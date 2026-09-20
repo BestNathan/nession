@@ -160,6 +160,19 @@ const LEGACY_TO_LAYER = {
   // longer a layer at all — a `src/core/` reappearing now resolves to `unknown`
   // and fails the completeness fixture rather than silently becoming one again.
   'shared': 'shared',
+  // `generated/` is `just codegen` output — the protocol bindings the Web reads
+  // (`#678` Phase 5). `shared` because that is what the direction rule already
+  // says about it: a generated file imports nothing (each is self-contained by
+  // construction), and every layer may import it. Classifying it as anything
+  // higher would be a claim that a wire shape means something in Nession's
+  // product vocabulary, which is the confusion `docs/design`'s capability rule
+  // exists to prevent.
+  //
+  // A directory that goes unclassified is not merely untidy here: it resolves to
+  // `unknown`, `checkRuntimeEdge` skips it, and every edge touching it is
+  // unchecked while looking checked — which is #793, and is exactly what this
+  // row was added in response to.
+  'generated': 'shared',
   // `features` is deliberately absent: the directory is gone. A row for it would
   // be a layer that nothing can be in — and if someone recreates `src/features/`,
   // the completeness fixture fails until it is classified rather than letting it

@@ -172,7 +172,7 @@ describe('GitHistoryView', () => {
   });
 
   it('reports the agent’s failure states with their own copy', async () => {
-    mockedLog.mockResolvedValue({ state: 'not_a_repository' });
+    mockedLog.mockResolvedValue({ state: 'not_a_repository', message: 'not a git repository' });
 
     render(<GitHistoryView ctx={ctx()} />);
 

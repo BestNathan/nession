@@ -28,6 +28,85 @@ describe('AgentsPlugin', () => {
     expect(plugin.name).toBe('agents');
   });
 
+  describe('protocol directory (#678 Phase 4)', () => {
+    const manifest = {
+      provider: 'a1',
+      protocols: { 'git.status': { versions: [1] } },
+    };
+
+    beforeEach(() => {
+      plugin.install(surface);
+    });
+
+    it('publishes what the list response carried', async () => {
+      // Through `listAgents`, not through a pushed `client.agents.list.response`
+      // message. That is not a shortcut in the test: `MessageRouter` hands a
+      // correlated reply to its pending request and returns, so the response
+      // subscription never sees it. A test that pushed the message instead would
+      // have passed against a plugin whose directory is empty in production.
+      const pending = plugin.listAgents();
+      surface.resolveNext('client.agents.list', {
+        agents: [{ ...makeAgent('a1'), protocols: manifest }],
+      });
+      await pending;
+
+      expect(surface.protocols.manifestFor('a1')).toEqual(manifest);
+    });
+
+    it('publishes before the caller can address anything to the agent', async () => {
+      // Ordering, not style: a caller that awaited the list and immediately made
+      // a git call would otherwise resolve against a directory the response had
+      // not reached yet, and send the request unversioned.
+      surface.protocols.publish(new Map());
+      const pending = plugin.listAgents();
+      surface.resolveNext('client.agents.list', {
+        agents: [{ ...makeAgent('a1'), protocols: manifest }],
+      });
+      await pending;
+
+      expect(surface.protocols.manifestFor('a1')).toEqual(manifest);
+    });
+
+    it('publishes from the push as well, because both paths go through notify', async () => {
+      // `agents.changed` is the path a client that never re-lists depends on,
+      // and the server now sends `protocols` on it too. If publishing lived at
+      // the call sites instead of in `notify`, this is the one that would be
+      // forgotten — and forgetting it looks like nothing, because an empty
+      // directory resolves as "Legacy Peer" and the calls keep working.
+      surface.pushMessage('agents.changed', {
+        agents: [{ ...makeAgent('a1'), protocols: manifest }],
+      });
+
+      expect(surface.protocols.manifestFor('a1')).toEqual(manifest);
+    });
+
+    it('replaces the snapshot, so an agent the server dropped stops resolving', () => {
+      surface.pushMessage('agents.changed', {
+        agents: [{ ...makeAgent('a1'), protocols: manifest }],
+      });
+      surface.pushMessage('agents.changed', { agents: [makeAgent('a2')] });
+
+      expect(surface.protocols.manifestFor('a1')).toBeNull();
+      expect(surface.protocols.manifestFor('a2')).toBeNull();
+    });
+
+    it('writes to the surface it is currently bound to', () => {
+      // A rebind re-points publishing at the new connection, which is what
+      // stops a replaced transport's manifest from being trusted. The old
+      // surface is left holding whatever it had: nothing clears it, and nothing
+      // reads it either, because its service went with it.
+      const other = createMockPluginSurface();
+      plugin.install(other);
+
+      other.pushMessage('agents.changed', {
+        agents: [{ ...makeAgent('a1'), protocols: manifest }],
+      });
+
+      expect(other.protocols.manifestFor('a1')).toEqual(manifest);
+      expect(surface.protocols.manifestFor('a1')).toBeNull();
+    });
+  });
+
   describe('binding lifecycle', () => {
     it('teardown unsubscribes the change listeners and clears registered consumers', () => {
       const cb = vi.fn();

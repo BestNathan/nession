@@ -1,0 +1,33 @@
+[package]
+name = "nession-protocol"
+version.workspace = true
+edition.workspace = true
+description = "The Nession Protocol Kernel: identity, envelope, descriptors, manifest and resolution"
+
+# The dependency list is the ownership rule made mechanical.
+#
+# This crate must never depend on nession-common, nession-agent,
+# nession-server, nession-git, nession-claude-code, MCP or the Web client. A
+# Protocol Unit depends on the Kernel; the Kernel knows about no concrete unit,
+# and no concrete provider. Anything that would need one of those crates in
+# this list is a sign the code belongs somewhere else — see
+# docs/architecture/protocol.md.
+[dependencies]
+serde.workspace = true
+thiserror.workspace = true
+# Codegen only, and optional. `ts-rs` is not a Nession crate, so it does not
+# touch the rule above — but it is still kept off the default dependency list,
+# because a list whose comment says "this is the ownership rule" should not grow
+# a transitive graph for a build nobody ships.
+ts-rs = { workspace = true, optional = true }
+
+[features]
+# Derives `TS` on the contracts so the TypeScript generator can read them.
+# Never enabled by a runtime build; see crates/nession-protocol-codegen.
+codegen = ["dep:ts-rs"]
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true

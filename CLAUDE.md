@@ -37,14 +37,30 @@ Existing code, historical design documents, fixtures, screenshots, and executabl
 
 ```
 nession/
-├── crates/                   # Rust workspace (5 crates)
-│   ├── nession-common/       # Shared types, protocol, config, error definitions
+├── crates/                   # Rust workspace (8 crates)
+│   ├── nession-protocol/     # The Protocol Kernel (#678) — identity, envelope,
+│   │   └── src/              #   descriptor, manifest, resolver — and, under
+│   │       ├── kernel/       #   `contracts/`, the core Protocol Units Nession
+│   │       └── contracts/    #   owns. Depends on serde + thiserror ONLY: the
+│   │                         #   dependency list *is* the ownership rule, so
+│   │                         #   no resolver can name a concrete provider.
+│   │                         #   Vocabulary, layout and the evolution rules:
+│   │                         #   docs/architecture/protocol.md
+│   ├── nession-common/       # Shared types, config, error definitions
 │   │   └── src/
-│   │       ├── protocol.rs   # WebSocket message types & serialization
+│   │       ├── protocol.rs   # Transition shim re-exporting nession-protocol's
+│   │       │                 #   core contracts (#678 Phase 1); new code imports
+│   │       │                 #   nession_protocol::contracts::<family>::v1
 │   │       ├── config.rs     # Agent/server config structs
 │   │       ├── error.rs      # Error types
 │   │       ├── paths.rs      # Config/data directory paths
 │   │       └── lib.rs
+│   ├── nession-git/          # Git Protocol Unit — typed contracts under
+│   │                         #   protocol/<unit>/v1.rs, erased at agent.rs
+│   ├── nession-protocol-codegen/  # `just codegen`: Rust contracts → the Web's
+│   │                         #   TypeScript bindings (#678 Phase 5). Depends on
+│   │                         #   the providers because enumerating them is its
+│   │                         #   job; nothing that ships depends on it.
 │   ├── nession-server/       # Central server — broker, registry, DB
 │   │   └── src/
 │   │       ├── main.rs
@@ -95,7 +111,10 @@ nession/
 │       ├── components/
 │       │   └── ui/           # shadcn/ui primitives + wrappers (shared, added via CLI)
 │       ├── lib/              # Pure helpers (shared layer)
-│       └── extensions/       # Generic UI-slot registry (no contributor today)
+│       ├── extensions/       # Generic UI-slot registry (no contributor today)
+│       └── generated/        # `just codegen` output — protocol/<owner>/<unit>/v<N>.ts
+│                             #   from the Rust contracts. NEVER hand-edited; the
+│                             #   name the version means is in the import path.
 │
 ├── deploy/                   # Docker runtime scripts & configs
 │   ├── docker-compose.yml
@@ -112,7 +131,7 @@ nession/
 ├── Dockerfile.ui.prebuilt    # nginx serving pre-built web/dist/
 ├── Dockerfile.{server,agent}.prebuilt  # Pre-built binary + UI variants
 │
-├── Cargo.toml                # Workspace root (5 crates, shared dependencies)
+├── Cargo.toml                # Workspace root (8 crates, shared dependencies)
 ├── agent-config.toml         # Default agent config
 ├── web/package.json          # React deps: shadcn/ui, xterm 5.5, sonner, lucide-react
 └── docs/

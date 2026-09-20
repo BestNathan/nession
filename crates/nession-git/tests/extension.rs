@@ -144,10 +144,21 @@ fn a_client_supplied_cwd_is_ignored_in_favour_of_the_resolved_one() {
 
 #[test]
 fn diff_requires_a_path() {
+    // A missing required field is now a **decode failure at the boundary**, so
+    // it is answered with the contract's own error state rather than propagated
+    // as an `Err`. That is the improvement, not a relaxation: a propagated error
+    // reached the registry, which answered `{"error": …, "available": false}` —
+    // a shape this contract never defines and the Web client cannot branch on,
+    // because it distinguishes the failure states by `state`.
     let dir = repo().unwrap();
     let ext = extension(Some(dir.path().to_path_buf()));
-    let result = run(&ext, "git.diff", json!({"session": "agent:s"}));
-    assert!(result.is_err(), "a diff with no path is a caller error");
+    let result = run(&ext, "git.diff", json!({"session": "agent:s"})).unwrap();
+
+    assert_eq!(result["state"], "error");
+    assert!(
+        result["message"].as_str().unwrap_or("").contains("path"),
+        "the message should name the missing field, got {result}"
+    );
 }
 
 #[test]
@@ -169,14 +180,27 @@ fn diff_returns_the_change_for_a_tracked_file() {
 
 #[test]
 fn diff_refuses_a_path_outside_the_repository() {
+    // The refusal still happens before git runs — that is `security`'s job and
+    // unchanged. What changed is that it now travels back as the contract's
+    // error state instead of as a propagated `Err` the registry would answer in
+    // its own generic shape.
     let dir = repo().unwrap();
     let ext = extension(Some(dir.path().to_path_buf()));
     let result = run(
         &ext,
         "git.diff",
         json!({"session": "agent:s", "path": "../../etc/passwd"}),
+    )
+    .unwrap();
+
+    assert_eq!(result["state"], "error");
+    assert!(
+        result["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("must not contain"),
+        "the refusal should say which rule the path broke, got {result}"
     );
-    assert!(result.is_err(), "an escaping path must not be served");
 }
 
 #[test]
@@ -202,15 +226,30 @@ fn an_unknown_command_is_refused() {
 }
 
 #[test]
-fn the_extension_declares_the_message_types_the_server_routes_on() {
+fn the_extension_declares_the_wire_types_the_registry_routes_on() {
+    // The registry derives its routing table from these declarations, so this
+    // list *is* the advertised set — there is no second one to disagree with.
     let ext = extension(None);
     assert_eq!(ext.name(), "git");
-    let types = ext.message_types();
+
+    let wires: Vec<String> = ext
+        .descriptors()
+        .unwrap()
+        .into_iter()
+        .flat_map(|d| d.contracts.into_iter().flat_map(|c| c.wire))
+        .collect();
+
     for expected in [
         "extension.git.status",
         "extension.git.diff",
         "extension.git.root",
+        "extension.git.log",
+        "extension.git.branches",
+        "extension.git.worktrees",
     ] {
-        assert!(types.contains(&expected), "missing {expected}");
+        assert!(
+            wires.iter().any(|w| w == expected),
+            "missing {expected} from {wires:?}"
+        );
     }
 }

@@ -1,4 +1,4 @@
-use serde_json::json;
+use serde_json::{json, Value};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio_tungstenite::tungstenite::Message;
@@ -261,6 +261,10 @@ impl ConnectionHandler {
             metadata: payload.metadata,
             session_count: 0,
             active_sessions: 0,
+            // What the agent says it can serve, taken from its own composition.
+            // An older agent sends nothing and registers exactly as before —
+            // that is a Legacy Peer, not a peer that supports everything.
+            protocol_manifest: payload.protocol_manifest,
         };
 
         self.agent_registry.register(agent_info).await;
@@ -554,34 +558,8 @@ impl ConnectionHandler {
 
         let agents = self.agent_registry.list().await;
 
-        let agents_json: Vec<serde_json::Value> = agents
-            .iter()
-            .map(|a| {
-                json!({
-                    "agent_id": a.agent_id,
-                    "hostname": a.hostname,
-                    "display_name": a.display_name,
-                    "ip_address": a.ip_address,
-                    "port": a.port,
-                    "status": match a.status {
-                        AgentStatus::Online => "online",
-                        AgentStatus::Offline => "offline",
-                        AgentStatus::Degraded => "degraded",
-                    },
-                    "session_count": a.session_count,
-                    "active_sessions": a.active_sessions,
-                    "last_heartbeat": a.last_heartbeat.to_rfc3339(),
-                    "registered_at": a.registered_at.to_rfc3339(),
-                    "addresses": serde_json::to_value(&a.addresses).unwrap_or(json!([])),
-                    "metadata": {
-                        "nession_version": a.metadata.nession_version,
-                        "tmux_version": a.metadata.tmux_version,
-                        "os_version": a.metadata.os_version,
-                        "image_tag": a.metadata.image_tag,
-                    },
-                })
-            })
-            .collect();
+        let agents_json: Vec<serde_json::Value> =
+            agents.iter().map(super::agent_view::agent_json).collect();
 
         info!(
             "Client requested agents list, returning {} agents",
@@ -2030,6 +2008,90 @@ impl ConnectionHandler {
 
         let response_msg_type = format!("{}.response", msg.msg_type);
 
+        // Does the target say it can carry this? (`#678`)
+        //
+        // The pipeline's "verify target manifest supports contract" step, and
+        // the first thing that consults the manifest an agent advertised.
+        //
+        // Guarded on the manifest **existing**, which is the design's legacy
+        // rule rather than a convenience: an agent that has not advertised one
+        // is a Legacy Peer, and a peer that has not spoken must not be read as
+        // one that said no. It relays exactly as it did before manifests
+        // existed.
+        //
+        // Refusing here is a *unit-scoped* answer, not a connection-level one —
+        // the design is explicit that a unit with no intersection disables that
+        // unit and does not take the connection with it. The client gets a
+        // response correlated to its own request id and everything else on the
+        // socket is untouched.
+        if let Some(manifest) = self
+            .agent_registry
+            .get(agent_id)
+            .await
+            .and_then(|agent| agent.protocol_manifest)
+        {
+            let Some(unit) = manifest.unit_for_wire(&msg.msg_type) else {
+                return Ok(HandlerAction::Reply(Some(Message::Text(
+                    json!({
+                        "msg_type": response_msg_type,
+                        "id": msg.id,
+                        "timestamp": current_timestamp(),
+                        "payload": {
+                            "error": "contract_not_supported",
+                            "available": false,
+                            "message": format!(
+                                "`{}` does not advertise `{}`",
+                                agent_id, msg.msg_type
+                            ),
+                        },
+                    })
+                    .to_string(),
+                ))));
+            };
+
+            // If the caller named a contract version, the target must offer it.
+            //
+            // A caller that names one has already resolved — it read the
+            // manifest this server serves and picked a version. Refusing here
+            // is not a second negotiation; it is checking that the manifest the
+            // caller resolved against is still the one the target advertises,
+            // which is the "target manifest stale" case the design lists.
+            //
+            // No version named means the caller has not resolved, and it relays
+            // as it always did. Absence is not a claim about versions any more
+            // than it is about wire types.
+            if let Some(named) = msg.payload.get("contract_version").and_then(Value::as_u64) {
+                let offered = manifest
+                    .support(unit)
+                    .map(|support| support.versions.clone())
+                    .unwrap_or_default();
+                let known = offered.iter().any(|v| u64::from(v.get()) == named);
+                if !known {
+                    return Ok(HandlerAction::Reply(Some(Message::Text(
+                        json!({
+                            "msg_type": response_msg_type,
+                            "id": msg.id,
+                            "timestamp": current_timestamp(),
+                            "payload": {
+                                "error": "contract_not_supported",
+                                "available": false,
+                                // Both sides, so a reader can see who has to
+                                // move rather than only that something did not
+                                // line up.
+                                "message": format!(
+                                    "`{agent_id}` offers `{unit}` at {offered:?}, not v{named}"
+                                ),
+                                "protocol": unit.as_str(),
+                                "named_version": named,
+                                "offered_versions": offered.iter().map(|v| v.get()).collect::<Vec<_>>(),
+                            },
+                        })
+                        .to_string(),
+                    ))));
+                }
+            }
+        }
+
         match self
             .agent_command(agent_id, &msg.msg_type, msg.payload.clone())
             .await
@@ -3288,6 +3350,8 @@ mod tests {
     use crate::registry::{AgentRegistry, SessionRegistry};
     use crate::server::client_registry::ClientRegistry;
     use crate::server::command_broker::CommandBroker;
+    use nession_common::protocol::AgentMetadata;
+    use nession_protocol::ProtocolManifest;
     use tokio_tungstenite::tungstenite::Message;
 
     /// Build a test handler wired to in-memory DB + tempdir env store.
@@ -3351,6 +3415,242 @@ mod tests {
             .await
             .unwrap();
         assert!(matches!(action, HandlerAction::Reply(None)));
+    }
+
+    // ---- manifest-gated extension relay (#678) ----
+
+    /// Register an agent, optionally with a manifest that carries one wire type.
+    async fn register_agent(h: &ConnectionHandler, manifest: Option<ProtocolManifest>) {
+        h.agent_registry
+            .register(AgentInfo {
+                agent_id: "agent-a".to_string(),
+                hostname: "h".to_string(),
+                ip_address: "10.0.0.1".to_string(),
+                port: 8080,
+                display_name: None,
+                connect_url: None,
+                addresses: vec![],
+                registered_at: chrono::Utc::now(),
+                last_heartbeat: chrono::Utc::now(),
+                status: AgentStatus::Online,
+                metadata: AgentMetadata {
+                    tmux_version: "3.3".to_string(),
+                    os_version: "Linux".to_string(),
+                    nession_version: "0.1.0".to_string(),
+                    image_tag: "test".to_string(),
+                },
+                session_count: 0,
+                active_sessions: 0,
+                protocol_manifest: manifest,
+            })
+            .await;
+    }
+
+    fn manifest_carrying(wire: &str) -> ProtocolManifest {
+        ProtocolManifest::from_descriptors(
+            "agent-a",
+            &[nession_protocol::ProtocolDescriptor::new(
+                "git.status",
+                "nession-git",
+                vec![nession_protocol::ContractDescriptor::new(
+                    nession_protocol::ContractVersion::V1,
+                    &[wire],
+                )],
+            )
+            .unwrap()],
+        )
+    }
+
+    async fn relay(h: &mut ConnectionHandler, wire: &str) -> serde_json::Value {
+        relay_payload(h, wire, json!({"agent_id": "agent-a"})).await
+    }
+
+    async fn relay_payload(
+        h: &mut ConnectionHandler,
+        wire: &str,
+        payload: serde_json::Value,
+    ) -> serde_json::Value {
+        let action = h.handle_message(proto_msg(wire, payload)).await.unwrap();
+        parse_reply(action)["payload"].clone()
+    }
+
+    /// A manifest offering `git.status` at v1 and v2.
+    fn manifest_with_two_versions() -> ProtocolManifest {
+        use nession_protocol::{ContractDescriptor, ContractVersion, ProtocolDescriptor};
+        ProtocolManifest::from_descriptors(
+            "agent-a",
+            &[ProtocolDescriptor::new(
+                "git.status",
+                "nession-git",
+                vec![
+                    ContractDescriptor::new(ContractVersion::V1, &["extension.git.status"]),
+                    ContractDescriptor::new(
+                        ContractVersion::new(2).unwrap(),
+                        &["extension.git.status.v2"],
+                    ),
+                ],
+            )
+            .unwrap()],
+        )
+    }
+
+    #[tokio::test]
+    async fn a_target_that_does_not_carry_the_wire_type_is_refused() {
+        // The first thing that consults the manifest an agent advertised.
+        let mut h = test_handler("").await;
+        register_agent(&h, Some(manifest_carrying("extension.git.status"))).await;
+
+        let payload = relay(&mut h, "extension.git.diff").await;
+        assert_eq!(payload["error"], "contract_not_supported");
+        assert!(
+            payload["message"]
+                .as_str()
+                .unwrap_or("")
+                .contains("extension.git.diff"),
+            "the refusal should name what was asked for: {payload}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_target_that_does_carry_it_is_relayed_rather_than_refused() {
+        // The discriminating half. With no live agent connection the relay
+        // fails — but it fails *later*, with a different error, which is what
+        // proves the manifest check let it through instead of refusing.
+        let mut h = test_handler("").await;
+        register_agent(&h, Some(manifest_carrying("extension.git.status"))).await;
+
+        let payload = relay(&mut h, "extension.git.status").await;
+        assert_ne!(
+            payload["error"], "contract_not_supported",
+            "a carried wire type must not be refused by the manifest check"
+        );
+        assert_eq!(payload["error"], "agent_disconnected");
+    }
+
+    #[tokio::test]
+    async fn an_agent_that_advertised_no_manifest_still_relays() {
+        // The legacy rule, and the one that decides whether this is a
+        // regression: a peer that has not spoken is not a peer that said no.
+        // An agent registered without a manifest relays exactly as it did
+        // before manifests existed.
+        let mut h = test_handler("").await;
+        register_agent(&h, None).await;
+
+        let payload = relay(&mut h, "extension.git.diff").await;
+        assert_ne!(payload["error"], "contract_not_supported");
+        assert_eq!(payload["error"], "agent_disconnected");
+    }
+
+    // ---- the target's protocol support is queryable (#678, Phase 3) ----
+
+    /// List agents and return the first agent's `protocols` field.
+    async fn listed_protocols(h: &mut ConnectionHandler) -> serde_json::Value {
+        h.authenticated_client = true;
+        let action = h
+            .handle_message(proto_msg("client.agents.list", json!({})))
+            .await
+            .unwrap();
+        parse_reply(action)["payload"]["agents"][0]["protocols"].clone()
+    }
+
+    #[tokio::test]
+    async fn the_agents_list_carries_what_each_agent_can_serve() {
+        // Served from the list rather than a query of its own: it is already
+        // the discover-agents call, so a consumer resolving per target has the
+        // manifests in hand without a second round trip per agent.
+        let mut h = test_handler("").await;
+        register_agent(&h, Some(manifest_carrying("extension.git.status"))).await;
+
+        let protocols = listed_protocols(&mut h).await;
+        assert_eq!(protocols["provider"], "agent-a");
+        assert_eq!(protocols["protocols"]["git.status"]["versions"][0], 1);
+        assert_eq!(
+            protocols["protocols"]["git.status"]["wire"][0],
+            "extension.git.status"
+        );
+    }
+
+    // ---- a named contract version is checked against the target (#678) ----
+
+    #[tokio::test]
+    async fn a_named_version_the_target_does_not_offer_is_refused() {
+        // The caller resolved against a manifest and picked v3. The target
+        // offers v1 and v2 — so either the caller read a manifest that is no
+        // longer current (the design's "target manifest stale"), or it invented
+        // the version. Either way it must not be relayed.
+        let mut h = test_handler("").await;
+        register_agent(&h, Some(manifest_with_two_versions())).await;
+
+        let payload = relay_payload(
+            &mut h,
+            "extension.git.status",
+            json!({"agent_id": "agent-a", "contract_version": 3}),
+        )
+        .await;
+
+        assert_eq!(payload["error"], "contract_not_supported");
+        assert_eq!(payload["protocol"], "git.status");
+        assert_eq!(payload["named_version"], 3);
+        // Both sides, so a reader learns who has to move rather than only that
+        // something did not line up.
+        assert_eq!(payload["offered_versions"], json!([1, 2]));
+        assert!(
+            payload["message"].as_str().unwrap_or("").contains("v3"),
+            "the refusal should name the version asked for: {payload}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_named_version_the_target_offers_is_relayed() {
+        // The discriminating half, as in the wire-type gate: with no live agent
+        // the relay fails later and differently, which is how this test knows
+        // the version check let it through.
+        let mut h = test_handler("").await;
+        register_agent(&h, Some(manifest_with_two_versions())).await;
+
+        for version in [1, 2] {
+            let payload = relay_payload(
+                &mut h,
+                "extension.git.status",
+                json!({"agent_id": "agent-a", "contract_version": version}),
+            )
+            .await;
+            assert_ne!(
+                payload["error"], "contract_not_supported",
+                "v{version} is offered and must not be refused"
+            );
+            assert_eq!(payload["error"], "agent_disconnected");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_caller_that_named_no_version_is_relayed_as_before() {
+        // Absence is not a claim about versions, any more than it is about wire
+        // types. A caller that has not resolved keeps working exactly as it did
+        // before version checking existed.
+        let mut h = test_handler("").await;
+        register_agent(&h, Some(manifest_with_two_versions())).await;
+
+        let payload = relay(&mut h, "extension.git.status").await;
+        assert_ne!(payload["error"], "contract_not_supported");
+        assert_eq!(payload["error"], "agent_disconnected");
+    }
+
+    #[tokio::test]
+    async fn an_agent_without_a_manifest_reports_null_rather_than_an_empty_set() {
+        // The distinction the whole legacy rule rests on. `{}` would say "this
+        // peer has a protocol set and it is empty" — a peer that serves
+        // nothing. `null` says "this peer predates manifests", which the design
+        // resolves as a Legacy Peer. A consumer that collapsed the two would
+        // refuse to talk to every old agent.
+        let mut h = test_handler("").await;
+        register_agent(&h, None).await;
+
+        let protocols = listed_protocols(&mut h).await;
+        assert!(
+            protocols.is_null(),
+            "expected null for a legacy peer, got {protocols}"
+        );
     }
 
     #[tokio::test]

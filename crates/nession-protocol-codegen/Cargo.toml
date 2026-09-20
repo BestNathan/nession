@@ -1,0 +1,24 @@
+[package]
+name = "nession-protocol-codegen"
+version.workspace = true
+edition.workspace = true
+description = "Generates the Web's TypeScript bindings from the Rust contracts (#678 Phase 5)"
+
+# A build-time catalog, which the design permits explicitly:
+#
+#   如 codegen 需要枚举构建时支持的 Provider，可以有 build-time codegen catalog，
+#   但必须与 runtime composition 分离。
+#
+# Separate is what this crate is. It depends on the concrete providers because
+# enumerating them is its entire job; nothing that *ships* does. `nession-server`
+# in particular still depends on no provider, and this does not change that.
+#
+# It is not built or linked into any binary. Run it with `just codegen`.
+[dependencies]
+nession-protocol = { path = "../nession-protocol", features = ["codegen"] }
+nession-git = { path = "../nession-git", features = ["codegen"] }
+nession-claude-code = { path = "../nession-claude-code", features = ["codegen"] }
+ts-rs.workspace = true
+
+[lints]
+workspace = true

@@ -5,12 +5,18 @@ edition.workspace = true
 
 [dependencies]
 nession-common = { path = "../nession-common" }
+nession-protocol = { path = "../nession-protocol" }
 serde.workspace = true
 serde_json.workspace = true
 async-trait.workspace = true
 tokio.workspace = true
 anyhow.workspace = true
 tracing.workspace = true
+# Codegen only — see nession-protocol/Cargo.toml.
+ts-rs = { workspace = true, optional = true }
+
+[features]
+codegen = ["dep:ts-rs", "nession-protocol/codegen"]
 
 [dev-dependencies]
 tempfile = "3"

@@ -111,13 +111,19 @@ const UNAVAILABLE_DETAILS: Record<GitUnavailableState, string | undefined> = {
 export function describeUnavailable(response: GitUnavailable): UnavailableCopy {
   const title = UNAVAILABLE_TITLES[response.state];
 
-  if (response.reason === 'session_workdir_unknown') {
+  // `reason` belongs to the `unavailable` variant alone. The hand-written
+  // mirror this replaced had one loose shape with `reason?` on it, so reading
+  // it off a `not_a_repository` answer looked fine and type-checked; the
+  // contract is the union, and this is where it says so.
+  const reason = response.state === 'unavailable' ? response.reason : undefined;
+
+  if (reason === 'session_workdir_unknown') {
     return {
       title: "Nession can't find this Session's directory",
       detail: 'The Session may have exited. Reopen it, or pick another Session.',
     };
   }
-  if (response.reason === 'git_not_installed') {
+  if (reason === 'git_not_installed') {
     return {
       title: 'git is not installed on this host',
       detail: 'Install git on the machine running this Session, then try again.',

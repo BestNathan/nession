@@ -90,7 +90,6 @@ async fn test_agent_registration() {
                 "os_version": "Linux",
                 "nession_version": "0.1.0"
             },
-            "protocol_version": "1.0"
         }
     });
 
@@ -311,7 +310,6 @@ async fn test_agent_registration_with_connect_url() {
             "metadata": {
                 "tmux_version": "3.3", "os_version": "Linux", "nession_version": "0.1"
             },
-            "protocol_version": "1.0"
         }
     });
     ws.send(tokio_tungstenite::tungstenite::Message::Text(

@@ -3,6 +3,8 @@ members = [
     "crates/nession-claude-code",
     "crates/nession-common",
     "crates/nession-git",
+    "crates/nession-protocol",
+    "crates/nession-protocol-codegen",
     "crates/nession-server",
     "crates/nession-agent",
     "crates/nession-cli",
@@ -55,6 +57,10 @@ async-trait = "0.1"
 mime_guess = "2.0"
 if-addrs = "0.13"
 hostname = "0.4"
+# Codegen only (#678 Phase 5). Optional and behind a `codegen` feature in every
+# crate that derives from it, so no shipped binary's dependency graph changes —
+# see crates/nession-protocol/Cargo.toml for why those lists are load-bearing.
+ts-rs = "12.0.1"
 
 # ── Workspace Lints (based on openai/codex codex-rs) ────────────────────
 [workspace.lints]

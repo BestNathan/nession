@@ -9,6 +9,9 @@ path = "src/main.rs"
 
 [dependencies]
 nession-common = { path = "../nession-common" }
+# The Protocol Kernel. The relay holds a peer's manifest without knowing any
+# concrete provider — see docs/architecture/protocol.md.
+nession-protocol = { path = "../nession-protocol" }
 tokio.workspace = true
 tokio-tungstenite.workspace = true
 rustls.workspace = true

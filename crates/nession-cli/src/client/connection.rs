@@ -2,6 +2,7 @@
 
 use anyhow::{Context, Result};
 use futures_util::{SinkExt, StreamExt};
+use nession_protocol::ProtocolManifest;
 use serde_json::json;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::net::TcpStream;
@@ -43,6 +44,13 @@ pub struct AgentInfo {
     pub status: String,
     pub session_count: u32,
     pub last_heartbeat: String,
+    /// What this agent reported it can serve (`#678`).
+    ///
+    /// `None` is a **Legacy Peer** — an agent that predates manifests, or one
+    /// that composed no providers. It is not a peer that supports everything,
+    /// and the CLI says so rather than showing an empty set.
+    #[serde(default)]
+    pub protocols: Option<ProtocolManifest>,
 }
 
 /// Session information returned from the server.

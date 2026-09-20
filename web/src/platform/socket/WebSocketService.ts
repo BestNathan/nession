@@ -1,3 +1,4 @@
+import { ProtocolDirectory } from '@/platform/protocol';
 import { MessageRouterImpl } from './MessageRouter';
 import type {
   TransportPlugin,
@@ -76,6 +77,14 @@ export class WebSocketService implements PluginSurface {
   private idCounter = 0;
   private readonly plugins = new Map<string, RegisteredPlugin>();
   private readonly router: MessageRouterImpl;
+  /**
+   * What the targets reachable over *this* connection advertise (`#678`).
+   *
+   * Per service rather than per process: a manifest is a fact about a peer on
+   * one socket, and the next connection may be to a different server whose
+   * agents offer different versions. See {@link PluginSurface.protocols}.
+   */
+  readonly protocols = new ProtocolDirectory();
 
   constructor(
     private readonly url: string,

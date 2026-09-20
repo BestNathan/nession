@@ -11,6 +11,9 @@ path = "src/main.rs"
 test-utils = []
 
 [dependencies]
+# The Protocol Kernel. A host runtime consumes the kernel; the kernel never
+# names a host runtime — see docs/architecture/protocol.md.
+nession-protocol = { path = "../nession-protocol" }
 nession-common = { path = "../nession-common" }
 nession-claude-code = { path = "../nession-claude-code" }
 nession-git = { path = "../nession-git" }
@@ -24,6 +27,9 @@ toml.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 anyhow.workspace = true
+# The extension registry's composition errors are a typed enum: callers match
+# on which conflict occurred, and the messages name both sides of it.
+thiserror.workspace = true
 chrono.workspace = true
 uuid.workspace = true
 async-trait.workspace = true

@@ -1,3 +1,4 @@
+import { manifestsOf, ProtocolDirectory } from '@/platform/protocol';
 import type { PluginSurface } from '@/platform/socket/types';
 import type {
   GitBranchesResponse,
@@ -6,6 +7,7 @@ import type {
   GitStatusResponse,
   GitWorktreesResponse,
 } from '@/capabilities/git';
+import { FIXTURE_AGENTS } from './fixtureData';
 
 /**
  * A canned git backend for the fixture route.
@@ -33,8 +35,16 @@ export function fixtureGitSurface(search: string): PluginSurface {
   const scenario = new URLSearchParams(search).get('git') ?? 'changed';
   const status = scenario === 'clean' ? CLEAN_STATUS : CHANGED_STATUS;
 
+  // The real directory is filled by `AgentsPlugin` from the agent list; the
+  // fixture has no agent list request, so it fills the same directory from the
+  // same `FIXTURE_AGENTS` the rest of the fixture renders. Built with the same
+  // `manifestsOf`, so the fixture cannot present a directory the app would not.
+  const protocols = new ProtocolDirectory();
+  protocols.publish(manifestsOf(FIXTURE_AGENTS));
+
   return {
     connectionState: 'connected',
+    protocols,
     request<T>(type: string, payload: Record<string, unknown>): Promise<T> {
       if (type === 'extension.git.status') {
         return Promise.resolve(status as T);
@@ -298,11 +308,11 @@ function diffFor(path: string): GitDiffResponse {
   if (path.endsWith('.png')) {
     return {
       state: 'ok',
-      diff: { path, text: '', binary: true, truncatedBytes: 0, truncated: false },
+      diff: { path, text: '', binary: true, truncated_bytes: 0, truncated: false },
     };
   }
   return {
     state: 'ok',
-    diff: { path, text: TEXT_DIFF, binary: false, truncatedBytes: 0, truncated: false },
+    diff: { path, text: TEXT_DIFF, binary: false, truncated_bytes: 0, truncated: false },
   };
 }
