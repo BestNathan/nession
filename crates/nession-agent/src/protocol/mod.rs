@@ -193,6 +193,26 @@ macro_rules! p2p_routes {
 
 pub(crate) use p2p_routes;
 
+/// Every Protocol Unit this agent serves, whoever answers it.
+///
+/// The union of the two invocations that dispatch the agent's own handlers:
+/// [`crate::connection::core_descriptors`] for the central-server connection and
+/// [`crate::server::websocket::p2p_descriptors`] for the socket an agent listens
+/// on. Unioned by id into the one manifest the agent registers
+/// ([`ProtocolManifest::from_descriptors`]), because it is one provider: a unit
+/// answered on both paths is one unit with two wires.
+///
+/// This exists so **the composition has one spelling**. `main` needs it, and so
+/// does every test that wants the manifest a real agent sends — and a test that
+/// composes its own subset is a test of a runtime that does not exist. Two of
+/// them did, each gathering `core_descriptors` alone, which is how a change to
+/// the union could have gone unnoticed by both.
+pub fn served_descriptors() -> Result<Vec<ProtocolDescriptor>, IdentityError> {
+    let mut served = crate::connection::core_descriptors()?;
+    served.extend(crate::server::websocket::p2p_descriptors()?);
+    Ok(served)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

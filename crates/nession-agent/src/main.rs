@@ -13,13 +13,13 @@
 
 use anyhow::{Context, Result};
 use nession_agent::config::AgentConfig;
-use nession_agent::connection::{core_descriptors, ServerClient};
+use nession_agent::connection::ServerClient;
 use nession_agent::extension::ExtensionRegistry;
 use nession_agent::git_workdir::TmuxWorkdirResolver;
 use nession_agent::identity;
 use nession_agent::netdetect::build_advertised_addresses;
 use nession_agent::netwatch;
-use nession_agent::server::websocket::p2p_descriptors;
+use nession_agent::protocol::served_descriptors;
 use nession_agent::server::AgentServer;
 use nession_agent::sync::heartbeat::HeartbeatLoop;
 use nession_agent::sync::session_watcher::SessionWatcher;
@@ -223,13 +223,8 @@ async fn main() -> Result<()> {
         // (`core_routes!` for the server connection, `p2p_routes!` for the
         // agent's own socket), so the manifest cannot advertise a unit neither
         // message loop routes.
-        //
-        // One list, unioned by id, because it is one provider: a unit answered
-        // on both paths is one unit with two wires, and only the union says so.
-        let mut served = core_descriptors()?;
-        served.extend(p2p_descriptors()?);
         let ext_registry = Arc::new(
-            ExtensionRegistry::new(agent_id.clone(), extensions, served)
+            ExtensionRegistry::new(agent_id.clone(), extensions, served_descriptors()?)
                 .context("cannot compose this agent's protocol providers")?,
         );
 

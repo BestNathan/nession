@@ -149,11 +149,13 @@ async fn register_agent(
         // A real registry, because registration is refused without a manifest
         // and `connect_and_run` spawns the connection — so a refused agent
         // would still return `Ok` here while its socket was already dead, and
-        // the failure would surface much later as a missing session.
+        // the failure would surface much later as a missing session. Uses the
+        // composition `main` uses, so this exercises the manifest an agent
+        // really registers.
         Some(Arc::new(nession_agent::extension::ExtensionRegistry::new(
             agent_id,
             Vec::new(),
-            nession_agent::connection::core_descriptors()?,
+            nession_agent::protocol::served_descriptors()?,
         )?)),
     );
 

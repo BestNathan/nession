@@ -628,11 +628,27 @@ mod tests {
         // `main` does. It fails if either list grows a unit the other cannot be
         // composed with — which is how the `session.capture_preview` overlap
         // was found.
-        let mut served = crate::connection::core_descriptors().unwrap();
-        served.extend(crate::server::websocket::p2p_descriptors().unwrap());
+        let core = crate::connection::core_descriptors().unwrap();
+        let p2p = crate::server::websocket::p2p_descriptors().unwrap();
+        let mut served = core.clone();
+        served.extend(p2p.clone());
 
         let registry = compose_with_core(Vec::new(), served).unwrap();
         let manifest = registry.manifest();
+
+        // 11 core units and 22 peer-to-peer ones, sharing four ids between them
+        // (`session.create`, `session.kill`, `session.list`,
+        // `session.capture-preview`) — so the union is 29, not 33.
+        //
+        // Spelled as a number on purpose: adding a unit should make someone read
+        // this line, and the failure of a relaxed assertion is indistinguishable
+        // from a unit that was never wired up.
+        assert_eq!(
+            manifest.protocols.len(),
+            core.len() + p2p.len() - 4,
+            "the union is by id, so the four shared units are counted once"
+        );
+        assert_eq!(manifest.protocols.len(), 29);
 
         // Served on both transports: one unit, both wire types.
         let both = ProtocolId::new("session.create").unwrap();
