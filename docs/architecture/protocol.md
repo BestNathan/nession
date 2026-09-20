@@ -204,6 +204,23 @@ Everything else answers `protocol_not_advertised`. It is forbidden to guess a
 payload shape from a software version, to downgrade unconditionally when a
 manifest is missing, or to silently fall back semantically.
 
+**Convergence debt — the blanket relay is still what runs.** Today a target with
+no manifest has *everything* relayed to it, which is the unconditional fallback
+this section forbids. Recorded here rather than left to be rediscovered:
+
+- **Why it is still that way.** Every agent built before `#854` has no manifest,
+  so refusing them would take the extension surface down for the whole fleet to
+  enforce a rule about a case that has not happened yet. A peer that *has* a
+  manifest is checked strictly, and that is where the mechanism is proven.
+- **What would end it.** Manifests are universal once `#854` has been deployed
+  long enough that no live agent predates it. The change is then a second
+  condition in the relay gate — "no manifest *and* no declared adapter" — and a
+  `legacy_wire` field on `ContractDescriptor` for providers to populate.
+- **What will not work.** The Server cannot decide this on its own: it composes
+  no provider, by design, so it cannot know which contracts declare an adapter.
+  The declaration has to travel — in the descriptor, carried to the relay by
+  whatever composes the provider.
+
 ### Resolve as a consumer
 
 A consumer declares what it can read, per unit, and resolves that against each
