@@ -44,6 +44,8 @@ nession/
 │   │       └── contracts/    #   owns. Depends on serde + thiserror ONLY: the
 │   │                         #   dependency list *is* the ownership rule, so
 │   │                         #   no resolver can name a concrete provider.
+│   │                         #   Vocabulary, layout and the evolution rules:
+│   │                         #   docs/architecture/protocol.md
 │   ├── nession-common/       # Shared types, config, error definitions
 │   │   └── src/
 │   │       ├── protocol.rs   # Transition shim re-exporting nession-protocol's

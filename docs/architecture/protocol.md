@@ -420,3 +420,9 @@ and says nothing about the session and env protocols it has always served.
   copying Nession DTOs.
 - [`docs/architecture/web.md`](web.md) — the Web layer model this mirrors on the
   client side.
+
+Reached from the root `CLAUDE.md` crate tree, where `nession-protocol` sits, and
+from that crate's own `lib.rs`. Deliberately **not** linked from
+`docs/design/README.md`: that tree's rule is one canonical owner per concept, and
+a wire protocol is not a product design concept — a link there would read as the
+design tree owning this one.
