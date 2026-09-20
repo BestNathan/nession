@@ -7,6 +7,7 @@
 //! ├── agent/v1.rs      agent.register, agent.heartbeat, agent.address.update
 //! ├── session/v1.rs    session.create, session.attach, session.env.apply
 //! ├── env/v1.rs        env.{list,get,write,delete} at both ends
+//! ├── client/v1.rs     client.auth — the peer-to-peer door
 //! ├── commands/v1.rs   commands.{list,add,remove,update}
 //! ├── server/v1.rs     server.info
 //! ├── terminal/v1.rs   terminal.{input,resize,output} — the P2P stream
@@ -29,6 +30,7 @@
 //! contract that can be changed without its tests being read.
 
 pub mod agent;
+pub mod client;
 pub mod commands;
 pub mod env;
 pub mod file;

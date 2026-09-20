@@ -168,37 +168,6 @@ pub use nession_protocol::Message;
 
 // --- Web UI compatibility payloads ---
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ClientAuthPayload {
-    #[serde(default)]
-    pub auth_token: String,
-    #[serde(default)]
-    pub client_id: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AuthResponsePayload {
-    pub status: String,
-    pub message: String,
-    pub client_id: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WebAgentInfo {
-    pub agent_id: String,
-    pub hostname: String,
-    pub ip_address: String,
-    pub port: u16,
-    pub status: String,
-    pub session_count: u32,
-    pub last_heartbeat: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WebAgentsListResponse {
-    pub agents: Vec<WebAgentInfo>,
-}
-
 // --- Response payloads (agent → client) ---
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -213,6 +182,10 @@ pub struct ErrorPayload {
 }
 
 // --- File operation payloads ---
+
+// --- Client and agent wire shapes, re-exported from the Protocol Kernel (#678) ---
+pub use nession_protocol::contracts::agent::v1::{WebAgentInfo, WebAgentsListResponse};
+pub use nession_protocol::contracts::client::v1::{AuthResponsePayload, ClientAuthPayload};
 
 // --- Session wire shapes, re-exported from the Protocol Kernel (#678) ---
 pub use nession_protocol::contracts::session::v1::{
