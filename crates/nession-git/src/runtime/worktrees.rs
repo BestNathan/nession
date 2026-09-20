@@ -24,8 +24,8 @@ use std::path::Path;
 
 use serde::Serialize;
 
-use crate::cmd::GitCmd;
-use crate::security::MAX_WORKTREES_BYTES;
+use crate::runtime::cmd::GitCmd;
+use crate::runtime::security::MAX_WORKTREES_BYTES;
 
 /// One work tree, or one administrative entry for one that used to exist.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

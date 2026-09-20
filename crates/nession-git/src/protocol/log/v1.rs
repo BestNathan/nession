@@ -3,8 +3,8 @@
 use nession_protocol::{IdentityError, ProtocolDescriptor};
 use serde::{Deserialize, Serialize};
 
-use crate::log::History;
 use crate::protocol::{v1_descriptor, GitResponseV1, SessionTargetV1};
+use crate::runtime::log::History;
 
 pub const WIRE: &str = "extension.git.log";
 

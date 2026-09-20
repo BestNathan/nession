@@ -13,8 +13,8 @@
 
 use serde::Serialize;
 
-use crate::cmd::GitCmd;
-use crate::security::{self, MAX_DIFF_BYTES};
+use crate::runtime::cmd::GitCmd;
+use crate::runtime::security::{self, MAX_DIFF_BYTES};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct FileDiff {
