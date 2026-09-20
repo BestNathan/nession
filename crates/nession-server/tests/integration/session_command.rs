@@ -55,7 +55,6 @@ async fn test_session_create_flow() {
             "port": 19999,
             "auth_token": "test",
             "metadata": {"tmux_version": "3.3", "os_version": "Linux", "nession_version": "0.1.0"},
-            "protocol_version": "1.0"
         }
     });
     agent_sink
@@ -157,7 +156,6 @@ async fn test_session_kill_flow() {
             "port": 19999,
             "auth_token": "test",
             "metadata": {"tmux_version": "3.3", "os_version": "Linux", "nession_version": "0.1.0"},
-            "protocol_version": "1.0"
         }
     });
     agent_sink

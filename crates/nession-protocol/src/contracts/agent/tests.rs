@@ -22,7 +22,6 @@ fn an_agent_register_rides_in_the_envelope_and_comes_back_intact() {
                 nession_version: "0.1.0".to_string(),
                 image_tag: "test".to_string(),
             },
-            protocol_version: "1.0".to_string(),
             display_name: None,
             connect_url: None,
             addresses: vec![],
@@ -95,7 +94,6 @@ fn test_agent_register_payload_serde() {
             nession_version: "0.1.0".to_string(),
             image_tag: "test".to_string(),
         },
-        protocol_version: "1.0".to_string(),
         display_name: Some("my-agent".to_string()),
         connect_url: None,
         addresses: vec![],
@@ -150,7 +148,6 @@ fn test_agent_register_payload_serialization() {
             nession_version: "0.3.2".to_string(),
             image_tag: "test".to_string(),
         },
-        protocol_version: "1.0".to_string(),
         display_name: None,
         connect_url: Some("wss://agent.example.com/ws".to_string()),
         addresses: vec![],
@@ -171,6 +168,12 @@ fn a_pre_678_agent_registers_exactly_as_it_always_did() {
     // message, and the design's condition for that was that an old agent's
     // register still parses. This is that condition, as a test: the payload has
     // no `protocol_manifest` key at all.
+    //
+    // `protocol_version` is here on purpose, and it is the only place left that
+    // sends it. It is what an agent released before Phase 6 wrote, and the
+    // field is gone from the struct now that nothing reads it — so this doubles
+    // as the evidence that removing it is read-compatible rather than a wire
+    // break. Delete the line and the evidence goes with it.
     let from_an_old_agent = serde_json::json!({
         "agent_id": "legacy",
         "hostname": "old-box",
@@ -211,7 +214,6 @@ fn an_absent_manifest_is_omitted_from_the_wire_rather_than_null() {
             nession_version: "0.1.0".to_string(),
             image_tag: "test".to_string(),
         },
-        protocol_version: "1.0".to_string(),
         display_name: None,
         connect_url: None,
         addresses: vec![],
@@ -245,7 +247,6 @@ fn a_manifest_rides_along_in_the_register_payload() {
             nession_version: "0.1.0".to_string(),
             image_tag: "test".to_string(),
         },
-        protocol_version: "1.0".to_string(),
         display_name: None,
         connect_url: None,
         addresses: vec![],
@@ -280,7 +281,6 @@ fn test_agent_register_payload_with_addresses_roundtrip() {
             nession_version: "0.5.1".to_string(),
             image_tag: "test".to_string(),
         },
-        protocol_version: "1.0".to_string(),
         display_name: None,
         connect_url: None,
         addresses: vec![
@@ -317,7 +317,9 @@ fn test_agent_register_payload_with_addresses_roundtrip() {
 
 #[test]
 fn test_agent_register_payload_legacy_json_defaults_addresses() {
-    // An old agent that predates the `addresses` field omits it entirely.
+    // An old agent that predates the `addresses` field omits it entirely — and
+    // still sends the `protocol_version` that predates Phase 6, which the
+    // decoder ignores rather than refusing.
     let legacy = r#"{
         "agent_id": "old-agent",
         "hostname": "legacy",
@@ -358,7 +360,6 @@ fn test_agent_register_payload_without_connect_url() {
             nession_version: "0.2.0".to_string(),
             image_tag: "test".to_string(),
         },
-        protocol_version: "1.0".to_string(),
         display_name: None,
         connect_url: None,
         addresses: vec![],

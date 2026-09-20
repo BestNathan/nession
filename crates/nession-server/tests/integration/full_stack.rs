@@ -172,7 +172,6 @@ async fn test_agent_registration_success() {
                 "os_version": "Linux 6.1",
                 "nession_version": "0.1.0"
             },
-            "protocol_version": "1.0"
         }
     });
 
@@ -204,7 +203,6 @@ async fn test_agent_registration_rejected_bad_token() {
                 "os_version": "Linux",
                 "nession_version": "0.1.0"
             },
-            "protocol_version": "1.0"
         }
     });
 
@@ -239,7 +237,6 @@ async fn test_multiple_agents_register_independently() {
                     "os_version": "Linux",
                     "nession_version": "0.1.0"
                 },
-                "protocol_version": "1.0"
             }
         })
     };
@@ -283,7 +280,6 @@ async fn test_heartbeat_after_registration_is_acked() {
                 "os_version": "Linux",
                 "nession_version": "0.1.0"
             },
-            "protocol_version": "1.0"
         }
     });
     send_text(&mut ws, reg.to_string()).await.unwrap();
@@ -361,7 +357,6 @@ async fn test_multiple_heartbeats_accepted() {
                 "os_version": "Linux",
                 "nession_version": "0.1.0"
             },
-            "protocol_version": "1.0"
         }
     });
     send_text(&mut ws, reg.to_string()).await.unwrap();
@@ -493,7 +488,6 @@ async fn test_full_workflow_agent_and_client() {
                 "os_version": "macOS 15",
                 "nession_version": "0.1.0"
             },
-            "protocol_version": "1.0"
         }
     });
     send_text(&mut agent_ws, reg.to_string()).await.unwrap();
@@ -608,7 +602,6 @@ async fn test_agent_can_register_then_authenticate_as_client() {
                 "os_version": "Linux",
                 "nession_version": "0.1.0"
             },
-            "protocol_version": "1.0"
         }
     });
     send_text(&mut ws, reg.to_string()).await.unwrap();
@@ -676,7 +669,6 @@ async fn test_response_preserves_message_id() {
                 "os_version": "Linux",
                 "nession_version": "0.1.0"
             },
-            "protocol_version": "1.0"
         }
     });
     send_text(&mut ws, reg.to_string()).await.unwrap();
@@ -740,7 +732,6 @@ async fn test_concurrent_agent_registrations() {
                         "os_version": "Linux",
                         "nession_version": "0.1.0"
                     },
-                    "protocol_version": "1.0"
                 }
             });
 
@@ -803,7 +794,6 @@ async fn test_agent_session_update_active() {
                 "agent_id": "a1", "hostname": "h", "ip_address": "10.0.0.1",
                 "port": 8080, "auth_token": "tok",
                 "metadata": {"tmux_version":"3.3","os_version":"Linux","nession_version":"0.1"},
-                "protocol_version": "1.0"
             }
         })
         .to_string(),
@@ -848,8 +838,7 @@ async fn test_agent_session_update_detached() {
             "msg_type": "agent.register","id": "r2","timestamp": current_timestamp(),
             "payload": {"agent_id":"a2","hostname":"h","ip_address":"10.0.0.2",
             "port":8080,"auth_token":"tok",
-            "metadata":{"tmux_version":"3.3","os_version":"Linux","nession_version":"0.1"},
-            "protocol_version":"1.0"}
+            "metadata":{"tmux_version":"3.3","os_version":"Linux","nession_version":"0.1"}}
         })
         .to_string(),
     )
@@ -884,8 +873,7 @@ async fn test_agent_session_update_gone_removes_session() {
             "msg_type": "agent.register","id":"r3","timestamp":current_timestamp(),
             "payload":{"agent_id":"a3","hostname":"h","ip_address":"10.0.0.3",
             "port":8080,"auth_token":"tok",
-            "metadata":{"tmux_version":"3.3","os_version":"Linux","nession_version":"0.1"},
-            "protocol_version":"1.0"}
+            "metadata":{"tmux_version":"3.3","os_version":"Linux","nession_version":"0.1"}}
         })
         .to_string(),
     )
@@ -980,8 +968,7 @@ async fn test_client_agents_list_returns_registered_agents() {
             "msg_type":"agent.register","id":"r-al","timestamp":current_timestamp(),
             "payload":{"agent_id":"list-agent","hostname":"list-host","ip_address":"10.0.0.50",
             "port":8080,"auth_token":"tok",
-            "metadata":{"tmux_version":"3.3","os_version":"Linux","nession_version":"0.1"},
-            "protocol_version":"1.0"}
+            "metadata":{"tmux_version":"3.3","os_version":"Linux","nession_version":"0.1"}}
         })
         .to_string(),
     )
@@ -1067,8 +1054,7 @@ async fn test_client_sessions_list_returns_sessions() {
             "msg_type":"agent.register","id":"r-sl","timestamp":current_timestamp(),
             "payload":{"agent_id":"sess-agent","hostname":"h","ip_address":"10.0.0.60",
             "port":8080,"auth_token":"tok",
-            "metadata":{"tmux_version":"3.3","os_version":"Linux","nession_version":"0.1"},
-            "protocol_version":"1.0"}
+            "metadata":{"tmux_version":"3.3","os_version":"Linux","nession_version":"0.1"}}
         })
         .to_string(),
     )
@@ -1132,8 +1118,7 @@ async fn test_client_sessions_list_filtered_by_agent() {
             "msg_type":"agent.register","id":"r1","timestamp":current_timestamp(),
             "payload":{"agent_id":"agent-x","hostname":"h","ip_address":"10.0.0.70",
             "port":8080,"auth_token":"tok",
-            "metadata":{"tmux_version":"3.3","os_version":"Linux","nession_version":"0.1"},
-            "protocol_version":"1.0"}
+            "metadata":{"tmux_version":"3.3","os_version":"Linux","nession_version":"0.1"}}
         })
         .to_string(),
     )
@@ -1159,8 +1144,7 @@ async fn test_client_sessions_list_filtered_by_agent() {
             "msg_type":"agent.register","id":"r2","timestamp":current_timestamp(),
             "payload":{"agent_id":"agent-y","hostname":"h","ip_address":"10.0.0.71",
             "port":8080,"auth_token":"tok",
-            "metadata":{"tmux_version":"3.3","os_version":"Linux","nession_version":"0.1"},
-            "protocol_version":"1.0"}
+            "metadata":{"tmux_version":"3.3","os_version":"Linux","nession_version":"0.1"}}
         })
         .to_string(),
     )
@@ -1326,8 +1310,7 @@ async fn test_client_session_attach_p2p_mode() {
             "payload":{"agent_id":"p2p-agent","hostname":"h","ip_address":"10.0.0.80",
             "port":9090,"auth_token":"tok",
             "connect_url":"ws://agent.example.com/ws",
-            "metadata":{"tmux_version":"3.3","os_version":"Linux","nession_version":"0.1"},
-            "protocol_version":"1.0"}
+            "metadata":{"tmux_version":"3.3","os_version":"Linux","nession_version":"0.1"}}
         })
         .to_string(),
     )
@@ -1560,7 +1543,6 @@ async fn test_no_auth_mode_accepts_any_agent() {
             "metadata": {
                 "tmux_version": "3.3", "os_version": "Linux", "nession_version": "0.1"
             },
-            "protocol_version": "1.0"
         }
     });
     send_text(&mut ws, reg.to_string()).await.unwrap();

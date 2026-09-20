@@ -384,6 +384,9 @@ is broken by it.
 | Two providers cannot claim one wire type or one protocol | `ExtensionRegistry::new` → `RegistryError`, naming both claimants |
 | An extension that declares nothing is a composition mistake | the same function |
 | What is routed is what is advertised | the routes are *derived* from the descriptors — there is no second list |
+| The same holds for the agent's core units | `core_routes!` (`crates/nession-agent/src/protocol/mod.rs`) — one invocation emits `core_descriptors()` **and** `dispatch_core()` |
+| One wire type, one claimant, across both halves | `ExtensionRegistry::new` — `DuplicateCoreWireType` names both, whichever side lost |
+| A core unit the agent does not serve is not advertised | the same invocation — `CORE_WIRES` and `core_descriptors()` are the same list |
 | A router can name a protocol without knowing any provider | `ContractSupport.wire` — the projection is declared by the provider, not derived by the router |
 | A target is never asked for a wire type it does not carry | the Server's extension relay, gated on the target's manifest |
 | A peer without a manifest still works | the same gate, skipped when there is no manifest — a Legacy Peer, not a peer that said no |
@@ -428,84 +431,123 @@ constructible. That is a stronger guarantee than detecting either after the
 fact — and it is why `AgentExtension` declares descriptors rather than the
 `message_types()` it used to, which nothing tied to the provider's own dispatch.
 
-## Open questions
+The core units reached the same place by a different route. They have no object
+to ask: the handlers are methods on `ServerClient`, reached by a `match` on the
+wire type, and a `match` cannot be read to produce the set it handles. The
+answer is `core_routes!`, one invocation that emits **both** the descriptor list
+and the dispatcher:
 
-Written down rather than answered by whoever gets there first. Both are
-reachable only from `#678`'s later phases, and neither has an answer that is
-obviously right, so a guess would be a decision nobody recorded.
+```text
+core_routes!(agent, msg, responses;
+    "session.create" => "server.session.create" => { …the handler… }
+    …
+);
+        ├── core_descriptors()   → the manifest
+        └── dispatch_core()      → the message loop
+```
+
+The routing half is additionally exported as `CORE_WIRES`, a constant the
+message loop tests before dispatching, so the notification match beside it keeps
+handling only notifications. All three come from the one invocation, so a unit
+cannot be advertised without a handler or handled without being advertised —
+the same guarantee as the extensions, arrived at without a registry of boxed
+futures and without disturbing what the handlers can reach.
+
+Two things this deliberately does **not** do. The bodies are the arms that used
+to sit in `handle_server_message`, moved verbatim: a table of function pointers
+would have boxed every future for no gain in guarantee. And a wire type claimed
+by both halves is refused at composition rather than resolved by whichever
+dispatch runs first — `ExtensionRegistry::new` names the extension and the core
+unit, because the loser of that collision would be advertised and never
+reached.
+
+## The three questions Phase 6 had to answer
+
+Written down as open before the work started, because a guess would have been a
+decision nobody recorded. Answered here, with what answered them — two of the
+three turned out to be answerable by the code rather than by preference.
 
 ### Which direction does a manifest describe?
 
-`ProtocolManifest` says what a runtime **offers** — but several core units run
-the other way. `agent.register` and `agent.heartbeat` are sent *by* the agent
-and served *by* the server; `session.attach` is served by the server and
-`server.session.create` by the agent, for the same Session.
+**Served only.** A manifest lists what the peer *answers*.
 
-So "Phase 6: version `agent.register`" has no immediate answer to *whose*
-manifest lists it. Three readings, none yet chosen:
+The manifest exists to answer one question — "may I send this peer this
+message?" — and that question is about the receiver, never the sender. A peer
+that sends `agent.register` is not thereby callable at `agent.register`; the one
+that answers it is the server. Reading 2 (a direction field on
+`ContractSupport`) and reading 3 (a set of units rather than of roles) would
+both model something true and nothing asks for it: the relay gate needs the wire
+projection, which `ContractSupport.wire` already carries.
 
-1. **Served only.** A manifest lists what the peer answers. `agent.register`
-   belongs in a *server* manifest, which does not exist yet — which makes
-   Phase 6's agent-side slice just the units the agent serves
-   (`server.session.*`, `server.env.*`, `sessions.list`), and the rest wait.
-2. **Both directions, distinguished.** `ContractSupport` gains a direction, and
-   the manifest says what a peer speaks as well as what it serves. More
-   faithful, and more surface than anything consumes today.
-3. **A set of units, not of roles.** The manifest lists contracts the peer
-   participates in, and direction is a property of the operation rather than of
-   the peer.
+The implementation made this concrete rather than a matter of taste.
+`core_routes!` covers exactly the arms where the agent **answers** a server-sent
+command. The two arms it left behind — `agent.register.response` and
+`server.heartbeat.ack` — are replies to something the agent itself sent, and
+advertising them would claim an offer that does not exist. So the agent's slice
+of Phase 6 is the units the agent serves, and the other three units the phase
+names are served by the **server**, where no manifest exists yet:
 
-Today only extension units are advertised, all of them served, so the question
-has not had to be asked. It is asked the moment a core unit is added.
+| Phase 6 unit | Served by | In the agent's manifest |
+|---|---|---|
+| `session.create` | the agent (`server.session.create`) | yes |
+| `session.attach` | the **server** (`client.session.attach`) | no — waits for a server manifest |
+| `agent.register` | the **server** | no — same |
+| `agent.heartbeat` | the **server** | no — same |
 
 ### Where does a core unit's descriptor live?
 
-For a core unit, the contract is the DTOs, and those are in
-`nession-protocol/src/contracts/`. But this document's other rule is that the
-crate that *implements* a contract owns its declaration, because that crate is
-the only one that can answer "what changed?" — and the implementer of
-`server.session.create` is `nession-agent`, not `nession-protocol`.
+**The contract in `nession-protocol/src/contracts/`; the descriptor with the
+implementer** — for the agent, `crates/nession-agent/src/protocol/mod.rs`.
 
-Both rules are right about different things and they collide here, for core
-units only. The collision is resolvable — the DTOs and the descriptor both stay
-in `contracts/`, and the agent *composes* them, which is the extension pattern
-with the ownership inverted: for an extension the provider owns contract and
-implementation both, and for a core unit Nession owns the contract while the
-agent is one of its providers. What it is not is *decided*, and the answer
-changes where a version bump is written down.
+The collision above is real, but only while "the contract" and "the declaration"
+are treated as one artifact. They answer different questions. The contract asks
+*what shape is this message*, and Nession owns it, because a router must be able
+to read it without having heard of any agent. The descriptor asks *what does
+this runtime offer, and what does it answer to*, and only the implementer knows
+the wire string its own dispatch is keyed on — as `session.capture_preview`
+shows, where the id and the wire are not derivable from each other.
+
+That is also why the two rules agree rather than fight. "The crate that
+implements a contract owns its declaration" is about the declaration; "no
+concrete provider inside `nession-protocol`" is about the contract. A core unit
+is an extension whose two halves live in different crates, and this is where a
+version bump is written: the contract in `contracts/<family>/v2.rs`, adopted by
+the descriptor the implementer composes. Today every core unit is one version on
+one wire type — `v1_descriptor` says so and exists so that eleven units do not
+each restate it — and a unit that needs a second version states it itself
+rather than going through that helper.
 
 ### How does a core unit stay derived rather than listed?
 
-This is the sharper one, and it is why the question above is not the only thing
-standing in the way.
+**One macro invocation emits both halves**, so the guarantee holds without a
+registry of boxed futures. Described under *What "derived" buys over "checked"*
+above; the point here is only that option 1's guarantee was reachable without
+option 1's blast radius, and that neither a behavioural test nor "do not
+advertise core units yet" was needed.
 
-`ExtensionRegistry` builds its routing table **from** the descriptors, and that
-is what makes *advertises no handler* and *handler exists but not advertised*
-unconstructible instead of merely detectable. The guarantee does not extend to
-core units: the agent's core dispatch is a `match` on the wire type, in two
-places (`connection/server_client.rs` for server-sent commands and
-`server/websocket.rs` for the P2P path), and a `match` cannot be read to produce
-the set it handles.
+### What is still not versioned
 
-So advertising core units today would mean two lists — the descriptors, and the
-match arms — kept in step by nothing. That is exactly the failure the derived
-design exists to remove, reintroduced in the one place the design has not yet
-reached. Three ways out, none chosen:
+Stated rather than implied, because a reader who finds an unadvertised protocol
+should know whether it was overlooked.
 
-1. **Restructure the core dispatch** into a registry keyed by wire type, the way
-   extensions already are, so derivation holds uniformly and the agent's message
-   loop becomes a lookup. The largest change and the only one that leaves the
-   guarantee intact.
-2. **A behavioural test instead of a structural one**: for each advertised core
-   wire type, dispatch a payload and assert the agent answered rather than
-   falling through to *unknown message type is ignored*. Weaker — it shows the
-   handler exists, not that the two lists are one — and several units need a
-   live tmux to answer at all.
-3. **Do not advertise core units yet.** The manifest keeps describing the
-   extension surface, and the gap is stated here, where a reader will look.
-
-Until one is chosen, an agent's manifest advertises `git.*` and `claude-code.*`
-and says nothing about the session and env protocols it has always served.
+- **The server's units.** `agent.register`, `agent.heartbeat` and
+  `client.session.attach` are served by `nession-server`, which composes no
+  manifest at all. Under *served only* they belong in one. Nothing consumes a
+  server manifest today, so building one now would be architecture for its own
+  sake — but it is the next real increment of Phase 6, and it is the reason
+  three of the phase's four named units are not in the table above.
+- **The P2P path.** `server/websocket.rs` dispatches a second, larger match —
+  `client.session.list`, `terminal.input`, `client.attach`, `file.read` — that
+  the browser speaks to an agent directly. Those *are* served by the agent and
+  do belong in its manifest, but not yet: their payloads are `json!` literals
+  with no typed contract in `contracts/`, and the catalog requires every
+  advertised contract to have generated bindings. The units come after their
+  contracts, not before.
+- **The global `protocol_version`.** Gone. It rode in `agent.register` and no
+  consumer ever read it — not the server, the CLI, the Web, or the database —
+  so it was the *shape* of a compatibility statement rather than one, and
+  leaving it there was an invitation for the next reader to branch on it. What
+  replaced it is the per-unit resolution above.
 
 ## Related
 

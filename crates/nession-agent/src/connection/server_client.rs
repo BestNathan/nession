@@ -32,6 +32,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::env::EnvStore;
 use crate::extension::ExtensionRegistry;
+use crate::protocol::core_routes;
 use crate::tmux::manager::SessionManager;
 
 /// Type alias for the WebSocket stream.
@@ -446,7 +447,6 @@ impl ServerClient {
             port: self.port,
             auth_token: self.auth_token.clone(),
             metadata: self.metadata.clone(),
-            protocol_version: "1.0".to_string(),
             display_name: self.display_name.clone(),
             connect_url: self.connect_url.clone(),
             addresses: self.addresses.clone(),
@@ -640,6 +640,12 @@ impl ServerClient {
                 }
             }
         }
+        // One list, not two: `CORE_WIRES` and `dispatch_core` are generated
+        // from the same `core_routes!` invocation, so a unit cannot be
+        // advertised without a handler or handled without being advertised.
+        if CORE_WIRES.contains(&msg.msg_type.as_str()) {
+            return dispatch_core(self, &msg, responses).await;
+        }
         match msg.msg_type.as_str() {
             msg_types::AGENT_REGISTER_RESPONSE => {
                 // Already handled during connect; log late/duplicate responses.
@@ -648,410 +654,7 @@ impl ServerClient {
             msg_types::SERVER_HEARTBEAT_ACK => {
                 debug!("Heartbeat acknowledged by server");
             }
-            "server.session.create" => {
-                let payload: ServerSessionCreatePayload =
-                    match serde_json::from_value(msg.payload.clone()) {
-                        Ok(p) => p,
-                        Err(e) => {
-                            warn!("Invalid server.session.create payload: {e}");
-                            return Ok(());
-                        }
-                    };
-                let request_id = payload.request_id.clone();
-                let name = payload.name.clone();
-                let env = flatten_snapshots(&payload.env_snapshots);
-
-                info!(
-                    "Server requested session create: name={}, width={}, height={}, env_files={}",
-                    name,
-                    payload.width,
-                    payload.height,
-                    payload.env_snapshots.len()
-                );
-
-                let (success, error, session_name) = match self
-                    .tmux
-                    .create_session(
-                        &name,
-                        payload.width,
-                        payload.height,
-                        &self.default_working_dir,
-                        &env,
-                    )
-                    .await
-                {
-                    Ok(()) => (true, None, Some(name.clone())),
-                    Err(e) => (false, Some(e.to_string()), None),
-                };
-
-                let response = serde_json::json!({
-                    "msg_type": "agent.session.command.response",
-                    "id": uuid::Uuid::new_v4().to_string(),
-                    "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
-                    "payload": {
-                        "request_id": request_id,
-                        "command": "session.create",
-                        "success": success,
-                        "error": error,
-                        "session_name": session_name,
-                    }
-                });
-                responses.send(WsMessage::Text(response.to_string()))?;
-            }
-            "server.env.list" => {
-                let request_id = str_field(&msg.payload, "request_id");
-                let files = self
-                    .env_store
-                    .list(&self.agent_id)
-                    .await
-                    .unwrap_or_default();
-                let response = serde_json::json!({
-                    "msg_type": "agent.session.command.response",
-                    "id": uuid::Uuid::new_v4().to_string(),
-                    "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
-                    "payload": {
-                        "request_id": request_id,
-                        "command": "env.list",
-                        "success": true,
-                        "files": files,
-                    }
-                });
-                responses.send(WsMessage::Text(response.to_string()))?;
-            }
-            "server.env.get" => {
-                let request_id = str_field(&msg.payload, "request_id");
-                let name = str_field(&msg.payload, "name");
-                let (success, content, error) = match self.env_store.read(&name).await {
-                    Ok(c) => (true, Some(c), None),
-                    Err(e) => (false, None, Some(e.to_string())),
-                };
-                let response = serde_json::json!({
-                    "msg_type": "agent.session.command.response",
-                    "id": uuid::Uuid::new_v4().to_string(),
-                    "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
-                    "payload": {
-                        "request_id": request_id,
-                        "command": "env.get",
-                        "success": success,
-                        "content": content,
-                        "error": error,
-                    }
-                });
-                responses.send(WsMessage::Text(response.to_string()))?;
-            }
-            "server.env.write" => {
-                let request_id = str_field(&msg.payload, "request_id");
-                let name = str_field(&msg.payload, "name");
-                let content = str_field(&msg.payload, "content");
-                let overwrite = msg
-                    .payload
-                    .get("overwrite")
-                    .and_then(serde_json::Value::as_bool)
-                    .unwrap_or(false);
-                let (success, exists, error) =
-                    match self.env_store.write(&name, &content, overwrite).await {
-                        Ok(true) => (true, false, None),
-                        Ok(false) => (false, true, None),
-                        Err(e) => (false, false, Some(e.to_string())),
-                    };
-                let warnings = nession_common::env_file::parse_env(&content).warnings;
-                let response = serde_json::json!({
-                    "msg_type": "agent.session.command.response",
-                    "id": uuid::Uuid::new_v4().to_string(),
-                    "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
-                    "payload": {
-                        "request_id": request_id,
-                        "command": "env.write",
-                        "success": success,
-                        "exists": exists,
-                        "error": error,
-                        "warnings": warnings,
-                    }
-                });
-                responses.send(WsMessage::Text(response.to_string()))?;
-            }
-            "server.env.delete" => {
-                let request_id = str_field(&msg.payload, "request_id");
-                let name = str_field(&msg.payload, "name");
-                let (success, error) = match self.env_store.delete(&name).await {
-                    Ok(()) => (true, None),
-                    Err(e) => (false, Some(e.to_string())),
-                };
-                let response = serde_json::json!({
-                    "msg_type": "agent.session.command.response",
-                    "id": uuid::Uuid::new_v4().to_string(),
-                    "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
-                    "payload": {
-                        "request_id": request_id,
-                        "command": "env.delete",
-                        "success": success,
-                        "error": error,
-                    }
-                });
-                responses.send(WsMessage::Text(response.to_string()))?;
-            }
-            "server.session.env.apply" => {
-                let payload: ServerSessionEnvApplyPayload =
-                    match serde_json::from_value(msg.payload.clone()) {
-                        Ok(p) => p,
-                        Err(e) => {
-                            warn!("Invalid server.session.env.apply payload: {e}");
-                            return Ok(());
-                        }
-                    };
-                // Extract client_id or use "unknown" if not provided
-                let client_id = payload.client_id.as_deref().unwrap_or("unknown");
-                // One source script per snapshot (env file), sent via send-keys
-                // to the session. Each command is hidden from view with tput.
-                let mut error: Option<String> = None;
-                for snap in &payload.snapshots {
-                    if let Err(e) = self
-                        .tmux
-                        .env()
-                        .source_env(client_id, &payload.name, &snap.name, &snap.vars)
-                        .await
-                    {
-                        error = Some(e.to_string());
-                        break;
-                    }
-                }
-                // Track sourced env files if no error occurred
-                if error.is_none() && !payload.env_files.is_empty() {
-                    if let Ok(mut sourced) = self.sourced_envs.lock() {
-                        sourced
-                            .entry(payload.name.clone())
-                            .or_insert_with(Vec::new)
-                            .extend(payload.env_files.clone());
-                    }
-                }
-                let response = serde_json::json!({
-                    "msg_type": "agent.session.command.response",
-                    "id": uuid::Uuid::new_v4().to_string(),
-                    "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
-                    "payload": {
-                        "request_id": payload.request_id,
-                        "command": "session.env.apply",
-                        "success": error.is_none(),
-                        "error": error,
-                    }
-                });
-                responses.send(WsMessage::Text(response.to_string()))?;
-            }
-            "server.session.env.unset" => {
-                let payload: ServerSessionEnvUnsetPayload =
-                    match serde_json::from_value(msg.payload.clone()) {
-                        Ok(p) => p,
-                        Err(e) => {
-                            warn!("Invalid server.session.env.unset payload: {e}");
-                            return Ok(());
-                        }
-                    };
-                // Extract client_id or use "unknown" if not provided
-                let client_id = payload.client_id.as_deref().unwrap_or("unknown");
-                let mut error: Option<String> = None;
-                if let Err(e) = self
-                    .tmux
-                    .env()
-                    .unsource_env(client_id, &payload.name, "all", &payload.keys)
-                    .await
-                {
-                    error = Some(e.to_string());
-                }
-                let response = serde_json::json!({
-                    "msg_type": "agent.session.command.response",
-                    "id": uuid::Uuid::new_v4().to_string(),
-                    "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
-                    "payload": {
-                        "request_id": payload.request_id,
-                        "command": "session.env.unset",
-                        "success": error.is_none(),
-                        "error": error,
-                    }
-                });
-                responses.send(WsMessage::Text(response.to_string()))?;
-            }
-            "server.env.query" => {
-                let request_id = str_field(&msg.payload, "request_id");
-                let sourced_files = self.get_sourced_env_files();
-                let response = serde_json::json!({
-                    "msg_type": "agent.session.command.response",
-                    "id": uuid::Uuid::new_v4().to_string(),
-                    "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
-                    "payload": {
-                        "request_id": request_id,
-                        "command": "env.query",
-                        "success": true,
-                        "sourced_files": sourced_files,
-                    }
-                });
-                responses.send(WsMessage::Text(response.to_string()))?;
-            }
-            "server.session.kill" => {
-                let request_id = msg
-                    .payload
-                    .get("request_id")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let name = msg
-                    .payload
-                    .get("name")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-
-                info!("Server requested session kill: name={}", name);
-
-                let (success, error) = match self.tmux.kill_session(&name).await {
-                    Ok(()) => (true, None),
-                    Err(e) => (false, Some(e.to_string())),
-                };
-
-                let response = serde_json::json!({
-                    "msg_type": "agent.session.command.response",
-                    "id": uuid::Uuid::new_v4().to_string(),
-                    "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
-                    "payload": {
-                        "request_id": request_id,
-                        "command": "session.kill",
-                        "success": success,
-                        "error": error,
-                    }
-                });
-                responses.send(WsMessage::Text(response.to_string()))?;
-            }
-            "session.capture_preview" => {
-                let request_id = str_field(&msg.payload, "request_id");
-                let session_name = str_field(&msg.payload, "session_name");
-                let lines = u32::try_from(
-                    msg.payload
-                        .get("lines")
-                        .and_then(serde_json::Value::as_u64)
-                        .unwrap_or(2000),
-                )
-                .unwrap_or(u32::MAX);
-
-                info!(
-                    "Server requested session capture_preview: session_name={}, lines={}",
-                    session_name, lines
-                );
-
-                let (success, ansi_b64, cols, rows, error) = if lines == 0 {
-                    (
-                        false,
-                        None,
-                        None,
-                        None,
-                        Some("invalid_lines: lines must be > 0".to_string()),
-                    )
-                } else if lines > 100_000 {
-                    (
-                        false,
-                        None,
-                        None,
-                        None,
-                        Some("lines_too_large: lines exceeds 100000 ceiling".to_string()),
-                    )
-                } else {
-                    match crate::tmux::util::capture_scrollback(&session_name, lines).await {
-                        Ok(Some((bytes, c, r))) => {
-                            use base64::Engine;
-                            let ansi_b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
-                            info!(
-                                "capture_preview success: session_name={}, ansi_b64 length={}, cols={}, rows={}",
-                                session_name,
-                                ansi_b64.len(),
-                                c,
-                                r
-                            );
-                            (true, Some(ansi_b64), Some(c), Some(r), None)
-                        }
-                        Ok(None) => {
-                            info!(
-                                "capture_preview success but empty (no scrollback): session_name={}",
-                                session_name
-                            );
-                            (true, Some(String::new()), Some(80), Some(24), None)
-                        }
-                        Err(e) => {
-                            warn!(
-                                "capture_preview failed: session_name={}, error={}",
-                                session_name, e
-                            );
-                            (false, None, None, None, Some(e.to_string()))
-                        }
-                    }
-                };
-
-                let response = serde_json::json!({
-                    "msg_type": "agent.session.command.response",
-                    "id": uuid::Uuid::new_v4().to_string(),
-                    "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
-                    "payload": {
-                        "request_id": request_id,
-                        "command": "session.capture_preview",
-                        "success": success,
-                        "ansi_b64": ansi_b64,
-                        "cols": cols,
-                        "rows": rows,
-                        "error": error,
-                    }
-                });
-                responses.send(WsMessage::Text(response.to_string()))?;
-            }
-            msg_types::SERVER_SESSIONS_LIST => {
-                let request_id = str_field(&msg.payload, "request_id");
-
-                // An empty list is a legitimate answer ("no sessions here"),
-                // not a failure — `list_sessions` already maps tmux's
-                // "no server running" to an empty Vec. Only report the raw
-                // fields; the server derives status from `attached_clients`
-                // so the rule lives in exactly one place.
-                let sessions = match self.tmux.list_sessions().await {
-                    Ok(s) => s,
-                    Err(e) => {
-                        warn!("tmux list-sessions failed: {:#}", e);
-                        vec![]
-                    }
-                };
-
-                debug!(
-                    "Server requested session list: returning {} session(s)",
-                    sessions.len()
-                );
-
-                let sessions_json: Vec<serde_json::Value> = sessions
-                    .iter()
-                    .map(|s| {
-                        serde_json::json!({
-                            "name": s.name,
-                            "created_at": s.created_at,
-                            "window_count": s.window_count,
-                            "attached_clients": s.attached_clients,
-                            "foreground_command": s.foreground_command,
-                        })
-                    })
-                    .collect();
-
-                let response = serde_json::json!({
-                    "msg_type": "agent.session.command.response",
-                    "id": uuid::Uuid::new_v4().to_string(),
-                    "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
-                    "payload": {
-                        "request_id": request_id,
-                        "command": "sessions.list",
-                        "success": true,
-                        "sessions": sessions_json,
-                    }
-                });
-                responses.send(WsMessage::Text(response.to_string()))?;
-            }
-            _ => {
-                debug!(
-                    "Received message from server: {} (id: {})",
-                    msg.msg_type, msg.id
-                );
-            }
+            _ => {}
         }
 
         Ok(())
@@ -2754,3 +2357,406 @@ mod tests {
         server_handle.abort();
     }
 }
+
+// ── The Protocol Units this agent serves ──
+
+core_routes!(agent, msg, responses;
+    "session.create" => "server.session.create" => {
+                    let payload: ServerSessionCreatePayload =
+                        match serde_json::from_value(msg.payload.clone()) {
+                            Ok(p) => p,
+                            Err(e) => {
+                                warn!("Invalid server.session.create payload: {e}");
+                                return Ok(());
+                            }
+                        };
+                    let request_id = payload.request_id.clone();
+                    let name = payload.name.clone();
+                    let env = flatten_snapshots(&payload.env_snapshots);
+
+                    info!(
+                        "Server requested session create: name={}, width={}, height={}, env_files={}",
+                        name,
+                        payload.width,
+                        payload.height,
+                        payload.env_snapshots.len()
+                    );
+
+                    let (success, error, session_name) = match agent
+                        .tmux
+                        .create_session(
+                            &name,
+                            payload.width,
+                            payload.height,
+                            &agent.default_working_dir,
+                            &env,
+                        )
+                        .await
+                    {
+                        Ok(()) => (true, None, Some(name.clone())),
+                        Err(e) => (false, Some(e.to_string()), None),
+                    };
+
+                    let response = serde_json::json!({
+                        "msg_type": "agent.session.command.response",
+                        "id": uuid::Uuid::new_v4().to_string(),
+                        "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                        "payload": {
+                            "request_id": request_id,
+                            "command": "session.create",
+                            "success": success,
+                            "error": error,
+                            "session_name": session_name,
+                        }
+                    });
+                    responses.send(WsMessage::Text(response.to_string()))?;
+    }
+    "env.list" => "server.env.list" => {
+                    let request_id = str_field(&msg.payload, "request_id");
+                    let files = agent
+                        .env_store
+                        .list(&agent.agent_id)
+                        .await
+                        .unwrap_or_default();
+                    let response = serde_json::json!({
+                        "msg_type": "agent.session.command.response",
+                        "id": uuid::Uuid::new_v4().to_string(),
+                        "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                        "payload": {
+                            "request_id": request_id,
+                            "command": "env.list",
+                            "success": true,
+                            "files": files,
+                        }
+                    });
+                    responses.send(WsMessage::Text(response.to_string()))?;
+    }
+    "env.get" => "server.env.get" => {
+                    let request_id = str_field(&msg.payload, "request_id");
+                    let name = str_field(&msg.payload, "name");
+                    let (success, content, error) = match agent.env_store.read(&name).await {
+                        Ok(c) => (true, Some(c), None),
+                        Err(e) => (false, None, Some(e.to_string())),
+                    };
+                    let response = serde_json::json!({
+                        "msg_type": "agent.session.command.response",
+                        "id": uuid::Uuid::new_v4().to_string(),
+                        "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                        "payload": {
+                            "request_id": request_id,
+                            "command": "env.get",
+                            "success": success,
+                            "content": content,
+                            "error": error,
+                        }
+                    });
+                    responses.send(WsMessage::Text(response.to_string()))?;
+    }
+    "env.write" => "server.env.write" => {
+                    let request_id = str_field(&msg.payload, "request_id");
+                    let name = str_field(&msg.payload, "name");
+                    let content = str_field(&msg.payload, "content");
+                    let overwrite = msg
+                        .payload
+                        .get("overwrite")
+                        .and_then(serde_json::Value::as_bool)
+                        .unwrap_or(false);
+                    let (success, exists, error) =
+                        match agent.env_store.write(&name, &content, overwrite).await {
+                            Ok(true) => (true, false, None),
+                            Ok(false) => (false, true, None),
+                            Err(e) => (false, false, Some(e.to_string())),
+                        };
+                    let warnings = nession_common::env_file::parse_env(&content).warnings;
+                    let response = serde_json::json!({
+                        "msg_type": "agent.session.command.response",
+                        "id": uuid::Uuid::new_v4().to_string(),
+                        "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                        "payload": {
+                            "request_id": request_id,
+                            "command": "env.write",
+                            "success": success,
+                            "exists": exists,
+                            "error": error,
+                            "warnings": warnings,
+                        }
+                    });
+                    responses.send(WsMessage::Text(response.to_string()))?;
+    }
+    "env.delete" => "server.env.delete" => {
+                    let request_id = str_field(&msg.payload, "request_id");
+                    let name = str_field(&msg.payload, "name");
+                    let (success, error) = match agent.env_store.delete(&name).await {
+                        Ok(()) => (true, None),
+                        Err(e) => (false, Some(e.to_string())),
+                    };
+                    let response = serde_json::json!({
+                        "msg_type": "agent.session.command.response",
+                        "id": uuid::Uuid::new_v4().to_string(),
+                        "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                        "payload": {
+                            "request_id": request_id,
+                            "command": "env.delete",
+                            "success": success,
+                            "error": error,
+                        }
+                    });
+                    responses.send(WsMessage::Text(response.to_string()))?;
+    }
+    "session.env.apply" => "server.session.env.apply" => {
+                    let payload: ServerSessionEnvApplyPayload =
+                        match serde_json::from_value(msg.payload.clone()) {
+                            Ok(p) => p,
+                            Err(e) => {
+                                warn!("Invalid server.session.env.apply payload: {e}");
+                                return Ok(());
+                            }
+                        };
+                    // Extract client_id or use "unknown" if not provided
+                    let client_id = payload.client_id.as_deref().unwrap_or("unknown");
+                    // One source script per snapshot (env file), sent via send-keys
+                    // to the session. Each command is hidden from view with tput.
+                    let mut error: Option<String> = None;
+                    for snap in &payload.snapshots {
+                        if let Err(e) = agent
+                            .tmux
+                            .env()
+                            .source_env(client_id, &payload.name, &snap.name, &snap.vars)
+                            .await
+                        {
+                            error = Some(e.to_string());
+                            break;
+                        }
+                    }
+                    // Track sourced env files if no error occurred
+                    if error.is_none() && !payload.env_files.is_empty() {
+                        if let Ok(mut sourced) = agent.sourced_envs.lock() {
+                            sourced
+                                .entry(payload.name.clone())
+                                .or_insert_with(Vec::new)
+                                .extend(payload.env_files.clone());
+                        }
+                    }
+                    let response = serde_json::json!({
+                        "msg_type": "agent.session.command.response",
+                        "id": uuid::Uuid::new_v4().to_string(),
+                        "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                        "payload": {
+                            "request_id": payload.request_id,
+                            "command": "session.env.apply",
+                            "success": error.is_none(),
+                            "error": error,
+                        }
+                    });
+                    responses.send(WsMessage::Text(response.to_string()))?;
+    }
+    "session.env.unset" => "server.session.env.unset" => {
+                    let payload: ServerSessionEnvUnsetPayload =
+                        match serde_json::from_value(msg.payload.clone()) {
+                            Ok(p) => p,
+                            Err(e) => {
+                                warn!("Invalid server.session.env.unset payload: {e}");
+                                return Ok(());
+                            }
+                        };
+                    // Extract client_id or use "unknown" if not provided
+                    let client_id = payload.client_id.as_deref().unwrap_or("unknown");
+                    let mut error: Option<String> = None;
+                    if let Err(e) = agent
+                        .tmux
+                        .env()
+                        .unsource_env(client_id, &payload.name, "all", &payload.keys)
+                        .await
+                    {
+                        error = Some(e.to_string());
+                    }
+                    let response = serde_json::json!({
+                        "msg_type": "agent.session.command.response",
+                        "id": uuid::Uuid::new_v4().to_string(),
+                        "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                        "payload": {
+                            "request_id": payload.request_id,
+                            "command": "session.env.unset",
+                            "success": error.is_none(),
+                            "error": error,
+                        }
+                    });
+                    responses.send(WsMessage::Text(response.to_string()))?;
+    }
+    "env.query" => "server.env.query" => {
+                    let request_id = str_field(&msg.payload, "request_id");
+                    let sourced_files = agent.get_sourced_env_files();
+                    let response = serde_json::json!({
+                        "msg_type": "agent.session.command.response",
+                        "id": uuid::Uuid::new_v4().to_string(),
+                        "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                        "payload": {
+                            "request_id": request_id,
+                            "command": "env.query",
+                            "success": true,
+                            "sourced_files": sourced_files,
+                        }
+                    });
+                    responses.send(WsMessage::Text(response.to_string()))?;
+    }
+    "session.kill" => "server.session.kill" => {
+                    let request_id = msg
+                        .payload
+                        .get("request_id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let name = msg
+                        .payload
+                        .get("name")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+
+                    info!("Server requested session kill: name={}", name);
+
+                    let (success, error) = match agent.tmux.kill_session(&name).await {
+                        Ok(()) => (true, None),
+                        Err(e) => (false, Some(e.to_string())),
+                    };
+
+                    let response = serde_json::json!({
+                        "msg_type": "agent.session.command.response",
+                        "id": uuid::Uuid::new_v4().to_string(),
+                        "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                        "payload": {
+                            "request_id": request_id,
+                            "command": "session.kill",
+                            "success": success,
+                            "error": error,
+                        }
+                    });
+                    responses.send(WsMessage::Text(response.to_string()))?;
+    }
+    "session.capture-preview" => "session.capture_preview" => {
+                    let request_id = str_field(&msg.payload, "request_id");
+                    let session_name = str_field(&msg.payload, "session_name");
+                    let lines = u32::try_from(
+                        msg.payload
+                            .get("lines")
+                            .and_then(serde_json::Value::as_u64)
+                            .unwrap_or(2000),
+                    )
+                    .unwrap_or(u32::MAX);
+
+                    info!(
+                        "Server requested session capture_preview: session_name={}, lines={}",
+                        session_name, lines
+                    );
+
+                    let (success, ansi_b64, cols, rows, error) = if lines == 0 {
+                        (
+                            false,
+                            None,
+                            None,
+                            None,
+                            Some("invalid_lines: lines must be > 0".to_string()),
+                        )
+                    } else if lines > 100_000 {
+                        (
+                            false,
+                            None,
+                            None,
+                            None,
+                            Some("lines_too_large: lines exceeds 100000 ceiling".to_string()),
+                        )
+                    } else {
+                        match crate::tmux::util::capture_scrollback(&session_name, lines).await {
+                            Ok(Some((bytes, c, r))) => {
+                                use base64::Engine;
+                                let ansi_b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+                                info!(
+                                    "capture_preview success: session_name={}, ansi_b64 length={}, cols={}, rows={}",
+                                    session_name,
+                                    ansi_b64.len(),
+                                    c,
+                                    r
+                                );
+                                (true, Some(ansi_b64), Some(c), Some(r), None)
+                            }
+                            Ok(None) => {
+                                info!(
+                                    "capture_preview success but empty (no scrollback): session_name={}",
+                                    session_name
+                                );
+                                (true, Some(String::new()), Some(80), Some(24), None)
+                            }
+                            Err(e) => {
+                                warn!(
+                                    "capture_preview failed: session_name={}, error={}",
+                                    session_name, e
+                                );
+                                (false, None, None, None, Some(e.to_string()))
+                            }
+                        }
+                    };
+
+                    let response = serde_json::json!({
+                        "msg_type": "agent.session.command.response",
+                        "id": uuid::Uuid::new_v4().to_string(),
+                        "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                        "payload": {
+                            "request_id": request_id,
+                            "command": "session.capture_preview",
+                            "success": success,
+                            "ansi_b64": ansi_b64,
+                            "cols": cols,
+                            "rows": rows,
+                            "error": error,
+                        }
+                    });
+                    responses.send(WsMessage::Text(response.to_string()))?;
+    }
+    "session.list" => "server.sessions.list" => {
+                    let request_id = str_field(&msg.payload, "request_id");
+
+                    // An empty list is a legitimate answer ("no sessions here"),
+                    // not a failure — `list_sessions` already maps tmux's
+                    // "no server running" to an empty Vec. Only report the raw
+                    // fields; the server derives status from `attached_clients`
+                    // so the rule lives in exactly one place.
+                    let sessions = match agent.tmux.list_sessions().await {
+                        Ok(s) => s,
+                        Err(e) => {
+                            warn!("tmux list-sessions failed: {:#}", e);
+                            vec![]
+                        }
+                    };
+
+                    debug!(
+                        "Server requested session list: returning {} session(s)",
+                        sessions.len()
+                    );
+
+                    let sessions_json: Vec<serde_json::Value> = sessions
+                        .iter()
+                        .map(|s| {
+                            serde_json::json!({
+                                "name": s.name,
+                                "created_at": s.created_at,
+                                "window_count": s.window_count,
+                                "attached_clients": s.attached_clients,
+                                "foreground_command": s.foreground_command,
+                            })
+                        })
+                        .collect();
+
+                    let response = serde_json::json!({
+                        "msg_type": "agent.session.command.response",
+                        "id": uuid::Uuid::new_v4().to_string(),
+                        "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                        "payload": {
+                            "request_id": request_id,
+                            "command": "sessions.list",
+                            "success": true,
+                            "sessions": sessions_json,
+                        }
+                    });
+                    responses.send(WsMessage::Text(response.to_string()))?;
+    }
+);

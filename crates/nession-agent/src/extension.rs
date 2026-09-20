@@ -106,6 +106,13 @@ pub enum RegistryError {
         first: &'static str,
         second: &'static str,
     },
+
+    #[error("`{wire}` is claimed by both `{first}` and `{second}`")]
+    DuplicateCoreWireType {
+        wire: String,
+        first: String,
+        second: String,
+    },
 }
 
 impl ExtensionRegistry {
@@ -113,9 +120,20 @@ impl ExtensionRegistry {
     ///
     /// `provider` names the runtime for the manifest — an agent id, or whatever
     /// identifies this process to a consumer resolving against it.
+    ///
+    /// `core` is the other half of what this runtime serves: the Protocol Units
+    /// whose handlers are the agent's own methods rather than an
+    /// [`AgentExtension`] (`#678`, Phase 6). They are **named here and routed
+    /// elsewhere** — [`crate::connection::server_client`] dispatches them from
+    /// the same declaration that produces this list — so the registry's job is
+    /// only to put them in the manifest and to refuse a collision with an
+    /// extension. A wire type claimed by both halves would route to one of them
+    /// and silently never reach the other, which is the failure the derivations
+    /// on each side exist to prevent between themselves.
     pub fn new(
         provider: impl Into<String>,
         extensions: Vec<Box<dyn AgentExtension>>,
+        core: Vec<ProtocolDescriptor>,
     ) -> Result<Self, RegistryError> {
         let mut routes: HashMap<String, Route> = HashMap::new();
         let mut declared: Vec<ProtocolDescriptor> = Vec::new();
@@ -180,6 +198,51 @@ impl ExtensionRegistry {
 
                 declared.push(descriptor);
             }
+        }
+
+        // The core half, after the extension half so a collision can name which
+        // side claimed the wire type first.
+        let mut core_wires: BTreeMap<String, String> = BTreeMap::new();
+
+        for descriptor in core {
+            descriptor
+                .validate()
+                .map_err(|source| RegistryError::InconsistentDescriptor {
+                    owner: crate::protocol::OWNER,
+                    source,
+                })?;
+
+            let unit = descriptor.id.as_str().to_string();
+
+            for contract in &descriptor.contracts {
+                for wire in &contract.wire {
+                    if let Some(existing) = routes.get(wire) {
+                        let first = extensions
+                            .get(existing.extension)
+                            .map_or("unknown", |e| e.name())
+                            .to_string();
+                        return Err(RegistryError::DuplicateCoreWireType {
+                            wire: wire.clone(),
+                            first,
+                            second: unit,
+                        });
+                    }
+
+                    // Core against core. The generated `match` would take the
+                    // first arm and leave the second unreachable, so a unit
+                    // could be advertised and never dispatched — the failure
+                    // both derivations exist to make unconstructible.
+                    if let Some(first) = core_wires.insert(wire.clone(), unit.clone()) {
+                        return Err(RegistryError::DuplicateCoreWireType {
+                            wire: wire.clone(),
+                            first,
+                            second: unit,
+                        });
+                    }
+                }
+            }
+
+            declared.push(descriptor);
         }
 
         Ok(Self {
@@ -277,7 +340,24 @@ mod tests {
     fn compose(
         extensions: Vec<Box<dyn AgentExtension>>,
     ) -> Result<ExtensionRegistry, RegistryError> {
-        ExtensionRegistry::new("agent-a", extensions)
+        ExtensionRegistry::new("agent-a", extensions, Vec::new())
+    }
+
+    fn compose_with_core(
+        extensions: Vec<Box<dyn AgentExtension>>,
+        core: Vec<ProtocolDescriptor>,
+    ) -> Result<ExtensionRegistry, RegistryError> {
+        ExtensionRegistry::new("agent-a", extensions, core)
+    }
+
+    /// A core descriptor, built the way the agent builds them.
+    fn core(id: &str, wire: &str) -> ProtocolDescriptor {
+        ProtocolDescriptor::new(
+            id,
+            crate::protocol::OWNER,
+            vec![ContractDescriptor::new(ContractVersion::V1, &[wire])],
+        )
+        .unwrap()
     }
 
     #[test]
@@ -404,6 +484,100 @@ mod tests {
                 .await
                 .is_none(),
             "an undeclared wire type must fall through, not be swallowed"
+        );
+    }
+
+    #[test]
+    fn core_units_are_advertised_beside_the_extensions() {
+        // The two halves are one manifest. An agent that serves `session.create`
+        // itself and `git.status` through an extension offers both, and a peer
+        // resolving against it must see both — otherwise the core half is
+        // invisible even though it is the half every agent has.
+        let registry = compose_with_core(
+            vec![Box::new(Fake::new(
+                "git",
+                "git.status",
+                "extension.git.status",
+            ))],
+            vec![core("session.create", "server.session.create")],
+        )
+        .unwrap();
+
+        let manifest = registry.manifest();
+        assert!(manifest.offers(&ProtocolId::new("session.create").unwrap()));
+        assert!(manifest.offers(&ProtocolId::new("git.status").unwrap()));
+    }
+
+    #[test]
+    fn an_agent_with_no_core_units_still_composes() {
+        // `DeclaresNothing` is about an *extension* that serves nothing — a
+        // provider that was registered and is unreachable. Having no core units
+        // is a different claim: the agent serves only what its extensions
+        // declare, which is what a stripped-down build looks like.
+        let registry = compose(vec![Box::new(Fake::new(
+            "git",
+            "git.status",
+            "extension.git.status",
+        ))])
+        .unwrap();
+
+        let manifest = registry.manifest();
+        assert!(!manifest.is_empty());
+        assert!(manifest.offers(&ProtocolId::new("git.status").unwrap()));
+        // Nothing was passed for the core half, so nothing is claimed for it.
+        assert!(!manifest.offers(&ProtocolId::new("session.create").unwrap()));
+    }
+
+    #[test]
+    fn a_core_unit_claiming_an_extension_wire_type_is_refused_and_both_are_named() {
+        // Invisible in production and impossible to debug from a symptom: the
+        // extension's route is in `routes`, `CORE_WIRES` answers the membership
+        // test first, so the message reaches the core handler and the
+        // extension's is dead — with its other wire types still working, so
+        // nothing looks broken enough to investigate.
+        let err = compose_with_core(
+            vec![Box::new(Fake::new(
+                "git",
+                "git.status",
+                "extension.shared.thing",
+            ))],
+            vec![core("session.create", "extension.shared.thing")],
+        )
+        .unwrap_err();
+
+        assert!(
+            matches!(err, RegistryError::DuplicateCoreWireType { .. }),
+            "got {err:?}"
+        );
+        let text = err.to_string();
+        assert!(text.contains("git"), "must name the extension: {text}");
+        assert!(
+            text.contains("session.create"),
+            "must name the core unit: {text}"
+        );
+        assert!(
+            text.contains("extension.shared.thing"),
+            "must name the wire type: {text}"
+        );
+    }
+
+    #[test]
+    fn two_core_units_claiming_one_wire_type_are_refused() {
+        // The core half is a list like any other, and a copy-paste that leaves
+        // the same wire type on two units would route to whichever arm came
+        // first in the generated match — silently, since both compile.
+        let err = compose_with_core(
+            Vec::new(),
+            vec![
+                core("session.create", "server.thing"),
+                core("session.kill", "server.thing"),
+            ],
+        )
+        .unwrap_err();
+
+        assert!(
+            matches!(err, RegistryError::DuplicateCoreWireType { .. }),
+            "got {err:?}"
         );
     }
 }
