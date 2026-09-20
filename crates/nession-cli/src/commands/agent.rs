@@ -3,6 +3,7 @@
 use crate::utils::{pid_file, process};
 use anyhow::{Context, Result};
 use nession_agent::config::AgentConfig;
+use nession_agent::extension::ExtensionRegistry;
 use std::fs;
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -396,7 +397,18 @@ async fn run_agent_foreground(config: AgentConfig) -> Result<()> {
         metadata,
         Arc::new(SessionManager::new()),
         config.default_working_dir.clone(),
-        None, // extension_registry
+        // `nession agent` composes no *extensions*, but it is not a peer with
+        // nothing to advertise: it runs the same `ServerClient` as the daemon
+        // and serves the same core units. `None` here would send no manifest,
+        // and a server that routes only by manifest refuses exactly that — so
+        // this agent would be turned away while `connect_and_run` still
+        // reported a healthy connection.
+        Some(Arc::new(ExtensionRegistry::new(
+            &agent_id,
+            Vec::new(),
+            nession_agent::connection::core_descriptors()
+                .context("the core protocol units name themselves")?,
+        )?)), // extension_registry
     );
 
     let (client_handle, heartbeat_interval_secs) = tokio::select! {

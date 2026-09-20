@@ -209,38 +209,52 @@ is still v1 — promotes its version files to directories, `session/v1/` and
 `session/v2/`, so a version is one addressable thing rather than a suffix
 scattered across a file. Until then the files stay files.
 
-### Provide a legacy adapter
+### A peer with no manifest is refused
 
-A peer with no manifest is a **Legacy Peer**, not a peer that supports
-everything. Only contracts with an explicit, evidence-backed adapter are served
-to it:
+`#678` is a **breaking upgrade**, and this is where that is decided. An agent
+that advertises no manifest does not connect.
 
-```text
-git.status/v1
-  legacy_wire    = extension.git.status
-  legacy_payload = flat
-```
+The alternative — a legacy adapter, with each contract declaring an old wire
+shape and a downgrade rule — was designed and is deliberately not built. It
+would be machinery for serving peers that will never exist here, and every part
+of it is a place where a wrong guess is invisible: a relay that went through an
+adapter looks exactly like a relay that did not need one. Refusing cannot be
+wrong quietly.
 
-Everything else answers `protocol_not_advertised`. It is forbidden to guess a
-payload shape from a software version, to downgrade unconditionally when a
-manifest is missing, or to silently fall back semantically.
+Two things follow, and they are the whole mechanism:
 
-**Convergence debt — the blanket relay is still what runs.** Today a target with
-no manifest has *everything* relayed to it, which is the unconditional fallback
-this section forbids. Recorded here rather than left to be rediscovered:
+- **Registration refuses.** `agent.register` without a `protocol_manifest` is
+  answered `status: "rejected"` and the agent's connect fails. The field stays
+  `Option` on the wire so this is a *clear rejection* rather than a parse error —
+  an old agent's payload deserializes, and the answer says why.
+- **The relay refuses.** A target the registry holds *no* manifest for is not
+  relayed to. Registration already turns those away, so reaching this means a
+  **straggler**: one that registered before the server was upgraded and has not
+  reconnected since. It answers `contract_not_supported`, which is a
+  unit-scoped refusal that leaves the connection and every other unit alone.
 
-- **Why it is still that way.** Every agent built before `#854` has no manifest,
-  so refusing them would take the extension surface down for the whole fleet to
-  enforce a rule about a case that has not happened yet. A peer that *has* a
-  manifest is checked strictly, and that is where the mechanism is proven.
-- **What would end it.** Manifests are universal once `#854` has been deployed
-  long enough that no live agent predates it. The change is then a second
-  condition in the relay gate — "no manifest *and* no declared adapter" — and a
-  `legacy_wire` field on `ContractDescriptor` for providers to populate.
-- **What will not work.** The Server cannot decide this on its own: it composes
-  no provider, by design, so it cannot know which contracts declare an adapter.
-  The declaration has to travel — in the descriptor, carried to the relay by
-  whatever composes the provider.
+So the vocabulary changes with it. There is no **Legacy Peer** — a peer whose
+answer is unknown — because there is no state in which the server has to
+proceed without one. The only two states are *has a manifest* and *has not
+reconnected*.
+
+### What is refused, and what is not
+
+The same section has to be read together with the one above, because "refuse"
+means two different scopes:
+
+| Situation | Scope | Answer |
+|---|---|---|
+| No manifest at `agent.register` | connection | rejected; the agent never comes up |
+| No manifest in the registry (straggler) | unit | `contract_not_supported` on each call; the socket stays |
+| Manifest present, unit not advertised | unit | `contract_not_supported`; the socket stays |
+| Manifest present, named version not offered | unit | `contract_not_supported`, naming both sides |
+
+Only the first is a connection-level answer, and it is the only one that is
+about the *peer* rather than about a *call*. The rest are the design's
+"a unit with no common version disables that unit and does not take the
+connection with it", which is why a target that simply lacks one extension still
+serves every other one.
 
 ### Resolve as a consumer
 
@@ -268,12 +282,11 @@ Four rules, each of which is a way this goes wrong quietly:
 - **Highest common version**, not the target's newest. A consumer speaking v1
   talking to a target offering v1 and v3 lands on v1.
 - **Versions are not contiguous.** `[1, 3]` is a legitimate answer set.
-- **Naming no version is not a refusal.** A target with no manifest is a Legacy
-  Peer and is addressed exactly as it was before any of this existed. A
-  consumer that *knows* it shares no version with the target must refuse
-  locally: sending nothing would be relayed as a Legacy Peer request and put a
-  v1-shaped payload in front of a v2-only target. The server's check is a second
-  boundary against a stale manifest, not the first one.
+- **Naming no version is not a refusal.** A caller that names no version is
+  relayed, because absence is not a claim about versions. A consumer that
+  *knows* it shares no version with the target must refuse locally: sending
+  nothing puts a v1-shaped payload in front of a v2-only target. The server's
+  check is a second boundary against a stale manifest, not the first one.
 
 A refusal names both sides, on the client exactly as on the server:
 `` `agent-a` offers `git.status` at [v2], which this client cannot read ``.
@@ -389,9 +402,10 @@ is broken by it.
 | A core unit the agent does not serve is not advertised | the same invocation — `CORE_WIRES` and `core_descriptors()` are the same list |
 | A router can name a protocol without knowing any provider | `ContractSupport.wire` — the projection is declared by the provider, not derived by the router |
 | A target is never asked for a wire type it does not carry | the Server's extension relay, gated on the target's manifest |
-| A peer without a manifest still works | the same gate, skipped when there is no manifest — a Legacy Peer, not a peer that said no |
+| A peer with no manifest does not connect | `handle_agent_register` — `protocol_manifest` is required, and its absence is a rejection |
+| A straggler is refused per call, not disconnected | the same gate as any other unsupported unit — `contract_not_supported` |
 | A consumer resolves per target, not per connection | `ProtocolDirectory` is keyed by agent id and replaced wholesale by each agent-list snapshot |
-| A consumer never sends a version it cannot read | `addressedPayload` refuses locally — the server's gate cannot catch this case, because a caller that names nothing is relayed as a Legacy Peer |
+| A consumer never sends a version it cannot read | `addressedPayload` refuses locally — the server's gate cannot catch this case, because a caller that names nothing is relayed |
 | Every path that learns an agent list publishes it | `AgentsPlugin.listAgents` and the `agents.changed` push, both calling one `publishProtocols` |
 | The agent list carries the same fields on every path | `server/agent_view.rs` — one builder, because the two hand-built ones had already drifted |
 | Generated bindings are what the contracts say | `just check-codegen` (`scripts/check-codegen-drift.sh`) — regenerate into a scratch directory, diff |
@@ -415,11 +429,11 @@ refusing on its silence.
 ### Where a target's support is served
 
 `client.agents.list` carries each agent's manifest as `protocols`, `null` for a
-peer that advertised none. It is served from the list rather than a query of its
-own because that is already the discover-agents call — a consumer resolving per
-target gets every manifest without a second round trip per agent. The CLI's
-`agents list` reads the same field and prints `legacy` rather than `0 units` for
-a peer without one, because those two resolve differently.
+peer the server holds no manifest for. It is served from the list rather than a
+query of its own because that is already the discover-agents call — a consumer
+resolving per target gets every manifest without a second round trip per agent.
+The CLI's `agents list` reads the same field and prints `no manifest` rather
+than `0 units` for such a peer, because those two resolve differently.
 
 ### What "derived" buys over "checked"
 

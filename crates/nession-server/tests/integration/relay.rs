@@ -146,7 +146,15 @@ async fn register_agent(
         metadata,
         Arc::new(SessionManager::new()),
         "/tmp".to_string(),
-        None, // extension_registry
+        // A real registry, because registration is refused without a manifest
+        // and `connect_and_run` spawns the connection — so a refused agent
+        // would still return `Ok` here while its socket was already dead, and
+        // the failure would surface much later as a missing session.
+        Some(Arc::new(nession_agent::extension::ExtensionRegistry::new(
+            agent_id,
+            Vec::new(),
+            nession_agent::connection::core_descriptors()?,
+        )?)),
     );
 
     Ok(client.connect_and_run().await?.0)

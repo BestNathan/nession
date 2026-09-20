@@ -124,7 +124,13 @@ async fn register_agent_with_server(
         metadata,
         Arc::new(SessionManager::new()),
         "/tmp".to_string(),
-        None, // extension_registry
+        // A real registry: this chain goes through a real nession-server, which
+        // refuses a registration with no manifest.
+        Some(Arc::new(nession_agent::extension::ExtensionRegistry::new(
+            agent_id,
+            Vec::new(),
+            nession_agent::connection::core_descriptors()?,
+        )?)),
     );
 
     Ok(client.connect_and_run().await?.0)

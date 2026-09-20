@@ -36,9 +36,14 @@ pub struct AgentInfo {
     /// **Not persisted**, deliberately. The manifest describes what an agent can
     /// serve *now*, and an agent that is not connected can serve nothing — a
     /// stored copy would let this server claim support on behalf of a process
-    /// that is not running. `None` also covers the agent that never sent one,
-    /// which the design calls a **Legacy Peer**: not "supports everything", and
-    /// resolvable only through contracts with an explicit legacy adapter.
+    /// that is not running.
+    ///
+    /// `None` is now only ever a **straggler**: registration refuses an agent
+    /// that advertises nothing (`#678` is a breaking upgrade — a peer this
+    /// server cannot route for is turned away at the door rather than relayed
+    /// to on a guess), so a missing manifest here means the agent registered
+    /// before this server was upgraded and has not reconnected since. The relay
+    /// refuses those too.
     pub protocol_manifest: Option<ProtocolManifest>,
 }
 

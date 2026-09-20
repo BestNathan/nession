@@ -79,6 +79,7 @@ async fn test_agent_command_response_missing_request_id() {
             "ip_address": "127.0.0.1",
             "port": 8080,
             "auth_token": "test_token",
+            "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["extension.git.status"]}}},
             "metadata": {
                 "tmux_version": "3.3a",
                 "os_version": "linux",
@@ -117,6 +118,7 @@ async fn test_agent_command_response_with_valid_request() {
             "ip_address": "127.0.0.1",
             "port": 8080,
             "auth_token": "test_token",
+            "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["extension.git.status"]}}},
             "metadata": {
                 "tmux_version": "3.3a",
                 "os_version": "linux",
@@ -170,6 +172,7 @@ async fn test_agent_session_update_unknown_status() {
             "ip_address": "127.0.0.1",
             "port": 8080,
             "auth_token": "test_token",
+            "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["extension.git.status"]}}},
             "metadata": {
                 "tmux_version": "3.3a",
                 "os_version": "linux",
