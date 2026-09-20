@@ -32,3 +32,4 @@ export type RootRequest = { session: string, };
 
 /** The payload the provider answers with. */
 export type RootResponse = { "state": "ok", root: string, } | { "state": "unavailable", reason: string, message: string, } | { "state": "not_a_repository", message: string, } | { "state": "error", message: string, };
+

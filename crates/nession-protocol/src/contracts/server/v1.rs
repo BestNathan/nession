@@ -10,10 +10,12 @@ pub(crate) fn default_build_time() -> String {
 // --- Server info ---
 
 /// Request payload for `client.server.info` — empty (protocol marker).
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerInfoRequest {}
 
 /// Response payload for `client.server.info`.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerInfoResponse {
     pub version: String,

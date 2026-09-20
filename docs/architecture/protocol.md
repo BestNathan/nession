@@ -320,8 +320,20 @@ It runs as `just codegen` and reads:
 ```text
 crates/nession-protocol-codegen/src/catalog.rs   which types are which contract
         ↓  ts-rs answers "what TypeScript shape is this Rust type?"
-web/src/generated/protocol/<owner>/<unit>/v<N>.ts
+web/src/generated/protocol/git/status/v1.ts            a provider's unit
+web/src/generated/protocol/claude-code/read/v1.ts      a provider's unit
+web/src/generated/protocol/core/session-create/v1.ts   the kernel's
 ```
+
+The directory is the id with the owner's prefix removed and dots as dashes —
+one rule for both kinds. For a provider the prefix *is* the owner, so
+`git.status` under `git` is `status`. The kernel's units are nobody's prefix:
+`session.create` and `client.session.create` are both the kernel's, and
+truncating them to their last segment would put both in `create`, as it would
+`client.attach` and `client.session.attach` in `attach`. Two units writing one
+file fails nothing — the second write wins and the Web imports a contract it did
+not ask for — so `check_paths_are_unique` refuses it rather than letting the
+last writer through.
 
 **ts-rs owns the type translation; this repository owns everything else** — the
 layout, the identity constants, the request/response aliases and which types a
@@ -336,8 +348,14 @@ Four things about the output that are decisions rather than details:
   duplication that costs is generated, so it cannot drift — and it is *checked*,
   not assumed: the generator refuses to write a file that refers to a name it
   does not declare, using ts-rs's own dependency data.
+- **`WIRES`, and `WIRE` only when there is one of them.** A contract carried by
+  two transports has no single wire, and `session.create` is carried by three.
+  Emitting a `WIRE` for it would mean picking one and dropping the rest
+  silently; instead the multi-wire unit has no `WIRE` at all, so a caller that
+  needs one is made to say which it means by a `tsc` error rather than by a
+  string that compiles and is wrong.
 - **There is no `index.ts`.** The first version had one and `tsc` refused it —
-  every unit exports `PROTOCOL`, `WIRE` and `VERSION`, so a barrel is a wall of
+  every unit exports `PROTOCOL`, `WIRES` and `VERSION`, so a barrel is a wall of
   ambiguity errors. The fix is not to rename the constants: a barrel would let a
   consumer import a shape without saying which contract version it is, which is
   the thing this whole document is against. The version is in the import path.
@@ -411,7 +429,8 @@ is broken by it.
 | Every path that learns an agent list publishes it | `AgentsPlugin.listAgents` and the `agents.changed` push, both calling one `publishProtocols` |
 | The agent list carries the same fields on every path | `server/agent_view.rs` — one builder, because the two hand-built ones had already drifted |
 | Generated bindings are what the contracts say | `just check-codegen` (`scripts/check-codegen-drift.sh`) — regenerate into a scratch directory, diff |
-| Every advertised contract has generated bindings | `nession-protocol-codegen`'s `every_advertised_contract_is_in_the_catalog`, against the providers' own `descriptors()` |
+| Every advertised contract has generated bindings | `nession-protocol-codegen`'s `every_advertised_contract_is_in_the_catalog`, against all four runtimes' own declarations — the agent's `served_descriptors`, the server's `server_manifest`, and the two providers' `descriptors()` |
+| Two units cannot generate to one file | the same crate's `check_paths_are_unique`, run by the generator |
 | A generated file refers to nothing it does not declare | the same crate's `check_self_contained`, run by the generator *and* as a test |
 
 ### Why the manifest carries the wire projection
@@ -610,12 +629,23 @@ two payloads differ only by the server's `request_id` correlation — framing, n
 contract semantics.
 
 **What remains here.** The server's own `json!` payloads, which are a larger and
-separate ledger (276 uses in `server/handler.rs`), and the fact that `contracts/`
-does not feed the TypeScript codegen at all: that catalog is a hand-written list
-of the git and Claude Code units, and nothing links a manifest to it. So an
-advertised contract need not have generated bindings today — which is worth
-knowing, because it means the codegen's coverage is not the guarantee it reads
-as.
+separate ledger (276 uses in `server/handler.rs`), and `#884` — five wires the
+kernel declares under two different unit ids, one of which carries two different
+payload shapes. Both are recorded rather than implied.
+
+**And what no longer does.** This section used to say that `contracts/` did not
+feed the TypeScript codegen at all, so an advertised contract need not have
+generated bindings — the codegen's coverage was not the guarantee it read as.
+That was true until `#876` and is not any more: the catalog now carries the
+kernel's units beside the providers', and
+`every_advertised_contract_is_in_the_catalog` checks it against **all four
+runtimes** — the agent's `served_descriptors`, the server's `server_manifest`,
+and the two extension providers — instead of the two it used to compare. Both
+runtimes are `dev`-dependencies of the generator, which is why nothing that ships
+links it.
+
+An advertised contract having bindings is now a checked property. Filing the
+check as a test rather than a comment is the reason it stayed true.
 
 ### What is still not versioned
 

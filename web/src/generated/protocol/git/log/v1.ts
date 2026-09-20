@@ -85,3 +85,4 @@ limit?: number | null, session: string, };
 
 /** The payload the provider answers with. */
 export type LogResponse = { "state": "ok", history: History, } | { "state": "unavailable", reason: string, message: string, } | { "state": "not_a_repository", message: string, } | { "state": "error", message: string, };
+

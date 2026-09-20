@@ -67,3 +67,4 @@ limit?: number | null, session: string, };
 
 /** The payload the provider answers with. */
 export type BranchesResponse = { "state": "ok", branches: Branches, } | { "state": "unavailable", reason: string, message: string, } | { "state": "not_a_repository", message: string, } | { "state": "error", message: string, };
+

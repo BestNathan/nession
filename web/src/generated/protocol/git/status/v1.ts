@@ -74,3 +74,4 @@ export type StatusResponse = { "state": "ok", status: RepoStatus, root: string,
  * a whole one is the failure `#750` C3 names.
  */
 truncated: boolean, truncatedBytes: number, } | { "state": "unavailable", reason: string, message: string, } | { "state": "not_a_repository", message: string, } | { "state": "error", message: string, };
+

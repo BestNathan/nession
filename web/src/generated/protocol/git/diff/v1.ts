@@ -58,3 +58,4 @@ path: string, session: string, };
 
 /** The payload the provider answers with. */
 export type DiffResponse = { "state": "ok", diff: FileDiff, } | { "state": "unavailable", reason: string, message: string, } | { "state": "not_a_repository", message: string, } | { "state": "error", message: string, };
+

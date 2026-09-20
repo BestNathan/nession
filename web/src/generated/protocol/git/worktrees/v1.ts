@@ -60,3 +60,4 @@ export type WorktreesRequest = { session: string, };
 
 /** The payload the provider answers with. */
 export type WorktreesResponse = { "state": "ok", worktrees: Worktrees, } | { "state": "unavailable", reason: string, message: string, } | { "state": "not_a_repository", message: string, } | { "state": "error", message: string, };
+

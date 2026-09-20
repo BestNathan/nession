@@ -223,12 +223,44 @@ fn render(unit: &Unit, cfg: &Config) -> String {
     }
 
     let _ = writeln!(out, "\n// ── Operations ──\n");
-    let (request_name, request) = unit.request;
-    let (response_name, response) = unit.response;
-    let _ = writeln!(out, "/** The payload a caller sends. */");
-    let _ = writeln!(out, "export type {request_name} = {};", request(cfg));
-    let _ = writeln!(out, "\n/** The payload the provider answers with. */");
-    let _ = writeln!(out, "export type {response_name} = {};", response(cfg));
+    // Absent, not empty. A half with no shape gets no alias — an alias over a
+    // made-up shape would be worse than none, and a consumer importing the
+    // missing one should be told it does not exist rather than handed an empty
+    // object that typechecks.
+    //
+    // The comment says only what this generator knows, which is less than it
+    // looks. It cannot tell a unit that is genuinely one-way from one whose
+    // kernel contract simply declares no shape for that half, and it must not
+    // guess: four of the kernel's list calls have no request type at all — the
+    // Web sends `{}` — and a generator that labelled those "an event a provider
+    // sends, with nothing to ask for" would be writing a falsehood into the one
+    // artefact nobody reads closely.
+    //
+    // The two `Some` arms keep distinct prose. They were once the same string,
+    // which made every generated response comment say "the payload a caller
+    // sends".
+    for (label, alias, what) in [
+        ("request", &unit.request, "The payload a caller sends."),
+        (
+            "response",
+            &unit.response,
+            "The payload the provider answers with.",
+        ),
+    ] {
+        match alias {
+            Some((name, shape)) => {
+                let _ = writeln!(out, "/** {what} */");
+                let _ = writeln!(out, "export type {name} = {};", shape(cfg));
+                let _ = writeln!(out);
+            }
+            None => {
+                let _ = writeln!(
+                    out,
+                    "/**\n * No {label} alias: the catalog declares no {label} shape for this unit.\n */"
+                );
+            }
+        }
+    }
     out
 }
 

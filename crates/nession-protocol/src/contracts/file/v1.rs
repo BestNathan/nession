@@ -1,10 +1,12 @@
 use serde::{Deserialize, Serialize};
 
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileListPayload {
     pub path: String,
 }
 
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileReadPayload {
     pub path: String,
@@ -22,6 +24,7 @@ pub struct FileReadPayload {
     pub limit: Option<u64>,
 }
 
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileWritePayload {
     pub path: String,
@@ -29,12 +32,14 @@ pub struct FileWritePayload {
     pub content: String,
 }
 
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileWriteResponse {
     pub path: String,
     pub written: u64,
 }
 
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileDeletePayload {
     pub path: String,
@@ -44,23 +49,27 @@ pub struct FileDeletePayload {
     pub recursive: bool,
 }
 
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileCreateDirPayload {
     pub path: String,
 }
 
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileRenamePayload {
     pub from: String,
     pub to: String,
 }
 
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileCwdPayload {
     /// Web UI session_id in "agent_id:session_name" format.
     pub session_id: String,
 }
 
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileCwdResponse {
     pub path: String,
@@ -75,6 +84,7 @@ pub struct FileCwdResponse {
 // the session family — the agent's filesystem model *was* the wire shape.
 
 /// A filesystem entry returned by directory listing.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileEntry {
     pub name: String,
@@ -91,12 +101,13 @@ pub struct FileEntry {
 }
 
 /// Data returned by a file read operation.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileData {
     pub path: String,
     /// Base64-encoded file content.
     pub content: String,
-    /// MIME type (e.g. "text/plain", "application/json").
+    /// MIME type: "text/plain", "application/json".
     pub mime_type: String,
     /// Byte offset into the file where this chunk starts.
     #[serde(default)]
@@ -109,6 +120,7 @@ pub struct FileData {
     pub has_more: bool,
 }
 
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileListResponse {
     pub entries: Vec<FileEntry>,
@@ -120,12 +132,14 @@ pub struct FileListResponse {
 /// error envelope — but it is carried, not dropped: it is on the wire today,
 /// and a consumer reading it is not wrong to. Removing a field is a contract
 /// version, not a transcription.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileMutationResponse {
     pub path: String,
     pub success: bool,
 }
 
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileRenameResponse {
     pub from: String,

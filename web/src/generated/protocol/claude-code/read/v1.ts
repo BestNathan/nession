@@ -56,3 +56,4 @@ limit?: number, };
 
 /** The payload the provider answers with. */
 export type ReadResponse = ReadOkV1 | ReadFailureV1;
+

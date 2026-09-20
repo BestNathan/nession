@@ -11,7 +11,17 @@ fn units() -> Vec<Unit> {
     crate::units()
 }
 
-/// The protocol ids each provider declares, as a runtime composes them.
+/// The protocol ids every runtime in this workspace declares, as they compose
+/// them.
+///
+/// Four, not two. The catalog used to be checked against the two extension
+/// providers alone, which was correct while it only carried them — and became
+/// the thing that hid the gap `#876` is about the moment the kernel's own
+/// contracts mattered, because nothing was asking whether *they* had bindings.
+///
+/// `served_descriptors` and `server_descriptors` are each derived from the
+/// invocation that dispatches them, so this is the set a runtime actually
+/// composes rather than a list kept in a fourth place.
 fn advertised() -> Vec<String> {
     let mut ids: Vec<String> = nession_git::protocol::descriptors()
         .expect("nession-git can name its contracts")
@@ -21,9 +31,28 @@ fn advertised() -> Vec<String> {
                 .expect("nession-claude-code can name its contracts")
                 .iter(),
         )
+        .chain(
+            nession_agent::protocol::served_descriptors()
+                .expect("the agent can name what it serves")
+                .iter(),
+        )
         .map(|d| d.id.as_str().to_string())
         .collect();
+    // The server's declaration is reachable as the manifest it serves, which is
+    // the public surface — `server_descriptors` is `pub(crate)`, deliberately,
+    // since nothing outside the crate dispatches by it.
+    ids.extend(
+        nession_server::protocol::server_manifest()
+            .expect("the server can name what it serves")
+            .protocols
+            .keys()
+            .map(|id| id.as_str().to_string()),
+    );
     ids.sort();
+    // The agent and the server both answer `session.create`, `env.*` and the
+    // rest — one unit seen from two sides, which is the model working. The
+    // comparison is over ids, so the overlap collapses here.
+    ids.dedup();
     ids
 }
 
@@ -58,23 +87,32 @@ fn every_unit_file_is_self_contained() {
 
 #[test]
 fn the_two_aliases_are_named_and_distinct() {
-    // `request.0` and `response.0` are hand-written strings, so they are the one
-    // part of the catalog the compiler cannot check. A unit whose two operations
-    // collided on one name would emit a file that does not compile.
+    // The alias names are hand-written strings, so they are the one part of the
+    // catalog the compiler cannot check. A unit whose two operations collided on
+    // one name would emit a file that does not compile.
+    for unit in units() {
+        let (Some(request), Some(response)) = (&unit.request, &unit.response) else {
+            continue;
+        };
+        assert!(!request.0.is_empty(), "{} has no request name", unit.id);
+        assert!(!response.0.is_empty(), "{} has no response name", unit.id);
+        assert_ne!(
+            request.0, response.0,
+            "{} names its request and response the same",
+            unit.id
+        );
+    }
+}
+
+#[test]
+fn a_unit_with_a_response_also_has_a_request() {
+    // The asymmetry worth forbidding, and the only one: a unit that answers has
+    // to be answerable. The reverse is ordinary — half the kernel's units are
+    // one-way — so it is not checked.
     for unit in units() {
         assert!(
-            !unit.request.0.is_empty(),
-            "{} has no request name",
-            unit.id
-        );
-        assert!(
-            !unit.response.0.is_empty(),
-            "{} has no response name",
-            unit.id
-        );
-        assert_ne!(
-            unit.request.0, unit.response.0,
-            "{} names its request and response the same",
+            unit.response.is_none() || unit.request.is_some(),
+            "{} answers but cannot be asked",
             unit.id
         );
     }
@@ -89,7 +127,10 @@ fn an_alias_is_a_shape_and_not_a_reference_to_one() {
     // failure is a `tsc` error three layers away.
     let cfg = crate::config();
     for unit in units() {
-        let response = (unit.response.1)(&cfg);
+        let Some((_, response)) = unit.response else {
+            continue;
+        };
+        let response = response(&cfg);
         assert!(
             !response.contains("type "),
             "{}'s response alias carries a declaration rather than a shape: {response}",

@@ -34,3 +34,4 @@ export type ListRequest = { scope: Scope, session_id?: string, };
 
 /** The payload the provider answers with. */
 export type ListResponse = { available: boolean, categories: Array<ConfigCategory>, };
+

@@ -65,6 +65,7 @@ pub enum IdentityError {
 /// Constructed only through [`ProtocolId::new`], so an invalid id cannot reach
 /// a registry key or a manifest.
 #[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[serde(try_from = "String", into = "String")]
 pub struct ProtocolId(String);
 
@@ -166,6 +167,7 @@ impl From<ProtocolId> for String {
 /// types is the point — one `u32` covering both is how a bug fix starts
 /// looking like a breaking change.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[serde(try_from = "u32", into = "u32")]
 pub struct ContractVersion(u32);
 
