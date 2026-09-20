@@ -22,6 +22,7 @@ use super::identity::{ContractVersion, ProtocolId};
 /// somewhere to go that is not a breaking change to the map's shape. None of
 /// them are populated yet; `第一版应保持最小稳定格式`.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 pub struct ContractSupport {
     pub versions: Vec<ContractVersion>,
     /// The wire message types this contract travels as.
@@ -64,6 +65,7 @@ impl ContractSupport {
 /// artifact that ends up compared, cached or committed, and a `HashMap` would
 /// make unrelated runs differ.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 pub struct ProtocolManifest {
     /// Who offers this set — an agent id, a server, a runtime name.
     pub provider: String,

@@ -6,7 +6,15 @@
 
 /** The canonical protocol id. Not the wire type. */
 export const PROTOCOL = 'claude-code.list';
-/** The transport projection this contract travels as. */
+/** Every transport projection this contract travels as. */
+export const WIRES = ['extension.claude_code.list'] as const;
+/**
+ * The only projection this contract travels as.
+ *
+ * Absent, deliberately, on a contract served over more than one transport: it
+ * has no single wire, and a caller that needs one has to say which it means.
+ * `WIRES` is always there.
+ */
 export const WIRE = 'extension.claude_code.list';
 /** The contract version these shapes are. */
 export const VERSION = 1;
@@ -26,3 +34,4 @@ export type ListRequest = { scope: Scope, session_id?: string, };
 
 /** The payload the provider answers with. */
 export type ListResponse = { available: boolean, categories: Array<ConfigCategory>, };
+

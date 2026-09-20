@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TerminalInputPayload {
     pub session_name: String,
@@ -7,6 +8,7 @@ pub struct TerminalInputPayload {
     pub data: String,
 }
 
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TerminalResizePayload {
     pub session_name: String,
@@ -14,6 +16,7 @@ pub struct TerminalResizePayload {
     pub rows: u16,
 }
 
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TerminalOutputPayload {
     pub session_name: String,

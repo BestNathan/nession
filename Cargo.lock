@@ -2003,9 +2003,11 @@ dependencies = [
 name = "nession-protocol-codegen"
 version = "0.35.0"
 dependencies = [
+ "nession-agent",
  "nession-claude-code",
  "nession-git",
  "nession-protocol",
+ "nession-server",
  "ts-rs",
 ]
 

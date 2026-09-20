@@ -5,6 +5,7 @@ use crate::contracts::env::v1::{EnvFileRef, EnvSnapshot};
 
 // --- Server → Agent command payloads ---
 
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerSessionCreatePayload {
     pub request_id: String,
@@ -19,6 +20,7 @@ pub struct ServerSessionCreatePayload {
     pub env_snapshots: Vec<EnvSnapshot>,
 }
 
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerSessionKillPayload {
     pub request_id: String,
@@ -35,6 +37,7 @@ pub(crate) fn default_height() -> u16 {
 
 // --- Agent → Server command response payload ---
 
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentCommandResponsePayload {
     pub request_id: String,
@@ -48,12 +51,14 @@ pub struct AgentCommandResponsePayload {
 
 // --- Client → Server session command payloads ---
 
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientSessionCreatePayload {
     pub agent_id: String,
     pub name: String,
 }
 
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientSessionKillPayload {
     pub session_id: String,
@@ -61,6 +66,7 @@ pub struct ClientSessionKillPayload {
 
 // --- Server → Client session command response payloads ---
 
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientSessionCreateResponsePayload {
     pub success: bool,
@@ -70,6 +76,7 @@ pub struct ClientSessionCreateResponsePayload {
     pub error: Option<String>,
 }
 
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientSessionKillResponsePayload {
     pub success: bool,
@@ -80,6 +87,7 @@ pub struct ClientSessionKillResponsePayload {
 // --- Client ↔ Server session attach ---
 
 /// `client.session.attach` — request to attach to a session.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientSessionAttachPayload {
     pub session_id: String,
@@ -104,6 +112,7 @@ pub(crate) fn default_attach_mode() -> String {
 }
 
 /// Server → Client response to `client.session.attach`.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientSessionAttachResponsePayload {
     /// "success" or "error".
@@ -130,12 +139,14 @@ pub struct ClientSessionAttachResponsePayload {
 
 /// `client.session.env.apply` — apply env files to an already-running session
 /// via `tmux set-environment` (attach-time).
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientSessionEnvApplyPayload {
     pub session_id: String,
     pub env_files: Vec<EnvFileRef>,
 }
 
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientSessionEnvUnsetPayload {
     pub session_id: String,
@@ -144,6 +155,7 @@ pub struct ClientSessionEnvUnsetPayload {
     pub env_files: Vec<EnvFileRef>,
 }
 
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientSessionEnvResponsePayload {
     pub success: bool,
@@ -156,6 +168,7 @@ pub struct ClientSessionEnvResponsePayload {
 /// `server.session.env.apply` / `server.session.env.unset` — the server hands
 /// the agent already-resolved snapshots (so parsing/source resolution is done
 /// centrally) to apply or remove on a running session.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerSessionEnvApplyPayload {
     pub request_id: String,
@@ -168,6 +181,7 @@ pub struct ServerSessionEnvApplyPayload {
     pub env_files: Vec<EnvFileRef>,
 }
 
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerSessionEnvUnsetPayload {
     pub request_id: String,
@@ -185,6 +199,7 @@ pub struct ServerSessionEnvUnsetPayload {
 /// Agent → Server: tmux session resized.
 /// Agent parses tmux control mode `%window-resize` events and sends this
 /// payload with the session id and new dimensions.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentTerminalResizePayload {
     pub session_id: String,
@@ -196,6 +211,7 @@ pub struct AgentTerminalResizePayload {
 /// Reuses the message type name already used by CLI (`terminal.resize`).
 /// The `session_id` lets each client route to its per-session callback —
 /// clients may be attached to multiple sessions on the same WebSocket.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerTerminalResizePayload {
     pub session_id: String,
@@ -210,6 +226,7 @@ pub struct ServerTerminalResizePayload {
 // a browser and by the agent for one, and this is the agent's second
 // projection of it.
 
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SessionInfo {
     pub name: String,
@@ -225,6 +242,7 @@ pub struct SessionInfo {
     pub foreground_command: Option<String>,
 }
 
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionCreatePayload {
     pub name: String,
@@ -234,11 +252,13 @@ pub struct SessionCreatePayload {
     pub height: u16,
 }
 
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionKillPayload {
     pub name: String,
 }
 
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientAttachPayload {
     pub session_name: String,
@@ -252,17 +272,20 @@ pub struct ClientAttachPayload {
     pub env_snapshots: Vec<EnvSnapshot>,
 }
 
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientDetachPayload {
     pub session_name: String,
 }
 
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionCapturePreviewPayload {
     pub session_name: String,
     pub lines: u32,
 }
 
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionCapturePreviewResponse {
     pub ansi_b64: String,
@@ -272,6 +295,7 @@ pub struct SessionCapturePreviewResponse {
     pub rows: Option<u16>,
 }
 
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebSessionInfo {
     pub session_id: String,
@@ -283,11 +307,13 @@ pub struct WebSessionInfo {
     pub last_activity: String,
 }
 
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebSessionsListResponse {
     pub sessions: Vec<WebSessionInfo>,
 }
 
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebSessionAttachPayload {
     pub session_id: String,
@@ -295,6 +321,7 @@ pub struct WebSessionAttachPayload {
     pub preferred_mode: String,
 }
 
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebAttachInfo {
     pub mode: String,
@@ -303,6 +330,7 @@ pub struct WebAttachInfo {
     pub agent_address: String,
 }
 
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebSessionCreatePayload {
     pub agent_id: String,
@@ -313,6 +341,7 @@ pub struct WebSessionCreatePayload {
     pub height: u16,
 }
 
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebSessionCreateResponse {
     pub success: bool,
@@ -320,37 +349,44 @@ pub struct WebSessionCreateResponse {
     pub error: Option<String>,
 }
 
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebSessionKillPayload {
     pub session_id: String,
 }
 
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebSessionKillResponse {
     pub success: bool,
     pub error: Option<String>,
 }
 
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionListResponse {
     pub sessions: Vec<SessionInfo>,
 }
 
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionCreateResponse {
     pub name: String,
 }
 
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionKillResponse {
     pub name: String,
 }
 
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientAttachResponse {
     pub session_name: String,
 }
 
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientDetachResponse {
     pub session_name: String,
