@@ -8,7 +8,9 @@
 //! ├── session/v1.rs    session.create, session.attach, session.env.apply
 //! ├── env/v1.rs        env.{list,get,write,delete} at both ends
 //! ├── commands/v1.rs   commands.{list,add,remove,update}
-//! └── server/v1.rs     server.info
+//! ├── server/v1.rs     server.info
+//! ├── terminal/v1.rs   terminal.{input,resize,output} — the P2P stream
+//! └── file/v1.rs       file.{list,read,write,delete,create_dir,rename,cwd}
 //! ```
 //!
 //! A family becomes a version directory when it holds a second version; a
@@ -29,8 +31,10 @@
 pub mod agent;
 pub mod commands;
 pub mod env;
+pub mod file;
 pub mod server;
 pub mod session;
+pub mod terminal;
 
 /// The build tag of whichever binary is answering.
 ///

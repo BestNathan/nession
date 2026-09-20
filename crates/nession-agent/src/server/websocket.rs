@@ -199,20 +199,6 @@ pub struct ClientDetachPayload {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TerminalInputPayload {
-    pub session_name: String,
-    /// Base64-encoded binary data.
-    pub data: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TerminalResizePayload {
-    pub session_name: String,
-    pub cols: u16,
-    pub rows: u16,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionCapturePreviewPayload {
     pub session_name: String,
     pub lines: u32,
@@ -358,13 +344,6 @@ pub struct ClientDetachResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TerminalOutputPayload {
-    pub session_name: String,
-    /// Base64-encoded binary data.
-    pub data: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OkPayload {
     pub message: String,
 }
@@ -377,65 +356,20 @@ pub struct ErrorPayload {
 
 // --- File operation payloads ---
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FileListPayload {
-    pub path: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FileReadPayload {
-    pub path: String,
-    /// Byte offset for chunked reads. `None` means start from beginning.
-    #[serde(default)]
-    pub offset: Option<u64>,
-    /// Maximum bytes to return for chunked reads. `None` means use default chunk size.
-    #[serde(default)]
-    pub limit: Option<u64>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FileWritePayload {
-    pub path: String,
-    /// Base64-encoded content.
-    pub content: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FileWriteResponse {
-    pub path: String,
-    pub written: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FileDeletePayload {
-    pub path: String,
-    /// Delete a directory's contents too. Defaults to `false` so an older
-    /// client keeps the previous empty-directory-only behaviour.
-    #[serde(default)]
-    pub recursive: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FileCreateDirPayload {
-    pub path: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FileRenamePayload {
-    pub from: String,
-    pub to: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FileCwdPayload {
-    /// Web UI session_id in "agent_id:session_name" format.
-    pub session_id: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FileCwdResponse {
-    pub path: String,
-}
+// --- Wire shapes, re-exported from the Protocol Kernel (#678) ---
+//
+// These used to be declared here, which made the agent's implementation the
+// contract: nothing else could name what a `terminal.input` message is, and the
+// kernel — whose job is to own exactly that — could not see it. They live in
+// `nession-protocol`'s `contracts/` now, and this is a re-export so every
+// existing path in this crate keeps resolving.
+pub use nession_protocol::contracts::file::v1::{
+    FileCreateDirPayload, FileCwdPayload, FileCwdResponse, FileDeletePayload, FileListPayload,
+    FileReadPayload, FileRenamePayload, FileWritePayload, FileWriteResponse,
+};
+pub use nession_protocol::contracts::terminal::v1::{
+    TerminalInputPayload, TerminalOutputPayload, TerminalResizePayload,
+};
 
 // --- Protocol helpers ---
 
