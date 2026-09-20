@@ -323,7 +323,10 @@ impl ServerClient {
         let (shutdown_tx, shutdown_rx) = mpsc::channel(1);
         // One-shot-ish channel to learn the heartbeat interval from the first
         // registration. Using a bounded channel of 1 keeps it simple.
-        let (interval_tx, mut interval_rx) = mpsc::channel::<Option<u64>>(1);
+        // The first attempt's outcome: the heartbeat interval on acceptance,
+        // `Ok(None)` on a transient failure, or the server's reason for
+        // refusing. `Err` is terminal and travels to the caller.
+        let (interval_tx, mut interval_rx) = mpsc::channel::<Result<Option<u64>, String>>(1);
         let sync_needed = Arc::new(AtomicBool::new(false));
         let connected = Arc::new(AtomicBool::new(false));
 
@@ -343,9 +346,18 @@ impl ServerClient {
                 .await;
         });
 
-        // Wait (briefly) for the first registration to report the interval.
-        let interval = interval_rx.recv().await.flatten();
-        Ok((handle, interval))
+        // Wait (briefly) for the first attempt to report its outcome. A refusal
+        // is returned rather than turned into `Ok`: the supervisor runs in a
+        // spawned task, so anything it swallows here is invisible to the
+        // caller — which is how an agent could report a healthy connection
+        // while the server was refusing every message it sent.
+        match interval_rx.recv().await {
+            Some(Ok(interval)) => Ok((handle, interval)),
+            Some(Err(message)) => Err(anyhow::Error::new(RegistrationRejected(message))),
+            // The supervisor stopped before reporting, which it does not do
+            // except on shutdown. `Ok` matches what this returned before.
+            None => Ok((handle, None)),
+        }
     }
 
     /// Supervisor loop: connect → register → service → reconnect, forever.
@@ -353,7 +365,7 @@ impl ServerClient {
         self,
         mut outbox_rx: mpsc::UnboundedReceiver<WsMessage>,
         mut shutdown_rx: mpsc::Receiver<()>,
-        interval_tx: mpsc::Sender<Option<u64>>,
+        interval_tx: mpsc::Sender<Result<Option<u64>, String>>,
         sync_needed: Arc<AtomicBool>,
         connected: Arc<AtomicBool>,
     ) {
@@ -382,7 +394,7 @@ impl ServerClient {
                     // Report the heartbeat interval from the first connection so
                     // connect_and_run can unblock.
                     if !reported_interval {
-                        let _ = interval_tx.try_send(interval);
+                        let _ = interval_tx.try_send(Ok(interval));
                         reported_interval = true;
                     }
 
@@ -405,10 +417,25 @@ impl ServerClient {
                     }
                 }
                 Err(e) => {
+                    // A refusal is permanent, so it must not be retried and it
+                    // must not be swallowed. Stop, and hand the reason to
+                    // whoever is waiting on the first attempt.
+                    if let Some(rejected) = e.downcast_ref::<RegistrationRejected>() {
+                        // No `reported_interval = true` here: this returns, so
+                        // nothing would read it.
+                        if !reported_interval {
+                            let _ = interval_tx.try_send(Err(rejected.0.clone()));
+                        }
+                        warn!("{e}. Not reconnecting — this agent must be upgraded.");
+                        return;
+                    }
+
                     // Make sure connect_and_run doesn't block forever if the
-                    // very first connection fails.
+                    // very first connection fails. `Ok(None)` rather than an
+                    // error: a connection failure is transient and the loop
+                    // below keeps trying.
                     if !reported_interval {
-                        let _ = interval_tx.try_send(None);
+                        let _ = interval_tx.try_send(Ok(None));
                         reported_interval = true;
                     }
                     warn!(
@@ -450,10 +477,14 @@ impl ServerClient {
             display_name: self.display_name.clone(),
             connect_url: self.connect_url.clone(),
             addresses: self.addresses.clone(),
-            // Derived from the providers this agent actually composed. `None`
-            // when it composed none — which is a real state (the CLI's path),
-            // and the server reads it as a Legacy Peer rather than as a peer
-            // that supports everything.
+            // Derived from the providers this agent actually composed.
+            //
+            // `None` when it composed none, and the server now **refuses** that
+            // (`#678` is a breaking upgrade): a peer it cannot route for does
+            // not connect. A real agent always composes at least one provider —
+            // `main.rs` builds a non-empty list — so this maps to `Some` on
+            // every path that ships. It stays an `Option` on the wire so an old
+            // agent gets a clear rejection rather than a parse error.
             protocol_manifest: self
                 .extension_registry
                 .as_ref()
@@ -485,7 +516,7 @@ impl ServerClient {
                             interval = payload.heartbeat_interval_secs;
                             break;
                         } else {
-                            anyhow::bail!("registration rejected by server: {}", payload.message);
+                            return Err(anyhow::Error::new(RegistrationRejected(payload.message)));
                         }
                     }
                     // Ignore any other message arriving before the response.
@@ -660,6 +691,26 @@ impl ServerClient {
         Ok(())
     }
 }
+
+/// The server refused this agent's registration (`#678`).
+///
+/// Its own type, not an `anyhow` message, because it is a different *kind* of
+/// failure from a connection error and the supervisor has to tell them apart:
+///
+/// - A connection error is **transient** — the server is down, the network
+///   blipped — and retrying is exactly right.
+/// - A refusal is **permanent**. The server routes only by manifest, this agent
+///   has none, and reconnecting will be refused identically. Retrying forever
+///   would bury the one line that says why in a stream of reconnect warnings.
+///
+/// It also has to reach the caller. The supervisor runs in a spawned task, so
+/// before this existed a refusal left `connect_and_run` returning `Ok` — an
+/// agent that logged "Connected to central server" while every message it sent
+/// went nowhere. That is the failure `#678` exists to make impossible, and
+/// refusing without saying so would have been a new instance of it.
+#[derive(Debug, thiserror::Error)]
+#[error("registration rejected by server: {0}")]
+pub struct RegistrationRejected(pub String);
 
 /// Why [`ServerClient::run_connection`] returned.
 enum ConnectionOutcome {

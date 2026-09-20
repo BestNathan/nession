@@ -222,6 +222,41 @@ impl ConnectionHandler {
             ))));
         }
 
+        // A manifest is required, not optional (`#678`).
+        //
+        // This is a **breaking upgrade**, chosen deliberately over supporting
+        // manifest-less peers through explicit adapters. An agent that
+        // advertises nothing is one this server cannot route for: every relay
+        // decision below is made by asking the target's manifest whether it
+        // carries a wire type, and a peer that has not spoken cannot answer.
+        // Relaying to it unconditionally — what this did before — is guessing,
+        // and guessing is the failure the whole design exists to remove.
+        //
+        // Refusing at registration rather than at the first relay is the
+        // difference between an agent that never starts and one that connects,
+        // looks healthy, and silently drops every request aimed at it.
+        //
+        // The field stays `Option` on the wire so this is a *clear rejection*
+        // rather than a parse error: an old agent's payload deserializes, and
+        // the answer it gets says why.
+        let Some(protocol_manifest) = payload.protocol_manifest.clone() else {
+            info!("Agent {} rejected: no protocol manifest", payload.agent_id);
+            return Ok(HandlerAction::Reply(Some(Message::Text(
+                json!({
+                    "msg_type": "agent.register.response",
+                    "id": msg.id,
+                    "timestamp": current_timestamp(),
+                    "payload": {
+                        "status": "rejected",
+                        "message": "This agent advertised no protocol manifest. \
+                                    This server routes only by manifest, so a peer \
+                                    without one cannot be served — upgrade the agent."
+                    }
+                })
+                .to_string(),
+            ))));
+        };
+
         let addresses = crate::registry::build_probed_addresses(
             payload.addresses.clone(),
             &payload.ip_address,
@@ -262,9 +297,12 @@ impl ConnectionHandler {
             session_count: 0,
             active_sessions: 0,
             // What the agent says it can serve, taken from its own composition.
-            // An older agent sends nothing and registers exactly as before —
-            // that is a Legacy Peer, not a peer that supports everything.
-            protocol_manifest: payload.protocol_manifest,
+            // Always present: registration is refused without it, above. The
+            // field stays `Option` because the *registry* can still hold an
+            // agent that registered before this server was upgraded and has not
+            // reconnected since — and for that straggler the relay gate refuses
+            // rather than guesses.
+            protocol_manifest: Some(protocol_manifest),
         };
 
         self.agent_registry.register(agent_info).await;
@@ -2013,24 +2051,83 @@ impl ConnectionHandler {
         // The pipeline's "verify target manifest supports contract" step, and
         // the first thing that consults the manifest an agent advertised.
         //
-        // Guarded on the manifest **existing**, which is the design's legacy
-        // rule rather than a convenience: an agent that has not advertised one
-        // is a Legacy Peer, and a peer that has not spoken must not be read as
-        // one that said no. It relays exactly as it did before manifests
-        // existed.
+        // A target with **no** manifest is refused, not relayed. Registration
+        // already turns away an agent that advertises nothing, so reaching this
+        // means a straggler: one that registered before this server was
+        // upgraded and has not reconnected since. Relaying to it would be
+        // guessing at a shape nobody declared — the thing the manifest exists
+        // to stop — and the guess would be invisible, because the relay would
+        // look exactly like a working one.
         //
         // Refusing here is a *unit-scoped* answer, not a connection-level one —
         // the design is explicit that a unit with no intersection disables that
         // unit and does not take the connection with it. The client gets a
         // response correlated to its own request id and everything else on the
         // socket is untouched.
-        if let Some(manifest) = self
+        let Some(manifest) = self
             .agent_registry
             .get(agent_id)
             .await
             .and_then(|agent| agent.protocol_manifest)
-        {
-            let Some(unit) = manifest.unit_for_wire(&msg.msg_type) else {
+        else {
+            return Ok(HandlerAction::Reply(Some(Message::Text(
+                json!({
+                    "msg_type": response_msg_type,
+                    "id": msg.id,
+                    "timestamp": current_timestamp(),
+                    "payload": {
+                        "error": "contract_not_supported",
+                        "available": false,
+                        // Names the fix: the agent has to come back with a
+                        // manifest, which means an upgrade, not a retry.
+                        "message": format!(
+                            "`{agent_id}` advertised no protocol manifest, so this server \
+                             will not route `{}` to it. It predates manifests — upgrade it.",
+                            msg.msg_type
+                        ),
+                    },
+                })
+                .to_string(),
+            ))));
+        };
+
+        let Some(unit) = manifest.unit_for_wire(&msg.msg_type) else {
+            return Ok(HandlerAction::Reply(Some(Message::Text(
+                json!({
+                    "msg_type": response_msg_type,
+                    "id": msg.id,
+                    "timestamp": current_timestamp(),
+                    "payload": {
+                        "error": "contract_not_supported",
+                        "available": false,
+                        "message": format!(
+                            "`{}` does not advertise `{}`",
+                            agent_id, msg.msg_type
+                        ),
+                    },
+                })
+                .to_string(),
+            ))));
+        };
+
+        // If the caller named a contract version, the target must offer it.
+        //
+        // A caller that names one has already resolved — it read the manifest
+        // this server serves and picked a version. Refusing here is not a
+        // second negotiation; it is checking that the manifest the caller
+        // resolved against is still the one the target advertises, which is the
+        // "target manifest stale" case the design lists.
+        //
+        // No version named means the caller has not resolved, and it relays as
+        // it always did. Absence is not a claim about versions any more than it
+        // is about wire types.
+        if let Some(named) = msg.payload.get("contract_version").and_then(Value::as_u64) {
+            let offered = manifest
+                .support(unit)
+                .map(|support| support.versions.clone())
+                .unwrap_or_default();
+            let known = offered.iter().any(|v| u64::from(v.get()) == named);
+            if !known {
                 return Ok(HandlerAction::Reply(Some(Message::Text(
                     json!({
                         "msg_type": response_msg_type,
@@ -2039,56 +2136,18 @@ impl ConnectionHandler {
                         "payload": {
                             "error": "contract_not_supported",
                             "available": false,
+                            // Both sides, so a reader can see who has to move
+                            // rather than only that something did not line up.
                             "message": format!(
-                                "`{}` does not advertise `{}`",
-                                agent_id, msg.msg_type
+                                "`{agent_id}` offers `{unit}` at {offered:?}, not v{named}"
                             ),
+                            "protocol": unit.as_str(),
+                            "named_version": named,
+                            "offered_versions": offered.iter().map(|v| v.get()).collect::<Vec<_>>(),
                         },
                     })
                     .to_string(),
                 ))));
-            };
-
-            // If the caller named a contract version, the target must offer it.
-            //
-            // A caller that names one has already resolved — it read the
-            // manifest this server serves and picked a version. Refusing here
-            // is not a second negotiation; it is checking that the manifest the
-            // caller resolved against is still the one the target advertises,
-            // which is the "target manifest stale" case the design lists.
-            //
-            // No version named means the caller has not resolved, and it relays
-            // as it always did. Absence is not a claim about versions any more
-            // than it is about wire types.
-            if let Some(named) = msg.payload.get("contract_version").and_then(Value::as_u64) {
-                let offered = manifest
-                    .support(unit)
-                    .map(|support| support.versions.clone())
-                    .unwrap_or_default();
-                let known = offered.iter().any(|v| u64::from(v.get()) == named);
-                if !known {
-                    return Ok(HandlerAction::Reply(Some(Message::Text(
-                        json!({
-                            "msg_type": response_msg_type,
-                            "id": msg.id,
-                            "timestamp": current_timestamp(),
-                            "payload": {
-                                "error": "contract_not_supported",
-                                "available": false,
-                                // Both sides, so a reader can see who has to
-                                // move rather than only that something did not
-                                // line up.
-                                "message": format!(
-                                    "`{agent_id}` offers `{unit}` at {offered:?}, not v{named}"
-                                ),
-                                "protocol": unit.as_str(),
-                                "named_version": named,
-                                "offered_versions": offered.iter().map(|v| v.get()).collect::<Vec<_>>(),
-                            },
-                        })
-                        .to_string(),
-                    ))));
-                }
             }
         }
 
@@ -3528,17 +3587,31 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_agent_that_advertised_no_manifest_still_relays() {
-        // The legacy rule, and the one that decides whether this is a
-        // regression: a peer that has not spoken is not a peer that said no.
-        // An agent registered without a manifest relays exactly as it did
-        // before manifests existed.
+    async fn an_agent_that_advertised_no_manifest_is_refused_not_relayed() {
+        // The rule this replaced said a peer that has not spoken is not a peer
+        // that said no, and relayed to it exactly as before manifests existed.
+        // `#678` is a breaking upgrade: it is now a peer this server cannot
+        // route for, and guessing at a shape nobody declared is the failure the
+        // manifest exists to prevent.
+        //
+        // Reached by registering directly into the registry, because that is
+        // the only way this state arises now — `agent.register` refuses it, so
+        // this is the straggler that registered before the upgrade.
         let mut h = test_handler("").await;
         register_agent(&h, None).await;
 
         let payload = relay(&mut h, "extension.git.diff").await;
-        assert_ne!(payload["error"], "contract_not_supported");
-        assert_eq!(payload["error"], "agent_disconnected");
+        assert_eq!(payload["error"], "contract_not_supported");
+        assert!(
+            payload["message"]
+                .as_str()
+                .unwrap()
+                .contains("no protocol manifest"),
+            "the refusal must say which absence it is: {payload}"
+        );
+        // Refusing is unit-scoped, so the connection and every other unit are
+        // untouched — the difference between this and a registration refusal.
+        assert_eq!(payload["available"], false);
     }
 
     // ---- the target's protocol support is queryable (#678, Phase 3) ----
@@ -3684,6 +3757,7 @@ mod tests {
                     "ip_address": "1.2.3.4",
                     "port": 19091,
                     "auth_token": "anything",
+                    "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["extension.git.status"]}}},
                     "addresses": [],
                     "connect_url": null,
                     "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
@@ -3708,6 +3782,7 @@ mod tests {
                     "ip_address": "1.2.3.4",
                     "port": 19091,
                     "auth_token": "secret",
+                    "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["extension.git.status"]}}},
                     "addresses": [],
                     "connect_url": null,
                     "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
@@ -3717,6 +3792,49 @@ mod tests {
             .unwrap();
         let reply = parse_reply(action);
         assert_eq!(reply["payload"]["status"], "accepted");
+    }
+
+    #[tokio::test]
+    async fn agent_register_without_a_manifest_is_rejected() {
+        // `#678` is a breaking upgrade: an agent this server cannot route for
+        // does not connect. Refusing here rather than at the first relay is the
+        // difference between an agent that never comes up and one that
+        // connects, looks healthy, and silently drops every request aimed at
+        // it.
+        //
+        // A valid auth token, so the rejection can only be the missing
+        // manifest — otherwise this test would pass for the wrong reason.
+        let mut h = test_handler("").await;
+        let action = h
+            .handle_message(proto_msg(
+                "agent.register",
+                json!({
+                    "agent_id": "old-agent",
+                    "hostname": "host",
+                    "ip_address": "1.2.3.4",
+                    "port": 19091,
+                    "auth_token": "",
+                    "addresses": [],
+                    "connect_url": null,
+                    "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
+                }),
+            ))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        assert_eq!(reply["payload"]["status"], "rejected");
+        assert!(
+            reply["payload"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("no protocol manifest"),
+            "the rejection must name the missing manifest: {reply}"
+        );
+        // And nothing was registered, so no later call can reach it.
+        assert!(
+            h.agent_registry.get("old-agent").await.is_none(),
+            "a rejected agent must not be in the registry"
+        );
     }
 
     #[tokio::test]
@@ -3731,6 +3849,7 @@ mod tests {
                     "ip_address": "1.2.3.4",
                     "port": 19091,
                     "auth_token": "wrong",
+                    "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["extension.git.status"]}}},
                     "addresses": [],
                     "connect_url": null,
                     "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
@@ -3758,6 +3877,7 @@ mod tests {
                     "ip_address": "1.2.3.4",
                     "port": 19091,
                     "auth_token": "",
+                    "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["extension.git.status"]}}},
                     "addresses": [
                         { "url": "ws://1.2.3.4:19091/ws", "network_type": "lan", "label": "" }
                     ],
@@ -3787,6 +3907,7 @@ mod tests {
                 "ip_address": "1.2.3.4",
                 "port": 19091,
                 "auth_token": "",
+                "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["extension.git.status"]}}},
                 "addresses": [],
                 "connect_url": null,
                 "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
@@ -3840,6 +3961,7 @@ mod tests {
                 "ip_address": "1.2.3.4",
                 "port": 19091,
                 "auth_token": "",
+                "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["extension.git.status"]}}},
                 "addresses": [],
                 "connect_url": null,
                 "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
@@ -3870,6 +3992,7 @@ mod tests {
                 "ip_address": "1.2.3.4",
                 "port": 19091,
                 "auth_token": "",
+                "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["extension.git.status"]}}},
                 "addresses": [],
                 "connect_url": null,
                 "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
@@ -3905,6 +4028,7 @@ mod tests {
                 "ip_address": "1.2.3.4",
                 "port": 19091,
                 "auth_token": "",
+                "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["extension.git.status"]}}},
                 "addresses": [],
                 "connect_url": null,
                 "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
@@ -3942,6 +4066,7 @@ mod tests {
                 "ip_address": "1.2.3.4",
                 "port": 19091,
                 "auth_token": "",
+                "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["extension.git.status"]}}},
                 "addresses": [],
                 "connect_url": null,
                 "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
@@ -3975,6 +4100,7 @@ mod tests {
                 "ip_address": "1.2.3.4",
                 "port": 19091,
                 "auth_token": "",
+                "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["extension.git.status"]}}},
                 "addresses": [],
                 "connect_url": null,
                 "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
@@ -4157,6 +4283,7 @@ mod tests {
                 "ip_address": "1.2.3.4",
                 "port": 19091,
                 "auth_token": "",
+                "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["extension.git.status"]}}},
                 "addresses": [],
                 "connect_url": null,
                 "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1", "image_tag": "sha-abc123" },
@@ -4206,6 +4333,7 @@ mod tests {
                 "ip_address": "1.2.3.4",
                 "port": 19091,
                 "auth_token": "",
+                "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["extension.git.status"]}}},
                 "addresses": [],
                 "connect_url": null,
                 "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
@@ -4257,6 +4385,7 @@ mod tests {
                 "ip_address": "1.2.3.4",
                 "port": 19091,
                 "auth_token": "",
+                "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["extension.git.status"]}}},
                 "addresses": [],
                 "connect_url": null,
                 "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
@@ -4599,6 +4728,7 @@ mod tests {
                 "ip_address": "1.2.3.4",
                 "port": 19091,
                 "auth_token": "",
+                "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["extension.git.status"]}}},
                 "addresses": [],
                 "connect_url": null,
                 "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
@@ -4652,6 +4782,7 @@ mod tests {
                 "ip_address": "1.2.3.4",
                 "port": 19091,
                 "auth_token": "",
+                "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["extension.git.status"]}}},
                 "addresses": [],
                 "connect_url": null,
                 "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
@@ -4705,6 +4836,7 @@ mod tests {
                 "ip_address": "1.2.3.4",
                 "port": 19091,
                 "auth_token": "",
+                "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["extension.git.status"]}}},
                 "addresses": [],
                 "connect_url": null,
                 "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
@@ -4870,6 +5002,7 @@ mod tests {
                 "ip_address": "1.2.3.4",
                 "port": 19091,
                 "auth_token": "",
+                "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["extension.git.status"]}}},
                 "addresses": [],
                 "connect_url": null,
                 "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
@@ -4920,6 +5053,7 @@ mod tests {
                 "ip_address": "1.2.3.4",
                 "port": 19091,
                 "auth_token": "",
+                "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["extension.git.status"]}}},
                 "addresses": [],
                 "connect_url": null,
                 "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
@@ -5611,6 +5745,7 @@ mod tests {
                 "ip_address": "1.2.3.4",
                 "port": 19091,
                 "auth_token": "",
+                "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["extension.git.status"]}}},
                 "addresses": [
                     { "url": "ws://1.2.3.4:19091/ws", "network_type": "lan" }
                 ],

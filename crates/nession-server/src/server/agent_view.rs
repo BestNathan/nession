@@ -22,10 +22,17 @@ use crate::registry::{AgentInfo, AgentStatus};
 /// One agent, as the Web receives it.
 ///
 /// `protocols` is a key whose value may be `null`, never an absent key and
-/// never an empty object. A client has to tell "this peer predates manifests"
-/// from "this peer has an empty protocol set": the design resolves the first as
-/// a **Legacy Peer** — relay exactly as before — and the second as a peer that
-/// serves nothing.
+/// never an empty object. A client still has to tell "this server has no
+/// manifest for that peer" from "that peer advertises an empty protocol set",
+/// because they resolve differently — the first is unresolvable, the second is
+/// a peer that serves nothing.
+///
+/// Registration now **refuses** an agent that advertises nothing, so `null`
+/// here means one thing only: a straggler that registered before this server
+/// was upgraded and has not reconnected since. The relay refuses those rather
+/// than guessing, so the Web will show a peer whose calls all come back
+/// `contract_not_supported` — which is the honest answer, and the reason the
+/// key is worth keeping rather than collapsing to an empty object.
 pub fn agent_json(a: &AgentInfo) -> serde_json::Value {
     json!({
         "agent_id": a.agent_id,
@@ -115,11 +122,16 @@ mod tests {
     }
 
     #[test]
-    fn a_legacy_peer_gets_null_and_not_a_missing_key() {
-        // The distinction the client resolves on: `null` is a peer that
-        // advertised none, and an absent key would be a peer whose answer this
-        // server does not know. Collapsing them would make an old agent look
-        // like one this server had nothing to say about.
+    fn a_peer_with_no_manifest_gets_null_and_not_a_missing_key() {
+        // The distinction the client resolves on: `null` is a peer this server
+        // has no manifest for, and an absent key would be one whose answer it
+        // does not know. Collapsing them would make an unroutable straggler
+        // look like a peer that serves nothing.
+        //
+        // Registration refuses an agent that advertises nothing, so this state
+        // is a straggler that has not reconnected since the upgrade — but it is
+        // still a state the server can be in, and the client still has to be
+        // able to tell it apart.
         let json = agent_json(&agent(None));
         assert!(json.get("protocols").is_some(), "key must be present");
         assert!(json["protocols"].is_null(), "and must be null");

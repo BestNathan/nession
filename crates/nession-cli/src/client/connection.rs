@@ -46,9 +46,10 @@ pub struct AgentInfo {
     pub last_heartbeat: String,
     /// What this agent reported it can serve (`#678`).
     ///
-    /// `None` is a **Legacy Peer** — an agent that predates manifests, or one
-    /// that composed no providers. It is not a peer that supports everything,
-    /// and the CLI says so rather than showing an empty set.
+    /// `None` is a peer the server holds no manifest for — since `#678` became
+    /// a breaking upgrade, only a straggler that registered before the server
+    /// was upgraded. It is not a peer that supports everything, and the CLI
+    /// says so rather than showing an empty set.
     #[serde(default)]
     pub protocols: Option<ProtocolManifest>,
 }

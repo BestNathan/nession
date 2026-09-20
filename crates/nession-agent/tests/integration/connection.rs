@@ -4,7 +4,8 @@
 //! send registration/heartbeat/session update messages, and handle responses.
 
 use futures_util::{SinkExt, StreamExt};
-use nession_agent::connection::{msg_types, ServerClient};
+use nession_agent::connection::{core_descriptors, msg_types, ServerClient};
+use nession_agent::extension::ExtensionRegistry;
 use nession_agent::tmux::manager::SessionManager;
 use nession_common::protocol::{AgentMetadata, AgentStatus};
 use std::sync::Arc;
@@ -145,7 +146,17 @@ async fn integration_registration_message_format() {
         metadata,
         Arc::new(SessionManager::new()),
         "/tmp".to_string(),
-        None, // extension_registry
+        // A real registry, because a real agent always composes one and the
+        // server now refuses a registration with no manifest. `None` here would
+        // exercise a shape that cannot reach a server.
+        Some(Arc::new(
+            ExtensionRegistry::new(
+                "integration-agent-2",
+                Vec::new(),
+                core_descriptors().expect("the core units name themselves"),
+            )
+            .expect("the core routes compose"),
+        )),
     );
 
     let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
@@ -178,6 +189,21 @@ async fn integration_registration_message_format() {
     assert!(
         payload.get("protocol_version").is_none(),
         "the global protocol version is gone: {payload}"
+    );
+    // And the field that replaced it has to be on the wire, because the server
+    // now refuses a registration without one. An agent that composed no
+    // extensions still advertises its core units, so "no extensions" is not
+    // "nothing to say" — asserted on a real registry rather than an empty one,
+    // which is what production composes.
+    let manifest = &payload["protocol_manifest"];
+    assert!(
+        manifest.is_object(),
+        "registration must carry a manifest: {payload}"
+    );
+    assert_eq!(manifest["provider"], "integration-agent-2");
+    assert!(
+        manifest["protocols"]["session.create"].is_object(),
+        "the agent's own core unit must be advertised: {manifest}"
     );
 
     // Verify metadata.
