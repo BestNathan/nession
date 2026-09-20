@@ -102,9 +102,9 @@ export class SessionAttachController {
       })
       .then(
         (result) => {
-          if (gen !== this.attachGeneration) {
-            // Canceled or superseded while in flight — the late resolution is a
-            // no-op (the dispose-time router rejection on teardown lands here).
+          if (gen !== this.attachGeneration && !result.ok) {
+            // Research fixture T02: stale failures remain suppressed, but stale
+            // success is intentionally allowed through to reproduce the bug.
             return;
           }
           this.inFlightTransportGen = null;
