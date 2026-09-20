@@ -202,3 +202,156 @@ pub struct ServerTerminalResizePayload {
     pub cols: u16,
     pub rows: u16,
 }
+
+// --- The peer-to-peer projection (#678) ---
+//
+// The same operations a browser asks a *server* for, spoken directly to an
+// agent. One unit, several wires: `session.create` is served by the server for
+// a browser and by the agent for one, and this is the agent's second
+// projection of it.
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SessionInfo {
+    pub name: String,
+    pub created_at: u64,
+    pub window_count: u32,
+    pub attached_clients: u32,
+    pub width: u16,
+    pub height: u16,
+    /// Foreground command of the session's active pane (`#{pane_current_command}`).
+    ///
+    /// Runtime observation, not durable session metadata: it changes as the user
+    /// runs things, and it is absent when tmux reports nothing.
+    pub foreground_command: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionCreatePayload {
+    pub name: String,
+    #[serde(default = "default_width")]
+    pub width: u16,
+    #[serde(default = "default_height")]
+    pub height: u16,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionKillPayload {
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClientAttachPayload {
+    pub session_name: String,
+    #[serde(default = "default_width")]
+    pub width: u16,
+    #[serde(default = "default_height")]
+    pub height: u16,
+    /// Resolved env-file snapshots to apply via `tmux set-environment`
+    /// before PTY creation. Empty (default) preserves pre-env behaviour.
+    #[serde(default)]
+    pub env_snapshots: Vec<EnvSnapshot>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClientDetachPayload {
+    pub session_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionCapturePreviewPayload {
+    pub session_name: String,
+    pub lines: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionCapturePreviewResponse {
+    pub ansi_b64: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cols: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rows: Option<u16>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebSessionInfo {
+    pub session_id: String,
+    pub agent_id: String,
+    pub session_name: String,
+    pub status: String,
+    pub window_count: u32,
+    pub attached_clients: u32,
+    pub last_activity: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebSessionsListResponse {
+    pub sessions: Vec<WebSessionInfo>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebSessionAttachPayload {
+    pub session_id: String,
+    #[serde(default = "default_attach_mode")]
+    pub preferred_mode: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebAttachInfo {
+    pub mode: String,
+    pub session_id: String,
+    pub session_name: String,
+    pub agent_address: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebSessionCreatePayload {
+    pub agent_id: String,
+    pub name: String,
+    #[serde(default = "default_width")]
+    pub width: u16,
+    #[serde(default = "default_height")]
+    pub height: u16,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebSessionCreateResponse {
+    pub success: bool,
+    pub session_id: Option<String>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebSessionKillPayload {
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebSessionKillResponse {
+    pub success: bool,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionListResponse {
+    pub sessions: Vec<SessionInfo>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionCreateResponse {
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionKillResponse {
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClientAttachResponse {
+    pub session_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClientDetachResponse {
+    pub session_name: String,
+}

@@ -7,6 +7,7 @@
 //! one from the descriptors that were actually composed makes advertising
 //! something you cannot serve impossible rather than merely discouraged.
 
+use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
@@ -84,11 +85,23 @@ impl ProtocolManifest {
     /// that still lists one is the "advertises what it cannot do" failure in
     /// its most direct form. The descriptor keeps the identity; the manifest
     /// does not keep the promise.
+    ///
+    /// **One id may arrive more than once, and the entries are unioned.** A
+    /// runtime can offer one unit over several wires — the agent serves
+    /// `session.create` for a server and for a browser talking to it directly —
+    /// and those are two dispatches with one identity. Replacing instead of
+    /// merging would keep whichever came last and silently drop the other's
+    /// wires, which is the "advertises less than it serves" failure this type
+    /// exists to make impossible.
+    ///
+    /// `wire` and `versions` are sorted on the way in so that two manifests
+    /// built from the same descriptors serialise byte-identically, whatever
+    /// order the dispatches were composed in.
     pub fn from_descriptors(
         provider: impl Into<String>,
         descriptors: &[ProtocolDescriptor],
     ) -> Self {
-        let mut protocols = BTreeMap::new();
+        let mut protocols: BTreeMap<ProtocolId, ContractSupport> = BTreeMap::new();
         for descriptor in descriptors {
             if descriptor.lifecycle == Lifecycle::Retired {
                 continue;
@@ -98,10 +111,26 @@ impl ProtocolManifest {
                 .iter()
                 .flat_map(|c| c.wire.iter().cloned())
                 .collect();
-            protocols.insert(
-                descriptor.id.clone(),
-                ContractSupport::with_wire(descriptor.versions(), wire),
-            );
+
+            match protocols.entry(descriptor.id.clone()) {
+                Entry::Occupied(mut entry) => {
+                    let support = entry.get_mut();
+                    support.wire.extend(wire);
+                    support.wire.sort();
+                    support.wire.dedup();
+                    support.versions.extend(descriptor.versions());
+                    support.versions.sort();
+                    support.versions.dedup();
+                }
+                Entry::Vacant(entry) => {
+                    let mut versions = descriptor.versions();
+                    let mut wire = wire;
+                    versions.sort();
+                    wire.sort();
+                    wire.dedup();
+                    entry.insert(ContractSupport::with_wire(versions, wire));
+                }
+            }
         }
         Self {
             provider: provider.into(),
@@ -254,6 +283,80 @@ mod tests {
             serde_json::to_string(&build()).unwrap(),
             serde_json::to_string(&build()).unwrap()
         );
+    }
+
+    #[test]
+    fn one_unit_over_two_wires_arrives_as_two_descriptors_and_keeps_both() {
+        // The shape a real runtime has: the agent serves `session.create` for a
+        // server and for a browser talking to it directly, and those are two
+        // dispatches with one identity. This used to `insert` — keep the last,
+        // drop the other's wire — which is the manifest advertising *less* than
+        // the runtime serves, and a router gating the dropped wire would refuse
+        // a call the agent would have answered.
+        let manifest = ProtocolManifest::from_descriptors(
+            "agent-a",
+            &[
+                ProtocolDescriptor::new(
+                    "session.create",
+                    "nession-agent",
+                    vec![ContractDescriptor::new(V1, &["server.session.create"])],
+                )
+                .unwrap(),
+                ProtocolDescriptor::new(
+                    "session.create",
+                    "nession-agent",
+                    vec![ContractDescriptor::new(V1, &["session.create"])],
+                )
+                .unwrap(),
+            ],
+        );
+
+        assert!(manifest.carries("server.session.create"));
+        assert!(
+            manifest.carries("session.create"),
+            "the second descriptor's wire must survive the first"
+        );
+        // One unit, not two — the union is by id, and the map is keyed by it.
+        assert_eq!(manifest.protocols.len(), 1);
+        assert_eq!(
+            manifest.protocols[&ProtocolId::new("session.create").unwrap()]
+                .wire
+                .len(),
+            2
+        );
+    }
+
+    #[test]
+    fn a_unit_offered_at_two_versions_keeps_both() {
+        // Same union, on the other axis. A provider that gained a second version
+        // declares it in its own descriptor, and a manifest that kept only the
+        // last would make the resolver unable to select the older one — which
+        // is the "highest common version" rule losing the version it was
+        // supposed to compare against.
+        let manifest = ProtocolManifest::from_descriptors(
+            "agent-a",
+            &[
+                ProtocolDescriptor::new(
+                    "git.status",
+                    "nession-git",
+                    vec![ContractDescriptor::new(V1, &["extension.git.status"])],
+                )
+                .unwrap(),
+                ProtocolDescriptor::new(
+                    "git.status",
+                    "nession-git",
+                    vec![ContractDescriptor::new(
+                        ContractVersion::new(2).unwrap(),
+                        &["extension.git.status.v2"],
+                    )],
+                )
+                .unwrap(),
+            ],
+        );
+
+        let support = &manifest.protocols[&ProtocolId::new("git.status").unwrap()];
+        assert_eq!(support.versions, vec![V1, ContractVersion::new(2).unwrap()]);
+        assert_eq!(support.wire.len(), 2);
     }
 
     #[test]

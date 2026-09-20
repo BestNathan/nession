@@ -4,7 +4,7 @@
 //! send registration/heartbeat/session update messages, and handle responses.
 
 use futures_util::{SinkExt, StreamExt};
-use nession_agent::connection::{core_descriptors, msg_types, ServerClient};
+use nession_agent::connection::{msg_types, ServerClient};
 use nession_agent::extension::ExtensionRegistry;
 use nession_agent::tmux::manager::SessionManager;
 use nession_common::protocol::{AgentMetadata, AgentStatus};
@@ -149,13 +149,18 @@ async fn integration_registration_message_format() {
         // A real registry, because a real agent always composes one and the
         // server now refuses a registration with no manifest. `None` here would
         // exercise a shape that cannot reach a server.
+        //
+        // `served_descriptors` rather than `core_descriptors`: this asserts what
+        // reaches the wire, and a test that composes its own subset asserts what
+        // a runtime that does not exist would send.
         Some(Arc::new(
             ExtensionRegistry::new(
                 "integration-agent-2",
                 Vec::new(),
-                core_descriptors().expect("the core units name themselves"),
+                nession_agent::protocol::served_descriptors()
+                    .expect("the served units name themselves"),
             )
-            .expect("the core routes compose"),
+            .expect("the routes compose"),
         )),
     );
 
@@ -204,6 +209,25 @@ async fn integration_registration_message_format() {
     assert!(
         manifest["protocols"]["session.create"].is_object(),
         "the agent's own core unit must be advertised: {manifest}"
+    );
+    // One unit, two wires: the relay wire the server speaks and the direct wire
+    // a browser speaks to this agent's own socket. Both are the same unit, so
+    // both belong on one advertised entry.
+    let create = &manifest["protocols"]["session.create"]["wire"];
+    assert!(
+        create
+            .as_array()
+            .is_some_and(|w| w.iter().any(|v| v == "server.session.create"))
+            && create
+                .as_array()
+                .is_some_and(|w| w.iter().any(|v| v == "session.create")),
+        "both projections of session.create must be advertised: {create}"
+    );
+    // And a unit only this agent's own socket serves reaches the wire too —
+    // the manifest is the union, not the server-connection half of it.
+    assert!(
+        manifest["protocols"]["terminal.input"].is_object(),
+        "a peer-to-peer-only unit must be advertised: {manifest}"
     );
 
     // Verify metadata.

@@ -125,11 +125,13 @@ async fn register_agent_with_server(
         Arc::new(SessionManager::new()),
         "/tmp".to_string(),
         // A real registry: this chain goes through a real nession-server, which
-        // refuses a registration with no manifest.
+        // refuses a registration with no manifest. `served_descriptors` is what
+        // `main` composes, so this chain carries the manifest an agent really
+        // sends rather than a subset of it.
         Some(Arc::new(nession_agent::extension::ExtensionRegistry::new(
             agent_id,
             Vec::new(),
-            nession_agent::connection::core_descriptors()?,
+            nession_agent::protocol::served_descriptors()?,
         )?)),
     );
 

@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use base64::Engine;
-use serde::{Deserialize, Serialize};
+
 use std::fs;
 use std::io::{Read, Seek, SeekFrom};
 use tokio::task;
@@ -37,40 +37,15 @@ fn is_binary_mime(mime: &str) -> bool {
     !TEXT_LIKE_APPLICATION_TYPES.contains(&mime)
 }
 
-/// A filesystem entry returned by directory listing.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FileEntry {
-    pub name: String,
-    pub path: String,
-    /// Absolute path on the filesystem, for actions like "copy full path".
-    pub full_path: String,
-    pub is_dir: bool,
-    pub size: u64,
-    pub modified: u64,
-    /// Inferred MIME type (from file extension). Directories use "inode/directory".
-    pub mime_type: String,
-    /// Whether the file is binary (non-text) content.
-    pub is_binary: bool,
-}
-
-/// Data returned by a file read operation.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FileData {
-    pub path: String,
-    /// Base64-encoded file content.
-    pub content: String,
-    /// MIME type (e.g. "text/plain", "application/json").
-    pub mime_type: String,
-    /// Byte offset into the file where this chunk starts.
-    #[serde(default)]
-    pub offset: u64,
-    /// Total file size in bytes.
-    #[serde(default)]
-    pub total_size: u64,
-    /// Whether more bytes remain after this chunk.
-    #[serde(default)]
-    pub has_more: bool,
-}
+/// Re-exported, not redefined (`#678`).
+///
+/// `FileEntry` and `FileData` serialise straight onto the wire — `file.list`
+/// answers with a `Vec<FileEntry>` and `file.read` with a `FileData` — so the
+/// agent's filesystem model *was* the contract, and nothing outside this crate
+/// could name what a listing is. They live in `contracts/file/v1.rs` now and
+/// every path naming `fs::ops::FileEntry` keeps resolving. What stays here is
+/// the filesystem knowledge: MIME inference, the sandbox, the chunking.
+pub use nession_protocol::contracts::file::v1::{FileData, FileEntry};
 
 /// High-level file operations scoped to a sandbox root.
 pub struct FileOps {

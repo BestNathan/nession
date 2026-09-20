@@ -399,15 +399,22 @@ async fn run_agent_foreground(config: AgentConfig) -> Result<()> {
         config.default_working_dir.clone(),
         // `nession agent` composes no *extensions*, but it is not a peer with
         // nothing to advertise: it runs the same `ServerClient` as the daemon
-        // and serves the same core units. `None` here would send no manifest,
-        // and a server that routes only by manifest refuses exactly that — so
-        // this agent would be turned away while `connect_and_run` still
-        // reported a healthy connection.
+        // and the same `AgentServer` above, so it serves the same units over the
+        // same two transports. `None` here would send no manifest, and a server
+        // that routes only by manifest refuses exactly that — so this agent
+        // would be turned away while `connect_and_run` still reported a healthy
+        // connection.
+        //
+        // `served_descriptors` and not the core half of it: this process starts
+        // a peer-to-peer listener three lines up, so a manifest carrying only
+        // the server-connection units is the under-declaration this whole
+        // mechanism exists to prevent — and it would have been invisible,
+        // because the relay path works either way.
         Some(Arc::new(ExtensionRegistry::new(
             &agent_id,
             Vec::new(),
-            nession_agent::connection::core_descriptors()
-                .context("the core protocol units name themselves")?,
+            nession_agent::protocol::served_descriptors()
+                .context("the served protocol units name themselves")?,
         )?)), // extension_registry
     );
 

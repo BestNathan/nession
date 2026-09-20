@@ -227,3 +227,21 @@ pub struct AgentAddressUpdatePayload {
     /// finalisation to keep priorities consistent across updates).
     pub addresses: Vec<AgentAddress>,
 }
+
+// --- The peer-to-peer projection (#678) ---
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebAgentInfo {
+    pub agent_id: String,
+    pub hostname: String,
+    pub ip_address: String,
+    pub port: u16,
+    pub status: String,
+    pub session_count: u32,
+    pub last_heartbeat: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebAgentsListResponse {
+    pub agents: Vec<WebAgentInfo>,
+}
