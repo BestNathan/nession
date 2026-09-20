@@ -447,7 +447,6 @@ impl ServerClient {
             port: self.port,
             auth_token: self.auth_token.clone(),
             metadata: self.metadata.clone(),
-            protocol_version: "1.0".to_string(),
             display_name: self.display_name.clone(),
             connect_url: self.connect_url.clone(),
             addresses: self.addresses.clone(),

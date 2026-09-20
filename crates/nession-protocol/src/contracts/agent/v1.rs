@@ -11,8 +11,6 @@ pub struct AgentRegisterPayload {
     pub port: u16,
     pub auth_token: String,
     pub metadata: AgentMetadata,
-    #[serde(default = "default_protocol_version")]
-    pub protocol_version: String,
     /// Human-readable display name (set via agent config or Web UI rename).
     /// When absent the UI falls back to hostname.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -40,10 +38,6 @@ pub struct AgentRegisterPayload {
     /// it cannot advertise a contract no handler serves.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub protocol_manifest: Option<ProtocolManifest>,
-}
-
-pub(crate) fn default_protocol_version() -> String {
-    "1.0".to_string()
 }
 
 /// Network category of an advertised agent address.

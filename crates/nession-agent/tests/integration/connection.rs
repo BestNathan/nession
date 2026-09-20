@@ -170,7 +170,15 @@ async fn integration_registration_message_format() {
     assert_eq!(payload["ip_address"], "192.168.1.100");
     assert_eq!(payload["port"], 9090);
     assert_eq!(payload["auth_token"], "secret-token-123");
-    assert_eq!(payload["protocol_version"], "1.0");
+    // Phase 6 removed the one number that stood for every protocol's
+    // compatibility. Nothing ever read it, and it is asserted absent rather
+    // than merely unmentioned so that re-adding it fails here — a field that
+    // comes back with no consumer is a field that comes back meaning whatever
+    // the next reader assumes.
+    assert!(
+        payload.get("protocol_version").is_none(),
+        "the global protocol version is gone: {payload}"
+    );
 
     // Verify metadata.
     assert!(payload["metadata"].is_object());

@@ -543,6 +543,11 @@ should know whether it was overlooked.
   with no typed contract in `contracts/`, and the catalog requires every
   advertised contract to have generated bindings. The units come after their
   contracts, not before.
+- **The global `protocol_version`.** Gone. It rode in `agent.register` and no
+  consumer ever read it — not the server, the CLI, the Web, or the database —
+  so it was the *shape* of a compatibility statement rather than one, and
+  leaving it there was an invitation for the next reader to branch on it. What
+  replaced it is the per-unit resolution above.
 
 ## Related
 
