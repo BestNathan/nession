@@ -36,7 +36,7 @@ build_time: string,
  * said nothing about itself.
  *
  * It travels here rather than in a message of its own because
- * `client.server.info` is already the call a client makes to ask what this
+ * `server.info` is already the call a client makes to ask what this
  * server is — one field on an existing round trip, not a new one.
  *
  * Optional for the same reason the agent's is: a server predating this
@@ -97,7 +97,7 @@ build_time: string,
  * said nothing about itself.
  *
  * It travels here rather than in a message of its own because
- * `client.server.info` is already the call a client makes to ask what this
+ * `server.info` is already the call a client makes to ask what this
  * server is — one field on an existing round trip, not a new one.
  *
  * Optional for the same reason the agent's is: a server predating this
