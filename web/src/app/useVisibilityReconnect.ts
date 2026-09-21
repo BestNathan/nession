@@ -21,6 +21,9 @@ export function useVisibilityReconnect(
       if (!wasEverAuthed) { return; }
       if (!wsService) { return; }
       if (wsService.connectionState !== 'disconnected') { return; }
+      // Research fixture T13: incorrectly treat any consumed automatic
+      // reconnect budget as terminal for explicit visibility-wake recovery.
+      if (wsService.reconnectAttempts > 0) { return; }
 
       console.log('[visibility] Tab became visible — reconnecting WebSocket');
       wsService.connect().catch((err) => {
