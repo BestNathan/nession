@@ -179,7 +179,7 @@ fn an_alias_is_a_shape_and_not_a_reference_to_one() {
     // failure is a `tsc` error three layers away.
     let cfg = crate::config();
     for unit in units() {
-        let Some((_, response)) = unit.response else {
+        let Some((_, response, _schema)) = unit.response else {
             continue;
         };
         let response = response(&cfg);
@@ -189,4 +189,125 @@ fn an_alias_is_a_shape_and_not_a_reference_to_one() {
             unit.id
         );
     }
+}
+
+// ── The JSON Schema projection ──────────────────────────────────────────────
+
+fn collect_refs(value: &serde_json::Value, found: &mut BTreeSet<String>) {
+    match value {
+        serde_json::Value::Object(map) => {
+            for (key, v) in map {
+                if key == "$ref" {
+                    if let Some(s) = v.as_str() {
+                        found.insert(s.to_string());
+                    }
+                } else {
+                    collect_refs(v, found);
+                }
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for v in items {
+                collect_refs(v, found);
+            }
+        }
+        _ => {}
+    }
+}
+
+#[test]
+fn the_document_covers_every_unit_the_catalog_declares() {
+    let doc = crate::schema::document(None);
+    let protocols = doc["protocols"]
+        .as_object()
+        .expect("protocols is an object");
+
+    for unit in units() {
+        assert!(
+            protocols.contains_key(unit.id),
+            "`{}` is in the catalog but not in the schema",
+            unit.id
+        );
+    }
+    assert_eq!(
+        protocols.len(),
+        units().len(),
+        "the schema carries a protocol the catalog does not declare"
+    );
+}
+
+#[test]
+fn every_reference_in_the_document_resolves() {
+    // The JSON Schema half of what `every_unit_file_is_self_contained` checks
+    // for TypeScript: a `$ref` with no matching `$defs` entry is a broken
+    // document, and a consumer would discover it at validation time rather than
+    // here. Every document shipped by the tool is checked, since the filtered
+    // one carries a different definition set than the whole.
+    for only in [None, Some("agent.session.create"), Some("git.status")] {
+        let doc = crate::schema::document(only);
+        let defs: BTreeSet<&str> = doc["$defs"]
+            .as_object()
+            .expect("$defs is an object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+
+        let mut refs = BTreeSet::new();
+        collect_refs(&doc["protocols"], &mut refs);
+
+        for r in refs {
+            let name = r
+                .strip_prefix("#/$defs/")
+                .unwrap_or_else(|| panic!("{only:?}: `{r}` is not a local definition reference"));
+            assert!(
+                defs.contains(name),
+                "{only:?}: `{r}` is referenced but not defined"
+            );
+        }
+    }
+}
+
+#[test]
+fn one_operation_carries_only_its_own_definitions() {
+    // The point of the filter: a reader of one operation should not have to
+    // wade through the whole catalog's types to find the four it uses.
+    let whole = crate::schema::document(None);
+    let one = crate::schema::document(Some("agent.session.create"));
+
+    let count = |d: &serde_json::Value| d["$defs"].as_object().unwrap().len();
+    assert!(
+        count(&one) < count(&whole),
+        "the filtered document carries as many definitions as the whole catalog"
+    );
+    assert_eq!(one["protocols"].as_object().unwrap().len(), 1);
+    assert!(
+        count(&one) > 0,
+        "a unit with shapes should carry the definitions they reference"
+    );
+}
+
+#[test]
+fn an_unknown_operation_is_an_empty_catalog_rather_than_an_error() {
+    // Asking about a unit that does not exist is a question, and the answer is
+    // that there is no such unit — not a failure of the tool. The document
+    // still parses, so a caller can tell the two apart.
+    let doc = crate::schema::document(Some("no.such.operation"));
+    assert!(doc["protocols"].as_object().unwrap().is_empty());
+    assert_eq!(
+        doc["$schema"],
+        "https://json-schema.org/draft/2020-12/schema"
+    );
+}
+
+#[test]
+fn a_unit_with_no_shape_says_so_instead_of_omitting_the_key() {
+    // `server.env.write` is identity-only: the handler reads raw JSON. Present
+    // and null, so a consumer can tell "no shape" from "this document predates
+    // the field" — the same rule the agent-list wire follows.
+    let doc = crate::schema::document(Some("server.env.write"));
+    let entry = &doc["protocols"]["server.env.write"];
+    assert!(entry["request"].is_null());
+    assert!(entry["response"].is_null());
+    assert_eq!(entry["owner"], "core");
+    assert_eq!(entry["version"], 1);
 }

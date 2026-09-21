@@ -308,6 +308,20 @@ protocol id constants, the operation request/response map and manifest metadata.
 Generated output is deterministic, committed, never hand-edited, and CI
 regenerates and diffs it so drift fails the build.
 
+**The same contracts project a second way**, for a consumer that validates a
+message rather than imports a shape:
+
+```bash
+just protocol-schema > protocol-schema.json   # every protocol, one document
+just protocol-schema agent.session.create     # one operation, and only the
+                                              # definitions it references
+```
+
+JSON Schema (2020-12), from the same catalog the TypeScript comes from, so the
+two cannot describe different contracts. A unit whose handler reads raw JSON
+rather than a named type has `request: null` — the document says so instead of
+inventing a shape it cannot vouch for.
+
 Product Capability UI state stays hand-written — only real wire contracts are
 generated. `capabilities/git/types.ts` is the shape that leaves behind: 238
 lines of hand-copied shapes became alias declarations, and the plugins read

@@ -58,6 +58,7 @@ pub const OWNER: &str = "nession-git";
 /// that carried it would suggest the provider could address another agent.
 #[derive(Debug, Clone, serde::Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 pub struct SessionTargetV1 {
     pub session: String,
 }
@@ -76,6 +77,7 @@ pub struct SessionTargetV1 {
 /// without one.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum GitResponseV1<T> {
     Ok {

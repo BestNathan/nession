@@ -8,6 +8,7 @@ use crate::protocol::{v1_descriptor, GitResponseV1, SessionTargetV1};
 /// One work tree, or one administrative entry for one that used to exist.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct Worktree {
     /// Absolute path as git records it.
@@ -32,6 +33,7 @@ pub struct Worktree {
 
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct Worktrees {
     pub worktrees: Vec<Worktree>,
@@ -43,6 +45,7 @@ pub const WIRE: &str = "git.worktrees";
 
 #[derive(Debug, Clone, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 pub struct WorktreesRequestV1 {
     #[serde(flatten)]
     pub target: SessionTargetV1,
@@ -52,6 +55,7 @@ pub struct WorktreesRequestV1 {
 /// small in a way a branch count is not. The agent still caps the bytes.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 pub struct WorktreesOkV1 {
     pub worktrees: Worktrees,
 }

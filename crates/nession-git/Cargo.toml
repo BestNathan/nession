@@ -14,9 +14,10 @@ anyhow.workspace = true
 tracing.workspace = true
 # Codegen only — see nession-protocol/Cargo.toml.
 ts-rs = { workspace = true, optional = true }
+schemars = { workspace = true, optional = true, features = ["derive"] }
 
 [features]
-codegen = ["dep:ts-rs", "nession-protocol/codegen"]
+codegen = ["dep:ts-rs", "dep:schemars", "nession-protocol/codegen"]
 
 [dev-dependencies]
 tempfile = "3"

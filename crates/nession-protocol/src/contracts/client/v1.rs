@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientAuthPayload {
     #[serde(default)]
@@ -10,6 +11,7 @@ pub struct ClientAuthPayload {
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthResponsePayload {
     pub status: String,

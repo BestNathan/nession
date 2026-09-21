@@ -8,6 +8,7 @@ use crate::protocol::{v1_descriptor, GitResponseV1, SessionTargetV1};
 /// One file's diff against HEAD, as the caller receives it.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 pub struct FileDiff {
     pub path: String,
     /// Unified diff text, already capped and lossily decoded for transport.
@@ -24,6 +25,7 @@ pub const WIRE: &str = "git.diff";
 
 #[derive(Debug, Clone, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 pub struct DiffRequestV1 {
     #[serde(flatten)]
     pub target: SessionTargetV1,
@@ -35,6 +37,7 @@ pub struct DiffRequestV1 {
 
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 pub struct DiffOkV1 {
     pub diff: FileDiff,
 }

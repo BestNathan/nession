@@ -20,11 +20,15 @@ thiserror.workspace = true
 # because a list whose comment says "this is the ownership rule" should not grow
 # a transitive graph for a build nobody ships.
 ts-rs = { workspace = true, optional = true }
+# Codegen only as well, and for the same reason. Carries the `derive` feature
+# because the contracts derive `JsonSchema` directly; a runtime build never sees
+# either crate.
+schemars = { workspace = true, optional = true, features = ["derive"] }
 
 [features]
-# Derives `TS` on the contracts so the TypeScript generator can read them.
-# Never enabled by a runtime build; see crates/nession-protocol-codegen.
-codegen = ["dep:ts-rs"]
+# Derives `TS` and `JsonSchema` on the contracts so the generators can read
+# them. Never enabled by a runtime build; see crates/nession-protocol-codegen.
+codegen = ["dep:ts-rs", "dep:schemars"]
 
 [dev-dependencies]
 serde_json.workspace = true

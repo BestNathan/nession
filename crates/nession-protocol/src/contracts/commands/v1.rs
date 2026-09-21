@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 /// A single quick command, matching the structure of the `quick_commands` DB
 /// table and the frontend `QuickCommand` interface.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QuickCommandItem {
     pub id: String,
@@ -20,10 +21,12 @@ pub struct QuickCommandItem {
 
 /// `server.commands.list` — fetch all server-stored quick commands.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ClientCommandsListPayload {}
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientCommandsListResponsePayload {
     pub commands: Vec<QuickCommandItem>,
@@ -31,6 +34,7 @@ pub struct ClientCommandsListResponsePayload {
 
 /// `server.commands.add` — add a new quick command.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientCommandsAddPayload {
     pub label: String,
@@ -40,6 +44,7 @@ pub struct ClientCommandsAddPayload {
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientCommandsAddResponsePayload {
     pub id: String,
@@ -50,12 +55,14 @@ pub struct ClientCommandsAddResponsePayload {
 
 /// `server.commands.remove` — delete a quick command by id.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientCommandsRemovePayload {
     pub id: String,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientCommandsRemoveResponsePayload {
     pub success: bool,
@@ -65,6 +72,7 @@ pub struct ClientCommandsRemoveResponsePayload {
 
 /// `server.commands.update` — update a quick command's label/command/raw.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientCommandsUpdatePayload {
     pub id: String,
@@ -77,6 +85,7 @@ pub struct ClientCommandsUpdatePayload {
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientCommandsUpdateResponsePayload {
     pub success: bool,

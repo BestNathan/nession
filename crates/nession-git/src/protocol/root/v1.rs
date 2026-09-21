@@ -9,6 +9,7 @@ pub const WIRE: &str = "git.root";
 
 #[derive(Debug, Clone, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 pub struct RootRequestV1 {
     #[serde(flatten)]
     pub target: SessionTargetV1,
@@ -16,6 +17,7 @@ pub struct RootRequestV1 {
 
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 pub struct RootOkV1 {
     pub root: String,
 }

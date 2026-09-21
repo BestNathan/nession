@@ -12,6 +12,7 @@ use crate::protocol::{v1_descriptor, GitResponseV1, SessionTargetV1};
 /// say so.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct Commit {
     /// Full object name.
@@ -34,6 +35,7 @@ pub struct Commit {
 
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct History {
     pub commits: Vec<Commit>,
@@ -48,6 +50,7 @@ pub const WIRE: &str = "git.log";
 
 #[derive(Debug, Clone, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 pub struct LogRequestV1 {
     #[serde(flatten)]
     pub target: SessionTargetV1,
@@ -62,6 +65,7 @@ pub struct LogRequestV1 {
 
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 pub struct LogOkV1 {
     pub history: History,
 }

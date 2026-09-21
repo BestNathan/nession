@@ -20,6 +20,24 @@ pub struct Decl {
     /// self-contained: a name that is referenced and not declared would be a
     /// TypeScript error at the consumer, and this says so at the source.
     pub deps: fn(&ts_rs::Config) -> Vec<ts_rs::Dependency>,
+    /// This type as a JSON Schema.
+    ///
+    /// A second projection of the same contract, beside TypeScript rather than
+    /// instead of it: `render` is for a consumer that imports the shape,
+    /// this is for one that validates a message against it. Both are derived
+    /// from the one Rust type, so neither can describe a contract the other
+    /// does not.
+    pub schema: fn(&mut schemars::SchemaGenerator) -> schemars::Schema,
+}
+
+/// One type, as a subschema of a shared generator.
+///
+/// It takes the generator rather than building a root of its own so that every
+/// type in the catalog contributes to **one** `$defs`: two units referring to
+/// the same shape must point at one definition, and separate roots would emit
+/// that shape twice under whatever names each happened to choose.
+fn schema_of<T: schemars::JsonSchema>(gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    gen.subschema_for::<T>()
 }
 
 /// One Protocol Unit at one contract version.
@@ -56,24 +74,34 @@ pub struct Unit {
 }
 
 /// One half of a unit's operation surface: the name its alias takes, and the
-/// shape the alias stands for.
+/// shape the alias stands for — as TypeScript, and as JSON Schema.
 ///
-/// A named type rather than the pair written out twice. `Option<(&str, fn(…))>`
-/// is over clippy's `type_complexity` threshold, and the way out of that is to
-/// name the thing rather than to silence the lint — the two halves are one
-/// concept, and both fields were already saying so in their doc comments.
-pub type Alias = (&'static str, fn(&ts_rs::Config) -> String);
+/// A named type rather than the trio written out twice. `Option<(&str, fn(…),
+/// fn(…))>` is over clippy's `type_complexity` threshold, and the way out of
+/// that is to name the thing rather than to silence the lint — the three parts
+/// are one concept, and both fields were already saying so in their doc
+/// comments.
+///
+/// The shape travels as two projections of one type rather than as a name,
+/// because the alias name is not the type name: `SessionCreateCall` aliases
+/// `SessionCreatePayload`, and nothing derives one from the other.
+pub type Alias = (
+    &'static str,
+    fn(&ts_rs::Config) -> String,
+    fn(&mut schemars::SchemaGenerator) -> schemars::Schema,
+);
 
 /// Describe one type for the catalog.
 ///
 /// `name` comes from ts-rs rather than being written out here, so a type that
 /// is renamed is reported by the compiler *and* the generated file follows
 /// without an edit.
-fn decl_of<T: TS + 'static>(cfg: &ts_rs::Config) -> Decl {
+fn decl_of<T: TS + schemars::JsonSchema + 'static>(cfg: &ts_rs::Config) -> Decl {
     Decl {
         name: T::ident(cfg),
         render: T::decl,
         deps: T::dependencies,
+        schema: schema_of::<T>,
     }
 }
 
@@ -96,10 +124,12 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
             request: Some((
                 "StatusRequest",
                 nession_git::protocol::status::v1::StatusRequestV1::inline,
+                schema_of::<nession_git::protocol::status::v1::StatusRequestV1>,
             )),
             response: Some((
                 "StatusResponse",
                 nession_git::protocol::status::v1::StatusResponseV1::inline,
+                schema_of::<nession_git::protocol::status::v1::StatusResponseV1>,
             )),
         },
         Unit {
@@ -116,10 +146,12 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
             request: Some((
                 "DiffRequest",
                 nession_git::protocol::diff::v1::DiffRequestV1::inline,
+                schema_of::<nession_git::protocol::diff::v1::DiffRequestV1>,
             )),
             response: Some((
                 "DiffResponse",
                 nession_git::protocol::diff::v1::DiffResponseV1::inline,
+                schema_of::<nession_git::protocol::diff::v1::DiffResponseV1>,
             )),
         },
         Unit {
@@ -135,10 +167,12 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
             request: Some((
                 "RootRequest",
                 nession_git::protocol::root::v1::RootRequestV1::inline,
+                schema_of::<nession_git::protocol::root::v1::RootRequestV1>,
             )),
             response: Some((
                 "RootResponse",
                 nession_git::protocol::root::v1::RootResponseV1::inline,
+                schema_of::<nession_git::protocol::root::v1::RootResponseV1>,
             )),
         },
         Unit {
@@ -156,10 +190,12 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
             request: Some((
                 "LogRequest",
                 nession_git::protocol::log::v1::LogRequestV1::inline,
+                schema_of::<nession_git::protocol::log::v1::LogRequestV1>,
             )),
             response: Some((
                 "LogResponse",
                 nession_git::protocol::log::v1::LogResponseV1::inline,
+                schema_of::<nession_git::protocol::log::v1::LogResponseV1>,
             )),
         },
         Unit {
@@ -177,10 +213,12 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
             request: Some((
                 "BranchesRequest",
                 nession_git::protocol::branches::v1::BranchesRequestV1::inline,
+                schema_of::<nession_git::protocol::branches::v1::BranchesRequestV1>,
             )),
             response: Some((
                 "BranchesResponse",
                 nession_git::protocol::branches::v1::BranchesResponseV1::inline,
+                schema_of::<nession_git::protocol::branches::v1::BranchesResponseV1>,
             )),
         },
         Unit {
@@ -198,10 +236,12 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
             request: Some((
                 "WorktreesRequest",
                 nession_git::protocol::worktrees::v1::WorktreesRequestV1::inline,
+                schema_of::<nession_git::protocol::worktrees::v1::WorktreesRequestV1>,
             )),
             response: Some((
                 "WorktreesResponse",
                 nession_git::protocol::worktrees::v1::WorktreesResponseV1::inline,
+                schema_of::<nession_git::protocol::worktrees::v1::WorktreesResponseV1>,
             )),
         },
         Unit {
@@ -224,10 +264,12 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
             request: Some((
                 "ListRequest",
                 nession_claude_code::protocol::list::v1::ListRequestV1::inline,
+                schema_of::<nession_claude_code::protocol::list::v1::ListRequestV1>,
             )),
             response: Some((
                 "ListResponse",
                 nession_claude_code::protocol::list::v1::ListResponseV1::inline,
+                schema_of::<nession_claude_code::protocol::list::v1::ListResponseV1>,
             )),
         },
         Unit {
@@ -245,10 +287,12 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
             request: Some((
                 "ReadRequest",
                 nession_claude_code::protocol::read::v1::ReadRequestV1::inline,
+                schema_of::<nession_claude_code::protocol::read::v1::ReadRequestV1>,
             )),
             response: Some((
                 "ReadResponse",
                 nession_claude_code::protocol::read::v1::ReadResponseV1::inline,
+                schema_of::<nession_claude_code::protocol::read::v1::ReadResponseV1>,
             )),
         },
         Unit {
@@ -270,10 +314,12 @@ wires: &["server.agent.register"],
             request: Some((
                 "AgentRegisterCall",
                 nession_protocol::contracts::agent::v1::AgentRegisterPayload::inline,
+                schema_of::<nession_protocol::contracts::agent::v1::AgentRegisterPayload>,
             )),
             response: Some((
                 "AgentRegisterReply",
                 nession_protocol::contracts::agent::v1::AgentRegisterResponsePayload::inline,
+                schema_of::<nession_protocol::contracts::agent::v1::AgentRegisterResponsePayload>,
             )),
         },
         Unit {
@@ -290,6 +336,7 @@ wires: &["server.agent.heartbeat"],
             request: Some((
                 "AgentHeartbeatCall",
                 nession_protocol::contracts::agent::v1::AgentHeartbeatPayload::inline,
+                schema_of::<nession_protocol::contracts::agent::v1::AgentHeartbeatPayload>,
             )),
             response: None,
         },
@@ -313,6 +360,7 @@ wires: &["server.agent.command-response"],
             request: Some((
                 "AgentCommandResponseCall",
                 nession_protocol::contracts::session::v1::AgentCommandResponsePayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::AgentCommandResponsePayload>,
             )),
             response: None,
         },
@@ -340,6 +388,7 @@ wires: &["server.agent.address-update"],
             request: Some((
                 "AgentAddressUpdateCall",
                 nession_protocol::contracts::agent::v1::AgentAddressUpdatePayload::inline,
+                schema_of::<nession_protocol::contracts::agent::v1::AgentAddressUpdatePayload>,
             )),
             response: None,
         },
@@ -373,10 +422,12 @@ wires: &["server.agent.delete"],
             request: Some((
                 "AgentDeleteCall",
                 nession_protocol::contracts::agent::v1::ClientAgentDeletePayload::inline,
+                schema_of::<nession_protocol::contracts::agent::v1::ClientAgentDeletePayload>,
             )),
             response: Some((
                 "AgentDeleteReply",
                 nession_protocol::contracts::agent::v1::ClientAgentDeleteResponsePayload::inline,
+                schema_of::<nession_protocol::contracts::agent::v1::ClientAgentDeleteResponsePayload>,
             )),
         },
         Unit {
@@ -404,10 +455,12 @@ wires: &["client.auth"],
             request: Some((
                 "ClientAuthCall",
                 nession_protocol::contracts::client::v1::ClientAuthPayload::inline,
+                schema_of::<nession_protocol::contracts::client::v1::ClientAuthPayload>,
             )),
             response: Some((
                 "ClientAuthReply",
                 nession_protocol::contracts::client::v1::AuthResponsePayload::inline,
+                schema_of::<nession_protocol::contracts::client::v1::AuthResponsePayload>,
             )),
         },
         Unit {
@@ -424,10 +477,12 @@ wires: &["client.auth"],
             request: Some((
                 "ClientAttachCall",
                 nession_protocol::contracts::session::v1::ClientAttachPayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::ClientAttachPayload>,
             )),
             response: Some((
                 "ClientAttachReply",
                 nession_protocol::contracts::session::v1::ClientAttachResponse::inline,
+                schema_of::<nession_protocol::contracts::session::v1::ClientAttachResponse>,
             )),
         },
         Unit {
@@ -442,10 +497,12 @@ wires: &["client.auth"],
             request: Some((
                 "ClientDetachCall",
                 nession_protocol::contracts::session::v1::ClientDetachPayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::ClientDetachPayload>,
             )),
             response: Some((
                 "ClientDetachReply",
                 nession_protocol::contracts::session::v1::ClientDetachResponse::inline,
+                schema_of::<nession_protocol::contracts::session::v1::ClientDetachResponse>,
             )),
         },
         Unit {
@@ -472,10 +529,12 @@ wires: &["client.auth"],
             request: Some((
                 "ClientSessionAttachCall",
                 nession_protocol::contracts::session::v1::WebSessionAttachPayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::WebSessionAttachPayload>,
             )),
             response: Some((
                 "ClientSessionAttachReply",
                 nession_protocol::contracts::session::v1::WebAttachInfo::inline,
+                schema_of::<nession_protocol::contracts::session::v1::WebAttachInfo>,
             )),
         },
         Unit {
@@ -490,10 +549,12 @@ wires: &["client.auth"],
             request: Some((
                 "ClientSessionCreateCall",
                 nession_protocol::contracts::session::v1::WebSessionCreatePayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::WebSessionCreatePayload>,
             )),
             response: Some((
                 "ClientSessionCreateReply",
                 nession_protocol::contracts::session::v1::WebSessionCreateResponse::inline,
+                schema_of::<nession_protocol::contracts::session::v1::WebSessionCreateResponse>,
             )),
         },
         Unit {
@@ -508,10 +569,12 @@ wires: &["client.auth"],
             request: Some((
                 "ClientSessionKillCall",
                 nession_protocol::contracts::session::v1::WebSessionKillPayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::WebSessionKillPayload>,
             )),
             response: Some((
                 "ClientSessionKillReply",
                 nession_protocol::contracts::session::v1::WebSessionKillResponse::inline,
+                schema_of::<nession_protocol::contracts::session::v1::WebSessionKillResponse>,
             )),
         },
         Unit {
@@ -579,10 +642,12 @@ wires: &["agent.session.create"],
             request: Some((
                 "SessionCreateCall",
                 nession_protocol::contracts::session::v1::SessionCreatePayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::SessionCreatePayload>,
             )),
             response: Some((
                 "SessionCreateReply",
                 nession_protocol::contracts::session::v1::SessionCreateResponse::inline,
+                schema_of::<nession_protocol::contracts::session::v1::SessionCreateResponse>,
             )),
         },
         Unit {
@@ -610,10 +675,12 @@ wires: &["agent.session.kill"],
             request: Some((
                 "SessionKillCall",
                 nession_protocol::contracts::session::v1::SessionKillPayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::SessionKillPayload>,
             )),
             response: Some((
                 "SessionKillReply",
                 nession_protocol::contracts::session::v1::SessionKillResponse::inline,
+                schema_of::<nession_protocol::contracts::session::v1::SessionKillResponse>,
             )),
         },
         Unit {
@@ -633,10 +700,12 @@ wires: &["server.session.attach"],
             request: Some((
                 "SessionAttachCall",
                 nession_protocol::contracts::session::v1::ClientSessionAttachPayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::ClientSessionAttachPayload>,
             )),
             response: Some((
                 "SessionAttachReply",
                 nession_protocol::contracts::session::v1::ClientSessionAttachResponsePayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::ClientSessionAttachResponsePayload>,
             )),
         },
         Unit {
@@ -664,10 +733,12 @@ wires: &["agent.session.capture-preview"],
             request: Some((
                 "SessionCapturePreviewCall",
                 nession_protocol::contracts::session::v1::SessionCapturePreviewPayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::SessionCapturePreviewPayload>,
             )),
             response: Some((
                 "SessionCapturePreviewReply",
                 nession_protocol::contracts::session::v1::SessionCapturePreviewResponse::inline,
+                schema_of::<nession_protocol::contracts::session::v1::SessionCapturePreviewResponse>,
             )),
         },
         Unit {
@@ -715,10 +786,12 @@ wires: &["agent.session.env.apply"],
             request: Some((
                 "SessionEnvApplyCall",
                 nession_protocol::contracts::session::v1::ClientSessionEnvApplyPayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::ClientSessionEnvApplyPayload>,
             )),
             response: Some((
                 "SessionEnvApplyReply",
                 nession_protocol::contracts::session::v1::ClientSessionEnvResponsePayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::ClientSessionEnvResponsePayload>,
             )),
         },
         Unit {
@@ -748,10 +821,12 @@ wires: &["agent.session.env.unset"],
             request: Some((
                 "SessionEnvUnsetCall",
                 nession_protocol::contracts::session::v1::ClientSessionEnvUnsetPayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::ClientSessionEnvUnsetPayload>,
             )),
             response: Some((
                 "SessionEnvUnsetReply",
                 nession_protocol::contracts::session::v1::ClientSessionEnvResponsePayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::ClientSessionEnvResponsePayload>,
             )),
         },
         Unit {
@@ -802,10 +877,12 @@ wires: &["agent.env.list"],
             request: Some((
                 "EnvListCall",
                 nession_protocol::contracts::env::v1::ClientEnvListPayload::inline,
+                schema_of::<nession_protocol::contracts::env::v1::ClientEnvListPayload>,
             )),
             response: Some((
                 "EnvListReply",
                 nession_protocol::contracts::env::v1::ClientEnvListResponsePayload::inline,
+                schema_of::<nession_protocol::contracts::env::v1::ClientEnvListResponsePayload>,
             )),
         },
         Unit {
@@ -834,10 +911,12 @@ wires: &["agent.env.get"],
             request: Some((
                 "EnvGetCall",
                 nession_protocol::contracts::env::v1::ClientEnvGetPayload::inline,
+                schema_of::<nession_protocol::contracts::env::v1::ClientEnvGetPayload>,
             )),
             response: Some((
                 "EnvGetReply",
                 nession_protocol::contracts::env::v1::ClientEnvGetResponsePayload::inline,
+                schema_of::<nession_protocol::contracts::env::v1::ClientEnvGetResponsePayload>,
             )),
         },
         Unit {
@@ -866,10 +945,12 @@ wires: &["agent.env.write"],
             request: Some((
                 "EnvWriteCall",
                 nession_protocol::contracts::env::v1::ClientEnvWritePayload::inline,
+                schema_of::<nession_protocol::contracts::env::v1::ClientEnvWritePayload>,
             )),
             response: Some((
                 "EnvWriteReply",
                 nession_protocol::contracts::env::v1::ClientEnvWriteResponsePayload::inline,
+                schema_of::<nession_protocol::contracts::env::v1::ClientEnvWriteResponsePayload>,
             )),
         },
         Unit {
@@ -898,10 +979,12 @@ wires: &["agent.env.delete"],
             request: Some((
                 "EnvDeleteCall",
                 nession_protocol::contracts::env::v1::ClientEnvDeletePayload::inline,
+                schema_of::<nession_protocol::contracts::env::v1::ClientEnvDeletePayload>,
             )),
             response: Some((
                 "EnvDeleteReply",
                 nession_protocol::contracts::env::v1::ClientEnvDeleteResponsePayload::inline,
+                schema_of::<nession_protocol::contracts::env::v1::ClientEnvDeleteResponsePayload>,
             )),
         },
                 Unit {
@@ -918,10 +1001,12 @@ wires: &["agent.env.query"],
             request: Some((
                 "EnvQueryCall",
                 nession_protocol::contracts::env::v1::ServerEnvQueryPayload::inline,
+                schema_of::<nession_protocol::contracts::env::v1::ServerEnvQueryPayload>,
             )),
             response: Some((
                 "EnvQueryReply",
                 nession_protocol::contracts::env::v1::AgentEnvStatePayload::inline,
+                schema_of::<nession_protocol::contracts::env::v1::AgentEnvStatePayload>,
             )),
         },
         Unit {
@@ -940,10 +1025,12 @@ wires: &["server.info"],
             request: Some((
                 "ServerInfoCall",
                 nession_protocol::contracts::server::v1::ServerInfoRequest::inline,
+                schema_of::<nession_protocol::contracts::server::v1::ServerInfoRequest>,
             )),
             response: Some((
                 "ServerInfoReply",
                 nession_protocol::contracts::server::v1::ServerInfoResponse::inline,
+                schema_of::<nession_protocol::contracts::server::v1::ServerInfoResponse>,
             )),
         },
         Unit {
@@ -959,10 +1046,12 @@ wires: &["server.commands.list"],
             request: Some((
                 "CommandsListCall",
                 nession_protocol::contracts::commands::v1::ClientCommandsListPayload::inline,
+                schema_of::<nession_protocol::contracts::commands::v1::ClientCommandsListPayload>,
             )),
             response: Some((
                 "CommandsListReply",
                 nession_protocol::contracts::commands::v1::ClientCommandsListResponsePayload::inline,
+                schema_of::<nession_protocol::contracts::commands::v1::ClientCommandsListResponsePayload>,
             )),
         },
         Unit {
@@ -977,10 +1066,12 @@ wires: &["server.commands.add"],
             request: Some((
                 "CommandsAddCall",
                 nession_protocol::contracts::commands::v1::ClientCommandsAddPayload::inline,
+                schema_of::<nession_protocol::contracts::commands::v1::ClientCommandsAddPayload>,
             )),
             response: Some((
                 "CommandsAddReply",
                 nession_protocol::contracts::commands::v1::ClientCommandsAddResponsePayload::inline,
+                schema_of::<nession_protocol::contracts::commands::v1::ClientCommandsAddResponsePayload>,
             )),
         },
         Unit {
@@ -995,10 +1086,12 @@ wires: &["server.commands.remove"],
             request: Some((
                 "CommandsRemoveCall",
                 nession_protocol::contracts::commands::v1::ClientCommandsRemovePayload::inline,
+                schema_of::<nession_protocol::contracts::commands::v1::ClientCommandsRemovePayload>,
             )),
             response: Some((
                 "CommandsRemoveReply",
                 nession_protocol::contracts::commands::v1::ClientCommandsRemoveResponsePayload::inline,
+                schema_of::<nession_protocol::contracts::commands::v1::ClientCommandsRemoveResponsePayload>,
             )),
         },
         Unit {
@@ -1013,10 +1106,12 @@ wires: &["server.commands.update"],
             request: Some((
                 "CommandsUpdateCall",
                 nession_protocol::contracts::commands::v1::ClientCommandsUpdatePayload::inline,
+                schema_of::<nession_protocol::contracts::commands::v1::ClientCommandsUpdatePayload>,
             )),
             response: Some((
                 "CommandsUpdateReply",
                 nession_protocol::contracts::commands::v1::ClientCommandsUpdateResponsePayload::inline,
+                schema_of::<nession_protocol::contracts::commands::v1::ClientCommandsUpdateResponsePayload>,
             )),
         },
         Unit {
@@ -1030,6 +1125,7 @@ wires: &["agent.terminal.input"],
             request: Some((
                 "TerminalInputCall",
                 nession_protocol::contracts::terminal::v1::TerminalInputPayload::inline,
+                schema_of::<nession_protocol::contracts::terminal::v1::TerminalInputPayload>,
             )),
             response: None,
         },
@@ -1044,6 +1140,7 @@ wires: &["agent.terminal.resize"],
             request: Some((
                 "TerminalResizeCall",
                 nession_protocol::contracts::terminal::v1::TerminalResizePayload::inline,
+                schema_of::<nession_protocol::contracts::terminal::v1::TerminalResizePayload>,
             )),
             response: None,
         },
@@ -1060,10 +1157,12 @@ wires: &["agent.file.list"],
             request: Some((
                 "FileListCall",
                 nession_protocol::contracts::file::v1::FileListPayload::inline,
+                schema_of::<nession_protocol::contracts::file::v1::FileListPayload>,
             )),
             response: Some((
                 "FileListReply",
                 nession_protocol::contracts::file::v1::FileListResponse::inline,
+                schema_of::<nession_protocol::contracts::file::v1::FileListResponse>,
             )),
         },
         Unit {
@@ -1078,10 +1177,12 @@ wires: &["agent.file.read"],
             request: Some((
                 "FileReadCall",
                 nession_protocol::contracts::file::v1::FileReadPayload::inline,
+                schema_of::<nession_protocol::contracts::file::v1::FileReadPayload>,
             )),
             response: Some((
                 "FileReadReply",
                 nession_protocol::contracts::file::v1::FileData::inline,
+                schema_of::<nession_protocol::contracts::file::v1::FileData>,
             )),
         },
         Unit {
@@ -1096,10 +1197,12 @@ wires: &["agent.file.write"],
             request: Some((
                 "FileWriteCall",
                 nession_protocol::contracts::file::v1::FileWritePayload::inline,
+                schema_of::<nession_protocol::contracts::file::v1::FileWritePayload>,
             )),
             response: Some((
                 "FileWriteReply",
                 nession_protocol::contracts::file::v1::FileWriteResponse::inline,
+                schema_of::<nession_protocol::contracts::file::v1::FileWriteResponse>,
             )),
         },
         Unit {
@@ -1114,10 +1217,12 @@ wires: &["agent.file.delete"],
             request: Some((
                 "FileDeleteCall",
                 nession_protocol::contracts::file::v1::FileDeletePayload::inline,
+                schema_of::<nession_protocol::contracts::file::v1::FileDeletePayload>,
             )),
             response: Some((
                 "FileDeleteReply",
                 nession_protocol::contracts::file::v1::FileMutationResponse::inline,
+                schema_of::<nession_protocol::contracts::file::v1::FileMutationResponse>,
             )),
         },
         Unit {
@@ -1132,10 +1237,12 @@ wires: &["agent.file.create-dir"],
             request: Some((
                 "FileCreateDirCall",
                 nession_protocol::contracts::file::v1::FileCreateDirPayload::inline,
+                schema_of::<nession_protocol::contracts::file::v1::FileCreateDirPayload>,
             )),
             response: Some((
                 "FileCreateDirReply",
                 nession_protocol::contracts::file::v1::FileMutationResponse::inline,
+                schema_of::<nession_protocol::contracts::file::v1::FileMutationResponse>,
             )),
         },
         Unit {
@@ -1150,10 +1257,12 @@ wires: &["agent.file.rename"],
             request: Some((
                 "FileRenameCall",
                 nession_protocol::contracts::file::v1::FileRenamePayload::inline,
+                schema_of::<nession_protocol::contracts::file::v1::FileRenamePayload>,
             )),
             response: Some((
                 "FileRenameReply",
                 nession_protocol::contracts::file::v1::FileRenameResponse::inline,
+                schema_of::<nession_protocol::contracts::file::v1::FileRenameResponse>,
             )),
         },
         Unit {
@@ -1168,10 +1277,12 @@ wires: &["agent.file.cwd"],
             request: Some((
                 "FileCwdCall",
                 nession_protocol::contracts::file::v1::FileCwdPayload::inline,
+                schema_of::<nession_protocol::contracts::file::v1::FileCwdPayload>,
             )),
             response: Some((
                 "FileCwdReply",
                 nession_protocol::contracts::file::v1::FileCwdResponse::inline,
+                schema_of::<nession_protocol::contracts::file::v1::FileCwdResponse>,
             )),
         },
         Unit {
