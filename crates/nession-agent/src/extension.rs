@@ -624,7 +624,12 @@ mod tests {
             core.len() + p2p.len() - 4,
             "the union is by id, so the four shared units are counted once"
         );
-        assert_eq!(manifest.protocols.len(), 29);
+        // 28 since `client.agents.list` was deleted rather than renamed: the
+        // agent cannot answer a fleet question, and nothing on its own socket
+        // was asking. The formula above adjusted by itself — which is the point
+        // of the two assertions sitting together: the derived one catches a
+        // wiring mistake, the literal one makes a deliberate removal say so.
+        assert_eq!(manifest.protocols.len(), 28);
 
         // Served on both transports: one unit, both wire types.
         let both = ProtocolId::new("session.create").unwrap();

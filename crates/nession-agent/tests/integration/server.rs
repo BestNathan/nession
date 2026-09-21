@@ -250,8 +250,8 @@ async fn integration_terminal_io_flow() {
 // ---------------------------------------------------------------------------
 
 use nession_agent::server::websocket::{
-    WebAgentsListResponse, WebAttachInfo, WebSessionCreatePayload, WebSessionCreateResponse,
-    WebSessionKillPayload, WebSessionKillResponse, WebSessionsListResponse,
+    WebAttachInfo, WebSessionCreatePayload, WebSessionCreateResponse, WebSessionKillPayload,
+    WebSessionKillResponse, WebSessionsListResponse,
 };
 
 #[tokio::test]
@@ -267,21 +267,6 @@ async fn integration_web_ui_client_auth() {
         round_trip(&mut sink, &mut stream, &req).await.unwrap();
     assert_eq!(resp.msg_type, msg_types::OK);
     assert_eq!(resp.payload["status"], "success");
-
-    handle.shutdown().await.ok();
-}
-
-#[tokio::test]
-async fn integration_web_ui_agents_list() {
-    let (addr, handle) = start_server(19087).await.unwrap();
-    let (mut sink, mut stream) = connect(addr).await.unwrap();
-
-    let req = new_message(msg_types::CLIENT_AGENTS_LIST, serde_json::json!({}));
-    let resp: nession_agent::server::websocket::Message<WebAgentsListResponse> =
-        round_trip(&mut sink, &mut stream, &req).await.unwrap();
-    assert_eq!(resp.msg_type, msg_types::OK);
-    assert!(!resp.payload.agents.is_empty());
-    assert_eq!(resp.payload.agents[0].agent_id, "test-agent");
 
     handle.shutdown().await.ok();
 }

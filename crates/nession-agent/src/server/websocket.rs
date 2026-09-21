@@ -130,7 +130,6 @@ pub mod msg_types {
 
     // Web UI → Agent (compatibility layer)
     pub const CLIENT_AUTH: &str = "client.auth";
-    pub const CLIENT_AGENTS_LIST: &str = "client.agents.list";
     pub const CLIENT_SESSIONS_LIST: &str = "client.sessions.list";
     pub const CLIENT_SESSION_ATTACH: &str = "client.session.attach";
     pub const CLIENT_SESSION_CREATE: &str = "client.session.create";
@@ -227,22 +226,6 @@ pub(crate) fn extract_session_name(session_id: &str) -> String {
         .split_once(':')
         .map(|(_, name)| name.to_string())
         .unwrap_or_else(|| session_id.to_string())
-}
-
-/// Parse a `host:port` listen address into an (ip, port) tuple.
-/// Supports both IPv4 (`0.0.0.0:9090`) and IPv6 (`[::1]:9090`) formats.
-/// Falls back to `("127.0.0.1", 9090)` on parse failure.
-fn parse_listen_address(addr: &str) -> (String, u16) {
-    match addr.parse::<std::net::SocketAddr>() {
-        Ok(sa) => (sa.ip().to_string(), sa.port()),
-        Err(_) => {
-            warn!(
-                "failed to parse listen_address '{}', falling back to 127.0.0.1:9090",
-                addr
-            );
-            ("127.0.0.1".to_string(), 9090)
-        }
-    }
 }
 
 /// Query tmux for the current window size of `session_name` using
@@ -972,27 +955,6 @@ p2p_routes! { ctx, msg_type, payload_value;
                 };
                 serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp)).unwrap_or_default()
             }
-            "client.agents.list" => "client.agents.list" => { match ctx.tmux.list_sessions().await {
-                Ok(sessions_list) => {
-                    let hostname = nession_common::system::get_hostname();
-                    let (ip, port) = parse_listen_address(ctx.listen_address);
-                    let agent = WebAgentInfo {
-                        agent_id: ctx.agent_id.to_string(),
-                        hostname,
-                        ip_address: ip,
-                        port,
-                        status: "online".to_string(),
-                        session_count: u32::try_from(sessions_list.len()).unwrap_or(0),
-                        last_heartbeat: chrono::Utc::now().to_rfc3339(),
-                    };
-                    let resp = WebAgentsListResponse {
-                        agents: vec![agent],
-                    };
-                    serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
-                        .unwrap_or_default()
-                }
-                Err(e) => ctx.err("list_failed", &e.to_string()),
-            } }
             "client.sessions.list" => "client.sessions.list" => { match ctx.tmux.list_sessions().await {
                 Ok(sessions_list) => {
                     let sessions: Vec<WebSessionInfo> = sessions_list
@@ -2484,29 +2446,6 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_listen_address_ipv4() {
-        let (ip, port) = parse_listen_address("0.0.0.0:8080");
-        assert_eq!(ip, "0.0.0.0");
-        assert_eq!(port, 8080);
-    }
-
-    #[test]
-    fn test_parse_listen_address_ipv6() {
-        let (ip, port) = parse_listen_address("[::1]:9090");
-        // The function strips the brackets from IPv6 addresses
-        assert_eq!(ip, "::1");
-        assert_eq!(port, 9090);
-    }
-
-    #[test]
-    fn test_parse_listen_address_invalid() {
-        // Invalid format should fall back to default
-        let (ip, port) = parse_listen_address("not-a-valid-address");
-        assert_eq!(ip, "127.0.0.1");
-        assert_eq!(port, 9090);
-    }
-
-    #[test]
     fn test_extract_session_name_with_agent_prefix() {
         assert_eq!(extract_session_name("agent1:mysession"), "mysession");
     }
@@ -2654,23 +2593,6 @@ mod tests {
         assert_eq!(resp.payload.status, "success");
         // Generated client_id should be a valid UUID
         assert!(uuid::Uuid::parse_str(&resp.payload.client_id).is_ok());
-
-        handle.shutdown().await.ok();
-    }
-
-    #[tokio::test]
-    async fn test_web_ui_agents_list() {
-        let (addr, handle) = start_test_server_on(18098).await;
-        let (mut sink, mut stream) = connect_client(addr).await;
-
-        let req = new_message(msg_types::CLIENT_AGENTS_LIST, serde_json::json!({}));
-        let resp: Message<WebAgentsListResponse> =
-            send_and_receive(&mut sink, &mut stream, &req).await;
-
-        assert_eq!(resp.msg_type, msg_types::OK);
-        assert_eq!(resp.payload.agents.len(), 1);
-        assert_eq!(resp.payload.agents[0].agent_id, "test-agent");
-        assert_eq!(resp.payload.agents[0].status, "online");
 
         handle.shutdown().await.ok();
     }
@@ -2886,7 +2808,6 @@ mod tests {
         msg_types::TERMINAL_INPUT,
         msg_types::TERMINAL_RESIZE,
         msg_types::CLIENT_AUTH,
-        msg_types::CLIENT_AGENTS_LIST,
         msg_types::CLIENT_SESSIONS_LIST,
         msg_types::CLIENT_SESSION_ATTACH,
         msg_types::CLIENT_SESSION_CREATE,

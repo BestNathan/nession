@@ -437,18 +437,6 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
         },
         Unit {
             owner: "core",
-            id: "client.agents.list",
-            version: 1,
-            wires: &["client.agents.list"],
-            decls: vec![
-                decl_of::<nession_protocol::contracts::agent::v1::WebAgentsListResponse>(cfg),
-                decl_of::<nession_protocol::contracts::agent::v1::WebAgentInfo>(cfg),
-            ],
-            request: None,
-            response: None,
-        },
-        Unit {
-            owner: "core",
             id: "client.sessions.list",
             version: 1,
             wires: &["client.sessions.list"],
