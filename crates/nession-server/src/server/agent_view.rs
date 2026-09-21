@@ -69,7 +69,7 @@ pub fn agent_json(a: &AgentInfo) -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nession_common::protocol::AgentMetadata;
+    use nession_protocol::contracts::agent::v1::AgentMetadata;
     use nession_protocol::{ContractSupport, ContractVersion, ProtocolId, ProtocolManifest};
     use std::collections::BTreeMap;
 

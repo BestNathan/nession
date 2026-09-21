@@ -3,7 +3,7 @@
 use crate::connection::ServerClientHandle;
 use crate::tmux::manager::SessionManager;
 use anyhow::Result;
-use nession_common::protocol::AgentStatus;
+use nession_protocol::contracts::agent::v1::AgentStatus;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tracing::{debug, error, info};

@@ -8,7 +8,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use nession_common::protocol::AddressStatus;
+use nession_protocol::contracts::agent::v1::AddressStatus;
 use tokio::net::TcpStream;
 
 use crate::registry::AgentRegistry;

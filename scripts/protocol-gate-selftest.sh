@@ -217,6 +217,31 @@ export function other(socket: { request(t: string, p: unknown): void }) {
 TS
 expect_fail "a file marker below the header does not exempt" 'no runtime answers `alpha.gone`'
 
+# ── 3. The transitional alias path ──────────────────────────────────────────
+# Rust refuses a use of the missing module, so the interesting case is the
+# module coming back — which the compiler would accept.
+reset_fixture
+rm -rf "$WORK/tree/crates/nession-common"
+mkdir -p "$WORK/tree/crates/nession-common/src"
+echo 'pub mod protocol;' > "$WORK/tree/crates/nession-common/src/lib.rs"
+cat > "$WORK/tree/crates/nession-common/src/protocol.rs" <<'RS'
+pub use nession_protocol::contracts::agent::v1::*;
+RS
+expect_fail "rule 3 — the alias module coming back" 'the transitional alias module is back'
+
+reset_fixture
+mkdir -p "$WORK/tree/crates/thing/src"
+cat > "$WORK/tree/crates/thing/src/lib.rs" <<'RS'
+use nession_common::protocol::AgentMetadata;
+RS
+write_caller <<'TS'
+export function go(socket: { request(t: string, p: unknown): void }) {
+  socket.request('alpha.one', {});
+  socket.request('beta.two', {});
+}
+TS
+expect_fail "rule 3 — an import of the alias path" 'the transitional alias path'
+
 echo
 if [[ $failures -eq 0 ]]; then
     echo -e "${GREEN}protocol gate selftest OK ✓${NC}"

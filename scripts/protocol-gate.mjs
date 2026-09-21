@@ -21,6 +21,8 @@
 //        b. unknown — well formed, but nothing in the advertised set matches.
 //   2. Every advertised protocol is named by at least one call site. A unit
 //      with no caller is a protocol this workspace maintains and cannot use.
+//   3. The transitional `nession_common::protocol` alias path stays gone, and
+//      the module that carried it does not come back.
 //
 // Scope is the *call sites*, not the tree. A scan over every dotted string
 // literal was measured first and is unusable: it returns 378 distinct values,
@@ -46,7 +48,7 @@
 //   ./scripts/protocol-gate.mjs          # check the tree
 //   ./scripts/protocol-gate.mjs --list   # print the advertised set
 
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
 const ROOT = process.cwd();
@@ -542,6 +544,32 @@ for (const id of [...ids].sort()) {
   if (importedBindings.has(bindingOf.get(id))) continue;
   report(GENERATED, 0, `\`${id}\` has no caller (rule 2)`, '',
     'either something should be using it, or it is dead and should go');
+}
+
+// ── Rule 3: the transitional alias path stays gone ──────────────────────────
+//
+// `nession_common::protocol` was the #678 Phase 1 shim: it re-exported the
+// kernel's contracts flatly, so a caller could not say which family or version
+// it meant — the question the whole Protocol Unit model exists to answer. It is
+// deleted, and `nession_protocol::contracts::<family>::vN` is the only spelling.
+//
+// Rust already refuses a use of it while the module is absent, which is the
+// stronger guard. What the compiler cannot see is the module coming *back* —
+// restore `pub mod protocol;` and the re-exports, and every old import compiles
+// again. That is the regression this checks.
+const SHIM = 'crates/nession-common/src/protocol.rs';
+if (existsSync(join(ROOT, SHIM))) {
+  report(SHIM, 0, 'the transitional alias module is back (rule 3)', '',
+    'nession_protocol::contracts::<family>::vN is the only spelling — a flat re-export cannot say which version a caller resolved');
+}
+for (const file of sourceFiles(join(ROOT, 'crates'))) {
+  if (!file.endsWith('.rs')) continue;
+  const text = maskComments(readFileSync(file, 'utf8'), 'rs');
+  for (const m of text.matchAll(/nession_common::protocol/g)) {
+    report(relative(ROOT, file), text.slice(0, m.index).split('\n').length,
+      'the transitional alias path (rule 3)', '',
+      'name the family and version: nession_protocol::contracts::<family>::vN');
+  }
 }
 
 // ── Report ──────────────────────────────────────────────────────────────────

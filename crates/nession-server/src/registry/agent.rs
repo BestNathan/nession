@@ -1,6 +1,6 @@
 use crate::db::Database;
 use chrono::{DateTime, Utc};
-use nession_common::protocol::{
+use nession_protocol::contracts::agent::v1::{
     AddressStatus, AgentAddress, AgentMetadata, NetworkType, ProbedAddress,
 };
 use nession_protocol::ProtocolManifest;

@@ -47,15 +47,20 @@ pub struct Unit {
     /// The canonical protocol id, `git.status`.
     pub id: &'static str,
     pub version: u32,
-    /// The wire message types this contract travels as.
+    /// The wire message types this contract travels as — **one**, since `#912`.
     ///
-    /// A list rather than one string because a unit can be served on more than
-    /// one transport, and `#678` is explicit that the unit is the semantic
-    /// boundary while the wire is a projection of it. `session.create` is the
-    /// case that forced this: the server answers it for a browser on
-    /// `server.session.create` and the agent answers it for the server on
-    /// `session.create`, and those are one unit seen from two sides. A single
-    /// field would have had to pick one and quietly drop the other.
+    /// This used to say that a unit could be served on two transports, and gave
+    /// `server.session.create` and `agent.session.create` as one unit seen from
+    /// two sides. That was the pre-`#912` model: the wire carried an
+    /// `extension.*` namespace, id and wire were different spellings, and a
+    /// lookup unioned them by id. `#912` made the wire *be* the id, and those
+    /// two are now two units, not one. Every entry here holds exactly one
+    /// string.
+    ///
+    /// Still a slice because the distinction is the model's, not this build's —
+    /// `#678` has the unit as the semantic boundary and the wire as a
+    /// projection of it. Collapsing it to `&'static str` is a separate change
+    /// and would carry the generated `WIRES` with it.
     pub wires: &'static [&'static str],
     /// The declarations this unit's file carries, in emit order.
     pub decls: Vec<Decl>,

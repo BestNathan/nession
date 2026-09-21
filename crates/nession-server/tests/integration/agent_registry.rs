@@ -1,5 +1,5 @@
 use chrono::Utc;
-use nession_common::protocol::AgentMetadata;
+use nession_protocol::contracts::agent::v1::AgentMetadata;
 use nession_server::db::Database;
 use nession_server::registry::agent::{AgentInfo, AgentRegistry, AgentStatus};
 use std::sync::Arc;

@@ -13,12 +13,16 @@
 
 use anyhow::{Context, Result};
 use futures_util::{SinkExt, StreamExt};
-use nession_common::protocol::{
+use nession_protocol::contracts::agent::v1::{
     AgentAddress, AgentAddressUpdatePayload, AgentHeartbeatPayload, AgentMetadata,
-    AgentRegisterPayload, AgentStatus, AgentTerminalResizePayload, EnvFileRef, EnvSnapshot,
-    HeartbeatMetadata, Message, ProtocolMessage, ServerSessionCreatePayload,
-    ServerSessionEnvApplyPayload, ServerSessionEnvUnsetPayload,
+    AgentRegisterPayload, AgentStatus, HeartbeatMetadata,
 };
+use nession_protocol::contracts::env::v1::{EnvFileRef, EnvSnapshot};
+use nession_protocol::contracts::session::v1::{
+    AgentTerminalResizePayload, ServerSessionCreatePayload, ServerSessionEnvApplyPayload,
+    ServerSessionEnvUnsetPayload,
+};
+use nession_protocol::{Message, ProtocolMessage};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -1483,7 +1487,7 @@ mod tests {
     fn flatten_snapshots_single_snapshot() {
         let snapshots = vec![EnvSnapshot {
             name: "a.env".to_string(),
-            source: nession_common::protocol::EnvSource::Server,
+            source: nession_protocol::contracts::env::v1::EnvSource::Server,
             agent_id: None,
             vars: vec![("FOO".into(), "bar".into()), ("BAZ".into(), "qux".into())],
             warnings: vec![],
@@ -1499,7 +1503,7 @@ mod tests {
         let snapshots = vec![
             EnvSnapshot {
                 name: "first.env".to_string(),
-                source: nession_common::protocol::EnvSource::Server,
+                source: nession_protocol::contracts::env::v1::EnvSource::Server,
                 agent_id: None,
                 vars: vec![
                     ("KEY".into(), "first_value".into()),
@@ -1509,7 +1513,7 @@ mod tests {
             },
             EnvSnapshot {
                 name: "second.env".to_string(),
-                source: nession_common::protocol::EnvSource::Server,
+                source: nession_protocol::contracts::env::v1::EnvSource::Server,
                 agent_id: None,
                 vars: vec![("KEY".into(), "second_value".into())],
                 warnings: vec![],
@@ -1527,14 +1531,14 @@ mod tests {
         let snapshots = vec![
             EnvSnapshot {
                 name: "a.env".to_string(),
-                source: nession_common::protocol::EnvSource::Server,
+                source: nession_protocol::contracts::env::v1::EnvSource::Server,
                 agent_id: None,
                 vars: vec![("B".into(), "1".into()), ("A".into(), "2".into())],
                 warnings: vec![],
             },
             EnvSnapshot {
                 name: "b.env".to_string(),
-                source: nession_common::protocol::EnvSource::Server,
+                source: nession_protocol::contracts::env::v1::EnvSource::Server,
                 agent_id: None,
                 vars: vec![("C".into(), "3".into())],
                 warnings: vec![],

@@ -6,7 +6,7 @@ use nession_agent::connection::{ServerClient, ServerClientHandle};
 use nession_agent::sync::heartbeat::HeartbeatLoop;
 use nession_agent::sync::session_watcher::SessionWatcher;
 use nession_agent::tmux::manager::SessionManager;
-use nession_common::protocol::AgentMetadata;
+use nession_protocol::contracts::agent::v1::AgentMetadata;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::TcpListener;

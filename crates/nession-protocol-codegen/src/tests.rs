@@ -24,9 +24,11 @@ fn units() -> Vec<Unit> {
 /// invocation that dispatches them, so this is the set a runtime actually
 /// composes rather than a list kept in a fifth place.
 ///
-/// Wires are unioned per id, because a unit served on two transports is one
-/// entry with two: `session.create` is answered by the server for a browser and
-/// by the agent for the server, and both belong on its one entry.
+/// Wires are unioned per id, so that a unit answered on more than one transport
+/// keeps both on its one entry. Since `#912` the wire and the id are the same
+/// spelling and every unit has exactly one, so today the union is over a single
+/// element — it stays because the alternative is a lookup that silently drops
+/// the second wire the day a unit grows one.
 fn declared() -> BTreeMap<String, BTreeSet<String>> {
     use std::collections::{BTreeMap, BTreeSet};
 
