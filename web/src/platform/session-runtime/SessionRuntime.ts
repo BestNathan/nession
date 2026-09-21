@@ -311,7 +311,7 @@ export class SessionRuntime {
     this.attachController.dispatch({ type: 'DISCONNECT' });
     const result = this.attachController.dispatch({ type: 'SESSION_SELECTED' });
     this.transportGeneration += 1;
-    this.syncAgentConnection({ forceReconnect: true });
+    // Research fixture T15: route intent no longer forces same-URL replacement.\n    this.syncAgentConnection();
     this.emitRuntimeEvent({ type: 'route-intent-changed', phase: result.phase });
   }
 
