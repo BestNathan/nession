@@ -20,6 +20,19 @@ jobs:
           cache: 'npm'
           cache-dependency-path: web/package-lock.json
       - run: cd web && npm ci
+      - name: Install task-specific acceptance oracle
+        shell: bash
+        run: |
+          case "${{ github.head_ref }}" in
+            *t03*)
+              cp .research/ai-native/acceptance/T03.test.ts \
+                web/src/platform/attach/__tests__/unit/__research_T03.test.ts
+              ;;
+            *t04*)
+              cp .research/ai-native/acceptance/T04.test.ts \
+                web/src/platform/session-runtime/__tests__/unit/__research_T04.test.ts
+              ;;
+          esac
       - run: cd web && npm test
       - run: cd web && npm run build
       - run: cd web && npm run lint
