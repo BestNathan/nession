@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+// not-protocol-file: this file tests the transport, and names a placeholder
+// wire (`anything`) where the identity of the wire is not what is under test.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { WebSocketService } from '@/platform/socket';
 import type { TransportPlugin, SocketMessage } from '@/platform/socket/types';

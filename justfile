@@ -32,10 +32,41 @@ coverage:
 # Fast pre-commit checks (fmt + clippy)
 quick: fmt lint
 
-# Full CI checks (fmt + lint + tmux-socket gate + codegen drift + coverage — coverage runs all tests)
-check: fmt lint check-tmux-socket check-codegen coverage
+# Full CI checks (fmt + lint + tmux-socket gate + protocol gate + codegen drift +
+# coverage — coverage runs all tests)
+check: fmt lint check-tmux-socket check-protocol check-codegen coverage
 
 # ── Protocol codegen (#678 Phase 5) ─────────────────────────────────────────
+
+# The protocol gate.
+#
+# An unrecognised wire is ignored, not rejected, so a sender that misspells one
+# — or names one that was renamed and not carried through — gets no error and
+# no reply. It waits. That is what `agent.env.resource` did until #913: a
+# forced env write reported a re-source failure and the session kept the old
+# values.
+#
+# Two rules, and they are duals:
+#
+#   1. every wire a call site names is well formed and some runtime answers it
+#   2. every advertised protocol is named by at least one call site
+#
+# Reads the advertised set from the generated tree (which `just check-codegen`
+# keeps equal to the contracts), from the kernel's `<wire>.response` rule, and
+# from the `pub const` declarations beside each dispatcher. A file that deals
+# in placeholder wires on purpose declares `// not-protocol-file: <reason>` in
+# its header, and every run prints which files do.
+check-protocol:
+    node scripts/protocol-gate.mjs
+
+# Every name a call site may use — units, wires, responses and notifications.
+protocol-list:
+    node scripts/protocol-gate.mjs --list
+
+# Prove the gate still catches what it exists for: each rule is injected into a
+# fixture tree and has to fail with that rule named.
+protocol-check-selftest:
+    ./scripts/protocol-gate-selftest.sh
 
 # Regenerate the Web's TypeScript bindings from the Rust contracts.
 # Committed output: run this and commit the result whenever a contract changes.
