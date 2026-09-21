@@ -2,7 +2,7 @@
 //!
 //! One function, because the field set is one contract.
 //!
-//! It was two hand-built `json!` blocks — `client.agents.list` in `handler.rs`
+//! It was two hand-built `json!` blocks — `server.agent.list` in `handler.rs`
 //! and the `agents.changed` push in `web_client_registry.rs` — and they had
 //! already drifted: the push carried neither `protocols` nor
 //! `metadata.image_tag`. Nothing failed, because nothing read either field off

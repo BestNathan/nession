@@ -198,14 +198,15 @@ impl AgentExtension for ClaudeCodeAgentExtension {
         crate::protocol::descriptors()
     }
 
-    /// Dispatch on the **command suffix**, which for this provider is not the
-    /// protocol id.
+    /// Dispatch on the **wire type**, which for this provider *is* the protocol
+    /// id.
     ///
-    /// The registry strips `extension.` and passes the remainder — here
-    /// `claude_code.read`, while the id is `claude-code.read`. `ProtocolId`
-    /// refuses underscores, so the two cannot be made equal, and the wire
-    /// spelling cannot change without breaking peers. Translating explicitly is
-    /// what the design means by calling the message type a projection.
+    /// The registry passes `msg_type` through verbatim — there is no namespace
+    /// left to strip — so `command` here is exactly what the peer sent and
+    /// exactly what the descriptor advertises. The two used to differ, as
+    /// `extension.claude_code.read` against `claude-code.read`; the parent
+    /// module records why the wire took the dash rather than the id taking an
+    /// underscore.
     async fn handle_command(&self, command: &str, payload: Value) -> anyhow::Result<Value> {
         match command {
             list::COMMAND => self.handle_list(payload).await,

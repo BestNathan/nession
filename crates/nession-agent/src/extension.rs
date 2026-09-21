@@ -70,7 +70,7 @@ impl std::fmt::Debug for ExtensionRegistry {
 /// Why a set of extensions cannot be composed.
 ///
 /// Every variant names **both** sides of a conflict. "Duplicate wire type" is
-/// not actionable; "`extension.x` claimed by both `git` and `claude_code`" is,
+/// not actionable; "`repo.info` claimed by both `git` and `claude_code`" is,
 /// and it is the difference between a five-minute fix and a bisect.
 #[derive(Debug, thiserror::Error)]
 pub enum RegistryError {

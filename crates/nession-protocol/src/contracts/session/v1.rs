@@ -86,7 +86,7 @@ pub struct ClientSessionKillResponsePayload {
 
 // --- Client ↔ Server session attach ---
 
-/// `client.session.attach` — request to attach to a session.
+/// `server.session.attach` — request to attach to a session.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientSessionAttachPayload {
@@ -111,7 +111,7 @@ pub(crate) fn default_attach_mode() -> String {
     "p2p".to_string()
 }
 
-/// Server → Client response to `client.session.attach`.
+/// Server → Client response to `server.session.attach`.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientSessionAttachResponsePayload {
@@ -137,7 +137,7 @@ pub struct ClientSessionAttachResponsePayload {
 
 // --- Env application to sessions ---
 
-/// `client.session.env.apply` — apply env files to an already-running session
+/// `server.session.env.apply` — apply env files to an already-running session
 /// via `tmux set-environment` (attach-time).
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]

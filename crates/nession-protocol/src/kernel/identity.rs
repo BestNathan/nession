@@ -1,16 +1,23 @@
 //! Protocol identity and contract version — the two names everything else
 //! refers to a protocol by.
 //!
-//! ## Why identity is not the message type
+//! ## Why identity and the message type are modelled separately
 //!
-//! The wire carries `extension.git.status`. That string is the contract's
-//! **transport projection**, not the protocol. Keeping them separately nameable
-//! is what lets a transport rename be told apart from a semantic change: today
-//! both would be "the string changed", and only one of them is a breaking
-//! contract event.
+//! A contract's wire is its **transport projection**, not its identity. Keeping
+//! the two separately nameable is what lets a transport rename be told apart
+//! from a semantic change: otherwise both are just "the string changed", and
+//! only one of them is a breaking contract event.
+//!
+//! Today that is a capability rather than a difference. Every unit answers on
+//! exactly one wire, and that wire is its id — the rule is in
+//! `docs/architecture/protocol-identity.md`. It has not always held: the wire
+//! used to be `extension.git.status` for the unit identified as `git.status`,
+//! with the namespace carried across each hop only to be stripped at the far
+//! end.
 //!
 //! So `ProtocolId` is canonical and transport-free (`git.status`), and the
-//! projection lives on the contract as data ([`super::descriptor`]).
+//! projection lives on the contract as data ([`super::descriptor`]) — the
+//! field that would carry a second projection if one were ever needed.
 
 use std::fmt;
 

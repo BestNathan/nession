@@ -16,8 +16,8 @@
 //! | client → agent  | `session.list`   | List tmux sessions               |
 //! | client → agent  | `session.create` | Create a new tmux session        |
 //! | client → agent  | `session.kill`   | Kill a tmux session              |
-//! | client → agent  | `client.attach`  | Attach a PTY to a session        |
-//! | client → agent  | `client.detach`  | Detach and close the PTY         |
+//! | client → agent  | `agent.attach`  | Attach a PTY to a session        |
+//! | client → agent  | `agent.detach`  | Detach and close the PTY         |
 //! | client → agent  | `terminal.input` | Send keystrokes to the PTY       |
 //! | client → agent  | `terminal.resize`| Resize the PTY                   |
 //! | agent → client  | `terminal.output`| PTY stdout data (base64)         |

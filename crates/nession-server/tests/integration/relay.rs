@@ -1,9 +1,9 @@
 //! Integration tests for relay mode: browser → server → agent → tmux
 //!
 //! These tests verify the complete relay chain:
-//! 1. Client sends client.session.attach (preferred_mode=relay) to server
+//! 1. Client sends server.session.attach (preferred_mode=relay) to server
 //! 2. Server responds with success and enters relay forwarding mode
-//! 3. Server connects to agent's internal WS, sends client.attach
+//! 3. Server connects to agent's internal WS, sends agent.attach
 //! 4. Agent creates PTY, sends terminal.output
 //! 5. Server forwards terminal.output to browser
 //! 6. Browser sends terminal.input → server forwards to agent → PTY

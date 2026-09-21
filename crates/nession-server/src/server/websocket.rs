@@ -612,7 +612,7 @@ where
             .unwrap_or(false)
     }
 
-    // Helper: detect client.session.relay.end — client wants to stop the
+    // Helper: detect server.session.relay.end — client wants to stop the
     // relay without closing the WebSocket.
     fn is_relay_end(msg: &tokio_tungstenite::tungstenite::Message) -> bool {
         msg.to_text()

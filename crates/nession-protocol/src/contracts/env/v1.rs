@@ -73,7 +73,7 @@ pub struct EnvSnapshot {
 
 // --- Client → Server env CRUD payloads ---
 
-/// `client.env.list` — list env files from server + all online agents.
+/// `server.env.list` — list env files from server + all online agents.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ClientEnvListPayload {}
@@ -84,7 +84,7 @@ pub struct ClientEnvListResponsePayload {
     pub files: Vec<EnvFileInfo>,
 }
 
-/// `client.env.get` — read one env file's raw content for editing.
+/// `server.env.get` — read one env file's raw content for editing.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientEnvGetPayload {
@@ -107,7 +107,7 @@ pub struct ClientEnvGetResponsePayload {
     pub error: Option<String>,
 }
 
-/// `client.env.write` — create or overwrite an env file (server or agent).
+/// `server.env.write` — create or overwrite an env file (server or agent).
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientEnvWritePayload {
@@ -135,7 +135,7 @@ pub struct ClientEnvWriteResponsePayload {
     pub warnings: Vec<String>,
 }
 
-/// `client.env.delete` — delete an env file.
+/// `server.env.delete` — delete an env file.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientEnvDeletePayload {
