@@ -2645,38 +2645,19 @@ impl ConnectionHandler {
                             .usage
                             .sessions_using(&name, source, agent_id.as_deref());
                     for sid in &sessions {
-                        // Get the agent_id from the session (first part before ':')
-                        let agent_id = sid.split(':').next().unwrap_or("");
-                        match self
-                            .agent_command(
-                                agent_id,
-                                "agent.env.resource",
-                                json!({
-                                    "session_id": sid,
-                                    "env_refs": [{"name": &name, "source": source, "agent_id": agent_id}],
-                                    "re_source": true,
-                                }),
-                            )
-                            .await
-                        {
-                            Ok(resp) => {
-                                if resp.get("success").and_then(serde_json::Value::as_bool)
-                                    == Some(true)
-                                {
-                                    re_sourced.push(sid.clone());
-                                } else {
-                                    re_source_errors.push(format!(
-                                        "{}: {}",
-                                        sid,
-                                        resp.get("error")
-                                            .and_then(serde_json::Value::as_str)
-                                            .unwrap_or("unknown error")
-                                    ));
-                                }
-                            }
-                            Err(e) => {
-                                re_source_errors.push(format!("{sid}: {e}"));
-                            }
+                        // Re-source through the same path the explicit
+                        // `server.session.env.apply` takes. This used to ask for
+                        // `agent.env.resource`, a wire no agent has ever
+                        // answered — so every forced write reported a re-source
+                        // failure and the running session kept the old values.
+                        let refs = [EnvFileRef {
+                            name: name.clone(),
+                            source,
+                            agent_id: agent_id.clone(),
+                        }];
+                        match self.source_env_into_session(sid, &refs).await {
+                            Ok(_) => re_sourced.push(sid.clone()),
+                            Err(e) => re_source_errors.push(format!("{sid}: {e}")),
                         }
                     }
                 }
@@ -2838,6 +2819,48 @@ impl ConnectionHandler {
         Ok(snapshots)
     }
 
+    /// Source env-file refs into a running session, on the agent that owns it.
+    ///
+    /// The one path for "put this env into that running session": resolve the
+    /// refs into snapshots (content captured now), then ask the owning agent to
+    /// source them. Both the `server.session.env.apply` handler and the
+    /// re-source that follows a forced write go through here, so the two cannot
+    /// drift into separate behaviours.
+    ///
+    /// Returns the resolution's non-fatal warnings on success. Usage recording
+    /// is left to the caller: a forced write re-sources a file the session
+    /// *already* has, which is not a new attachment.
+    async fn source_env_into_session(
+        &self,
+        session_id: &str,
+        refs: &[EnvFileRef],
+    ) -> Result<Vec<String>, String> {
+        let Some((agent_id, session_name)) = session_id.split_once(':') else {
+            return Err("Invalid session_id".to_string());
+        };
+        let snapshots = self.resolve_snapshots(agent_id, refs).await?;
+        let warnings: Vec<String> = snapshots.iter().flat_map(|s| s.warnings.clone()).collect();
+
+        match self
+            .agent_command(
+                agent_id,
+                "agent.session.env.apply",
+                json!({ "name": session_name, "snapshots": snapshots }),
+            )
+            .await
+        {
+            Ok(r) if r.get("success").and_then(serde_json::Value::as_bool) == Some(true) => {
+                Ok(warnings)
+            }
+            Ok(r) => Err(r
+                .get("error")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("the agent could not source the env")
+                .to_string()),
+            Err(e) => Err(e),
+        }
+    }
+
     /// Handle `server.session.env.apply` — apply env files to a running session.
     async fn handle_client_session_env_apply(
         &mut self,
@@ -2862,39 +2885,11 @@ impl ConnectionHandler {
             .and_then(|v| serde_json::from_value(v.clone()).ok())
             .unwrap_or_default();
 
-        let Some((agent_id, session_name)) = session_id.split_once(':') else {
-            return Ok(reply_json(
-                &msg.id,
-                "server.session.env.apply.response",
-                json!({ "success": false, "error": "Invalid session_id" }),
-            ));
-        };
-        let agent_id = agent_id.to_string();
-        let session_name = session_name.to_string();
-
-        let snapshots = match self.resolve_snapshots(&agent_id, &refs).await {
-            Ok(s) => s,
-            Err(e) => {
-                return Ok(reply_json(
-                    &msg.id,
-                    "server.session.env.apply.response",
-                    json!({ "success": false, "error": e }),
-                ));
-            }
-        };
-
-        let warnings: Vec<String> = snapshots.iter().flat_map(|s| s.warnings.clone()).collect();
-
-        let resp = self
-            .agent_command(
-                &agent_id,
-                "agent.session.env.apply",
-                json!({ "name": session_name, "snapshots": snapshots }),
-            )
-            .await;
-
-        match resp {
-            Ok(r) if r.get("success").and_then(serde_json::Value::as_bool) == Some(true) => {
+        match self.source_env_into_session(&session_id, &refs).await {
+            Ok(warnings) => {
+                // An explicit apply is a new attachment. The forced-write
+                // re-source is not — that session already had the file — which
+                // is why usage is recorded here rather than in the helper.
                 self.env_service
                     .usage
                     .record_attach(&session_id, &refs, None);
@@ -2904,14 +2899,6 @@ impl ConnectionHandler {
                     json!({ "success": true, "warnings": warnings }),
                 ))
             }
-            Ok(r) => Ok(reply_json(
-                &msg.id,
-                "server.session.env.apply.response",
-                json!({
-                    "success": false,
-                    "error": r.get("error").and_then(|v| v.as_str()).unwrap_or("apply failed")
-                }),
-            )),
             Err(e) => Ok(reply_json(
                 &msg.id,
                 "server.session.env.apply.response",
@@ -5696,6 +5683,26 @@ mod tests {
                 .unwrap()
                 .to_string();
             let parsed: serde_json::Value = serde_json::from_str(&text).unwrap();
+
+            // The wire matters as much as the response. This mock used to answer
+            // whatever arrived, and so passed while the server was asking for
+            // `agent.env.resource` — a wire no agent has ever handled, which made
+            // every forced write report a re-source failure while the session
+            // kept its old values. Asserting the wire is what keeps the mock
+            // honest; without it the test cannot tell the fix from the bug.
+            assert_eq!(
+                parsed["msg_type"], "agent.session.env.apply",
+                "the re-source must use the wire the agent answers"
+            );
+            // The session name without its `<agent>:` prefix, and the content
+            // the forced write just stored — not the pre-write content.
+            assert_eq!(parsed["payload"]["name"], "s1");
+            assert_eq!(
+                parsed["payload"]["snapshots"][0]["vars"],
+                json!([["X", "2"]]),
+                "the re-source must carry the file's current content"
+            );
+
             let request_id = parsed["payload"]["request_id"]
                 .as_str()
                 .unwrap()
