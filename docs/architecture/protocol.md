@@ -456,6 +456,55 @@ is broken by it.
 | Every advertised contract has generated bindings | `nession-protocol-codegen`'s `every_advertised_contract_is_in_the_catalog`, against all four runtimes' own declarations — the agent's `served_descriptors`, the server's `server_manifest`, and the two providers' `descriptors()` |
 | Two units cannot generate to one file | the same crate's `check_paths_are_unique`, run by the generator |
 | A generated file refers to nothing it does not declare | the same crate's `check_self_contained`, run by the generator *and* as a test |
+| The wire a *call site* names is one some runtime answers | `just check-protocol` (`scripts/protocol-gate.mjs`) — rule 1 |
+| Every advertised protocol has a caller | the same gate — rule 2 |
+| The gate still catches each of those | `just protocol-check-selftest` — each rule injected into a fixture tree, which must fail with that rule named |
+
+### The one thing two lists cannot see (the gate)
+
+Everything above is about the contracts and the runtimes agreeing with each
+other. None of it can see a **call site**.
+
+`agent.env.resource` had a sender and no receiver for long enough that the
+symptom was diagnosed as something else entirely: the Server's forced env write
+asked the agent to re-source through a wire no agent has ever answered, so every
+forced write reported a re-source failure and the running session kept its old
+values (#913). Nothing failed. Nothing was refused. The reply simply never came,
+because an unrecognised wire is ignored rather than rejected.
+
+The route tables and the catalog cannot catch that — both are correct. What is
+wrong is a string in a caller. So `just check-protocol` reads the call sites, in
+both directions:
+
+- **Every wire a call site names is one a runtime answers.** A name that is not
+  a valid `ProtocolId` is reported as malformed; a name that is valid but
+  advertised nowhere is reported as unanswered. Kept apart because the fixes
+  differ: one is a spelling, the other is a wire that does not exist.
+- **Every advertised protocol has a caller.** A unit nothing calls is a protocol
+  this workspace maintains and cannot use.
+
+The advertised set is not a list the gate keeps. It is read from the generated
+bindings (which `just check-codegen` holds equal to the contracts), from the
+kernel's `<wire>.response` rule, and from the `pub const` declarations beside
+each dispatcher — the notification wires, which no route table can describe
+because nothing answers them.
+
+A name is **resolved**, not required to be a literal. `msg_types::AGENT_HEARTBEAT`
+and an imported `WIRE as BRANCHES_WIRE` are both *better* than a literal — they
+cannot drift from the contract — so a gate demanding literals would be asking
+for the worse style. What gets reported is a name that resolves to nothing,
+which is where a misspelling hides.
+
+Two escape hatches, and both are printed on every run so an exemption cannot
+spread unnoticed: `// not-protocol: <reason>` on a line, and
+`// not-protocol-file: <reason>` in a file's header, for a file whose subject is
+the transport and whose wires are deliberately arbitrary. An excused site is
+still counted as a caller — it is excused from being checked, not from
+existing, which is a distinction the gate first got wrong.
+
+`just protocol-check-selftest` injects each rule into a fixture tree and
+requires the gate to fail with that rule named. A gate that has quietly stopped
+matching reports success, and success looks exactly like nothing being wrong.
 
 ### Why the manifest carries the wire projection
 

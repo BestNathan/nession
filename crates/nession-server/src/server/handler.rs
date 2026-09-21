@@ -2201,6 +2201,8 @@ impl ConnectionHandler {
         }
 
         match self
+            // not-protocol: the relay forwards the wire the client named, so the
+            // id arrives as data. `agent_command` takes it as a parameter.
             .agent_command(agent_id, &msg.msg_type, msg.payload.clone())
             .await
         {
@@ -2373,6 +2375,8 @@ impl ConnectionHandler {
         msg_type: &str,
         payload: serde_json::Value,
     ) -> Result<serde_json::Value, String> {
+        // not-protocol: this is the pass-through. Every caller of it names a
+        // wire literal, and those are the sites the gate reads.
         self.agent_command_with_timeout(agent_id, msg_type, payload, Duration::from_secs(10))
             .await
     }
@@ -3577,6 +3581,7 @@ mod tests {
         payload: serde_json::Value,
     ) -> serde_json::Value {
         h.authenticated_client = true;
+        // not-protocol: a test helper — the wire is the argument the test names.
         let action = h.handle_message(proto_msg(wire, payload)).await.unwrap();
         parse_reply(action)["payload"].clone()
     }
@@ -3667,6 +3672,7 @@ mod tests {
     /// here would assert nothing about the refusal.
     async fn relay_unauthenticated(h: &mut ConnectionHandler, wire: &str) -> serde_json::Value {
         let action = h
+            // not-protocol: a test helper — the wire is the argument the test names.
             .handle_message(proto_msg(wire, json!({ "agent_id": "agent-a" })))
             .await
             .unwrap();
@@ -3912,6 +3918,7 @@ mod tests {
     async fn unknown_msg_type_returns_empty_reply() {
         let mut h = test_handler("").await;
         let action = h
+            // not-protocol: the wire being unknown is what this test asserts.
             .handle_message(proto_msg("unknown.type", json!({})))
             .await
             .unwrap();

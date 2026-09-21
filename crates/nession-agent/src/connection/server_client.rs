@@ -1566,6 +1566,7 @@ mod tests {
 
     #[test]
     fn new_message_has_correct_type_and_payload() {
+        // not-protocol: this test is about the envelope, not about any wire.
         let msg = new_message("test.type", serde_json::json!({"key": "value"}));
         assert_eq!(msg.msg_type, "test.type");
         assert_eq!(msg.payload, serde_json::json!({"key": "value"}));
@@ -1653,7 +1654,8 @@ mod tests {
         // Drop the receiver so the channel is closed
         drop(outbox_rx);
 
-        // Enqueue should fail because supervisor is gone
+        // Enqueue should fail because supervisor is gone.
+        // not-protocol: this test is about the outbox, not about any wire.
         let msg = new_message("test", serde_json::json!({}));
         let result = handle.enqueue(&msg);
         assert!(result.is_err());

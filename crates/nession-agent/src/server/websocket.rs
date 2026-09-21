@@ -2515,6 +2515,7 @@ mod tests {
 
     #[test]
     fn test_new_message_structure() {
+        // not-protocol: this test is about the envelope, not about any wire.
         let msg = new_message("test.type", serde_json::json!({"key": "value"}));
         assert_eq!(msg.msg_type, "test.type");
         assert!(!msg.id.is_empty());

@@ -178,6 +178,8 @@ export class FilesPlugin implements TransportPlugin, FileApi {
     if (!connection) {
       throw new Error('files feature is not connected');
     }
+    // not-protocol: the pass-through. Every caller names a wire literal, and
+    // those are the sites the protocol gate reads.
     return connection.request<T>(type, payload);
   }
 }

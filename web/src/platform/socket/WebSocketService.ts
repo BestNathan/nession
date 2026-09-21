@@ -232,6 +232,7 @@ export class WebSocketService implements PluginSurface {
     }
     const timeoutMs = options?.timeoutMs ?? 15_000;
     if (this.state === 'connected') {
+      // not-protocol: the pass-through; callers name the wire.
       return this.router.request<T>(type, payload, { timeoutMs });
     }
     if (this.state === 'disconnected') {
@@ -246,6 +247,7 @@ export class WebSocketService implements PluginSurface {
       if (remaining <= 0) {
         return Promise.reject(new Error(`Request timeout: ${type}`));
       }
+      // not-protocol: the pass-through; callers name the wire.
       return this.router.request<T>(type, payload, { timeoutMs: remaining });
     });
   }
@@ -339,6 +341,7 @@ export class WebSocketService implements PluginSurface {
           });
         },
         request: <T>(type: string, payload: Record<string, unknown>, options?: RequestOptions) =>
+          // not-protocol: the pass-through; callers name the wire.
           this.router.request<T>(type, payload, options),
       };
       handshake(surface).then(() => {
