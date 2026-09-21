@@ -70,7 +70,7 @@ type GitUnit = keyof typeof CONSUMER_REQUIREMENTS;
 
 /**
  * git capability — repository state and file diffs for the current Session
- * (`extension.git.{status,diff,root}`, #750).
+ * (`git.{status,diff,root}`, #750).
  *
  * The request objects are forwarded whole, exactly as the Claude Code plugin
  * does: the transport never sees individual fields. The wire strings and the

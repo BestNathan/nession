@@ -89,7 +89,7 @@ export function useAppConnection() {
       service = new WebSocketService(serverUrl, SERVER_PLUGINS, {
         maxReconnectAttempts: 5,
         handshake: (surface) => surface
-          .request<AuthResponse>('client.auth', { auth_token: authToken, client_id: clientId })
+          .request<AuthResponse>('server.auth', { auth_token: authToken, client_id: clientId })
           .then((res) => {
             if (res.status !== 'success') {
               throw new Error(res.message || 'Authentication failed');

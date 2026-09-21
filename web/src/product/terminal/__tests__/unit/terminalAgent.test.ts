@@ -15,12 +15,12 @@ describe('createTerminalAgentApi', () => {
     it('requests client.attach with session_name and the viewport as width/height', async () => {
       const pending = api.attach('work', { cols: 120, rows: 40 });
       expect(surface.requests[0]).toMatchObject({
-        type: 'client.attach',
+        type: 'agent.attach',
         payload: { session_name: 'work', width: 120, height: 40 },
         options: { timeoutMs: ATTACH_TIMEOUT_MS },
       });
 
-      surface.resolveNext('client.attach', {});
+      surface.resolveNext('agent.attach', {});
       await expect(pending).resolves.toEqual({ ok: true });
     });
 
@@ -29,7 +29,7 @@ describe('createTerminalAgentApi', () => {
       expect(surface.requests[0]?.payload).toEqual({ session_name: 'work', width: 80, height: 24 });
       expect(surface.requests[0]?.options).toEqual({ timeoutMs: 500 });
 
-      surface.resolveNext('client.attach', {});
+      surface.resolveNext('agent.attach', {});
       await expect(pending).resolves.toEqual({ ok: true });
     });
 
@@ -38,27 +38,27 @@ describe('createTerminalAgentApi', () => {
       expect(surface.requests[0]?.payload).toEqual({ session_name: 'work' });
       expect(surface.requests[0]?.options).toEqual({ timeoutMs: ATTACH_TIMEOUT_MS });
 
-      surface.resolveNext('client.attach', {});
+      surface.resolveNext('agent.attach', {});
       await expect(pending).resolves.toEqual({ ok: true });
     });
 
     it('maps a remote error ack to { ok: false, error } instead of throwing', async () => {
       const pending = api.attach('work', { cols: 80, rows: 24 });
-      surface.rejectNext('client.attach', new Error('no such session'));
+      surface.rejectNext('agent.attach', new Error('no such session'));
 
       await expect(pending).resolves.toEqual({ ok: false, error: 'no such session' });
     });
 
     it('maps a request timeout to { ok: false, error: "timeout" }', async () => {
       const pending = api.attach('work', { cols: 80, rows: 24 });
-      surface.rejectNext('client.attach', new Error('Request timeout: client.attach'));
+      surface.rejectNext('agent.attach', new Error('Request timeout: client.attach'));
 
       await expect(pending).resolves.toEqual({ ok: false, error: 'timeout' });
     });
 
     it('passes through agent error prose that merely mentions "timeout"', async () => {
       const pending = api.attach('work', { cols: 80, rows: 24 });
-      surface.rejectNext('client.attach', new Error('agent: attach timed out while starting'));
+      surface.rejectNext('agent.attach', new Error('agent: attach timed out while starting'));
 
       await expect(pending).resolves.toEqual({
         ok: false,
@@ -68,7 +68,7 @@ describe('createTerminalAgentApi', () => {
 
     it('never rejects — any transport failure converges into an AttachResult', async () => {
       const pending = api.attach('work', { cols: 80, rows: 24 });
-      surface.rejectNext('client.attach', new Error('Connection lost'));
+      surface.rejectNext('agent.attach', new Error('Connection lost'));
 
       await expect(pending).resolves.toEqual({ ok: false, error: 'Connection lost' });
     });
@@ -79,7 +79,7 @@ describe('createTerminalAgentApi', () => {
       api.sendInput('work', 'hello');
 
       expect(surface.sent).toEqual([
-        { type: 'terminal.input', payload: { session_name: 'work', data: 'aGVsbG8=' } },
+        { type: 'agent.terminal.input', payload: { session_name: 'work', data: 'aGVsbG8=' } },
       ]);
     });
   });
@@ -89,7 +89,7 @@ describe('createTerminalAgentApi', () => {
       api.sendResize('work', 120, 40);
 
       expect(surface.sent).toEqual([
-        { type: 'terminal.resize', payload: { session_name: 'work', cols: 120, rows: 40 } },
+        { type: 'agent.terminal.resize', payload: { session_name: 'work', cols: 120, rows: 40 } },
       ]);
     });
   });
@@ -99,7 +99,7 @@ describe('createTerminalAgentApi', () => {
       const cb = vi.fn();
       api.onOutput(cb);
 
-      surface.pushMessage('terminal.output', { session_name: 'work', data: 'aGVsbG8=' });
+      surface.pushMessage('agent.terminal.output', { session_name: 'work', data: 'aGVsbG8=' });
 
       expect(cb).toHaveBeenCalledTimes(1);
       expect(cb.mock.calls[0]?.[0]).toEqual(new Uint8Array([104, 101, 108, 108, 111]));
@@ -109,8 +109,8 @@ describe('createTerminalAgentApi', () => {
       const cb = vi.fn();
       api.onOutput(cb);
 
-      surface.pushMessage('terminal.output', { session_name: 'work', data: '' });
-      surface.pushMessage('terminal.output', { session_name: 'work' });
+      surface.pushMessage('agent.terminal.output', { session_name: 'work', data: '' });
+      surface.pushMessage('agent.terminal.output', { session_name: 'work' });
 
       expect(cb).not.toHaveBeenCalled();
     });
@@ -120,7 +120,7 @@ describe('createTerminalAgentApi', () => {
       const unsub = api.onOutput(cb);
       unsub();
 
-      surface.pushMessage('terminal.output', { session_name: 'work', data: 'aGk=' });
+      surface.pushMessage('agent.terminal.output', { session_name: 'work', data: 'aGk=' });
 
       expect(cb).not.toHaveBeenCalled();
     });
@@ -131,7 +131,7 @@ describe('createTerminalAgentApi', () => {
       const cb = vi.fn();
       api.onResize(cb);
 
-      surface.pushMessage('terminal.resize', { session_name: 'work', cols: 150, rows: 50 });
+      surface.pushMessage('agent.terminal.resize', { session_name: 'work', cols: 150, rows: 50 });
 
       expect(cb).toHaveBeenCalledWith(150, 50);
     });
@@ -141,7 +141,7 @@ describe('createTerminalAgentApi', () => {
       const unsub = api.onResize(cb);
       unsub();
 
-      surface.pushMessage('terminal.resize', { session_name: 'work', cols: 150, rows: 50 });
+      surface.pushMessage('agent.terminal.resize', { session_name: 'work', cols: 150, rows: 50 });
 
       expect(cb).not.toHaveBeenCalled();
     });
@@ -198,7 +198,7 @@ describe('createTerminalAgentApi', () => {
     it('sends keepalive.ping with an empty payload', () => {
       api.ping();
 
-      expect(surface.sent).toEqual([{ type: 'keepalive.ping', payload: {} }]);
+      expect(surface.sent).toEqual([{ type: 'agent.keepalive.ping', payload: {} }]);
     });
   });
 });

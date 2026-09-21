@@ -45,7 +45,7 @@ describe('GitPlugin', () => {
       const pending = plugin.gitStatus(statusReq);
       expect(surfaceA.requests).toHaveLength(0);
       expect(surfaceB.requests).toHaveLength(1);
-      surfaceB.resolveNext('extension.git.status', statusResponse);
+      surfaceB.resolveNext('git.status', statusResponse);
       await expect(pending).resolves.toEqual(statusResponse);
 
       teardownB();
@@ -71,22 +71,22 @@ describe('GitPlugin', () => {
     it('gitStatus forwards the whole request object as the payload', async () => {
       const pending = plugin.gitStatus(statusReq);
       expect(surface.requests[0]).toMatchObject({
-        type: 'extension.git.status',
+        type: 'git.status',
         payload: statusReq,
       });
 
-      surface.resolveNext('extension.git.status', statusResponse);
+      surface.resolveNext('git.status', statusResponse);
       await expect(pending).resolves.toEqual(statusResponse);
     });
 
     it('gitDiff carries the agent id alongside the path it must not be able to widen', async () => {
       const pending = plugin.gitDiff(diffReq);
       expect(surface.requests[0]).toMatchObject({
-        type: 'extension.git.diff',
+        type: 'git.diff',
         payload: diffReq,
       });
 
-      surface.resolveNext('extension.git.diff', {
+      surface.resolveNext('git.diff', {
         state: 'ok',
         diff: { path: 'src/a.ts', text: '+x', binary: false, truncatedBytes: 0, truncated: false },
       });
@@ -97,7 +97,7 @@ describe('GitPlugin', () => {
       // "This is not a repository" is an answer, not a transport failure — a
       // plugin that rejected it would make #750 SC4's four states unreachable.
       const pending = plugin.gitStatus(statusReq);
-      surface.resolveNext('extension.git.status', {
+      surface.resolveNext('git.status', {
         state: 'not_a_repository',
         message: 'This Session’s working directory is not a git repository.',
       });
@@ -110,11 +110,11 @@ describe('GitPlugin', () => {
     it('gitRoot forwards the whole request object', async () => {
       const pending = plugin.gitRoot(statusReq);
       expect(surface.requests[0]).toMatchObject({
-        type: 'extension.git.root',
+        type: 'git.root',
         payload: statusReq,
       });
 
-      surface.resolveNext('extension.git.root', { state: 'ok', root: '/repo' });
+      surface.resolveNext('git.root', { state: 'ok', root: '/repo' });
       await expect(pending).resolves.toEqual({ state: 'ok', root: '/repo' });
     });
   });
@@ -136,7 +136,7 @@ describe('GitPlugin', () => {
         contract_version: 1,
       });
 
-      surface.resolveNext('extension.git.status', statusResponse);
+      surface.resolveNext('git.status', statusResponse);
       await expect(pending).resolves.toEqual(statusResponse);
     });
 
@@ -146,7 +146,7 @@ describe('GitPlugin', () => {
       const pending = plugin.gitStatus(statusReq);
       expect(surface.requests[0].payload).toEqual(statusReq);
 
-      surface.resolveNext('extension.git.status', statusResponse);
+      surface.resolveNext('git.status', statusResponse);
       await expect(pending).resolves.toEqual(statusResponse);
     });
 
@@ -186,7 +186,7 @@ describe('GitPlugin', () => {
 
       const pending = plugin.gitStatus({ agent_id: 'a2', session: 'a2:work' });
       expect(surface.requests[0].payload).toMatchObject({ contract_version: 1 });
-      surface.resolveNext('extension.git.status', statusResponse);
+      surface.resolveNext('git.status', statusResponse);
       await expect(pending).resolves.toEqual(statusResponse);
     });
   });

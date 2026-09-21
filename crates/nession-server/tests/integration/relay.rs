@@ -1,9 +1,9 @@
 //! Integration tests for relay mode: browser → server → agent → tmux
 //!
 //! These tests verify the complete relay chain:
-//! 1. Client sends client.session.attach (preferred_mode=relay) to server
+//! 1. Client sends server.session.attach (preferred_mode=relay) to server
 //! 2. Server responds with success and enters relay forwarding mode
-//! 3. Server connects to agent's internal WS, sends client.attach
+//! 3. Server connects to agent's internal WS, sends agent.attach
 //! 4. Agent creates PTY, sends terminal.output
 //! 5. Server forwards terminal.output to browser
 //! 6. Browser sends terminal.input → server forwards to agent → PTY
@@ -269,7 +269,7 @@ async fn relay_attach_and_terminal_io() {
 
     // 5. Authenticate.
     let auth_req = msg(
-        "client.auth",
+        "server.auth",
         "auth-1",
         serde_json::json!({
             "auth_token": "test-token",
@@ -287,7 +287,7 @@ async fn relay_attach_and_terminal_io() {
     //    but does NOT enter relay forwarding.
     let session_id = format!("relay-test-agent:{session_name}");
     let attach_req = msg(
-        "client.session.attach",
+        "server.session.attach",
         "attach-1",
         serde_json::json!({
             "session_id": session_id,
@@ -307,7 +307,7 @@ async fn relay_attach_and_terminal_io() {
     // 7. Phase 2: begin relay — actually enters relay forwarding.
     //    The Terminal is now "mounted" and subscribed to terminal.output.
     let begin_req = msg(
-        "client.session.relay.begin",
+        "server.session.relay.begin",
         "begin-1",
         serde_json::json!({ "session_id": session_id }),
     );
@@ -319,7 +319,7 @@ async fn relay_attach_and_terminal_io() {
     // with EIO when the agent attach subprocess idles too long before input.
     let input_data = base64::engine::general_purpose::STANDARD.encode(b"echo RELAY_TEST_MARKER\n");
     let input_msg = msg(
-        "terminal.input",
+        "agent.terminal.input",
         "input-1",
         serde_json::json!({
             "session_name": session_name,
@@ -338,7 +338,7 @@ async fn relay_attach_and_terminal_io() {
             Ok(Some(Ok(WsMessage::Text(text)))) => {
                 let parsed: serde_json::Value = serde_json::from_str(&text).unwrap_or_default();
                 let msg_type = parsed["msg_type"].as_str().unwrap_or("");
-                if msg_type == "terminal.output" {
+                if msg_type == "agent.terminal.output" {
                     let b64 = parsed["payload"]["data"].as_str().unwrap_or("");
                     if let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(b64) {
                         let output = String::from_utf8_lossy(&decoded);

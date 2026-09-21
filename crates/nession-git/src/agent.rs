@@ -294,8 +294,8 @@ impl AgentExtension for GitAgentExtension {
 
     async fn handle_command(&self, command: &str, payload: Value) -> anyhow::Result<Value> {
         // Matching on the contracts' ids rather than re-spelled strings: the
-        // registry strips `extension.` and the remainder *is* the ProtocolId,
-        // which is the relation asserted by the test module below.
+        // registry hands the wire over verbatim and the wire *is* the
+        // ProtocolId, which is the relation asserted by the test module below.
         match command {
             protocol::status::ID => self.handle_status(payload).await,
             protocol::diff::ID => self.handle_diff(payload).await,
@@ -332,15 +332,18 @@ mod tests {
     }
 
     #[test]
-    fn the_wire_projection_strips_to_the_protocol_id() {
-        // `ExtensionRegistry::new` does `strip_prefix("extension.")` and hands
-        // the remainder to `handle_command`, which matches on the ids above.
-        // That relation lived only in a comment until this test.
+    fn the_wire_is_the_id_that_handle_command_matches_on() {
+        // This asserted that the wire stripped to the id — the registry used to
+        // do `strip_prefix("extension.")` and hand the remainder to
+        // `handle_command`, which matches on the ids above.
+        //
+        // There is no strip now. The wire *is* the id, and `handle_command`
+        // receives exactly what the contract declared, so this asserts the
+        // equality the strip used to produce rather than the strip.
         for (wire, id) in contracts() {
             assert_eq!(
-                wire.strip_prefix("extension."),
-                Some(id),
-                "`{wire}` must strip to `{id}` for the registry to dispatch it"
+                wire, id,
+                "`handle_command` matches on `{id}`, so the wire must be it"
             );
         }
     }
@@ -371,10 +374,12 @@ mod tests {
         // someone called it.
         let extension = extension();
         for (wire, _) in contracts() {
-            let command = wire.strip_prefix("extension.").unwrap_or(wire);
+            // No strip here: the wire *is* the command `handle_command` matches
+            // on, so `is_known_command` is asked about the advertised name
+            // itself rather than about a namespace-stripped copy of it.
             assert!(
-                is_known_command(command),
-                "`{wire}` is advertised but no match arm handles `{command}`"
+                is_known_command(wire),
+                "`{wire}` is advertised but no match arm handles it"
             );
         }
         assert!(!is_known_command("git.nonexistent"));

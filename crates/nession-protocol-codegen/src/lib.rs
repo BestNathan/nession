@@ -158,10 +158,10 @@ fn unit_path(unit: &Unit) -> PathBuf {
 /// One rule, and it covers both halves without a special case. For a provider
 /// the prefix *is* the owner — `git.status` under `git` is `status`, and
 /// `claude-code.read` under `claude-code` is `read`. The kernel's units have no
-/// such prefix: `session.create` and `client.session.create` are both the
+/// such prefix: `server.session.create` and `agent.session.create` are both the
 /// kernel's, so they keep their whole id — which is also what keeps them apart,
-/// since both would otherwise end in `create`, as would `client.attach` and
-/// `client.session.attach` in `attach`.
+/// since both would otherwise end in `create`, as would `agent.attach` and
+/// `server.session.attach` in `attach`.
 ///
 /// Dots become dashes because the segment is a directory name.
 fn operation(unit: &Unit) -> String {

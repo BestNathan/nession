@@ -507,9 +507,13 @@ where
 
     let (mut agent_write, mut agent_read) = agent_ws.split();
 
-    // ── Step 1: Send client.attach to the agent ──
+    // ── Step 1: Send agent.attach to the agent ──
+    // The Agent answers this one, so the wire carries the Agent's prefix even
+    // though the Server is the sender — the rule names the handler, not the
+    // sender. Writing `server.attach` here reads as "the Server handles it",
+    // which is the opposite of true and leaves the relay hanging.
     let attach_msg = serde_json::json!({
-        "msg_type": "client.attach",
+        "msg_type": "agent.attach",
         "id": uuid::Uuid::new_v4().to_string(),
         "timestamp": std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -608,12 +612,12 @@ where
             .unwrap_or(false)
     }
 
-    // Helper: detect client.session.relay.end — client wants to stop the
+    // Helper: detect server.session.relay.end — client wants to stop the
     // relay without closing the WebSocket.
     fn is_relay_end(msg: &tokio_tungstenite::tungstenite::Message) -> bool {
         msg.to_text()
             .ok()
-            .map(|t| t.contains("\"client.session.relay.end\""))
+            .map(|t| t.contains("\"server.session.relay.end\""))
             .unwrap_or(false)
     }
 
@@ -725,13 +729,13 @@ where
         }
     }
 
-    // ── Step 3: Send client.detach on exit (best-effort, fresh connection) ──
+    // ── Step 3: Send agent.detach on exit (best-effort, fresh connection) ──
     // The original agent WS was split+consumed, so we open a fresh connection
     // to the same URL that worked for the attach.
     if let Some(ref url) = connected_url {
         if let Ok((mut detach_ws, _)) = tokio_tungstenite::connect_async(url).await {
             let detach_msg = serde_json::json!({
-                "msg_type": "client.detach",
+                "msg_type": "agent.detach",
                 "id": uuid::Uuid::new_v4().to_string(),
                 "timestamp": std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)

@@ -7,7 +7,7 @@
 /** The canonical protocol id. Not the wire type. */
 export const PROTOCOL = 'server.info';
 /** Every transport projection this contract travels as. */
-export const WIRES = ['client.server.info'] as const;
+export const WIRES = ['server.info'] as const;
 /**
  * The only projection this contract travels as.
  *
@@ -15,7 +15,7 @@ export const WIRES = ['client.server.info'] as const;
  * has no single wire, and a caller that needs one has to say which it means.
  * `WIRES` is always there.
  */
-export const WIRE = 'client.server.info';
+export const WIRE = 'server.info';
 /** The contract version these shapes are. */
 export const VERSION = 1;
 
@@ -36,7 +36,7 @@ build_time: string,
  * said nothing about itself.
  *
  * It travels here rather than in a message of its own because
- * `client.server.info` is already the call a client makes to ask what this
+ * `server.info` is already the call a client makes to ask what this
  * server is — one field on an existing round trip, not a new one.
  *
  * Optional for the same reason the agent's is: a server predating this
@@ -97,7 +97,7 @@ build_time: string,
  * said nothing about itself.
  *
  * It travels here rather than in a message of its own because
- * `client.server.info` is already the call a client makes to ask what this
+ * `server.info` is already the call a client makes to ask what this
  * server is — one field on an existing round trip, not a new one.
  *
  * Optional for the same reason the agent's is: a server predating this

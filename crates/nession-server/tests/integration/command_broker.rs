@@ -24,7 +24,7 @@ async fn start_mock_agent() -> anyhow::Result<(
             let _ = sink
                 .send(WsMessage::Text(
                     serde_json::json!({
-                        "msg_type": "agent.register.response",
+                        "msg_type": "server.agent.register.response",
                         "id": "test",
                         "timestamp": 0,
                         "payload": {"status": "accepted", "message": "ok"}

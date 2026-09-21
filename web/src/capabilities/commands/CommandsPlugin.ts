@@ -63,7 +63,7 @@ export class CommandsPlugin implements TransportPlugin {
 
   /** Fetch all quick commands in display order. */
   async listCommands(): Promise<CommandsListResponse> {
-    return this.requireConnection().request<CommandsListResponse>('client.commands.list', {});
+    return this.requireConnection().request<CommandsListResponse>('server.commands.list', {});
   }
 
   /** Add a quick command. `raw: true` disables shell quoting/expansion. */
@@ -72,7 +72,7 @@ export class CommandsPlugin implements TransportPlugin {
     command: string,
     raw = false,
   ): Promise<CommandsAddResponse> {
-    return this.requireConnection().request<CommandsAddResponse>('client.commands.add', {
+    return this.requireConnection().request<CommandsAddResponse>('server.commands.add', {
       label,
       command,
       raw,
@@ -81,7 +81,7 @@ export class CommandsPlugin implements TransportPlugin {
 
   /** Remove a quick command by id. */
   async removeCommand(id: string): Promise<CommandsRemoveResponse> {
-    return this.requireConnection().request<CommandsRemoveResponse>('client.commands.remove', {
+    return this.requireConnection().request<CommandsRemoveResponse>('server.commands.remove', {
       id,
     });
   }
@@ -91,7 +91,7 @@ export class CommandsPlugin implements TransportPlugin {
     id: string,
     fields: { label?: string; command?: string; raw?: boolean },
   ): Promise<CommandsUpdateResponse> {
-    return this.requireConnection().request<CommandsUpdateResponse>('client.commands.update', {
+    return this.requireConnection().request<CommandsUpdateResponse>('server.commands.update', {
       id,
       ...fields,
     });

@@ -86,7 +86,7 @@ pub struct ClientSessionKillResponsePayload {
 
 // --- Client ↔ Server session attach ---
 
-/// `client.session.attach` — request to attach to a session.
+/// `server.session.attach` — request to attach to a session.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientSessionAttachPayload {
@@ -111,7 +111,7 @@ pub(crate) fn default_attach_mode() -> String {
     "p2p".to_string()
 }
 
-/// Server → Client response to `client.session.attach`.
+/// Server → Client response to `server.session.attach`.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientSessionAttachResponsePayload {
@@ -137,7 +137,7 @@ pub struct ClientSessionAttachResponsePayload {
 
 // --- Env application to sessions ---
 
-/// `client.session.env.apply` — apply env files to an already-running session
+/// `server.session.env.apply` — apply env files to an already-running session
 /// via `tmux set-environment` (attach-time).
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -250,6 +250,19 @@ pub struct SessionCreatePayload {
     pub width: u16,
     #[serde(default = "default_height")]
     pub height: u16,
+    /// Resolved env-file snapshots to inject via `tmux new-session -e`.
+    ///
+    /// `ServerSessionCreatePayload` has carried this since the env feature
+    /// landed; this projection did not, and the omission is what stopped the
+    /// two being one protocol. `agent.session.create` is answered by the agent
+    /// whichever side asks, so the two payloads have to be the same payload —
+    /// and the difference was never a decision, just a field the direct path
+    /// never grew.
+    ///
+    /// Empty (default) preserves the previous behaviour exactly for a caller
+    /// that does not send it.
+    #[serde(default)]
+    pub env_snapshots: Vec<EnvSnapshot>,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]

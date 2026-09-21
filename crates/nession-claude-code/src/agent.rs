@@ -198,14 +198,15 @@ impl AgentExtension for ClaudeCodeAgentExtension {
         crate::protocol::descriptors()
     }
 
-    /// Dispatch on the **command suffix**, which for this provider is not the
-    /// protocol id.
+    /// Dispatch on the **wire type**, which for this provider *is* the protocol
+    /// id.
     ///
-    /// The registry strips `extension.` and passes the remainder — here
-    /// `claude_code.read`, while the id is `claude-code.read`. `ProtocolId`
-    /// refuses underscores, so the two cannot be made equal, and the wire
-    /// spelling cannot change without breaking peers. Translating explicitly is
-    /// what the design means by calling the message type a projection.
+    /// The registry passes `msg_type` through verbatim — there is no namespace
+    /// left to strip — so `command` here is exactly what the peer sent and
+    /// exactly what the descriptor advertises. The two used to differ, as
+    /// `extension.claude_code.read` against `claude-code.read`; the parent
+    /// module records why the wire took the dash rather than the id taking an
+    /// underscore.
     async fn handle_command(&self, command: &str, payload: Value) -> anyhow::Result<Value> {
         match command {
             list::COMMAND => self.handle_list(payload).await,
@@ -221,15 +222,19 @@ mod tests {
     use crate::security::MAX_CHUNK_SIZE;
 
     #[test]
-    fn the_command_suffix_is_the_wire_type_without_its_namespace() {
-        // The registry's silent transform, asserted. `nession-git` gets to
-        // compare against its ids here; this provider has to translate, and the
-        // translation is checked rather than assumed.
-        for (wire, command) in [
-            (list::v1::WIRE, list::COMMAND),
-            (read::v1::WIRE, read::COMMAND),
+    fn the_command_the_wire_and_the_id_are_one_string() {
+        // Three names that used to differ, and both differences are gone. The
+        // wire carried an `extension.` namespace the registry stripped before
+        // dispatching; the id spelled `claude-code` where the wire spelled
+        // `claude_code`, because `ProtocolId` refuses underscores.
+        //
+        // So there is nothing left to translate. This provider compares.
+        for (wire, command, id) in [
+            (list::v1::WIRE, list::COMMAND, list::ID),
+            (read::v1::WIRE, read::COMMAND, read::ID),
         ] {
-            assert_eq!(wire.strip_prefix("extension."), Some(command));
+            assert_eq!(wire, command, "the dispatch key is the wire");
+            assert_eq!(wire, id, "and the wire is the protocol id");
         }
     }
 
@@ -255,8 +260,8 @@ mod tests {
         // protocol is. Both are asserted so neither can drift into the other.
         assert_eq!(list::ID, "claude-code.list");
         assert_eq!(read::ID, "claude-code.read");
-        assert_eq!(list::COMMAND, "claude_code.list");
-        assert_eq!(read::COMMAND, "claude_code.read");
+        assert_eq!(list::COMMAND, "claude-code.list");
+        assert_eq!(read::COMMAND, "claude-code.read");
     }
 
     #[test]

@@ -13,7 +13,7 @@ use crate::protocol::{v1_descriptor, GitResponseV1, SessionTargetV1};
 /// Not the protocol id. Keeping the two separately nameable is what lets a
 /// transport rename be told apart from a semantic change; only the second is a
 /// breaking contract event.
-pub const WIRE: &str = "extension.git.status";
+pub const WIRE: &str = "git.status";
 
 /// What a caller asks for.
 #[derive(Debug, Clone, Deserialize)]
@@ -185,10 +185,7 @@ mod tests {
         assert_eq!(d.id.as_str(), "git.status");
         assert_eq!(d.owner, "nession-git");
         assert_eq!(d.versions(), vec![nession_protocol::ContractVersion::V1]);
-        assert_eq!(
-            d.contracts[0].wire,
-            vec!["extension.git.status".to_string()]
-        );
+        assert_eq!(d.contracts[0].wire, vec!["git.status".to_string()]);
         assert!(d.validate().is_ok());
     }
 }

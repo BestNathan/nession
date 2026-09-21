@@ -16,8 +16,8 @@
 //! | client → agent  | `session.list`   | List tmux sessions               |
 //! | client → agent  | `session.create` | Create a new tmux session        |
 //! | client → agent  | `session.kill`   | Kill a tmux session              |
-//! | client → agent  | `client.attach`  | Attach a PTY to a session        |
-//! | client → agent  | `client.detach`  | Detach and close the PTY         |
+//! | client → agent  | `agent.attach`  | Attach a PTY to a session        |
+//! | client → agent  | `agent.detach`  | Detach and close the PTY         |
 //! | client → agent  | `terminal.input` | Send keystrokes to the PTY       |
 //! | client → agent  | `terminal.resize`| Resize the PTY                   |
 //! | agent → client  | `terminal.output`| PTY stdout data (base64)         |
@@ -119,38 +119,37 @@ impl tokio::io::AsyncWrite for TcpOrTls {
 /// Message type constants for the agent protocol.
 pub mod msg_types {
     // Client → Agent
-    pub const SESSION_LIST: &str = "session.list";
-    pub const SESSION_CREATE: &str = "session.create";
-    pub const SESSION_KILL: &str = "session.kill";
-    pub const SESSION_CAPTURE_PREVIEW: &str = "session.capture_preview";
-    pub const CLIENT_ATTACH: &str = "client.attach";
-    pub const CLIENT_DETACH: &str = "client.detach";
-    pub const TERMINAL_INPUT: &str = "terminal.input";
-    pub const TERMINAL_RESIZE: &str = "terminal.resize";
+    pub const SESSION_LIST: &str = "agent.session.list";
+    pub const SESSION_CREATE: &str = "agent.session.create";
+    pub const SESSION_KILL: &str = "agent.session.kill";
+    pub const SESSION_CAPTURE_PREVIEW: &str = "agent.session.capture-preview";
+    pub const CLIENT_ATTACH: &str = "agent.attach";
+    pub const CLIENT_DETACH: &str = "agent.detach";
+    pub const TERMINAL_INPUT: &str = "agent.terminal.input";
+    pub const TERMINAL_RESIZE: &str = "agent.terminal.resize";
 
     // Web UI → Agent (compatibility layer)
     pub const CLIENT_AUTH: &str = "client.auth";
-    pub const CLIENT_AGENTS_LIST: &str = "client.agents.list";
     pub const CLIENT_SESSIONS_LIST: &str = "client.sessions.list";
     pub const CLIENT_SESSION_ATTACH: &str = "client.session.attach";
     pub const CLIENT_SESSION_CREATE: &str = "client.session.create";
     pub const CLIENT_SESSION_KILL: &str = "client.session.kill";
 
     // File operations
-    pub const FILE_LIST: &str = "file.list";
-    pub const FILE_READ: &str = "file.read";
-    pub const FILE_WRITE: &str = "file.write";
-    pub const FILE_DELETE: &str = "file.delete";
-    pub const FILE_CREATE_DIR: &str = "file.create_dir";
-    pub const FILE_RENAME: &str = "file.rename";
-    pub const FILE_CWD: &str = "file.cwd";
+    pub const FILE_LIST: &str = "agent.file.list";
+    pub const FILE_READ: &str = "agent.file.read";
+    pub const FILE_WRITE: &str = "agent.file.write";
+    pub const FILE_DELETE: &str = "agent.file.delete";
+    pub const FILE_CREATE_DIR: &str = "agent.file.create-dir";
+    pub const FILE_RENAME: &str = "agent.file.rename";
+    pub const FILE_CWD: &str = "agent.file.cwd";
 
     // Keepalive (P2P client → agent)
-    pub const KEEPALIVE_PING: &str = "keepalive.ping";
+    pub const KEEPALIVE_PING: &str = "agent.keepalive.ping";
     pub const KEEPALIVE_PONG: &str = "keepalive.pong";
 
     // Agent → Client
-    pub const TERMINAL_OUTPUT: &str = "terminal.output";
+    pub const TERMINAL_OUTPUT: &str = "agent.terminal.output";
     pub const OK: &str = "ok";
     pub const ERROR: &str = "error";
 }
@@ -227,22 +226,6 @@ pub(crate) fn extract_session_name(session_id: &str) -> String {
         .split_once(':')
         .map(|(_, name)| name.to_string())
         .unwrap_or_else(|| session_id.to_string())
-}
-
-/// Parse a `host:port` listen address into an (ip, port) tuple.
-/// Supports both IPv4 (`0.0.0.0:9090`) and IPv6 (`[::1]:9090`) formats.
-/// Falls back to `("127.0.0.1", 9090)` on parse failure.
-fn parse_listen_address(addr: &str) -> (String, u16) {
-    match addr.parse::<std::net::SocketAddr>() {
-        Ok(sa) => (sa.ip().to_string(), sa.port()),
-        Err(_) => {
-            warn!(
-                "failed to parse listen_address '{}', falling back to 127.0.0.1:9090",
-                addr
-            );
-            ("127.0.0.1".to_string(), 9090)
-        }
-    }
 }
 
 /// Query tmux for the current window size of `session_name` using
@@ -479,7 +462,7 @@ impl P2pRequest<'_> {
 // below read together: this is what an agent answers on its own socket, and
 // `handle_request` is only the envelope parsing in front of it.
 p2p_routes! { ctx, msg_type, payload_value;
-            "session.list" => "session.list" => { match ctx.tmux.list_sessions().await {
+            "agent.session.list" => "agent.session.list" => { match ctx.tmux.list_sessions().await {
                 Ok(sessions_list) => {
                     let payload = SessionListResponse {
                         sessions: sessions_list,
@@ -489,7 +472,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                 }
                 Err(e) => ctx.err("list_failed", &e.to_string()),
             } }
-            "session.create" => "session.create" => {
+            "agent.session.create" => "agent.session.create" => {
                 let payload: SessionCreatePayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -506,6 +489,18 @@ p2p_routes! { ctx, msg_type, payload_value;
                     .await
                 {
                     Ok(()) => {
+                        // Applied after creation rather than passed to
+                        // `new-session`, which is how the attach path injects
+                        // its snapshots too. The field is new here — this
+                        // projection had none — and accepting a parameter and
+                        // then dropping it is the failure mode the rest of this
+                        // change exists to remove.
+                        let env_warnings =
+                            apply_env_snapshots(ctx.tmux, &payload.name, &payload.env_snapshots)
+                                .await;
+                        for w in &env_warnings {
+                            warn!("env set-environment warning for session {}: {w}", payload.name);
+                        }
                         let resp = SessionCreateResponse { name: payload.name };
                         serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
                             .unwrap_or_default()
@@ -513,7 +508,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     Err(e) => ctx.err("create_failed", &e.to_string()),
                 }
             }
-            "session.kill" => "session.kill" => {
+            "agent.session.kill" => "agent.session.kill" => {
                 let payload: SessionKillPayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -527,7 +522,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     Err(e) => ctx.err("kill_failed", &e.to_string()),
                 }
             }
-            "session.capture-preview" => "session.capture_preview" => {
+            "agent.session.capture-preview" => "agent.session.capture-preview" => {
                 info!(
                     "agent: received session.capture_preview request id={}",
                     ctx.id
@@ -588,7 +583,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     }
                 }
             }
-            "client.attach" => "client.attach" => {
+            "agent.attach" => "agent.attach" => {
                 let payload: ClientAttachPayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -861,7 +856,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     }
                 }
             }
-            "client.detach" => "client.detach" => {
+            "agent.detach" => "agent.detach" => {
                 let payload: ClientDetachPayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -897,7 +892,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     ),
                 }
             }
-            "terminal.input" => "terminal.input" => {
+            "agent.terminal.input" => "agent.terminal.input" => {
                 let payload: TerminalInputPayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -919,7 +914,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     ),
                 }
             }
-            "terminal.resize" => "terminal.resize" => {
+            "agent.terminal.resize" => "agent.terminal.resize" => {
                 let payload: TerminalResizePayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -972,27 +967,6 @@ p2p_routes! { ctx, msg_type, payload_value;
                 };
                 serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp)).unwrap_or_default()
             }
-            "client.agents.list" => "client.agents.list" => { match ctx.tmux.list_sessions().await {
-                Ok(sessions_list) => {
-                    let hostname = nession_common::system::get_hostname();
-                    let (ip, port) = parse_listen_address(ctx.listen_address);
-                    let agent = WebAgentInfo {
-                        agent_id: ctx.agent_id.to_string(),
-                        hostname,
-                        ip_address: ip,
-                        port,
-                        status: "online".to_string(),
-                        session_count: u32::try_from(sessions_list.len()).unwrap_or(0),
-                        last_heartbeat: chrono::Utc::now().to_rfc3339(),
-                    };
-                    let resp = WebAgentsListResponse {
-                        agents: vec![agent],
-                    };
-                    serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
-                        .unwrap_or_default()
-                }
-                Err(e) => ctx.err("list_failed", &e.to_string()),
-            } }
             "client.sessions.list" => "client.sessions.list" => { match ctx.tmux.list_sessions().await {
                 Ok(sessions_list) => {
                     let sessions: Vec<WebSessionInfo> = sessions_list
@@ -1114,13 +1088,13 @@ p2p_routes! { ctx, msg_type, payload_value;
             }
 
             // --- Keepalive ---
-            "keepalive.ping" => "keepalive.ping" => {
+            "agent.keepalive.ping" => "agent.keepalive.ping" => {
                 serde_json::to_string(&make_response(ctx.id, msg_types::KEEPALIVE_PONG, ()))
                     .unwrap_or_default()
             }
 
             // --- File operations ---
-            "file.list" => "file.list" => {
+            "agent.file.list" => "agent.file.list" => {
                 let payload: FileListPayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -1134,7 +1108,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     Err(e) => ctx.err("list_failed", &format_error_chain(&e)),
                 }
             }
-            "file.read" => "file.read" => {
+            "agent.file.read" => "agent.file.read" => {
                 let payload: FileReadPayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -1160,7 +1134,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     }
                 }
             }
-            "file.write" => "file.write" => {
+            "agent.file.write" => "agent.file.write" => {
                 let payload: FileWritePayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -1175,7 +1149,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     Err(e) => ctx.err("write_error", &e.to_string()),
                 }
             }
-            "file.delete" => "file.delete" => {
+            "agent.file.delete" => "agent.file.delete" => {
                 let payload: FileDeletePayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -1193,7 +1167,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     Err(e) => ctx.err("delete_failed", &format_error_chain(&e)),
                 }
             }
-            "file.create-dir" => "file.create_dir" => {
+            "agent.file.create-dir" => "agent.file.create-dir" => {
                 let payload: FileCreateDirPayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -1211,7 +1185,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     Err(e) => ctx.err("create_dir_failed", &format_error_chain(&e)),
                 }
             }
-            "file.rename" => "file.rename" => {
+            "agent.file.rename" => "agent.file.rename" => {
                 let payload: FileRenamePayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -1231,7 +1205,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     Err(e) => ctx.err("rename_failed", &e.to_string()),
                 }
             }
-            "file.cwd" => "file.cwd" => {
+            "agent.file.cwd" => "agent.file.cwd" => {
                 let payload: FileCwdPayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -1793,6 +1767,7 @@ mod tests {
             name: session_name.clone(),
             width: 80,
             height: 24,
+            env_snapshots: Vec::new(),
         };
         let create_req = new_message(msg_types::SESSION_CREATE, create_payload);
         let create_resp: Message<SessionCreateResponse> =
@@ -2484,29 +2459,6 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_listen_address_ipv4() {
-        let (ip, port) = parse_listen_address("0.0.0.0:8080");
-        assert_eq!(ip, "0.0.0.0");
-        assert_eq!(port, 8080);
-    }
-
-    #[test]
-    fn test_parse_listen_address_ipv6() {
-        let (ip, port) = parse_listen_address("[::1]:9090");
-        // The function strips the brackets from IPv6 addresses
-        assert_eq!(ip, "::1");
-        assert_eq!(port, 9090);
-    }
-
-    #[test]
-    fn test_parse_listen_address_invalid() {
-        // Invalid format should fall back to default
-        let (ip, port) = parse_listen_address("not-a-valid-address");
-        assert_eq!(ip, "127.0.0.1");
-        assert_eq!(port, 9090);
-    }
-
-    #[test]
     fn test_extract_session_name_with_agent_prefix() {
         assert_eq!(extract_session_name("agent1:mysession"), "mysession");
     }
@@ -2654,23 +2606,6 @@ mod tests {
         assert_eq!(resp.payload.status, "success");
         // Generated client_id should be a valid UUID
         assert!(uuid::Uuid::parse_str(&resp.payload.client_id).is_ok());
-
-        handle.shutdown().await.ok();
-    }
-
-    #[tokio::test]
-    async fn test_web_ui_agents_list() {
-        let (addr, handle) = start_test_server_on(18098).await;
-        let (mut sink, mut stream) = connect_client(addr).await;
-
-        let req = new_message(msg_types::CLIENT_AGENTS_LIST, serde_json::json!({}));
-        let resp: Message<WebAgentsListResponse> =
-            send_and_receive(&mut sink, &mut stream, &req).await;
-
-        assert_eq!(resp.msg_type, msg_types::OK);
-        assert_eq!(resp.payload.agents.len(), 1);
-        assert_eq!(resp.payload.agents[0].agent_id, "test-agent");
-        assert_eq!(resp.payload.agents[0].status, "online");
 
         handle.shutdown().await.ok();
     }
@@ -2886,7 +2821,6 @@ mod tests {
         msg_types::TERMINAL_INPUT,
         msg_types::TERMINAL_RESIZE,
         msg_types::CLIENT_AUTH,
-        msg_types::CLIENT_AGENTS_LIST,
         msg_types::CLIENT_SESSIONS_LIST,
         msg_types::CLIENT_SESSION_ATTACH,
         msg_types::CLIENT_SESSION_CREATE,
@@ -2936,17 +2870,21 @@ mod tests {
         let ids: Vec<&str> = descriptors.iter().map(|d| d.id.as_str()).collect();
 
         assert_eq!(descriptors.len(), P2P_WIRES.len());
-        assert!(ids.contains(&"session.create"));
-        assert!(ids.contains(&"terminal.input"));
-        assert!(ids.contains(&"file.read"));
+        assert!(ids.contains(&"agent.session.create"));
+        assert!(ids.contains(&"agent.terminal.input"));
+        assert!(ids.contains(&"agent.file.read"));
 
         // `ProtocolId` refuses underscores, so three units are spelled
         // differently from the wire they answer. A provider that passed the
         // wire string through would produce an id the registry rejects — which
         // these three would have done silently had `v1_descriptor` not been the
         // only way to build one.
-        assert!(ids.contains(&"session.capture-preview"));
-        assert!(ids.contains(&"file.create-dir"));
-        assert!(!ids.contains(&"session.capture_preview"));
+        assert!(ids.contains(&"agent.session.capture-preview"));
+        assert!(ids.contains(&"agent.file.create-dir"));
+        assert!(
+            !ids.contains(&"agent.session.capture_preview"),
+            "the wire spelling is not an id — `ProtocolId` refuses underscores, \
+             so the hyphenated form is the only one that can exist"
+        );
     }
 }

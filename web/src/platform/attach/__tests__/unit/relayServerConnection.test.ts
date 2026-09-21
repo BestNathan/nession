@@ -38,10 +38,10 @@ describe('relayServerHandle', () => {
 
     const sent = frames(socket);
     expect(sent.map((m) => m.msg_type)).toEqual([
-      'client.session.relay.begin',
-      'terminal.input',
-      'terminal.resize',
-      'client.session.relay.end',
+      'server.session.relay.begin',
+      'agent.terminal.input',
+      'agent.terminal.resize',
+      'server.session.relay.end',
     ]);
     expect(sent[0]?.payload).toEqual({ session_id: 'a:work', cols: 120, rows: 40 });
     expect(sent[1]?.payload).toMatchObject({ session_name: 'work' });

@@ -53,7 +53,7 @@ export interface PluginSurface {
  *
  * Named for what it plugs *into*, not for what it serves. Implementors are the
  * request/response families a connection speaks — `file.*`, `session.*`,
- * `extension.claude_code.*` — installed once per service lifetime and never on
+ * `claude-code.*` — installed once per service lifetime and never on
  * reconnect.
  *
  * It was called `CapabilityPlugin` until #801, which put one word on two

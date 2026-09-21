@@ -88,7 +88,7 @@ export class AgentsPlugin implements TransportPlugin {
    */
   async listAgents(): Promise<Agent[]> {
     const response = await this.requireConnection().request<AgentsListResponse>(
-      'client.agents.list',
+      'server.agent.list',
       {},
     );
     this.publishProtocols(response.agents);
@@ -98,7 +98,7 @@ export class AgentsPlugin implements TransportPlugin {
   /** Rename an agent's display name. Pass null to clear (reset to config/hostname). */
   async renameAgent(agentId: string, displayName: string | null): Promise<Agent> {
     const response = await this.requireConnection().request<AgentRenameResponse>(
-      'client.agent.rename',
+      'server.agent.rename',
       { agent_id: agentId, display_name: displayName },
     );
     if (!response.success || !response.agent) {
@@ -110,7 +110,7 @@ export class AgentsPlugin implements TransportPlugin {
   /** Delete an offline agent and all its sessions. Rejects if agent is online. */
   async deleteAgent(agentId: string): Promise<void> {
     const response = await this.requireConnection().request<AgentDeleteResponse>(
-      'client.agent.delete',
+      'server.agent.delete',
       { agent_id: agentId },
     );
     if (!response.success) {

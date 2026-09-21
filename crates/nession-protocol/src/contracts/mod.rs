@@ -7,7 +7,7 @@
 //! ├── agent/v1.rs      agent.register, agent.heartbeat, agent.address.update
 //! ├── session/v1.rs    session.create, session.attach, session.env.apply
 //! ├── env/v1.rs        env.{list,get,write,delete} at both ends
-//! ├── client/v1.rs     client.auth — the peer-to-peer door
+//! ├── client/v1.rs     server.auth — the peer-to-peer door
 //! ├── commands/v1.rs   commands.{list,add,remove,update}
 //! ├── server/v1.rs     server.info
 //! ├── terminal/v1.rs   terminal.{input,resize,output} — the P2P stream
@@ -20,7 +20,7 @@
 //! currently a single file — which is the rule the provider layout uses too
 //! (`protocol/<unit>/v1.rs`), applied to the units Nession owns.
 //!
-//! The family is the segment the protocol id names: `client.session.attach`
+//! The family is the segment the protocol id names: `server.session.attach`
 //! belongs to `session`, `server.env.list` to `env`. Placement is then a
 //! lookup, not a judgement, which is what keeps this directory from decaying
 //! into a `misc/`.
