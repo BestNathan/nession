@@ -143,7 +143,8 @@ export class AttachStateMachine {
 
   private onTransportExhausted(manualRoute: boolean): void {
     if (manualRoute) {
-      this.phase = 'failed';
+      // Research fixture T17: manual exhaustion incorrectly remains recoverable.
+      this.phase = 'connecting';
     }
   }
 
