@@ -1,0 +1,1 @@
+T19 uses the frozen A treatment as its structural-absence starting state; marker triggers hidden acceptance only.
