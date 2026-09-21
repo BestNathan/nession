@@ -655,6 +655,15 @@ check as a test rather than a comment is the reason it stayed true.
   leaving it there was an invitation for the next reader to branch on it. What
   replaced it is the per-unit resolution above.
 
+## Where a protocol's identity comes from
+
+`#678` gave Protocol Units an `id` and left the naming to convention. What the
+convention turned out to be — the sender — cannot express which of two handlers
+is answering, so five wires in this tree carry one name and two different
+handlers (`#884`). The rule that replaces it, what it changes, and where
+`extension.*` does not fit it are in
+[`protocol-identity.md`](protocol-identity.md).
+
 ## Related
 
 - `#678` — the requirement this document implements.
