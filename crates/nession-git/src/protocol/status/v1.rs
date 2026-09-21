@@ -18,6 +18,7 @@ pub const WIRE: &str = "git.status";
 /// What a caller asks for.
 #[derive(Debug, Clone, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 pub struct StatusRequestV1 {
     #[serde(flatten)]
     pub target: SessionTargetV1,
@@ -31,6 +32,7 @@ pub struct StatusRequestV1 {
 /// for renames, which is exactly the case no fixture exercised over the wire.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct ChangedFile {
     pub path: String,
@@ -46,6 +48,7 @@ pub struct ChangedFile {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum ChangeKind {
     Modified,
@@ -61,6 +64,7 @@ pub enum ChangeKind {
 /// A repository's state as of one `status` call.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 pub struct RepoStatus {
     /// Branch name, or `None` when detached.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -86,6 +90,7 @@ pub struct RepoStatus {
 /// probe that decided "this is a repository" already knew it.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 pub struct StatusOkV1 {
     pub status: RepoStatus,
     pub root: String,

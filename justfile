@@ -52,6 +52,20 @@ codegen:
 check-codegen:
     ./scripts/check-codegen-drift.sh
 
+# Every protocol in the tree, as one JSON Schema document on stdout:
+#
+#     just protocol-schema > protocol-schema.json
+#
+# Or a single operation's slice of it, which carries only the definitions that
+# operation actually references rather than the whole catalog:
+#
+#     just protocol-schema agent.session.create
+#
+# The same contracts the TypeScript bindings are generated from, projected for
+# a consumer that *validates* a message rather than one that imports a shape.
+protocol-schema *op:
+    cargo run --quiet -p nession-protocol-codegen -- --schema {{op}}
+
 # ── Design tokens + UI contracts ────────────────────────────────────────────
 
 tokens-gen:

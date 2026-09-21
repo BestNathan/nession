@@ -55,6 +55,7 @@
 //! hand. `main.rs` is the argument parsing, and nothing else.
 
 pub mod catalog;
+pub mod schema;
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -248,7 +249,9 @@ fn render(unit: &Unit, cfg: &Config) -> String {
         ),
     ] {
         match alias {
-            Some((name, shape)) => {
+            // The third element is the shape as JSON Schema, which this file —
+            // the TypeScript one — has no use for.
+            Some((name, shape, _schema)) => {
                 let _ = writeln!(out, "/** {what} */");
                 let _ = writeln!(out, "export type {name} = {};", shape(cfg));
                 let _ = writeln!(out);

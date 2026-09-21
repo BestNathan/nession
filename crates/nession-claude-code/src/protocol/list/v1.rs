@@ -10,6 +10,7 @@ pub const WIRE: &str = "claude-code.list";
 
 #[derive(Debug, Clone, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 pub struct ListRequestV1 {
     #[serde(default)]
     pub scope: Scope,
@@ -26,6 +27,7 @@ pub struct ListRequestV1 {
 /// answer from the contract alone.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 pub struct ConfigCategory {
     pub name: String,
     pub icon: Option<String>,
@@ -34,6 +36,7 @@ pub struct ConfigCategory {
 
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 pub struct ConfigFile {
     pub path: String,
     pub size: usize,
@@ -49,6 +52,7 @@ pub struct ConfigFile {
 /// shape would be a contract change.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 pub struct ListResponseV1 {
     pub available: bool,
     pub categories: Vec<ConfigCategory>,

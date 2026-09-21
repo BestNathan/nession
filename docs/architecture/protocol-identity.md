@@ -115,7 +115,7 @@ worse than no handler.** It reads as working.
 
 ---
 
-## 3. Where `extension.*` does not fit — the open question
+## 3. Where `extension.*` did not fit — the reasoning, and how it resolved
 
 `extension.git.status` breaks the rule in a way the rule cannot fix by renaming.
 
@@ -144,10 +144,11 @@ So the rule needs its own boundary stated:
 That reading leaves `git.status` correct as an id and makes `agent.git.status`
 wrong — the opposite of what applying the rule mechanically would produce.
 
-### The `extension.` wire prefix is a separate question
+### The `extension.` wire prefix was a separate question
 
-The id and the wire are already allowed to differ, so `extension.git.status` as a
-*wire* is legal today. But it is load-bearing in a way worth naming:
+The id and the wire are separately modelled, which is what made
+`extension.git.status` legal as a *wire* even though it is not an id. But it was
+load-bearing in a way worth naming:
 
 ```rust
 // crates/nession-server/src/server/handler.rs
@@ -162,31 +163,43 @@ by **manifest**, not by a name it has to recognise. The prefix also cannot
 survive the rule above: once an extension can be hosted anywhere, `extension.`
 says nothing about who answers.
 
-### What is not decided
+### How it resolved
 
-Three questions this document deliberately leaves open, because each is a design
-choice rather than a consequence of the rule:
+Three questions this document left open, because each is a design choice rather
+than a consequence of the rule. `#912` answered the first two by taking the rule
+seriously:
 
-1. **Does the wire prefix survive at all?** Either `extension.` stays as an
-   explicit relay marker and the server keeps routing on it, or the server
-   resolves every message by manifest and the prefix goes.
-2. **If it goes, what replaces it?** `git.status` as a wire, matching the id — or
-   something that still marks the relay path without naming a capability's host.
-3. **What does `owner` mean when a capability runs in two hosts at once?** Today
-   it is a crate name and there is one host per deployment. `#565` is the change
-   that tests it.
+1. **Does the wire prefix survive at all?** It does not. The prefix only ever
+   bought the server one branch — deciding whether to consult the manifest it
+   already held — and the registry stripped it again on arrival. Deleted.
+2. **What replaces it?** `git.status` as a wire, matching the id. Routing is now
+   "is this wire in my manifest, or does it name a target?" rather than "does
+   this string start with `extension.`".
+3. **What does `owner` mean when a capability runs in two hosts at once?** Still
+   open, and still `#565`'s to answer. It is also the reason the `id`/`owner`
+   split is worth keeping even though the wire and the id are now one string:
+   the id names the capability, the owner names who owns its semantics, and the
+   runtime hosting it stays a deployment fact.
 
 ---
 
 ## 4. Status
 
+**All of it landed in `#912`** (on `staging` as `8944f68a`, released to `main`
+in `#878`). The table records what each row resolved to, because two of them
+were decided by measuring rather than by applying the rule:
+
 | | |
 |---|---|
 | The rule | decided, above |
-| The core-unit rename | decided, not started — breaking, accepted |
-| `client.agents.list` on the agent | delete, not rename |
-| The agent's two session-list wires | **measure first**: same handler and subject, so the contract decides |
-| `extension.*` | open — section 3 |
+| The core-unit rename | **done** — every wire names its handler, and the wire is the id |
+| `client.agents.list` on the agent | **deleted**, not renamed: the Server answers `server.agent.list`, and the agent's 6-field variant that carried a different payload shape went with it |
+| The agent's two session-list wires | **measured, then split** — `agent.session.report` (the registry's five-field answer, `width`/`height` dropped) and `agent.session.list` (the full `SessionInfo`). Same handler and subject, different contract, so two protocols |
+| `extension.*` | **removed**, not renamed — see section 3 |
+
+Section 3 is kept as the reasoning that produced the second row of that rule
+(the capability, not the host, owns a provider unit's prefix). It is no longer
+an open question; the namespace it asks about was deleted rather than renamed.
 
 Reached from `docs/architecture/protocol.md`, which owns the Protocol Unit model
 this refines.

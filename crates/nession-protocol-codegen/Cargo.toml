@@ -19,6 +19,8 @@ nession-protocol = { path = "../nession-protocol", features = ["codegen"] }
 nession-git = { path = "../nession-git", features = ["codegen"] }
 nession-claude-code = { path = "../nession-claude-code", features = ["codegen"] }
 ts-rs.workspace = true
+schemars = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
 
 # Test-only, and deliberately the *runtimes* rather than more provider crates:
 # `every_advertised_contract_is_in_the_catalog` asks whether the catalog covers
@@ -32,3 +34,4 @@ nession-server = { path = "../nession-server" }
 
 [lints]
 workspace = true
+

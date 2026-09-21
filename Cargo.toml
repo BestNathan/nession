@@ -61,6 +61,9 @@ hostname = "0.4"
 # crate that derives from it, so no shipped binary's dependency graph changes —
 # see crates/nession-protocol/Cargo.toml for why those lists are load-bearing.
 ts-rs = "12.0.1"
+# The same contracts, emitted as JSON Schema rather than TypeScript. Same rule:
+# codegen only, optional, never in a shipped graph.
+schemars = "1.2.2"
 
 # ── Workspace Lints (based on openai/codex codex-rs) ────────────────────
 [workspace.lints]

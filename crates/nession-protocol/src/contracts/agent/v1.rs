@@ -4,6 +4,7 @@ use crate::contracts::default_image_tag;
 use crate::ProtocolManifest;
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentRegisterPayload {
     pub agent_id: String,
@@ -46,6 +47,7 @@ pub struct AgentRegisterPayload {
 /// Used to label endpoints in the UI and to break ties when the server must
 /// pick a single legacy `agent_address` for old clients (tunnels win).
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum NetworkType {
@@ -90,6 +92,7 @@ impl NetworkType {
 
 /// A single advertised way to reach an agent over WebSocket.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentAddress {
     /// Complete WebSocket URL, e.g. `ws://192.168.1.5:8080/ws`.
@@ -107,6 +110,7 @@ pub struct AgentAddress {
 
 /// Result of the server's TCP reachability probe for an address.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AddressStatus {
@@ -133,6 +137,7 @@ impl AddressStatus {
 /// Sent to clients in the attach response so they can prioritise reachable
 /// endpoints and skip known-dead ones.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProbedAddress {
     #[serde(flatten)]
@@ -144,6 +149,7 @@ pub struct ProbedAddress {
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentMetadata {
     pub tmux_version: String,
@@ -160,6 +166,7 @@ pub struct AgentMetadata {
 /// On acceptance the server tells the agent which heartbeat interval to use,
 /// so the cadence is configured centrally rather than per-agent.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentRegisterResponsePayload {
     /// "accepted" or "rejected".
@@ -173,6 +180,7 @@ pub struct AgentRegisterResponsePayload {
 
 /// Server → Agent acknowledgement of a received `agent.heartbeat`.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerHeartbeatAckPayload {
     /// Echoes the agent id the heartbeat was for.
@@ -182,6 +190,7 @@ pub struct ServerHeartbeatAckPayload {
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentHeartbeatPayload {
     pub agent_id: String,
@@ -192,6 +201,7 @@ pub struct AgentHeartbeatPayload {
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AgentStatus {
@@ -201,6 +211,7 @@ pub enum AgentStatus {
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HeartbeatMetadata {
     pub uptime_seconds: u64,
@@ -215,12 +226,14 @@ pub struct HeartbeatMetadata {
 
 /// `server.agent.delete` — permanently remove an offline agent and its sessions.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientAgentDeletePayload {
     pub agent_id: String,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientAgentDeleteResponsePayload {
     pub success: bool,
@@ -234,6 +247,7 @@ pub struct ClientAgentDeleteResponsePayload {
 /// VPN connect/disconnect, sleep/wake). The server replaces the agent's
 /// address list and re-probes reachability.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentAddressUpdatePayload {
     pub agent_id: String,
@@ -245,6 +259,7 @@ pub struct AgentAddressUpdatePayload {
 // --- The peer-to-peer projection (#678) ---
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebAgentInfo {
     pub agent_id: String,
@@ -257,6 +272,7 @@ pub struct WebAgentInfo {
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebAgentsListResponse {
     pub agents: Vec<WebAgentInfo>,
