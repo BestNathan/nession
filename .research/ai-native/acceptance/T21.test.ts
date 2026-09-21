@@ -7,12 +7,17 @@ import type {
 type IsAssignable<A, B> = [A] extends [B] ? true : false;
 type AssertFalse<T extends false> = T;
 
-// Both directions must be false; otherwise the identities are substitutable.
-type _TransportIsNotAttach = AssertFalse<IsAssignable<TransportGeneration, AttachAttemptGeneration>>;
-type _AttachIsNotTransport = AssertFalse<IsAssignable<AttachAttemptGeneration, TransportGeneration>>;
+const transportIsNotAttach: AssertFalse<
+  IsAssignable<TransportGeneration, AttachAttemptGeneration>
+> = false;
+
+const attachIsNotTransport: AssertFalse<
+  IsAssignable<AttachAttemptGeneration, TransportGeneration>
+> = false;
 
 describe('research acceptance T21', () => {
   it('keeps transport and attach-attempt identities distinct at the type level', () => {
-    expect(true).toBe(true);
+    expect(transportIsNotAttach).toBe(false);
+    expect(attachIsNotTransport).toBe(false);
   });
 });
