@@ -16,8 +16,8 @@
         "disposed transport"
       ],
       "owners": [
-        "web/src/platform/socket/WebSocketService.ts",
-        "web/src/platform/socket/types.ts"
+        "web/src/units/terminal-session/transport-reconnect/service.ts",
+        "web/src/units/terminal-session/transport-reconnect/types.ts"
       ],
       "dependencies": [
         "capability://terminal/session/visibility-wake",
