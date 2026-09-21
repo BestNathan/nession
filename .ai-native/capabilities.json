@@ -56,7 +56,7 @@
         "mobile app switch"
       ],
       "owners": [
-        "web/src/app/useVisibilityReconnect.ts"
+        "web/src/units/terminal-session/visibility-wake/useVisibilityReconnect.ts"
       ],
       "dependencies": [
         "capability://web/transport/reconnect"
@@ -91,7 +91,7 @@
         "transport lost"
       ],
       "owners": [
-        "web/src/platform/attach/AttachStateMachine.ts"
+        "web/src/units/terminal-session/attach/state.ts"
       ],
       "dependencies": [],
       "consumers": [
@@ -126,7 +126,7 @@
         "duplicate attach"
       ],
       "owners": [
-        "web/src/platform/attach/SessionAttachController.ts"
+        "web/src/units/terminal-session/attach/controller.ts"
       ],
       "dependencies": [
         "capability://terminal/session/attach-state"
@@ -221,5 +221,10 @@
         "web/src/product/terminal/__tests__/integration/useTerminalAttach.test.ts"
       ]
     }
+  ],
+  "treatment": "C-agent-native",
+  "notes": [
+    "Canonical capability owners may move under web/src/units/terminal-session.",
+    "Legacy paths are compatibility projections and are not semantic owners."
   ]
 }
