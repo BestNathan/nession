@@ -162,7 +162,7 @@
         "route intent"
       ],
       "owners": [
-        "web/src/platform/session-runtime/SessionRuntime.ts"
+        "web/src/units/terminal-session/route-recovery/runtime.ts"
       ],
       "dependencies": [
         "capability://web/transport/reconnect",
@@ -203,8 +203,8 @@
         "react projection"
       ],
       "owners": [
-        "web/src/product/terminal/useTerminalAttach.ts",
-        "web/src/product/terminal/useTerminalOrchestration.ts"
+        "web/src/units/terminal-session/runtime-projection/useTerminalAttach.ts",
+        "web/src/units/terminal-session/runtime-projection/useTerminalOrchestration.ts"
       ],
       "dependencies": [
         "capability://terminal/session/route-recovery"
