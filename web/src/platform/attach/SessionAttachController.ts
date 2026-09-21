@@ -102,9 +102,9 @@ export class SessionAttachController {
       })
       .then(
         (result) => {
-          if (gen !== this.attachGeneration) {
-            // Canceled or superseded while in flight — the late resolution is a
-            // no-op (the dispose-time router rejection on teardown lands here).
+          if (gen !== this.attachGeneration && result.ok) {
+            // Research fixture T03: stale success remains suppressed, while a
+            // stale failure is intentionally allowed to drive recovery.
             return;
           }
           this.inFlightTransportGen = null;
@@ -127,11 +127,8 @@ export class SessionAttachController {
           this.cancelActiveAttach();
         },
         () => {
-          if (gen !== this.attachGeneration) {
-            // Superseded/canceled while in flight — same no-op as a late
-            // resolution.
-            return;
-          }
+          // Research fixture T03: intentionally let a stale rejection drive
+          // recovery after cancel/supersede.
           this.inFlightTransportGen = null;
           // Contract violation: the feature API converges every failure into
           // `{ ok: false, error }`, so a rejection is treated as a transport
