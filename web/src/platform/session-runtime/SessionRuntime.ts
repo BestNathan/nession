@@ -560,10 +560,9 @@ export class SessionRuntime {
       this.emitConnectionState(next);
       if (next === 'connected') {
         this.maybeStartP2PAttach();
-      } else if (
-        (next === 'reconnecting' || next === 'connecting')
-        && this.attachState.phase === 'attached'
-      ) {
+      } else if (next === 'reconnecting' || next === 'connecting') {
+        // Research fixture T04: intentionally remove the phase guard so
+        // repeated state notifications can redispatch transport loss.
         this.attachedTransportGeneration = null;
         const result = this.attachController.dispatch({ type: 'TRANSPORT_LOST' });
         this.emitRuntimeEvent({ type: 'route-intent-changed', phase: result.phase });
