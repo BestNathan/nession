@@ -449,3 +449,24 @@ fn test_server_heartbeat_ack_payload() {
     assert_eq!(decoded.agent_id, "agent-1");
     assert_eq!(decoded.server_time, 1700000000);
 }
+
+#[test]
+fn a_registration_from_before_manifests_existed_still_decodes() {
+    // The compatibility claim `#678` rests on, asserted against bytes rather
+    // than against the type: the server refuses a manifest-less peer, and that
+    // refusal is only a *decision* if the payload parses first. If this fixture
+    // were rejected at `from_str`, the refusal would be a parse error wearing
+    // a policy's clothes.
+    use crate::contracts::fixtures::fixture;
+
+    let payload: AgentRegisterPayload = fixture("register-legacy-no-manifest.json").decode();
+    assert_eq!(payload.agent_id, "legacy-agent");
+    assert!(
+        payload.protocol_manifest.is_none(),
+        "an absent manifest must decode as `None`, not fail"
+    );
+    // The other half of the same claim: the fields that predate `#678`
+    // advertise the addresses the old agent really sent.
+    assert_eq!(payload.addresses.len(), 1);
+    assert_eq!(payload.metadata.nession_version, "0.34.1");
+}

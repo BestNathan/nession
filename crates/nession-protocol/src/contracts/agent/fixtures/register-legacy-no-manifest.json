@@ -1,0 +1,1 @@
+{"agent_id":"legacy-agent","hostname":"build-box","ip_address":"10.0.2.5","port":8080,"auth_token":"secret","metadata":{"tmux_version":"3.3a","os_version":"Linux x86_64","nession_version":"0.34.1","image_tag":"a1b2c3d"},"addresses":[{"url":"ws://10.0.2.5:8080/ws","network_type":"lan","priority":10}]}

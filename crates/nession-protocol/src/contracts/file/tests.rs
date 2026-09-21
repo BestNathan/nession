@@ -75,3 +75,37 @@ fn cwd_answers_with_a_path_though_it_asks_with_a_session() {
         serde_json::from_value(serde_json::to_value(&answer).unwrap()).unwrap();
     assert_eq!(back.path, "/home/u/project");
 }
+
+// --- the byte-level fixtures (#875) ---
+
+#[test]
+fn the_fixtures_decode_into_the_shapes_they_are_evidence_about() {
+    // These read a file rather than build a value. The difference is where the
+    // shape comes from: `FileReadPayload { .. }` serialised here would be the
+    // type agreeing with itself, which it does forever.
+    use crate::contracts::fixtures::fixture;
+
+    let whole: FileReadPayload = fixture("read-window-absent.json").decode();
+    assert!(whole.offset.is_none() && whole.limit.is_none());
+
+    // Present and null decodes to the same value as absent. That is why the
+    // distinction has to be made on the way *out* — it is lost on the way in,
+    // and a consumer reading the raw JSON cannot tell the two clients apart.
+    let explicit: FileReadPayload = fixture("read-window-explicit-null.json").decode();
+    assert_eq!(
+        (explicit.offset, explicit.limit),
+        (whole.offset, whole.limit),
+        "explicit null and an absent key must decode alike"
+    );
+
+    let chunked: FileReadPayload = fixture("read-window-chunked.json").decode();
+    assert_eq!(chunked.offset, Some(4096));
+    assert_eq!(chunked.limit, Some(4096));
+
+    let legacy_delete: FileDeletePayload = fixture("delete-legacy-no-recursive.json").decode();
+    assert!(
+        !legacy_delete.recursive,
+        "an older client that never sent `recursive` must not start deleting \
+         directory contents"
+    );
+}
