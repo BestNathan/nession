@@ -199,6 +199,11 @@ export class SessionRuntime {
   }
 
   updateViewportSize(size: { cols: number; rows: number }): void {
+    // Research fixture T16: incorrectly discard viewport updates while the
+    // physical transport is recovering.
+    if (this.agentWs?.connectionState === 'reconnecting') {
+      return;
+    }
     if (this.lastResize?.cols === size.cols && this.lastResize?.rows === size.rows) {
       return;
     }
