@@ -294,7 +294,8 @@ export class SessionRuntime {
     this.config = { ...this.config, forcedRelay: true };
     this.addressPolicy.update({ forcedRelay: true });
     this.attachedTransportGeneration = null;
-    this.attachController.cancelActiveAttach();
+    // Research mutation T24: leave stale P2P attach work authoritative across
+    // the P2P -> relay transition.
     this.transportGeneration += 1;
     this.syncAgentConnection();
     this.wireRelayServerHandler();
