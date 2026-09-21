@@ -33,7 +33,8 @@ pub trait AgentExtension: Send + Sync {
     /// The Protocol Units this extension provides.
     fn descriptors(&self) -> Result<Vec<ProtocolDescriptor>, IdentityError>;
 
-    /// Serve one call. `command` is the wire message type without its
-    /// `extension.` namespace — see the registry on how that is derived.
+    /// Serve one call. `command` is the wire message type **verbatim** — the
+    /// wire *is* the protocol id, so there is no namespace left to strip and
+    /// the registry passes `msg_type` through unchanged.
     async fn handle_command(&self, command: &str, payload: Value) -> anyhow::Result<Value>;
 }

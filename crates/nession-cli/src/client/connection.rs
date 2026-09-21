@@ -296,7 +296,7 @@ impl ClientConnection {
         }
     }
 
-    /// Request to attach to a session. Sends `client.session.attach` with the
+    /// Request to attach to a session. Sends `server.session.attach` with the
     /// given preferred mode. Returns either P2P connection info (to connect
     /// directly to the agent) or Relay (the server relays I/O).
     pub async fn request_attach(

@@ -9,12 +9,12 @@ pub(crate) fn default_build_time() -> String {
 
 // --- Server info ---
 
-/// Request payload for `client.server.info` — empty (protocol marker).
+/// Request payload for `server.info` — empty (protocol marker).
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerInfoRequest {}
 
-/// Response payload for `client.server.info`.
+/// Response payload for `server.info`.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerInfoResponse {
@@ -36,7 +36,7 @@ pub struct ServerInfoResponse {
     /// said nothing about itself.
     ///
     /// It travels here rather than in a message of its own because
-    /// `client.server.info` is already the call a client makes to ask what this
+    /// `server.info` is already the call a client makes to ask what this
     /// server is — one field on an existing round trip, not a new one.
     ///
     /// Optional for the same reason the agent's is: a server predating this

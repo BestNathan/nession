@@ -114,7 +114,7 @@ pub struct ServerClient {
     display_name: Option<String>,
     /// Default working directory for new tmux sessions.
     default_working_dir: String,
-    /// Extension registry for dispatching extension.* messages.
+    /// Registry for dispatching the units the composed providers declare.
     extension_registry: Option<Arc<ExtensionRegistry>>,
     /// Agent metadata.
     metadata: AgentMetadata,

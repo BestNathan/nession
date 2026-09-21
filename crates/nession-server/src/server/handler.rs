@@ -33,11 +33,11 @@ pub enum HandlerAction {
         agent_ws_urls: Vec<String>,
         /// Session id ("agent_id:session_name") for client registry tracking.
         session_id: String,
-        /// Short session name for agent protocol messages (client.attach, etc.).
+        /// Short session name for agent protocol messages (agent.attach, etc.).
         session_name: String,
         /// Unique client id assigned for this relay connection.
         client_id: String,
-        /// Resolved env snapshots to inject via client.attach to the agent.
+        /// Resolved env snapshots to inject via agent.attach to the agent.
         env_snapshots: Vec<EnvSnapshot>,
         /// Terminal columns for the initial tmux resize (from browser viewport).
         cols: u16,
@@ -186,7 +186,7 @@ impl ConnectionHandler {
             return self.handle_relayed_message(msg).await;
         }
 
-        // Not a declared unit. Nothing is served here — `client.session.relay.end`
+        // Not a declared unit. Nothing is served here — `server.session.relay.end`
         // reaches this only as a duplicate after the relay function
         // (`relay_bidirectional_via_channel`) has already handled it during
         // active relay, and is a safe no-op.
@@ -571,7 +571,7 @@ impl ConnectionHandler {
         }
     }
 
-    /// Handle `client.agents.list` - returns all registered agents.
+    /// Handle `server.agent.list` - returns all registered agents.
     async fn handle_client_agents_list(
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
@@ -615,7 +615,7 @@ impl ConnectionHandler {
         ))))
     }
 
-    /// Handle `client.server.info` — return server version, uptime, and stats.
+    /// Handle `server.info` — return server version, uptime, and stats.
     async fn handle_client_server_info(
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
@@ -650,7 +650,7 @@ impl ConnectionHandler {
         ))))
     }
 
-    /// Handle `client.agent.rename` — update an agent's display name.
+    /// Handle `server.agent.rename` — update an agent's display name.
     /// Accepts `agent_id` and `display_name` (string or null to clear).
     /// Returns the updated agent info on success.
     async fn handle_client_agent_rename(
@@ -795,7 +795,7 @@ impl ConnectionHandler {
         }
     }
 
-    /// Handle `client.agent.delete` — permanently remove an offline agent and its sessions.
+    /// Handle `server.agent.delete` — permanently remove an offline agent and its sessions.
     /// Rejects if the agent is online or degraded.
     async fn handle_client_agent_delete(
         &mut self,
@@ -938,7 +938,7 @@ impl ConnectionHandler {
         ))))
     }
 
-    /// Handle `client.sessions.list` - returns all sessions, optionally filtered by agent_id.
+    /// Handle `server.session.list` - returns all sessions, optionally filtered by agent_id.
     ///
     /// With `force: true` the server first queries every online agent for its
     /// live tmux state and rebuilds the registry from the answers, so the
@@ -1078,7 +1078,7 @@ impl ConnectionHandler {
         stale
     }
 
-    /// Handle `client.session.attach` - returns P2P agent address or enters relay mode.
+    /// Handle `server.session.attach` - returns P2P agent address or enters relay mode.
     ///
     /// In P2P mode, the response includes the agent's IP:port so the client can
     /// connect directly. In relay mode, the server opens a WebSocket to the agent
@@ -1309,7 +1309,7 @@ impl ConnectionHandler {
             }
 
             // Phase 1 complete — relay info returned to browser.
-            // The browser will send client.session.relay.begin when the
+            // The browser will send server.session.relay.begin when the
             // Terminal is mounted and ready to receive terminal output.
             // This avoids the race between server entering relay mode and
             // the browser subscribing to terminal.output.
@@ -1341,9 +1341,9 @@ impl ConnectionHandler {
         }
     }
 
-    /// Handle `client.session.relay.begin` — Phase 2 of relay attach.
+    /// Handle `server.session.relay.begin` — Phase 2 of relay attach.
     ///
-    /// Phase 1 (client.session.attach, relay mode) returned the candidate
+    /// Phase 1 (server.session.attach, relay mode) returned the candidate
     /// addresses but did NOT enter relay forwarding.  Now the Terminal is
     /// mounted and subscribed — the browser sends this to actually start
     /// the relay data flow.
@@ -1495,7 +1495,7 @@ impl ConnectionHandler {
         })
     }
 
-    /// Handle `client.session.create` — create a new session on a target agent.
+    /// Handle `server.session.create` — create a new session on a target agent.
     async fn handle_client_session_create(
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
@@ -1709,7 +1709,7 @@ impl ConnectionHandler {
         }
     }
 
-    /// Handle `client.session.kill` — kill a session on its agent.
+    /// Handle `server.session.kill` — kill a session on its agent.
     async fn handle_client_session_kill(
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
@@ -2045,16 +2045,16 @@ impl ConnectionHandler {
         // caller nothing about the fleet.
         //
         // Every other client-facing handler in this file has had this gate all
-        // along; the extension relay reaches further than any of them — it
-        // crosses into another machine and can read that machine's repositories
-        // and `~/.claude/` — and was the one path that did not check.
+        // along; the relay reaches further than any of them — it crosses into
+        // another machine and can read that machine's repositories and
+        // `~/.claude/` — and was the one path that did not check.
         //
-        // `client.auth` sets `authenticated_client` (`handler.rs`, the
-        // `CLIENT_AUTH` arm), and the Web sends it as a handshake before the
-        // socket is usable, so nothing that works today stops working.
+        // `server.auth` sets `authenticated_client` (see `handle_client_auth`),
+        // and the Web sends it as a handshake before the socket is usable, so
+        // nothing that works today stops working.
         if !self.authenticated_client {
             warn!(
-                "Rejected unauthenticated extension request `{}` id={}",
+                "Rejected unauthenticated relayed request `{}` id={}",
                 msg.msg_type, msg.id
             );
             return Ok(HandlerAction::Reply(Some(Message::Text(
@@ -2233,7 +2233,7 @@ impl ConnectionHandler {
         }
     }
 
-    /// Handle `client.session.capture_preview` — capture tmux scrollback from
+    /// Handle `server.session.capture-preview` — capture tmux scrollback from
     /// a session on its agent and relay the base64-encoded ANSI back to the client.
     async fn handle_client_session_capture_preview(
         &mut self,
@@ -2426,7 +2426,7 @@ impl ConnectionHandler {
         }
     }
 
-    /// Handle `client.env.list` — aggregate server env files with those from
+    /// Handle `server.env.list` — aggregate server env files with those from
     /// every online agent (EC6: same filename on both shows twice with badges).
     async fn handle_client_env_list(
         &mut self,
@@ -2474,7 +2474,7 @@ impl ConnectionHandler {
         ))
     }
 
-    /// Handle `client.env.get` — read one env file's content and report which
+    /// Handle `server.env.get` — read one env file's content and report which
     /// sessions currently use it (for the in-use lock).
     async fn handle_client_env_get(
         &mut self,
@@ -2545,7 +2545,7 @@ impl ConnectionHandler {
         }
     }
 
-    /// Handle `client.env.write` — create/overwrite an env file. Blocks writes
+    /// Handle `server.env.write` — create/overwrite an env file. Blocks writes
     /// to files currently in use by a running session (SC5/EC10).
     async fn handle_client_env_write(
         &mut self,
@@ -2705,7 +2705,7 @@ impl ConnectionHandler {
         }
     }
 
-    /// Handle `client.env.delete` — delete an env file (blocked if in use).
+    /// Handle `server.env.delete` — delete an env file (blocked if in use).
     async fn handle_client_env_delete(
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
@@ -2838,7 +2838,7 @@ impl ConnectionHandler {
         Ok(snapshots)
     }
 
-    /// Handle `client.session.env.apply` — apply env files to a running session.
+    /// Handle `server.session.env.apply` — apply env files to a running session.
     async fn handle_client_session_env_apply(
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
@@ -2920,7 +2920,7 @@ impl ConnectionHandler {
         }
     }
 
-    /// Handle `client.session.env.unset` — remove attach-time env files from a
+    /// Handle `server.session.env.unset` — remove attach-time env files from a
     /// running session (on detach).
     async fn handle_client_session_env_unset(
         &mut self,
@@ -3004,7 +3004,7 @@ impl ConnectionHandler {
         }
     }
 
-    /// Handle `client.session.env.active` — list env files active on a session.
+    /// Handle `server.session.env.active` — list env files active on a session.
     async fn handle_client_session_env_active(
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
@@ -3029,7 +3029,7 @@ impl ConnectionHandler {
         ))
     }
 
-    /// Handle `client.session.env.query` — ask the agent which env files are
+    /// Handle `server.session.env.query` — ask the agent which env files are
     /// currently sourced (applied to its process environment).
     async fn handle_client_session_env_query(
         &mut self,
@@ -3365,7 +3365,7 @@ fn current_timestamp() -> u64 {
         .as_secs()
 }
 
-/// Serialise a session for the wire. Shared by `client.sessions.list` and the
+/// Serialise a session for the wire. Shared by `server.session.list` and the
 /// `sessions.changed` broadcast so both always agree on the field set — the
 /// web client feeds either straight into the same state setter.
 pub(crate) fn session_to_json(s: &crate::registry::SessionInfo) -> serde_json::Value {
@@ -4355,7 +4355,7 @@ mod tests {
         assert!(matches!(action, HandlerAction::Reply(None)));
     }
 
-    // ---- client.auth ----
+    // ---- server.auth ----
 
     #[tokio::test]
     async fn client_auth_success() {
@@ -4459,7 +4459,7 @@ mod tests {
         assert_eq!(reply["payload"]["success"], false);
     }
 
-    // ---- client.agents.list ----
+    // ---- server.agent.list ----
 
     #[tokio::test]
     async fn agents_list_returns_registered() {
@@ -4509,7 +4509,7 @@ mod tests {
         assert!(reply["payload"]["agents"].as_array().unwrap().is_empty());
     }
 
-    // ---- client.sessions.list ----
+    // ---- server.session.list ----
 
     #[tokio::test]
     async fn sessions_list_with_filter() {
@@ -4560,7 +4560,7 @@ mod tests {
         assert_eq!(sessions.len(), 2);
     }
 
-    // ---- client.sessions.list force refresh ----
+    // ---- server.session.list force refresh ----
 
     /// Registering via `agent.register` marks the agent Online but does not
     /// give it a CommandBroker control connection, so a force refresh will
@@ -4867,7 +4867,7 @@ mod tests {
         assert_eq!(got[0].status, SessionStatus::Detached);
     }
 
-    // ---- client.session.attach ----
+    // ---- server.session.attach ----
 
     #[tokio::test]
     async fn attach_invalid_session_id_format() {
@@ -5100,7 +5100,7 @@ mod tests {
         }
     }
 
-    // ---- client.session.create ----
+    // ---- server.session.create ----
 
     #[tokio::test]
     async fn session_create_missing_fields() {
@@ -5140,7 +5140,7 @@ mod tests {
             .contains("not found"));
     }
 
-    // ---- client.session.kill ----
+    // ---- server.session.kill ----
 
     #[tokio::test]
     async fn session_kill_invalid_format() {
@@ -6199,7 +6199,7 @@ server_routes!(handler, msg;
     "server.session.list" => "server.session.list" => handler.handle_client_sessions_list(msg).await,
     "server.session.attach" => "server.session.attach" => handler.handle_client_session_attach(msg).await,
     "server.session.relay.begin" => "server.session.relay.begin" => handler.handle_client_session_relay_begin(msg).await,
-    // `client.session.relay.end` is intercepted by the relay function
+    // `server.session.relay.end` is intercepted by the relay function
     // (`relay_bidirectional_via_channel`) and never reaches the dispatcher
     // during active relay. It is declared here anyway, because the Server does
     // serve it — the relay loop is the handler — and a manifest that omitted it

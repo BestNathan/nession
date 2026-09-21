@@ -588,7 +588,7 @@ async fn test_unknown_message_type_is_ignored() {
 
 #[tokio::test]
 async fn test_agent_can_register_then_authenticate_as_client() {
-    // A single connection that first registers as an agent, then sends client.auth.
+    // A single connection that first registers as an agent, then sends server.auth.
     let server = TestServer::start("dual_tok").await.unwrap();
     let mut ws = server.connect().await.unwrap();
 
@@ -1206,7 +1206,7 @@ async fn test_client_sessions_list_filtered_by_agent() {
 
     // The broadcast channel (capacity 16) may still hold stale
     // `sessions.changed` messages from the agent register path.
-    // Skip those so we consume the actual `client.sessions.list.response`.
+    // Skip those so we consume the actual `server.session.list.response`.
     let list_resp = loop {
         let raw = recv_text(&mut client).await;
         let v: serde_json::Value = serde_json::from_str(&raw).unwrap();

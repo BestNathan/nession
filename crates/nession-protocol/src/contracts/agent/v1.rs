@@ -213,7 +213,7 @@ pub struct HeartbeatMetadata {
 
 // --- Client → Server agent management payloads ---
 
-/// `client.agent.delete` — permanently remove an offline agent and its sessions.
+/// `server.agent.delete` — permanently remove an offline agent and its sessions.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientAgentDeletePayload {

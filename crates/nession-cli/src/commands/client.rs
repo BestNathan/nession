@@ -176,7 +176,7 @@ pub async fn attach_session(
             // Create WebSocket transport
             let transport = crate::terminal::raw::WebSocketTransport::new(agent_ws);
 
-            // Send client.attach to agent with session name
+            // Send agent.attach to agent with session name
             use nession_agent::server::websocket::{
                 msg_types as agent_msg_types, ClientAttachPayload, Message as AgentMessage,
             };
