@@ -34,17 +34,17 @@ describe('ServerPlugin', () => {
     it('sends client.server.info with an empty payload and resolves the info', async () => {
       const pending = plugin.serverInfo();
       expect(surface.requests).toHaveLength(1);
-      expect(surface.requests[0]?.type).toBe('client.server.info');
+      expect(surface.requests[0]?.type).toBe('server.info');
       expect(surface.requests[0]?.payload).toEqual({});
 
       const info = makeServerInfo();
-      surface.resolveNext('client.server.info', info);
+      surface.resolveNext('server.info', info);
       await expect(pending).resolves.toEqual(info);
     });
 
     it('propagates transport rejections', async () => {
       const pending = plugin.serverInfo();
-      surface.rejectNext('client.server.info', new Error('Connection lost'));
+      surface.rejectNext('server.info', new Error('Connection lost'));
       await expect(pending).rejects.toThrow('Connection lost');
     });
   });
@@ -62,7 +62,7 @@ describe('ServerPlugin', () => {
       const pending = plugin.serverInfo();
       expect(surfaceA.requests).toHaveLength(0);
       expect(surfaceB.requests).toHaveLength(1);
-      surfaceB.resolveNext('client.server.info', makeServerInfo());
+      surfaceB.resolveNext('server.info', makeServerInfo());
       await expect(pending).resolves.toEqual(makeServerInfo());
 
       // The final teardown detaches the plugin completely.

@@ -113,6 +113,7 @@ async fn integration_session_create_and_kill() {
         name: session_name.to_string(),
         width: 80,
         height: 24,
+        env_snapshots: Vec::new(),
     };
     let req = new_message(msg_types::SESSION_CREATE, create);
     let resp: nession_agent::server::websocket::Message<SessionCreateResponse> =

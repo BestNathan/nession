@@ -43,7 +43,7 @@ describe('TerminalServerPlugin', () => {
       plugin.beginRelay('sess-1');
 
       expect(surface.sent).toEqual([
-        { type: 'client.session.relay.begin', payload: { session_id: 'sess-1' } },
+        { type: 'server.session.relay.begin', payload: { session_id: 'sess-1' } },
       ]);
     });
 
@@ -52,7 +52,7 @@ describe('TerminalServerPlugin', () => {
 
       expect(surface.sent).toEqual([
         {
-          type: 'client.session.relay.begin',
+          type: 'server.session.relay.begin',
           payload: { session_id: 'sess-1', relay_url: 'ws://agent:19090/ws', cols: 120, rows: 40 },
         },
       ]);
@@ -62,7 +62,7 @@ describe('TerminalServerPlugin', () => {
       plugin.beginRelay('sess-1', undefined, 100);
 
       expect(surface.sent).toEqual([
-        { type: 'client.session.relay.begin', payload: { session_id: 'sess-1', cols: 100 } },
+        { type: 'server.session.relay.begin', payload: { session_id: 'sess-1', cols: 100 } },
       ]);
     });
 
@@ -70,7 +70,7 @@ describe('TerminalServerPlugin', () => {
       plugin.endRelay('sess-1');
 
       expect(surface.sent).toEqual([
-        { type: 'client.session.relay.end', payload: { session_id: 'sess-1' } },
+        { type: 'server.session.relay.end', payload: { session_id: 'sess-1' } },
       ]);
     });
 
@@ -78,7 +78,7 @@ describe('TerminalServerPlugin', () => {
       plugin.sendRelayInput('work', 'hello');
 
       expect(surface.sent).toEqual([
-        { type: 'terminal.input', payload: { session_name: 'work', data: 'aGVsbG8=' } },
+        { type: 'agent.terminal.input', payload: { session_name: 'work', data: 'aGVsbG8=' } },
       ]);
     });
 
@@ -86,7 +86,7 @@ describe('TerminalServerPlugin', () => {
       plugin.sendRelayResize('work', 120, 40);
 
       expect(surface.sent).toEqual([
-        { type: 'terminal.resize', payload: { session_name: 'work', cols: 120, rows: 40 } },
+        { type: 'agent.terminal.resize', payload: { session_name: 'work', cols: 120, rows: 40 } },
       ]);
     });
   });
@@ -98,12 +98,12 @@ describe('TerminalServerPlugin', () => {
       plugin.onRelayOutput('work', cbWork);
       plugin.onRelayOutput('other', cbOther);
 
-      surface.pushMessage('terminal.output', { session_name: 'work', data: 'aGVsbG8=' });
+      surface.pushMessage('agent.terminal.output', { session_name: 'work', data: 'aGVsbG8=' });
       expect(cbWork).toHaveBeenCalledTimes(1);
       expect(cbWork.mock.calls[0]?.[0]).toEqual(new Uint8Array([104, 101, 108, 108, 111]));
       expect(cbOther).not.toHaveBeenCalled();
 
-      surface.pushMessage('terminal.output', { session_name: 'other', data: 'aGk=' });
+      surface.pushMessage('agent.terminal.output', { session_name: 'other', data: 'aGk=' });
       expect(cbOther.mock.calls[0]?.[0]).toEqual(new Uint8Array([104, 105]));
     });
 
@@ -111,7 +111,7 @@ describe('TerminalServerPlugin', () => {
       const cb = vi.fn();
       plugin.onRelayOutput('direct', cb);
 
-      surface.pushMessage('terminal.output', { session_id: 'direct', data: 'aGk=' });
+      surface.pushMessage('agent.terminal.output', { session_id: 'direct', data: 'aGk=' });
 
       // Non-relay frames carry a plain byte string — no base64 decoding.
       expect(cb.mock.calls[0]?.[0]).toEqual(new TextEncoder().encode('aGk='));
@@ -121,7 +121,7 @@ describe('TerminalServerPlugin', () => {
       const cb = vi.fn();
       plugin.onRelayOutput('work', cb);
 
-      surface.pushMessage('terminal.output', { session_name: 'work', data: b64Bytes([104, 105, 200]) });
+      surface.pushMessage('agent.terminal.output', { session_name: 'work', data: b64Bytes([104, 105, 200]) });
 
       expect(cb.mock.calls[0]?.[0]).toEqual(new Uint8Array([104, 105, 200]));
     });
@@ -130,7 +130,7 @@ describe('TerminalServerPlugin', () => {
       const cb = vi.fn();
       plugin.onRelayOutput('work', cb);
 
-      surface.pushMessage('terminal.output', { session_name: 'work', data: '!!!' });
+      surface.pushMessage('agent.terminal.output', { session_name: 'work', data: '!!!' });
 
       expect(cb.mock.calls[0]?.[0]).toEqual(new Uint8Array([33, 33, 33]));
     });
@@ -139,7 +139,7 @@ describe('TerminalServerPlugin', () => {
       const cb = vi.fn();
       plugin.onRelayOutput('work', cb);
 
-      surface.pushMessage('terminal.output', { session_name: 'work', data: '' });
+      surface.pushMessage('agent.terminal.output', { session_name: 'work', data: '' });
 
       expect(cb.mock.calls[0]?.[0]).toEqual(new Uint8Array(0));
     });
@@ -150,7 +150,7 @@ describe('TerminalServerPlugin', () => {
       plugin.onRelayOutput('work', cbOne);
       plugin.onRelayOutput('work', cbTwo);
 
-      surface.pushMessage('terminal.output', { session_name: 'work', data: 'aGk=' });
+      surface.pushMessage('agent.terminal.output', { session_name: 'work', data: 'aGk=' });
 
       expect(cbOne).toHaveBeenCalledTimes(1);
       expect(cbTwo).toHaveBeenCalledTimes(1);
@@ -163,14 +163,14 @@ describe('TerminalServerPlugin', () => {
       plugin.onRelayOutput('work', cbTwo);
 
       unsubOne();
-      surface.pushMessage('terminal.output', { session_name: 'work', data: 'aGk=' });
+      surface.pushMessage('agent.terminal.output', { session_name: 'work', data: 'aGk=' });
       expect(cbOne).not.toHaveBeenCalled();
       expect(cbTwo).toHaveBeenCalledTimes(1);
 
       cbTwo.mockClear();
       const reSub = vi.fn();
       plugin.onRelayOutput('work', reSub);
-      surface.pushMessage('terminal.output', { session_name: 'work', data: 'aGk=' });
+      surface.pushMessage('agent.terminal.output', { session_name: 'work', data: 'aGk=' });
       expect(cbTwo).toHaveBeenCalledTimes(1);
       expect(reSub).toHaveBeenCalledTimes(1);
     });
@@ -183,11 +183,11 @@ describe('TerminalServerPlugin', () => {
       plugin.onRelayResize('work', cbWork);
       plugin.onRelayResize('other', cbOther);
 
-      surface.pushMessage('terminal.resize', { session_name: 'work', cols: 150, rows: 50 });
+      surface.pushMessage('agent.terminal.resize', { session_name: 'work', cols: 150, rows: 50 });
       expect(cbWork).toHaveBeenCalledWith(150, 50);
       expect(cbOther).not.toHaveBeenCalled();
 
-      surface.pushMessage('terminal.resize', { session_name: 'other', cols: 90, rows: 30 });
+      surface.pushMessage('agent.terminal.resize', { session_name: 'other', cols: 90, rows: 30 });
       expect(cbOther).toHaveBeenCalledWith(90, 30);
     });
 
@@ -195,7 +195,7 @@ describe('TerminalServerPlugin', () => {
       const cb = vi.fn();
       plugin.onRelayResize('work', cb);
 
-      surface.pushMessage('terminal.resize', { session_name: 'work' });
+      surface.pushMessage('agent.terminal.resize', { session_name: 'work' });
 
       expect(cb).toHaveBeenCalledWith(0, 0);
     });
@@ -221,8 +221,8 @@ describe('TerminalServerPlugin', () => {
 
       // The stale teardown dropped the old generation's consumers; only the
       // new binding's subscribers are notified.
-      surfaceA.pushMessage('terminal.output', { session_name: 'work', data: 'aGk=' });
-      surfaceB.pushMessage('terminal.output', { session_name: 'work', data: 'aGk=' });
+      surfaceA.pushMessage('agent.terminal.output', { session_name: 'work', data: 'aGk=' });
+      surfaceB.pushMessage('agent.terminal.output', { session_name: 'work', data: 'aGk=' });
       expect(staleCb).not.toHaveBeenCalled();
       expect(liveCb).toHaveBeenCalledTimes(1);
 
@@ -242,12 +242,12 @@ describe('TerminalServerPlugin', () => {
 
       teardownA(); // stale release — must not drop B's consumers
 
-      surfaceB.pushMessage('terminal.output', { session_name: 'work', data: 'aGk=' });
+      surfaceB.pushMessage('agent.terminal.output', { session_name: 'work', data: 'aGk=' });
       expect(cb).toHaveBeenCalledTimes(1);
       expect(cb.mock.calls[0]?.[0]).toEqual(new Uint8Array([104, 105]));
 
       teardownB(); // current release — the consumer dies with its binding
-      surfaceB.pushMessage('terminal.output', { session_name: 'work', data: 'aGk=' });
+      surfaceB.pushMessage('agent.terminal.output', { session_name: 'work', data: 'aGk=' });
       expect(cb).toHaveBeenCalledTimes(1);
     });
 
@@ -270,7 +270,7 @@ describe('TerminalServerPlugin', () => {
       const liveCb = vi.fn();
       plugin.onRelayOutput('work', liveCb);
 
-      surface2.pushMessage('terminal.output', { session_name: 'work', data: 'aGk=' });
+      surface2.pushMessage('agent.terminal.output', { session_name: 'work', data: 'aGk=' });
 
       expect(staleCb).not.toHaveBeenCalled();
       expect(liveCb).toHaveBeenCalledTimes(1);

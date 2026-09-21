@@ -123,7 +123,7 @@ pub(crate) const FIXTURES: &[Fixture] = &[
     Fixture {
         family: "agent",
         file: "register-legacy-no-manifest.json",
-        wire: "agent.register",
+        wire: "server.agent.register",
         direction: "agent -> server",
         origin: Origin::Reconstructed(
             "`AgentRegisterPayload` before #678 added `protocol_manifest`",

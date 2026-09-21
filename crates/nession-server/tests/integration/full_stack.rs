@@ -158,7 +158,7 @@ async fn test_agent_registration_success() {
     let mut ws = server.connect().await.unwrap();
 
     let msg = serde_json::json!({
-        "msg_type": "agent.register",
+        "msg_type": "server.agent.register",
         "id": "reg-1",
         "timestamp": current_timestamp(),
         "payload": {
@@ -179,7 +179,7 @@ async fn test_agent_registration_success() {
     send_text(&mut ws, msg.to_string()).await.unwrap();
     let resp: serde_json::Value = serde_json::from_str(&recv_text(&mut ws).await).unwrap();
 
-    assert_eq!(resp["msg_type"], "agent.register.response");
+    assert_eq!(resp["msg_type"], "server.agent.register.response");
     assert_eq!(resp["payload"]["status"], "accepted");
     assert_eq!(resp["id"], "reg-1");
 }
@@ -190,7 +190,7 @@ async fn test_agent_registration_rejected_bad_token() {
     let mut ws = server.connect().await.unwrap();
 
     let msg = serde_json::json!({
-        "msg_type": "agent.register",
+        "msg_type": "server.agent.register",
         "id": "reg-2",
         "timestamp": current_timestamp(),
         "payload": {
@@ -211,7 +211,7 @@ async fn test_agent_registration_rejected_bad_token() {
     send_text(&mut ws, msg.to_string()).await.unwrap();
     let resp: serde_json::Value = serde_json::from_str(&recv_text(&mut ws).await).unwrap();
 
-    assert_eq!(resp["msg_type"], "agent.register.response");
+    assert_eq!(resp["msg_type"], "server.agent.register.response");
     assert_eq!(resp["payload"]["status"], "rejected");
 }
 
@@ -225,7 +225,7 @@ async fn test_multiple_agents_register_independently() {
 
     let make_reg = |agent_id: &str| {
         serde_json::json!({
-            "msg_type": "agent.register",
+            "msg_type": "server.agent.register",
             "id": format!("reg-{}", agent_id),
             "timestamp": current_timestamp(),
             "payload": {
@@ -269,7 +269,7 @@ async fn test_heartbeat_after_registration_is_acked() {
 
     // Register first.
     let reg = serde_json::json!({
-        "msg_type": "agent.register",
+        "msg_type": "server.agent.register",
         "id": "reg-hb",
         "timestamp": current_timestamp(),
         "payload": {
@@ -291,7 +291,7 @@ async fn test_heartbeat_after_registration_is_acked() {
 
     // Send a heartbeat.
     let hb = serde_json::json!({
-        "msg_type": "agent.heartbeat",
+        "msg_type": "server.agent.heartbeat",
         "id": "hb-1",
         "timestamp": current_timestamp(),
         "payload": {
@@ -321,7 +321,7 @@ async fn test_heartbeat_without_registration_is_silent() {
     let mut ws = server.connect().await.unwrap();
 
     let hb = serde_json::json!({
-        "msg_type": "agent.heartbeat",
+        "msg_type": "server.agent.heartbeat",
         "id": "hb-unreg",
         "timestamp": current_timestamp(),
         "payload": {
@@ -347,7 +347,7 @@ async fn test_multiple_heartbeats_accepted() {
 
     // Register.
     let reg = serde_json::json!({
-        "msg_type": "agent.register",
+        "msg_type": "server.agent.register",
         "id": "reg-multi-hb",
         "timestamp": current_timestamp(),
         "payload": {
@@ -370,7 +370,7 @@ async fn test_multiple_heartbeats_accepted() {
     // Send several heartbeats.
     for i in 0..5 {
         let hb = serde_json::json!({
-            "msg_type": "agent.heartbeat",
+            "msg_type": "server.agent.heartbeat",
             "id": format!("hb-{}", i),
             "timestamp": current_timestamp(),
             "payload": {
@@ -403,7 +403,7 @@ async fn test_client_auth_success() {
     let mut ws = server.connect().await.unwrap();
 
     let auth = serde_json::json!({
-        "msg_type": "client.auth",
+        "msg_type": "server.auth",
         "id": "auth-1",
         "timestamp": current_timestamp(),
         "payload": {
@@ -413,7 +413,7 @@ async fn test_client_auth_success() {
     send_text(&mut ws, auth.to_string()).await.unwrap();
 
     let resp: serde_json::Value = serde_json::from_str(&recv_text(&mut ws).await).unwrap();
-    assert_eq!(resp["msg_type"], "client.auth.response");
+    assert_eq!(resp["msg_type"], "server.auth.response");
     assert_eq!(resp["payload"]["status"], "success");
     assert_eq!(resp["id"], "auth-1");
 }
@@ -424,7 +424,7 @@ async fn test_client_auth_failure() {
     let mut ws = server.connect().await.unwrap();
 
     let auth = serde_json::json!({
-        "msg_type": "client.auth",
+        "msg_type": "server.auth",
         "id": "auth-2",
         "timestamp": current_timestamp(),
         "payload": {
@@ -434,7 +434,7 @@ async fn test_client_auth_failure() {
     send_text(&mut ws, auth.to_string()).await.unwrap();
 
     let resp: serde_json::Value = serde_json::from_str(&recv_text(&mut ws).await).unwrap();
-    assert_eq!(resp["msg_type"], "client.auth.response");
+    assert_eq!(resp["msg_type"], "server.auth.response");
     assert_eq!(resp["payload"]["status"], "failed");
 }
 
@@ -446,13 +446,13 @@ async fn test_multiple_clients_auth_simultaneously() {
     let mut ws2 = server.connect().await.unwrap();
 
     let auth1 = serde_json::json!({
-        "msg_type": "client.auth",
+        "msg_type": "server.auth",
         "id": "auth-c1",
         "timestamp": current_timestamp(),
         "payload": { "auth_token": "shared_client_tok" }
     });
     let auth2 = serde_json::json!({
-        "msg_type": "client.auth",
+        "msg_type": "server.auth",
         "id": "auth-c2",
         "timestamp": current_timestamp(),
         "payload": { "auth_token": "shared_client_tok" }
@@ -479,7 +479,7 @@ async fn test_full_workflow_agent_and_client() {
     // --- Step 1: Agent registers ---
     let mut agent_ws = server.connect().await.unwrap();
     let reg = serde_json::json!({
-        "msg_type": "agent.register",
+        "msg_type": "server.agent.register",
         "id": "wf-reg",
         "timestamp": current_timestamp(),
         "payload": {
@@ -503,7 +503,7 @@ async fn test_full_workflow_agent_and_client() {
 
     // --- Step 2: Agent sends heartbeat ---
     let hb = serde_json::json!({
-        "msg_type": "agent.heartbeat",
+        "msg_type": "server.agent.heartbeat",
         "id": "wf-hb",
         "timestamp": current_timestamp(),
         "payload": {
@@ -527,7 +527,7 @@ async fn test_full_workflow_agent_and_client() {
     // --- Step 3: Client authenticates ---
     let mut client_ws = server.connect().await.unwrap();
     let auth = serde_json::json!({
-        "msg_type": "client.auth",
+        "msg_type": "server.auth",
         "id": "wf-auth",
         "timestamp": current_timestamp(),
         "payload": {
@@ -541,7 +541,7 @@ async fn test_full_workflow_agent_and_client() {
 
     // --- Step 4: Agent sends another heartbeat after client connected ---
     let hb2 = serde_json::json!({
-        "msg_type": "agent.heartbeat",
+        "msg_type": "server.agent.heartbeat",
         "id": "wf-hb-2",
         "timestamp": current_timestamp(),
         "payload": {
@@ -594,7 +594,7 @@ async fn test_agent_can_register_then_authenticate_as_client() {
 
     // Register as agent.
     let reg = serde_json::json!({
-        "msg_type": "agent.register",
+        "msg_type": "server.agent.register",
         "id": "dual-reg",
         "timestamp": current_timestamp(),
         "payload": {
@@ -617,7 +617,7 @@ async fn test_agent_can_register_then_authenticate_as_client() {
 
     // Now also authenticate as a client on the same connection.
     let auth = serde_json::json!({
-        "msg_type": "client.auth",
+        "msg_type": "server.auth",
         "id": "dual-auth",
         "timestamp": current_timestamp(),
         "payload": { "auth_token": "dual_tok" }
@@ -644,7 +644,7 @@ async fn test_malformed_json_does_not_crash_server() {
 
     let mut ws2 = server.connect().await.unwrap();
     let auth = serde_json::json!({
-        "msg_type": "client.auth",
+        "msg_type": "server.auth",
         "id": "post-crash",
         "timestamp": current_timestamp(),
         "payload": { "auth_token": "tok" }
@@ -662,7 +662,7 @@ async fn test_response_preserves_message_id() {
 
     let unique_id = "unique-msg-id-42";
     let reg = serde_json::json!({
-        "msg_type": "agent.register",
+        "msg_type": "server.agent.register",
         "id": unique_id,
         "timestamp": current_timestamp(),
         "payload": {
@@ -692,7 +692,7 @@ async fn test_response_includes_timestamp() {
     let before = current_timestamp();
 
     let auth = serde_json::json!({
-        "msg_type": "client.auth",
+        "msg_type": "server.auth",
         "id": "ts-1",
         "timestamp": current_timestamp(),
         "payload": { "auth_token": "ts_tok" }
@@ -726,7 +726,7 @@ async fn test_concurrent_agent_registrations() {
             let (mut ws, _) = connect_async(&url).await.unwrap();
 
             let reg = serde_json::json!({
-                "msg_type": "agent.register",
+                "msg_type": "server.agent.register",
                 "id": format!("conc-reg-{}", i),
                 "timestamp": current_timestamp(),
                 "payload": {
@@ -774,7 +774,7 @@ async fn test_connection_disconnect_does_not_affect_others() {
     // Server should still accept new connections.
     let mut ws = server.connect().await.unwrap();
     let auth = serde_json::json!({
-        "msg_type": "client.auth",
+        "msg_type": "server.auth",
         "id": "after-disc",
         "timestamp": current_timestamp(),
         "payload": { "auth_token": "disc_tok" }
@@ -797,7 +797,7 @@ async fn test_agent_session_update_active() {
     send_text(
         &mut ws,
         serde_json::json!({
-            "msg_type": "agent.register",
+            "msg_type": "server.agent.register",
             "id": "r1", "timestamp": current_timestamp(),
             "payload": {
                 "agent_id": "a1", "hostname": "h", "ip_address": "10.0.0.1",
@@ -816,7 +816,7 @@ async fn test_agent_session_update_active() {
     send_text(
         &mut ws,
         serde_json::json!({
-            "msg_type": "agent.session.update",
+            "msg_type": "server.agent.session-update",
             "id": "su1", "timestamp": current_timestamp(),
             "payload": {
                 "agent_id": "a1", "session_name": "dev", "status": "active",
@@ -845,7 +845,7 @@ async fn test_agent_session_update_detached() {
     send_text(
         &mut ws,
         serde_json::json!({
-            "msg_type": "agent.register","id": "r2","timestamp": current_timestamp(),
+            "msg_type": "server.agent.register","id": "r2","timestamp": current_timestamp(),
             "payload": {"agent_id":"a2","hostname":"h","ip_address":"10.0.0.2",
             "port":8080,"auth_token":"tok",
             "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
@@ -860,7 +860,7 @@ async fn test_agent_session_update_detached() {
     send_text(
         &mut ws,
         serde_json::json!({
-            "msg_type": "agent.session.update","id": "su2","timestamp": current_timestamp(),
+            "msg_type": "server.agent.session-update","id": "su2","timestamp": current_timestamp(),
             "payload": {"agent_id":"a2","session_name":"stale","status":"detached",
             "window_count":1,"attached_clients":0}
         })
@@ -881,7 +881,7 @@ async fn test_agent_session_update_gone_removes_session() {
     send_text(
         &mut ws,
         serde_json::json!({
-            "msg_type": "agent.register","id":"r3","timestamp":current_timestamp(),
+            "msg_type": "server.agent.register","id":"r3","timestamp":current_timestamp(),
             "payload":{"agent_id":"a3","hostname":"h","ip_address":"10.0.0.3",
             "port":8080,"auth_token":"tok",
             "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
@@ -897,7 +897,7 @@ async fn test_agent_session_update_gone_removes_session() {
     send_text(
         &mut ws,
         serde_json::json!({
-            "msg_type":"agent.session.update","id":"su3","timestamp":current_timestamp(),
+            "msg_type":"server.agent.session-update","id":"su3","timestamp":current_timestamp(),
             "payload":{"agent_id":"a3","session_name":"temp","status":"active",
             "window_count":1,"attached_clients":0}
         })
@@ -910,7 +910,7 @@ async fn test_agent_session_update_gone_removes_session() {
     send_text(
         &mut ws,
         serde_json::json!({
-            "msg_type":"agent.session.update","id":"su4","timestamp":current_timestamp(),
+            "msg_type":"server.agent.session-update","id":"su4","timestamp":current_timestamp(),
             "payload":{"agent_id":"a3","session_name":"temp","status":"gone",
             "window_count":0,"attached_clients":0}
         })
@@ -931,7 +931,7 @@ async fn test_session_update_from_unregistered_agent_is_silent() {
     send_text(
         &mut ws,
         serde_json::json!({
-            "msg_type":"agent.session.update","id":"su-ghost","timestamp":current_timestamp(),
+            "msg_type":"server.agent.session-update","id":"su-ghost","timestamp":current_timestamp(),
             "payload":{"agent_id":"ghost","session_name":"s","status":"active",
             "window_count":0,"attached_clients":0}
         })
@@ -956,7 +956,7 @@ async fn test_client_agents_list_requires_auth() {
     send_text(
         &mut ws,
         serde_json::json!({
-            "msg_type":"client.agents.list","id":"al1","timestamp":current_timestamp(),
+            "msg_type":"server.agent.list","id":"al1","timestamp":current_timestamp(),
             "payload":{}
         })
         .to_string(),
@@ -977,7 +977,7 @@ async fn test_client_agents_list_returns_registered_agents() {
     send_text(
         &mut agent_ws,
         serde_json::json!({
-            "msg_type":"agent.register","id":"r-al","timestamp":current_timestamp(),
+            "msg_type":"server.agent.register","id":"r-al","timestamp":current_timestamp(),
             "payload":{"agent_id":"list-agent","hostname":"list-host","ip_address":"10.0.0.50",
             "port":8080,"auth_token":"tok",
             "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
@@ -994,7 +994,7 @@ async fn test_client_agents_list_returns_registered_agents() {
     send_text(
         &mut client_ws,
         serde_json::json!({
-            "msg_type":"client.auth","id":"auth-al","timestamp":current_timestamp(),
+            "msg_type":"server.auth","id":"auth-al","timestamp":current_timestamp(),
             "payload":{"auth_token":"tok"}
         })
         .to_string(),
@@ -1006,7 +1006,7 @@ async fn test_client_agents_list_returns_registered_agents() {
     send_text(
         &mut client_ws,
         serde_json::json!({
-            "msg_type":"client.agents.list","id":"list-req","timestamp":current_timestamp(),
+            "msg_type":"server.agent.list","id":"list-req","timestamp":current_timestamp(),
             "payload":{}
         })
         .to_string(),
@@ -1015,7 +1015,7 @@ async fn test_client_agents_list_returns_registered_agents() {
     .unwrap();
 
     let resp: serde_json::Value = serde_json::from_str(&recv_text(&mut client_ws).await).unwrap();
-    assert_eq!(resp["msg_type"], "client.agents.list.response");
+    assert_eq!(resp["msg_type"], "server.agent.list.response");
     let agents = resp["payload"]["agents"].as_array().unwrap();
     assert!(!agents.is_empty());
     assert_eq!(agents[0]["agent_id"], "list-agent");
@@ -1043,7 +1043,7 @@ async fn test_client_sessions_list_requires_auth() {
     send_text(
         &mut ws,
         serde_json::json!({
-            "msg_type":"client.sessions.list","id":"sl1","timestamp":current_timestamp(),
+            "msg_type":"server.session.list","id":"sl1","timestamp":current_timestamp(),
             "payload":{}
         })
         .to_string(),
@@ -1064,7 +1064,7 @@ async fn test_client_sessions_list_returns_sessions() {
     send_text(
         &mut agent_ws,
         serde_json::json!({
-            "msg_type":"agent.register","id":"r-sl","timestamp":current_timestamp(),
+            "msg_type":"server.agent.register","id":"r-sl","timestamp":current_timestamp(),
             "payload":{"agent_id":"sess-agent","hostname":"h","ip_address":"10.0.0.60",
             "port":8080,"auth_token":"tok",
             "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
@@ -1079,7 +1079,7 @@ async fn test_client_sessions_list_returns_sessions() {
     send_text(
         &mut agent_ws,
         serde_json::json!({
-            "msg_type":"agent.session.update","id":"su-sl","timestamp":current_timestamp(),
+            "msg_type":"server.agent.session-update","id":"su-sl","timestamp":current_timestamp(),
             "payload":{"agent_id":"sess-agent","session_name":"my-sess","status":"active",
             "window_count":2,"attached_clients":0}
         })
@@ -1093,7 +1093,7 @@ async fn test_client_sessions_list_returns_sessions() {
     send_text(
         &mut client_ws,
         serde_json::json!({
-            "msg_type":"client.auth","id":"auth-sl","timestamp":current_timestamp(),
+            "msg_type":"server.auth","id":"auth-sl","timestamp":current_timestamp(),
             "payload":{"auth_token":"tok"}
         })
         .to_string(),
@@ -1105,7 +1105,7 @@ async fn test_client_sessions_list_returns_sessions() {
     send_text(
         &mut client_ws,
         serde_json::json!({
-            "msg_type":"client.sessions.list","id":"sl-req","timestamp":current_timestamp(),
+            "msg_type":"server.session.list","id":"sl-req","timestamp":current_timestamp(),
             "payload":{}
         })
         .to_string(),
@@ -1129,7 +1129,7 @@ async fn test_client_sessions_list_filtered_by_agent() {
     send_text(
         &mut agent1,
         serde_json::json!({
-            "msg_type":"agent.register","id":"r1","timestamp":current_timestamp(),
+            "msg_type":"server.agent.register","id":"r1","timestamp":current_timestamp(),
             "payload":{"agent_id":"agent-x","hostname":"h","ip_address":"10.0.0.70",
             "port":8080,"auth_token":"tok",
             "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
@@ -1143,7 +1143,7 @@ async fn test_client_sessions_list_filtered_by_agent() {
     send_text(
         &mut agent1,
         serde_json::json!({
-            "msg_type":"agent.session.update","id":"sx","timestamp":current_timestamp(),
+            "msg_type":"server.agent.session-update","id":"sx","timestamp":current_timestamp(),
             "payload":{"agent_id":"agent-x","session_name":"sess-x","status":"active",
             "window_count":1,"attached_clients":0}
         })
@@ -1156,7 +1156,7 @@ async fn test_client_sessions_list_filtered_by_agent() {
     send_text(
         &mut agent2,
         serde_json::json!({
-            "msg_type":"agent.register","id":"r2","timestamp":current_timestamp(),
+            "msg_type":"server.agent.register","id":"r2","timestamp":current_timestamp(),
             "payload":{"agent_id":"agent-y","hostname":"h","ip_address":"10.0.0.71",
             "port":8080,"auth_token":"tok",
             "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
@@ -1170,7 +1170,7 @@ async fn test_client_sessions_list_filtered_by_agent() {
     send_text(
         &mut agent2,
         serde_json::json!({
-            "msg_type":"agent.session.update","id":"sy","timestamp":current_timestamp(),
+            "msg_type":"server.agent.session-update","id":"sy","timestamp":current_timestamp(),
             "payload":{"agent_id":"agent-y","session_name":"sess-y","status":"detached",
             "window_count":2,"attached_clients":0}
         })
@@ -1184,7 +1184,7 @@ async fn test_client_sessions_list_filtered_by_agent() {
     send_text(
         &mut client,
         serde_json::json!({
-            "msg_type":"client.auth","id":"auth-filt","timestamp":current_timestamp(),
+            "msg_type":"server.auth","id":"auth-filt","timestamp":current_timestamp(),
             "payload":{"auth_token":"tok"}
         })
         .to_string(),
@@ -1196,7 +1196,7 @@ async fn test_client_sessions_list_filtered_by_agent() {
     send_text(
         &mut client,
         serde_json::json!({
-            "msg_type":"client.sessions.list","id":"filt-req","timestamp":current_timestamp(),
+            "msg_type":"server.session.list","id":"filt-req","timestamp":current_timestamp(),
             "payload":{"agent_id":"agent-x"}
         })
         .to_string(),
@@ -1210,7 +1210,7 @@ async fn test_client_sessions_list_filtered_by_agent() {
     let list_resp = loop {
         let raw = recv_text(&mut client).await;
         let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
-        if v["msg_type"].as_str() == Some("client.sessions.list.response") {
+        if v["msg_type"].as_str() == Some("server.session.list.response") {
             break v;
         }
     };
@@ -1231,7 +1231,7 @@ async fn test_client_session_attach_requires_auth() {
     send_text(
         &mut ws,
         serde_json::json!({
-            "msg_type":"client.session.attach","id":"att1","timestamp":current_timestamp(),
+            "msg_type":"server.session.attach","id":"att1","timestamp":current_timestamp(),
             "payload":{"session_id":"a:sess","preferred_mode":"p2p"}
         })
         .to_string(),
@@ -1251,7 +1251,7 @@ async fn test_client_session_attach_invalid_format() {
     send_text(
         &mut ws,
         serde_json::json!({
-            "msg_type":"client.auth","id":"auth","timestamp":current_timestamp(),
+            "msg_type":"server.auth","id":"auth","timestamp":current_timestamp(),
             "payload":{"auth_token":"tok"}
         })
         .to_string(),
@@ -1263,7 +1263,7 @@ async fn test_client_session_attach_invalid_format() {
     send_text(
         &mut ws,
         serde_json::json!({
-            "msg_type":"client.session.attach","id":"att-bad","timestamp":current_timestamp(),
+            "msg_type":"server.session.attach","id":"att-bad","timestamp":current_timestamp(),
             "payload":{"session_id":"bad_format_no_colon"}
         })
         .to_string(),
@@ -1286,7 +1286,7 @@ async fn test_client_session_attach_session_not_found() {
     send_text(
         &mut ws,
         serde_json::json!({
-            "msg_type":"client.auth","id":"auth","timestamp":current_timestamp(),
+            "msg_type":"server.auth","id":"auth","timestamp":current_timestamp(),
             "payload":{"auth_token":"tok"}
         })
         .to_string(),
@@ -1298,7 +1298,7 @@ async fn test_client_session_attach_session_not_found() {
     send_text(
         &mut ws,
         serde_json::json!({
-            "msg_type":"client.session.attach","id":"att-nf","timestamp":current_timestamp(),
+            "msg_type":"server.session.attach","id":"att-nf","timestamp":current_timestamp(),
             "payload":{"session_id":"ghost:nonexistent","preferred_mode":"p2p"}
         })
         .to_string(),
@@ -1322,7 +1322,7 @@ async fn test_client_session_attach_p2p_mode() {
     send_text(
         &mut agent_ws,
         serde_json::json!({
-            "msg_type":"agent.register","id":"r","timestamp":current_timestamp(),
+            "msg_type":"server.agent.register","id":"r","timestamp":current_timestamp(),
             "payload":{"agent_id":"p2p-agent","hostname":"h","ip_address":"10.0.0.80",
             "port":9090,"auth_token":"tok",
             "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
@@ -1339,7 +1339,7 @@ async fn test_client_session_attach_p2p_mode() {
     send_text(
         &mut agent_ws,
         serde_json::json!({
-            "msg_type":"agent.session.update","id":"su","timestamp":current_timestamp(),
+            "msg_type":"server.agent.session-update","id":"su","timestamp":current_timestamp(),
             "payload":{"agent_id":"p2p-agent","session_name":"p2p-sess","status":"active",
             "window_count":1,"attached_clients":0}
         })
@@ -1353,7 +1353,7 @@ async fn test_client_session_attach_p2p_mode() {
     send_text(
         &mut client,
         serde_json::json!({
-            "msg_type":"client.auth","id":"auth","timestamp":current_timestamp(),
+            "msg_type":"server.auth","id":"auth","timestamp":current_timestamp(),
             "payload":{"auth_token":"tok"}
         })
         .to_string(),
@@ -1365,7 +1365,7 @@ async fn test_client_session_attach_p2p_mode() {
     send_text(
         &mut client,
         serde_json::json!({
-            "msg_type":"client.session.attach","id":"att-p2p","timestamp":current_timestamp(),
+            "msg_type":"server.session.attach","id":"att-p2p","timestamp":current_timestamp(),
             "payload":{"session_id":"p2p-agent:p2p-sess","preferred_mode":"p2p"}
         })
         .to_string(),
@@ -1377,7 +1377,7 @@ async fn test_client_session_attach_p2p_mode() {
     let attach_resp = loop {
         let raw = recv_text(&mut client).await;
         let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
-        if v["msg_type"].as_str() == Some("client.session.attach.response") {
+        if v["msg_type"].as_str() == Some("server.session.attach.response") {
             break v;
         }
     };
@@ -1404,7 +1404,7 @@ async fn test_client_session_create_requires_auth() {
     send_text(
         &mut ws,
         serde_json::json!({
-            "msg_type":"client.session.create","id":"c1","timestamp":current_timestamp(),
+            "msg_type":"server.session.create","id":"c1","timestamp":current_timestamp(),
             "payload":{"agent_id":"a","name":"s"}
         })
         .to_string(),
@@ -1424,7 +1424,7 @@ async fn test_client_session_create_missing_fields() {
     send_text(
         &mut ws,
         serde_json::json!({
-            "msg_type":"client.auth","id":"auth","timestamp":current_timestamp(),
+            "msg_type":"server.auth","id":"auth","timestamp":current_timestamp(),
             "payload":{"auth_token":"tok"}
         })
         .to_string(),
@@ -1436,7 +1436,7 @@ async fn test_client_session_create_missing_fields() {
     send_text(
         &mut ws,
         serde_json::json!({
-            "msg_type":"client.session.create","id":"c-empty","timestamp":current_timestamp(),
+            "msg_type":"server.session.create","id":"c-empty","timestamp":current_timestamp(),
             "payload":{"agent_id":"","name":""}
         })
         .to_string(),
@@ -1456,7 +1456,7 @@ async fn test_client_session_kill_requires_auth() {
     send_text(
         &mut ws,
         serde_json::json!({
-            "msg_type":"client.session.kill","id":"k1","timestamp":current_timestamp(),
+            "msg_type":"server.session.kill","id":"k1","timestamp":current_timestamp(),
             "payload":{"session_id":"a:s"}
         })
         .to_string(),
@@ -1476,7 +1476,7 @@ async fn test_client_session_kill_invalid_format() {
     send_text(
         &mut ws,
         serde_json::json!({
-            "msg_type":"client.auth","id":"auth","timestamp":current_timestamp(),
+            "msg_type":"server.auth","id":"auth","timestamp":current_timestamp(),
             "payload":{"auth_token":"tok"}
         })
         .to_string(),
@@ -1488,7 +1488,7 @@ async fn test_client_session_kill_invalid_format() {
     send_text(
         &mut ws,
         serde_json::json!({
-            "msg_type":"client.session.kill","id":"k-bad","timestamp":current_timestamp(),
+            "msg_type":"server.session.kill","id":"k-bad","timestamp":current_timestamp(),
             "payload":{"session_id":"badformat"}
         })
         .to_string(),
@@ -1511,7 +1511,7 @@ async fn test_client_session_kill_agent_not_found() {
     send_text(
         &mut ws,
         serde_json::json!({
-            "msg_type":"client.auth","id":"auth","timestamp":current_timestamp(),
+            "msg_type":"server.auth","id":"auth","timestamp":current_timestamp(),
             "payload":{"auth_token":"tok"}
         })
         .to_string(),
@@ -1523,7 +1523,7 @@ async fn test_client_session_kill_agent_not_found() {
     send_text(
         &mut ws,
         serde_json::json!({
-            "msg_type":"client.session.kill","id":"k-ghost","timestamp":current_timestamp(),
+            "msg_type":"server.session.kill","id":"k-ghost","timestamp":current_timestamp(),
             "payload":{"session_id":"ghost:session"}
         })
         .to_string(),
@@ -1548,7 +1548,7 @@ async fn test_no_auth_mode_accepts_any_agent() {
 
     let mut ws = server.connect().await.unwrap();
     let reg = serde_json::json!({
-        "msg_type": "agent.register",
+        "msg_type": "server.agent.register",
         "id": "reg-noauth",
         "timestamp": current_timestamp(),
         "payload": {
@@ -1574,7 +1574,7 @@ async fn test_no_auth_mode_accepts_any_client() {
     let mut ws = server.connect().await.unwrap();
 
     let auth = serde_json::json!({
-        "msg_type": "client.auth",
+        "msg_type": "server.auth",
         "id": "auth-noauth",
         "timestamp": current_timestamp(),
         "payload": { "auth_token": "random" }

@@ -175,7 +175,7 @@ describe('FilesPlugin', () => {
       const pending = plugin.listDir('/');
       expect(surfaceA.requests).toHaveLength(0);
       expect(surfaceB.requests).toHaveLength(1);
-      surfaceB.resolveNext('file.list', { entries: [] });
+      surfaceB.resolveNext('agent.file.list', { entries: [] });
       await expect(pending).resolves.toEqual({ entries: [] });
 
       teardownB();
@@ -198,9 +198,9 @@ describe('FilesPlugin', () => {
 
     it('listDir sends file.list with the path', async () => {
       const pending = plugin.listDir('/tmp');
-      expect(surface.requests[0]).toMatchObject({ type: 'file.list', payload: { path: '/tmp' } });
+      expect(surface.requests[0]).toMatchObject({ type: 'agent.file.list', payload: { path: '/tmp' } });
 
-      surface.resolveNext('file.list', { entries: [sampleEntry] });
+      surface.resolveNext('agent.file.list', { entries: [sampleEntry] });
       await expect(pending).resolves.toEqual({ entries: [sampleEntry] });
     });
 
@@ -208,7 +208,7 @@ describe('FilesPlugin', () => {
       const pending = plugin.readFile('/tmp/a.txt');
       expect(surface.requests[0]?.payload).toEqual({ path: '/tmp/a.txt' });
 
-      surface.resolveNext('file.read', {
+      surface.resolveNext('agent.file.read', {
         path: '/tmp/a.txt',
         content: 'aGVsbG8=',
         mime_type: 'text/plain',
@@ -223,11 +223,11 @@ describe('FilesPlugin', () => {
     it('readFile forwards offset and limit when given', async () => {
       const pending = plugin.readFile('/tmp/a.txt', { offset: 100, limit: 512 });
       expect(surface.requests[0]).toMatchObject({
-        type: 'file.read',
+        type: 'agent.file.read',
         payload: { path: '/tmp/a.txt', offset: 100, limit: 512 },
       });
 
-      surface.resolveNext('file.read', {
+      surface.resolveNext('agent.file.read', {
         path: '/tmp/a.txt',
         content: 'Yg==',
         mime_type: 'text/plain',
@@ -241,68 +241,68 @@ describe('FilesPlugin', () => {
     it('writeFile passes base64 content through unchanged', async () => {
       const pending = plugin.writeFile('/tmp/a.txt', 'aGVsbG8=');
       expect(surface.requests[0]).toMatchObject({
-        type: 'file.write',
+        type: 'agent.file.write',
         payload: { path: '/tmp/a.txt', content: 'aGVsbG8=' },
       });
 
-      surface.resolveNext('file.write', { path: '/tmp/a.txt', written: 5 });
+      surface.resolveNext('agent.file.write', { path: '/tmp/a.txt', written: 5 });
       await expect(pending).resolves.toEqual({ path: '/tmp/a.txt', written: 5 });
     });
 
     it('deleteFile defaults recursive to false', async () => {
       const pending = plugin.deleteFile('/tmp/a.txt');
       expect(surface.requests[0]).toMatchObject({
-        type: 'file.delete',
+        type: 'agent.file.delete',
         payload: { path: '/tmp/a.txt', recursive: false },
       });
 
-      surface.resolveNext('file.delete', { path: '/tmp/a.txt', success: true });
+      surface.resolveNext('agent.file.delete', { path: '/tmp/a.txt', success: true });
       await expect(pending).resolves.toEqual({ path: '/tmp/a.txt', success: true });
     });
 
     it('deleteFile forwards recursive when requested', async () => {
       const pending = plugin.deleteFile('/tmp/dir', true);
       expect(surface.requests[0]?.payload).toEqual({ path: '/tmp/dir', recursive: true });
-      surface.resolveNext('file.delete', { path: '/tmp/dir', success: false, error: 'busy' });
+      surface.resolveNext('agent.file.delete', { path: '/tmp/dir', success: false, error: 'busy' });
       await expect(pending).resolves.toEqual({ path: '/tmp/dir', success: false, error: 'busy' });
     });
 
     it('createDir sends file.create_dir with the path', async () => {
       const pending = plugin.createDir('/tmp/newdir');
       expect(surface.requests[0]).toMatchObject({
-        type: 'file.create_dir',
+        type: 'agent.file.create-dir',
         payload: { path: '/tmp/newdir' },
       });
 
-      surface.resolveNext('file.create_dir', { path: '/tmp/newdir', success: true });
+      surface.resolveNext('agent.file.create-dir', { path: '/tmp/newdir', success: true });
       await expect(pending).resolves.toEqual({ path: '/tmp/newdir', success: true });
     });
 
     it('renameFile sends file.rename with from and to', async () => {
       const pending = plugin.renameFile('/tmp/a.txt', '/tmp/b.txt');
       expect(surface.requests[0]).toMatchObject({
-        type: 'file.rename',
+        type: 'agent.file.rename',
         payload: { from: '/tmp/a.txt', to: '/tmp/b.txt' },
       });
 
-      surface.resolveNext('file.rename', { from: '/tmp/a.txt', to: '/tmp/b.txt', success: true });
+      surface.resolveNext('agent.file.rename', { from: '/tmp/a.txt', to: '/tmp/b.txt', success: true });
       await expect(pending).resolves.toEqual({ from: '/tmp/a.txt', to: '/tmp/b.txt', success: true });
     });
 
     it('getCwd sends file.cwd with the session id', async () => {
       const pending = plugin.getCwd('a1:work');
       expect(surface.requests[0]).toMatchObject({
-        type: 'file.cwd',
+        type: 'agent.file.cwd',
         payload: { session_id: 'a1:work' },
       });
 
-      surface.resolveNext('file.cwd', { path: '/home/agent' });
+      surface.resolveNext('agent.file.cwd', { path: '/home/agent' });
       await expect(pending).resolves.toEqual({ path: '/home/agent' });
     });
 
     it('propagates transport rejections', async () => {
       const pending = plugin.listDir('/');
-      surface.rejectNext('file.list', new Error('Connection lost'));
+      surface.rejectNext('agent.file.list', new Error('Connection lost'));
       await expect(pending).rejects.toThrow('Connection lost');
     });
 
@@ -311,11 +311,11 @@ describe('FilesPlugin', () => {
       const pending = plugin.uploadFile('/remote/data.bin', file);
       await vi.waitFor(() => expect(surface.requests).toHaveLength(1));
       expect(surface.requests[0]).toMatchObject({
-        type: 'file.write',
+        type: 'agent.file.write',
         payload: { path: '/remote/data.bin', content: 'cGF5bG9hZA==' },
       });
 
-      surface.resolveNext('file.write', { path: '/remote/data.bin', written: 7 });
+      surface.resolveNext('agent.file.write', { path: '/remote/data.bin', written: 7 });
       await expect(pending).resolves.toEqual({ path: '/remote/data.bin', written: 7 });
     });
 
@@ -324,7 +324,7 @@ describe('FilesPlugin', () => {
       const pending = plugin.uploadFile('/remote/x.bin', file);
       await vi.waitFor(() => expect(surface.requests).toHaveLength(1));
 
-      surface.rejectNext('file.write', new Error('Connection lost'));
+      surface.rejectNext('agent.file.write', new Error('Connection lost'));
       await expect(pending).rejects.toThrow('Connection lost');
     });
   });
@@ -338,11 +338,11 @@ describe('FilesPlugin', () => {
       const ops = plugin.toFileOps();
       const pending = ops.writeFile('/tmp/a.txt', 'héllo');
       expect(surface.requests[0]).toMatchObject({
-        type: 'file.write',
+        type: 'agent.file.write',
         payload: { path: '/tmp/a.txt', content: base64Encode('héllo') },
       });
 
-      surface.resolveNext('file.write', { path: '/tmp/a.txt', written: 7 });
+      surface.resolveNext('agent.file.write', { path: '/tmp/a.txt', written: 7 });
       await expect(pending).resolves.toEqual({ path: '/tmp/a.txt', written: 7 });
     });
 
@@ -351,39 +351,39 @@ describe('FilesPlugin', () => {
 
       // Settled requests leave the recorded array — every next request is index 0.
       const pendingList = ops.listDir('/');
-      expect(surface.requests[0]).toMatchObject({ type: 'file.list', payload: { path: '/' } });
-      surface.resolveNext('file.list', { entries: [] });
+      expect(surface.requests[0]).toMatchObject({ type: 'agent.file.list', payload: { path: '/' } });
+      surface.resolveNext('agent.file.list', { entries: [] });
       await expect(pendingList).resolves.toEqual({ entries: [] });
 
       const pendingRead = ops.readFile('/a', { offset: 1, limit: 2 });
       expect(surface.requests[0]).toMatchObject({
-        type: 'file.read',
+        type: 'agent.file.read',
         payload: { path: '/a', offset: 1, limit: 2 },
       });
-      surface.resolveNext('file.read', { path: '/a', content: 'YQ==', mime_type: 'text/plain' });
+      surface.resolveNext('agent.file.read', { path: '/a', content: 'YQ==', mime_type: 'text/plain' });
       await expect(pendingRead).resolves.toEqual({ path: '/a', content: 'YQ==', mime_type: 'text/plain' });
 
       const pendingDelete = ops.deleteFile('/a');
       expect(surface.requests[0]).toMatchObject({
-        type: 'file.delete',
+        type: 'agent.file.delete',
         payload: { path: '/a', recursive: false },
       });
-      surface.resolveNext('file.delete', { path: '/a', success: true });
+      surface.resolveNext('agent.file.delete', { path: '/a', success: true });
       await expect(pendingDelete).resolves.toEqual({ path: '/a', success: true });
 
       const pendingMkdir = ops.createDir('/d');
-      expect(surface.requests[0]).toMatchObject({ type: 'file.create_dir', payload: { path: '/d' } });
-      surface.resolveNext('file.create_dir', { path: '/d', success: true });
+      expect(surface.requests[0]).toMatchObject({ type: 'agent.file.create-dir', payload: { path: '/d' } });
+      surface.resolveNext('agent.file.create-dir', { path: '/d', success: true });
       await expect(pendingMkdir).resolves.toEqual({ path: '/d', success: true });
 
       const pendingRename = ops.renameFile('/a', '/b');
-      expect(surface.requests[0]).toMatchObject({ type: 'file.rename', payload: { from: '/a', to: '/b' } });
-      surface.resolveNext('file.rename', { from: '/a', to: '/b', success: true });
+      expect(surface.requests[0]).toMatchObject({ type: 'agent.file.rename', payload: { from: '/a', to: '/b' } });
+      surface.resolveNext('agent.file.rename', { from: '/a', to: '/b', success: true });
       await expect(pendingRename).resolves.toEqual({ from: '/a', to: '/b', success: true });
 
       const pendingCwd = ops.getCwd('sess-1');
-      expect(surface.requests[0]).toMatchObject({ type: 'file.cwd', payload: { session_id: 'sess-1' } });
-      surface.resolveNext('file.cwd', { path: '/cwd' });
+      expect(surface.requests[0]).toMatchObject({ type: 'agent.file.cwd', payload: { session_id: 'sess-1' } });
+      surface.resolveNext('agent.file.cwd', { path: '/cwd' });
       await expect(pendingCwd).resolves.toEqual({ path: '/cwd' });
 
       expect(ops.base64Encode('hello')).toBe('aGVsbG8=');

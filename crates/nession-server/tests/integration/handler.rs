@@ -51,7 +51,7 @@ async fn test_agent_command_response_without_registration() {
 
     // Send command response without registering first
     let msg = make_text_message(
-        "agent.session.command.response",
+        "server.agent.command-response",
         serde_json::json!({
             "request_id": "req-123",
             "command": "session.create",
@@ -72,7 +72,7 @@ async fn test_agent_command_response_missing_request_id() {
 
     // First register as an agent
     let register_msg = make_text_message(
-        "agent.register",
+        "server.agent.register",
         serde_json::json!({
             "agent_id": "test-agent",
             "hostname": "test-host",
@@ -91,7 +91,7 @@ async fn test_agent_command_response_missing_request_id() {
 
     // Send command response without request_id
     let msg = make_text_message(
-        "agent.session.command.response",
+        "server.agent.command-response",
         serde_json::json!({
             "command": "session.create",
             "success": true
@@ -111,7 +111,7 @@ async fn test_agent_command_response_with_valid_request() {
 
     // First register as an agent
     let register_msg = make_text_message(
-        "agent.register",
+        "server.agent.register",
         serde_json::json!({
             "agent_id": "test-agent",
             "hostname": "test-host",
@@ -130,7 +130,7 @@ async fn test_agent_command_response_with_valid_request() {
 
     // Send valid command response
     let msg = make_text_message(
-        "agent.session.command.response",
+        "server.agent.command-response",
         serde_json::json!({
             "request_id": "req-123",
             "command": "session.create",
@@ -165,7 +165,7 @@ async fn test_agent_session_update_unknown_status() {
 
     // First register as an agent
     let register_msg = make_text_message(
-        "agent.register",
+        "server.agent.register",
         serde_json::json!({
             "agent_id": "test-agent",
             "hostname": "test-host",
@@ -184,7 +184,7 @@ async fn test_agent_session_update_unknown_status() {
 
     // Send session update with unknown status
     let msg = make_text_message(
-        "agent.session.update",
+        "server.agent.session-update",
         serde_json::json!({
             "agent_id": "test-agent",
             "session_name": "session1",
@@ -207,7 +207,7 @@ async fn test_client_session_attach_agent_offline() {
 
     // Authenticate as client
     let auth_msg = make_text_message(
-        "client.auth",
+        "server.auth",
         serde_json::json!({
             "auth_token": "test_token"
         }),
@@ -216,7 +216,7 @@ async fn test_client_session_attach_agent_offline() {
 
     // Try to attach to a session on an offline agent
     let msg = make_text_message(
-        "client.session.attach",
+        "server.session.attach",
         serde_json::json!({
             "session_id": "offline-agent:session1",
             "mode": "p2p"
@@ -239,7 +239,7 @@ async fn test_client_session_create_agent_offline() {
 
     // Authenticate as client
     let auth_msg = make_text_message(
-        "client.auth",
+        "server.auth",
         serde_json::json!({
             "auth_token": "test_token"
         }),
@@ -248,7 +248,7 @@ async fn test_client_session_create_agent_offline() {
 
     // Try to create a session on an offline agent
     let msg = make_text_message(
-        "client.session.create",
+        "server.session.create",
         serde_json::json!({
             "agent_id": "offline-agent",
             "name": "new-session"
@@ -271,7 +271,7 @@ async fn test_client_session_kill_agent_offline() {
 
     // Authenticate as client
     let auth_msg = make_text_message(
-        "client.auth",
+        "server.auth",
         serde_json::json!({
             "auth_token": "test_token"
         }),
@@ -280,7 +280,7 @@ async fn test_client_session_kill_agent_offline() {
 
     // Try to kill a session on an offline agent
     let msg = make_text_message(
-        "client.session.kill",
+        "server.session.kill",
         serde_json::json!({
             "session_id": "offline-agent:session1"
         }),

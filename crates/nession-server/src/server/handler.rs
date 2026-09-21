@@ -208,7 +208,7 @@ impl ConnectionHandler {
             info!("Agent {} rejected: invalid auth token", payload.agent_id);
             return Ok(HandlerAction::Reply(Some(Message::Text(
                 json!({
-                    "msg_type": "agent.register.response",
+                    "msg_type": "server.agent.register.response",
                     "id": msg.id,
                     "timestamp": current_timestamp(),
                     "payload": {
@@ -241,7 +241,7 @@ impl ConnectionHandler {
             info!("Agent {} rejected: no protocol manifest", payload.agent_id);
             return Ok(HandlerAction::Reply(Some(Message::Text(
                 json!({
-                    "msg_type": "agent.register.response",
+                    "msg_type": "server.agent.register.response",
                     "id": msg.id,
                     "timestamp": current_timestamp(),
                     "payload": {
@@ -331,7 +331,7 @@ impl ConnectionHandler {
 
         Ok(HandlerAction::Reply(Some(Message::Text(
             json!({
-                "msg_type": "agent.register.response",
+                "msg_type": "server.agent.register.response",
                 "id": msg.id,
                 "timestamp": current_timestamp(),
                 "payload": {
@@ -543,7 +543,7 @@ impl ConnectionHandler {
 
             Ok(HandlerAction::Reply(Some(Message::Text(
                 json!({
-                    "msg_type": "client.auth.response",
+                    "msg_type": "server.auth.response",
                     "id": msg.id,
                     "timestamp": current_timestamp(),
                     "payload": {
@@ -558,7 +558,7 @@ impl ConnectionHandler {
 
             Ok(HandlerAction::Reply(Some(Message::Text(
                 json!({
-                    "msg_type": "client.auth.response",
+                    "msg_type": "server.auth.response",
                     "id": msg.id,
                     "timestamp": current_timestamp(),
                     "payload": {
@@ -580,7 +580,7 @@ impl ConnectionHandler {
             warn!("Unauthenticated client requested agents list");
             return Ok(HandlerAction::Reply(Some(Message::Text(
                 json!({
-                    "msg_type": "client.agents.list.response",
+                    "msg_type": "server.agent.list.response",
                     "id": msg.id,
                     "timestamp": current_timestamp(),
                     "payload": {
@@ -604,7 +604,7 @@ impl ConnectionHandler {
 
         Ok(HandlerAction::Reply(Some(Message::Text(
             json!({
-                "msg_type": "client.agents.list.response",
+                "msg_type": "server.agent.list.response",
                 "id": msg.id,
                 "timestamp": current_timestamp(),
                 "payload": {
@@ -629,7 +629,7 @@ impl ConnectionHandler {
 
         Ok(HandlerAction::Reply(Some(Message::Text(
             json!({
-                "msg_type": "client.server.info.response",
+                "msg_type": "server.info.response",
                 "id": msg.id,
                 "timestamp": current_timestamp(),
                 "payload": {
@@ -660,7 +660,7 @@ impl ConnectionHandler {
         if !self.authenticated_client {
             return Ok(HandlerAction::Reply(Some(Message::Text(
                 json!({
-                    "msg_type": "client.agent.rename.response",
+                    "msg_type": "server.agent.rename.response",
                     "id": msg.id,
                     "timestamp": current_timestamp(),
                     "payload": {
@@ -681,7 +681,7 @@ impl ConnectionHandler {
         if agent_id.is_empty() {
             return Ok(HandlerAction::Reply(Some(Message::Text(
                 json!({
-                    "msg_type": "client.agent.rename.response",
+                    "msg_type": "server.agent.rename.response",
                     "id": msg.id,
                     "timestamp": current_timestamp(),
                     "payload": {
@@ -713,7 +713,7 @@ impl ConnectionHandler {
                 Err(e) => {
                     return Ok(HandlerAction::Reply(Some(Message::Text(
                         json!({
-                            "msg_type": "client.agent.rename.response",
+                            "msg_type": "server.agent.rename.response",
                             "id": msg.id,
                             "timestamp": current_timestamp(),
                             "payload": {
@@ -769,7 +769,7 @@ impl ConnectionHandler {
 
                 Ok(HandlerAction::Reply(Some(Message::Text(
                     json!({
-                        "msg_type": "client.agent.rename.response",
+                        "msg_type": "server.agent.rename.response",
                         "id": msg.id,
                         "timestamp": current_timestamp(),
                         "payload": {
@@ -782,7 +782,7 @@ impl ConnectionHandler {
             }
             None => Ok(HandlerAction::Reply(Some(Message::Text(
                 json!({
-                    "msg_type": "client.agent.rename.response",
+                    "msg_type": "server.agent.rename.response",
                     "id": msg.id,
                     "timestamp": current_timestamp(),
                     "payload": {
@@ -804,7 +804,7 @@ impl ConnectionHandler {
         if !self.authenticated_client {
             return Ok(HandlerAction::Reply(Some(Message::Text(
                 json!({
-                    "msg_type": "client.agent.delete.response",
+                    "msg_type": "server.agent.delete.response",
                     "id": msg.id,
                     "timestamp": current_timestamp(),
                     "payload": {
@@ -825,7 +825,7 @@ impl ConnectionHandler {
         if agent_id.is_empty() {
             return Ok(HandlerAction::Reply(Some(Message::Text(
                 json!({
-                    "msg_type": "client.agent.delete.response",
+                    "msg_type": "server.agent.delete.response",
                     "id": msg.id,
                     "timestamp": current_timestamp(),
                     "payload": {
@@ -843,7 +843,7 @@ impl ConnectionHandler {
             None => {
                 return Ok(HandlerAction::Reply(Some(Message::Text(
                     json!({
-                        "msg_type": "client.agent.delete.response",
+                        "msg_type": "server.agent.delete.response",
                         "id": msg.id,
                         "timestamp": current_timestamp(),
                         "payload": {
@@ -859,7 +859,7 @@ impl ConnectionHandler {
         if agent.status != AgentStatus::Offline {
             return Ok(HandlerAction::Reply(Some(Message::Text(
                 json!({
-                    "msg_type": "client.agent.delete.response",
+                    "msg_type": "server.agent.delete.response",
                     "id": msg.id,
                     "timestamp": current_timestamp(),
                     "payload": {
@@ -886,7 +886,7 @@ impl ConnectionHandler {
             tracing::error!("Failed to delete sessions for agent {}: {:?}", agent_id, e);
             return Ok(HandlerAction::Reply(Some(Message::Text(
                 json!({
-                    "msg_type": "client.agent.delete.response",
+                    "msg_type": "server.agent.delete.response",
                     "id": msg.id,
                     "timestamp": current_timestamp(),
                     "payload": {
@@ -902,7 +902,7 @@ impl ConnectionHandler {
             tracing::error!("Failed to delete agent {}: {:?}", agent_id, e);
             return Ok(HandlerAction::Reply(Some(Message::Text(
                 json!({
-                    "msg_type": "client.agent.delete.response",
+                    "msg_type": "server.agent.delete.response",
                     "id": msg.id,
                     "timestamp": current_timestamp(),
                     "payload": {
@@ -927,7 +927,7 @@ impl ConnectionHandler {
 
         Ok(HandlerAction::Reply(Some(Message::Text(
             json!({
-                "msg_type": "client.agent.delete.response",
+                "msg_type": "server.agent.delete.response",
                 "id": msg.id,
                 "timestamp": current_timestamp(),
                 "payload": {
@@ -953,7 +953,7 @@ impl ConnectionHandler {
             warn!("Unauthenticated client requested sessions list");
             return Ok(HandlerAction::Reply(Some(Message::Text(
                 json!({
-                    "msg_type": "client.sessions.list.response",
+                    "msg_type": "server.session.list.response",
                     "id": msg.id,
                     "timestamp": current_timestamp(),
                     "payload": {
@@ -999,7 +999,7 @@ impl ConnectionHandler {
 
         Ok(HandlerAction::Reply(Some(Message::Text(
             json!({
-                "msg_type": "client.sessions.list.response",
+                "msg_type": "server.session.list.response",
                 "id": msg.id,
                 "timestamp": current_timestamp(),
                 "payload": {
@@ -1041,7 +1041,7 @@ impl ConnectionHandler {
             let outcome = self
                 .agent_command_with_timeout(
                     agent_id,
-                    "server.sessions.list",
+                    "agent.session.report",
                     json!({}),
                     SESSION_REFRESH_TIMEOUT,
                 )
@@ -1090,7 +1090,7 @@ impl ConnectionHandler {
         if !self.authenticated_client {
             return Ok(HandlerAction::Reply(Some(Message::Text(
                 json!({
-                    "msg_type": "client.session.attach.response",
+                    "msg_type": "server.session.attach.response",
                     "id": msg.id,
                     "timestamp": current_timestamp(),
                     "payload": {
@@ -1119,7 +1119,7 @@ impl ConnectionHandler {
             None => {
                 return Ok(HandlerAction::Reply(Some(Message::Text(
                     json!({
-                        "msg_type": "client.session.attach.response",
+                        "msg_type": "server.session.attach.response",
                         "id": msg.id,
                         "timestamp": current_timestamp(),
                         "payload": {
@@ -1137,7 +1137,7 @@ impl ConnectionHandler {
         if session.is_none() {
             return Ok(HandlerAction::Reply(Some(Message::Text(
                 json!({
-                    "msg_type": "client.session.attach.response",
+                    "msg_type": "server.session.attach.response",
                     "id": msg.id,
                     "timestamp": current_timestamp(),
                     "payload": {
@@ -1156,7 +1156,7 @@ impl ConnectionHandler {
             Some(_) => {
                 return Ok(HandlerAction::Reply(Some(Message::Text(
                     json!({
-                        "msg_type": "client.session.attach.response",
+                        "msg_type": "server.session.attach.response",
                         "id": msg.id,
                         "timestamp": current_timestamp(),
                         "payload": {
@@ -1170,7 +1170,7 @@ impl ConnectionHandler {
             None => {
                 return Ok(HandlerAction::Reply(Some(Message::Text(
                     json!({
-                        "msg_type": "client.session.attach.response",
+                        "msg_type": "server.session.attach.response",
                         "id": msg.id,
                         "timestamp": current_timestamp(),
                         "payload": {
@@ -1287,7 +1287,7 @@ impl ConnectionHandler {
             if let Some(ref sender) = self.client_sender {
                 let response = Message::Text(
                     serde_json::json!({
-                        "msg_type": "client.session.attach.response",
+                        "msg_type": "server.session.attach.response",
                         "id": msg.id,
                         "timestamp": current_timestamp(),
                         "payload": {
@@ -1320,7 +1320,7 @@ impl ConnectionHandler {
             // client tests latency across `addresses` and falls back per-address.
             Ok(HandlerAction::Reply(Some(Message::Text(
                 json!({
-                    "msg_type": "client.session.attach.response",
+                    "msg_type": "server.session.attach.response",
                     "id": msg.id,
                     "timestamp": current_timestamp(),
                     "payload": {
@@ -1354,7 +1354,7 @@ impl ConnectionHandler {
         if !self.authenticated_client {
             return Ok(HandlerAction::Reply(Some(Message::Text(
                 json!({
-                    "msg_type": "client.session.relay.begin.response",
+                    "msg_type": "server.session.relay.begin.response",
                     "id": msg.id,
                     "timestamp": current_timestamp(),
                     "payload": { "status": "error", "message": "Not authenticated" }
@@ -1373,7 +1373,7 @@ impl ConnectionHandler {
             None => {
                 return Ok(HandlerAction::Reply(Some(Message::Text(
                     json!({
-                        "msg_type": "client.session.relay.begin.response",
+                        "msg_type": "server.session.relay.begin.response",
                         "id": msg.id,
                         "timestamp": current_timestamp(),
                         "payload": { "status": "error", "message": "Invalid session_id format" }
@@ -1387,7 +1387,7 @@ impl ConnectionHandler {
         if session.is_none() {
             return Ok(HandlerAction::Reply(Some(Message::Text(
                 json!({
-                    "msg_type": "client.session.relay.begin.response",
+                    "msg_type": "server.session.relay.begin.response",
                     "id": msg.id, "timestamp": current_timestamp(),
                     "payload": { "status": "error", "message": format!("Session not found: {session_id}") }
                 }).to_string(),
@@ -1400,7 +1400,7 @@ impl ConnectionHandler {
             _ => {
                 return Ok(HandlerAction::Reply(Some(Message::Text(
                     json!({
-                        "msg_type": "client.session.relay.begin.response",
+                        "msg_type": "server.session.relay.begin.response",
                         "id": msg.id, "timestamp": current_timestamp(),
                         "payload": { "status": "error", "message": format!("Agent '{agent_id}' is offline") }
                     }).to_string(),
@@ -1503,7 +1503,7 @@ impl ConnectionHandler {
         if !self.authenticated_client {
             return Ok(HandlerAction::Reply(Some(Message::Text(
                 json!({
-                    "msg_type": "client.session.create.response",
+                    "msg_type": "server.session.create.response",
                     "id": msg.id,
                     "timestamp": current_timestamp(),
                     "payload": {
@@ -1529,7 +1529,7 @@ impl ConnectionHandler {
         if agent_id.is_empty() || name.is_empty() {
             return Ok(HandlerAction::Reply(Some(Message::Text(
                 json!({
-                    "msg_type": "client.session.create.response",
+                    "msg_type": "server.session.create.response",
                     "id": msg.id,
                     "timestamp": current_timestamp(),
                     "payload": {
@@ -1548,7 +1548,7 @@ impl ConnectionHandler {
             Some(_) => {
                 return Ok(HandlerAction::Reply(Some(Message::Text(
                     json!({
-                        "msg_type": "client.session.create.response",
+                        "msg_type": "server.session.create.response",
                         "id": msg.id,
                         "timestamp": current_timestamp(),
                         "payload": {
@@ -1562,7 +1562,7 @@ impl ConnectionHandler {
             None => {
                 return Ok(HandlerAction::Reply(Some(Message::Text(
                     json!({
-                        "msg_type": "client.session.create.response",
+                        "msg_type": "server.session.create.response",
                         "id": msg.id,
                         "timestamp": current_timestamp(),
                         "payload": {
@@ -1592,7 +1592,7 @@ impl ConnectionHandler {
                 Err(e) => {
                     return Ok(HandlerAction::Reply(Some(Message::Text(
                         json!({
-                            "msg_type": "client.session.create.response",
+                            "msg_type": "server.session.create.response",
                             "id": msg.id,
                             "timestamp": current_timestamp(),
                             "payload": { "success": false, "error": e }
@@ -1614,7 +1614,7 @@ impl ConnectionHandler {
             .command_broker
             .send_command(
                 agent_id,
-                "server.session.create",
+                "agent.session.create",
                 &request_id,
                 json!({
                     "request_id": request_id,
@@ -1670,7 +1670,7 @@ impl ConnectionHandler {
 
                 Ok(HandlerAction::Reply(Some(Message::Text(
                     json!({
-                        "msg_type": "client.session.create.response",
+                        "msg_type": "server.session.create.response",
                         "id": msg.id,
                         "timestamp": current_timestamp(),
                         "payload": {
@@ -1684,7 +1684,7 @@ impl ConnectionHandler {
             }
             Ok(Err(_)) => Ok(HandlerAction::Reply(Some(Message::Text(
                 json!({
-                    "msg_type": "client.session.create.response",
+                    "msg_type": "server.session.create.response",
                     "id": msg.id,
                     "timestamp": current_timestamp(),
                     "payload": {
@@ -1696,7 +1696,7 @@ impl ConnectionHandler {
             )))),
             Err(_) => Ok(HandlerAction::Reply(Some(Message::Text(
                 json!({
-                    "msg_type": "client.session.create.response",
+                    "msg_type": "server.session.create.response",
                     "id": msg.id,
                     "timestamp": current_timestamp(),
                     "payload": {
@@ -1717,7 +1717,7 @@ impl ConnectionHandler {
         if !self.authenticated_client {
             return Ok(HandlerAction::Reply(Some(Message::Text(
                 json!({
-                    "msg_type": "client.session.kill.response",
+                    "msg_type": "server.session.kill.response",
                     "id": msg.id,
                     "timestamp": current_timestamp(),
                     "payload": {
@@ -1740,7 +1740,7 @@ impl ConnectionHandler {
             None => {
                 return Ok(HandlerAction::Reply(Some(Message::Text(
                     json!({
-                        "msg_type": "client.session.kill.response",
+                        "msg_type": "server.session.kill.response",
                         "id": msg.id,
                         "timestamp": current_timestamp(),
                         "payload": {
@@ -1762,7 +1762,7 @@ impl ConnectionHandler {
                     self.session_registry.remove(session_id).await;
                     return Ok(HandlerAction::Reply(Some(Message::Text(
                         json!({
-                            "msg_type": "client.session.kill.response",
+                            "msg_type": "server.session.kill.response",
                             "id": msg.id,
                             "timestamp": current_timestamp(),
                             "payload": {
@@ -1775,7 +1775,7 @@ impl ConnectionHandler {
                 Some(_) => {
                     return Ok(HandlerAction::Reply(Some(Message::Text(
                         json!({
-                            "msg_type": "client.session.kill.response",
+                            "msg_type": "server.session.kill.response",
                             "id": msg.id,
                             "timestamp": current_timestamp(),
                             "payload": {
@@ -1789,7 +1789,7 @@ impl ConnectionHandler {
                 None => {
                     return Ok(HandlerAction::Reply(Some(Message::Text(
                         json!({
-                            "msg_type": "client.session.kill.response",
+                            "msg_type": "server.session.kill.response",
                             "id": msg.id,
                             "timestamp": current_timestamp(),
                             "payload": {
@@ -1814,7 +1814,7 @@ impl ConnectionHandler {
             .command_broker
             .send_command(
                 &agent_id,
-                "server.session.kill",
+                "agent.session.kill",
                 &request_id,
                 json!({
                     "request_id": request_id,
@@ -1846,7 +1846,7 @@ impl ConnectionHandler {
 
                 Ok(HandlerAction::Reply(Some(Message::Text(
                     json!({
-                        "msg_type": "client.session.kill.response",
+                        "msg_type": "server.session.kill.response",
                         "id": msg.id,
                         "timestamp": current_timestamp(),
                         "payload": {
@@ -1859,7 +1859,7 @@ impl ConnectionHandler {
             }
             Ok(Err(_)) => Ok(HandlerAction::Reply(Some(Message::Text(
                 json!({
-                    "msg_type": "client.session.kill.response",
+                    "msg_type": "server.session.kill.response",
                     "id": msg.id,
                     "timestamp": current_timestamp(),
                     "payload": {
@@ -1871,7 +1871,7 @@ impl ConnectionHandler {
             )))),
             Err(_) => Ok(HandlerAction::Reply(Some(Message::Text(
                 json!({
-                    "msg_type": "client.session.kill.response",
+                    "msg_type": "server.session.kill.response",
                     "id": msg.id,
                     "timestamp": current_timestamp(),
                     "payload": {
@@ -2248,7 +2248,7 @@ impl ConnectionHandler {
             warn!("handle_client_session_capture_preview: client not authenticated");
             return Ok(reply_json(
                 &msg.id,
-                "client.session.capture_preview.response",
+                "server.session.capture-preview.response",
                 json!({ "error": "Not authenticated" }),
             ));
         }
@@ -2280,7 +2280,7 @@ impl ConnectionHandler {
                 );
                 return Ok(reply_json(
                     &msg.id,
-                    "client.session.capture_preview.response",
+                    "server.session.capture-preview.response",
                     json!({ "error": "Invalid session_id format. Expected 'agent_id:session_name'" }),
                 ));
             }
@@ -2301,7 +2301,7 @@ impl ConnectionHandler {
                 );
                 return Ok(reply_json(
                     &msg.id,
-                    "client.session.capture_preview.response",
+                    "server.session.capture-preview.response",
                     json!({ "error": format!("Agent '{}' is offline", agent_id) }),
                 ));
             }
@@ -2312,7 +2312,7 @@ impl ConnectionHandler {
                 );
                 return Ok(reply_json(
                     &msg.id,
-                    "client.session.capture_preview.response",
+                    "server.session.capture-preview.response",
                     json!({ "error": format!("Agent '{}' not found", agent_id) }),
                 ));
             }
@@ -2333,7 +2333,7 @@ impl ConnectionHandler {
         match self
             .agent_command_with_timeout(
                 &agent_id,
-                "session.capture_preview",
+                "agent.session.capture-preview",
                 payload,
                 Duration::from_secs(15),
             )
@@ -2346,7 +2346,7 @@ impl ConnectionHandler {
                 );
                 Ok(reply_json(
                     &msg.id,
-                    "client.session.capture_preview.response",
+                    "server.session.capture-preview.response",
                     response,
                 ))
             }
@@ -2354,7 +2354,7 @@ impl ConnectionHandler {
                 warn!("handle_client_session_capture_preview: agent_command_with_timeout failed for agent {}: {}", agent_id, e);
                 Ok(reply_json(
                     &msg.id,
-                    "client.session.capture_preview.response",
+                    "server.session.capture-preview.response",
                     json!({ "error": e }),
                 ))
             }
@@ -2435,7 +2435,7 @@ impl ConnectionHandler {
         if !self.authenticated_client {
             return Ok(reply_json(
                 &msg.id,
-                "client.env.list.response",
+                "server.env.list.response",
                 json!({ "files": [], "error": "Not authenticated" }),
             ));
         }
@@ -2448,7 +2448,7 @@ impl ConnectionHandler {
                 continue;
             }
             match self
-                .agent_command(&agent.agent_id, "server.env.list", json!({}))
+                .agent_command(&agent.agent_id, "agent.env.list", json!({}))
                 .await
             {
                 Ok(resp) => {
@@ -2469,7 +2469,7 @@ impl ConnectionHandler {
 
         Ok(reply_json(
             &msg.id,
-            "client.env.list.response",
+            "server.env.list.response",
             json!({ "files": files }),
         ))
     }
@@ -2483,7 +2483,7 @@ impl ConnectionHandler {
         if !self.authenticated_client {
             return Ok(reply_json(
                 &msg.id,
-                "client.env.get.response",
+                "server.env.get.response",
                 json!({ "success": false, "error": "Not authenticated" }),
             ));
         }
@@ -2491,7 +2491,7 @@ impl ConnectionHandler {
         if name.is_empty() {
             return Ok(reply_json(
                 &msg.id,
-                "client.env.get.response",
+                "server.env.get.response",
                 json!({ "success": false, "error": "name is required" }),
             ));
         }
@@ -2510,7 +2510,7 @@ impl ConnectionHandler {
                 .map_err(|e| e.to_string()),
             EnvSource::Agent => match &agent_id {
                 Some(aid) => self
-                    .agent_command(aid, "server.env.get", json!({ "name": name }))
+                    .agent_command(aid, "agent.env.get", json!({ "name": name }))
                     .await
                     .and_then(|resp| {
                         if resp.get("success").and_then(serde_json::Value::as_bool) == Some(true) {
@@ -2534,12 +2534,12 @@ impl ConnectionHandler {
         match result {
             Ok(content) => Ok(reply_json(
                 &msg.id,
-                "client.env.get.response",
+                "server.env.get.response",
                 json!({ "success": true, "content": content, "in_use_by": in_use_by }),
             )),
             Err(e) => Ok(reply_json(
                 &msg.id,
-                "client.env.get.response",
+                "server.env.get.response",
                 json!({ "success": false, "error": e, "in_use_by": in_use_by }),
             )),
         }
@@ -2554,7 +2554,7 @@ impl ConnectionHandler {
         if !self.authenticated_client {
             return Ok(reply_json(
                 &msg.id,
-                "client.env.write.response",
+                "server.env.write.response",
                 json!({ "success": false, "error": "Not authenticated" }),
             ));
         }
@@ -2579,7 +2579,7 @@ impl ConnectionHandler {
         if name.is_empty() {
             return Ok(reply_json(
                 &msg.id,
-                "client.env.write.response",
+                "server.env.write.response",
                 json!({ "success": false, "error": "name is required" }),
             ));
         }
@@ -2595,7 +2595,7 @@ impl ConnectionHandler {
             if !in_use.is_empty() {
                 return Ok(reply_json(
                     &msg.id,
-                    "client.env.write.response",
+                    "server.env.write.response",
                     json!({
                         "success": false,
                         "error": format!(
@@ -2621,7 +2621,7 @@ impl ConnectionHandler {
                 Some(aid) => self
                     .agent_command(
                         aid,
-                        "server.env.write",
+                        "agent.env.write",
                         json!({ "name": name, "content": content, "overwrite": overwrite }),
                     )
                     .await
@@ -2683,7 +2683,7 @@ impl ConnectionHandler {
 
                 Ok(reply_json(
                     &msg.id,
-                    "client.env.write.response",
+                    "server.env.write.response",
                     json!({
                         "success": true,
                         "warnings": warnings,
@@ -2694,12 +2694,12 @@ impl ConnectionHandler {
             }
             Ok(false) => Ok(reply_json(
                 &msg.id,
-                "client.env.write.response",
+                "server.env.write.response",
                 json!({ "success": false, "exists": true }),
             )),
             Err(e) => Ok(reply_json(
                 &msg.id,
-                "client.env.write.response",
+                "server.env.write.response",
                 json!({ "success": false, "error": e }),
             )),
         }
@@ -2713,7 +2713,7 @@ impl ConnectionHandler {
         if !self.authenticated_client {
             return Ok(reply_json(
                 &msg.id,
-                "client.env.delete.response",
+                "server.env.delete.response",
                 json!({ "success": false, "error": "Not authenticated" }),
             ));
         }
@@ -2726,7 +2726,7 @@ impl ConnectionHandler {
         if name.is_empty() {
             return Ok(reply_json(
                 &msg.id,
-                "client.env.delete.response",
+                "server.env.delete.response",
                 json!({ "success": false, "error": "name is required" }),
             ));
         }
@@ -2741,7 +2741,7 @@ impl ConnectionHandler {
             if !in_use.is_empty() {
                 return Ok(reply_json(
                     &msg.id,
-                    "client.env.delete.response",
+                    "server.env.delete.response",
                     json!({
                         "success": false,
                         "error": format!(
@@ -2762,7 +2762,7 @@ impl ConnectionHandler {
                 .map_err(|e| e.to_string()),
             EnvSource::Agent => match &agent_id {
                 Some(aid) => self
-                    .agent_command(aid, "server.env.delete", json!({ "name": name }))
+                    .agent_command(aid, "agent.env.delete", json!({ "name": name }))
                     .await
                     .and_then(|resp| {
                         if resp.get("success").and_then(serde_json::Value::as_bool) == Some(true) {
@@ -2782,12 +2782,12 @@ impl ConnectionHandler {
         match outcome {
             Ok(()) => Ok(reply_json(
                 &msg.id,
-                "client.env.delete.response",
+                "server.env.delete.response",
                 json!({ "success": true }),
             )),
             Err(e) => Ok(reply_json(
                 &msg.id,
-                "client.env.delete.response",
+                "server.env.delete.response",
                 json!({ "success": false, "error": e }),
             )),
         }
@@ -2812,7 +2812,7 @@ impl ConnectionHandler {
                     // normally the same agent hosting the session).
                     let owner = r.agent_id.as_deref().unwrap_or(agent_id);
                     let resp = self
-                        .agent_command(owner, "server.env.get", json!({ "name": r.name }))
+                        .agent_command(owner, "agent.env.get", json!({ "name": r.name }))
                         .await?;
                     if resp.get("success").and_then(serde_json::Value::as_bool) != Some(true) {
                         return Err(format!(
@@ -2846,7 +2846,7 @@ impl ConnectionHandler {
         if !self.authenticated_client {
             return Ok(reply_json(
                 &msg.id,
-                "client.session.env.apply.response",
+                "server.session.env.apply.response",
                 json!({ "success": false, "error": "Not authenticated" }),
             ));
         }
@@ -2865,7 +2865,7 @@ impl ConnectionHandler {
         let Some((agent_id, session_name)) = session_id.split_once(':') else {
             return Ok(reply_json(
                 &msg.id,
-                "client.session.env.apply.response",
+                "server.session.env.apply.response",
                 json!({ "success": false, "error": "Invalid session_id" }),
             ));
         };
@@ -2877,7 +2877,7 @@ impl ConnectionHandler {
             Err(e) => {
                 return Ok(reply_json(
                     &msg.id,
-                    "client.session.env.apply.response",
+                    "server.session.env.apply.response",
                     json!({ "success": false, "error": e }),
                 ));
             }
@@ -2888,7 +2888,7 @@ impl ConnectionHandler {
         let resp = self
             .agent_command(
                 &agent_id,
-                "server.session.env.apply",
+                "agent.session.env.apply",
                 json!({ "name": session_name, "snapshots": snapshots }),
             )
             .await;
@@ -2900,13 +2900,13 @@ impl ConnectionHandler {
                     .record_attach(&session_id, &refs, None);
                 Ok(reply_json(
                     &msg.id,
-                    "client.session.env.apply.response",
+                    "server.session.env.apply.response",
                     json!({ "success": true, "warnings": warnings }),
                 ))
             }
             Ok(r) => Ok(reply_json(
                 &msg.id,
-                "client.session.env.apply.response",
+                "server.session.env.apply.response",
                 json!({
                     "success": false,
                     "error": r.get("error").and_then(|v| v.as_str()).unwrap_or("apply failed")
@@ -2914,7 +2914,7 @@ impl ConnectionHandler {
             )),
             Err(e) => Ok(reply_json(
                 &msg.id,
-                "client.session.env.apply.response",
+                "server.session.env.apply.response",
                 json!({ "success": false, "error": e }),
             )),
         }
@@ -2929,7 +2929,7 @@ impl ConnectionHandler {
         if !self.authenticated_client {
             return Ok(reply_json(
                 &msg.id,
-                "client.session.env.unset.response",
+                "server.session.env.unset.response",
                 json!({ "success": false, "error": "Not authenticated" }),
             ));
         }
@@ -2948,7 +2948,7 @@ impl ConnectionHandler {
         let Some((agent_id, session_name)) = session_id.split_once(':') else {
             return Ok(reply_json(
                 &msg.id,
-                "client.session.env.unset.response",
+                "server.session.env.unset.response",
                 json!({ "success": false, "error": "Invalid session_id" }),
             ));
         };
@@ -2969,7 +2969,7 @@ impl ConnectionHandler {
         let resp = self
             .agent_command(
                 &agent_id,
-                "server.session.env.unset",
+                "agent.session.env.unset",
                 json!({ "name": session_name, "keys": keys }),
             )
             .await;
@@ -2984,13 +2984,13 @@ impl ConnectionHandler {
             Ok(r) if r.get("success").and_then(serde_json::Value::as_bool) == Some(true) => {
                 Ok(reply_json(
                     &msg.id,
-                    "client.session.env.unset.response",
+                    "server.session.env.unset.response",
                     json!({ "success": true }),
                 ))
             }
             Ok(r) => Ok(reply_json(
                 &msg.id,
-                "client.session.env.unset.response",
+                "server.session.env.unset.response",
                 json!({
                     "success": false,
                     "error": r.get("error").and_then(|v| v.as_str()).unwrap_or("unset failed")
@@ -2998,7 +2998,7 @@ impl ConnectionHandler {
             )),
             Err(e) => Ok(reply_json(
                 &msg.id,
-                "client.session.env.unset.response",
+                "server.session.env.unset.response",
                 json!({ "success": false, "error": e }),
             )),
         }
@@ -3012,7 +3012,7 @@ impl ConnectionHandler {
         if !self.authenticated_client {
             return Ok(reply_json(
                 &msg.id,
-                "client.session.env.active.response",
+                "server.session.env.active.response",
                 json!({ "active": [], "error": "Not authenticated" }),
             ));
         }
@@ -3024,7 +3024,7 @@ impl ConnectionHandler {
         let active = self.env_service.usage.active_for(session_id);
         Ok(reply_json(
             &msg.id,
-            "client.session.env.active.response",
+            "server.session.env.active.response",
             json!({ "active": active }),
         ))
     }
@@ -3038,7 +3038,7 @@ impl ConnectionHandler {
         if !self.authenticated_client {
             return Ok(reply_json(
                 &msg.id,
-                "client.session.env.query.response",
+                "server.session.env.query.response",
                 json!({ "sourced_files": [], "error": "Not authenticated" }),
             ));
         }
@@ -3050,12 +3050,12 @@ impl ConnectionHandler {
         let Some((agent_id, _session_name)) = session_id.split_once(':') else {
             return Ok(reply_json(
                 &msg.id,
-                "client.session.env.query.response",
+                "server.session.env.query.response",
                 json!({ "sourced_files": [], "error": "Invalid session_id" }),
             ));
         };
         let resp = self
-            .agent_command(agent_id, "server.env.query", json!({}))
+            .agent_command(agent_id, "agent.env.query", json!({}))
             .await;
         match resp {
             Ok(r) => {
@@ -3070,13 +3070,13 @@ impl ConnectionHandler {
                     .unwrap_or_default();
                 Ok(reply_json(
                     &msg.id,
-                    "client.session.env.query.response",
+                    "server.session.env.query.response",
                     json!({ "sourced_files": sourced }),
                 ))
             }
             Err(e) => Ok(reply_json(
                 &msg.id,
-                "client.session.env.query.response",
+                "server.session.env.query.response",
                 json!({ "sourced_files": [], "error": e }),
             )),
         }
@@ -3091,7 +3091,7 @@ impl ConnectionHandler {
         if !self.authenticated_client {
             return Ok(reply_json(
                 &msg.id,
-                "client.commands.list.response",
+                "server.commands.list.response",
                 json!({ "commands": [], "error": "Not authenticated" }),
             ));
         }
@@ -3111,7 +3111,7 @@ impl ConnectionHandler {
             .collect();
         Ok(reply_json(
             &msg.id,
-            "client.commands.list.response",
+            "server.commands.list.response",
             json!({ "commands": items }),
         ))
     }
@@ -3123,7 +3123,7 @@ impl ConnectionHandler {
         if !self.authenticated_client {
             return Ok(reply_json(
                 &msg.id,
-                "client.commands.add.response",
+                "server.commands.add.response",
                 json!({ "success": false, "error": "Not authenticated" }),
             ));
         }
@@ -3146,7 +3146,7 @@ impl ConnectionHandler {
         if label.is_empty() || command.is_empty() {
             return Ok(reply_json(
                 &msg.id,
-                "client.commands.add.response",
+                "server.commands.add.response",
                 json!({ "success": false, "error": "Label and command are required" }),
             ));
         }
@@ -3164,14 +3164,14 @@ impl ConnectionHandler {
         if let Err(e) = self.db.upsert_quick_command(&row).await {
             return Ok(reply_json(
                 &msg.id,
-                "client.commands.add.response",
+                "server.commands.add.response",
                 json!({ "success": false, "error": e.to_string() }),
             ));
         }
         self.web_client_registry.broadcast_commands_changed().await;
         Ok(reply_json(
             &msg.id,
-            "client.commands.add.response",
+            "server.commands.add.response",
             json!({ "success": true, "id": id }),
         ))
     }
@@ -3183,7 +3183,7 @@ impl ConnectionHandler {
         if !self.authenticated_client {
             return Ok(reply_json(
                 &msg.id,
-                "client.commands.remove.response",
+                "server.commands.remove.response",
                 json!({ "success": false, "error": "Not authenticated" }),
             ));
         }
@@ -3196,21 +3196,21 @@ impl ConnectionHandler {
         if id.is_empty() {
             return Ok(reply_json(
                 &msg.id,
-                "client.commands.remove.response",
+                "server.commands.remove.response",
                 json!({ "success": false, "error": "id is required" }),
             ));
         }
         if let Err(e) = self.db.delete_quick_command(&id).await {
             return Ok(reply_json(
                 &msg.id,
-                "client.commands.remove.response",
+                "server.commands.remove.response",
                 json!({ "success": false, "error": e.to_string() }),
             ));
         }
         self.web_client_registry.broadcast_commands_changed().await;
         Ok(reply_json(
             &msg.id,
-            "client.commands.remove.response",
+            "server.commands.remove.response",
             json!({ "success": true }),
         ))
     }
@@ -3222,7 +3222,7 @@ impl ConnectionHandler {
         if !self.authenticated_client {
             return Ok(reply_json(
                 &msg.id,
-                "client.commands.update.response",
+                "server.commands.update.response",
                 json!({ "success": false, "error": "Not authenticated" }),
             ));
         }
@@ -3235,7 +3235,7 @@ impl ConnectionHandler {
         if id.is_empty() {
             return Ok(reply_json(
                 &msg.id,
-                "client.commands.update.response",
+                "server.commands.update.response",
                 json!({ "success": false, "error": "id is required" }),
             ));
         }
@@ -3248,18 +3248,18 @@ impl ConnectionHandler {
                 self.web_client_registry.broadcast_commands_changed().await;
                 Ok(reply_json(
                     &msg.id,
-                    "client.commands.update.response",
+                    "server.commands.update.response",
                     json!({ "success": true }),
                 ))
             }
             Ok(false) => Ok(reply_json(
                 &msg.id,
-                "client.commands.update.response",
+                "server.commands.update.response",
                 json!({ "success": false, "error": "Command not found" }),
             )),
             Err(e) => Ok(reply_json(
                 &msg.id,
-                "client.commands.update.response",
+                "server.commands.update.response",
                 json!({ "success": false, "error": e.to_string() }),
             )),
         }
@@ -3757,7 +3757,7 @@ mod tests {
     async fn listed_protocols(h: &mut ConnectionHandler) -> serde_json::Value {
         h.authenticated_client = true;
         let action = h
-            .handle_message(proto_msg("client.agents.list", json!({})))
+            .handle_message(proto_msg("server.agent.list", json!({})))
             .await
             .unwrap();
         parse_reply(action)["payload"]["agents"][0]["protocols"].clone()
@@ -3772,7 +3772,7 @@ mod tests {
         h.authenticated_client = true;
 
         let action = h
-            .handle_message(proto_msg("client.server.info", json!({})))
+            .handle_message(proto_msg("server.info", json!({})))
             .await
             .unwrap();
         let reply = parse_reply(action);
@@ -3782,8 +3782,8 @@ mod tests {
         // Named units, not a count: the manifest answers "may I send this peer
         // this message?", so the assertion should be about a message. These two
         // are the ones Phase 6 named and that had no declaration anywhere.
-        assert!(manifest["protocols"]["session.attach"].is_object());
-        assert!(manifest["protocols"]["agent.register"].is_object());
+        assert!(manifest["protocols"]["server.session.attach"].is_object());
+        assert!(manifest["protocols"]["server.agent.register"].is_object());
         // And a unit this server does not serve stays absent — the manifest
         // exists to refuse, so claiming an offer that does not exist would be
         // the one failure it cannot make.
@@ -3938,7 +3938,7 @@ mod tests {
         let mut h = test_handler("").await;
         let action = h
             .handle_message(proto_msg(
-                "agent.register",
+                "server.agent.register",
                 json!({
                     "agent_id": "a1",
                     "hostname": "host",
@@ -3963,7 +3963,7 @@ mod tests {
         let mut h = test_handler("secret").await;
         let action = h
             .handle_message(proto_msg(
-                "agent.register",
+                "server.agent.register",
                 json!({
                     "agent_id": "a1",
                     "hostname": "host",
@@ -3995,7 +3995,7 @@ mod tests {
         let mut h = test_handler("").await;
         let action = h
             .handle_message(proto_msg(
-                "agent.register",
+                "server.agent.register",
                 json!({
                     "agent_id": "old-agent",
                     "hostname": "host",
@@ -4030,7 +4030,7 @@ mod tests {
         let mut h = test_handler("secret").await;
         let action = h
             .handle_message(proto_msg(
-                "agent.register",
+                "server.agent.register",
                 json!({
                     "agent_id": "a1",
                     "hostname": "host",
@@ -4058,7 +4058,7 @@ mod tests {
         let mut h = test_handler("").await;
         let action = h
             .handle_message(proto_msg(
-                "agent.register",
+                "server.agent.register",
                 json!({
                     "agent_id": "a1",
                     "hostname": "host",
@@ -4088,7 +4088,7 @@ mod tests {
         let mut h = test_handler("").await;
         // Register first
         h.handle_message(proto_msg(
-            "agent.register",
+            "server.agent.register",
             json!({
                 "agent_id": "a1",
                 "hostname": "host",
@@ -4106,7 +4106,7 @@ mod tests {
 
         let action = h
             .handle_message(proto_msg(
-                "agent.heartbeat",
+                "server.agent.heartbeat",
                 json!({
                     "agent_id": "a1",
                     "session_count": 3,
@@ -4125,7 +4125,7 @@ mod tests {
         let mut h = test_handler("").await;
         let action = h
             .handle_message(proto_msg(
-                "agent.heartbeat",
+                "server.agent.heartbeat",
                 json!({
                     "agent_id": "unknown",
                     "session_count": 0,
@@ -4142,7 +4142,7 @@ mod tests {
         let mut h = test_handler("").await;
         // Register
         h.handle_message(proto_msg(
-            "agent.register",
+            "server.agent.register",
             json!({
                 "agent_id": "a1",
                 "hostname": "host",
@@ -4159,7 +4159,10 @@ mod tests {
         .unwrap();
         // Heartbeat with no session_count / active_sessions
         let action = h
-            .handle_message(proto_msg("agent.heartbeat", json!({ "agent_id": "a1" })))
+            .handle_message(proto_msg(
+                "server.agent.heartbeat",
+                json!({ "agent_id": "a1" }),
+            ))
             .await
             .unwrap();
         let reply = parse_reply(action);
@@ -4173,7 +4176,7 @@ mod tests {
         let mut h = test_handler("").await;
         // Register agent
         h.handle_message(proto_msg(
-            "agent.register",
+            "server.agent.register",
             json!({
                 "agent_id": "a1",
                 "hostname": "host",
@@ -4191,7 +4194,7 @@ mod tests {
 
         let action = h
             .handle_message(proto_msg(
-                "agent.session.update",
+                "server.agent.session-update",
                 json!({
                     "agent_id": "a1",
                     "session_name": "dev",
@@ -4209,7 +4212,7 @@ mod tests {
     async fn session_update_all_statuses() {
         let mut h = test_handler("").await;
         h.handle_message(proto_msg(
-            "agent.register",
+            "server.agent.register",
             json!({
                 "agent_id": "a1",
                 "hostname": "host",
@@ -4228,7 +4231,7 @@ mod tests {
         for status in &["active", "detached", "recovering", "orphaned", "zombie"] {
             let action = h
                 .handle_message(proto_msg(
-                    "agent.session.update",
+                    "server.agent.session-update",
                     json!({
                         "agent_id": "a1",
                         "session_name": format!("s_{status}"),
@@ -4247,7 +4250,7 @@ mod tests {
     async fn session_update_unknown_status_returns_none() {
         let mut h = test_handler("").await;
         h.handle_message(proto_msg(
-            "agent.register",
+            "server.agent.register",
             json!({
                 "agent_id": "a1",
                 "hostname": "host",
@@ -4264,7 +4267,7 @@ mod tests {
         .unwrap();
         let action = h
             .handle_message(proto_msg(
-                "agent.session.update",
+                "server.agent.session-update",
                 json!({
                     "agent_id": "a1",
                     "session_name": "dev",
@@ -4281,7 +4284,7 @@ mod tests {
         let mut h = test_handler("").await;
         // Register agent
         h.handle_message(proto_msg(
-            "agent.register",
+            "server.agent.register",
             json!({
                 "agent_id": "a1",
                 "hostname": "host",
@@ -4298,7 +4301,7 @@ mod tests {
         .unwrap();
         // Create a session
         h.handle_message(proto_msg(
-            "agent.session.update",
+            "server.agent.session-update",
             json!({
                 "agent_id": "a1",
                 "session_name": "dev",
@@ -4311,7 +4314,7 @@ mod tests {
         .unwrap();
         // Remove it
         h.handle_message(proto_msg(
-            "agent.session.update",
+            "server.agent.session-update",
             json!({
                 "agent_id": "a1",
                 "session_name": "dev",
@@ -4322,13 +4325,13 @@ mod tests {
         .unwrap();
         // Session should be gone
         let _action = h
-            .handle_message(proto_msg("client.sessions.list", json!({})))
+            .handle_message(proto_msg("server.session.list", json!({})))
             .await
             .unwrap();
         // First need to authenticate
         h.authenticated_client = true;
         let action = h
-            .handle_message(proto_msg("client.sessions.list", json!({})))
+            .handle_message(proto_msg("server.session.list", json!({})))
             .await
             .unwrap();
         let reply = parse_reply(action);
@@ -4340,7 +4343,7 @@ mod tests {
         let mut h = test_handler("").await;
         let action = h
             .handle_message(proto_msg(
-                "agent.session.update",
+                "server.agent.session-update",
                 json!({
                     "agent_id": "unknown",
                     "session_name": "dev",
@@ -4358,7 +4361,7 @@ mod tests {
     async fn client_auth_success() {
         let mut h = test_handler("secret").await;
         let action = h
-            .handle_message(proto_msg("client.auth", json!({ "auth_token": "secret" })))
+            .handle_message(proto_msg("server.auth", json!({ "auth_token": "secret" })))
             .await
             .unwrap();
         let reply = parse_reply(action);
@@ -4369,7 +4372,7 @@ mod tests {
     async fn client_auth_failure() {
         let mut h = test_handler("secret").await;
         let action = h
-            .handle_message(proto_msg("client.auth", json!({ "auth_token": "wrong" })))
+            .handle_message(proto_msg("server.auth", json!({ "auth_token": "wrong" })))
             .await
             .unwrap();
         let reply = parse_reply(action);
@@ -4381,7 +4384,7 @@ mod tests {
         let mut h = test_handler("").await;
         let action = h
             .handle_message(proto_msg(
-                "client.auth",
+                "server.auth",
                 json!({ "auth_token": "anything" }),
             ))
             .await
@@ -4396,7 +4399,7 @@ mod tests {
     async fn unauthenticated_agents_list_rejected() {
         let mut h = test_handler("").await;
         let action = h
-            .handle_message(proto_msg("client.agents.list", json!({})))
+            .handle_message(proto_msg("server.agent.list", json!({})))
             .await
             .unwrap();
         let reply = parse_reply(action);
@@ -4407,7 +4410,7 @@ mod tests {
     async fn unauthenticated_sessions_list_rejected() {
         let mut h = test_handler("").await;
         let action = h
-            .handle_message(proto_msg("client.sessions.list", json!({})))
+            .handle_message(proto_msg("server.session.list", json!({})))
             .await
             .unwrap();
         let reply = parse_reply(action);
@@ -4419,7 +4422,7 @@ mod tests {
         let mut h = test_handler("").await;
         let action = h
             .handle_message(proto_msg(
-                "client.session.attach",
+                "server.session.attach",
                 json!({ "session_id": "a1:s1" }),
             ))
             .await
@@ -4433,7 +4436,7 @@ mod tests {
         let mut h = test_handler("").await;
         let action = h
             .handle_message(proto_msg(
-                "client.session.create",
+                "server.session.create",
                 json!({ "agent_id": "a1", "name": "dev" }),
             ))
             .await
@@ -4447,7 +4450,7 @@ mod tests {
         let mut h = test_handler("").await;
         let action = h
             .handle_message(proto_msg(
-                "client.session.kill",
+                "server.session.kill",
                 json!({ "session_id": "a1:s1" }),
             ))
             .await
@@ -4464,7 +4467,7 @@ mod tests {
         h.authenticated_client = true;
         // Register an agent
         h.handle_message(proto_msg(
-            "agent.register",
+            "server.agent.register",
             json!({
                 "agent_id": "a1",
                 "hostname": "host",
@@ -4481,7 +4484,7 @@ mod tests {
         .unwrap();
 
         let action = h
-            .handle_message(proto_msg("client.agents.list", json!({})))
+            .handle_message(proto_msg("server.agent.list", json!({})))
             .await
             .unwrap();
         let reply = parse_reply(action);
@@ -4499,7 +4502,7 @@ mod tests {
         let mut h = test_handler("").await;
         h.authenticated_client = true;
         let action = h
-            .handle_message(proto_msg("client.agents.list", json!({})))
+            .handle_message(proto_msg("server.agent.list", json!({})))
             .await
             .unwrap();
         let reply = parse_reply(action);
@@ -4514,7 +4517,7 @@ mod tests {
         h.authenticated_client = true;
         // Register agent
         h.handle_message(proto_msg(
-            "agent.register",
+            "server.agent.register",
             json!({
                 "agent_id": "a1",
                 "hostname": "host",
@@ -4532,7 +4535,7 @@ mod tests {
         // Create sessions
         for name in &["s1", "s2"] {
             h.handle_message(proto_msg(
-                "agent.session.update",
+                "server.agent.session-update",
                 json!({
                     "agent_id": "a1",
                     "session_name": name,
@@ -4547,7 +4550,7 @@ mod tests {
         // Filter by agent_id
         let action = h
             .handle_message(proto_msg(
-                "client.sessions.list",
+                "server.session.list",
                 json!({ "agent_id": "a1" }),
             ))
             .await
@@ -4566,7 +4569,7 @@ mod tests {
         let mut h = test_handler("").await;
         h.authenticated_client = true;
         h.handle_message(proto_msg(
-            "agent.register",
+            "server.agent.register",
             json!({
                 "agent_id": "a1",
                 "hostname": "host",
@@ -4586,7 +4589,7 @@ mod tests {
 
     async fn add_session(h: &mut ConnectionHandler, agent_id: &str, name: &str) {
         h.handle_message(proto_msg(
-            "agent.session.update",
+            "server.agent.session-update",
             json!({
                 "agent_id": agent_id,
                 "session_name": name,
@@ -4604,7 +4607,7 @@ mod tests {
         let mut h = test_handler("").await;
         h.authenticated_client = true;
         let action = h
-            .handle_message(proto_msg("client.sessions.list", json!({ "force": true })))
+            .handle_message(proto_msg("server.session.list", json!({ "force": true })))
             .await
             .unwrap();
         let reply = parse_reply(action);
@@ -4624,7 +4627,7 @@ mod tests {
         add_session(&mut h, "a1", "s1").await;
 
         let action = h
-            .handle_message(proto_msg("client.sessions.list", json!({ "force": true })))
+            .handle_message(proto_msg("server.session.list", json!({ "force": true })))
             .await
             .unwrap();
         let reply = parse_reply(action);
@@ -4646,7 +4649,7 @@ mod tests {
         add_session(&mut h, "a1", "s1").await;
 
         let action = h
-            .handle_message(proto_msg("client.sessions.list", json!({})))
+            .handle_message(proto_msg("server.session.list", json!({})))
             .await
             .unwrap();
         let reply = parse_reply(action);
@@ -4667,7 +4670,7 @@ mod tests {
 
         let action = h
             .handle_message(proto_msg(
-                "client.sessions.list",
+                "server.session.list",
                 json!({ "force": true, "agent_id": "nonexistent" }),
             ))
             .await
@@ -4696,8 +4699,7 @@ mod tests {
         h.command_broker.register_agent("a1", sender).await;
 
         let broker = Arc::clone(&h.command_broker);
-        let list_fut =
-            h.handle_message(proto_msg("client.sessions.list", json!({ "force": true })));
+        let list_fut = h.handle_message(proto_msg("server.session.list", json!({ "force": true })));
         let agent_fut = async move {
             let text = rx
                 .recv()
@@ -4707,7 +4709,7 @@ mod tests {
                 .unwrap()
                 .to_string();
             let parsed: serde_json::Value = serde_json::from_str(&text).unwrap();
-            assert_eq!(parsed["msg_type"], "server.sessions.list");
+            assert_eq!(parsed["msg_type"], "agent.session.report");
             let request_id = parsed["payload"]["request_id"]
                 .as_str()
                 .unwrap()
@@ -4768,7 +4770,7 @@ mod tests {
 
         let broker = Arc::clone(&h.command_broker);
         let create_fut = h.handle_message(proto_msg(
-            "client.session.create",
+            "server.session.create",
             json!({ "agent_id": "a1", "name": "regression-743" }),
         ));
         let agent_fut = async move {
@@ -4873,7 +4875,7 @@ mod tests {
         h.authenticated_client = true;
         let action = h
             .handle_message(proto_msg(
-                "client.session.attach",
+                "server.session.attach",
                 json!({ "session_id": "no-colon" }),
             ))
             .await
@@ -4891,7 +4893,7 @@ mod tests {
         h.authenticated_client = true;
         let action = h
             .handle_message(proto_msg(
-                "client.session.attach",
+                "server.session.attach",
                 json!({ "session_id": "a1:nonexistent" }),
             ))
             .await
@@ -4909,7 +4911,7 @@ mod tests {
         h.authenticated_client = true;
         // Register agent
         h.handle_message(proto_msg(
-            "agent.register",
+            "server.agent.register",
             json!({
                 "agent_id": "a1",
                 "hostname": "host",
@@ -4926,7 +4928,7 @@ mod tests {
         .unwrap();
         // Create session
         h.handle_message(proto_msg(
-            "agent.session.update",
+            "server.agent.session-update",
             json!({
                 "agent_id": "a1",
                 "session_name": "dev",
@@ -4945,7 +4947,7 @@ mod tests {
         // Re-register with a different approach - just test that agent not found works
         let action = h
             .handle_message(proto_msg(
-                "client.session.attach",
+                "server.session.attach",
                 json!({ "session_id": "a1:dev" }),
             ))
             .await
@@ -4963,7 +4965,7 @@ mod tests {
         h.authenticated_client = true;
         // Register agent
         h.handle_message(proto_msg(
-            "agent.register",
+            "server.agent.register",
             json!({
                 "agent_id": "a1",
                 "hostname": "host",
@@ -4980,7 +4982,7 @@ mod tests {
         .unwrap();
         // Create session
         h.handle_message(proto_msg(
-            "agent.session.update",
+            "server.agent.session-update",
             json!({
                 "agent_id": "a1",
                 "session_name": "dev",
@@ -4994,7 +4996,7 @@ mod tests {
         // Attach in P2P mode
         let action = h
             .handle_message(proto_msg(
-                "client.session.attach",
+                "server.session.attach",
                 json!({ "session_id": "a1:dev", "preferred_mode": "p2p" }),
             ))
             .await
@@ -5017,7 +5019,7 @@ mod tests {
         h.authenticated_client = true;
         // Register agent + create session
         h.handle_message(proto_msg(
-            "agent.register",
+            "server.agent.register",
             json!({
                 "agent_id": "a1",
                 "hostname": "host",
@@ -5033,7 +5035,7 @@ mod tests {
         .await
         .unwrap();
         h.handle_message(proto_msg(
-            "agent.session.update",
+            "server.agent.session-update",
             json!({
                 "agent_id": "a1",
                 "session_name": "dev",
@@ -5050,7 +5052,7 @@ mod tests {
         h.set_client_sender(relay_sender);
         let action = h
             .handle_message(proto_msg(
-                "client.session.attach",
+                "server.session.attach",
                 json!({ "session_id": "a1:dev", "preferred_mode": "relay" }),
             ))
             .await
@@ -5074,7 +5076,7 @@ mod tests {
         // Phase 2: begin relay — actually enters relay forwarding.
         let action = h
             .handle_message(proto_msg(
-                "client.session.relay.begin",
+                "server.session.relay.begin",
                 json!({ "session_id": "a1:dev" }),
             ))
             .await
@@ -5106,7 +5108,7 @@ mod tests {
         h.authenticated_client = true;
         let action = h
             .handle_message(proto_msg(
-                "client.session.create",
+                "server.session.create",
                 json!({ "agent_id": "", "name": "" }),
             ))
             .await
@@ -5125,7 +5127,7 @@ mod tests {
         h.authenticated_client = true;
         let action = h
             .handle_message(proto_msg(
-                "client.session.create",
+                "server.session.create",
                 json!({ "agent_id": "nonexistent", "name": "dev" }),
             ))
             .await
@@ -5146,7 +5148,7 @@ mod tests {
         h.authenticated_client = true;
         let action = h
             .handle_message(proto_msg(
-                "client.session.kill",
+                "server.session.kill",
                 json!({ "session_id": "no-colon" }),
             ))
             .await
@@ -5164,7 +5166,7 @@ mod tests {
         h.authenticated_client = true;
         let action = h
             .handle_message(proto_msg(
-                "client.session.kill",
+                "server.session.kill",
                 json!({ "session_id": "unknown:s1" }),
             ))
             .await
@@ -5183,7 +5185,7 @@ mod tests {
         h.authenticated_client = true;
         // Register agent (it's online)
         h.handle_message(proto_msg(
-            "agent.register",
+            "server.agent.register",
             json!({
                 "agent_id": "a1",
                 "hostname": "host",
@@ -5201,7 +5203,7 @@ mod tests {
         // Kill a session that doesn't exist — agent is online
         let action = h
             .handle_message(proto_msg(
-                "client.session.kill",
+                "server.session.kill",
                 json!({ "session_id": "a1:nonexistent" }),
             ))
             .await
@@ -5221,7 +5223,7 @@ mod tests {
         let mut h = test_handler("").await;
         let action = h
             .handle_message(proto_msg(
-                "agent.session.command.response",
+                "server.agent.command-response",
                 json!({ "request_id": "r1", "success": true }),
             ))
             .await
@@ -5234,7 +5236,7 @@ mod tests {
         let mut h = test_handler("").await;
         // Register agent
         h.handle_message(proto_msg(
-            "agent.register",
+            "server.agent.register",
             json!({
                 "agent_id": "a1",
                 "hostname": "host",
@@ -5251,7 +5253,7 @@ mod tests {
         .unwrap();
         let action = h
             .handle_message(proto_msg(
-                "agent.session.command.response",
+                "server.agent.command-response",
                 json!({ "request_id": "", "success": true }),
             ))
             .await
@@ -5265,7 +5267,7 @@ mod tests {
     async fn env_list_unauthenticated() {
         let mut h = test_handler("").await;
         let action = h
-            .handle_message(proto_msg("client.env.list", json!({})))
+            .handle_message(proto_msg("server.env.list", json!({})))
             .await
             .unwrap();
         let reply = parse_reply(action);
@@ -5276,7 +5278,7 @@ mod tests {
     async fn env_get_unauthenticated() {
         let mut h = test_handler("").await;
         let action = h
-            .handle_message(proto_msg("client.env.get", json!({ "name": "test.env" })))
+            .handle_message(proto_msg("server.env.get", json!({ "name": "test.env" })))
             .await
             .unwrap();
         let reply = parse_reply(action);
@@ -5288,7 +5290,7 @@ mod tests {
         let mut h = test_handler("").await;
         let action = h
             .handle_message(proto_msg(
-                "client.env.write",
+                "server.env.write",
                 json!({ "name": "test.env", "content": "X=1" }),
             ))
             .await
@@ -5302,7 +5304,7 @@ mod tests {
         let mut h = test_handler("").await;
         let action = h
             .handle_message(proto_msg(
-                "client.env.delete",
+                "server.env.delete",
                 json!({ "name": "test.env" }),
             ))
             .await
@@ -5318,7 +5320,7 @@ mod tests {
         let mut h = test_handler("").await;
         h.authenticated_client = true;
         let action = h
-            .handle_message(proto_msg("client.env.get", json!({})))
+            .handle_message(proto_msg("server.env.get", json!({})))
             .await
             .unwrap();
         let reply = parse_reply(action);
@@ -5336,7 +5338,7 @@ mod tests {
         // Write
         let action = h
             .handle_message(proto_msg(
-                "client.env.write",
+                "server.env.write",
                 json!({
                     "name": "test.env",
                     "content": "FOO=bar\nBAZ=qux",
@@ -5350,7 +5352,7 @@ mod tests {
         // Read back
         let action = h
             .handle_message(proto_msg(
-                "client.env.get",
+                "server.env.get",
                 json!({ "name": "test.env", "source": "server" }),
             ))
             .await
@@ -5369,7 +5371,7 @@ mod tests {
         h.authenticated_client = true;
         let action = h
             .handle_message(proto_msg(
-                "client.env.write",
+                "server.env.write",
                 json!({ "name": "", "content": "X=1" }),
             ))
             .await
@@ -5387,7 +5389,7 @@ mod tests {
         let mut h = test_handler("").await;
         h.authenticated_client = true;
         let action = h
-            .handle_message(proto_msg("client.env.delete", json!({})))
+            .handle_message(proto_msg("server.env.delete", json!({})))
             .await
             .unwrap();
         let reply = parse_reply(action);
@@ -5404,7 +5406,7 @@ mod tests {
         h.authenticated_client = true;
         // Write a file first
         h.handle_message(proto_msg(
-            "client.env.write",
+            "server.env.write",
             json!({
                 "name": "test.env",
                 "content": "X=1",
@@ -5414,7 +5416,7 @@ mod tests {
         .await
         .unwrap();
         let action = h
-            .handle_message(proto_msg("client.env.list", json!({})))
+            .handle_message(proto_msg("server.env.list", json!({})))
             .await
             .unwrap();
         let reply = parse_reply(action);
@@ -5427,14 +5429,14 @@ mod tests {
         let mut h = test_handler("").await;
         h.authenticated_client = true;
         h.handle_message(proto_msg(
-            "client.env.write",
+            "server.env.write",
             json!({ "name": "del.env", "content": "X=1", "overwrite": false }),
         ))
         .await
         .unwrap();
         let action = h
             .handle_message(proto_msg(
-                "client.env.delete",
+                "server.env.delete",
                 json!({ "name": "del.env", "source": "server" }),
             ))
             .await
@@ -5450,7 +5452,7 @@ mod tests {
         let mut h = test_handler("").await;
         let action = h
             .handle_message(proto_msg(
-                "client.session.env.apply",
+                "server.session.env.apply",
                 json!({ "session_id": "a1:s1", "env_files": [] }),
             ))
             .await
@@ -5465,7 +5467,7 @@ mod tests {
         h.authenticated_client = true;
         let action = h
             .handle_message(proto_msg(
-                "client.session.env.apply",
+                "server.session.env.apply",
                 json!({ "session_id": "no-colon", "env_files": [] }),
             ))
             .await
@@ -5483,7 +5485,7 @@ mod tests {
         let mut h = test_handler("").await;
         let action = h
             .handle_message(proto_msg(
-                "client.session.env.unset",
+                "server.session.env.unset",
                 json!({ "session_id": "a1:s1" }),
             ))
             .await
@@ -5498,7 +5500,7 @@ mod tests {
         h.authenticated_client = true;
         let action = h
             .handle_message(proto_msg(
-                "client.session.env.unset",
+                "server.session.env.unset",
                 json!({ "session_id": "no-colon" }),
             ))
             .await
@@ -5512,7 +5514,7 @@ mod tests {
         let mut h = test_handler("").await;
         let action = h
             .handle_message(proto_msg(
-                "client.session.env.active",
+                "server.session.env.active",
                 json!({ "session_id": "a1:s1" }),
             ))
             .await
@@ -5527,7 +5529,7 @@ mod tests {
         h.authenticated_client = true;
         let action = h
             .handle_message(proto_msg(
-                "client.session.env.active",
+                "server.session.env.active",
                 json!({ "session_id": "a1:s1" }),
             ))
             .await
@@ -5541,7 +5543,7 @@ mod tests {
         let mut h = test_handler("").await;
         let action = h
             .handle_message(proto_msg(
-                "client.session.env.query",
+                "server.session.env.query",
                 json!({ "session_id": "a1:s1" }),
             ))
             .await
@@ -5556,7 +5558,7 @@ mod tests {
         h.authenticated_client = true;
         let action = h
             .handle_message(proto_msg(
-                "client.session.env.query",
+                "server.session.env.query",
                 json!({ "session_id": "no-colon" }),
             ))
             .await
@@ -5605,7 +5607,7 @@ mod tests {
         h.authenticated_client = true;
         // Write a file first
         h.handle_message(proto_msg(
-            "client.env.write",
+            "server.env.write",
             json!({ "name": "locked.env", "content": "X=1", "overwrite": false }),
         ))
         .await
@@ -5623,7 +5625,7 @@ mod tests {
         // Try to overwrite — should fail
         let action = h
             .handle_message(proto_msg(
-                "client.env.write",
+                "server.env.write",
                 json!({
                     "name": "locked.env",
                     "content": "X=2",
@@ -5651,7 +5653,7 @@ mod tests {
 
         // Write a file first so the store has it.
         h.handle_message(proto_msg(
-            "client.env.write",
+            "server.env.write",
             json!({ "name": "forced.env", "content": "X=1", "overwrite": false }),
         ))
         .await
@@ -5676,7 +5678,7 @@ mod tests {
         // re-source (`agent.env.resource`) command.
         let broker = Arc::clone(&h.command_broker);
         let send_fut = h.handle_message(proto_msg(
-            "client.env.write",
+            "server.env.write",
             json!({
                 "name": "forced.env",
                 "content": "X=2",
@@ -5716,7 +5718,7 @@ mod tests {
         h.authenticated_client = true;
         // Write a file first
         h.handle_message(proto_msg(
-            "client.env.write",
+            "server.env.write",
             json!({ "name": "used.env", "content": "X=1", "overwrite": false }),
         ))
         .await
@@ -5734,7 +5736,7 @@ mod tests {
         // Try to delete — should fail
         let action = h
             .handle_message(proto_msg(
-                "client.env.delete",
+                "server.env.delete",
                 json!({ "name": "used.env", "source": "server" }),
             ))
             .await
@@ -5753,7 +5755,7 @@ mod tests {
         h.authenticated_client = true;
         // Write a file first
         h.handle_message(proto_msg(
-            "client.env.write",
+            "server.env.write",
             json!({ "name": "used.env", "content": "X=1", "overwrite": false }),
         ))
         .await
@@ -5771,7 +5773,7 @@ mod tests {
         // Delete with force — should succeed despite being in use
         let action = h
             .handle_message(proto_msg(
-                "client.env.delete",
+                "server.env.delete",
                 json!({ "name": "used.env", "source": "server", "force": true }),
             ))
             .await
@@ -5788,7 +5790,7 @@ mod tests {
         h.authenticated_client = true;
         let action = h
             .handle_message(proto_msg(
-                "client.env.get",
+                "server.env.get",
                 json!({ "name": "test.env", "source": "agent" }),
             ))
             .await
@@ -5807,7 +5809,7 @@ mod tests {
         h.authenticated_client = true;
         let action = h
             .handle_message(proto_msg(
-                "client.env.write",
+                "server.env.write",
                 json!({ "name": "test.env", "content": "X=1", "source": "agent" }),
             ))
             .await
@@ -5826,7 +5828,7 @@ mod tests {
         h.authenticated_client = true;
         let action = h
             .handle_message(proto_msg(
-                "client.env.delete",
+                "server.env.delete",
                 json!({ "name": "test.env", "source": "agent" }),
             ))
             .await
@@ -5857,7 +5859,7 @@ mod tests {
         // Send agent.terminal.resize
         let action = h
             .handle_message(proto_msg(
-                "agent.terminal.resize",
+                "server.agent.terminal-resize",
                 json!({
                     "session_id": "a1:dev",
                     "cols": 120,
@@ -5892,7 +5894,7 @@ mod tests {
         // No clients attached — should still succeed silently
         let action = h
             .handle_message(proto_msg(
-                "agent.terminal.resize",
+                "server.agent.terminal-resize",
                 json!({
                     "session_id": "a1:dev",
                     "cols": 80,
@@ -5911,7 +5913,7 @@ mod tests {
         // Missing required fields — should log warning but not crash
         let action = h
             .handle_message(proto_msg(
-                "agent.terminal.resize",
+                "server.agent.terminal-resize",
                 json!({ "session_id": "a1:dev" }),
             ))
             .await
@@ -5926,7 +5928,7 @@ mod tests {
         let mut h = test_handler("").await;
         // Register an agent with an initial address.
         h.handle_message(proto_msg(
-            "agent.register",
+            "server.agent.register",
             json!({
                 "agent_id": "a1",
                 "hostname": "host",
@@ -5947,7 +5949,7 @@ mod tests {
         // Send an address update with new addresses.
         let action = h
             .handle_message(proto_msg(
-                "agent.address_update",
+                "server.agent.address-update",
                 json!({
                     "agent_id": "a1",
                     "addresses": [
@@ -5978,7 +5980,7 @@ mod tests {
         let mut h = test_handler("").await;
         let action = h
             .handle_message(proto_msg(
-                "agent.address_update",
+                "server.agent.address-update",
                 json!({
                     "agent_id": "nonexistent",
                     "addresses": [],
@@ -5995,11 +5997,11 @@ mod tests {
     async fn commands_list_requires_auth() {
         let mut h = test_handler("tok").await;
         let action = h
-            .handle_message(proto_msg("client.commands.list", json!({})))
+            .handle_message(proto_msg("server.commands.list", json!({})))
             .await
             .unwrap();
         let reply = parse_reply(action);
-        assert_eq!(reply["msg_type"], "client.commands.list.response");
+        assert_eq!(reply["msg_type"], "server.commands.list.response");
         assert!(reply["payload"]["error"]
             .as_str()
             .unwrap()
@@ -6011,15 +6013,15 @@ mod tests {
         let mut h = test_handler("tok").await;
         // Auth as client first
         let _ = h
-            .handle_message(proto_msg("client.auth", json!({ "auth_token": "tok" })))
+            .handle_message(proto_msg("server.auth", json!({ "auth_token": "tok" })))
             .await
             .unwrap();
         let action = h
-            .handle_message(proto_msg("client.commands.list", json!({})))
+            .handle_message(proto_msg("server.commands.list", json!({})))
             .await
             .unwrap();
         let reply = parse_reply(action);
-        assert_eq!(reply["msg_type"], "client.commands.list.response");
+        assert_eq!(reply["msg_type"], "server.commands.list.response");
         assert!(reply["payload"]["commands"].as_array().unwrap().is_empty());
     }
 
@@ -6028,7 +6030,7 @@ mod tests {
         let mut h = test_handler("tok").await;
         let action = h
             .handle_message(proto_msg(
-                "client.commands.add",
+                "server.commands.add",
                 json!({ "label": "test", "command": "echo hi" }),
             ))
             .await
@@ -6042,13 +6044,13 @@ mod tests {
         let mut h = test_handler("tok").await;
         // Auth as client
         let _ = h
-            .handle_message(proto_msg("client.auth", json!({ "auth_token": "tok" })))
+            .handle_message(proto_msg("server.auth", json!({ "auth_token": "tok" })))
             .await
             .unwrap();
         // Add a command
         let action = h
             .handle_message(proto_msg(
-                "client.commands.add",
+                "server.commands.add",
                 json!({ "label": "My Cmd", "command": "echo hello" }),
             ))
             .await
@@ -6059,7 +6061,7 @@ mod tests {
 
         // List should include it
         let action = h
-            .handle_message(proto_msg("client.commands.list", json!({})))
+            .handle_message(proto_msg("server.commands.list", json!({})))
             .await
             .unwrap();
         let reply = parse_reply(action);
@@ -6070,7 +6072,7 @@ mod tests {
 
         // Remove it
         let action = h
-            .handle_message(proto_msg("client.commands.remove", json!({ "id": cmd_id })))
+            .handle_message(proto_msg("server.commands.remove", json!({ "id": cmd_id })))
             .await
             .unwrap();
         let reply = parse_reply(action);
@@ -6078,7 +6080,7 @@ mod tests {
 
         // List should be empty again
         let action = h
-            .handle_message(proto_msg("client.commands.list", json!({})))
+            .handle_message(proto_msg("server.commands.list", json!({})))
             .await
             .unwrap();
         let reply = parse_reply(action);
@@ -6090,13 +6092,13 @@ mod tests {
         let mut h = test_handler("tok").await;
         // Auth as client
         let _ = h
-            .handle_message(proto_msg("client.auth", json!({ "auth_token": "tok" })))
+            .handle_message(proto_msg("server.auth", json!({ "auth_token": "tok" })))
             .await
             .unwrap();
         // Add a command
         let action = h
             .handle_message(proto_msg(
-                "client.commands.add",
+                "server.commands.add",
                 json!({ "label": "Old", "command": "old cmd" }),
             ))
             .await
@@ -6107,7 +6109,7 @@ mod tests {
         // Update it
         let action = h
             .handle_message(proto_msg(
-                "client.commands.update",
+                "server.commands.update",
                 json!({ "id": cmd_id, "label": "New", "command": "new cmd" }),
             ))
             .await
@@ -6117,7 +6119,7 @@ mod tests {
 
         // List should show updated values
         let action = h
-            .handle_message(proto_msg("client.commands.list", json!({})))
+            .handle_message(proto_msg("server.commands.list", json!({})))
             .await
             .unwrap();
         let reply = parse_reply(action);
@@ -6132,13 +6134,13 @@ mod tests {
         let mut h = test_handler("tok").await;
         // Auth as client
         let _ = h
-            .handle_message(proto_msg("client.auth", json!({ "auth_token": "tok" })))
+            .handle_message(proto_msg("server.auth", json!({ "auth_token": "tok" })))
             .await
             .unwrap();
         // Remove an id that doesn't exist (should still succeed — idempotent)
         let action = h
             .handle_message(proto_msg(
-                "client.commands.remove",
+                "server.commands.remove",
                 json!({ "id": "nonexistent" }),
             ))
             .await
@@ -6152,13 +6154,13 @@ mod tests {
         let mut h = test_handler("tok").await;
         // Auth as client
         let _ = h
-            .handle_message(proto_msg("client.auth", json!({ "auth_token": "tok" })))
+            .handle_message(proto_msg("server.auth", json!({ "auth_token": "tok" })))
             .await
             .unwrap();
         // Update a nonexistent command
         let action = h
             .handle_message(proto_msg(
-                "client.commands.update",
+                "server.commands.update",
                 json!({ "id": "missing", "label": "Nope" }),
             ))
             .await
@@ -6186,39 +6188,39 @@ mod tests {
 // several providers, `ContractSupport.wire` carrying the difference.
 
 server_routes!(handler, msg;
-    "agent.register" => "agent.register" => handler.handle_agent_register(msg).await,
-    "agent.heartbeat" => "agent.heartbeat" => handler.handle_agent_heartbeat(msg).await,
-    "agent.session-update" => "agent.session.update" => handler.handle_agent_session_update(msg).await,
-    "agent.command-response" => "agent.session.command.response" => handler.handle_agent_command_response(msg).await,
-    "agent.terminal-resize" => "agent.terminal.resize" => handler.handle_agent_terminal_resize(msg).await,
-    "agent.address-update" => "agent.address_update" => handler.handle_agent_address_update(msg).await,
-    "client.auth" => "client.auth" => handler.handle_client_auth(msg).await,
-    "agent.list" => "client.agents.list" => handler.handle_client_agents_list(msg).await,
-    "session.list" => "client.sessions.list" => handler.handle_client_sessions_list(msg).await,
-    "session.attach" => "client.session.attach" => handler.handle_client_session_attach(msg).await,
-    "session.relay.begin" => "client.session.relay.begin" => handler.handle_client_session_relay_begin(msg).await,
+    "server.agent.register" => "server.agent.register" => handler.handle_agent_register(msg).await,
+    "server.agent.heartbeat" => "server.agent.heartbeat" => handler.handle_agent_heartbeat(msg).await,
+    "server.agent.session-update" => "server.agent.session-update" => handler.handle_agent_session_update(msg).await,
+    "server.agent.command-response" => "server.agent.command-response" => handler.handle_agent_command_response(msg).await,
+    "server.agent.terminal-resize" => "server.agent.terminal-resize" => handler.handle_agent_terminal_resize(msg).await,
+    "server.agent.address-update" => "server.agent.address-update" => handler.handle_agent_address_update(msg).await,
+    "server.auth" => "server.auth" => handler.handle_client_auth(msg).await,
+    "server.agent.list" => "server.agent.list" => handler.handle_client_agents_list(msg).await,
+    "server.session.list" => "server.session.list" => handler.handle_client_sessions_list(msg).await,
+    "server.session.attach" => "server.session.attach" => handler.handle_client_session_attach(msg).await,
+    "server.session.relay.begin" => "server.session.relay.begin" => handler.handle_client_session_relay_begin(msg).await,
     // `client.session.relay.end` is intercepted by the relay function
     // (`relay_bidirectional_via_channel`) and never reaches the dispatcher
     // during active relay. It is declared here anyway, because the Server does
     // serve it — the relay loop is the handler — and a manifest that omitted it
     // would understate what this peer answers.
-    "session.relay.end" => "client.session.relay.end" => Ok(HandlerAction::Reply(None)),
-    "session.create" => "client.session.create" => handler.handle_client_session_create(msg).await,
-    "session.kill" => "client.session.kill" => handler.handle_client_session_kill(msg).await,
-    "session.capture-preview" => "client.session.capture_preview" => handler.handle_client_session_capture_preview(msg).await,
-    "env.list" => "client.env.list" => handler.handle_client_env_list(msg).await,
-    "env.get" => "client.env.get" => handler.handle_client_env_get(msg).await,
-    "env.write" => "client.env.write" => handler.handle_client_env_write(msg).await,
-    "env.delete" => "client.env.delete" => handler.handle_client_env_delete(msg).await,
-    "session.env.apply" => "client.session.env.apply" => handler.handle_client_session_env_apply(msg).await,
-    "session.env.unset" => "client.session.env.unset" => handler.handle_client_session_env_unset(msg).await,
-    "session.env.active" => "client.session.env.active" => handler.handle_client_session_env_active(msg).await,
-    "session.env.query" => "client.session.env.query" => handler.handle_client_session_env_query(msg).await,
-    "server.info" => "client.server.info" => handler.handle_client_server_info(msg).await,
-    "agent.rename" => "client.agent.rename" => handler.handle_client_agent_rename(msg).await,
-    "agent.delete" => "client.agent.delete" => handler.handle_client_agent_delete(msg).await,
-    "commands.list" => "client.commands.list" => handler.handle_client_commands_list(msg).await,
-    "commands.add" => "client.commands.add" => handler.handle_client_commands_add(msg).await,
-    "commands.remove" => "client.commands.remove" => handler.handle_client_commands_remove(msg).await,
-    "commands.update" => "client.commands.update" => handler.handle_client_commands_update(msg).await,
+    "server.session.relay.end" => "server.session.relay.end" => Ok(HandlerAction::Reply(None)),
+    "server.session.create" => "server.session.create" => handler.handle_client_session_create(msg).await,
+    "server.session.kill" => "server.session.kill" => handler.handle_client_session_kill(msg).await,
+    "server.session.capture-preview" => "server.session.capture-preview" => handler.handle_client_session_capture_preview(msg).await,
+    "server.env.list" => "server.env.list" => handler.handle_client_env_list(msg).await,
+    "server.env.get" => "server.env.get" => handler.handle_client_env_get(msg).await,
+    "server.env.write" => "server.env.write" => handler.handle_client_env_write(msg).await,
+    "server.env.delete" => "server.env.delete" => handler.handle_client_env_delete(msg).await,
+    "server.session.env.apply" => "server.session.env.apply" => handler.handle_client_session_env_apply(msg).await,
+    "server.session.env.unset" => "server.session.env.unset" => handler.handle_client_session_env_unset(msg).await,
+    "server.session.env.active" => "server.session.env.active" => handler.handle_client_session_env_active(msg).await,
+    "server.session.env.query" => "server.session.env.query" => handler.handle_client_session_env_query(msg).await,
+    "server.info" => "server.info" => handler.handle_client_server_info(msg).await,
+    "server.agent.rename" => "server.agent.rename" => handler.handle_client_agent_rename(msg).await,
+    "server.agent.delete" => "server.agent.delete" => handler.handle_client_agent_delete(msg).await,
+    "server.commands.list" => "server.commands.list" => handler.handle_client_commands_list(msg).await,
+    "server.commands.add" => "server.commands.add" => handler.handle_client_commands_add(msg).await,
+    "server.commands.remove" => "server.commands.remove" => handler.handle_client_commands_remove(msg).await,
+    "server.commands.update" => "server.commands.update" => handler.handle_client_commands_update(msg).await,
 );

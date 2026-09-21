@@ -36,7 +36,7 @@ function countClientAttach(): number {
     for (const call of ws.send.mock.calls) {
       try {
         const parsed = JSON.parse(String(call[0]));
-        if (parsed.msg_type === 'client.attach') {
+        if (parsed.msg_type === 'agent.attach') {
           count += 1;
         }
       } catch {

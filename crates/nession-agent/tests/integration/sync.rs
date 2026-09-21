@@ -36,7 +36,7 @@ async fn start_mock_server() -> anyhow::Result<(
 
             // Send registration response.
             let response = serde_json::json!({
-                "msg_type": "agent.register.response",
+                "msg_type": "server.agent.register.response",
                 "id": "test-id",
                 "timestamp": 1234567890,
                 "payload": {
@@ -120,7 +120,7 @@ async fn test_heartbeat_loop_sends_heartbeat() {
         .expect("no heartbeat message");
 
     let parsed: serde_json::Value = serde_json::from_str(&msg).unwrap();
-    assert_eq!(parsed["msg_type"], "agent.heartbeat");
+    assert_eq!(parsed["msg_type"], "server.agent.heartbeat");
     assert_eq!(parsed["payload"]["agent_id"], "test-agent-sync");
     assert_eq!(parsed["payload"]["status"], "online");
 
@@ -242,7 +242,7 @@ async fn test_session_watcher_detects_new_session() {
     let found = tokio::time::timeout(Duration::from_secs(10), async {
         while let Some(msg) = msg_rx.recv().await {
             let parsed: serde_json::Value = serde_json::from_str(&msg).unwrap();
-            if parsed["msg_type"] == "agent.session.update"
+            if parsed["msg_type"] == "server.agent.session-update"
                 && parsed["payload"]["session_name"] == session_name
             {
                 return parsed;
@@ -298,7 +298,7 @@ async fn test_session_watcher_detects_removed_session() {
         match tokio::time::timeout(Duration::from_secs(2), msg_rx.recv()).await {
             Ok(Some(msg)) => {
                 let parsed: serde_json::Value = serde_json::from_str(&msg).unwrap();
-                if parsed["msg_type"] == "agent.session.update"
+                if parsed["msg_type"] == "server.agent.session-update"
                     && parsed["payload"]["session_name"] == session_name
                     && parsed["payload"]["status"] == "detached"
                 {
@@ -318,7 +318,7 @@ async fn test_session_watcher_detects_removed_session() {
     let found = tokio::time::timeout(Duration::from_secs(10), async {
         while let Some(msg) = msg_rx.recv().await {
             let parsed: serde_json::Value = serde_json::from_str(&msg).unwrap();
-            if parsed["msg_type"] == "agent.session.update"
+            if parsed["msg_type"] == "server.agent.session-update"
                 && parsed["payload"]["session_name"] == session_name
                 && parsed["payload"]["status"] == "gone"
             {

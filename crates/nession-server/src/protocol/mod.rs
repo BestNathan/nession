@@ -137,12 +137,12 @@ mod tests {
 
     #[test]
     fn a_descriptor_names_its_unit_its_owner_and_its_wire_type() {
-        let d = v1_descriptor("session.attach", "client.session.attach").unwrap();
+        let d = v1_descriptor("session.attach", "server.session.attach").unwrap();
         assert_eq!(d.id.as_str(), "session.attach");
         assert_eq!(d.owner, OWNER);
         assert_eq!(
             d.contracts[0].wire,
-            vec!["client.session.attach".to_string()]
+            vec!["server.session.attach".to_string()]
         );
         assert!(d.validate().is_ok());
     }
@@ -174,11 +174,17 @@ mod tests {
 
     #[test]
     fn an_id_that_is_not_canonical_is_refused_rather_than_renamed() {
-        // `session.capture_preview` is the wire; the id is
-        // `session.capture-preview`, because `ProtocolId` refuses underscores.
+        // The spelling is the point of this test, so it is not a typo and must
+        // not be "corrected": `session.capture_preview` with an underscore is
+        // not an id, and `ProtocolId` refuses it rather than quietly renaming
+        // it. Writing the canonical spelling here would leave `is_err()`
+        // asserting nothing at all.
+        //
+        // The two calls differ only in the id's spelling, so the first failing
+        // and the second succeeding is the whole rule.
         assert!(
-            v1_descriptor("session.capture_preview", "client.session.capture_preview").is_err()
+            v1_descriptor("session.capture_preview", "server.session.capture-preview").is_err()
         );
-        assert!(v1_descriptor("session.capture-preview", "client.session.capture_preview").is_ok());
+        assert!(v1_descriptor("session.capture-preview", "server.session.capture-preview").is_ok());
     }
 }

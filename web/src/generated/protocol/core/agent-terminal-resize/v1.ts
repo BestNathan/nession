@@ -2,10 +2,10 @@
 //
 // Source of truth: the Rust contracts in `crates/nession-git/src/protocol/`,
 // `crates/nession-claude-code/src/protocol/` and `crates/nession-protocol/`.
-// This file is agent.terminal-resize / v1.
+// This file is agent.terminal.resize / v1.
 
 /** The canonical protocol id. Not the wire type. */
-export const PROTOCOL = 'agent.terminal-resize';
+export const PROTOCOL = 'agent.terminal.resize';
 /** Every transport projection this contract travels as. */
 export const WIRES = ['agent.terminal.resize'] as const;
 /**
@@ -21,13 +21,13 @@ export const VERSION = 1;
 
 // ── Shapes ──
 
-export type AgentTerminalResizePayload = { session_id: string, cols: number, rows: number, };
+export type TerminalResizePayload = { session_name: string, cols: number, rows: number, };
 
 // ── Operations ──
 
-/**
- * No request alias: the catalog declares no request shape for this unit.
- */
+/** The payload a caller sends. */
+export type TerminalResizeCall = { session_name: string, cols: number, rows: number, };
+
 /**
  * No response alias: the catalog declares no response shape for this unit.
  */

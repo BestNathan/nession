@@ -61,7 +61,7 @@ describe('consumer contract resolution end to end', () => {
 
   async function listAgents(list: Agent[]): Promise<void> {
     const pending = agents.listAgents();
-    surface.resolveNext('client.agents.list', { agents: list });
+    surface.resolveNext('server.agent.list', { agents: list });
     await pending;
   }
 

@@ -42,7 +42,7 @@ describe('SessionsPlugin', () => {
       const pending = plugin.listSessions();
       expect(surfaceA.requests).toHaveLength(0);
       expect(surfaceB.requests).toHaveLength(1);
-      surfaceB.resolveNext('client.sessions.list', { sessions: [makeSession('b', 's1')] });
+      surfaceB.resolveNext('server.session.list', { sessions: [makeSession('b', 's1')] });
       await expect(pending).resolves.toEqual([makeSession('b', 's1')]);
 
       // Consumers registered under B receive events through B.
@@ -138,11 +138,11 @@ describe('SessionsPlugin', () => {
     it('sends client.sessions.list with an empty payload and fills stale_agents with []', async () => {
       const pending = plugin.fetchSessions();
       expect(surface.requests).toHaveLength(1);
-      expect(surface.requests[0]?.type).toBe('client.sessions.list');
+      expect(surface.requests[0]?.type).toBe('server.session.list');
       expect(surface.requests[0]?.payload).toEqual({});
 
       const sessions = [makeSession('a', 's1')];
-      surface.resolveNext('client.sessions.list', { sessions });
+      surface.resolveNext('server.session.list', { sessions });
       await expect(pending).resolves.toEqual({ sessions, stale_agents: [] });
     });
 
@@ -150,14 +150,14 @@ describe('SessionsPlugin', () => {
       const pending = plugin.fetchSessions({ agentId: 'a1', force: true });
       expect(surface.requests[0]?.payload).toEqual({ agent_id: 'a1', force: true });
 
-      surface.resolveNext('client.sessions.list', { sessions: [], stale_agents: ['a1'] });
+      surface.resolveNext('server.session.list', { sessions: [], stale_agents: ['a1'] });
       await expect(pending).resolves.toEqual({ sessions: [], stale_agents: ['a1'] });
     });
 
     it('does not add falsey option keys to the payload', async () => {
       const pending = plugin.fetchSessions({ force: false });
       expect(surface.requests[0]?.payload).toEqual({});
-      surface.resolveNext('client.sessions.list', { sessions: [] });
+      surface.resolveNext('server.session.list', { sessions: [] });
       await expect(pending).resolves.toEqual({ sessions: [], stale_agents: [] });
     });
   });
@@ -169,17 +169,17 @@ describe('SessionsPlugin', () => {
 
     it('unwraps the sessions list for all agents', async () => {
       const pending = plugin.listSessions();
-      expect(surface.requests[0]).toMatchObject({ type: 'client.sessions.list', payload: {} });
+      expect(surface.requests[0]).toMatchObject({ type: 'server.session.list', payload: {} });
 
       const sessions = [makeSession('a', 's1'), makeSession('a', 's2')];
-      surface.resolveNext('client.sessions.list', { sessions });
+      surface.resolveNext('server.session.list', { sessions });
       await expect(pending).resolves.toEqual(sessions);
     });
 
     it('forwards the optional agentId filter', async () => {
       const pending = plugin.listSessions('a1');
       expect(surface.requests[0]?.payload).toEqual({ agent_id: 'a1' });
-      surface.resolveNext('client.sessions.list', { sessions: [] });
+      surface.resolveNext('server.session.list', { sessions: [] });
       await expect(pending).resolves.toEqual([]);
     });
   });
@@ -192,11 +192,11 @@ describe('SessionsPlugin', () => {
     it('sends client.session.create with env_files defaulting to [] and returns the raw response', async () => {
       const pending = plugin.createSession('a1', 'work');
       expect(surface.requests[0]).toMatchObject({
-        type: 'client.session.create',
+        type: 'server.session.create',
         payload: { agent_id: 'a1', name: 'work', env_files: [] },
       });
 
-      surface.resolveNext('client.session.create', { success: true, session_id: 'a1:work' });
+      surface.resolveNext('server.session.create', { success: true, session_id: 'a1:work' });
       await expect(pending).resolves.toEqual({ success: true, session_id: 'a1:work' });
     });
 
@@ -210,7 +210,7 @@ describe('SessionsPlugin', () => {
       });
 
       // Failure responses pass through raw — the caller decides (oracle behavior).
-      surface.resolveNext('client.session.create', { success: false, error: 'exists' });
+      surface.resolveNext('server.session.create', { success: false, error: 'exists' });
       await expect(pending).resolves.toEqual({ success: false, error: 'exists' });
     });
   });
@@ -223,11 +223,11 @@ describe('SessionsPlugin', () => {
     it('sends client.session.kill and returns the raw response', async () => {
       const pending = plugin.killSession('a1:work');
       expect(surface.requests[0]).toMatchObject({
-        type: 'client.session.kill',
+        type: 'server.session.kill',
         payload: { session_id: 'a1:work' },
       });
 
-      surface.resolveNext('client.session.kill', { success: true });
+      surface.resolveNext('server.session.kill', { success: true });
       await expect(pending).resolves.toEqual({ success: true });
     });
   });
@@ -240,11 +240,11 @@ describe('SessionsPlugin', () => {
     it('sends client.session.attach with preferred_mode p2p by default', async () => {
       const pending = plugin.requestAttach('a1:work');
       expect(surface.requests[0]).toMatchObject({
-        type: 'client.session.attach',
+        type: 'server.session.attach',
         payload: { session_id: 'a1:work', preferred_mode: 'p2p' },
       });
 
-      surface.resolveNext('client.session.attach', { mode: 'p2p', session_id: 'a1:work' });
+      surface.resolveNext('server.session.attach', { mode: 'p2p', session_id: 'a1:work' });
       await expect(pending).resolves.toEqual({ mode: 'p2p', session_id: 'a1:work' });
     });
 
@@ -255,7 +255,7 @@ describe('SessionsPlugin', () => {
         preferred_mode: 'relay',
         relay_url: 'wss://relay.example',
       });
-      surface.resolveNext('client.session.attach', {
+      surface.resolveNext('server.session.attach', {
         mode: 'relay',
         session_id: 'a1:work',
         session_name: 'work',
@@ -273,7 +273,7 @@ describe('SessionsPlugin', () => {
         session_id: 'a1:work',
         preferred_mode: 'relay',
       });
-      surface.resolveNext('client.session.attach', { mode: 'relay', session_id: 'a1:work' });
+      surface.resolveNext('server.session.attach', { mode: 'relay', session_id: 'a1:work' });
       await expect(pending).resolves.toEqual({ mode: 'relay', session_id: 'a1:work' });
     });
   });
@@ -293,12 +293,12 @@ describe('SessionsPlugin', () => {
     it('decodes the base64 ANSI payload', async () => {
       const pending = plugin.capturePreview('a1:work', 100);
       expect(surface.requests[0]).toMatchObject({
-        type: 'client.session.capture_preview',
+        type: 'server.session.capture-preview',
         payload: { session_id: 'a1:work', lines: 100 },
       });
 
       const ansi = '[32mhello world[0m';
-      surface.resolveNext('client.session.capture_preview', {
+      surface.resolveNext('server.session.capture-preview', {
         ansi_b64: encodeUtf8Base64(ansi),
         cols: 120,
         rows: 40,
@@ -308,7 +308,7 @@ describe('SessionsPlugin', () => {
 
     it('rejects with the server error text', async () => {
       const pending = plugin.capturePreview('a1:work', 100);
-      surface.resolveNext('client.session.capture_preview', {
+      surface.resolveNext('server.session.capture-preview', {
         error: 'session vanished',
       });
       await expect(pending).rejects.toThrow('session vanished');
@@ -316,7 +316,7 @@ describe('SessionsPlugin', () => {
 
     it('rejects when no data was returned', async () => {
       const pending = plugin.capturePreview('a1:work', 100);
-      surface.resolveNext('client.session.capture_preview', { ansi_b64: undefined });
+      surface.resolveNext('server.session.capture-preview', { ansi_b64: undefined });
       await expect(pending).rejects.toThrow('Capture failed: no data returned');
     });
   });

@@ -14,7 +14,7 @@
 //! is one invocation that emits both:
 //!
 //! ```text
-//! core_routes! { "session.create" => "server.session.create" => { …body… } }
+//! core_routes! { "session.create" => "agent.session.create" => { …body… } }
 //!        ├── core_descriptors()   the manifest's half
 //!        └── dispatch_core()      the routing half
 //! ```
@@ -227,23 +227,38 @@ mod tests {
 
     #[test]
     fn a_descriptor_names_its_unit_its_owner_and_its_wire_type() {
-        let d = v1_descriptor("session.create", "server.session.create").unwrap();
+        let d = v1_descriptor("session.create", "agent.session.create").unwrap();
         assert_eq!(d.id.as_str(), "session.create");
         assert_eq!(d.owner, OWNER);
         assert_eq!(
             d.contracts[0].wire,
-            vec!["server.session.create".to_string()]
+            vec!["agent.session.create".to_string()]
         );
         assert!(d.validate().is_ok());
     }
 
     #[test]
     fn an_id_that_is_not_canonical_is_refused_rather_than_renamed() {
-        // `session.capture_preview` is the wire; the id is
-        // `session.capture-preview`, because `ProtocolId` refuses underscores.
-        // A provider that passed the wire string through would get an id the
-        // registry rejects, and this is where that surfaces.
-        assert!(v1_descriptor("session.capture_preview", "session.capture_preview").is_err());
-        assert!(v1_descriptor("session.capture-preview", "session.capture_preview").is_ok());
+        // `ProtocolId` refuses underscores, so a provider that passed a wire
+        // string through as its id would get one the registry rejects. The
+        // capture-preview unit is where this bit: its wire was
+        // `session.capture_preview` and its id `session.capture-preview`.
+        //
+        // The wire is the id now — one spelling — so the two arguments below
+        // are the same string by construction, and what the test pins is that
+        // the *id* form is the one that has to be canonical.
+        assert!(
+            v1_descriptor(
+                "agent.session.capture_preview",
+                "agent.session.capture-preview"
+            )
+            .is_err(),
+            "an id with an underscore is not canonical and must be refused"
+        );
+        assert!(v1_descriptor(
+            "agent.session.capture-preview",
+            "agent.session.capture-preview"
+        )
+        .is_ok());
     }
 }

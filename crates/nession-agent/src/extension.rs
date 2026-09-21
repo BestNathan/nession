@@ -496,7 +496,7 @@ mod tests {
         // invisible even though it is the half every agent has.
         let registry = compose_with_core(
             vec![Box::new(Fake::new("git", "git.status", "git.status"))],
-            vec![core("session.create", "server.session.create")],
+            vec![core("session.create", "agent.session.create")],
         )
         .unwrap();
 
@@ -580,8 +580,8 @@ mod tests {
         let registry = compose_with_core(
             Vec::new(),
             vec![
-                core("session.capture-preview", "session.capture_preview"),
-                core("session.capture-preview", "session.capture_preview"),
+                core("session.capture-preview", "agent.session.capture-preview"),
+                core("session.capture-preview", "agent.session.capture-preview"),
             ],
         )
         .unwrap();
@@ -592,7 +592,7 @@ mod tests {
         let support = &manifest.protocols[&id];
         assert_eq!(
             support.wire,
-            vec!["session.capture_preview".to_string()],
+            vec!["agent.session.capture-preview".to_string()],
             "one wire, named once even though two paths serve it"
         );
     }
@@ -621,34 +621,46 @@ mod tests {
         // from a unit that was never wired up.
         assert_eq!(
             manifest.protocols.len(),
-            core.len() + p2p.len() - 4,
-            "the union is by id, so the four shared units are counted once"
+            core.len() + p2p.len() - 3,
+            "the union is by id, so the three shared units are counted once"
         );
-        // 28 since `client.agents.list` was deleted rather than renamed: the
-        // agent cannot answer a fleet question, and nothing on its own socket
-        // was asking. The formula above adjusted by itself — which is the point
-        // of the two assertions sitting together: the derived one catches a
-        // wiring mistake, the literal one makes a deliberate removal say so.
-        assert_eq!(manifest.protocols.len(), 28);
-
-        // Served on both transports: one unit, both wire types.
-        let both = ProtocolId::new("session.create").unwrap();
-        assert!(manifest.offers(&both));
-        let mut wires = manifest.protocols[&both].wire.clone();
-        wires.sort();
+        // Three, not four: `session.list` stopped being shared when the core
+        // side became `session.report`. The two arms answer different questions
+        // — the registry's five-field report against the full `SessionInfo` —
+        // so they are two protocols, and only the exception needs justifying.
+        //
+        // Both 28 and 29 have been right at different points this week, which
+        // is the argument for the two assertions together: the derived one
+        // catches a wiring mistake, the literal one makes every deliberate
+        // change to the surface say so out loud.
         assert_eq!(
-            wires,
-            vec![
-                "server.session.create".to_string(),
-                "session.create".to_string()
-            ],
-            "the relay wire and the direct wire are the same unit"
+            manifest.protocols.len(),
+            29,
+            "the surface is {:?}",
+            manifest.protocols.keys().collect::<Vec<_>>()
+        );
+
+        // Served on both sockets: one unit, and now **one wire name** too.
+        //
+        // It used to be two — `server.session.create` for the relay and
+        // `session.create` for the direct path — because the wire was named
+        // after whoever sent it. The handler is the agent either way, so both
+        // became `agent.session.create` and the name stopped being a way to
+        // tell the transports apart. It should not have been one: which socket
+        // a message arrived on is a transport fact, and the design says the
+        // wire is the protocol's projection, not its routing.
+        let both = ProtocolId::new("agent.session.create").unwrap();
+        assert!(manifest.offers(&both));
+        assert_eq!(
+            manifest.protocols[&both].wire,
+            vec!["agent.session.create".to_string()],
+            "one protocol, one name, two sockets"
         );
 
         // Served only on the agent's own socket.
-        assert!(manifest.offers(&ProtocolId::new("terminal.input").unwrap()));
-        assert!(manifest.offers(&ProtocolId::new("file.read").unwrap()));
+        assert!(manifest.offers(&ProtocolId::new("agent.terminal.input").unwrap()));
+        assert!(manifest.offers(&ProtocolId::new("agent.file.read").unwrap()));
         // Served only on the server connection.
-        assert!(manifest.offers(&ProtocolId::new("env.write").unwrap()));
+        assert!(manifest.offers(&ProtocolId::new("agent.env.write").unwrap()));
     }
 }

@@ -31,7 +31,7 @@ describe('EnvPlugin', () => {
       const pending = plugin.listEnvFiles();
       expect(surfaceA.requests).toHaveLength(0);
       expect(surfaceB.requests).toHaveLength(1);
-      surfaceB.resolveNext('client.env.list', { files: [] });
+      surfaceB.resolveNext('server.env.list', { files: [] });
       await expect(pending).resolves.toEqual({ files: [] });
 
       teardownB();
@@ -54,21 +54,21 @@ describe('EnvPlugin', () => {
 
     it('listEnvFiles sends client.env.list with an empty payload', async () => {
       const pending = plugin.listEnvFiles();
-      expect(surface.requests[0]).toMatchObject({ type: 'client.env.list', payload: {} });
+      expect(surface.requests[0]).toMatchObject({ type: 'server.env.list', payload: {} });
 
       const file = { name: 'a.env', source: 'server' as const, size: 3, modified: 1, var_count: 1 };
-      surface.resolveNext('client.env.list', { files: [file] });
+      surface.resolveNext('server.env.list', { files: [file] });
       await expect(pending).resolves.toEqual({ files: [file] });
     });
 
     it('getEnvFile sends the ref fields and returns the raw response', async () => {
       const pending = plugin.getEnvFile(serverFile);
       expect(surface.requests[0]).toMatchObject({
-        type: 'client.env.get',
+        type: 'server.env.get',
         payload: { name: 'prod.env', source: 'server', agent_id: undefined },
       });
 
-      surface.resolveNext('client.env.get', { success: true, content: 'A=1', in_use_by: [] });
+      surface.resolveNext('server.env.get', { success: true, content: 'A=1', in_use_by: [] });
       await expect(pending).resolves.toEqual({ success: true, content: 'A=1', in_use_by: [] });
     });
 
@@ -79,14 +79,14 @@ describe('EnvPlugin', () => {
         source: 'agent',
         agent_id: 'a1',
       });
-      surface.resolveNext('client.env.get', { success: false, error: 'missing' });
+      surface.resolveNext('server.env.get', { success: false, error: 'missing' });
       await expect(pending).resolves.toEqual({ success: false, error: 'missing' });
     });
 
     it('writeEnvFile defaults force to false and passes content/overwrite through', async () => {
       const pending = plugin.writeEnvFile(serverFile, 'A=1', true);
       expect(surface.requests[0]).toMatchObject({
-        type: 'client.env.write',
+        type: 'server.env.write',
         payload: {
           name: 'prod.env',
           source: 'server',
@@ -97,7 +97,7 @@ describe('EnvPlugin', () => {
         },
       });
 
-      surface.resolveNext('client.env.write', { success: true });
+      surface.resolveNext('server.env.write', { success: true });
       await expect(pending).resolves.toEqual({ success: true });
     });
 
@@ -111,7 +111,7 @@ describe('EnvPlugin', () => {
         overwrite: false,
         force: true,
       });
-      surface.resolveNext('client.env.write', {
+      surface.resolveNext('server.env.write', {
         success: false,
         error: 'in use',
         in_use_by: ['a1:sess'],
@@ -122,11 +122,11 @@ describe('EnvPlugin', () => {
     it('deleteEnvFile sends the ref fields and returns the raw response', async () => {
       const pending = plugin.deleteEnvFile(serverFile);
       expect(surface.requests[0]).toMatchObject({
-        type: 'client.env.delete',
+        type: 'server.env.delete',
         payload: { name: 'prod.env', source: 'server', agent_id: undefined },
       });
 
-      surface.resolveNext('client.env.delete', { success: true });
+      surface.resolveNext('server.env.delete', { success: true });
       await expect(pending).resolves.toEqual({ success: true });
     });
   });
@@ -139,11 +139,11 @@ describe('EnvPlugin', () => {
     it('applySessionEnv sends the session id and env file refs', async () => {
       const pending = plugin.applySessionEnv('a1:work', [serverFile]);
       expect(surface.requests[0]).toMatchObject({
-        type: 'client.session.env.apply',
+        type: 'server.session.env.apply',
         payload: { session_id: 'a1:work', env_files: [serverFile] },
       });
 
-      surface.resolveNext('client.session.env.apply', {
+      surface.resolveNext('server.session.env.apply', {
         success: true,
         re_sourced: ['prod.env'],
       });
@@ -153,33 +153,33 @@ describe('EnvPlugin', () => {
     it('unsetSessionEnv sends the session id and env file refs', async () => {
       const pending = plugin.unsetSessionEnv('a1:work', [serverFile]);
       expect(surface.requests[0]).toMatchObject({
-        type: 'client.session.env.unset',
+        type: 'server.session.env.unset',
         payload: { session_id: 'a1:work', env_files: [serverFile] },
       });
 
-      surface.resolveNext('client.session.env.unset', { success: true });
+      surface.resolveNext('server.session.env.unset', { success: true });
       await expect(pending).resolves.toEqual({ success: true });
     });
 
     it('getSessionEnvActive sends the session id', async () => {
       const pending = plugin.getSessionEnvActive('a1:work');
       expect(surface.requests[0]).toMatchObject({
-        type: 'client.session.env.active',
+        type: 'server.session.env.active',
         payload: { session_id: 'a1:work' },
       });
 
-      surface.resolveNext('client.session.env.active', { files: [], active: [] });
+      surface.resolveNext('server.session.env.active', { files: [], active: [] });
       await expect(pending).resolves.toEqual({ files: [], active: [] });
     });
 
     it('queryAgentEnvState sends the session id', async () => {
       const pending = plugin.queryAgentEnvState('a1:work');
       expect(surface.requests[0]).toMatchObject({
-        type: 'client.session.env.query',
+        type: 'server.session.env.query',
         payload: { session_id: 'a1:work' },
       });
 
-      surface.resolveNext('client.session.env.query', { files: [] });
+      surface.resolveNext('server.session.env.query', { files: [] });
       await expect(pending).resolves.toEqual({ files: [] });
     });
   });

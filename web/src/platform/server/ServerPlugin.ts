@@ -30,7 +30,7 @@ export class ServerPlugin implements TransportPlugin {
 
   /** Fetch server info (version, uptime, counts). */
   async serverInfo(): Promise<ServerInfo> {
-    return this.requireConnection().request<ServerInfo>('client.server.info', {});
+    return this.requireConnection().request<ServerInfo>('server.info', {});
   }
 
   private requireConnection(): PluginSurface {

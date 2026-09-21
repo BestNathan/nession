@@ -71,7 +71,7 @@ export function createTerminalAgentApi(surface: PluginSurface): TerminalAgentApi
       opts?: { timeoutMs?: number },
     ): Promise<AttachResult> => {
       try {
-        await surface.request('client.attach', {
+        await surface.request('agent.attach', {
           session_name: sessionName,
           ...(size ? { width: size.cols, height: size.rows } : {}),
         }, { timeoutMs: opts?.timeoutMs ?? ATTACH_TIMEOUT_MS });
@@ -87,15 +87,15 @@ export function createTerminalAgentApi(surface: PluginSurface): TerminalAgentApi
     },
 
     sendInput: (sessionName: string, data: string): void => {
-      surface.send('terminal.input', { session_name: sessionName, data: encodeBase64(data) });
+      surface.send('agent.terminal.input', { session_name: sessionName, data: encodeBase64(data) });
     },
 
     sendResize: (sessionName: string, cols: number, rows: number): void => {
-      surface.send('terminal.resize', { session_name: sessionName, cols, rows });
+      surface.send('agent.terminal.resize', { session_name: sessionName, cols, rows });
     },
 
     onOutput: (cb: (data: Uint8Array) => void): (() => void) => {
-      return surface.subscribe('terminal.output', (payload) => {
+      return surface.subscribe('agent.terminal.output', (payload) => {
         const data = (payload as { data?: unknown })?.data as string | undefined;
         if (data) {
           // Strict decode (throws on invalid base64) — see './base64' for why
@@ -106,7 +106,7 @@ export function createTerminalAgentApi(surface: PluginSurface): TerminalAgentApi
     },
 
     onResize: (cb: (cols: number, rows: number) => void): (() => void) => {
-      return surface.subscribe('terminal.resize', (payload) => {
+      return surface.subscribe('agent.terminal.resize', (payload) => {
         const { cols, rows } = payload as { cols: number; rows: number };
         cb(cols, rows);
       });
@@ -126,7 +126,7 @@ export function createTerminalAgentApi(surface: PluginSurface): TerminalAgentApi
     },
 
     ping: (): void => {
-      surface.send('keepalive.ping', {});
+      surface.send('agent.keepalive.ping', {});
     },
   };
 }

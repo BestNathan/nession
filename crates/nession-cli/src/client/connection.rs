@@ -118,7 +118,7 @@ impl ClientConnection {
         let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
 
         let auth_msg = json!({
-            "msg_type": "client.auth",
+            "msg_type": "server.auth",
             "id": msg_id,
             "timestamp": timestamp,
             "payload": {
@@ -142,7 +142,7 @@ impl ClientConnection {
                         .and_then(|v| v.as_str())
                         .unwrap_or("");
 
-                    if msg_type == "client.auth.response" {
+                    if msg_type == "server.auth.response" {
                         let status = response
                             .get("payload")
                             .and_then(|v| v.get("status"))
@@ -163,7 +163,7 @@ impl ClientConnection {
                         }
                     } else {
                         anyhow::bail!(
-                            "Unexpected response: expected client.auth.response, got {msg_type}"
+                            "Unexpected response: expected server.auth.response, got {msg_type}"
                         )
                     }
                 }
@@ -188,7 +188,7 @@ impl ClientConnection {
         let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
 
         let request = json!({
-            "msg_type": "client.agents.list",
+            "msg_type": "server.agent.list",
             "id": msg_id,
             "timestamp": timestamp,
             "payload": {}
@@ -209,7 +209,7 @@ impl ClientConnection {
                         .and_then(|v| v.as_str())
                         .unwrap_or("");
 
-                    if msg_type == "client.agents.list.response" {
+                    if msg_type == "server.agent.list.response" {
                         let agents: Vec<AgentInfo> = serde_json::from_value(
                             response
                                 .get("payload")
@@ -220,7 +220,7 @@ impl ClientConnection {
                         Ok(agents)
                     } else {
                         anyhow::bail!(
-                            "Unexpected response: expected client.agents.list.response, got {msg_type}"
+                            "Unexpected response: expected server.agent.list.response, got {msg_type}"
                         )
                     }
                 }
@@ -252,7 +252,7 @@ impl ClientConnection {
         }
 
         let request = json!({
-            "msg_type": "client.sessions.list",
+            "msg_type": "server.session.list",
             "id": msg_id,
             "timestamp": timestamp,
             "payload": payload
@@ -273,7 +273,7 @@ impl ClientConnection {
                         .and_then(|v| v.as_str())
                         .unwrap_or("");
 
-                    if msg_type == "client.sessions.list.response" {
+                    if msg_type == "server.session.list.response" {
                         let sessions: Vec<SessionInfo> = serde_json::from_value(
                             response
                                 .get("payload")
@@ -284,7 +284,7 @@ impl ClientConnection {
                         Ok(sessions)
                     } else {
                         anyhow::bail!(
-                            "Unexpected response: expected client.sessions.list.response, got {msg_type}"
+                            "Unexpected response: expected server.session.list.response, got {msg_type}"
                         )
                     }
                 }
@@ -315,7 +315,7 @@ impl ClientConnection {
         let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
 
         let request = json!({
-            "msg_type": "client.session.attach",
+            "msg_type": "server.session.attach",
             "id": msg_id,
             "timestamp": timestamp,
             "payload": {
@@ -339,9 +339,9 @@ impl ClientConnection {
                         .and_then(|v| v.as_str())
                         .unwrap_or("");
 
-                    if msg_type != "client.session.attach.response" {
+                    if msg_type != "server.session.attach.response" {
                         anyhow::bail!(
-                            "Unexpected response: expected client.session.attach.response, got {msg_type}"
+                            "Unexpected response: expected server.session.attach.response, got {msg_type}"
                         );
                     }
 
@@ -443,7 +443,7 @@ pub async fn create_session_on_agent(
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
 
     let request = json!({
-        "msg_type": "session.create",
+        "msg_type": "agent.session.create",
         "id": msg_id,
         "timestamp": timestamp,
         "payload": {
@@ -527,7 +527,7 @@ pub async fn kill_session_on_agent(agent_address: &str, session_name: &str) -> R
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
 
     let request = json!({
-        "msg_type": "session.kill",
+        "msg_type": "agent.session.kill",
         "id": msg_id,
         "timestamp": timestamp,
         "payload": {
@@ -617,7 +617,7 @@ mod tests {
                             .unwrap_or("");
 
                         let response = match msg_type {
-                            "client.auth" => {
+                            "server.auth" => {
                                 let token = parsed
                                     .get("payload")
                                     .and_then(|v| v.get("auth_token"))
@@ -632,7 +632,7 @@ mod tests {
 
                                 if token == "valid_token" {
                                     json!({
-                                        "msg_type": "client.auth.response",
+                                        "msg_type": "server.auth.response",
                                         "id": parsed.get("id").unwrap(),
                                         "timestamp": 0,
                                         "payload": {
@@ -643,7 +643,7 @@ mod tests {
                                     })
                                 } else {
                                     json!({
-                                        "msg_type": "client.auth.response",
+                                        "msg_type": "server.auth.response",
                                         "id": parsed.get("id").unwrap(),
                                         "timestamp": 0,
                                         "payload": {
@@ -653,9 +653,9 @@ mod tests {
                                     })
                                 }
                             }
-                            "client.agents.list" => {
+                            "server.agent.list" => {
                                 json!({
-                                    "msg_type": "client.agents.list.response",
+                                    "msg_type": "server.agent.list.response",
                                     "id": parsed.get("id").unwrap(),
                                     "timestamp": 0,
                                     "payload": {
@@ -673,9 +673,9 @@ mod tests {
                                     }
                                 })
                             }
-                            "client.sessions.list" => {
+                            "server.session.list" => {
                                 json!({
-                                    "msg_type": "client.sessions.list.response",
+                                    "msg_type": "server.session.list.response",
                                     "id": parsed.get("id").unwrap(),
                                     "timestamp": 0,
                                     "payload": {
@@ -692,7 +692,7 @@ mod tests {
                                     }
                                 })
                             }
-                            "client.session.attach" => {
+                            "server.session.attach" => {
                                 let preferred_mode = parsed
                                     .get("payload")
                                     .and_then(|v| v.get("preferred_mode"))
@@ -701,7 +701,7 @@ mod tests {
 
                                 if preferred_mode == "relay" {
                                     json!({
-                                        "msg_type": "client.session.attach.response",
+                                        "msg_type": "server.session.attach.response",
                                         "id": parsed.get("id").unwrap(),
                                         "timestamp": 0,
                                         "payload": {
@@ -711,7 +711,7 @@ mod tests {
                                     })
                                 } else {
                                     json!({
-                                        "msg_type": "client.session.attach.response",
+                                        "msg_type": "server.session.attach.response",
                                         "id": parsed.get("id").unwrap(),
                                         "timestamp": 0,
                                         "payload": {
@@ -887,7 +887,7 @@ mod tests {
                             .unwrap_or("");
 
                         let response = match msg_type {
-                            "session.create" => {
+                            "agent.session.create" => {
                                 let name = parsed
                                     .get("payload")
                                     .and_then(|v| v.get("name"))
@@ -903,7 +903,7 @@ mod tests {
                                     }
                                 })
                             }
-                            "session.kill" => {
+                            "agent.session.kill" => {
                                 let name = parsed
                                     .get("payload")
                                     .and_then(|v| v.get("name"))

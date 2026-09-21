@@ -40,12 +40,12 @@ export class EnvPlugin implements TransportPlugin {
 
   /** List all environment-variable files visible to the server. */
   async listEnvFiles(): Promise<EnvListResponse> {
-    return this.requireConnection().request<EnvListResponse>('client.env.list', {});
+    return this.requireConnection().request<EnvListResponse>('server.env.list', {});
   }
 
   /** Fetch a single env file's content and usage state. */
   async getEnvFile(ref: EnvFileRef): Promise<EnvGetResponse> {
-    return this.requireConnection().request<EnvGetResponse>('client.env.get', {
+    return this.requireConnection().request<EnvGetResponse>('server.env.get', {
       name: ref.name,
       source: ref.source,
       agent_id: ref.agent_id,
@@ -62,7 +62,7 @@ export class EnvPlugin implements TransportPlugin {
     overwrite: boolean,
     force = false,
   ): Promise<EnvWriteResponse> {
-    return this.requireConnection().request<EnvWriteResponse>('client.env.write', {
+    return this.requireConnection().request<EnvWriteResponse>('server.env.write', {
       name: ref.name,
       source: ref.source,
       agent_id: ref.agent_id,
@@ -74,7 +74,7 @@ export class EnvPlugin implements TransportPlugin {
 
   /** Delete an env file. */
   async deleteEnvFile(ref: EnvFileRef): Promise<EnvDeleteResponse> {
-    return this.requireConnection().request<EnvDeleteResponse>('client.env.delete', {
+    return this.requireConnection().request<EnvDeleteResponse>('server.env.delete', {
       name: ref.name,
       source: ref.source,
       agent_id: ref.agent_id,
@@ -86,7 +86,7 @@ export class EnvPlugin implements TransportPlugin {
     sessionId: string,
     envFiles: EnvFileRef[],
   ): Promise<SessionEnvResponse> {
-    return this.requireConnection().request<SessionEnvResponse>('client.session.env.apply', {
+    return this.requireConnection().request<SessionEnvResponse>('server.session.env.apply', {
       session_id: sessionId,
       env_files: envFiles,
     });
@@ -97,7 +97,7 @@ export class EnvPlugin implements TransportPlugin {
     sessionId: string,
     envFiles: EnvFileRef[],
   ): Promise<SessionEnvResponse> {
-    return this.requireConnection().request<SessionEnvResponse>('client.session.env.unset', {
+    return this.requireConnection().request<SessionEnvResponse>('server.session.env.unset', {
       session_id: sessionId,
       env_files: envFiles,
     });
@@ -106,7 +106,7 @@ export class EnvPlugin implements TransportPlugin {
   /** List the env files currently sourced into a session. */
   async getSessionEnvActive(sessionId: string): Promise<SessionEnvActiveResponse> {
     return this.requireConnection().request<SessionEnvActiveResponse>(
-      'client.session.env.active',
+      'server.session.env.active',
       { session_id: sessionId },
     );
   }
@@ -114,7 +114,7 @@ export class EnvPlugin implements TransportPlugin {
   /** Query an agent's full env-file state for a session. */
   async queryAgentEnvState(sessionId: string): Promise<SessionEnvQueryResponse> {
     return this.requireConnection().request<SessionEnvQueryResponse>(
-      'client.session.env.query',
+      'server.session.env.query',
       { session_id: sessionId },
     );
   }
