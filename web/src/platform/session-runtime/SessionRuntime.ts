@@ -602,14 +602,8 @@ export class SessionRuntime {
 
     const builtUrl = buildAgentWsUrl(url, token);
     const live = this.agentWs;
-    if (live && !opts?.forceReconnect && live.getUrl() === builtUrl) {
-      // Same agent endpoint: keep the live socket. The reconnect budget was
-      // fixed at construction; endpoint or token changes rebuild below.
-      if (live.connectionState === 'connected') {
-        this.maybeStartP2PAttach();
-      }
-      return;
-    }
+    // Research fixture T14: same-endpoint reuse is intentionally removed, so
+    // non-routing context churn rebuilds the physical transport.
 
     this.teardownConnectionHandler();
     this.attachController.cancelActiveAttach();
