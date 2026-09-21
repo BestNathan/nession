@@ -56,6 +56,30 @@ jobs:
               cp .research/ai-native/acceptance/T12.test.ts \
                 web/src/platform/session-runtime/__tests__/unit/__research_T12.test.ts
               ;;
+            *t13*)
+              cp .research/ai-native/acceptance/T13.test.ts \
+                web/src/app/__tests__/integration/__research_T13.test.ts
+              ;;
+            *t14*)
+              cp .research/ai-native/acceptance/T14.test.ts \
+                web/src/platform/session-runtime/__tests__/unit/__research_T14.test.ts
+              ;;
+            *t15*)
+              cp .research/ai-native/acceptance/T15.test.ts \
+                web/src/platform/session-runtime/__tests__/unit/__research_T15.test.ts
+              ;;
+            *t16*)
+              cp .research/ai-native/acceptance/T16.test.ts \
+                web/src/platform/session-runtime/__tests__/unit/__research_T16.test.ts
+              ;;
+            *t17*)
+              cp .research/ai-native/acceptance/T17.test.ts \
+                web/src/platform/attach/__tests__/unit/__research_T17.test.ts
+              ;;
+            *t18*)
+              cp .research/ai-native/acceptance/T18.test.ts \
+                web/src/platform/session-runtime/__tests__/unit/__research_T18.test.ts
+              ;;
             *t04*)
               cp .research/ai-native/acceptance/T04.test.ts \
                 web/src/platform/session-runtime/__tests__/unit/__research_T04.test.ts
