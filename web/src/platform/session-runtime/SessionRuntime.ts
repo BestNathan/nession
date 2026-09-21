@@ -288,9 +288,7 @@ export class SessionRuntime {
   }
 
   private applyForceRelay(): void {
-    if (this.config.forcedRelay) {
-      return;
-    }
+    // Research mutation T23: force-relay transition is intentionally non-idempotent.
     this.config = { ...this.config, forcedRelay: true };
     this.addressPolicy.update({ forcedRelay: true });
     this.attachedTransportGeneration = null;
