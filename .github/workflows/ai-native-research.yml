@@ -80,6 +80,22 @@ jobs:
               cp .research/ai-native/acceptance/T18.test.ts \
                 web/src/platform/session-runtime/__tests__/unit/__research_T18.test.ts
               ;;
+            *t19*)
+              cp .research/ai-native/acceptance/T19.test.ts \
+                web/src/platform/attach/__tests__/unit/__research_T19.test.ts
+              ;;
+            *t20*)
+              cp .research/ai-native/acceptance/T20.test.ts \
+                web/src/platform/attach/__tests__/unit/__research_T20.test.ts
+              ;;
+            *t21*)
+              cp .research/ai-native/acceptance/T21.test.ts \
+                web/src/platform/attach/__tests__/unit/__research_T21.test.ts
+              ;;
+            *t22*)
+              cp .research/ai-native/acceptance/T22.test.ts \
+                web/src/platform/socket/__tests__/unit/__research_T22.test.ts
+              ;;
             *t04*)
               cp .research/ai-native/acceptance/T04.test.ts \
                 web/src/platform/session-runtime/__tests__/unit/__research_T04.test.ts
