@@ -124,7 +124,15 @@ async fn register_agent_with_server(
         metadata,
         Arc::new(SessionManager::new()),
         "/tmp".to_string(),
-        None, // extension_registry
+        // A real registry: this chain goes through a real nession-server, which
+        // refuses a registration with no manifest. `served_descriptors` is what
+        // `main` composes, so this chain carries the manifest an agent really
+        // sends rather than a subset of it.
+        Some(Arc::new(nession_agent::extension::ExtensionRegistry::new(
+            agent_id,
+            Vec::new(),
+            nession_agent::protocol::served_descriptors()?,
+        )?)),
     );
 
     Ok(client.connect_and_run().await?.0)
@@ -343,6 +351,7 @@ async fn test_session_lifecycle() {
         name: session_name.to_string(),
         width: 80,
         height: 24,
+        env_snapshots: Vec::new(),
     };
     let req = new_message(agent_msg_types::SESSION_CREATE, create);
     let json = serde_json::to_string(&req).unwrap();

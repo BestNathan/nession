@@ -13,7 +13,7 @@ import { FIXTURE_AGENTS } from './fixtureData';
  * A canned git backend for the fixture route.
  *
  * The fixture is offline, so the git capability has nothing to talk to. This
- * stands in for the agent's `extension.git.*` answers with deterministic data,
+ * stands in for the agent's `git.*` answers with deterministic data,
  * which is what lets the canonical route render the view at all — and therefore
  * what lets e2e assert #750 SC2 (untracked has no expander) and SC5 (no write
  * affordance) against real DOM rather than against a jsdom mock.
@@ -46,19 +46,19 @@ export function fixtureGitSurface(search: string): PluginSurface {
     connectionState: 'connected',
     protocols,
     request<T>(type: string, payload: Record<string, unknown>): Promise<T> {
-      if (type === 'extension.git.status') {
+      if (type === 'git.status') {
         return Promise.resolve(status as T);
       }
-      if (type === 'extension.git.diff') {
+      if (type === 'git.diff') {
         return Promise.resolve(diffFor(String(payload.path)) as T);
       }
-      if (type === 'extension.git.log') {
+      if (type === 'git.log') {
         return Promise.resolve(historyFor(payload.limit) as T);
       }
-      if (type === 'extension.git.branches') {
+      if (type === 'git.branches') {
         return Promise.resolve(branchesFor(payload.limit) as T);
       }
-      if (type === 'extension.git.worktrees') {
+      if (type === 'git.worktrees') {
         return Promise.resolve(WORKTREES as T);
       }
       return Promise.reject(new Error(`fixture git surface does not answer ${type}`));

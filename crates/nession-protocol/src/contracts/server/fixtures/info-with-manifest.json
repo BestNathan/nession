@@ -1,0 +1,1 @@
+{"version":"0.35.0","image_tag":"a1b2c3d","uptime_seconds":8412,"agent_count":3,"online_agent_count":2,"session_count":7,"build_time":"2026-09-20T05:12:00Z","protocol_manifest":{"provider":"nession-server","protocols":{"session.attach":{"versions":[1],"wire":["client.session.attach"]},"agent.register":{"versions":[1],"wire":["agent.register"]}}}}

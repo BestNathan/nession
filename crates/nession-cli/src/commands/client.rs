@@ -51,16 +51,19 @@ pub async fn list_agents(server_url: &str, auth_token: &str) -> Result<()> {
 
 /// How an agent's advertised protocol set reads in one column (`#678`).
 ///
-/// `legacy` rather than `0`: an agent that advertised no manifest is a **Legacy
-/// Peer** — one that predates manifests — not a peer serving nothing. Printing
-/// `0` would report the second as the first, and they resolve differently.
+/// `no manifest` rather than `0`: a peer this server has no manifest for is not
+/// a peer that serves nothing, and printing `0` would report the second as the
+/// first — they resolve differently.
 ///
-/// `None` also covers the agent that composed no providers, which is the same
-/// absence for the same reason: nothing to serve.
+/// Since `#678` became a breaking upgrade, registration refuses an agent that
+/// advertises nothing, so this is a straggler that has not reconnected since
+/// the server was upgraded. It is worth naming rather than hiding: every call
+/// to that agent will come back `contract_not_supported`, and a reader looking
+/// at this column should be able to see why.
 fn protocol_summary(agent: &crate::client::connection::AgentInfo) -> String {
     match &agent.protocols {
         Some(manifest) => format!("{} units", manifest.protocols.len()),
-        None => "legacy".to_string(),
+        None => "no manifest".to_string(),
     }
 }
 
@@ -173,7 +176,7 @@ pub async fn attach_session(
             // Create WebSocket transport
             let transport = crate::terminal::raw::WebSocketTransport::new(agent_ws);
 
-            // Send client.attach to agent with session name
+            // Send agent.attach to agent with session name
             use nession_agent::server::websocket::{
                 msg_types as agent_msg_types, ClientAttachPayload, Message as AgentMessage,
             };

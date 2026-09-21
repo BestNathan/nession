@@ -1,5 +1,5 @@
 /**
- * The git capability's names for the wire types (`extension.git.*`, #750).
+ * The git capability's names for the wire types (`git.*`, #750).
  *
  * **These are aliases, not mirrors.** Every shape here is derived from the
  * generated bindings in `@/generated/protocol/git/…`, which are generated from

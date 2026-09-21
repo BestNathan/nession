@@ -13,12 +13,13 @@
 
 use anyhow::{Context, Result};
 use nession_agent::config::AgentConfig;
-use nession_agent::connection::{core_descriptors, ServerClient};
+use nession_agent::connection::ServerClient;
 use nession_agent::extension::ExtensionRegistry;
 use nession_agent::git_workdir::TmuxWorkdirResolver;
 use nession_agent::identity;
 use nession_agent::netdetect::build_advertised_addresses;
 use nession_agent::netwatch;
+use nession_agent::protocol::served_descriptors;
 use nession_agent::server::AgentServer;
 use nession_agent::sync::heartbeat::HeartbeatLoop;
 use nession_agent::sync::session_watcher::SessionWatcher;
@@ -218,11 +219,12 @@ async fn main() -> Result<()> {
         //
         // The third argument is the other half of what this runtime serves: the
         // Protocol Units whose handlers are the agent's own methods rather than
-        // an extension. They come from the same `core_routes!` invocation that
-        // dispatches them (`protocol`), so the manifest cannot advertise a unit
-        // the message loop does not route.
+        // an extension. They come from the two invocations that dispatch them
+        // (`core_routes!` for the server connection, `p2p_routes!` for the
+        // agent's own socket), so the manifest cannot advertise a unit neither
+        // message loop routes.
         let ext_registry = Arc::new(
-            ExtensionRegistry::new(agent_id.clone(), extensions, core_descriptors()?)
+            ExtensionRegistry::new(agent_id.clone(), extensions, served_descriptors()?)
                 .context("cannot compose this agent's protocol providers")?,
         );
 

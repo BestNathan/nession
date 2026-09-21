@@ -52,16 +52,16 @@ const INITIAL_RECONNECT_DELAY: Duration = Duration::from_secs(1);
 
 /// Message type constants for agent-to-server protocol.
 pub mod msg_types {
-    pub const AGENT_REGISTER: &str = "agent.register";
-    pub const AGENT_REGISTER_RESPONSE: &str = "agent.register.response";
-    pub const AGENT_HEARTBEAT: &str = "agent.heartbeat";
-    pub const AGENT_SESSION_UPDATE: &str = "agent.session.update";
+    pub const AGENT_REGISTER: &str = "server.agent.register";
+    pub const AGENT_REGISTER_RESPONSE: &str = "server.agent.register.response";
+    pub const AGENT_HEARTBEAT: &str = "server.agent.heartbeat";
+    pub const AGENT_SESSION_UPDATE: &str = "server.agent.session-update";
     pub const SERVER_HEARTBEAT_ACK: &str = "server.heartbeat.ack";
-    pub const AGENT_ADDRESS_UPDATE: &str = "agent.address_update";
+    pub const AGENT_ADDRESS_UPDATE: &str = "server.agent.address-update";
     /// Server asks the agent for its live tmux session list. Used by the web
     /// UI's force-refresh so the server can rebuild its registry from the
     /// agent's actual state instead of waiting for the next watcher poll.
-    pub const SERVER_SESSIONS_LIST: &str = "server.sessions.list";
+    pub const SERVER_SESSIONS_LIST: &str = "agent.session.report";
 }
 
 /// Payload for session update messages.
@@ -114,7 +114,7 @@ pub struct ServerClient {
     display_name: Option<String>,
     /// Default working directory for new tmux sessions.
     default_working_dir: String,
-    /// Extension registry for dispatching extension.* messages.
+    /// Registry for dispatching the units the composed providers declare.
     extension_registry: Option<Arc<ExtensionRegistry>>,
     /// Agent metadata.
     metadata: AgentMetadata,
@@ -323,7 +323,10 @@ impl ServerClient {
         let (shutdown_tx, shutdown_rx) = mpsc::channel(1);
         // One-shot-ish channel to learn the heartbeat interval from the first
         // registration. Using a bounded channel of 1 keeps it simple.
-        let (interval_tx, mut interval_rx) = mpsc::channel::<Option<u64>>(1);
+        // The first attempt's outcome: the heartbeat interval on acceptance,
+        // `Ok(None)` on a transient failure, or the server's reason for
+        // refusing. `Err` is terminal and travels to the caller.
+        let (interval_tx, mut interval_rx) = mpsc::channel::<Result<Option<u64>, String>>(1);
         let sync_needed = Arc::new(AtomicBool::new(false));
         let connected = Arc::new(AtomicBool::new(false));
 
@@ -343,9 +346,18 @@ impl ServerClient {
                 .await;
         });
 
-        // Wait (briefly) for the first registration to report the interval.
-        let interval = interval_rx.recv().await.flatten();
-        Ok((handle, interval))
+        // Wait (briefly) for the first attempt to report its outcome. A refusal
+        // is returned rather than turned into `Ok`: the supervisor runs in a
+        // spawned task, so anything it swallows here is invisible to the
+        // caller — which is how an agent could report a healthy connection
+        // while the server was refusing every message it sent.
+        match interval_rx.recv().await {
+            Some(Ok(interval)) => Ok((handle, interval)),
+            Some(Err(message)) => Err(anyhow::Error::new(RegistrationRejected(message))),
+            // The supervisor stopped before reporting, which it does not do
+            // except on shutdown. `Ok` matches what this returned before.
+            None => Ok((handle, None)),
+        }
     }
 
     /// Supervisor loop: connect → register → service → reconnect, forever.
@@ -353,7 +365,7 @@ impl ServerClient {
         self,
         mut outbox_rx: mpsc::UnboundedReceiver<WsMessage>,
         mut shutdown_rx: mpsc::Receiver<()>,
-        interval_tx: mpsc::Sender<Option<u64>>,
+        interval_tx: mpsc::Sender<Result<Option<u64>, String>>,
         sync_needed: Arc<AtomicBool>,
         connected: Arc<AtomicBool>,
     ) {
@@ -382,7 +394,7 @@ impl ServerClient {
                     // Report the heartbeat interval from the first connection so
                     // connect_and_run can unblock.
                     if !reported_interval {
-                        let _ = interval_tx.try_send(interval);
+                        let _ = interval_tx.try_send(Ok(interval));
                         reported_interval = true;
                     }
 
@@ -405,10 +417,25 @@ impl ServerClient {
                     }
                 }
                 Err(e) => {
+                    // A refusal is permanent, so it must not be retried and it
+                    // must not be swallowed. Stop, and hand the reason to
+                    // whoever is waiting on the first attempt.
+                    if let Some(rejected) = e.downcast_ref::<RegistrationRejected>() {
+                        // No `reported_interval = true` here: this returns, so
+                        // nothing would read it.
+                        if !reported_interval {
+                            let _ = interval_tx.try_send(Err(rejected.0.clone()));
+                        }
+                        warn!("{e}. Not reconnecting — this agent must be upgraded.");
+                        return;
+                    }
+
                     // Make sure connect_and_run doesn't block forever if the
-                    // very first connection fails.
+                    // very first connection fails. `Ok(None)` rather than an
+                    // error: a connection failure is transient and the loop
+                    // below keeps trying.
                     if !reported_interval {
-                        let _ = interval_tx.try_send(None);
+                        let _ = interval_tx.try_send(Ok(None));
                         reported_interval = true;
                     }
                     warn!(
@@ -450,10 +477,14 @@ impl ServerClient {
             display_name: self.display_name.clone(),
             connect_url: self.connect_url.clone(),
             addresses: self.addresses.clone(),
-            // Derived from the providers this agent actually composed. `None`
-            // when it composed none — which is a real state (the CLI's path),
-            // and the server reads it as a Legacy Peer rather than as a peer
-            // that supports everything.
+            // Derived from the providers this agent actually composed.
+            //
+            // `None` when it composed none, and the server now **refuses** that
+            // (`#678` is a breaking upgrade): a peer it cannot route for does
+            // not connect. A real agent always composes at least one provider —
+            // `main.rs` builds a non-empty list — so this maps to `Some` on
+            // every path that ships. It stays an `Option` on the wire so an old
+            // agent gets a clear rejection rather than a parse error.
             protocol_manifest: self
                 .extension_registry
                 .as_ref()
@@ -485,7 +516,7 @@ impl ServerClient {
                             interval = payload.heartbeat_interval_secs;
                             break;
                         } else {
-                            anyhow::bail!("registration rejected by server: {}", payload.message);
+                            return Err(anyhow::Error::new(RegistrationRejected(payload.message)));
                         }
                     }
                     // Ignore any other message arriving before the response.
@@ -624,7 +655,7 @@ impl ServerClient {
                     };
 
                     let response = serde_json::json!({
-                        "msg_type": "agent.session.command.response",
+                        "msg_type": "server.agent.command-response",
                         "id": uuid::Uuid::new_v4().to_string(),
                         "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
                         "payload": {
@@ -660,6 +691,26 @@ impl ServerClient {
         Ok(())
     }
 }
+
+/// The server refused this agent's registration (`#678`).
+///
+/// Its own type, not an `anyhow` message, because it is a different *kind* of
+/// failure from a connection error and the supervisor has to tell them apart:
+///
+/// - A connection error is **transient** — the server is down, the network
+///   blipped — and retrying is exactly right.
+/// - A refusal is **permanent**. The server routes only by manifest, this agent
+///   has none, and reconnecting will be refused identically. Retrying forever
+///   would bury the one line that says why in a stream of reconnect warnings.
+///
+/// It also has to reach the caller. The supervisor runs in a spawned task, so
+/// before this existed a refusal left `connect_and_run` returning `Ok` — an
+/// agent that logged "Connected to central server" while every message it sent
+/// went nowhere. That is the failure `#678` exists to make impossible, and
+/// refusing without saying so would have been a new instance of it.
+#[derive(Debug, thiserror::Error)]
+#[error("registration rejected by server: {0}")]
+pub struct RegistrationRejected(pub String);
 
 /// Why [`ServerClient::run_connection`] returned.
 enum ConnectionOutcome {
@@ -768,7 +819,7 @@ mod tests {
 
                 // Send a registration response.
                 let response = serde_json::json!({
-                    "msg_type": "agent.register.response",
+                    "msg_type": "server.agent.register.response",
                     "id": "test-id",
                     "timestamp": 1234567890,
                     "payload": {
@@ -829,7 +880,7 @@ mod tests {
             .expect("no message received");
 
         let parsed: serde_json::Value = serde_json::from_str(&msg).unwrap();
-        assert_eq!(parsed["msg_type"], "agent.register");
+        assert_eq!(parsed["msg_type"], "server.agent.register");
         assert_eq!(parsed["payload"]["agent_id"], "test-agent-1");
         assert_eq!(parsed["payload"]["hostname"], "test-host");
         assert_eq!(parsed["payload"]["port"], 8080);
@@ -883,7 +934,7 @@ mod tests {
             .expect("no message received");
 
         let parsed: serde_json::Value = serde_json::from_str(&msg).unwrap();
-        assert_eq!(parsed["msg_type"], "agent.heartbeat");
+        assert_eq!(parsed["msg_type"], "server.agent.heartbeat");
         assert_eq!(parsed["payload"]["agent_id"], "test-agent-2");
         assert_eq!(parsed["payload"]["status"], "online");
         assert_eq!(parsed["payload"]["session_count"], 5);
@@ -939,7 +990,7 @@ mod tests {
             .expect("no message received");
 
         let parsed: serde_json::Value = serde_json::from_str(&msg).unwrap();
-        assert_eq!(parsed["msg_type"], "agent.session.update");
+        assert_eq!(parsed["msg_type"], "server.agent.session-update");
         assert_eq!(parsed["payload"]["agent_id"], "test-agent-3");
         assert_eq!(parsed["payload"]["session_name"], "test-session");
         assert_eq!(parsed["payload"]["status"], "active");
@@ -964,7 +1015,7 @@ mod tests {
                 let ws = accept_async(stream).await.expect("failed to accept ws");
                 let (mut sink, mut stream) = ws.split();
                 let response = serde_json::json!({
-                    "msg_type": "agent.register.response",
+                    "msg_type": "server.agent.register.response",
                     "id": "test-id",
                     "timestamp": 1234567890,
                     "payload": {
@@ -1028,7 +1079,7 @@ mod tests {
                     let ws = accept_async(stream).await.expect("accept ws");
                     let (mut sink, mut stream) = ws.split();
                     let response = serde_json::json!({
-                        "msg_type": "agent.register.response",
+                        "msg_type": "server.agent.register.response",
                         "id": "test-id",
                         "timestamp": 1,
                         "payload": { "status": "accepted", "message": "ok" }
@@ -1038,7 +1089,7 @@ mod tests {
                     // Read the register message and report it.
                     if let Some(Ok(WsMessage::Text(text))) = stream.next().await {
                         let parsed: serde_json::Value = serde_json::from_str(&text).unwrap();
-                        if parsed["msg_type"] == "agent.register" {
+                        if parsed["msg_type"] == "server.agent.register" {
                             let _ = re_tx
                                 .send(
                                     parsed["payload"]["agent_id"]
@@ -1125,7 +1176,7 @@ mod tests {
 
                 // Send registration response.
                 let response = serde_json::json!({
-                    "msg_type": "agent.register.response",
+                    "msg_type": "server.agent.register.response",
                     "id": "test-id",
                     "timestamp": 1234567890,
                     "payload": {
@@ -1140,7 +1191,7 @@ mod tests {
 
                 // Send session create command.
                 let create_cmd = serde_json::json!({
-                    "msg_type": "server.session.create",
+                    "msg_type": "agent.session.create",
                     "id": "cmd-1",
                     "timestamp": 1234567891,
                     "payload": {
@@ -1205,7 +1256,7 @@ mod tests {
             .expect("no message received");
 
         let parsed: serde_json::Value = serde_json::from_str(&msg).unwrap();
-        assert_eq!(parsed["msg_type"], "agent.session.command.response");
+        assert_eq!(parsed["msg_type"], "server.agent.command-response");
         assert_eq!(parsed["payload"]["request_id"], "req-123");
         assert_eq!(parsed["payload"]["command"], "session.create");
         assert_eq!(parsed["payload"]["success"], true);
@@ -1240,7 +1291,7 @@ mod tests {
 
                 // Send registration response.
                 let response = serde_json::json!({
-                    "msg_type": "agent.register.response",
+                    "msg_type": "server.agent.register.response",
                     "id": "test-id",
                     "timestamp": 1234567890,
                     "payload": {
@@ -1261,7 +1312,7 @@ mod tests {
 
                 // Send session kill command.
                 let kill_cmd = serde_json::json!({
-                    "msg_type": "server.session.kill",
+                    "msg_type": "agent.session.kill",
                     "id": "cmd-2",
                     "timestamp": 1234567892,
                     "payload": {
@@ -1323,7 +1374,7 @@ mod tests {
             .expect("no message received");
 
         let parsed: serde_json::Value = serde_json::from_str(&msg).unwrap();
-        assert_eq!(parsed["msg_type"], "agent.session.command.response");
+        assert_eq!(parsed["msg_type"], "server.agent.command-response");
         assert_eq!(parsed["payload"]["request_id"], "req-456");
         assert_eq!(parsed["payload"]["command"], "session.kill");
         assert_eq!(parsed["payload"]["success"], true);
@@ -1351,7 +1402,7 @@ mod tests {
 
                 // Send registration response.
                 let response = serde_json::json!({
-                    "msg_type": "agent.register.response",
+                    "msg_type": "server.agent.register.response",
                     "id": "test-id",
                     "timestamp": 1234567890,
                     "payload": {
@@ -1660,7 +1711,7 @@ mod tests {
                 let (mut sink, mut stream) = ws.split();
 
                 let response = serde_json::json!({
-                    "msg_type": "agent.register.response",
+                    "msg_type": "server.agent.register.response",
                     "id": "test-id",
                     "timestamp": 1234567890,
                     "payload": { "status": "accepted", "message": "ok" }
@@ -1669,7 +1720,7 @@ mod tests {
                 let _ = stream.next().await;
 
                 let cmd = serde_json::json!({
-                    "msg_type": "server.env.list",
+                    "msg_type": "agent.env.list",
                     "id": "cmd-env-list",
                     "timestamp": 1234567891,
                     "payload": { "request_id": "req-env-list-1" }
@@ -1749,7 +1800,7 @@ mod tests {
                 let (mut sink, mut stream) = ws.split();
 
                 let response = serde_json::json!({
-                    "msg_type": "agent.register.response",
+                    "msg_type": "server.agent.register.response",
                     "id": "test-id",
                     "timestamp": 1234567890,
                     "payload": { "status": "accepted", "message": "ok" }
@@ -1758,7 +1809,7 @@ mod tests {
                 let _ = stream.next().await;
 
                 let cmd = serde_json::json!({
-                    "msg_type": "server.sessions.list",
+                    "msg_type": "agent.session.report",
                     "id": "cmd-sessions-list",
                     "timestamp": 1234567891,
                     "payload": { "request_id": "req-sessions-list-1" }
@@ -1815,7 +1866,7 @@ mod tests {
             .expect("no message received");
 
         let parsed: serde_json::Value = serde_json::from_str(&msg).unwrap();
-        assert_eq!(parsed["msg_type"], "agent.session.command.response");
+        assert_eq!(parsed["msg_type"], "server.agent.command-response");
         assert_eq!(parsed["payload"]["request_id"], "req-sessions-list-1");
         assert_eq!(parsed["payload"]["command"], "sessions.list");
         assert_eq!(parsed["payload"]["success"], true);
@@ -1843,7 +1894,7 @@ mod tests {
                 let (mut sink, mut stream) = ws.split();
 
                 let response = serde_json::json!({
-                    "msg_type": "agent.register.response",
+                    "msg_type": "server.agent.register.response",
                     "id": "test-id",
                     "timestamp": 1234567890,
                     "payload": { "status": "accepted", "message": "ok" }
@@ -1852,7 +1903,7 @@ mod tests {
                 let _ = stream.next().await;
 
                 let cmd = serde_json::json!({
-                    "msg_type": "server.env.query",
+                    "msg_type": "agent.env.query",
                     "id": "cmd-env-query",
                     "timestamp": 1234567891,
                     "payload": { "request_id": "req-env-query-1" }
@@ -1934,7 +1985,7 @@ mod tests {
                 let (mut sink, mut stream) = ws.split();
 
                 let response = serde_json::json!({
-                    "msg_type": "agent.register.response",
+                    "msg_type": "server.agent.register.response",
                     "id": "test-id",
                     "timestamp": 1234567890,
                     "payload": { "status": "accepted", "message": "ok" }
@@ -1949,7 +2000,7 @@ mod tests {
                     .await;
 
                 let cmd = serde_json::json!({
-                    "msg_type": "server.session.env.unset",
+                    "msg_type": "agent.session.env.unset",
                     "id": "cmd-env-unset",
                     "timestamp": 1234567891,
                     "payload": {
@@ -2153,7 +2204,7 @@ mod tests {
                 let (mut sink, mut stream) = ws.split();
 
                 let response = serde_json::json!({
-                    "msg_type": "agent.register.response",
+                    "msg_type": "server.agent.register.response",
                     "id": "test-id",
                     "timestamp": 1234567890,
                     "payload": { "status": "accepted", "message": "ok" }
@@ -2162,7 +2213,7 @@ mod tests {
                 let _ = stream.next().await; // skip registration
 
                 let create_cmd = serde_json::json!({
-                    "msg_type": "server.session.create",
+                    "msg_type": "agent.session.create",
                     "id": "cmd-create",
                     "timestamp": 1234567891,
                     "payload": {
@@ -2175,7 +2226,7 @@ mod tests {
                 let _ = sink.send(WsMessage::Text(create_cmd.to_string())).await;
 
                 let list_cmd = serde_json::json!({
-                    "msg_type": "server.sessions.list",
+                    "msg_type": "agent.session.report",
                     "id": "cmd-list",
                     "timestamp": 1234567892,
                     "payload": { "request_id": "req-list" }
@@ -2256,7 +2307,8 @@ mod tests {
             loop {
                 let msg = msg_rx.recv().await.expect("server closed");
                 let parsed: serde_json::Value = serde_json::from_str(&msg).unwrap();
-                if parsed.get("msg_type").and_then(|v| v.as_str()) == Some("agent.heartbeat") {
+                if parsed.get("msg_type").and_then(|v| v.as_str()) == Some("server.agent.heartbeat")
+                {
                     return;
                 }
             }
@@ -2361,7 +2413,7 @@ mod tests {
 // ── The Protocol Units this agent serves ──
 
 core_routes!(agent, msg, responses;
-    "session.create" => "server.session.create" => {
+    "agent.session.create" => "agent.session.create" => {
                     let payload: ServerSessionCreatePayload =
                         match serde_json::from_value(msg.payload.clone()) {
                             Ok(p) => p,
@@ -2398,7 +2450,7 @@ core_routes!(agent, msg, responses;
                     };
 
                     let response = serde_json::json!({
-                        "msg_type": "agent.session.command.response",
+                        "msg_type": "server.agent.command-response",
                         "id": uuid::Uuid::new_v4().to_string(),
                         "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
                         "payload": {
@@ -2411,7 +2463,7 @@ core_routes!(agent, msg, responses;
                     });
                     responses.send(WsMessage::Text(response.to_string()))?;
     }
-    "env.list" => "server.env.list" => {
+    "agent.env.list" => "agent.env.list" => {
                     let request_id = str_field(&msg.payload, "request_id");
                     let files = agent
                         .env_store
@@ -2419,7 +2471,7 @@ core_routes!(agent, msg, responses;
                         .await
                         .unwrap_or_default();
                     let response = serde_json::json!({
-                        "msg_type": "agent.session.command.response",
+                        "msg_type": "server.agent.command-response",
                         "id": uuid::Uuid::new_v4().to_string(),
                         "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
                         "payload": {
@@ -2431,7 +2483,7 @@ core_routes!(agent, msg, responses;
                     });
                     responses.send(WsMessage::Text(response.to_string()))?;
     }
-    "env.get" => "server.env.get" => {
+    "agent.env.get" => "agent.env.get" => {
                     let request_id = str_field(&msg.payload, "request_id");
                     let name = str_field(&msg.payload, "name");
                     let (success, content, error) = match agent.env_store.read(&name).await {
@@ -2439,7 +2491,7 @@ core_routes!(agent, msg, responses;
                         Err(e) => (false, None, Some(e.to_string())),
                     };
                     let response = serde_json::json!({
-                        "msg_type": "agent.session.command.response",
+                        "msg_type": "server.agent.command-response",
                         "id": uuid::Uuid::new_v4().to_string(),
                         "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
                         "payload": {
@@ -2452,7 +2504,7 @@ core_routes!(agent, msg, responses;
                     });
                     responses.send(WsMessage::Text(response.to_string()))?;
     }
-    "env.write" => "server.env.write" => {
+    "agent.env.write" => "agent.env.write" => {
                     let request_id = str_field(&msg.payload, "request_id");
                     let name = str_field(&msg.payload, "name");
                     let content = str_field(&msg.payload, "content");
@@ -2469,7 +2521,7 @@ core_routes!(agent, msg, responses;
                         };
                     let warnings = nession_common::env_file::parse_env(&content).warnings;
                     let response = serde_json::json!({
-                        "msg_type": "agent.session.command.response",
+                        "msg_type": "server.agent.command-response",
                         "id": uuid::Uuid::new_v4().to_string(),
                         "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
                         "payload": {
@@ -2483,7 +2535,7 @@ core_routes!(agent, msg, responses;
                     });
                     responses.send(WsMessage::Text(response.to_string()))?;
     }
-    "env.delete" => "server.env.delete" => {
+    "agent.env.delete" => "agent.env.delete" => {
                     let request_id = str_field(&msg.payload, "request_id");
                     let name = str_field(&msg.payload, "name");
                     let (success, error) = match agent.env_store.delete(&name).await {
@@ -2491,7 +2543,7 @@ core_routes!(agent, msg, responses;
                         Err(e) => (false, Some(e.to_string())),
                     };
                     let response = serde_json::json!({
-                        "msg_type": "agent.session.command.response",
+                        "msg_type": "server.agent.command-response",
                         "id": uuid::Uuid::new_v4().to_string(),
                         "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
                         "payload": {
@@ -2503,7 +2555,7 @@ core_routes!(agent, msg, responses;
                     });
                     responses.send(WsMessage::Text(response.to_string()))?;
     }
-    "session.env.apply" => "server.session.env.apply" => {
+    "agent.session.env.apply" => "agent.session.env.apply" => {
                     let payload: ServerSessionEnvApplyPayload =
                         match serde_json::from_value(msg.payload.clone()) {
                             Ok(p) => p,
@@ -2538,7 +2590,7 @@ core_routes!(agent, msg, responses;
                         }
                     }
                     let response = serde_json::json!({
-                        "msg_type": "agent.session.command.response",
+                        "msg_type": "server.agent.command-response",
                         "id": uuid::Uuid::new_v4().to_string(),
                         "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
                         "payload": {
@@ -2550,7 +2602,7 @@ core_routes!(agent, msg, responses;
                     });
                     responses.send(WsMessage::Text(response.to_string()))?;
     }
-    "session.env.unset" => "server.session.env.unset" => {
+    "agent.session.env.unset" => "agent.session.env.unset" => {
                     let payload: ServerSessionEnvUnsetPayload =
                         match serde_json::from_value(msg.payload.clone()) {
                             Ok(p) => p,
@@ -2571,7 +2623,7 @@ core_routes!(agent, msg, responses;
                         error = Some(e.to_string());
                     }
                     let response = serde_json::json!({
-                        "msg_type": "agent.session.command.response",
+                        "msg_type": "server.agent.command-response",
                         "id": uuid::Uuid::new_v4().to_string(),
                         "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
                         "payload": {
@@ -2583,11 +2635,11 @@ core_routes!(agent, msg, responses;
                     });
                     responses.send(WsMessage::Text(response.to_string()))?;
     }
-    "env.query" => "server.env.query" => {
+    "agent.env.query" => "agent.env.query" => {
                     let request_id = str_field(&msg.payload, "request_id");
                     let sourced_files = agent.get_sourced_env_files();
                     let response = serde_json::json!({
-                        "msg_type": "agent.session.command.response",
+                        "msg_type": "server.agent.command-response",
                         "id": uuid::Uuid::new_v4().to_string(),
                         "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
                         "payload": {
@@ -2599,7 +2651,7 @@ core_routes!(agent, msg, responses;
                     });
                     responses.send(WsMessage::Text(response.to_string()))?;
     }
-    "session.kill" => "server.session.kill" => {
+    "agent.session.kill" => "agent.session.kill" => {
                     let request_id = msg
                         .payload
                         .get("request_id")
@@ -2621,7 +2673,7 @@ core_routes!(agent, msg, responses;
                     };
 
                     let response = serde_json::json!({
-                        "msg_type": "agent.session.command.response",
+                        "msg_type": "server.agent.command-response",
                         "id": uuid::Uuid::new_v4().to_string(),
                         "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
                         "payload": {
@@ -2633,7 +2685,7 @@ core_routes!(agent, msg, responses;
                     });
                     responses.send(WsMessage::Text(response.to_string()))?;
     }
-    "session.capture-preview" => "session.capture_preview" => {
+    "agent.session.capture-preview" => "agent.session.capture-preview" => {
                     let request_id = str_field(&msg.payload, "request_id");
                     let session_name = str_field(&msg.payload, "session_name");
                     let lines = u32::try_from(
@@ -2697,12 +2749,12 @@ core_routes!(agent, msg, responses;
                     };
 
                     let response = serde_json::json!({
-                        "msg_type": "agent.session.command.response",
+                        "msg_type": "server.agent.command-response",
                         "id": uuid::Uuid::new_v4().to_string(),
                         "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
                         "payload": {
                             "request_id": request_id,
-                            "command": "session.capture_preview",
+                            "command": "agent.session.capture-preview",
                             "success": success,
                             "ansi_b64": ansi_b64,
                             "cols": cols,
@@ -2712,7 +2764,7 @@ core_routes!(agent, msg, responses;
                     });
                     responses.send(WsMessage::Text(response.to_string()))?;
     }
-    "session.list" => "server.sessions.list" => {
+    "agent.session.report" => "agent.session.report" => {
                     let request_id = str_field(&msg.payload, "request_id");
 
                     // An empty list is a legitimate answer ("no sessions here"),
@@ -2747,7 +2799,7 @@ core_routes!(agent, msg, responses;
                         .collect();
 
                     let response = serde_json::json!({
-                        "msg_type": "agent.session.command.response",
+                        "msg_type": "server.agent.command-response",
                         "id": uuid::Uuid::new_v4().to_string(),
                         "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
                         "payload": {

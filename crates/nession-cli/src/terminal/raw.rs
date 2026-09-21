@@ -626,7 +626,7 @@ mod tests {
     fn build_terminal_input_message_is_valid_json() {
         let msg = build_terminal_input_message("foo", b"hello");
         let v: serde_json::Value = serde_json::from_str(&msg).unwrap();
-        assert_eq!(v["msg_type"], "terminal.input");
+        assert_eq!(v["msg_type"], "agent.terminal.input");
         assert_eq!(v["payload"]["session_name"], "foo");
         // "hello" → base64 is "aGVsbG8="
         assert_eq!(v["payload"]["data"], "aGVsbG8=");
@@ -636,7 +636,7 @@ mod tests {
     fn build_terminal_resize_message_is_valid_json() {
         let msg = build_terminal_resize_message("s", 120, 40);
         let v: serde_json::Value = serde_json::from_str(&msg).unwrap();
-        assert_eq!(v["msg_type"], "terminal.resize");
+        assert_eq!(v["msg_type"], "agent.terminal.resize");
         assert_eq!(v["payload"]["cols"], 120);
         assert_eq!(v["payload"]["rows"], 40);
     }

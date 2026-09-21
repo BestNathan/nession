@@ -5,6 +5,7 @@ use tokio_tungstenite::tungstenite::Message;
 use tracing::{info, warn};
 
 use crate::env::EnvService;
+use crate::protocol::server_routes;
 use crate::registry::{AgentInfo, AgentRegistry, AgentStatus, SessionRegistry, SessionStatus};
 use crate::server::client_registry::ClientRegistry;
 use crate::server::command_broker::{CommandBroker, WsMessageSender};
@@ -32,11 +33,11 @@ pub enum HandlerAction {
         agent_ws_urls: Vec<String>,
         /// Session id ("agent_id:session_name") for client registry tracking.
         session_id: String,
-        /// Short session name for agent protocol messages (client.attach, etc.).
+        /// Short session name for agent protocol messages (agent.attach, etc.).
         session_name: String,
         /// Unique client id assigned for this relay connection.
         client_id: String,
-        /// Resolved env snapshots to inject via client.attach to the agent.
+        /// Resolved env snapshots to inject via agent.attach to the agent.
         env_snapshots: Vec<EnvSnapshot>,
         /// Terminal columns for the initial tmux resize (from browser viewport).
         cols: u16,
@@ -148,52 +149,49 @@ impl ConnectionHandler {
                 msg.msg_type, msg.id
             );
         }
-        // Try extension dispatch first (extension.* messages get relayed to agent)
-        if msg.msg_type.starts_with("extension.") {
-            return self.handle_extension_message(msg).await;
+        // One list, not two: `SERVER_WIRES` and `dispatch_server` come from the
+        // same `server_routes!` invocation below, so a unit cannot be
+        // advertised in the Server's manifest without a handler, or handled
+        // without being advertised. The Server is a provider like any other —
+        // it serves `agent.register`, `session.attach`, `env.*` and the rest —
+        // and before this it was the one peer whose offer was invisible.
+        if SERVER_WIRES.contains(&msg.msg_type.as_str()) {
+            return dispatch_server(self, msg).await;
         }
-        match msg.msg_type.as_str() {
-            "agent.register" => self.handle_agent_register(msg).await,
-            "agent.heartbeat" => self.handle_agent_heartbeat(msg).await,
-            "agent.session.update" => self.handle_agent_session_update(msg).await,
-            "agent.session.command.response" => self.handle_agent_command_response(msg).await,
-            "agent.terminal.resize" => self.handle_agent_terminal_resize(msg).await,
-            "agent.address_update" => self.handle_agent_address_update(msg).await,
-            "client.auth" => self.handle_client_auth(msg).await,
-            "client.agents.list" => self.handle_client_agents_list(msg).await,
-            "client.sessions.list" => self.handle_client_sessions_list(msg).await,
-            "client.session.attach" => self.handle_client_session_attach(msg).await,
-            "client.session.relay.begin" => self.handle_client_session_relay_begin(msg).await,
-            // client.session.relay.end is intercepted by the relay function
-            // (relay_bidirectional_via_channel) and never reaches here during
-            // active relay.  After relay exits the duplicate lands here; it is
-            // a safe no-op.
-            "client.session.relay.end" => Ok(HandlerAction::Reply(None)),
-            "client.session.create" => self.handle_client_session_create(msg).await,
-            "client.session.kill" => self.handle_client_session_kill(msg).await,
-            "client.session.capture_preview" => {
-                self.handle_client_session_capture_preview(msg).await
-            }
-            "client.env.list" => self.handle_client_env_list(msg).await,
-            "client.env.get" => self.handle_client_env_get(msg).await,
-            "client.env.write" => self.handle_client_env_write(msg).await,
-            "client.env.delete" => self.handle_client_env_delete(msg).await,
-            "client.session.env.apply" => self.handle_client_session_env_apply(msg).await,
-            "client.server.info" => self.handle_client_server_info(msg).await,
-            "client.session.env.unset" => self.handle_client_session_env_unset(msg).await,
-            "client.session.env.active" => self.handle_client_session_env_active(msg).await,
-            "client.session.env.query" => self.handle_client_session_env_query(msg).await,
-            "client.agent.rename" => self.handle_client_agent_rename(msg).await,
-            "client.agent.delete" => self.handle_client_agent_delete(msg).await,
-            "client.commands.list" => self.handle_client_commands_list(msg).await,
-            "client.commands.add" => self.handle_client_commands_add(msg).await,
-            "client.commands.remove" => self.handle_client_commands_remove(msg).await,
-            "client.commands.update" => self.handle_client_commands_update(msg).await,
-            _ => {
-                warn!("Unknown message type: {}", msg.msg_type);
-                Ok(HandlerAction::Reply(None))
-            }
+
+        // Not one of ours, so it is either a relay or nothing. The Server's
+        // entire knowledge of an agent's own protocols — including the ones a
+        // plugin provides — is the manifest that agent registered, and this is
+        // where it is consulted.
+        //
+        // It used to be a name test: `starts_with("extension.")`. That carried
+        // a category the Server has no business holding. Whether a protocol is
+        // a plugin is an agent-side fact; the Server's only legitimate question
+        // is "does this target say it can carry this wire?", which is what the
+        // manifest answers. The prefix also could not survive `#565`: a
+        // standalone capability host has nothing to be an "extension" *of*.
+        //
+        // Addressed to an agent, so it is a relay — and the relay decides. The
+        // gate is "does it name a target", not "does the target support it",
+        // deliberately: an agent that registered **no** manifest has to reach
+        // `handle_relayed_message` to get the refusal that names the fix
+        // ("it predates manifests — upgrade it"). Gating on the manifest here
+        // would drop that agent into the no-op below and say nothing.
+        if msg
+            .payload
+            .get("agent_id")
+            .and_then(|v| v.as_str())
+            .is_some_and(|id| !id.is_empty())
+        {
+            return self.handle_relayed_message(msg).await;
         }
+
+        // Not a declared unit. Nothing is served here — `server.session.relay.end`
+        // reaches this only as a duplicate after the relay function
+        // (`relay_bidirectional_via_channel`) has already handled it during
+        // active relay, and is a safe no-op.
+        warn!("Unknown message type: {}", msg.msg_type);
+        Ok(HandlerAction::Reply(None))
     }
 
     async fn handle_agent_register(
@@ -210,7 +208,7 @@ impl ConnectionHandler {
             info!("Agent {} rejected: invalid auth token", payload.agent_id);
             return Ok(HandlerAction::Reply(Some(Message::Text(
                 json!({
-                    "msg_type": "agent.register.response",
+                    "msg_type": "server.agent.register.response",
                     "id": msg.id,
                     "timestamp": current_timestamp(),
                     "payload": {
@@ -221,6 +219,41 @@ impl ConnectionHandler {
                 .to_string(),
             ))));
         }
+
+        // A manifest is required, not optional (`#678`).
+        //
+        // This is a **breaking upgrade**, chosen deliberately over supporting
+        // manifest-less peers through explicit adapters. An agent that
+        // advertises nothing is one this server cannot route for: every relay
+        // decision below is made by asking the target's manifest whether it
+        // carries a wire type, and a peer that has not spoken cannot answer.
+        // Relaying to it unconditionally — what this did before — is guessing,
+        // and guessing is the failure the whole design exists to remove.
+        //
+        // Refusing at registration rather than at the first relay is the
+        // difference between an agent that never starts and one that connects,
+        // looks healthy, and silently drops every request aimed at it.
+        //
+        // The field stays `Option` on the wire so this is a *clear rejection*
+        // rather than a parse error: an old agent's payload deserializes, and
+        // the answer it gets says why.
+        let Some(protocol_manifest) = payload.protocol_manifest.clone() else {
+            info!("Agent {} rejected: no protocol manifest", payload.agent_id);
+            return Ok(HandlerAction::Reply(Some(Message::Text(
+                json!({
+                    "msg_type": "server.agent.register.response",
+                    "id": msg.id,
+                    "timestamp": current_timestamp(),
+                    "payload": {
+                        "status": "rejected",
+                        "message": "This agent advertised no protocol manifest. \
+                                    This server routes only by manifest, so a peer \
+                                    without one cannot be served — upgrade the agent."
+                    }
+                })
+                .to_string(),
+            ))));
+        };
 
         let addresses = crate::registry::build_probed_addresses(
             payload.addresses.clone(),
@@ -262,9 +295,12 @@ impl ConnectionHandler {
             session_count: 0,
             active_sessions: 0,
             // What the agent says it can serve, taken from its own composition.
-            // An older agent sends nothing and registers exactly as before —
-            // that is a Legacy Peer, not a peer that supports everything.
-            protocol_manifest: payload.protocol_manifest,
+            // Always present: registration is refused without it, above. The
+            // field stays `Option` because the *registry* can still hold an
+            // agent that registered before this server was upgraded and has not
+            // reconnected since — and for that straggler the relay gate refuses
+            // rather than guesses.
+            protocol_manifest: Some(protocol_manifest),
         };
 
         self.agent_registry.register(agent_info).await;
@@ -295,7 +331,7 @@ impl ConnectionHandler {
 
         Ok(HandlerAction::Reply(Some(Message::Text(
             json!({
-                "msg_type": "agent.register.response",
+                "msg_type": "server.agent.register.response",
                 "id": msg.id,
                 "timestamp": current_timestamp(),
                 "payload": {
@@ -507,7 +543,7 @@ impl ConnectionHandler {
 
             Ok(HandlerAction::Reply(Some(Message::Text(
                 json!({
-                    "msg_type": "client.auth.response",
+                    "msg_type": "server.auth.response",
                     "id": msg.id,
                     "timestamp": current_timestamp(),
                     "payload": {
@@ -522,7 +558,7 @@ impl ConnectionHandler {
 
             Ok(HandlerAction::Reply(Some(Message::Text(
                 json!({
-                    "msg_type": "client.auth.response",
+                    "msg_type": "server.auth.response",
                     "id": msg.id,
                     "timestamp": current_timestamp(),
                     "payload": {
@@ -535,7 +571,7 @@ impl ConnectionHandler {
         }
     }
 
-    /// Handle `client.agents.list` - returns all registered agents.
+    /// Handle `server.agent.list` - returns all registered agents.
     async fn handle_client_agents_list(
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
@@ -544,7 +580,7 @@ impl ConnectionHandler {
             warn!("Unauthenticated client requested agents list");
             return Ok(HandlerAction::Reply(Some(Message::Text(
                 json!({
-                    "msg_type": "client.agents.list.response",
+                    "msg_type": "server.agent.list.response",
                     "id": msg.id,
                     "timestamp": current_timestamp(),
                     "payload": {
@@ -568,7 +604,7 @@ impl ConnectionHandler {
 
         Ok(HandlerAction::Reply(Some(Message::Text(
             json!({
-                "msg_type": "client.agents.list.response",
+                "msg_type": "server.agent.list.response",
                 "id": msg.id,
                 "timestamp": current_timestamp(),
                 "payload": {
@@ -579,7 +615,7 @@ impl ConnectionHandler {
         ))))
     }
 
-    /// Handle `client.server.info` — return server version, uptime, and stats.
+    /// Handle `server.info` — return server version, uptime, and stats.
     async fn handle_client_server_info(
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
@@ -593,7 +629,7 @@ impl ConnectionHandler {
 
         Ok(HandlerAction::Reply(Some(Message::Text(
             json!({
-                "msg_type": "client.server.info.response",
+                "msg_type": "server.info.response",
                 "id": msg.id,
                 "timestamp": current_timestamp(),
                 "payload": {
@@ -604,13 +640,17 @@ impl ConnectionHandler {
                     "online_agent_count": online,
                     "session_count": sessions,
                     "build_time": option_env!("BUILD_TIME").unwrap_or("unknown"),
+                    // What this server serves (`#678`). Derived from the same
+                    // declaration that dispatches, so it cannot claim a unit
+                    // this server does not answer.
+                    "protocol_manifest": crate::protocol::server_manifest()?,
                 }
             })
             .to_string(),
         ))))
     }
 
-    /// Handle `client.agent.rename` — update an agent's display name.
+    /// Handle `server.agent.rename` — update an agent's display name.
     /// Accepts `agent_id` and `display_name` (string or null to clear).
     /// Returns the updated agent info on success.
     async fn handle_client_agent_rename(
@@ -620,7 +660,7 @@ impl ConnectionHandler {
         if !self.authenticated_client {
             return Ok(HandlerAction::Reply(Some(Message::Text(
                 json!({
-                    "msg_type": "client.agent.rename.response",
+                    "msg_type": "server.agent.rename.response",
                     "id": msg.id,
                     "timestamp": current_timestamp(),
                     "payload": {
@@ -641,7 +681,7 @@ impl ConnectionHandler {
         if agent_id.is_empty() {
             return Ok(HandlerAction::Reply(Some(Message::Text(
                 json!({
-                    "msg_type": "client.agent.rename.response",
+                    "msg_type": "server.agent.rename.response",
                     "id": msg.id,
                     "timestamp": current_timestamp(),
                     "payload": {
@@ -673,7 +713,7 @@ impl ConnectionHandler {
                 Err(e) => {
                     return Ok(HandlerAction::Reply(Some(Message::Text(
                         json!({
-                            "msg_type": "client.agent.rename.response",
+                            "msg_type": "server.agent.rename.response",
                             "id": msg.id,
                             "timestamp": current_timestamp(),
                             "payload": {
@@ -729,7 +769,7 @@ impl ConnectionHandler {
 
                 Ok(HandlerAction::Reply(Some(Message::Text(
                     json!({
-                        "msg_type": "client.agent.rename.response",
+                        "msg_type": "server.agent.rename.response",
                         "id": msg.id,
                         "timestamp": current_timestamp(),
                         "payload": {
@@ -742,7 +782,7 @@ impl ConnectionHandler {
             }
             None => Ok(HandlerAction::Reply(Some(Message::Text(
                 json!({
-                    "msg_type": "client.agent.rename.response",
+                    "msg_type": "server.agent.rename.response",
                     "id": msg.id,
                     "timestamp": current_timestamp(),
                     "payload": {
@@ -755,7 +795,7 @@ impl ConnectionHandler {
         }
     }
 
-    /// Handle `client.agent.delete` — permanently remove an offline agent and its sessions.
+    /// Handle `server.agent.delete` — permanently remove an offline agent and its sessions.
     /// Rejects if the agent is online or degraded.
     async fn handle_client_agent_delete(
         &mut self,
@@ -764,7 +804,7 @@ impl ConnectionHandler {
         if !self.authenticated_client {
             return Ok(HandlerAction::Reply(Some(Message::Text(
                 json!({
-                    "msg_type": "client.agent.delete.response",
+                    "msg_type": "server.agent.delete.response",
                     "id": msg.id,
                     "timestamp": current_timestamp(),
                     "payload": {
@@ -785,7 +825,7 @@ impl ConnectionHandler {
         if agent_id.is_empty() {
             return Ok(HandlerAction::Reply(Some(Message::Text(
                 json!({
-                    "msg_type": "client.agent.delete.response",
+                    "msg_type": "server.agent.delete.response",
                     "id": msg.id,
                     "timestamp": current_timestamp(),
                     "payload": {
@@ -803,7 +843,7 @@ impl ConnectionHandler {
             None => {
                 return Ok(HandlerAction::Reply(Some(Message::Text(
                     json!({
-                        "msg_type": "client.agent.delete.response",
+                        "msg_type": "server.agent.delete.response",
                         "id": msg.id,
                         "timestamp": current_timestamp(),
                         "payload": {
@@ -819,7 +859,7 @@ impl ConnectionHandler {
         if agent.status != AgentStatus::Offline {
             return Ok(HandlerAction::Reply(Some(Message::Text(
                 json!({
-                    "msg_type": "client.agent.delete.response",
+                    "msg_type": "server.agent.delete.response",
                     "id": msg.id,
                     "timestamp": current_timestamp(),
                     "payload": {
@@ -846,7 +886,7 @@ impl ConnectionHandler {
             tracing::error!("Failed to delete sessions for agent {}: {:?}", agent_id, e);
             return Ok(HandlerAction::Reply(Some(Message::Text(
                 json!({
-                    "msg_type": "client.agent.delete.response",
+                    "msg_type": "server.agent.delete.response",
                     "id": msg.id,
                     "timestamp": current_timestamp(),
                     "payload": {
@@ -862,7 +902,7 @@ impl ConnectionHandler {
             tracing::error!("Failed to delete agent {}: {:?}", agent_id, e);
             return Ok(HandlerAction::Reply(Some(Message::Text(
                 json!({
-                    "msg_type": "client.agent.delete.response",
+                    "msg_type": "server.agent.delete.response",
                     "id": msg.id,
                     "timestamp": current_timestamp(),
                     "payload": {
@@ -887,7 +927,7 @@ impl ConnectionHandler {
 
         Ok(HandlerAction::Reply(Some(Message::Text(
             json!({
-                "msg_type": "client.agent.delete.response",
+                "msg_type": "server.agent.delete.response",
                 "id": msg.id,
                 "timestamp": current_timestamp(),
                 "payload": {
@@ -898,7 +938,7 @@ impl ConnectionHandler {
         ))))
     }
 
-    /// Handle `client.sessions.list` - returns all sessions, optionally filtered by agent_id.
+    /// Handle `server.session.list` - returns all sessions, optionally filtered by agent_id.
     ///
     /// With `force: true` the server first queries every online agent for its
     /// live tmux state and rebuilds the registry from the answers, so the
@@ -913,7 +953,7 @@ impl ConnectionHandler {
             warn!("Unauthenticated client requested sessions list");
             return Ok(HandlerAction::Reply(Some(Message::Text(
                 json!({
-                    "msg_type": "client.sessions.list.response",
+                    "msg_type": "server.session.list.response",
                     "id": msg.id,
                     "timestamp": current_timestamp(),
                     "payload": {
@@ -959,7 +999,7 @@ impl ConnectionHandler {
 
         Ok(HandlerAction::Reply(Some(Message::Text(
             json!({
-                "msg_type": "client.sessions.list.response",
+                "msg_type": "server.session.list.response",
                 "id": msg.id,
                 "timestamp": current_timestamp(),
                 "payload": {
@@ -1001,7 +1041,7 @@ impl ConnectionHandler {
             let outcome = self
                 .agent_command_with_timeout(
                     agent_id,
-                    "server.sessions.list",
+                    "agent.session.report",
                     json!({}),
                     SESSION_REFRESH_TIMEOUT,
                 )
@@ -1038,7 +1078,7 @@ impl ConnectionHandler {
         stale
     }
 
-    /// Handle `client.session.attach` - returns P2P agent address or enters relay mode.
+    /// Handle `server.session.attach` - returns P2P agent address or enters relay mode.
     ///
     /// In P2P mode, the response includes the agent's IP:port so the client can
     /// connect directly. In relay mode, the server opens a WebSocket to the agent
@@ -1050,7 +1090,7 @@ impl ConnectionHandler {
         if !self.authenticated_client {
             return Ok(HandlerAction::Reply(Some(Message::Text(
                 json!({
-                    "msg_type": "client.session.attach.response",
+                    "msg_type": "server.session.attach.response",
                     "id": msg.id,
                     "timestamp": current_timestamp(),
                     "payload": {
@@ -1079,7 +1119,7 @@ impl ConnectionHandler {
             None => {
                 return Ok(HandlerAction::Reply(Some(Message::Text(
                     json!({
-                        "msg_type": "client.session.attach.response",
+                        "msg_type": "server.session.attach.response",
                         "id": msg.id,
                         "timestamp": current_timestamp(),
                         "payload": {
@@ -1097,7 +1137,7 @@ impl ConnectionHandler {
         if session.is_none() {
             return Ok(HandlerAction::Reply(Some(Message::Text(
                 json!({
-                    "msg_type": "client.session.attach.response",
+                    "msg_type": "server.session.attach.response",
                     "id": msg.id,
                     "timestamp": current_timestamp(),
                     "payload": {
@@ -1116,7 +1156,7 @@ impl ConnectionHandler {
             Some(_) => {
                 return Ok(HandlerAction::Reply(Some(Message::Text(
                     json!({
-                        "msg_type": "client.session.attach.response",
+                        "msg_type": "server.session.attach.response",
                         "id": msg.id,
                         "timestamp": current_timestamp(),
                         "payload": {
@@ -1130,7 +1170,7 @@ impl ConnectionHandler {
             None => {
                 return Ok(HandlerAction::Reply(Some(Message::Text(
                     json!({
-                        "msg_type": "client.session.attach.response",
+                        "msg_type": "server.session.attach.response",
                         "id": msg.id,
                         "timestamp": current_timestamp(),
                         "payload": {
@@ -1247,7 +1287,7 @@ impl ConnectionHandler {
             if let Some(ref sender) = self.client_sender {
                 let response = Message::Text(
                     serde_json::json!({
-                        "msg_type": "client.session.attach.response",
+                        "msg_type": "server.session.attach.response",
                         "id": msg.id,
                         "timestamp": current_timestamp(),
                         "payload": {
@@ -1269,7 +1309,7 @@ impl ConnectionHandler {
             }
 
             // Phase 1 complete — relay info returned to browser.
-            // The browser will send client.session.relay.begin when the
+            // The browser will send server.session.relay.begin when the
             // Terminal is mounted and ready to receive terminal output.
             // This avoids the race between server entering relay mode and
             // the browser subscribing to terminal.output.
@@ -1280,7 +1320,7 @@ impl ConnectionHandler {
             // client tests latency across `addresses` and falls back per-address.
             Ok(HandlerAction::Reply(Some(Message::Text(
                 json!({
-                    "msg_type": "client.session.attach.response",
+                    "msg_type": "server.session.attach.response",
                     "id": msg.id,
                     "timestamp": current_timestamp(),
                     "payload": {
@@ -1301,9 +1341,9 @@ impl ConnectionHandler {
         }
     }
 
-    /// Handle `client.session.relay.begin` — Phase 2 of relay attach.
+    /// Handle `server.session.relay.begin` — Phase 2 of relay attach.
     ///
-    /// Phase 1 (client.session.attach, relay mode) returned the candidate
+    /// Phase 1 (server.session.attach, relay mode) returned the candidate
     /// addresses but did NOT enter relay forwarding.  Now the Terminal is
     /// mounted and subscribed — the browser sends this to actually start
     /// the relay data flow.
@@ -1314,7 +1354,7 @@ impl ConnectionHandler {
         if !self.authenticated_client {
             return Ok(HandlerAction::Reply(Some(Message::Text(
                 json!({
-                    "msg_type": "client.session.relay.begin.response",
+                    "msg_type": "server.session.relay.begin.response",
                     "id": msg.id,
                     "timestamp": current_timestamp(),
                     "payload": { "status": "error", "message": "Not authenticated" }
@@ -1333,7 +1373,7 @@ impl ConnectionHandler {
             None => {
                 return Ok(HandlerAction::Reply(Some(Message::Text(
                     json!({
-                        "msg_type": "client.session.relay.begin.response",
+                        "msg_type": "server.session.relay.begin.response",
                         "id": msg.id,
                         "timestamp": current_timestamp(),
                         "payload": { "status": "error", "message": "Invalid session_id format" }
@@ -1347,7 +1387,7 @@ impl ConnectionHandler {
         if session.is_none() {
             return Ok(HandlerAction::Reply(Some(Message::Text(
                 json!({
-                    "msg_type": "client.session.relay.begin.response",
+                    "msg_type": "server.session.relay.begin.response",
                     "id": msg.id, "timestamp": current_timestamp(),
                     "payload": { "status": "error", "message": format!("Session not found: {session_id}") }
                 }).to_string(),
@@ -1360,7 +1400,7 @@ impl ConnectionHandler {
             _ => {
                 return Ok(HandlerAction::Reply(Some(Message::Text(
                     json!({
-                        "msg_type": "client.session.relay.begin.response",
+                        "msg_type": "server.session.relay.begin.response",
                         "id": msg.id, "timestamp": current_timestamp(),
                         "payload": { "status": "error", "message": format!("Agent '{agent_id}' is offline") }
                     }).to_string(),
@@ -1455,7 +1495,7 @@ impl ConnectionHandler {
         })
     }
 
-    /// Handle `client.session.create` — create a new session on a target agent.
+    /// Handle `server.session.create` — create a new session on a target agent.
     async fn handle_client_session_create(
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
@@ -1463,7 +1503,7 @@ impl ConnectionHandler {
         if !self.authenticated_client {
             return Ok(HandlerAction::Reply(Some(Message::Text(
                 json!({
-                    "msg_type": "client.session.create.response",
+                    "msg_type": "server.session.create.response",
                     "id": msg.id,
                     "timestamp": current_timestamp(),
                     "payload": {
@@ -1489,7 +1529,7 @@ impl ConnectionHandler {
         if agent_id.is_empty() || name.is_empty() {
             return Ok(HandlerAction::Reply(Some(Message::Text(
                 json!({
-                    "msg_type": "client.session.create.response",
+                    "msg_type": "server.session.create.response",
                     "id": msg.id,
                     "timestamp": current_timestamp(),
                     "payload": {
@@ -1508,7 +1548,7 @@ impl ConnectionHandler {
             Some(_) => {
                 return Ok(HandlerAction::Reply(Some(Message::Text(
                     json!({
-                        "msg_type": "client.session.create.response",
+                        "msg_type": "server.session.create.response",
                         "id": msg.id,
                         "timestamp": current_timestamp(),
                         "payload": {
@@ -1522,7 +1562,7 @@ impl ConnectionHandler {
             None => {
                 return Ok(HandlerAction::Reply(Some(Message::Text(
                     json!({
-                        "msg_type": "client.session.create.response",
+                        "msg_type": "server.session.create.response",
                         "id": msg.id,
                         "timestamp": current_timestamp(),
                         "payload": {
@@ -1552,7 +1592,7 @@ impl ConnectionHandler {
                 Err(e) => {
                     return Ok(HandlerAction::Reply(Some(Message::Text(
                         json!({
-                            "msg_type": "client.session.create.response",
+                            "msg_type": "server.session.create.response",
                             "id": msg.id,
                             "timestamp": current_timestamp(),
                             "payload": { "success": false, "error": e }
@@ -1574,7 +1614,7 @@ impl ConnectionHandler {
             .command_broker
             .send_command(
                 agent_id,
-                "server.session.create",
+                "agent.session.create",
                 &request_id,
                 json!({
                     "request_id": request_id,
@@ -1630,7 +1670,7 @@ impl ConnectionHandler {
 
                 Ok(HandlerAction::Reply(Some(Message::Text(
                     json!({
-                        "msg_type": "client.session.create.response",
+                        "msg_type": "server.session.create.response",
                         "id": msg.id,
                         "timestamp": current_timestamp(),
                         "payload": {
@@ -1644,7 +1684,7 @@ impl ConnectionHandler {
             }
             Ok(Err(_)) => Ok(HandlerAction::Reply(Some(Message::Text(
                 json!({
-                    "msg_type": "client.session.create.response",
+                    "msg_type": "server.session.create.response",
                     "id": msg.id,
                     "timestamp": current_timestamp(),
                     "payload": {
@@ -1656,7 +1696,7 @@ impl ConnectionHandler {
             )))),
             Err(_) => Ok(HandlerAction::Reply(Some(Message::Text(
                 json!({
-                    "msg_type": "client.session.create.response",
+                    "msg_type": "server.session.create.response",
                     "id": msg.id,
                     "timestamp": current_timestamp(),
                     "payload": {
@@ -1669,7 +1709,7 @@ impl ConnectionHandler {
         }
     }
 
-    /// Handle `client.session.kill` — kill a session on its agent.
+    /// Handle `server.session.kill` — kill a session on its agent.
     async fn handle_client_session_kill(
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
@@ -1677,7 +1717,7 @@ impl ConnectionHandler {
         if !self.authenticated_client {
             return Ok(HandlerAction::Reply(Some(Message::Text(
                 json!({
-                    "msg_type": "client.session.kill.response",
+                    "msg_type": "server.session.kill.response",
                     "id": msg.id,
                     "timestamp": current_timestamp(),
                     "payload": {
@@ -1700,7 +1740,7 @@ impl ConnectionHandler {
             None => {
                 return Ok(HandlerAction::Reply(Some(Message::Text(
                     json!({
-                        "msg_type": "client.session.kill.response",
+                        "msg_type": "server.session.kill.response",
                         "id": msg.id,
                         "timestamp": current_timestamp(),
                         "payload": {
@@ -1722,7 +1762,7 @@ impl ConnectionHandler {
                     self.session_registry.remove(session_id).await;
                     return Ok(HandlerAction::Reply(Some(Message::Text(
                         json!({
-                            "msg_type": "client.session.kill.response",
+                            "msg_type": "server.session.kill.response",
                             "id": msg.id,
                             "timestamp": current_timestamp(),
                             "payload": {
@@ -1735,7 +1775,7 @@ impl ConnectionHandler {
                 Some(_) => {
                     return Ok(HandlerAction::Reply(Some(Message::Text(
                         json!({
-                            "msg_type": "client.session.kill.response",
+                            "msg_type": "server.session.kill.response",
                             "id": msg.id,
                             "timestamp": current_timestamp(),
                             "payload": {
@@ -1749,7 +1789,7 @@ impl ConnectionHandler {
                 None => {
                     return Ok(HandlerAction::Reply(Some(Message::Text(
                         json!({
-                            "msg_type": "client.session.kill.response",
+                            "msg_type": "server.session.kill.response",
                             "id": msg.id,
                             "timestamp": current_timestamp(),
                             "payload": {
@@ -1774,7 +1814,7 @@ impl ConnectionHandler {
             .command_broker
             .send_command(
                 &agent_id,
-                "server.session.kill",
+                "agent.session.kill",
                 &request_id,
                 json!({
                     "request_id": request_id,
@@ -1806,7 +1846,7 @@ impl ConnectionHandler {
 
                 Ok(HandlerAction::Reply(Some(Message::Text(
                     json!({
-                        "msg_type": "client.session.kill.response",
+                        "msg_type": "server.session.kill.response",
                         "id": msg.id,
                         "timestamp": current_timestamp(),
                         "payload": {
@@ -1819,7 +1859,7 @@ impl ConnectionHandler {
             }
             Ok(Err(_)) => Ok(HandlerAction::Reply(Some(Message::Text(
                 json!({
-                    "msg_type": "client.session.kill.response",
+                    "msg_type": "server.session.kill.response",
                     "id": msg.id,
                     "timestamp": current_timestamp(),
                     "payload": {
@@ -1831,7 +1871,7 @@ impl ConnectionHandler {
             )))),
             Err(_) => Ok(HandlerAction::Reply(Some(Message::Text(
                 json!({
-                    "msg_type": "client.session.kill.response",
+                    "msg_type": "server.session.kill.response",
                     "id": msg.id,
                     "timestamp": current_timestamp(),
                     "payload": {
@@ -1978,13 +2018,60 @@ impl ConnectionHandler {
         Ok(HandlerAction::Reply(None))
     }
 
-    /// Relay an extension message (extension.<name>.<action>) to the target agent.
+    /// Relay a message to the agent it names.
+    ///
+    /// Named for what it does rather than for what it used to recognise: the
+    /// caller has already established that this target's manifest carries the
+    /// wire, and nothing here inspects the message type beyond using it as the
+    /// lookup key and echoing it back. Whether the far side implements it with
+    /// a plugin is not visible from here and does not need to be.
+    ///
     /// Uses agent_command() which injects request_id into the payload so the agent
     /// can correlate its response via agent.session.command.response.
-    async fn handle_extension_message(
+    async fn handle_relayed_message(
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
     ) -> anyhow::Result<HandlerAction> {
+        // The pipeline's first step (`#678`), and the one that was missing
+        // until `#877`.
+        //
+        // **Before the payload is read, deliberately.** Everything below this
+        // point answers differently depending on which agent was named — a
+        // target that does not exist and a target that exists but does not
+        // advertise the unit are both `contract_not_supported`, with different
+        // text. An unauthenticated caller must not be able to tell those apart,
+        // so the refusal cannot consult the payload at all: it is the same
+        // answer for every request, which is also the answer that tells the
+        // caller nothing about the fleet.
+        //
+        // Every other client-facing handler in this file has had this gate all
+        // along; the relay reaches further than any of them — it crosses into
+        // another machine and can read that machine's repositories and
+        // `~/.claude/` — and was the one path that did not check.
+        //
+        // `server.auth` sets `authenticated_client` (see `handle_client_auth`),
+        // and the Web sends it as a handshake before the socket is usable, so
+        // nothing that works today stops working.
+        if !self.authenticated_client {
+            warn!(
+                "Rejected unauthenticated relayed request `{}` id={}",
+                msg.msg_type, msg.id
+            );
+            return Ok(HandlerAction::Reply(Some(Message::Text(
+                json!({
+                    "msg_type": format!("{}.response", msg.msg_type),
+                    "id": msg.id,
+                    "timestamp": current_timestamp(),
+                    "payload": {
+                        "error": "not_authenticated",
+                        "available": false,
+                        "message": "this connection has not authenticated; send `client.auth` first",
+                    },
+                })
+                .to_string(),
+            ))));
+        }
+
         let agent_id = msg
             .payload
             .get("agent_id")
@@ -2013,24 +2100,83 @@ impl ConnectionHandler {
         // The pipeline's "verify target manifest supports contract" step, and
         // the first thing that consults the manifest an agent advertised.
         //
-        // Guarded on the manifest **existing**, which is the design's legacy
-        // rule rather than a convenience: an agent that has not advertised one
-        // is a Legacy Peer, and a peer that has not spoken must not be read as
-        // one that said no. It relays exactly as it did before manifests
-        // existed.
+        // A target with **no** manifest is refused, not relayed. Registration
+        // already turns away an agent that advertises nothing, so reaching this
+        // means a straggler: one that registered before this server was
+        // upgraded and has not reconnected since. Relaying to it would be
+        // guessing at a shape nobody declared — the thing the manifest exists
+        // to stop — and the guess would be invisible, because the relay would
+        // look exactly like a working one.
         //
         // Refusing here is a *unit-scoped* answer, not a connection-level one —
         // the design is explicit that a unit with no intersection disables that
         // unit and does not take the connection with it. The client gets a
         // response correlated to its own request id and everything else on the
         // socket is untouched.
-        if let Some(manifest) = self
+        let Some(manifest) = self
             .agent_registry
             .get(agent_id)
             .await
             .and_then(|agent| agent.protocol_manifest)
-        {
-            let Some(unit) = manifest.unit_for_wire(&msg.msg_type) else {
+        else {
+            return Ok(HandlerAction::Reply(Some(Message::Text(
+                json!({
+                    "msg_type": response_msg_type,
+                    "id": msg.id,
+                    "timestamp": current_timestamp(),
+                    "payload": {
+                        "error": "contract_not_supported",
+                        "available": false,
+                        // Names the fix: the agent has to come back with a
+                        // manifest, which means an upgrade, not a retry.
+                        "message": format!(
+                            "`{agent_id}` advertised no protocol manifest, so this server \
+                             will not route `{}` to it. It predates manifests — upgrade it.",
+                            msg.msg_type
+                        ),
+                    },
+                })
+                .to_string(),
+            ))));
+        };
+
+        let Some(unit) = manifest.unit_for_wire(&msg.msg_type) else {
+            return Ok(HandlerAction::Reply(Some(Message::Text(
+                json!({
+                    "msg_type": response_msg_type,
+                    "id": msg.id,
+                    "timestamp": current_timestamp(),
+                    "payload": {
+                        "error": "contract_not_supported",
+                        "available": false,
+                        "message": format!(
+                            "`{}` does not advertise `{}`",
+                            agent_id, msg.msg_type
+                        ),
+                    },
+                })
+                .to_string(),
+            ))));
+        };
+
+        // If the caller named a contract version, the target must offer it.
+        //
+        // A caller that names one has already resolved — it read the manifest
+        // this server serves and picked a version. Refusing here is not a
+        // second negotiation; it is checking that the manifest the caller
+        // resolved against is still the one the target advertises, which is the
+        // "target manifest stale" case the design lists.
+        //
+        // No version named means the caller has not resolved, and it relays as
+        // it always did. Absence is not a claim about versions any more than it
+        // is about wire types.
+        if let Some(named) = msg.payload.get("contract_version").and_then(Value::as_u64) {
+            let offered = manifest
+                .support(unit)
+                .map(|support| support.versions.clone())
+                .unwrap_or_default();
+            let known = offered.iter().any(|v| u64::from(v.get()) == named);
+            if !known {
                 return Ok(HandlerAction::Reply(Some(Message::Text(
                     json!({
                         "msg_type": response_msg_type,
@@ -2039,56 +2185,18 @@ impl ConnectionHandler {
                         "payload": {
                             "error": "contract_not_supported",
                             "available": false,
+                            // Both sides, so a reader can see who has to move
+                            // rather than only that something did not line up.
                             "message": format!(
-                                "`{}` does not advertise `{}`",
-                                agent_id, msg.msg_type
+                                "`{agent_id}` offers `{unit}` at {offered:?}, not v{named}"
                             ),
+                            "protocol": unit.as_str(),
+                            "named_version": named,
+                            "offered_versions": offered.iter().map(|v| v.get()).collect::<Vec<_>>(),
                         },
                     })
                     .to_string(),
                 ))));
-            };
-
-            // If the caller named a contract version, the target must offer it.
-            //
-            // A caller that names one has already resolved — it read the
-            // manifest this server serves and picked a version. Refusing here
-            // is not a second negotiation; it is checking that the manifest the
-            // caller resolved against is still the one the target advertises,
-            // which is the "target manifest stale" case the design lists.
-            //
-            // No version named means the caller has not resolved, and it relays
-            // as it always did. Absence is not a claim about versions any more
-            // than it is about wire types.
-            if let Some(named) = msg.payload.get("contract_version").and_then(Value::as_u64) {
-                let offered = manifest
-                    .support(unit)
-                    .map(|support| support.versions.clone())
-                    .unwrap_or_default();
-                let known = offered.iter().any(|v| u64::from(v.get()) == named);
-                if !known {
-                    return Ok(HandlerAction::Reply(Some(Message::Text(
-                        json!({
-                            "msg_type": response_msg_type,
-                            "id": msg.id,
-                            "timestamp": current_timestamp(),
-                            "payload": {
-                                "error": "contract_not_supported",
-                                "available": false,
-                                // Both sides, so a reader can see who has to
-                                // move rather than only that something did not
-                                // line up.
-                                "message": format!(
-                                    "`{agent_id}` offers `{unit}` at {offered:?}, not v{named}"
-                                ),
-                                "protocol": unit.as_str(),
-                                "named_version": named,
-                                "offered_versions": offered.iter().map(|v| v.get()).collect::<Vec<_>>(),
-                            },
-                        })
-                        .to_string(),
-                    ))));
-                }
             }
         }
 
@@ -2125,7 +2233,7 @@ impl ConnectionHandler {
         }
     }
 
-    /// Handle `client.session.capture_preview` — capture tmux scrollback from
+    /// Handle `server.session.capture-preview` — capture tmux scrollback from
     /// a session on its agent and relay the base64-encoded ANSI back to the client.
     async fn handle_client_session_capture_preview(
         &mut self,
@@ -2140,7 +2248,7 @@ impl ConnectionHandler {
             warn!("handle_client_session_capture_preview: client not authenticated");
             return Ok(reply_json(
                 &msg.id,
-                "client.session.capture_preview.response",
+                "server.session.capture-preview.response",
                 json!({ "error": "Not authenticated" }),
             ));
         }
@@ -2172,7 +2280,7 @@ impl ConnectionHandler {
                 );
                 return Ok(reply_json(
                     &msg.id,
-                    "client.session.capture_preview.response",
+                    "server.session.capture-preview.response",
                     json!({ "error": "Invalid session_id format. Expected 'agent_id:session_name'" }),
                 ));
             }
@@ -2193,7 +2301,7 @@ impl ConnectionHandler {
                 );
                 return Ok(reply_json(
                     &msg.id,
-                    "client.session.capture_preview.response",
+                    "server.session.capture-preview.response",
                     json!({ "error": format!("Agent '{}' is offline", agent_id) }),
                 ));
             }
@@ -2204,7 +2312,7 @@ impl ConnectionHandler {
                 );
                 return Ok(reply_json(
                     &msg.id,
-                    "client.session.capture_preview.response",
+                    "server.session.capture-preview.response",
                     json!({ "error": format!("Agent '{}' not found", agent_id) }),
                 ));
             }
@@ -2225,7 +2333,7 @@ impl ConnectionHandler {
         match self
             .agent_command_with_timeout(
                 &agent_id,
-                "session.capture_preview",
+                "agent.session.capture-preview",
                 payload,
                 Duration::from_secs(15),
             )
@@ -2238,7 +2346,7 @@ impl ConnectionHandler {
                 );
                 Ok(reply_json(
                     &msg.id,
-                    "client.session.capture_preview.response",
+                    "server.session.capture-preview.response",
                     response,
                 ))
             }
@@ -2246,7 +2354,7 @@ impl ConnectionHandler {
                 warn!("handle_client_session_capture_preview: agent_command_with_timeout failed for agent {}: {}", agent_id, e);
                 Ok(reply_json(
                     &msg.id,
-                    "client.session.capture_preview.response",
+                    "server.session.capture-preview.response",
                     json!({ "error": e }),
                 ))
             }
@@ -2318,7 +2426,7 @@ impl ConnectionHandler {
         }
     }
 
-    /// Handle `client.env.list` — aggregate server env files with those from
+    /// Handle `server.env.list` — aggregate server env files with those from
     /// every online agent (EC6: same filename on both shows twice with badges).
     async fn handle_client_env_list(
         &mut self,
@@ -2327,7 +2435,7 @@ impl ConnectionHandler {
         if !self.authenticated_client {
             return Ok(reply_json(
                 &msg.id,
-                "client.env.list.response",
+                "server.env.list.response",
                 json!({ "files": [], "error": "Not authenticated" }),
             ));
         }
@@ -2340,7 +2448,7 @@ impl ConnectionHandler {
                 continue;
             }
             match self
-                .agent_command(&agent.agent_id, "server.env.list", json!({}))
+                .agent_command(&agent.agent_id, "agent.env.list", json!({}))
                 .await
             {
                 Ok(resp) => {
@@ -2361,12 +2469,12 @@ impl ConnectionHandler {
 
         Ok(reply_json(
             &msg.id,
-            "client.env.list.response",
+            "server.env.list.response",
             json!({ "files": files }),
         ))
     }
 
-    /// Handle `client.env.get` — read one env file's content and report which
+    /// Handle `server.env.get` — read one env file's content and report which
     /// sessions currently use it (for the in-use lock).
     async fn handle_client_env_get(
         &mut self,
@@ -2375,7 +2483,7 @@ impl ConnectionHandler {
         if !self.authenticated_client {
             return Ok(reply_json(
                 &msg.id,
-                "client.env.get.response",
+                "server.env.get.response",
                 json!({ "success": false, "error": "Not authenticated" }),
             ));
         }
@@ -2383,7 +2491,7 @@ impl ConnectionHandler {
         if name.is_empty() {
             return Ok(reply_json(
                 &msg.id,
-                "client.env.get.response",
+                "server.env.get.response",
                 json!({ "success": false, "error": "name is required" }),
             ));
         }
@@ -2402,7 +2510,7 @@ impl ConnectionHandler {
                 .map_err(|e| e.to_string()),
             EnvSource::Agent => match &agent_id {
                 Some(aid) => self
-                    .agent_command(aid, "server.env.get", json!({ "name": name }))
+                    .agent_command(aid, "agent.env.get", json!({ "name": name }))
                     .await
                     .and_then(|resp| {
                         if resp.get("success").and_then(serde_json::Value::as_bool) == Some(true) {
@@ -2426,18 +2534,18 @@ impl ConnectionHandler {
         match result {
             Ok(content) => Ok(reply_json(
                 &msg.id,
-                "client.env.get.response",
+                "server.env.get.response",
                 json!({ "success": true, "content": content, "in_use_by": in_use_by }),
             )),
             Err(e) => Ok(reply_json(
                 &msg.id,
-                "client.env.get.response",
+                "server.env.get.response",
                 json!({ "success": false, "error": e, "in_use_by": in_use_by }),
             )),
         }
     }
 
-    /// Handle `client.env.write` — create/overwrite an env file. Blocks writes
+    /// Handle `server.env.write` — create/overwrite an env file. Blocks writes
     /// to files currently in use by a running session (SC5/EC10).
     async fn handle_client_env_write(
         &mut self,
@@ -2446,7 +2554,7 @@ impl ConnectionHandler {
         if !self.authenticated_client {
             return Ok(reply_json(
                 &msg.id,
-                "client.env.write.response",
+                "server.env.write.response",
                 json!({ "success": false, "error": "Not authenticated" }),
             ));
         }
@@ -2471,7 +2579,7 @@ impl ConnectionHandler {
         if name.is_empty() {
             return Ok(reply_json(
                 &msg.id,
-                "client.env.write.response",
+                "server.env.write.response",
                 json!({ "success": false, "error": "name is required" }),
             ));
         }
@@ -2487,7 +2595,7 @@ impl ConnectionHandler {
             if !in_use.is_empty() {
                 return Ok(reply_json(
                     &msg.id,
-                    "client.env.write.response",
+                    "server.env.write.response",
                     json!({
                         "success": false,
                         "error": format!(
@@ -2513,7 +2621,7 @@ impl ConnectionHandler {
                 Some(aid) => self
                     .agent_command(
                         aid,
-                        "server.env.write",
+                        "agent.env.write",
                         json!({ "name": name, "content": content, "overwrite": overwrite }),
                     )
                     .await
@@ -2575,7 +2683,7 @@ impl ConnectionHandler {
 
                 Ok(reply_json(
                     &msg.id,
-                    "client.env.write.response",
+                    "server.env.write.response",
                     json!({
                         "success": true,
                         "warnings": warnings,
@@ -2586,18 +2694,18 @@ impl ConnectionHandler {
             }
             Ok(false) => Ok(reply_json(
                 &msg.id,
-                "client.env.write.response",
+                "server.env.write.response",
                 json!({ "success": false, "exists": true }),
             )),
             Err(e) => Ok(reply_json(
                 &msg.id,
-                "client.env.write.response",
+                "server.env.write.response",
                 json!({ "success": false, "error": e }),
             )),
         }
     }
 
-    /// Handle `client.env.delete` — delete an env file (blocked if in use).
+    /// Handle `server.env.delete` — delete an env file (blocked if in use).
     async fn handle_client_env_delete(
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
@@ -2605,7 +2713,7 @@ impl ConnectionHandler {
         if !self.authenticated_client {
             return Ok(reply_json(
                 &msg.id,
-                "client.env.delete.response",
+                "server.env.delete.response",
                 json!({ "success": false, "error": "Not authenticated" }),
             ));
         }
@@ -2618,7 +2726,7 @@ impl ConnectionHandler {
         if name.is_empty() {
             return Ok(reply_json(
                 &msg.id,
-                "client.env.delete.response",
+                "server.env.delete.response",
                 json!({ "success": false, "error": "name is required" }),
             ));
         }
@@ -2633,7 +2741,7 @@ impl ConnectionHandler {
             if !in_use.is_empty() {
                 return Ok(reply_json(
                     &msg.id,
-                    "client.env.delete.response",
+                    "server.env.delete.response",
                     json!({
                         "success": false,
                         "error": format!(
@@ -2654,7 +2762,7 @@ impl ConnectionHandler {
                 .map_err(|e| e.to_string()),
             EnvSource::Agent => match &agent_id {
                 Some(aid) => self
-                    .agent_command(aid, "server.env.delete", json!({ "name": name }))
+                    .agent_command(aid, "agent.env.delete", json!({ "name": name }))
                     .await
                     .and_then(|resp| {
                         if resp.get("success").and_then(serde_json::Value::as_bool) == Some(true) {
@@ -2674,12 +2782,12 @@ impl ConnectionHandler {
         match outcome {
             Ok(()) => Ok(reply_json(
                 &msg.id,
-                "client.env.delete.response",
+                "server.env.delete.response",
                 json!({ "success": true }),
             )),
             Err(e) => Ok(reply_json(
                 &msg.id,
-                "client.env.delete.response",
+                "server.env.delete.response",
                 json!({ "success": false, "error": e }),
             )),
         }
@@ -2704,7 +2812,7 @@ impl ConnectionHandler {
                     // normally the same agent hosting the session).
                     let owner = r.agent_id.as_deref().unwrap_or(agent_id);
                     let resp = self
-                        .agent_command(owner, "server.env.get", json!({ "name": r.name }))
+                        .agent_command(owner, "agent.env.get", json!({ "name": r.name }))
                         .await?;
                     if resp.get("success").and_then(serde_json::Value::as_bool) != Some(true) {
                         return Err(format!(
@@ -2730,7 +2838,7 @@ impl ConnectionHandler {
         Ok(snapshots)
     }
 
-    /// Handle `client.session.env.apply` — apply env files to a running session.
+    /// Handle `server.session.env.apply` — apply env files to a running session.
     async fn handle_client_session_env_apply(
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
@@ -2738,7 +2846,7 @@ impl ConnectionHandler {
         if !self.authenticated_client {
             return Ok(reply_json(
                 &msg.id,
-                "client.session.env.apply.response",
+                "server.session.env.apply.response",
                 json!({ "success": false, "error": "Not authenticated" }),
             ));
         }
@@ -2757,7 +2865,7 @@ impl ConnectionHandler {
         let Some((agent_id, session_name)) = session_id.split_once(':') else {
             return Ok(reply_json(
                 &msg.id,
-                "client.session.env.apply.response",
+                "server.session.env.apply.response",
                 json!({ "success": false, "error": "Invalid session_id" }),
             ));
         };
@@ -2769,7 +2877,7 @@ impl ConnectionHandler {
             Err(e) => {
                 return Ok(reply_json(
                     &msg.id,
-                    "client.session.env.apply.response",
+                    "server.session.env.apply.response",
                     json!({ "success": false, "error": e }),
                 ));
             }
@@ -2780,7 +2888,7 @@ impl ConnectionHandler {
         let resp = self
             .agent_command(
                 &agent_id,
-                "server.session.env.apply",
+                "agent.session.env.apply",
                 json!({ "name": session_name, "snapshots": snapshots }),
             )
             .await;
@@ -2792,13 +2900,13 @@ impl ConnectionHandler {
                     .record_attach(&session_id, &refs, None);
                 Ok(reply_json(
                     &msg.id,
-                    "client.session.env.apply.response",
+                    "server.session.env.apply.response",
                     json!({ "success": true, "warnings": warnings }),
                 ))
             }
             Ok(r) => Ok(reply_json(
                 &msg.id,
-                "client.session.env.apply.response",
+                "server.session.env.apply.response",
                 json!({
                     "success": false,
                     "error": r.get("error").and_then(|v| v.as_str()).unwrap_or("apply failed")
@@ -2806,13 +2914,13 @@ impl ConnectionHandler {
             )),
             Err(e) => Ok(reply_json(
                 &msg.id,
-                "client.session.env.apply.response",
+                "server.session.env.apply.response",
                 json!({ "success": false, "error": e }),
             )),
         }
     }
 
-    /// Handle `client.session.env.unset` — remove attach-time env files from a
+    /// Handle `server.session.env.unset` — remove attach-time env files from a
     /// running session (on detach).
     async fn handle_client_session_env_unset(
         &mut self,
@@ -2821,7 +2929,7 @@ impl ConnectionHandler {
         if !self.authenticated_client {
             return Ok(reply_json(
                 &msg.id,
-                "client.session.env.unset.response",
+                "server.session.env.unset.response",
                 json!({ "success": false, "error": "Not authenticated" }),
             ));
         }
@@ -2840,7 +2948,7 @@ impl ConnectionHandler {
         let Some((agent_id, session_name)) = session_id.split_once(':') else {
             return Ok(reply_json(
                 &msg.id,
-                "client.session.env.unset.response",
+                "server.session.env.unset.response",
                 json!({ "success": false, "error": "Invalid session_id" }),
             ));
         };
@@ -2861,7 +2969,7 @@ impl ConnectionHandler {
         let resp = self
             .agent_command(
                 &agent_id,
-                "server.session.env.unset",
+                "agent.session.env.unset",
                 json!({ "name": session_name, "keys": keys }),
             )
             .await;
@@ -2876,13 +2984,13 @@ impl ConnectionHandler {
             Ok(r) if r.get("success").and_then(serde_json::Value::as_bool) == Some(true) => {
                 Ok(reply_json(
                     &msg.id,
-                    "client.session.env.unset.response",
+                    "server.session.env.unset.response",
                     json!({ "success": true }),
                 ))
             }
             Ok(r) => Ok(reply_json(
                 &msg.id,
-                "client.session.env.unset.response",
+                "server.session.env.unset.response",
                 json!({
                     "success": false,
                     "error": r.get("error").and_then(|v| v.as_str()).unwrap_or("unset failed")
@@ -2890,13 +2998,13 @@ impl ConnectionHandler {
             )),
             Err(e) => Ok(reply_json(
                 &msg.id,
-                "client.session.env.unset.response",
+                "server.session.env.unset.response",
                 json!({ "success": false, "error": e }),
             )),
         }
     }
 
-    /// Handle `client.session.env.active` — list env files active on a session.
+    /// Handle `server.session.env.active` — list env files active on a session.
     async fn handle_client_session_env_active(
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
@@ -2904,7 +3012,7 @@ impl ConnectionHandler {
         if !self.authenticated_client {
             return Ok(reply_json(
                 &msg.id,
-                "client.session.env.active.response",
+                "server.session.env.active.response",
                 json!({ "active": [], "error": "Not authenticated" }),
             ));
         }
@@ -2916,12 +3024,12 @@ impl ConnectionHandler {
         let active = self.env_service.usage.active_for(session_id);
         Ok(reply_json(
             &msg.id,
-            "client.session.env.active.response",
+            "server.session.env.active.response",
             json!({ "active": active }),
         ))
     }
 
-    /// Handle `client.session.env.query` — ask the agent which env files are
+    /// Handle `server.session.env.query` — ask the agent which env files are
     /// currently sourced (applied to its process environment).
     async fn handle_client_session_env_query(
         &mut self,
@@ -2930,7 +3038,7 @@ impl ConnectionHandler {
         if !self.authenticated_client {
             return Ok(reply_json(
                 &msg.id,
-                "client.session.env.query.response",
+                "server.session.env.query.response",
                 json!({ "sourced_files": [], "error": "Not authenticated" }),
             ));
         }
@@ -2942,12 +3050,12 @@ impl ConnectionHandler {
         let Some((agent_id, _session_name)) = session_id.split_once(':') else {
             return Ok(reply_json(
                 &msg.id,
-                "client.session.env.query.response",
+                "server.session.env.query.response",
                 json!({ "sourced_files": [], "error": "Invalid session_id" }),
             ));
         };
         let resp = self
-            .agent_command(agent_id, "server.env.query", json!({}))
+            .agent_command(agent_id, "agent.env.query", json!({}))
             .await;
         match resp {
             Ok(r) => {
@@ -2962,13 +3070,13 @@ impl ConnectionHandler {
                     .unwrap_or_default();
                 Ok(reply_json(
                     &msg.id,
-                    "client.session.env.query.response",
+                    "server.session.env.query.response",
                     json!({ "sourced_files": sourced }),
                 ))
             }
             Err(e) => Ok(reply_json(
                 &msg.id,
-                "client.session.env.query.response",
+                "server.session.env.query.response",
                 json!({ "sourced_files": [], "error": e }),
             )),
         }
@@ -2983,7 +3091,7 @@ impl ConnectionHandler {
         if !self.authenticated_client {
             return Ok(reply_json(
                 &msg.id,
-                "client.commands.list.response",
+                "server.commands.list.response",
                 json!({ "commands": [], "error": "Not authenticated" }),
             ));
         }
@@ -3003,7 +3111,7 @@ impl ConnectionHandler {
             .collect();
         Ok(reply_json(
             &msg.id,
-            "client.commands.list.response",
+            "server.commands.list.response",
             json!({ "commands": items }),
         ))
     }
@@ -3015,7 +3123,7 @@ impl ConnectionHandler {
         if !self.authenticated_client {
             return Ok(reply_json(
                 &msg.id,
-                "client.commands.add.response",
+                "server.commands.add.response",
                 json!({ "success": false, "error": "Not authenticated" }),
             ));
         }
@@ -3038,7 +3146,7 @@ impl ConnectionHandler {
         if label.is_empty() || command.is_empty() {
             return Ok(reply_json(
                 &msg.id,
-                "client.commands.add.response",
+                "server.commands.add.response",
                 json!({ "success": false, "error": "Label and command are required" }),
             ));
         }
@@ -3056,14 +3164,14 @@ impl ConnectionHandler {
         if let Err(e) = self.db.upsert_quick_command(&row).await {
             return Ok(reply_json(
                 &msg.id,
-                "client.commands.add.response",
+                "server.commands.add.response",
                 json!({ "success": false, "error": e.to_string() }),
             ));
         }
         self.web_client_registry.broadcast_commands_changed().await;
         Ok(reply_json(
             &msg.id,
-            "client.commands.add.response",
+            "server.commands.add.response",
             json!({ "success": true, "id": id }),
         ))
     }
@@ -3075,7 +3183,7 @@ impl ConnectionHandler {
         if !self.authenticated_client {
             return Ok(reply_json(
                 &msg.id,
-                "client.commands.remove.response",
+                "server.commands.remove.response",
                 json!({ "success": false, "error": "Not authenticated" }),
             ));
         }
@@ -3088,21 +3196,21 @@ impl ConnectionHandler {
         if id.is_empty() {
             return Ok(reply_json(
                 &msg.id,
-                "client.commands.remove.response",
+                "server.commands.remove.response",
                 json!({ "success": false, "error": "id is required" }),
             ));
         }
         if let Err(e) = self.db.delete_quick_command(&id).await {
             return Ok(reply_json(
                 &msg.id,
-                "client.commands.remove.response",
+                "server.commands.remove.response",
                 json!({ "success": false, "error": e.to_string() }),
             ));
         }
         self.web_client_registry.broadcast_commands_changed().await;
         Ok(reply_json(
             &msg.id,
-            "client.commands.remove.response",
+            "server.commands.remove.response",
             json!({ "success": true }),
         ))
     }
@@ -3114,7 +3222,7 @@ impl ConnectionHandler {
         if !self.authenticated_client {
             return Ok(reply_json(
                 &msg.id,
-                "client.commands.update.response",
+                "server.commands.update.response",
                 json!({ "success": false, "error": "Not authenticated" }),
             ));
         }
@@ -3127,7 +3235,7 @@ impl ConnectionHandler {
         if id.is_empty() {
             return Ok(reply_json(
                 &msg.id,
-                "client.commands.update.response",
+                "server.commands.update.response",
                 json!({ "success": false, "error": "id is required" }),
             ));
         }
@@ -3140,18 +3248,18 @@ impl ConnectionHandler {
                 self.web_client_registry.broadcast_commands_changed().await;
                 Ok(reply_json(
                     &msg.id,
-                    "client.commands.update.response",
+                    "server.commands.update.response",
                     json!({ "success": true }),
                 ))
             }
             Ok(false) => Ok(reply_json(
                 &msg.id,
-                "client.commands.update.response",
+                "server.commands.update.response",
                 json!({ "success": false, "error": "Command not found" }),
             )),
             Err(e) => Ok(reply_json(
                 &msg.id,
-                "client.commands.update.response",
+                "server.commands.update.response",
                 json!({ "success": false, "error": e.to_string() }),
             )),
         }
@@ -3257,7 +3365,7 @@ fn current_timestamp() -> u64 {
         .as_secs()
 }
 
-/// Serialise a session for the wire. Shared by `client.sessions.list` and the
+/// Serialise a session for the wire. Shared by `server.session.list` and the
 /// `sessions.changed` broadcast so both always agree on the field set — the
 /// web client feeds either straight into the same state setter.
 pub(crate) fn session_to_json(s: &crate::registry::SessionInfo) -> serde_json::Value {
@@ -3465,11 +3573,23 @@ mod tests {
         relay_payload(h, wire, json!({"agent_id": "agent-a"})).await
     }
 
+    /// Relay an extension message **as an authenticated client**.
+    ///
+    /// The authentication is part of the helper because it is a precondition
+    /// now (`#877`): a connection that has not authenticated is refused before
+    /// the payload is read, so a test that relays without this flag is a test
+    /// of the refusal, not of the relay. Every other handler in this file has
+    /// always worked this way — `listed_protocols` below sets the same flag —
+    /// and these tests only ever got away without it because the extension path
+    /// was the one that forgot to check.
+    ///
+    /// Tests asserting the refusal deliberately do **not** call this.
     async fn relay_payload(
         h: &mut ConnectionHandler,
         wire: &str,
         payload: serde_json::Value,
     ) -> serde_json::Value {
+        h.authenticated_client = true;
         let action = h.handle_message(proto_msg(wire, payload)).await.unwrap();
         parse_reply(action)["payload"].clone()
     }
@@ -3483,11 +3603,8 @@ mod tests {
                 "git.status",
                 "nession-git",
                 vec![
-                    ContractDescriptor::new(ContractVersion::V1, &["extension.git.status"]),
-                    ContractDescriptor::new(
-                        ContractVersion::new(2).unwrap(),
-                        &["extension.git.status.v2"],
-                    ),
+                    ContractDescriptor::new(ContractVersion::V1, &["git.status"]),
+                    ContractDescriptor::new(ContractVersion::new(2).unwrap(), &["git.status.v2"]),
                 ],
             )
             .unwrap()],
@@ -3498,15 +3615,15 @@ mod tests {
     async fn a_target_that_does_not_carry_the_wire_type_is_refused() {
         // The first thing that consults the manifest an agent advertised.
         let mut h = test_handler("").await;
-        register_agent(&h, Some(manifest_carrying("extension.git.status"))).await;
+        register_agent(&h, Some(manifest_carrying("git.status"))).await;
 
-        let payload = relay(&mut h, "extension.git.diff").await;
+        let payload = relay(&mut h, "git.diff").await;
         assert_eq!(payload["error"], "contract_not_supported");
         assert!(
             payload["message"]
                 .as_str()
                 .unwrap_or("")
-                .contains("extension.git.diff"),
+                .contains("git.diff"),
             "the refusal should name what was asked for: {payload}"
         );
     }
@@ -3517,9 +3634,9 @@ mod tests {
         // fails — but it fails *later*, with a different error, which is what
         // proves the manifest check let it through instead of refusing.
         let mut h = test_handler("").await;
-        register_agent(&h, Some(manifest_carrying("extension.git.status"))).await;
+        register_agent(&h, Some(manifest_carrying("git.status"))).await;
 
-        let payload = relay(&mut h, "extension.git.status").await;
+        let payload = relay(&mut h, "git.status").await;
         assert_ne!(
             payload["error"], "contract_not_supported",
             "a carried wire type must not be refused by the manifest check"
@@ -3528,17 +3645,110 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_agent_that_advertised_no_manifest_still_relays() {
-        // The legacy rule, and the one that decides whether this is a
-        // regression: a peer that has not spoken is not a peer that said no.
-        // An agent registered without a manifest relays exactly as it did
-        // before manifests existed.
+    async fn an_agent_that_advertised_no_manifest_is_refused_not_relayed() {
+        // The rule this replaced said a peer that has not spoken is not a peer
+        // that said no, and relayed to it exactly as before manifests existed.
+        // `#678` is a breaking upgrade: it is now a peer this server cannot
+        // route for, and guessing at a shape nobody declared is the failure the
+        // manifest exists to prevent.
+        //
+        // Reached by registering directly into the registry, because that is
+        // the only way this state arises now — `agent.register` refuses it, so
+        // this is the straggler that registered before the upgrade.
         let mut h = test_handler("").await;
         register_agent(&h, None).await;
 
-        let payload = relay(&mut h, "extension.git.diff").await;
-        assert_ne!(payload["error"], "contract_not_supported");
-        assert_eq!(payload["error"], "agent_disconnected");
+        let payload = relay(&mut h, "git.diff").await;
+        assert_eq!(payload["error"], "contract_not_supported");
+        assert!(
+            payload["message"]
+                .as_str()
+                .unwrap()
+                .contains("no protocol manifest"),
+            "the refusal must say which absence it is: {payload}"
+        );
+        // Refusing is unit-scoped, so the connection and every other unit are
+        // untouched — the difference between this and a registration refusal.
+        assert_eq!(payload["available"], false);
+    }
+
+    // ---- the pipeline's first step (#877) ----
+
+    /// Relay without authenticating, which is the state the gate exists for.
+    ///
+    /// Deliberately not `relay_payload`: that helper authenticates, so using it
+    /// here would assert nothing about the refusal.
+    async fn relay_unauthenticated(h: &mut ConnectionHandler, wire: &str) -> serde_json::Value {
+        let action = h
+            .handle_message(proto_msg(wire, json!({ "agent_id": "agent-a" })))
+            .await
+            .unwrap();
+        parse_reply(action)["payload"].clone()
+    }
+
+    #[tokio::test]
+    async fn an_unauthenticated_extension_request_is_refused_before_it_reaches_an_agent() {
+        // The finding in `#877`: every other client-facing handler checked
+        // `authenticated_client` and this one did not, so any client that could
+        // open a socket could relay to any agent with no credentials — and the
+        // target was named by the caller, so it was not merely "some agent".
+        //
+        // The target here *does* carry the wire type and *is* registered, so
+        // without the gate this would get as far as the relay and fail with
+        // `agent_disconnected`. `not_authenticated` is therefore the proof it
+        // stopped at the gate rather than somewhere further down.
+        let mut h = test_handler("tok").await;
+        register_agent(&h, Some(manifest_carrying("git.status"))).await;
+
+        let payload = relay_unauthenticated(&mut h, "git.status").await;
+        assert_eq!(payload["error"], "not_authenticated");
+        assert_eq!(payload["available"], false);
+    }
+
+    #[tokio::test]
+    async fn the_refusal_does_not_depend_on_which_target_was_named() {
+        // The property that decides where the gate sits. Below it, the answers
+        // differ by target: an agent that does not exist and one that exists
+        // but does not carry the unit are both `contract_not_supported`, with
+        // different text naming the agent. An unauthenticated caller able to
+        // tell those apart has a way to enumerate the fleet without a
+        // credential.
+        //
+        // The gate reads nothing from the payload, so the two are not merely
+        // similar — they are the same bytes.
+        let mut h = test_handler("tok").await;
+        register_agent(&h, Some(manifest_carrying("git.status"))).await;
+
+        let known_target = relay_unauthenticated(&mut h, "git.status").await;
+
+        let action = h
+            .handle_message(proto_msg(
+                "git.status",
+                json!({ "agent_id": "an-agent-that-was-never-registered" }),
+            ))
+            .await
+            .unwrap();
+        let unknown_target = parse_reply(action)["payload"].clone();
+
+        assert_eq!(
+            known_target, unknown_target,
+            "the refusal must not vary with the target"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_authenticated_client_still_relays() {
+        // The other half of the gate: it must refuse exactly the connections
+        // that have not authenticated and nothing else. Without this, deleting
+        // the relay would leave the two tests above passing.
+        let mut h = test_handler("tok").await;
+        register_agent(&h, Some(manifest_carrying("git.status"))).await;
+
+        let payload = relay(&mut h, "git.status").await;
+        assert_ne!(
+            payload["error"], "not_authenticated",
+            "an authenticated client must get past the gate"
+        );
     }
 
     // ---- the target's protocol support is queryable (#678, Phase 3) ----
@@ -3547,10 +3757,61 @@ mod tests {
     async fn listed_protocols(h: &mut ConnectionHandler) -> serde_json::Value {
         h.authenticated_client = true;
         let action = h
-            .handle_message(proto_msg("client.agents.list", json!({})))
+            .handle_message(proto_msg("server.agent.list", json!({})))
             .await
             .unwrap();
         parse_reply(action)["payload"]["agents"][0]["protocols"].clone()
+    }
+
+    #[tokio::test]
+    async fn the_server_advertises_what_it_serves() {
+        // The Server is a provider like any other (`#678`), and this is where a
+        // client learns what it answers — on the call a client already makes to
+        // ask what this server is, rather than a message of its own.
+        let mut h = test_handler("").await;
+        h.authenticated_client = true;
+
+        let action = h
+            .handle_message(proto_msg("server.info", json!({})))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        let manifest = &reply["payload"]["protocol_manifest"];
+
+        assert_eq!(manifest["provider"], "nession-server");
+        // Named units, not a count: the manifest answers "may I send this peer
+        // this message?", so the assertion should be about a message. These two
+        // are the ones Phase 6 named and that had no declaration anywhere.
+        assert!(manifest["protocols"]["server.session.attach"].is_object());
+        assert!(manifest["protocols"]["server.agent.register"].is_object());
+        // And a unit this server does not serve stays absent — the manifest
+        // exists to refuse, so claiming an offer that does not exist would be
+        // the one failure it cannot make.
+        assert!(manifest["protocols"]["git.status"].is_null());
+    }
+
+    #[test]
+    fn every_unit_the_server_dispatches_is_in_its_manifest() {
+        // The derivation, asserted. `SERVER_WIRES` and `server_descriptors()`
+        // come from one `server_routes!` invocation, so neither can name a unit
+        // the other does not — and this is the test that says so rather than
+        // the comment that claims it.
+        //
+        // It matters in one direction especially: a wire this server answers
+        // but does not advertise would make its manifest understate it, and a
+        // consumer resolving against that manifest would refuse a call this
+        // server would have served.
+        let manifest = crate::protocol::server_manifest().unwrap();
+        assert!(
+            !SERVER_WIRES.is_empty(),
+            "a declaration with no units is a mistake, not a peer that serves nothing"
+        );
+        for wire in SERVER_WIRES {
+            assert!(
+                manifest.carries(wire),
+                "`{wire}` is dispatched but not advertised"
+            );
+        }
     }
 
     #[tokio::test]
@@ -3559,14 +3820,14 @@ mod tests {
         // the discover-agents call, so a consumer resolving per target has the
         // manifests in hand without a second round trip per agent.
         let mut h = test_handler("").await;
-        register_agent(&h, Some(manifest_carrying("extension.git.status"))).await;
+        register_agent(&h, Some(manifest_carrying("git.status"))).await;
 
         let protocols = listed_protocols(&mut h).await;
         assert_eq!(protocols["provider"], "agent-a");
         assert_eq!(protocols["protocols"]["git.status"]["versions"][0], 1);
         assert_eq!(
             protocols["protocols"]["git.status"]["wire"][0],
-            "extension.git.status"
+            "git.status"
         );
     }
 
@@ -3583,7 +3844,7 @@ mod tests {
 
         let payload = relay_payload(
             &mut h,
-            "extension.git.status",
+            "git.status",
             json!({"agent_id": "agent-a", "contract_version": 3}),
         )
         .await;
@@ -3611,7 +3872,7 @@ mod tests {
         for version in [1, 2] {
             let payload = relay_payload(
                 &mut h,
-                "extension.git.status",
+                "git.status",
                 json!({"agent_id": "agent-a", "contract_version": version}),
             )
             .await;
@@ -3631,7 +3892,7 @@ mod tests {
         let mut h = test_handler("").await;
         register_agent(&h, Some(manifest_with_two_versions())).await;
 
-        let payload = relay(&mut h, "extension.git.status").await;
+        let payload = relay(&mut h, "git.status").await;
         assert_ne!(payload["error"], "contract_not_supported");
         assert_eq!(payload["error"], "agent_disconnected");
     }
@@ -3677,13 +3938,14 @@ mod tests {
         let mut h = test_handler("").await;
         let action = h
             .handle_message(proto_msg(
-                "agent.register",
+                "server.agent.register",
                 json!({
                     "agent_id": "a1",
                     "hostname": "host",
                     "ip_address": "1.2.3.4",
                     "port": 19091,
                     "auth_token": "anything",
+                    "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
                     "addresses": [],
                     "connect_url": null,
                     "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
@@ -3701,13 +3963,14 @@ mod tests {
         let mut h = test_handler("secret").await;
         let action = h
             .handle_message(proto_msg(
-                "agent.register",
+                "server.agent.register",
                 json!({
                     "agent_id": "a1",
                     "hostname": "host",
                     "ip_address": "1.2.3.4",
                     "port": 19091,
                     "auth_token": "secret",
+                    "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
                     "addresses": [],
                     "connect_url": null,
                     "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
@@ -3720,17 +3983,61 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn agent_register_without_a_manifest_is_rejected() {
+        // `#678` is a breaking upgrade: an agent this server cannot route for
+        // does not connect. Refusing here rather than at the first relay is the
+        // difference between an agent that never comes up and one that
+        // connects, looks healthy, and silently drops every request aimed at
+        // it.
+        //
+        // A valid auth token, so the rejection can only be the missing
+        // manifest — otherwise this test would pass for the wrong reason.
+        let mut h = test_handler("").await;
+        let action = h
+            .handle_message(proto_msg(
+                "server.agent.register",
+                json!({
+                    "agent_id": "old-agent",
+                    "hostname": "host",
+                    "ip_address": "1.2.3.4",
+                    "port": 19091,
+                    "auth_token": "",
+                    "addresses": [],
+                    "connect_url": null,
+                    "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
+                }),
+            ))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        assert_eq!(reply["payload"]["status"], "rejected");
+        assert!(
+            reply["payload"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("no protocol manifest"),
+            "the rejection must name the missing manifest: {reply}"
+        );
+        // And nothing was registered, so no later call can reach it.
+        assert!(
+            h.agent_registry.get("old-agent").await.is_none(),
+            "a rejected agent must not be in the registry"
+        );
+    }
+
+    #[tokio::test]
     async fn agent_register_invalid_token_rejected() {
         let mut h = test_handler("secret").await;
         let action = h
             .handle_message(proto_msg(
-                "agent.register",
+                "server.agent.register",
                 json!({
                     "agent_id": "a1",
                     "hostname": "host",
                     "ip_address": "1.2.3.4",
                     "port": 19091,
                     "auth_token": "wrong",
+                    "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
                     "addresses": [],
                     "connect_url": null,
                     "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
@@ -3751,13 +4058,14 @@ mod tests {
         let mut h = test_handler("").await;
         let action = h
             .handle_message(proto_msg(
-                "agent.register",
+                "server.agent.register",
                 json!({
                     "agent_id": "a1",
                     "hostname": "host",
                     "ip_address": "1.2.3.4",
                     "port": 19091,
                     "auth_token": "",
+                    "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
                     "addresses": [
                         { "url": "ws://1.2.3.4:19091/ws", "network_type": "lan", "label": "" }
                     ],
@@ -3780,13 +4088,14 @@ mod tests {
         let mut h = test_handler("").await;
         // Register first
         h.handle_message(proto_msg(
-            "agent.register",
+            "server.agent.register",
             json!({
                 "agent_id": "a1",
                 "hostname": "host",
                 "ip_address": "1.2.3.4",
                 "port": 19091,
                 "auth_token": "",
+                "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
                 "addresses": [],
                 "connect_url": null,
                 "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
@@ -3797,7 +4106,7 @@ mod tests {
 
         let action = h
             .handle_message(proto_msg(
-                "agent.heartbeat",
+                "server.agent.heartbeat",
                 json!({
                     "agent_id": "a1",
                     "session_count": 3,
@@ -3816,7 +4125,7 @@ mod tests {
         let mut h = test_handler("").await;
         let action = h
             .handle_message(proto_msg(
-                "agent.heartbeat",
+                "server.agent.heartbeat",
                 json!({
                     "agent_id": "unknown",
                     "session_count": 0,
@@ -3833,13 +4142,14 @@ mod tests {
         let mut h = test_handler("").await;
         // Register
         h.handle_message(proto_msg(
-            "agent.register",
+            "server.agent.register",
             json!({
                 "agent_id": "a1",
                 "hostname": "host",
                 "ip_address": "1.2.3.4",
                 "port": 19091,
                 "auth_token": "",
+                "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
                 "addresses": [],
                 "connect_url": null,
                 "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
@@ -3849,7 +4159,10 @@ mod tests {
         .unwrap();
         // Heartbeat with no session_count / active_sessions
         let action = h
-            .handle_message(proto_msg("agent.heartbeat", json!({ "agent_id": "a1" })))
+            .handle_message(proto_msg(
+                "server.agent.heartbeat",
+                json!({ "agent_id": "a1" }),
+            ))
             .await
             .unwrap();
         let reply = parse_reply(action);
@@ -3863,13 +4176,14 @@ mod tests {
         let mut h = test_handler("").await;
         // Register agent
         h.handle_message(proto_msg(
-            "agent.register",
+            "server.agent.register",
             json!({
                 "agent_id": "a1",
                 "hostname": "host",
                 "ip_address": "1.2.3.4",
                 "port": 19091,
                 "auth_token": "",
+                "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
                 "addresses": [],
                 "connect_url": null,
                 "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
@@ -3880,7 +4194,7 @@ mod tests {
 
         let action = h
             .handle_message(proto_msg(
-                "agent.session.update",
+                "server.agent.session-update",
                 json!({
                     "agent_id": "a1",
                     "session_name": "dev",
@@ -3898,13 +4212,14 @@ mod tests {
     async fn session_update_all_statuses() {
         let mut h = test_handler("").await;
         h.handle_message(proto_msg(
-            "agent.register",
+            "server.agent.register",
             json!({
                 "agent_id": "a1",
                 "hostname": "host",
                 "ip_address": "1.2.3.4",
                 "port": 19091,
                 "auth_token": "",
+                "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
                 "addresses": [],
                 "connect_url": null,
                 "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
@@ -3916,7 +4231,7 @@ mod tests {
         for status in &["active", "detached", "recovering", "orphaned", "zombie"] {
             let action = h
                 .handle_message(proto_msg(
-                    "agent.session.update",
+                    "server.agent.session-update",
                     json!({
                         "agent_id": "a1",
                         "session_name": format!("s_{status}"),
@@ -3935,13 +4250,14 @@ mod tests {
     async fn session_update_unknown_status_returns_none() {
         let mut h = test_handler("").await;
         h.handle_message(proto_msg(
-            "agent.register",
+            "server.agent.register",
             json!({
                 "agent_id": "a1",
                 "hostname": "host",
                 "ip_address": "1.2.3.4",
                 "port": 19091,
                 "auth_token": "",
+                "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
                 "addresses": [],
                 "connect_url": null,
                 "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
@@ -3951,7 +4267,7 @@ mod tests {
         .unwrap();
         let action = h
             .handle_message(proto_msg(
-                "agent.session.update",
+                "server.agent.session-update",
                 json!({
                     "agent_id": "a1",
                     "session_name": "dev",
@@ -3968,13 +4284,14 @@ mod tests {
         let mut h = test_handler("").await;
         // Register agent
         h.handle_message(proto_msg(
-            "agent.register",
+            "server.agent.register",
             json!({
                 "agent_id": "a1",
                 "hostname": "host",
                 "ip_address": "1.2.3.4",
                 "port": 19091,
                 "auth_token": "",
+                "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
                 "addresses": [],
                 "connect_url": null,
                 "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
@@ -3984,7 +4301,7 @@ mod tests {
         .unwrap();
         // Create a session
         h.handle_message(proto_msg(
-            "agent.session.update",
+            "server.agent.session-update",
             json!({
                 "agent_id": "a1",
                 "session_name": "dev",
@@ -3997,7 +4314,7 @@ mod tests {
         .unwrap();
         // Remove it
         h.handle_message(proto_msg(
-            "agent.session.update",
+            "server.agent.session-update",
             json!({
                 "agent_id": "a1",
                 "session_name": "dev",
@@ -4008,13 +4325,13 @@ mod tests {
         .unwrap();
         // Session should be gone
         let _action = h
-            .handle_message(proto_msg("client.sessions.list", json!({})))
+            .handle_message(proto_msg("server.session.list", json!({})))
             .await
             .unwrap();
         // First need to authenticate
         h.authenticated_client = true;
         let action = h
-            .handle_message(proto_msg("client.sessions.list", json!({})))
+            .handle_message(proto_msg("server.session.list", json!({})))
             .await
             .unwrap();
         let reply = parse_reply(action);
@@ -4026,7 +4343,7 @@ mod tests {
         let mut h = test_handler("").await;
         let action = h
             .handle_message(proto_msg(
-                "agent.session.update",
+                "server.agent.session-update",
                 json!({
                     "agent_id": "unknown",
                     "session_name": "dev",
@@ -4038,13 +4355,13 @@ mod tests {
         assert!(matches!(action, HandlerAction::Reply(None)));
     }
 
-    // ---- client.auth ----
+    // ---- server.auth ----
 
     #[tokio::test]
     async fn client_auth_success() {
         let mut h = test_handler("secret").await;
         let action = h
-            .handle_message(proto_msg("client.auth", json!({ "auth_token": "secret" })))
+            .handle_message(proto_msg("server.auth", json!({ "auth_token": "secret" })))
             .await
             .unwrap();
         let reply = parse_reply(action);
@@ -4055,7 +4372,7 @@ mod tests {
     async fn client_auth_failure() {
         let mut h = test_handler("secret").await;
         let action = h
-            .handle_message(proto_msg("client.auth", json!({ "auth_token": "wrong" })))
+            .handle_message(proto_msg("server.auth", json!({ "auth_token": "wrong" })))
             .await
             .unwrap();
         let reply = parse_reply(action);
@@ -4067,7 +4384,7 @@ mod tests {
         let mut h = test_handler("").await;
         let action = h
             .handle_message(proto_msg(
-                "client.auth",
+                "server.auth",
                 json!({ "auth_token": "anything" }),
             ))
             .await
@@ -4082,7 +4399,7 @@ mod tests {
     async fn unauthenticated_agents_list_rejected() {
         let mut h = test_handler("").await;
         let action = h
-            .handle_message(proto_msg("client.agents.list", json!({})))
+            .handle_message(proto_msg("server.agent.list", json!({})))
             .await
             .unwrap();
         let reply = parse_reply(action);
@@ -4093,7 +4410,7 @@ mod tests {
     async fn unauthenticated_sessions_list_rejected() {
         let mut h = test_handler("").await;
         let action = h
-            .handle_message(proto_msg("client.sessions.list", json!({})))
+            .handle_message(proto_msg("server.session.list", json!({})))
             .await
             .unwrap();
         let reply = parse_reply(action);
@@ -4105,7 +4422,7 @@ mod tests {
         let mut h = test_handler("").await;
         let action = h
             .handle_message(proto_msg(
-                "client.session.attach",
+                "server.session.attach",
                 json!({ "session_id": "a1:s1" }),
             ))
             .await
@@ -4119,7 +4436,7 @@ mod tests {
         let mut h = test_handler("").await;
         let action = h
             .handle_message(proto_msg(
-                "client.session.create",
+                "server.session.create",
                 json!({ "agent_id": "a1", "name": "dev" }),
             ))
             .await
@@ -4133,7 +4450,7 @@ mod tests {
         let mut h = test_handler("").await;
         let action = h
             .handle_message(proto_msg(
-                "client.session.kill",
+                "server.session.kill",
                 json!({ "session_id": "a1:s1" }),
             ))
             .await
@@ -4142,7 +4459,7 @@ mod tests {
         assert_eq!(reply["payload"]["success"], false);
     }
 
-    // ---- client.agents.list ----
+    // ---- server.agent.list ----
 
     #[tokio::test]
     async fn agents_list_returns_registered() {
@@ -4150,13 +4467,14 @@ mod tests {
         h.authenticated_client = true;
         // Register an agent
         h.handle_message(proto_msg(
-            "agent.register",
+            "server.agent.register",
             json!({
                 "agent_id": "a1",
                 "hostname": "host",
                 "ip_address": "1.2.3.4",
                 "port": 19091,
                 "auth_token": "",
+                "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
                 "addresses": [],
                 "connect_url": null,
                 "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1", "image_tag": "sha-abc123" },
@@ -4166,7 +4484,7 @@ mod tests {
         .unwrap();
 
         let action = h
-            .handle_message(proto_msg("client.agents.list", json!({})))
+            .handle_message(proto_msg("server.agent.list", json!({})))
             .await
             .unwrap();
         let reply = parse_reply(action);
@@ -4184,14 +4502,14 @@ mod tests {
         let mut h = test_handler("").await;
         h.authenticated_client = true;
         let action = h
-            .handle_message(proto_msg("client.agents.list", json!({})))
+            .handle_message(proto_msg("server.agent.list", json!({})))
             .await
             .unwrap();
         let reply = parse_reply(action);
         assert!(reply["payload"]["agents"].as_array().unwrap().is_empty());
     }
 
-    // ---- client.sessions.list ----
+    // ---- server.session.list ----
 
     #[tokio::test]
     async fn sessions_list_with_filter() {
@@ -4199,13 +4517,14 @@ mod tests {
         h.authenticated_client = true;
         // Register agent
         h.handle_message(proto_msg(
-            "agent.register",
+            "server.agent.register",
             json!({
                 "agent_id": "a1",
                 "hostname": "host",
                 "ip_address": "1.2.3.4",
                 "port": 19091,
                 "auth_token": "",
+                "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
                 "addresses": [],
                 "connect_url": null,
                 "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
@@ -4216,7 +4535,7 @@ mod tests {
         // Create sessions
         for name in &["s1", "s2"] {
             h.handle_message(proto_msg(
-                "agent.session.update",
+                "server.agent.session-update",
                 json!({
                     "agent_id": "a1",
                     "session_name": name,
@@ -4231,7 +4550,7 @@ mod tests {
         // Filter by agent_id
         let action = h
             .handle_message(proto_msg(
-                "client.sessions.list",
+                "server.session.list",
                 json!({ "agent_id": "a1" }),
             ))
             .await
@@ -4241,7 +4560,7 @@ mod tests {
         assert_eq!(sessions.len(), 2);
     }
 
-    // ---- client.sessions.list force refresh ----
+    // ---- server.session.list force refresh ----
 
     /// Registering via `agent.register` marks the agent Online but does not
     /// give it a CommandBroker control connection, so a force refresh will
@@ -4250,13 +4569,14 @@ mod tests {
         let mut h = test_handler("").await;
         h.authenticated_client = true;
         h.handle_message(proto_msg(
-            "agent.register",
+            "server.agent.register",
             json!({
                 "agent_id": "a1",
                 "hostname": "host",
                 "ip_address": "1.2.3.4",
                 "port": 19091,
                 "auth_token": "",
+                "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
                 "addresses": [],
                 "connect_url": null,
                 "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
@@ -4269,7 +4589,7 @@ mod tests {
 
     async fn add_session(h: &mut ConnectionHandler, agent_id: &str, name: &str) {
         h.handle_message(proto_msg(
-            "agent.session.update",
+            "server.agent.session-update",
             json!({
                 "agent_id": agent_id,
                 "session_name": name,
@@ -4287,7 +4607,7 @@ mod tests {
         let mut h = test_handler("").await;
         h.authenticated_client = true;
         let action = h
-            .handle_message(proto_msg("client.sessions.list", json!({ "force": true })))
+            .handle_message(proto_msg("server.session.list", json!({ "force": true })))
             .await
             .unwrap();
         let reply = parse_reply(action);
@@ -4307,7 +4627,7 @@ mod tests {
         add_session(&mut h, "a1", "s1").await;
 
         let action = h
-            .handle_message(proto_msg("client.sessions.list", json!({ "force": true })))
+            .handle_message(proto_msg("server.session.list", json!({ "force": true })))
             .await
             .unwrap();
         let reply = parse_reply(action);
@@ -4329,7 +4649,7 @@ mod tests {
         add_session(&mut h, "a1", "s1").await;
 
         let action = h
-            .handle_message(proto_msg("client.sessions.list", json!({})))
+            .handle_message(proto_msg("server.session.list", json!({})))
             .await
             .unwrap();
         let reply = parse_reply(action);
@@ -4350,7 +4670,7 @@ mod tests {
 
         let action = h
             .handle_message(proto_msg(
-                "client.sessions.list",
+                "server.session.list",
                 json!({ "force": true, "agent_id": "nonexistent" }),
             ))
             .await
@@ -4379,8 +4699,7 @@ mod tests {
         h.command_broker.register_agent("a1", sender).await;
 
         let broker = Arc::clone(&h.command_broker);
-        let list_fut =
-            h.handle_message(proto_msg("client.sessions.list", json!({ "force": true })));
+        let list_fut = h.handle_message(proto_msg("server.session.list", json!({ "force": true })));
         let agent_fut = async move {
             let text = rx
                 .recv()
@@ -4390,7 +4709,7 @@ mod tests {
                 .unwrap()
                 .to_string();
             let parsed: serde_json::Value = serde_json::from_str(&text).unwrap();
-            assert_eq!(parsed["msg_type"], "server.sessions.list");
+            assert_eq!(parsed["msg_type"], "agent.session.report");
             let request_id = parsed["payload"]["request_id"]
                 .as_str()
                 .unwrap()
@@ -4451,7 +4770,7 @@ mod tests {
 
         let broker = Arc::clone(&h.command_broker);
         let create_fut = h.handle_message(proto_msg(
-            "client.session.create",
+            "server.session.create",
             json!({ "agent_id": "a1", "name": "regression-743" }),
         ));
         let agent_fut = async move {
@@ -4548,7 +4867,7 @@ mod tests {
         assert_eq!(got[0].status, SessionStatus::Detached);
     }
 
-    // ---- client.session.attach ----
+    // ---- server.session.attach ----
 
     #[tokio::test]
     async fn attach_invalid_session_id_format() {
@@ -4556,7 +4875,7 @@ mod tests {
         h.authenticated_client = true;
         let action = h
             .handle_message(proto_msg(
-                "client.session.attach",
+                "server.session.attach",
                 json!({ "session_id": "no-colon" }),
             ))
             .await
@@ -4574,7 +4893,7 @@ mod tests {
         h.authenticated_client = true;
         let action = h
             .handle_message(proto_msg(
-                "client.session.attach",
+                "server.session.attach",
                 json!({ "session_id": "a1:nonexistent" }),
             ))
             .await
@@ -4592,13 +4911,14 @@ mod tests {
         h.authenticated_client = true;
         // Register agent
         h.handle_message(proto_msg(
-            "agent.register",
+            "server.agent.register",
             json!({
                 "agent_id": "a1",
                 "hostname": "host",
                 "ip_address": "1.2.3.4",
                 "port": 19091,
                 "auth_token": "",
+                "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
                 "addresses": [],
                 "connect_url": null,
                 "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
@@ -4608,7 +4928,7 @@ mod tests {
         .unwrap();
         // Create session
         h.handle_message(proto_msg(
-            "agent.session.update",
+            "server.agent.session-update",
             json!({
                 "agent_id": "a1",
                 "session_name": "dev",
@@ -4627,7 +4947,7 @@ mod tests {
         // Re-register with a different approach - just test that agent not found works
         let action = h
             .handle_message(proto_msg(
-                "client.session.attach",
+                "server.session.attach",
                 json!({ "session_id": "a1:dev" }),
             ))
             .await
@@ -4645,13 +4965,14 @@ mod tests {
         h.authenticated_client = true;
         // Register agent
         h.handle_message(proto_msg(
-            "agent.register",
+            "server.agent.register",
             json!({
                 "agent_id": "a1",
                 "hostname": "host",
                 "ip_address": "1.2.3.4",
                 "port": 19091,
                 "auth_token": "",
+                "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
                 "addresses": [],
                 "connect_url": null,
                 "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
@@ -4661,7 +4982,7 @@ mod tests {
         .unwrap();
         // Create session
         h.handle_message(proto_msg(
-            "agent.session.update",
+            "server.agent.session-update",
             json!({
                 "agent_id": "a1",
                 "session_name": "dev",
@@ -4675,7 +4996,7 @@ mod tests {
         // Attach in P2P mode
         let action = h
             .handle_message(proto_msg(
-                "client.session.attach",
+                "server.session.attach",
                 json!({ "session_id": "a1:dev", "preferred_mode": "p2p" }),
             ))
             .await
@@ -4698,13 +5019,14 @@ mod tests {
         h.authenticated_client = true;
         // Register agent + create session
         h.handle_message(proto_msg(
-            "agent.register",
+            "server.agent.register",
             json!({
                 "agent_id": "a1",
                 "hostname": "host",
                 "ip_address": "1.2.3.4",
                 "port": 19091,
                 "auth_token": "",
+                "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
                 "addresses": [],
                 "connect_url": null,
                 "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
@@ -4713,7 +5035,7 @@ mod tests {
         .await
         .unwrap();
         h.handle_message(proto_msg(
-            "agent.session.update",
+            "server.agent.session-update",
             json!({
                 "agent_id": "a1",
                 "session_name": "dev",
@@ -4730,7 +5052,7 @@ mod tests {
         h.set_client_sender(relay_sender);
         let action = h
             .handle_message(proto_msg(
-                "client.session.attach",
+                "server.session.attach",
                 json!({ "session_id": "a1:dev", "preferred_mode": "relay" }),
             ))
             .await
@@ -4754,7 +5076,7 @@ mod tests {
         // Phase 2: begin relay — actually enters relay forwarding.
         let action = h
             .handle_message(proto_msg(
-                "client.session.relay.begin",
+                "server.session.relay.begin",
                 json!({ "session_id": "a1:dev" }),
             ))
             .await
@@ -4778,7 +5100,7 @@ mod tests {
         }
     }
 
-    // ---- client.session.create ----
+    // ---- server.session.create ----
 
     #[tokio::test]
     async fn session_create_missing_fields() {
@@ -4786,7 +5108,7 @@ mod tests {
         h.authenticated_client = true;
         let action = h
             .handle_message(proto_msg(
-                "client.session.create",
+                "server.session.create",
                 json!({ "agent_id": "", "name": "" }),
             ))
             .await
@@ -4805,7 +5127,7 @@ mod tests {
         h.authenticated_client = true;
         let action = h
             .handle_message(proto_msg(
-                "client.session.create",
+                "server.session.create",
                 json!({ "agent_id": "nonexistent", "name": "dev" }),
             ))
             .await
@@ -4818,7 +5140,7 @@ mod tests {
             .contains("not found"));
     }
 
-    // ---- client.session.kill ----
+    // ---- server.session.kill ----
 
     #[tokio::test]
     async fn session_kill_invalid_format() {
@@ -4826,7 +5148,7 @@ mod tests {
         h.authenticated_client = true;
         let action = h
             .handle_message(proto_msg(
-                "client.session.kill",
+                "server.session.kill",
                 json!({ "session_id": "no-colon" }),
             ))
             .await
@@ -4844,7 +5166,7 @@ mod tests {
         h.authenticated_client = true;
         let action = h
             .handle_message(proto_msg(
-                "client.session.kill",
+                "server.session.kill",
                 json!({ "session_id": "unknown:s1" }),
             ))
             .await
@@ -4863,13 +5185,14 @@ mod tests {
         h.authenticated_client = true;
         // Register agent (it's online)
         h.handle_message(proto_msg(
-            "agent.register",
+            "server.agent.register",
             json!({
                 "agent_id": "a1",
                 "hostname": "host",
                 "ip_address": "1.2.3.4",
                 "port": 19091,
                 "auth_token": "",
+                "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
                 "addresses": [],
                 "connect_url": null,
                 "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
@@ -4880,7 +5203,7 @@ mod tests {
         // Kill a session that doesn't exist — agent is online
         let action = h
             .handle_message(proto_msg(
-                "client.session.kill",
+                "server.session.kill",
                 json!({ "session_id": "a1:nonexistent" }),
             ))
             .await
@@ -4900,7 +5223,7 @@ mod tests {
         let mut h = test_handler("").await;
         let action = h
             .handle_message(proto_msg(
-                "agent.session.command.response",
+                "server.agent.command-response",
                 json!({ "request_id": "r1", "success": true }),
             ))
             .await
@@ -4913,13 +5236,14 @@ mod tests {
         let mut h = test_handler("").await;
         // Register agent
         h.handle_message(proto_msg(
-            "agent.register",
+            "server.agent.register",
             json!({
                 "agent_id": "a1",
                 "hostname": "host",
                 "ip_address": "1.2.3.4",
                 "port": 19091,
                 "auth_token": "",
+                "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
                 "addresses": [],
                 "connect_url": null,
                 "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
@@ -4929,7 +5253,7 @@ mod tests {
         .unwrap();
         let action = h
             .handle_message(proto_msg(
-                "agent.session.command.response",
+                "server.agent.command-response",
                 json!({ "request_id": "", "success": true }),
             ))
             .await
@@ -4943,7 +5267,7 @@ mod tests {
     async fn env_list_unauthenticated() {
         let mut h = test_handler("").await;
         let action = h
-            .handle_message(proto_msg("client.env.list", json!({})))
+            .handle_message(proto_msg("server.env.list", json!({})))
             .await
             .unwrap();
         let reply = parse_reply(action);
@@ -4954,7 +5278,7 @@ mod tests {
     async fn env_get_unauthenticated() {
         let mut h = test_handler("").await;
         let action = h
-            .handle_message(proto_msg("client.env.get", json!({ "name": "test.env" })))
+            .handle_message(proto_msg("server.env.get", json!({ "name": "test.env" })))
             .await
             .unwrap();
         let reply = parse_reply(action);
@@ -4966,7 +5290,7 @@ mod tests {
         let mut h = test_handler("").await;
         let action = h
             .handle_message(proto_msg(
-                "client.env.write",
+                "server.env.write",
                 json!({ "name": "test.env", "content": "X=1" }),
             ))
             .await
@@ -4980,7 +5304,7 @@ mod tests {
         let mut h = test_handler("").await;
         let action = h
             .handle_message(proto_msg(
-                "client.env.delete",
+                "server.env.delete",
                 json!({ "name": "test.env" }),
             ))
             .await
@@ -4996,7 +5320,7 @@ mod tests {
         let mut h = test_handler("").await;
         h.authenticated_client = true;
         let action = h
-            .handle_message(proto_msg("client.env.get", json!({})))
+            .handle_message(proto_msg("server.env.get", json!({})))
             .await
             .unwrap();
         let reply = parse_reply(action);
@@ -5014,7 +5338,7 @@ mod tests {
         // Write
         let action = h
             .handle_message(proto_msg(
-                "client.env.write",
+                "server.env.write",
                 json!({
                     "name": "test.env",
                     "content": "FOO=bar\nBAZ=qux",
@@ -5028,7 +5352,7 @@ mod tests {
         // Read back
         let action = h
             .handle_message(proto_msg(
-                "client.env.get",
+                "server.env.get",
                 json!({ "name": "test.env", "source": "server" }),
             ))
             .await
@@ -5047,7 +5371,7 @@ mod tests {
         h.authenticated_client = true;
         let action = h
             .handle_message(proto_msg(
-                "client.env.write",
+                "server.env.write",
                 json!({ "name": "", "content": "X=1" }),
             ))
             .await
@@ -5065,7 +5389,7 @@ mod tests {
         let mut h = test_handler("").await;
         h.authenticated_client = true;
         let action = h
-            .handle_message(proto_msg("client.env.delete", json!({})))
+            .handle_message(proto_msg("server.env.delete", json!({})))
             .await
             .unwrap();
         let reply = parse_reply(action);
@@ -5082,7 +5406,7 @@ mod tests {
         h.authenticated_client = true;
         // Write a file first
         h.handle_message(proto_msg(
-            "client.env.write",
+            "server.env.write",
             json!({
                 "name": "test.env",
                 "content": "X=1",
@@ -5092,7 +5416,7 @@ mod tests {
         .await
         .unwrap();
         let action = h
-            .handle_message(proto_msg("client.env.list", json!({})))
+            .handle_message(proto_msg("server.env.list", json!({})))
             .await
             .unwrap();
         let reply = parse_reply(action);
@@ -5105,14 +5429,14 @@ mod tests {
         let mut h = test_handler("").await;
         h.authenticated_client = true;
         h.handle_message(proto_msg(
-            "client.env.write",
+            "server.env.write",
             json!({ "name": "del.env", "content": "X=1", "overwrite": false }),
         ))
         .await
         .unwrap();
         let action = h
             .handle_message(proto_msg(
-                "client.env.delete",
+                "server.env.delete",
                 json!({ "name": "del.env", "source": "server" }),
             ))
             .await
@@ -5128,7 +5452,7 @@ mod tests {
         let mut h = test_handler("").await;
         let action = h
             .handle_message(proto_msg(
-                "client.session.env.apply",
+                "server.session.env.apply",
                 json!({ "session_id": "a1:s1", "env_files": [] }),
             ))
             .await
@@ -5143,7 +5467,7 @@ mod tests {
         h.authenticated_client = true;
         let action = h
             .handle_message(proto_msg(
-                "client.session.env.apply",
+                "server.session.env.apply",
                 json!({ "session_id": "no-colon", "env_files": [] }),
             ))
             .await
@@ -5161,7 +5485,7 @@ mod tests {
         let mut h = test_handler("").await;
         let action = h
             .handle_message(proto_msg(
-                "client.session.env.unset",
+                "server.session.env.unset",
                 json!({ "session_id": "a1:s1" }),
             ))
             .await
@@ -5176,7 +5500,7 @@ mod tests {
         h.authenticated_client = true;
         let action = h
             .handle_message(proto_msg(
-                "client.session.env.unset",
+                "server.session.env.unset",
                 json!({ "session_id": "no-colon" }),
             ))
             .await
@@ -5190,7 +5514,7 @@ mod tests {
         let mut h = test_handler("").await;
         let action = h
             .handle_message(proto_msg(
-                "client.session.env.active",
+                "server.session.env.active",
                 json!({ "session_id": "a1:s1" }),
             ))
             .await
@@ -5205,7 +5529,7 @@ mod tests {
         h.authenticated_client = true;
         let action = h
             .handle_message(proto_msg(
-                "client.session.env.active",
+                "server.session.env.active",
                 json!({ "session_id": "a1:s1" }),
             ))
             .await
@@ -5219,7 +5543,7 @@ mod tests {
         let mut h = test_handler("").await;
         let action = h
             .handle_message(proto_msg(
-                "client.session.env.query",
+                "server.session.env.query",
                 json!({ "session_id": "a1:s1" }),
             ))
             .await
@@ -5234,7 +5558,7 @@ mod tests {
         h.authenticated_client = true;
         let action = h
             .handle_message(proto_msg(
-                "client.session.env.query",
+                "server.session.env.query",
                 json!({ "session_id": "no-colon" }),
             ))
             .await
@@ -5283,7 +5607,7 @@ mod tests {
         h.authenticated_client = true;
         // Write a file first
         h.handle_message(proto_msg(
-            "client.env.write",
+            "server.env.write",
             json!({ "name": "locked.env", "content": "X=1", "overwrite": false }),
         ))
         .await
@@ -5301,7 +5625,7 @@ mod tests {
         // Try to overwrite — should fail
         let action = h
             .handle_message(proto_msg(
-                "client.env.write",
+                "server.env.write",
                 json!({
                     "name": "locked.env",
                     "content": "X=2",
@@ -5329,7 +5653,7 @@ mod tests {
 
         // Write a file first so the store has it.
         h.handle_message(proto_msg(
-            "client.env.write",
+            "server.env.write",
             json!({ "name": "forced.env", "content": "X=1", "overwrite": false }),
         ))
         .await
@@ -5354,7 +5678,7 @@ mod tests {
         // re-source (`agent.env.resource`) command.
         let broker = Arc::clone(&h.command_broker);
         let send_fut = h.handle_message(proto_msg(
-            "client.env.write",
+            "server.env.write",
             json!({
                 "name": "forced.env",
                 "content": "X=2",
@@ -5394,7 +5718,7 @@ mod tests {
         h.authenticated_client = true;
         // Write a file first
         h.handle_message(proto_msg(
-            "client.env.write",
+            "server.env.write",
             json!({ "name": "used.env", "content": "X=1", "overwrite": false }),
         ))
         .await
@@ -5412,7 +5736,7 @@ mod tests {
         // Try to delete — should fail
         let action = h
             .handle_message(proto_msg(
-                "client.env.delete",
+                "server.env.delete",
                 json!({ "name": "used.env", "source": "server" }),
             ))
             .await
@@ -5431,7 +5755,7 @@ mod tests {
         h.authenticated_client = true;
         // Write a file first
         h.handle_message(proto_msg(
-            "client.env.write",
+            "server.env.write",
             json!({ "name": "used.env", "content": "X=1", "overwrite": false }),
         ))
         .await
@@ -5449,7 +5773,7 @@ mod tests {
         // Delete with force — should succeed despite being in use
         let action = h
             .handle_message(proto_msg(
-                "client.env.delete",
+                "server.env.delete",
                 json!({ "name": "used.env", "source": "server", "force": true }),
             ))
             .await
@@ -5466,7 +5790,7 @@ mod tests {
         h.authenticated_client = true;
         let action = h
             .handle_message(proto_msg(
-                "client.env.get",
+                "server.env.get",
                 json!({ "name": "test.env", "source": "agent" }),
             ))
             .await
@@ -5485,7 +5809,7 @@ mod tests {
         h.authenticated_client = true;
         let action = h
             .handle_message(proto_msg(
-                "client.env.write",
+                "server.env.write",
                 json!({ "name": "test.env", "content": "X=1", "source": "agent" }),
             ))
             .await
@@ -5504,7 +5828,7 @@ mod tests {
         h.authenticated_client = true;
         let action = h
             .handle_message(proto_msg(
-                "client.env.delete",
+                "server.env.delete",
                 json!({ "name": "test.env", "source": "agent" }),
             ))
             .await
@@ -5535,7 +5859,7 @@ mod tests {
         // Send agent.terminal.resize
         let action = h
             .handle_message(proto_msg(
-                "agent.terminal.resize",
+                "server.agent.terminal-resize",
                 json!({
                     "session_id": "a1:dev",
                     "cols": 120,
@@ -5570,7 +5894,7 @@ mod tests {
         // No clients attached — should still succeed silently
         let action = h
             .handle_message(proto_msg(
-                "agent.terminal.resize",
+                "server.agent.terminal-resize",
                 json!({
                     "session_id": "a1:dev",
                     "cols": 80,
@@ -5589,7 +5913,7 @@ mod tests {
         // Missing required fields — should log warning but not crash
         let action = h
             .handle_message(proto_msg(
-                "agent.terminal.resize",
+                "server.agent.terminal-resize",
                 json!({ "session_id": "a1:dev" }),
             ))
             .await
@@ -5604,13 +5928,14 @@ mod tests {
         let mut h = test_handler("").await;
         // Register an agent with an initial address.
         h.handle_message(proto_msg(
-            "agent.register",
+            "server.agent.register",
             json!({
                 "agent_id": "a1",
                 "hostname": "host",
                 "ip_address": "1.2.3.4",
                 "port": 19091,
                 "auth_token": "",
+                "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
                 "addresses": [
                     { "url": "ws://1.2.3.4:19091/ws", "network_type": "lan" }
                 ],
@@ -5624,7 +5949,7 @@ mod tests {
         // Send an address update with new addresses.
         let action = h
             .handle_message(proto_msg(
-                "agent.address_update",
+                "server.agent.address-update",
                 json!({
                     "agent_id": "a1",
                     "addresses": [
@@ -5655,7 +5980,7 @@ mod tests {
         let mut h = test_handler("").await;
         let action = h
             .handle_message(proto_msg(
-                "agent.address_update",
+                "server.agent.address-update",
                 json!({
                     "agent_id": "nonexistent",
                     "addresses": [],
@@ -5672,11 +5997,11 @@ mod tests {
     async fn commands_list_requires_auth() {
         let mut h = test_handler("tok").await;
         let action = h
-            .handle_message(proto_msg("client.commands.list", json!({})))
+            .handle_message(proto_msg("server.commands.list", json!({})))
             .await
             .unwrap();
         let reply = parse_reply(action);
-        assert_eq!(reply["msg_type"], "client.commands.list.response");
+        assert_eq!(reply["msg_type"], "server.commands.list.response");
         assert!(reply["payload"]["error"]
             .as_str()
             .unwrap()
@@ -5688,15 +6013,15 @@ mod tests {
         let mut h = test_handler("tok").await;
         // Auth as client first
         let _ = h
-            .handle_message(proto_msg("client.auth", json!({ "auth_token": "tok" })))
+            .handle_message(proto_msg("server.auth", json!({ "auth_token": "tok" })))
             .await
             .unwrap();
         let action = h
-            .handle_message(proto_msg("client.commands.list", json!({})))
+            .handle_message(proto_msg("server.commands.list", json!({})))
             .await
             .unwrap();
         let reply = parse_reply(action);
-        assert_eq!(reply["msg_type"], "client.commands.list.response");
+        assert_eq!(reply["msg_type"], "server.commands.list.response");
         assert!(reply["payload"]["commands"].as_array().unwrap().is_empty());
     }
 
@@ -5705,7 +6030,7 @@ mod tests {
         let mut h = test_handler("tok").await;
         let action = h
             .handle_message(proto_msg(
-                "client.commands.add",
+                "server.commands.add",
                 json!({ "label": "test", "command": "echo hi" }),
             ))
             .await
@@ -5719,13 +6044,13 @@ mod tests {
         let mut h = test_handler("tok").await;
         // Auth as client
         let _ = h
-            .handle_message(proto_msg("client.auth", json!({ "auth_token": "tok" })))
+            .handle_message(proto_msg("server.auth", json!({ "auth_token": "tok" })))
             .await
             .unwrap();
         // Add a command
         let action = h
             .handle_message(proto_msg(
-                "client.commands.add",
+                "server.commands.add",
                 json!({ "label": "My Cmd", "command": "echo hello" }),
             ))
             .await
@@ -5736,7 +6061,7 @@ mod tests {
 
         // List should include it
         let action = h
-            .handle_message(proto_msg("client.commands.list", json!({})))
+            .handle_message(proto_msg("server.commands.list", json!({})))
             .await
             .unwrap();
         let reply = parse_reply(action);
@@ -5747,7 +6072,7 @@ mod tests {
 
         // Remove it
         let action = h
-            .handle_message(proto_msg("client.commands.remove", json!({ "id": cmd_id })))
+            .handle_message(proto_msg("server.commands.remove", json!({ "id": cmd_id })))
             .await
             .unwrap();
         let reply = parse_reply(action);
@@ -5755,7 +6080,7 @@ mod tests {
 
         // List should be empty again
         let action = h
-            .handle_message(proto_msg("client.commands.list", json!({})))
+            .handle_message(proto_msg("server.commands.list", json!({})))
             .await
             .unwrap();
         let reply = parse_reply(action);
@@ -5767,13 +6092,13 @@ mod tests {
         let mut h = test_handler("tok").await;
         // Auth as client
         let _ = h
-            .handle_message(proto_msg("client.auth", json!({ "auth_token": "tok" })))
+            .handle_message(proto_msg("server.auth", json!({ "auth_token": "tok" })))
             .await
             .unwrap();
         // Add a command
         let action = h
             .handle_message(proto_msg(
-                "client.commands.add",
+                "server.commands.add",
                 json!({ "label": "Old", "command": "old cmd" }),
             ))
             .await
@@ -5784,7 +6109,7 @@ mod tests {
         // Update it
         let action = h
             .handle_message(proto_msg(
-                "client.commands.update",
+                "server.commands.update",
                 json!({ "id": cmd_id, "label": "New", "command": "new cmd" }),
             ))
             .await
@@ -5794,7 +6119,7 @@ mod tests {
 
         // List should show updated values
         let action = h
-            .handle_message(proto_msg("client.commands.list", json!({})))
+            .handle_message(proto_msg("server.commands.list", json!({})))
             .await
             .unwrap();
         let reply = parse_reply(action);
@@ -5809,13 +6134,13 @@ mod tests {
         let mut h = test_handler("tok").await;
         // Auth as client
         let _ = h
-            .handle_message(proto_msg("client.auth", json!({ "auth_token": "tok" })))
+            .handle_message(proto_msg("server.auth", json!({ "auth_token": "tok" })))
             .await
             .unwrap();
         // Remove an id that doesn't exist (should still succeed — idempotent)
         let action = h
             .handle_message(proto_msg(
-                "client.commands.remove",
+                "server.commands.remove",
                 json!({ "id": "nonexistent" }),
             ))
             .await
@@ -5829,13 +6154,13 @@ mod tests {
         let mut h = test_handler("tok").await;
         // Auth as client
         let _ = h
-            .handle_message(proto_msg("client.auth", json!({ "auth_token": "tok" })))
+            .handle_message(proto_msg("server.auth", json!({ "auth_token": "tok" })))
             .await
             .unwrap();
         // Update a nonexistent command
         let action = h
             .handle_message(proto_msg(
-                "client.commands.update",
+                "server.commands.update",
                 json!({ "id": "missing", "label": "Nope" }),
             ))
             .await
@@ -5848,3 +6173,54 @@ mod tests {
             .contains("not found"));
     }
 }
+
+// ── The Protocol Units this server serves ──
+//
+// One invocation, three artefacts: `server_descriptors()` (the manifest's
+// half), `SERVER_WIRES` (what the message loop tests) and `dispatch_server()`
+// (the routing half). A unit cannot be advertised without a handler, or handled
+// without being advertised, because there is one list.
+//
+// The ids are the *operations*, not the wire types. Where an operation has a
+// provider on each side — `session.create` is served by this server for a
+// browser and by the agent for this server — both declare the same id and each
+// declares its own wire projection, which is exactly the model: one contract,
+// several providers, `ContractSupport.wire` carrying the difference.
+
+server_routes!(handler, msg;
+    "server.agent.register" => "server.agent.register" => handler.handle_agent_register(msg).await,
+    "server.agent.heartbeat" => "server.agent.heartbeat" => handler.handle_agent_heartbeat(msg).await,
+    "server.agent.session-update" => "server.agent.session-update" => handler.handle_agent_session_update(msg).await,
+    "server.agent.command-response" => "server.agent.command-response" => handler.handle_agent_command_response(msg).await,
+    "server.agent.terminal-resize" => "server.agent.terminal-resize" => handler.handle_agent_terminal_resize(msg).await,
+    "server.agent.address-update" => "server.agent.address-update" => handler.handle_agent_address_update(msg).await,
+    "server.auth" => "server.auth" => handler.handle_client_auth(msg).await,
+    "server.agent.list" => "server.agent.list" => handler.handle_client_agents_list(msg).await,
+    "server.session.list" => "server.session.list" => handler.handle_client_sessions_list(msg).await,
+    "server.session.attach" => "server.session.attach" => handler.handle_client_session_attach(msg).await,
+    "server.session.relay.begin" => "server.session.relay.begin" => handler.handle_client_session_relay_begin(msg).await,
+    // `server.session.relay.end` is intercepted by the relay function
+    // (`relay_bidirectional_via_channel`) and never reaches the dispatcher
+    // during active relay. It is declared here anyway, because the Server does
+    // serve it — the relay loop is the handler — and a manifest that omitted it
+    // would understate what this peer answers.
+    "server.session.relay.end" => "server.session.relay.end" => Ok(HandlerAction::Reply(None)),
+    "server.session.create" => "server.session.create" => handler.handle_client_session_create(msg).await,
+    "server.session.kill" => "server.session.kill" => handler.handle_client_session_kill(msg).await,
+    "server.session.capture-preview" => "server.session.capture-preview" => handler.handle_client_session_capture_preview(msg).await,
+    "server.env.list" => "server.env.list" => handler.handle_client_env_list(msg).await,
+    "server.env.get" => "server.env.get" => handler.handle_client_env_get(msg).await,
+    "server.env.write" => "server.env.write" => handler.handle_client_env_write(msg).await,
+    "server.env.delete" => "server.env.delete" => handler.handle_client_env_delete(msg).await,
+    "server.session.env.apply" => "server.session.env.apply" => handler.handle_client_session_env_apply(msg).await,
+    "server.session.env.unset" => "server.session.env.unset" => handler.handle_client_session_env_unset(msg).await,
+    "server.session.env.active" => "server.session.env.active" => handler.handle_client_session_env_active(msg).await,
+    "server.session.env.query" => "server.session.env.query" => handler.handle_client_session_env_query(msg).await,
+    "server.info" => "server.info" => handler.handle_client_server_info(msg).await,
+    "server.agent.rename" => "server.agent.rename" => handler.handle_client_agent_rename(msg).await,
+    "server.agent.delete" => "server.agent.delete" => handler.handle_client_agent_delete(msg).await,
+    "server.commands.list" => "server.commands.list" => handler.handle_client_commands_list(msg).await,
+    "server.commands.add" => "server.commands.add" => handler.handle_client_commands_add(msg).await,
+    "server.commands.remove" => "server.commands.remove" => handler.handle_client_commands_remove(msg).await,
+    "server.commands.update" => "server.commands.update" => handler.handle_client_commands_update(msg).await,
+);

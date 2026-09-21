@@ -45,7 +45,7 @@ describe('AgentsPlugin', () => {
       // subscription never sees it. A test that pushed the message instead would
       // have passed against a plugin whose directory is empty in production.
       const pending = plugin.listAgents();
-      surface.resolveNext('client.agents.list', {
+      surface.resolveNext('server.agent.list', {
         agents: [{ ...makeAgent('a1'), protocols: manifest }],
       });
       await pending;
@@ -59,7 +59,7 @@ describe('AgentsPlugin', () => {
       // not reached yet, and send the request unversioned.
       surface.protocols.publish(new Map());
       const pending = plugin.listAgents();
-      surface.resolveNext('client.agents.list', {
+      surface.resolveNext('server.agent.list', {
         agents: [{ ...makeAgent('a1'), protocols: manifest }],
       });
       await pending;
@@ -131,7 +131,7 @@ describe('AgentsPlugin', () => {
       const pending = plugin.listAgents();
       expect(surfaceA.requests).toHaveLength(0);
       expect(surfaceB.requests).toHaveLength(1);
-      surfaceB.resolveNext('client.agents.list', { agents: [makeAgent('b1')] });
+      surfaceB.resolveNext('server.agent.list', { agents: [makeAgent('b1')] });
       await expect(pending).resolves.toEqual([makeAgent('b1')]);
 
       // Consumers registered under B receive events through B.
@@ -227,17 +227,17 @@ describe('AgentsPlugin', () => {
     it('sends client.agents.list and resolves with the unwrapped agent list', async () => {
       const pending = plugin.listAgents();
       expect(surface.requests).toHaveLength(1);
-      expect(surface.requests[0]?.type).toBe('client.agents.list');
+      expect(surface.requests[0]?.type).toBe('server.agent.list');
       expect(surface.requests[0]?.payload).toEqual({});
 
       const agents = [makeAgent('a1')];
-      surface.resolveNext('client.agents.list', { agents });
+      surface.resolveNext('server.agent.list', { agents });
       await expect(pending).resolves.toEqual(agents);
     });
 
     it('propagates transport rejections', async () => {
       const pending = plugin.listAgents();
-      surface.rejectNext('client.agents.list', new Error('Connection lost'));
+      surface.rejectNext('server.agent.list', new Error('Connection lost'));
       await expect(pending).rejects.toThrow('Connection lost');
     });
   });
@@ -250,30 +250,30 @@ describe('AgentsPlugin', () => {
     it('sends client.agent.rename with agent_id and display_name and resolves the agent', async () => {
       const pending = plugin.renameAgent('a1', 'New Name');
       expect(surface.requests[0]).toMatchObject({
-        type: 'client.agent.rename',
+        type: 'server.agent.rename',
         payload: { agent_id: 'a1', display_name: 'New Name' },
       });
 
       const renamed = makeAgent('a1');
-      surface.resolveNext('client.agent.rename', { success: true, agent: renamed });
+      surface.resolveNext('server.agent.rename', { success: true, agent: renamed });
       await expect(pending).resolves.toEqual(renamed);
     });
 
     it('rejects with the server-provided error text when not successful', async () => {
       const pending = plugin.renameAgent('a1', 'New Name');
-      surface.resolveNext('client.agent.rename', { success: false, error: 'Agent online' });
+      surface.resolveNext('server.agent.rename', { success: false, error: 'Agent online' });
       await expect(pending).rejects.toThrow('Agent online');
     });
 
     it('falls back to "Rename failed" when failing without an error message', async () => {
       const pending = plugin.renameAgent('a1', 'New Name');
-      surface.resolveNext('client.agent.rename', { success: false });
+      surface.resolveNext('server.agent.rename', { success: false });
       await expect(pending).rejects.toThrow('Rename failed');
     });
 
     it('falls back to "Rename failed" when the response carries no agent', async () => {
       const pending = plugin.renameAgent('a1', 'New Name');
-      surface.resolveNext('client.agent.rename', { success: true });
+      surface.resolveNext('server.agent.rename', { success: true });
       await expect(pending).rejects.toThrow('Rename failed');
     });
   });
@@ -286,23 +286,23 @@ describe('AgentsPlugin', () => {
     it('sends client.agent.delete with the agent_id and resolves on success', async () => {
       const pending = plugin.deleteAgent('a1');
       expect(surface.requests[0]).toMatchObject({
-        type: 'client.agent.delete',
+        type: 'server.agent.delete',
         payload: { agent_id: 'a1' },
       });
 
-      surface.resolveNext('client.agent.delete', { success: true });
+      surface.resolveNext('server.agent.delete', { success: true });
       await expect(pending).resolves.toBeUndefined();
     });
 
     it('rejects with the server-provided error text when not successful', async () => {
       const pending = plugin.deleteAgent('a1');
-      surface.resolveNext('client.agent.delete', { success: false, error: 'Agent online' });
+      surface.resolveNext('server.agent.delete', { success: false, error: 'Agent online' });
       await expect(pending).rejects.toThrow('Agent online');
     });
 
     it('falls back to "Delete failed" without an error message', async () => {
       const pending = plugin.deleteAgent('a1');
-      surface.resolveNext('client.agent.delete', { success: false });
+      surface.resolveNext('server.agent.delete', { success: false });
       await expect(pending).rejects.toThrow('Delete failed');
     });
   });

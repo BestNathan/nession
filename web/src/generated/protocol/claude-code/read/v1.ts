@@ -6,8 +6,16 @@
 
 /** The canonical protocol id. Not the wire type. */
 export const PROTOCOL = 'claude-code.read';
-/** The transport projection this contract travels as. */
-export const WIRE = 'extension.claude_code.read';
+/** Every transport projection this contract travels as. */
+export const WIRES = ['claude-code.read'] as const;
+/**
+ * The only projection this contract travels as.
+ *
+ * Absent, deliberately, on a contract served over more than one transport: it
+ * has no single wire, and a caller that needs one has to say which it means.
+ * `WIRES` is always there.
+ */
+export const WIRE = 'claude-code.read';
 /** The contract version these shapes are. */
 export const VERSION = 1;
 
@@ -48,3 +56,4 @@ limit?: number, };
 
 /** The payload the provider answers with. */
 export type ReadResponse = ReadOkV1 | ReadFailureV1;
+

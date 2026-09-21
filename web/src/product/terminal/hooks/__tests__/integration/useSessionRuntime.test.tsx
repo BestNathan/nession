@@ -538,7 +538,7 @@ describe('useSessionRuntime integration', () => {
     const attachCall = lastWs().send.mock.calls.find((call: unknown[]) => {
       const raw = String(call[0]);
       try {
-        return JSON.parse(raw).msg_type === 'client.attach';
+        return JSON.parse(raw).msg_type === 'agent.attach';
       } catch {
         return false;
       }

@@ -20,5 +20,15 @@ nession-git = { path = "../nession-git", features = ["codegen"] }
 nession-claude-code = { path = "../nession-claude-code", features = ["codegen"] }
 ts-rs.workspace = true
 
+# Test-only, and deliberately the *runtimes* rather than more provider crates:
+# `every_advertised_contract_is_in_the_catalog` asks whether the catalog covers
+# what a runtime actually composes, and after `#876` that includes the agent's
+# and the server's own units. Neither depends on this crate, so there is no
+# cycle — and keeping them out of `[dependencies]` is what keeps this a
+# build-time catalog nothing that ships links against.
+[dev-dependencies]
+nession-agent = { path = "../nession-agent" }
+nession-server = { path = "../nession-server" }
+
 [lints]
 workspace = true

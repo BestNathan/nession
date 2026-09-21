@@ -209,38 +209,52 @@ is still v1 — promotes its version files to directories, `session/v1/` and
 `session/v2/`, so a version is one addressable thing rather than a suffix
 scattered across a file. Until then the files stay files.
 
-### Provide a legacy adapter
+### A peer with no manifest is refused
 
-A peer with no manifest is a **Legacy Peer**, not a peer that supports
-everything. Only contracts with an explicit, evidence-backed adapter are served
-to it:
+`#678` is a **breaking upgrade**, and this is where that is decided. An agent
+that advertises no manifest does not connect.
 
-```text
-git.status/v1
-  legacy_wire    = extension.git.status
-  legacy_payload = flat
-```
+The alternative — a legacy adapter, with each contract declaring an old wire
+shape and a downgrade rule — was designed and is deliberately not built. It
+would be machinery for serving peers that will never exist here, and every part
+of it is a place where a wrong guess is invisible: a relay that went through an
+adapter looks exactly like a relay that did not need one. Refusing cannot be
+wrong quietly.
 
-Everything else answers `protocol_not_advertised`. It is forbidden to guess a
-payload shape from a software version, to downgrade unconditionally when a
-manifest is missing, or to silently fall back semantically.
+Two things follow, and they are the whole mechanism:
 
-**Convergence debt — the blanket relay is still what runs.** Today a target with
-no manifest has *everything* relayed to it, which is the unconditional fallback
-this section forbids. Recorded here rather than left to be rediscovered:
+- **Registration refuses.** `agent.register` without a `protocol_manifest` is
+  answered `status: "rejected"` and the agent's connect fails. The field stays
+  `Option` on the wire so this is a *clear rejection* rather than a parse error —
+  an old agent's payload deserializes, and the answer says why.
+- **The relay refuses.** A target the registry holds *no* manifest for is not
+  relayed to. Registration already turns those away, so reaching this means a
+  **straggler**: one that registered before the server was upgraded and has not
+  reconnected since. It answers `contract_not_supported`, which is a
+  unit-scoped refusal that leaves the connection and every other unit alone.
 
-- **Why it is still that way.** Every agent built before `#854` has no manifest,
-  so refusing them would take the extension surface down for the whole fleet to
-  enforce a rule about a case that has not happened yet. A peer that *has* a
-  manifest is checked strictly, and that is where the mechanism is proven.
-- **What would end it.** Manifests are universal once `#854` has been deployed
-  long enough that no live agent predates it. The change is then a second
-  condition in the relay gate — "no manifest *and* no declared adapter" — and a
-  `legacy_wire` field on `ContractDescriptor` for providers to populate.
-- **What will not work.** The Server cannot decide this on its own: it composes
-  no provider, by design, so it cannot know which contracts declare an adapter.
-  The declaration has to travel — in the descriptor, carried to the relay by
-  whatever composes the provider.
+So the vocabulary changes with it. There is no **Legacy Peer** — a peer whose
+answer is unknown — because there is no state in which the server has to
+proceed without one. The only two states are *has a manifest* and *has not
+reconnected*.
+
+### What is refused, and what is not
+
+The same section has to be read together with the one above, because "refuse"
+means two different scopes:
+
+| Situation | Scope | Answer |
+|---|---|---|
+| No manifest at `agent.register` | connection | rejected; the agent never comes up |
+| No manifest in the registry (straggler) | unit | `contract_not_supported` on each call; the socket stays |
+| Manifest present, unit not advertised | unit | `contract_not_supported`; the socket stays |
+| Manifest present, named version not offered | unit | `contract_not_supported`, naming both sides |
+
+Only the first is a connection-level answer, and it is the only one that is
+about the *peer* rather than about a *call*. The rest are the design's
+"a unit with no common version disables that unit and does not take the
+connection with it", which is why a target that simply lacks one extension still
+serves every other one.
 
 ### Resolve as a consumer
 
@@ -268,12 +282,11 @@ Four rules, each of which is a way this goes wrong quietly:
 - **Highest common version**, not the target's newest. A consumer speaking v1
   talking to a target offering v1 and v3 lands on v1.
 - **Versions are not contiguous.** `[1, 3]` is a legitimate answer set.
-- **Naming no version is not a refusal.** A target with no manifest is a Legacy
-  Peer and is addressed exactly as it was before any of this existed. A
-  consumer that *knows* it shares no version with the target must refuse
-  locally: sending nothing would be relayed as a Legacy Peer request and put a
-  v1-shaped payload in front of a v2-only target. The server's check is a second
-  boundary against a stale manifest, not the first one.
+- **Naming no version is not a refusal.** A caller that names no version is
+  relayed, because absence is not a claim about versions. A consumer that
+  *knows* it shares no version with the target must refuse locally: sending
+  nothing puts a v1-shaped payload in front of a v2-only target. The server's
+  check is a second boundary against a stale manifest, not the first one.
 
 A refusal names both sides, on the client exactly as on the server:
 `` `agent-a` offers `git.status` at [v2], which this client cannot read ``.
@@ -307,8 +320,20 @@ It runs as `just codegen` and reads:
 ```text
 crates/nession-protocol-codegen/src/catalog.rs   which types are which contract
         ↓  ts-rs answers "what TypeScript shape is this Rust type?"
-web/src/generated/protocol/<owner>/<unit>/v<N>.ts
+web/src/generated/protocol/git/status/v1.ts            a provider's unit
+web/src/generated/protocol/claude-code/read/v1.ts      a provider's unit
+web/src/generated/protocol/core/session-create/v1.ts   the kernel's
 ```
+
+The directory is the id with the owner's prefix removed and dots as dashes —
+one rule for both kinds. For a provider the prefix *is* the owner, so
+`git.status` under `git` is `status`. The kernel's units are nobody's prefix:
+`session.create` and `client.session.create` are both the kernel's, and
+truncating them to their last segment would put both in `create`, as it would
+`client.attach` and `client.session.attach` in `attach`. Two units writing one
+file fails nothing — the second write wins and the Web imports a contract it did
+not ask for — so `check_paths_are_unique` refuses it rather than letting the
+last writer through.
 
 **ts-rs owns the type translation; this repository owns everything else** — the
 layout, the identity constants, the request/response aliases and which types a
@@ -323,8 +348,14 @@ Four things about the output that are decisions rather than details:
   duplication that costs is generated, so it cannot drift — and it is *checked*,
   not assumed: the generator refuses to write a file that refers to a name it
   does not declare, using ts-rs's own dependency data.
+- **`WIRES`, and `WIRE` only when there is one of them.** A contract carried by
+  two transports has no single wire, and `session.create` is carried by three.
+  Emitting a `WIRE` for it would mean picking one and dropping the rest
+  silently; instead the multi-wire unit has no `WIRE` at all, so a caller that
+  needs one is made to say which it means by a `tsc` error rather than by a
+  string that compiles and is wrong.
 - **There is no `index.ts`.** The first version had one and `tsc` refused it —
-  every unit exports `PROTOCOL`, `WIRE` and `VERSION`, so a barrel is a wall of
+  every unit exports `PROTOCOL`, `WIRES` and `VERSION`, so a barrel is a wall of
   ambiguity errors. The fix is not to rename the constants: a barrel would let a
   consumer import a shape without saying which contract version it is, which is
   the thing this whole document is against. The version is in the import path.
@@ -387,15 +418,19 @@ is broken by it.
 | The same holds for the agent's core units | `core_routes!` (`crates/nession-agent/src/protocol/mod.rs`) — one invocation emits `core_descriptors()` **and** `dispatch_core()` |
 | One wire type, one claimant, across both halves | `ExtensionRegistry::new` — `DuplicateCoreWireType` names both, whichever side lost |
 | A core unit the agent does not serve is not advertised | the same invocation — `CORE_WIRES` and `core_descriptors()` are the same list |
+| The same holds for the Server's units | `server_routes!` (`crates/nession-server/src/protocol/mod.rs`) — one invocation, and `every_unit_the_server_dispatches_is_in_its_manifest` says so |
+| A client can ask the Server what it serves | `client.server.info` → `ServerInfoResponse.protocol_manifest` |
 | A router can name a protocol without knowing any provider | `ContractSupport.wire` — the projection is declared by the provider, not derived by the router |
 | A target is never asked for a wire type it does not carry | the Server's extension relay, gated on the target's manifest |
-| A peer without a manifest still works | the same gate, skipped when there is no manifest — a Legacy Peer, not a peer that said no |
+| A peer with no manifest does not connect | `handle_agent_register` — `protocol_manifest` is required, and its absence is a rejection |
+| A straggler is refused per call, not disconnected | the same gate as any other unsupported unit — `contract_not_supported` |
 | A consumer resolves per target, not per connection | `ProtocolDirectory` is keyed by agent id and replaced wholesale by each agent-list snapshot |
-| A consumer never sends a version it cannot read | `addressedPayload` refuses locally — the server's gate cannot catch this case, because a caller that names nothing is relayed as a Legacy Peer |
+| A consumer never sends a version it cannot read | `addressedPayload` refuses locally — the server's gate cannot catch this case, because a caller that names nothing is relayed |
 | Every path that learns an agent list publishes it | `AgentsPlugin.listAgents` and the `agents.changed` push, both calling one `publishProtocols` |
 | The agent list carries the same fields on every path | `server/agent_view.rs` — one builder, because the two hand-built ones had already drifted |
 | Generated bindings are what the contracts say | `just check-codegen` (`scripts/check-codegen-drift.sh`) — regenerate into a scratch directory, diff |
-| Every advertised contract has generated bindings | `nession-protocol-codegen`'s `every_advertised_contract_is_in_the_catalog`, against the providers' own `descriptors()` |
+| Every advertised contract has generated bindings | `nession-protocol-codegen`'s `every_advertised_contract_is_in_the_catalog`, against all four runtimes' own declarations — the agent's `served_descriptors`, the server's `server_manifest`, and the two providers' `descriptors()` |
+| Two units cannot generate to one file | the same crate's `check_paths_are_unique`, run by the generator |
 | A generated file refers to nothing it does not declare | the same crate's `check_self_contained`, run by the generator *and* as a test |
 
 ### Why the manifest carries the wire projection
@@ -415,11 +450,11 @@ refusing on its silence.
 ### Where a target's support is served
 
 `client.agents.list` carries each agent's manifest as `protocols`, `null` for a
-peer that advertised none. It is served from the list rather than a query of its
-own because that is already the discover-agents call — a consumer resolving per
-target gets every manifest without a second round trip per agent. The CLI's
-`agents list` reads the same field and prints `legacy` rather than `0 units` for
-a peer without one, because those two resolve differently.
+peer the server holds no manifest for. It is served from the list rather than a
+query of its own because that is already the discover-agents call — a consumer
+resolving per target gets every manifest without a second round trip per agent.
+The CLI's `agents list` reads the same field and prints `no manifest` rather
+than `0 units` for such a peer, because those two resolve differently.
 
 ### What "derived" buys over "checked"
 
@@ -485,14 +520,15 @@ command. The two arms it left behind — `agent.register.response` and
 `server.heartbeat.ack` — are replies to something the agent itself sent, and
 advertising them would claim an offer that does not exist. So the agent's slice
 of Phase 6 is the units the agent serves, and the other three units the phase
-names are served by the **server**, where no manifest exists yet:
+names are served by the **server** — which composes a manifest of its own, so
+all four are declared, two of them on each side:
 
-| Phase 6 unit | Served by | In the agent's manifest |
+| Phase 6 unit | Served by | Declared in |
 |---|---|---|
-| `session.create` | the agent (`server.session.create`) | yes |
-| `session.attach` | the **server** (`client.session.attach`) | no — waits for a server manifest |
-| `agent.register` | the **server** | no — same |
-| `agent.heartbeat` | the **server** | no — same |
+| `session.create` | the agent for the server (`server.session.create`) **and** the server for a browser (`client.session.create`) | both manifests, one id |
+| `session.attach` | the **server** (`client.session.attach`) | the server's |
+| `agent.register` | the **server** (`agent.register`) | the server's |
+| `agent.heartbeat` | the **server** (`agent.heartbeat`) | the server's |
 
 ### Where does a core unit's descriptor live?
 
@@ -525,29 +561,108 @@ above; the point here is only that option 1's guarantee was reachable without
 option 1's blast radius, and that neither a behavioural test nor "do not
 advertise core units yet" was needed.
 
+### The Server is a provider too
+
+For most of `#678`'s life it was not, in the only sense that mattered: it served
+`agent.register`, `session.attach`, `env.*`, `commands.*` and the rest, and
+declared none of them. Its dispatch was a `match` in `server/handler.rs`, and a
+`match` cannot be read to produce the set it handles — the same problem the
+agent's core units had, and the same answer.
+
+`crates/nession-server/src/protocol/mod.rs` carries `server_routes!`, one
+invocation emitting `server_descriptors()`, `SERVER_WIRES` and
+`dispatch_server()`. Deliberately the same shape as the agent's `core_routes!`:
+two mechanisms for one rule would be a second thing to keep in step, and the
+hygiene workaround is identical — `self` cannot be captured by a `$body`, so the
+dispatcher is a free function taking the handler and the bodies say `handler`
+where they said `self`.
+
+One difference is worth knowing, because it is not cosmetic. The agent's
+dispatcher matches on `$msg.msg_type.as_str()`; this one clones the wire type
+first. The agent's handlers *borrow* the message, so a borrow held across the
+match is fine — these take it **by value**, and a borrow in the scrutinee would
+conflict with every arm that moves it.
+
+The ids are the **operations**, not the wire types, which is what lets one
+contract have a provider on each side: `session.create` is served by this server
+for a browser and by the agent for this server, both declare the same id, and
+each declares its own wire projection in `ContractSupport.wire`. That is the
+model working rather than a coincidence — a browser asking for a session and a
+server asking for one are the same operation seen from two sides.
+
+**Where it is read.** `client.server.info` carries it as `protocol_manifest` —
+one field on the call a client already makes to ask what this server is, rather
+than a message of its own. The Web already calls it (`platform/server/`), and
+`ServerInfoResponse.protocol_manifest` is the contract.
+
+### The agent answers on two sockets
+
+An agent serves its own units over two transports — the connection it opens to
+the central server, and the WebSocket it listens on for a browser to reach it
+directly — and until now only the first was declared. `server/websocket.rs`
+dispatched a second, larger `match` that no manifest described.
+
+`p2p_routes!` is the second invocation, deliberately the same shape as
+`core_routes!` and for the same reason: a `match` cannot be read to produce the
+set it handles, so a hand-written list of peer-to-peer wires would be a second
+list free to drift from the arms it claims to describe. Thirty-five payload
+types moved into `contracts/` with it, including `FileEntry` and `FileData` —
+the agent's filesystem model *was* the wire shape, exactly as `SessionInfo`
+was — and four responses that were `json!({ … })` at the handler are now named
+types. No `json!` remains on that path.
+
+**One provider, so one list.** `main` unions `core_descriptors()` with
+`p2p_descriptors()` and composes one registry from the result, because it is one
+agent offering one set of units over two wires. `session.create` is the clearest
+case: the relay wire is `server.session.create` and the direct wire is
+`session.create`, and they are the same unit seen from two sides. The manifest's
+`ProtocolManifest::from_descriptors` already unions wire sets by id, so the
+union is what states that rather than a coincidence of ordering.
+
+**One unit can share a wire name across transports.** `session.capture_preview`
+is claimed by both halves — the server sends it to the agent, and a browser
+connecting directly sends it too. The registry's core-against-core check exists
+so that two *units* cannot claim one wire, which would leave one of them
+advertised and never dispatched; it now compares units rather than wire types
+alone, because the same unit arriving twice is both dispatchers serving it. The
+two payloads differ only by the server's `request_id` correlation — framing, not
+contract semantics.
+
+**What remains here.** The server's own `json!` payloads, which are a larger and
+separate ledger (276 uses in `server/handler.rs`), and `#884` — five wires the
+kernel declares under two different unit ids, one of which carries two different
+payload shapes. Both are recorded rather than implied.
+
+**And what no longer does.** This section used to say that `contracts/` did not
+feed the TypeScript codegen at all, so an advertised contract need not have
+generated bindings — the codegen's coverage was not the guarantee it read as.
+That was true until `#876` and is not any more: the catalog now carries the
+kernel's units beside the providers', and
+`every_advertised_contract_is_in_the_catalog` checks it against **all four
+runtimes** — the agent's `served_descriptors`, the server's `server_manifest`,
+and the two extension providers — instead of the two it used to compare. Both
+runtimes are `dev`-dependencies of the generator, which is why nothing that ships
+links it.
+
+An advertised contract having bindings is now a checked property. Filing the
+check as a test rather than a comment is the reason it stayed true.
+
 ### What is still not versioned
 
-Stated rather than implied, because a reader who finds an unadvertised protocol
-should know whether it was overlooked.
-
-- **The server's units.** `agent.register`, `agent.heartbeat` and
-  `client.session.attach` are served by `nession-server`, which composes no
-  manifest at all. Under *served only* they belong in one. Nothing consumes a
-  server manifest today, so building one now would be architecture for its own
-  sake — but it is the next real increment of Phase 6, and it is the reason
-  three of the phase's four named units are not in the table above.
-- **The P2P path.** `server/websocket.rs` dispatches a second, larger match —
-  `client.session.list`, `terminal.input`, `client.attach`, `file.read` — that
-  the browser speaks to an agent directly. Those *are* served by the agent and
-  do belong in its manifest, but not yet: their payloads are `json!` literals
-  with no typed contract in `contracts/`, and the catalog requires every
-  advertised contract to have generated bindings. The units come after their
-  contracts, not before.
 - **The global `protocol_version`.** Gone. It rode in `agent.register` and no
   consumer ever read it — not the server, the CLI, the Web, or the database —
   so it was the *shape* of a compatibility statement rather than one, and
   leaving it there was an invitation for the next reader to branch on it. What
   replaced it is the per-unit resolution above.
+
+## Where a protocol's identity comes from
+
+`#678` gave Protocol Units an `id` and left the naming to convention. What the
+convention turned out to be — the sender — cannot express which of two handlers
+is answering, so five wires in this tree carry one name and two different
+handlers (`#884`). The rule that replaces it, what it changes, and where
+`extension.*` does not fit it are in
+[`protocol-identity.md`](protocol-identity.md).
 
 ## Related
 

@@ -39,7 +39,7 @@ pub struct Worktrees {
     pub truncated: bool,
 }
 
-pub const WIRE: &str = "extension.git.worktrees";
+pub const WIRE: &str = "git.worktrees";
 
 #[derive(Debug, Clone, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
@@ -77,10 +77,7 @@ mod tests {
     fn the_descriptor_names_this_unit_its_owner_and_its_wire_type() {
         let d = descriptor().unwrap();
         assert_eq!(d.id.as_str(), "git.worktrees");
-        assert_eq!(
-            d.contracts[0].wire,
-            vec!["extension.git.worktrees".to_string()]
-        );
+        assert_eq!(d.contracts[0].wire, vec!["git.worktrees".to_string()]);
         assert!(d.validate().is_ok());
     }
 }

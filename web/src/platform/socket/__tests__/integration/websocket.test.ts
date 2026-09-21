@@ -80,7 +80,7 @@ function makeService(): WebSocketService {
   const service = new WebSocketService(TEST_URL, SERVER_PLUGINS, {
     maxReconnectAttempts: 0,
     handshake: (surface) =>
-      surface.request<AuthResponse>('client.auth', AUTH_PAYLOAD).then((res) => {
+      surface.request<AuthResponse>('server.auth', AUTH_PAYLOAD).then((res) => {
         if (res.status !== 'success') {
           throw new Error(res.message || 'Authentication failed');
         }
@@ -100,7 +100,7 @@ async function connectAndAuth(service: WebSocketService): Promise<MockWebSocket>
   socket.open();
 
   const auth = frameAt(socket, 0);
-  expect(auth.msg_type).toBe('client.auth');
+  expect(auth.msg_type).toBe('server.auth');
   reply(socket, auth, { status: 'success' });
 
   await connected;
@@ -178,7 +178,7 @@ describe('WebSocketService + feature singletons', () => {
 
       socket.open();
       const auth = frameAt(socket, 0);
-      expect(auth.msg_type).toBe('client.auth');
+      expect(auth.msg_type).toBe('server.auth');
       expect(auth.payload).toEqual(AUTH_PAYLOAD);
 
       // Handshake not acknowledged yet: connect() stays pending, state frozen.
@@ -225,7 +225,7 @@ describe('WebSocketService + feature singletons', () => {
 
       const pending = agentsApi.listAgents();
       const request = frameAt(socket, 1); // frame 0 is the auth handshake
-      expect(request.msg_type).toBe('client.agents.list');
+      expect(request.msg_type).toBe('server.agent.list');
       expect(request.payload).toEqual({});
       expect(typeof request.id).toBe('string');
 
@@ -240,7 +240,7 @@ describe('WebSocketService + feature singletons', () => {
 
       const first = sessionsApi.fetchSessions();
       const request1 = frameAt(socket, 1);
-      expect(request1.msg_type).toBe('client.sessions.list');
+      expect(request1.msg_type).toBe('server.session.list');
       expect(request1.payload).toEqual({});
       const sessions = [makeSession('agent-a', 'main')];
       reply(socket, request1, { sessions, stale_agents: ['agent-a'] });
@@ -259,7 +259,7 @@ describe('WebSocketService + feature singletons', () => {
 
       const pending = agentsApi.deleteAgent('agent-1');
       const request = frameAt(socket, 1);
-      expect(request.msg_type).toBe('client.agent.delete');
+      expect(request.msg_type).toBe('server.agent.delete');
       expect(request.payload).toEqual({ agent_id: 'agent-1' });
 
       socket.message(
@@ -383,7 +383,7 @@ describe('WebSocketService + feature singletons', () => {
       const socketASendsBefore = socketA.send.mock.calls.length;
       const pending = agentsApi.listAgents();
       const request = lastFrame(socketB);
-      expect(request.msg_type).toBe('client.agents.list');
+      expect(request.msg_type).toBe('server.agent.list');
       expect(request.payload).toEqual({});
       expect(socketA.send.mock.calls.length).toBe(socketASendsBefore); // A's socket stays silent
       reply(socketB, request, { agents: [makeAgent('agent-2')] });

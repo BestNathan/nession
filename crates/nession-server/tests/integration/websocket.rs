@@ -76,7 +76,7 @@ async fn test_agent_registration() {
     let (mut ws_stream, _) = connect_async(&url).await.unwrap();
 
     let register_msg = serde_json::json!({
-        "msg_type": "agent.register",
+        "msg_type": "server.agent.register",
         "id": "msg_1",
         "timestamp": current_timestamp(),
         "payload": {
@@ -85,6 +85,7 @@ async fn test_agent_registration() {
             "ip_address": "127.0.0.1",
             "port": 8080,
             "auth_token": "test_token",
+            "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
             "metadata": {
                 "tmux_version": "3.3a",
                 "os_version": "Linux",
@@ -107,7 +108,7 @@ async fn test_agent_registration() {
     };
 
     let response_msg: serde_json::Value = serde_json::from_str(&response_text).unwrap();
-    assert_eq!(response_msg["msg_type"], "agent.register.response");
+    assert_eq!(response_msg["msg_type"], "server.agent.register.response");
     assert_eq!(response_msg["payload"]["status"], "accepted");
 }
 
@@ -131,7 +132,7 @@ async fn test_invalid_auth_token() {
     let (mut ws_stream, _) = connect_async(&url).await.unwrap();
 
     let auth_msg = serde_json::json!({
-        "msg_type": "client.auth",
+        "msg_type": "server.auth",
         "id": "msg_1",
         "timestamp": current_timestamp(),
         "payload": {
@@ -156,7 +157,7 @@ async fn test_invalid_auth_token() {
     };
 
     let response_msg: serde_json::Value = serde_json::from_str(&response_text).unwrap();
-    assert_eq!(response_msg["msg_type"], "client.auth.response");
+    assert_eq!(response_msg["msg_type"], "server.auth.response");
     assert_eq!(response_msg["payload"]["status"], "failed");
 }
 
@@ -180,7 +181,7 @@ async fn test_heartbeat_without_registration() {
     let (mut ws_stream, _) = connect_async(&url).await.unwrap();
 
     let heartbeat_msg = serde_json::json!({
-        "msg_type": "agent.heartbeat",
+        "msg_type": "server.agent.heartbeat",
         "id": "msg_1",
         "timestamp": current_timestamp(),
         "payload": {
@@ -231,7 +232,7 @@ async fn test_client_agents_list_unauthenticated() {
     let (mut ws, _) = connect_async(&url).await.unwrap();
 
     let msg = serde_json::json!({
-        "msg_type": "client.agents.list",
+        "msg_type": "server.agent.list",
         "id": "al1", "timestamp": current_timestamp(),
         "payload": {}
     });
@@ -301,11 +302,12 @@ async fn test_agent_registration_with_connect_url() {
     let (mut ws, _) = connect_async(&url).await.unwrap();
 
     let msg = serde_json::json!({
-        "msg_type": "agent.register",
+        "msg_type": "server.agent.register",
         "id": "cu1", "timestamp": current_timestamp(),
         "payload": {
             "agent_id": "cu-agent", "hostname": "h", "ip_address": "10.0.0.1",
             "port": 9090, "auth_token": "test_token",
+            "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
             "connect_url": "wss://custom.example.com/ws",
             "metadata": {
                 "tmux_version": "3.3", "os_version": "Linux", "nession_version": "0.1"
@@ -370,7 +372,7 @@ async fn test_client_sessions_list_authenticated() {
 
     // Authenticate
     let auth_msg = serde_json::json!({
-        "msg_type": "client.auth",
+        "msg_type": "server.auth",
         "id": "msg_auth",
         "timestamp": current_timestamp(),
         "payload": {
@@ -396,7 +398,7 @@ async fn test_client_sessions_list_authenticated() {
 
     // Request sessions list
     let sessions_msg = serde_json::json!({
-        "msg_type": "client.sessions.list",
+        "msg_type": "server.session.list",
         "id": "msg_sessions",
         "timestamp": current_timestamp(),
         "payload": {}
@@ -416,6 +418,6 @@ async fn test_client_sessions_list_authenticated() {
     };
 
     let response_msg: serde_json::Value = serde_json::from_str(&response_text).unwrap();
-    assert_eq!(response_msg["msg_type"], "client.sessions.list.response");
+    assert_eq!(response_msg["msg_type"], "server.session.list.response");
     assert!(response_msg["payload"]["sessions"].is_array());
 }

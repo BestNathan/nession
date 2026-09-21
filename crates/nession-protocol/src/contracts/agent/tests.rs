@@ -7,7 +7,7 @@ fn an_agent_register_rides_in_the_envelope_and_comes_back_intact() {
     // contract payload in it*, which is the pair every real message is. A
     // rename on either side that the other's tests do not see fails here.
     let msg: ProtocolMessage<AgentRegisterPayload> = Message {
-        msg_type: "agent.register".to_string(),
+        msg_type: "server.agent.register".to_string(),
         id: "msg-99".to_string(),
         timestamp: 1700000000,
         payload: AgentRegisterPayload {
@@ -31,7 +31,7 @@ fn an_agent_register_rides_in_the_envelope_and_comes_back_intact() {
 
     let json = serde_json::to_string(&msg).unwrap();
     let decoded: ProtocolMessage<AgentRegisterPayload> = serde_json::from_str(&json).unwrap();
-    assert_eq!(decoded.msg_type, "agent.register");
+    assert_eq!(decoded.msg_type, "server.agent.register");
     assert_eq!(decoded.id, "msg-99");
     assert_eq!(decoded.payload.agent_id, "a1");
     assert_eq!(decoded.payload.metadata.tmux_version, "3.3");
@@ -448,4 +448,25 @@ fn test_server_heartbeat_ack_payload() {
     let decoded: ServerHeartbeatAckPayload = serde_json::from_str(&json).unwrap();
     assert_eq!(decoded.agent_id, "agent-1");
     assert_eq!(decoded.server_time, 1700000000);
+}
+
+#[test]
+fn a_registration_from_before_manifests_existed_still_decodes() {
+    // The compatibility claim `#678` rests on, asserted against bytes rather
+    // than against the type: the server refuses a manifest-less peer, and that
+    // refusal is only a *decision* if the payload parses first. If this fixture
+    // were rejected at `from_str`, the refusal would be a parse error wearing
+    // a policy's clothes.
+    use crate::contracts::fixtures::fixture;
+
+    let payload: AgentRegisterPayload = fixture("register-legacy-no-manifest.json").decode();
+    assert_eq!(payload.agent_id, "legacy-agent");
+    assert!(
+        payload.protocol_manifest.is_none(),
+        "an absent manifest must decode as `None`, not fail"
+    );
+    // The other half of the same claim: the fields that predate `#678`
+    // advertise the addresses the old agent really sent.
+    assert_eq!(payload.addresses.len(), 1);
+    assert_eq!(payload.metadata.nession_version, "0.34.1");
 }

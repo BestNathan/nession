@@ -5,6 +5,7 @@
 
 use futures_util::{SinkExt, StreamExt};
 use nession_agent::connection::{msg_types, ServerClient};
+use nession_agent::extension::ExtensionRegistry;
 use nession_agent::tmux::manager::SessionManager;
 use nession_common::protocol::{AgentMetadata, AgentStatus};
 use std::sync::Arc;
@@ -61,7 +62,7 @@ fn serve_mock(listener: TcpListener) -> (tokio::task::JoinHandle<()>, mpsc::Rece
 
             // Send a registration response.
             let response = serde_json::json!({
-                "msg_type": "agent.register.response",
+                "msg_type": "server.agent.register.response",
                 "id": "test-id",
                 "timestamp": 1234567890,
                 "payload": {
@@ -145,7 +146,22 @@ async fn integration_registration_message_format() {
         metadata,
         Arc::new(SessionManager::new()),
         "/tmp".to_string(),
-        None, // extension_registry
+        // A real registry, because a real agent always composes one and the
+        // server now refuses a registration with no manifest. `None` here would
+        // exercise a shape that cannot reach a server.
+        //
+        // `served_descriptors` rather than `core_descriptors`: this asserts what
+        // reaches the wire, and a test that composes its own subset asserts what
+        // a runtime that does not exist would send.
+        Some(Arc::new(
+            ExtensionRegistry::new(
+                "integration-agent-2",
+                Vec::new(),
+                nession_agent::protocol::served_descriptors()
+                    .expect("the served units name themselves"),
+            )
+            .expect("the routes compose"),
+        )),
     );
 
     let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
@@ -178,6 +194,40 @@ async fn integration_registration_message_format() {
     assert!(
         payload.get("protocol_version").is_none(),
         "the global protocol version is gone: {payload}"
+    );
+    // And the field that replaced it has to be on the wire, because the server
+    // now refuses a registration without one. An agent that composed no
+    // extensions still advertises its core units, so "no extensions" is not
+    // "nothing to say" — asserted on a real registry rather than an empty one,
+    // which is what production composes.
+    let manifest = &payload["protocol_manifest"];
+    assert!(
+        manifest.is_object(),
+        "registration must carry a manifest: {payload}"
+    );
+    assert_eq!(manifest["provider"], "integration-agent-2");
+    assert!(
+        manifest["protocols"]["agent.session.create"].is_object(),
+        "the agent's own core unit must be advertised: {manifest}"
+    );
+    // One unit, one wire. This agent answers session-create on both of its
+    // sockets, and the identity rule named the wire after the handler rather
+    // than the socket, so the two projections collapsed onto `agent.session.create`
+    // (they used to be `server.session.create` and `session.create`, one per
+    // transport). Which socket a message arrived on is a transport fact, so the
+    // manifest keeps one entry and says so once.
+    let create = &manifest["protocols"]["agent.session.create"]["wire"];
+    assert!(
+        create
+            .as_array()
+            .is_some_and(|w| w.iter().any(|v| v == "agent.session.create")),
+        "session.create must be advertised under the wire it answers: {create}"
+    );
+    // And a unit only this agent's own socket serves reaches the wire too —
+    // the manifest is the union, not the server-connection half of it.
+    assert!(
+        manifest["protocols"]["agent.terminal.input"].is_object(),
+        "a peer-to-peer-only unit must be advertised: {manifest}"
     );
 
     // Verify metadata.

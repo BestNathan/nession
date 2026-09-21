@@ -240,12 +240,12 @@ fn the_extension_declares_the_wire_types_the_registry_routes_on() {
         .collect();
 
     for expected in [
-        "extension.git.status",
-        "extension.git.diff",
-        "extension.git.root",
-        "extension.git.log",
-        "extension.git.branches",
-        "extension.git.worktrees",
+        "git.status",
+        "git.diff",
+        "git.root",
+        "git.log",
+        "git.branches",
+        "git.worktrees",
     ] {
         assert!(
             wires.iter().any(|w| w == expected),
