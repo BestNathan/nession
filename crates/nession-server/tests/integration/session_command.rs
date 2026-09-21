@@ -45,7 +45,7 @@ async fn test_session_create_flow() {
 
     // Register agent
     let reg = serde_json::json!({
-        "msg_type": "agent.register",
+        "msg_type": "server.agent.register",
         "id": "reg-1",
         "timestamp": 0,
         "payload": {
@@ -54,7 +54,7 @@ async fn test_session_create_flow() {
             "ip_address": "127.0.0.1",
             "port": 19999,
             "auth_token": "test",
-            "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["extension.git.status"]}}},
+            "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
             "metadata": {"tmux_version": "3.3", "os_version": "Linux", "nession_version": "0.1.0"},
         }
     });
@@ -72,7 +72,7 @@ async fn test_session_create_flow() {
 
     // Authenticate
     let auth = serde_json::json!({
-        "msg_type": "client.auth",
+        "msg_type": "server.auth",
         "id": "auth-1",
         "timestamp": 0,
         "payload": {"auth_token": "test"}
@@ -85,7 +85,7 @@ async fn test_session_create_flow() {
 
     // Send session create
     let create = serde_json::json!({
-        "msg_type": "client.session.create",
+        "msg_type": "server.session.create",
         "id": "create-1",
         "timestamp": 0,
         "payload": {"agent_id": "agent-1", "name": "my-session"}
@@ -102,13 +102,17 @@ async fn test_session_create_flow() {
         _ => panic!("expected text"),
     };
     let agent_parsed: serde_json::Value = serde_json::from_str(&agent_text).unwrap();
-    assert_eq!(agent_parsed["msg_type"], "server.session.create");
+    // What the Server *forwards*, which is the Agent's unit: the wire is named
+    // for who answers it, and on this hop that is the Agent even though the
+    // Server is the one sending. (The client-facing `server.session.create`
+    // above is a different unit — the Server answers that one itself.)
+    assert_eq!(agent_parsed["msg_type"], "agent.session.create");
     assert_eq!(agent_parsed["payload"]["name"], "my-session");
     let request_id = agent_parsed["payload"]["request_id"].as_str().unwrap();
 
     // Agent sends response
     let response = serde_json::json!({
-        "msg_type": "agent.session.command.response",
+        "msg_type": "server.agent.command-response",
         "id": "resp-1",
         "timestamp": 0,
         "payload": {
@@ -130,7 +134,7 @@ async fn test_session_create_flow() {
         _ => panic!("expected text"),
     };
     let client_parsed: serde_json::Value = serde_json::from_str(&client_text).unwrap();
-    assert_eq!(client_parsed["msg_type"], "client.session.create.response");
+    assert_eq!(client_parsed["msg_type"], "server.session.create.response");
     assert_eq!(client_parsed["payload"]["success"], true);
     assert_eq!(client_parsed["payload"]["session_id"], "agent-1:my-session");
 }
@@ -147,7 +151,7 @@ async fn test_session_kill_flow() {
 
     // Register agent
     let reg = serde_json::json!({
-        "msg_type": "agent.register",
+        "msg_type": "server.agent.register",
         "id": "reg-1",
         "timestamp": 0,
         "payload": {
@@ -156,7 +160,7 @@ async fn test_session_kill_flow() {
             "ip_address": "127.0.0.1",
             "port": 19999,
             "auth_token": "test",
-            "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["extension.git.status"]}}},
+            "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
             "metadata": {"tmux_version": "3.3", "os_version": "Linux", "nession_version": "0.1.0"},
         }
     });
@@ -172,7 +176,7 @@ async fn test_session_kill_flow() {
         .unwrap();
     let (mut client_sink, mut client_stream) = client_ws.split();
     let auth = serde_json::json!({
-        "msg_type": "client.auth",
+        "msg_type": "server.auth",
         "id": "auth-1",
         "timestamp": 0,
         "payload": {"auth_token": "test"}
@@ -185,7 +189,7 @@ async fn test_session_kill_flow() {
 
     // Register a session in the server's registry via agent.session.update
     let update = serde_json::json!({
-        "msg_type": "agent.session.update",
+        "msg_type": "server.agent.session-update",
         "id": "update-1",
         "timestamp": 0,
         "payload": {
@@ -204,7 +208,7 @@ async fn test_session_kill_flow() {
 
     // Send session kill
     let kill = serde_json::json!({
-        "msg_type": "client.session.kill",
+        "msg_type": "server.session.kill",
         "id": "kill-1",
         "timestamp": 0,
         "payload": {"session_id": "agent-1:my-session"}
@@ -221,13 +225,14 @@ async fn test_session_kill_flow() {
         _ => panic!("expected text"),
     };
     let agent_parsed: serde_json::Value = serde_json::from_str(&agent_text).unwrap();
-    assert_eq!(agent_parsed["msg_type"], "server.session.kill");
+    // The Agent's unit, for the same reason as the create case above.
+    assert_eq!(agent_parsed["msg_type"], "agent.session.kill");
     assert_eq!(agent_parsed["payload"]["name"], "my-session");
     let request_id = agent_parsed["payload"]["request_id"].as_str().unwrap();
 
     // Agent sends success response
     let response = serde_json::json!({
-        "msg_type": "agent.session.command.response",
+        "msg_type": "server.agent.command-response",
         "id": "resp-1",
         "timestamp": 0,
         "payload": {
@@ -250,11 +255,11 @@ async fn test_session_kill_flow() {
             _ => panic!("expected text"),
         };
         let v: serde_json::Value = serde_json::from_str(&client_text).unwrap();
-        if v["msg_type"].as_str() == Some("client.session.kill.response") {
+        if v["msg_type"].as_str() == Some("server.session.kill.response") {
             break v;
         }
     };
-    assert_eq!(client_parsed["msg_type"], "client.session.kill.response");
+    assert_eq!(client_parsed["msg_type"], "server.session.kill.response");
     assert_eq!(client_parsed["payload"]["success"], true);
 }
 
@@ -268,7 +273,7 @@ async fn test_create_with_offline_agent_returns_error() {
         .unwrap();
     let (mut client_sink, mut client_stream) = client_ws.split();
     let auth = serde_json::json!({
-        "msg_type": "client.auth",
+        "msg_type": "server.auth",
         "id": "auth-1",
         "timestamp": 0,
         "payload": {"auth_token": "test"}
@@ -281,7 +286,7 @@ async fn test_create_with_offline_agent_returns_error() {
 
     // Try to create session on non-existent agent
     let create = serde_json::json!({
-        "msg_type": "client.session.create",
+        "msg_type": "server.session.create",
         "id": "create-1",
         "timestamp": 0,
         "payload": {"agent_id": "nonexistent", "name": "test"}
@@ -298,7 +303,7 @@ async fn test_create_with_offline_agent_returns_error() {
         _ => panic!("expected text"),
     };
     let parsed: serde_json::Value = serde_json::from_str(&text).unwrap();
-    assert_eq!(parsed["msg_type"], "client.session.create.response");
+    assert_eq!(parsed["msg_type"], "server.session.create.response");
     assert_eq!(parsed["payload"]["success"], false);
     assert!(parsed["payload"]["error"]
         .as_str()

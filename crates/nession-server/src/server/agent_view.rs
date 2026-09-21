@@ -102,10 +102,7 @@ mod tests {
         let mut protocols = BTreeMap::new();
         protocols.insert(
             ProtocolId::new("git.status").unwrap(),
-            ContractSupport::with_wire(
-                vec![ContractVersion::V1],
-                vec!["extension.git.status".to_string()],
-            ),
+            ContractSupport::with_wire(vec![ContractVersion::V1], vec!["git.status".to_string()]),
         );
         let manifest = ProtocolManifest {
             provider: "agent-a".to_string(),

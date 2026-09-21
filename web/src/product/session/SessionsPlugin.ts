@@ -98,7 +98,7 @@ export class SessionsPlugin implements TransportPlugin {
       payload.force = true;
     }
     const response = await this.requireConnection().request<SessionsListResponse>(
-      'client.sessions.list',
+      'server.session.list',
       payload,
     );
     return { sessions: response.sessions, stale_agents: response.stale_agents ?? [] };
@@ -126,7 +126,7 @@ export class SessionsPlugin implements TransportPlugin {
     if (relayUrl) {
       payload.relay_url = relayUrl;
     }
-    return this.requireConnection().request<AttachInfo>('client.session.attach', payload);
+    return this.requireConnection().request<AttachInfo>('server.session.attach', payload);
   }
 
   /** Create a tmux session on an agent, optionally sourcing env files. */
@@ -135,7 +135,7 @@ export class SessionsPlugin implements TransportPlugin {
     name: string,
     envFiles: EnvFileRef[] = [],
   ): Promise<CreateSessionResponse> {
-    return this.requireConnection().request<CreateSessionResponse>('client.session.create', {
+    return this.requireConnection().request<CreateSessionResponse>('server.session.create', {
       agent_id: agentId,
       name,
       env_files: envFiles,
@@ -144,7 +144,7 @@ export class SessionsPlugin implements TransportPlugin {
 
   /** Kill a tmux session (`"agentId:sessionName"`). */
   async killSession(sessionId: string): Promise<KillSessionResponse> {
-    return this.requireConnection().request<KillSessionResponse>('client.session.kill', {
+    return this.requireConnection().request<KillSessionResponse>('server.session.kill', {
       session_id: sessionId,
     });
   }
@@ -169,7 +169,7 @@ export class SessionsPlugin implements TransportPlugin {
       cols?: number;
       rows?: number;
       error?: string;
-    }>('client.session.capture_preview', { session_id: sessionId, lines });
+    }>('server.session.capture-preview', { session_id: sessionId, lines });
     if (response.error) {
       throw new Error(response.error);
     }

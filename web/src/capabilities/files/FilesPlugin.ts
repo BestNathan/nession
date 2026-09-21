@@ -112,31 +112,31 @@ export class FilesPlugin implements TransportPlugin, FileApi {
   }
 
   listDir(path: string): Promise<{ entries: FileEntry[] }> {
-    return this.request('file.list', { path });
+    return this.request('agent.file.list', { path });
   }
 
   readFile(path: string, options?: { offset?: number; limit?: number }): Promise<FileData> {
-    return this.request('file.read', { path, ...options });
+    return this.request('agent.file.read', { path, ...options });
   }
 
   writeFile(path: string, contentB64: string): Promise<{ path: string; written: number }> {
-    return this.request('file.write', { path, content: contentB64 });
+    return this.request('agent.file.write', { path, content: contentB64 });
   }
 
   deleteFile(path: string, recursive = false): Promise<{ path: string; success: boolean }> {
-    return this.request('file.delete', { path, recursive });
+    return this.request('agent.file.delete', { path, recursive });
   }
 
   createDir(path: string): Promise<{ path: string; success: boolean }> {
-    return this.request('file.create_dir', { path });
+    return this.request('agent.file.create-dir', { path });
   }
 
   renameFile(from: string, to: string): Promise<{ from: string; to: string; success: boolean }> {
-    return this.request('file.rename', { from, to });
+    return this.request('agent.file.rename', { from, to });
   }
 
   getCwd(sessionId: string): Promise<{ path: string }> {
-    return this.request('file.cwd', { session_id: sessionId });
+    return this.request('agent.file.cwd', { session_id: sessionId });
   }
 
   /** Read a local file and upload its base64 content as `file.write`. */

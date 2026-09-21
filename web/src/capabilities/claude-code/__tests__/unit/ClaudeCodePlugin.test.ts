@@ -52,7 +52,7 @@ describe('ClaudeCodePlugin', () => {
       const pending = plugin.claudeCodeList(listReq);
       expect(surfaceA.requests).toHaveLength(0);
       expect(surfaceB.requests).toHaveLength(1);
-      surfaceB.resolveNext('extension.claude_code.list', listResponse);
+      surfaceB.resolveNext('claude-code.list', listResponse);
       await expect(pending).resolves.toEqual(listResponse);
 
       teardownB();
@@ -78,17 +78,17 @@ describe('ClaudeCodePlugin', () => {
     it('claudeCodeList forwards the whole request object as the payload', async () => {
       const pending = plugin.claudeCodeList(listReq);
       expect(surface.requests[0]).toMatchObject({
-        type: 'extension.claude_code.list',
+        type: 'claude-code.list',
         payload: listReq,
       });
 
-      surface.resolveNext('extension.claude_code.list', listResponse);
+      surface.resolveNext('claude-code.list', listResponse);
       await expect(pending).resolves.toEqual(listResponse);
     });
 
     it('claudeCodeList passes error responses through raw', async () => {
       const pending = plugin.claudeCodeList(listReq);
-      surface.resolveNext('extension.claude_code.list', {
+      surface.resolveNext('claude-code.list', {
         available: false,
         categories: [],
         error: 'agent offline',
@@ -103,11 +103,11 @@ describe('ClaudeCodePlugin', () => {
     it('claudeCodeRead forwards the whole request object', async () => {
       const pending = plugin.claudeCodeRead(readReq);
       expect(surface.requests[0]).toMatchObject({
-        type: 'extension.claude_code.read',
+        type: 'claude-code.read',
         payload: readReq,
       });
 
-      surface.resolveNext('extension.claude_code.read', {
+      surface.resolveNext('claude-code.read', {
         content: '{"apiKey":"x"}',
         content_type: 'json',
         total_size: 100,

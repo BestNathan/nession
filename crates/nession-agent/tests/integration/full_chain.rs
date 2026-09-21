@@ -351,6 +351,7 @@ async fn test_session_lifecycle() {
         name: session_name.to_string(),
         width: 80,
         height: 24,
+        env_snapshots: Vec::new(),
     };
     let req = new_message(agent_msg_types::SESSION_CREATE, create);
     let json = serde_json::to_string(&req).unwrap();

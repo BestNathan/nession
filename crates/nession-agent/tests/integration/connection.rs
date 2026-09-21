@@ -62,7 +62,7 @@ fn serve_mock(listener: TcpListener) -> (tokio::task::JoinHandle<()>, mpsc::Rece
 
             // Send a registration response.
             let response = serde_json::json!({
-                "msg_type": "agent.register.response",
+                "msg_type": "server.agent.register.response",
                 "id": "test-id",
                 "timestamp": 1234567890,
                 "payload": {
@@ -207,26 +207,26 @@ async fn integration_registration_message_format() {
     );
     assert_eq!(manifest["provider"], "integration-agent-2");
     assert!(
-        manifest["protocols"]["session.create"].is_object(),
+        manifest["protocols"]["agent.session.create"].is_object(),
         "the agent's own core unit must be advertised: {manifest}"
     );
-    // One unit, two wires: the relay wire the server speaks and the direct wire
-    // a browser speaks to this agent's own socket. Both are the same unit, so
-    // both belong on one advertised entry.
-    let create = &manifest["protocols"]["session.create"]["wire"];
+    // One unit, one wire. This agent answers session-create on both of its
+    // sockets, and the identity rule named the wire after the handler rather
+    // than the socket, so the two projections collapsed onto `agent.session.create`
+    // (they used to be `server.session.create` and `session.create`, one per
+    // transport). Which socket a message arrived on is a transport fact, so the
+    // manifest keeps one entry and says so once.
+    let create = &manifest["protocols"]["agent.session.create"]["wire"];
     assert!(
         create
             .as_array()
-            .is_some_and(|w| w.iter().any(|v| v == "server.session.create"))
-            && create
-                .as_array()
-                .is_some_and(|w| w.iter().any(|v| v == "session.create")),
-        "both projections of session.create must be advertised: {create}"
+            .is_some_and(|w| w.iter().any(|v| v == "agent.session.create")),
+        "session.create must be advertised under the wire it answers: {create}"
     );
     // And a unit only this agent's own socket serves reaches the wire too —
     // the manifest is the union, not the server-connection half of it.
     assert!(
-        manifest["protocols"]["terminal.input"].is_object(),
+        manifest["protocols"]["agent.terminal.input"].is_object(),
         "a peer-to-peer-only unit must be advertised: {manifest}"
     );
 

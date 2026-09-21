@@ -6,24 +6,38 @@
 //! a diff of the output would not tell anyone.
 
 use crate::catalog::Unit;
+use std::collections::{BTreeMap, BTreeSet};
 
 fn units() -> Vec<Unit> {
     crate::units()
 }
 
-/// The protocol ids every runtime in this workspace declares, as they compose
-/// them.
+/// Every Protocol Unit every runtime in this workspace declares, and the wires
+/// each is declared over.
 ///
-/// Four, not two. The catalog used to be checked against the two extension
-/// providers alone, which was correct while it only carried them — and became
-/// the thing that hid the gap `#876` is about the moment the kernel's own
+/// Four runtimes, not two. The catalog used to be checked against the two
+/// extension providers alone, which was correct while it only carried them — and
+/// became the thing that hid the gap `#876` is about the moment the kernel's own
 /// contracts mattered, because nothing was asking whether *they* had bindings.
 ///
-/// `served_descriptors` and `server_descriptors` are each derived from the
+/// `served_descriptors` and `server_manifest` are each derived from the
 /// invocation that dispatches them, so this is the set a runtime actually
-/// composes rather than a list kept in a fourth place.
-fn advertised() -> Vec<String> {
-    let mut ids: Vec<String> = nession_git::protocol::descriptors()
+/// composes rather than a list kept in a fifth place.
+///
+/// Wires are unioned per id, because a unit served on two transports is one
+/// entry with two: `session.create` is answered by the server for a browser and
+/// by the agent for the server, and both belong on its one entry.
+fn declared() -> BTreeMap<String, BTreeSet<String>> {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    let mut map: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    let mut add = |id: &str, wires: &[String]| {
+        map.entry(id.to_string())
+            .or_default()
+            .extend(wires.iter().cloned());
+    };
+
+    for d in nession_git::protocol::descriptors()
         .expect("nession-git can name its contracts")
         .iter()
         .chain(
@@ -36,24 +50,28 @@ fn advertised() -> Vec<String> {
                 .expect("the agent can name what it serves")
                 .iter(),
         )
-        .map(|d| d.id.as_str().to_string())
-        .collect();
+    {
+        for contract in &d.contracts {
+            add(d.id.as_str(), &contract.wire);
+        }
+    }
+
     // The server's declaration is reachable as the manifest it serves, which is
     // the public surface — `server_descriptors` is `pub(crate)`, deliberately,
     // since nothing outside the crate dispatches by it.
-    ids.extend(
-        nession_server::protocol::server_manifest()
-            .expect("the server can name what it serves")
-            .protocols
-            .keys()
-            .map(|id| id.as_str().to_string()),
-    );
-    ids.sort();
-    // The agent and the server both answer `session.create`, `env.*` and the
-    // rest — one unit seen from two sides, which is the model working. The
-    // comparison is over ids, so the overlap collapses here.
-    ids.dedup();
-    ids
+    for (id, support) in &nession_server::protocol::server_manifest()
+        .expect("the server can name what it serves")
+        .protocols
+    {
+        add(id.as_str(), &support.wire);
+    }
+
+    map
+}
+
+/// The protocol ids every runtime declares.
+fn advertised() -> Vec<String> {
+    declared().into_keys().collect()
 }
 
 #[test]
@@ -70,6 +88,40 @@ fn every_advertised_contract_is_in_the_catalog() {
         advertised(),
         "the catalog and the providers disagree about which contracts exist"
     );
+}
+
+#[test]
+fn the_catalog_names_the_wires_the_runtimes_declare() {
+    // The catalog's `wires` are **string literals** — not reads of the
+    // providers' `WIRE` consts — and until this test nothing compared them. The
+    // completeness check above is over *ids*.
+    //
+    // So a wire could be spelled one way in the contract and another in the
+    // catalog, and nothing said so. It happened: `just codegen` kept writing
+    // `extension.git.status` after every provider const had moved to
+    // `git.status`, which means the drift survived a change that moved every
+    // wire in the workspace. Two spellings of one thing, inside the artefact
+    // whose entire purpose is to stop that.
+    //
+    // The ids are checked; the wires are checked here.
+    let declared = declared();
+    for unit in units() {
+        let Some(expected) = declared.get(unit.id) else {
+            panic!("`{}` is in the catalog and no runtime declares it", unit.id);
+        };
+
+        let mut actual: Vec<&str> = unit.wires.to_vec();
+        actual.sort_unstable();
+        let mut expected: Vec<&str> = expected.iter().map(String::as_str).collect();
+        expected.sort_unstable();
+
+        assert_eq!(
+            actual, expected,
+            "the catalog and the runtimes disagree about `{}`'s wires — the \
+             contract is the source of truth, not the catalog",
+            unit.id
+        );
+    }
 }
 
 #[test]

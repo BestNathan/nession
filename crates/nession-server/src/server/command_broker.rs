@@ -215,7 +215,7 @@ mod tests {
         broker.register_agent("a1", sender).await;
 
         let waiter = broker
-            .send_command("a1", "server.session.create", "req-1", json!({}))
+            .send_command("a1", "agent.session.create", "req-1", json!({}))
             .await;
 
         // An unrelated message from the same agent re-registers its sender.
@@ -244,7 +244,7 @@ mod tests {
         broker.register_agent("a1", sender).await;
 
         let waiter = broker
-            .send_command("a1", "server.session.create", "req-1", json!({}))
+            .send_command("a1", "agent.session.create", "req-1", json!({}))
             .await;
 
         broker.unregister_agent("a1").await;

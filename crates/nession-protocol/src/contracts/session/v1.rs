@@ -250,6 +250,19 @@ pub struct SessionCreatePayload {
     pub width: u16,
     #[serde(default = "default_height")]
     pub height: u16,
+    /// Resolved env-file snapshots to inject via `tmux new-session -e`.
+    ///
+    /// `ServerSessionCreatePayload` has carried this since the env feature
+    /// landed; this projection did not, and the omission is what stopped the
+    /// two being one protocol. `agent.session.create` is answered by the agent
+    /// whichever side asks, so the two payloads have to be the same payload —
+    /// and the difference was never a decision, just a field the direct path
+    /// never grew.
+    ///
+    /// Empty (default) preserves the previous behaviour exactly for a caller
+    /// that does not send it.
+    #[serde(default)]
+    pub env_snapshots: Vec<EnvSnapshot>,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]

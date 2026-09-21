@@ -36,7 +36,7 @@ impl TerminalTransport for MockTransport {
 async fn test_terminal_input_message_format() {
     let msg = build_terminal_input_message("test_session", b"hello");
     let v: serde_json::Value = serde_json::from_str(&msg).unwrap();
-    assert_eq!(v["msg_type"], "terminal.input");
+    assert_eq!(v["msg_type"], "agent.terminal.input");
     assert_eq!(v["payload"]["session_name"], "test_session");
     // "hello" in base64 is "aGVsbG8="
     assert_eq!(v["payload"]["data"], "aGVsbG8=");
@@ -46,7 +46,7 @@ async fn test_terminal_input_message_format() {
 async fn test_terminal_resize_message_format() {
     let msg = build_terminal_resize_message("sess", 120, 40);
     let v: serde_json::Value = serde_json::from_str(&msg).unwrap();
-    assert_eq!(v["msg_type"], "terminal.resize");
+    assert_eq!(v["msg_type"], "agent.terminal.resize");
     assert_eq!(v["payload"]["session_name"], "sess");
     assert_eq!(v["payload"]["cols"], 120);
     assert_eq!(v["payload"]["rows"], 40);
@@ -145,7 +145,7 @@ async fn test_message_routing_input_to_transport() {
 
     // Verify the message structure
     let v: serde_json::Value = serde_json::from_str(&msg).unwrap();
-    assert_eq!(v["msg_type"], "terminal.input");
+    assert_eq!(v["msg_type"], "agent.terminal.input");
     assert_eq!(v["payload"]["session_name"], "test");
 
     drop(cancel_tx);
@@ -177,7 +177,7 @@ async fn test_message_routing_output_from_transport() {
 async fn test_resize_message_routing() {
     let msg = build_terminal_resize_message("session1", 132, 50);
     let v: serde_json::Value = serde_json::from_str(&msg).unwrap();
-    assert_eq!(v["msg_type"], "terminal.resize");
+    assert_eq!(v["msg_type"], "agent.terminal.resize");
     assert_eq!(v["payload"]["cols"], 132);
     assert_eq!(v["payload"]["rows"], 50);
 }

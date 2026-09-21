@@ -106,7 +106,7 @@ describe('useAppConnection', () => {
 
     // Wire frame: client.auth carrying the token + a persisted client id.
     const frame = authRequestOf(socket);
-    expect(frame.msg_type).toBe('client.auth');
+    expect(frame.msg_type).toBe('server.auth');
     expect((frame.payload as { auth_token: string }).auth_token).toBe('stored-token');
     const clientId = (frame.payload as { client_id: string }).client_id;
     expect(clientId).toBeTruthy();

@@ -84,7 +84,7 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
             owner: "git",
             id: "git.status",
             version: 1,
-            wires: &["extension.git.status"],
+            wires: &["git.status"],
             decls: vec![
                 decl_of::<nession_git::protocol::status::v1::StatusRequestV1>(cfg),
                 decl_of::<nession_git::protocol::status::v1::StatusOkV1>(cfg),
@@ -106,7 +106,7 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
             owner: "git",
             id: "git.diff",
             version: 1,
-            wires: &["extension.git.diff"],
+            wires: &["git.diff"],
             decls: vec![
                 decl_of::<nession_git::protocol::diff::v1::DiffRequestV1>(cfg),
                 decl_of::<nession_git::protocol::diff::v1::DiffOkV1>(cfg),
@@ -126,7 +126,7 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
             owner: "git",
             id: "git.root",
             version: 1,
-            wires: &["extension.git.root"],
+            wires: &["git.root"],
             decls: vec![
                 decl_of::<nession_git::protocol::root::v1::RootRequestV1>(cfg),
                 decl_of::<nession_git::protocol::root::v1::RootOkV1>(cfg),
@@ -145,7 +145,7 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
             owner: "git",
             id: "git.log",
             version: 1,
-            wires: &["extension.git.log"],
+            wires: &["git.log"],
             decls: vec![
                 decl_of::<nession_git::protocol::log::v1::LogRequestV1>(cfg),
                 decl_of::<nession_git::protocol::log::v1::LogOkV1>(cfg),
@@ -166,7 +166,7 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
             owner: "git",
             id: "git.branches",
             version: 1,
-            wires: &["extension.git.branches"],
+            wires: &["git.branches"],
             decls: vec![
                 decl_of::<nession_git::protocol::branches::v1::BranchesRequestV1>(cfg),
                 decl_of::<nession_git::protocol::branches::v1::BranchesOkV1>(cfg),
@@ -187,7 +187,7 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
             owner: "git",
             id: "git.worktrees",
             version: 1,
-            wires: &["extension.git.worktrees"],
+            wires: &["git.worktrees"],
             decls: vec![
                 decl_of::<nession_git::protocol::worktrees::v1::WorktreesRequestV1>(cfg),
                 decl_of::<nession_git::protocol::worktrees::v1::WorktreesOkV1>(cfg),
@@ -208,7 +208,7 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
             owner: "claude-code",
             id: "claude-code.list",
             version: 1,
-            wires: &["extension.claude_code.list"],
+            wires: &["claude-code.list"],
             decls: vec![
                 decl_of::<nession_claude_code::protocol::list::v1::ListRequestV1>(cfg),
                 decl_of::<nession_claude_code::protocol::list::v1::ListResponseV1>(cfg),
@@ -234,7 +234,7 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
             owner: "claude-code",
             id: "claude-code.read",
             version: 1,
-            wires: &["extension.claude_code.read"],
+            wires: &["claude-code.read"],
             decls: vec![
                 decl_of::<nession_claude_code::protocol::read::v1::ReadRequestV1>(cfg),
                 decl_of::<nession_claude_code::protocol::read::v1::ReadResponseV1>(cfg),
@@ -253,9 +253,9 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
         },
         Unit {
             owner: "core",
-            id: "agent.register",
+            id: "server.agent.register",
             version: 1,
-            wires: &["agent.register"],
+wires: &["server.agent.register"],
             decls: vec![
                 decl_of::<nession_protocol::contracts::agent::v1::AgentRegisterPayload>(cfg),
                 decl_of::<nession_protocol::contracts::agent::v1::AgentRegisterResponsePayload>(cfg),
@@ -278,9 +278,9 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
         },
         Unit {
             owner: "core",
-            id: "agent.heartbeat",
+            id: "server.agent.heartbeat",
             version: 1,
-            wires: &["agent.heartbeat"],
+wires: &["server.agent.heartbeat"],
             decls: vec![
                 decl_of::<nession_protocol::contracts::agent::v1::AgentHeartbeatPayload>(cfg),
                 decl_of::<nession_protocol::contracts::agent::v1::AgentStatus>(cfg),
@@ -295,18 +295,18 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
         },
         Unit {
             owner: "core",
-            id: "agent.session-update",
+            id: "server.agent.session-update",
             version: 1,
-            wires: &["agent.session.update"],
+wires: &["server.agent.session-update"],
             decls: vec![],
             request: None,
             response: None,
         },
         Unit {
             owner: "core",
-            id: "agent.command-response",
+            id: "server.agent.command-response",
             version: 1,
-            wires: &["agent.session.command.response"],
+wires: &["server.agent.command-response"],
             decls: vec![
                 decl_of::<nession_protocol::contracts::session::v1::AgentCommandResponsePayload>(cfg),
             ],
@@ -318,9 +318,9 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
         },
         Unit {
             owner: "core",
-            id: "agent.terminal-resize",
+            id: "server.agent.terminal-resize",
             version: 1,
-            wires: &["agent.terminal.resize"],
+wires: &["server.agent.terminal-resize"],
             decls: vec![
                 decl_of::<nession_protocol::contracts::session::v1::AgentTerminalResizePayload>(cfg),
             ],
@@ -329,9 +329,9 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
         },
         Unit {
             owner: "core",
-            id: "agent.address-update",
+            id: "server.agent.address-update",
             version: 1,
-            wires: &["agent.address_update"],
+wires: &["server.agent.address-update"],
             decls: vec![
                 decl_of::<nession_protocol::contracts::agent::v1::AgentAddressUpdatePayload>(cfg),
                 decl_of::<nession_protocol::contracts::agent::v1::AgentAddress>(cfg),
@@ -345,27 +345,27 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
         },
         Unit {
             owner: "core",
-            id: "agent.list",
+            id: "server.agent.list",
             version: 1,
-            wires: &["client.agents.list"],
+wires: &["server.agent.list"],
             decls: vec![],
             request: None,
             response: None,
         },
         Unit {
             owner: "core",
-            id: "agent.rename",
+            id: "server.agent.rename",
             version: 1,
-            wires: &["client.agent.rename"],
+wires: &["server.agent.rename"],
             decls: vec![],
             request: None,
             response: None,
         },
         Unit {
             owner: "core",
-            id: "agent.delete",
+            id: "server.agent.delete",
             version: 1,
-            wires: &["client.agent.delete"],
+wires: &["server.agent.delete"],
             decls: vec![
                 decl_of::<nession_protocol::contracts::agent::v1::ClientAgentDeletePayload>(cfg),
                 decl_of::<nession_protocol::contracts::agent::v1::ClientAgentDeleteResponsePayload>(cfg),
@@ -381,9 +381,22 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
         },
         Unit {
             owner: "core",
+            id: "server.auth",
+            version: 1,
+            wires: &["server.auth"],
+            // Identity only. The Server reads this request's fields out of
+            // `serde_json::Value` and builds its answer with `json!`, so there
+            // is no named shape to point at. Naming one from `contracts/`
+            // would describe a type the handler does not use.
+            decls: vec![],
+            request: None,
+            response: None,
+        },
+        Unit {
+            owner: "core",
             id: "client.auth",
             version: 1,
-            wires: &["client.auth"],
+wires: &["client.auth"],
             decls: vec![
                 decl_of::<nession_protocol::contracts::client::v1::ClientAuthPayload>(cfg),
                 decl_of::<nession_protocol::contracts::client::v1::AuthResponsePayload>(cfg),
@@ -399,9 +412,9 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
         },
         Unit {
             owner: "core",
-            id: "client.attach",
+            id: "agent.attach",
             version: 1,
-            wires: &["client.attach"],
+            wires: &["agent.attach"],
             decls: vec![
                 decl_of::<nession_protocol::contracts::session::v1::ClientAttachPayload>(cfg),
                 decl_of::<nession_protocol::contracts::session::v1::ClientAttachResponse>(cfg),
@@ -419,9 +432,9 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
         },
         Unit {
             owner: "core",
-            id: "client.detach",
+            id: "agent.detach",
             version: 1,
-            wires: &["client.detach"],
+            wires: &["agent.detach"],
             decls: vec![
                 decl_of::<nession_protocol::contracts::session::v1::ClientDetachPayload>(cfg),
                 decl_of::<nession_protocol::contracts::session::v1::ClientDetachResponse>(cfg),
@@ -434,18 +447,6 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
                 "ClientDetachReply",
                 nession_protocol::contracts::session::v1::ClientDetachResponse::inline,
             )),
-        },
-        Unit {
-            owner: "core",
-            id: "client.agents.list",
-            version: 1,
-            wires: &["client.agents.list"],
-            decls: vec![
-                decl_of::<nession_protocol::contracts::agent::v1::WebAgentsListResponse>(cfg),
-                decl_of::<nession_protocol::contracts::agent::v1::WebAgentInfo>(cfg),
-            ],
-            request: None,
-            response: None,
         },
         Unit {
             owner: "core",
@@ -515,9 +516,22 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
         },
         Unit {
             owner: "core",
-            id: "session.list",
+            id: "server.session.list",
             version: 1,
-            wires: &["client.sessions.list", "server.sessions.list", "session.list"],
+            wires: &["server.session.list"],
+            // Identity only. The Server reads this request's fields out of
+            // `serde_json::Value` and builds its answer with `json!`, so there
+            // is no named shape to point at. Naming one from `contracts/`
+            // would describe a type the handler does not use.
+            decls: vec![],
+            request: None,
+            response: None,
+        },
+        Unit {
+            owner: "core",
+            id: "agent.session.report",
+            version: 1,
+wires: &["agent.session.report"],
             decls: vec![
                 decl_of::<nession_protocol::contracts::session::v1::SessionListResponse>(cfg),
                 decl_of::<nession_protocol::contracts::session::v1::SessionInfo>(cfg),
@@ -527,10 +541,38 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
         },
         Unit {
             owner: "core",
-            id: "session.create",
+            id: "agent.session.list",
             version: 1,
-            wires: &["client.session.create", "server.session.create", "session.create"],
+            wires: &["agent.session.list"],
+            // Identity only. The Server reads this request's fields out of
+            // `serde_json::Value` and builds its answer with `json!`, so there
+            // is no named shape to point at. Naming one from `contracts/`
+            // would describe a type the handler does not use.
+            decls: vec![],
+            request: None,
+            response: None,
+        },
+        Unit {
+            owner: "core",
+            id: "server.session.create",
+            version: 1,
+            wires: &["server.session.create"],
+            // Identity only. The Server reads this request's fields out of
+            // `serde_json::Value` and builds its answer with `json!`, so there
+            // is no named shape to point at. Naming one from `contracts/`
+            // would describe a type the handler does not use.
+            decls: vec![],
+            request: None,
+            response: None,
+        },
+        Unit {
+            owner: "core",
+            id: "agent.session.create",
+            version: 1,
+wires: &["agent.session.create"],
             decls: vec![
+                decl_of::<nession_protocol::contracts::env::v1::EnvSource>(cfg),
+                decl_of::<nession_protocol::contracts::env::v1::EnvSnapshot>(cfg),
                 decl_of::<nession_protocol::contracts::session::v1::SessionCreatePayload>(cfg),
                 decl_of::<nession_protocol::contracts::session::v1::SessionCreateResponse>(cfg),
             ],
@@ -545,9 +587,22 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
         },
         Unit {
             owner: "core",
-            id: "session.kill",
+            id: "server.session.kill",
             version: 1,
-            wires: &["client.session.kill", "server.session.kill", "session.kill"],
+            wires: &["server.session.kill"],
+            // Identity only. The Server reads this request's fields out of
+            // `serde_json::Value` and builds its answer with `json!`, so there
+            // is no named shape to point at. Naming one from `contracts/`
+            // would describe a type the handler does not use.
+            decls: vec![],
+            request: None,
+            response: None,
+        },
+        Unit {
+            owner: "core",
+            id: "agent.session.kill",
+            version: 1,
+wires: &["agent.session.kill"],
             decls: vec![
                 decl_of::<nession_protocol::contracts::session::v1::SessionKillPayload>(cfg),
                 decl_of::<nession_protocol::contracts::session::v1::SessionKillResponse>(cfg),
@@ -563,9 +618,9 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
         },
         Unit {
             owner: "core",
-            id: "session.attach",
+            id: "server.session.attach",
             version: 1,
-            wires: &["client.session.attach"],
+wires: &["server.session.attach"],
             decls: vec![
                 decl_of::<nession_protocol::contracts::session::v1::ClientSessionAttachPayload>(cfg),
                 decl_of::<nession_protocol::contracts::session::v1::ClientSessionAttachResponsePayload>(cfg),
@@ -586,9 +641,22 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
         },
         Unit {
             owner: "core",
-            id: "session.capture-preview",
+            id: "server.session.capture-preview",
             version: 1,
-            wires: &["client.session.capture_preview", "session.capture_preview"],
+            wires: &["server.session.capture-preview"],
+            // Identity only. The Server reads this request's fields out of
+            // `serde_json::Value` and builds its answer with `json!`, so there
+            // is no named shape to point at. Naming one from `contracts/`
+            // would describe a type the handler does not use.
+            decls: vec![],
+            request: None,
+            response: None,
+        },
+        Unit {
+            owner: "core",
+            id: "agent.session.capture-preview",
+            version: 1,
+wires: &["agent.session.capture-preview"],
             decls: vec![
                 decl_of::<nession_protocol::contracts::session::v1::SessionCapturePreviewPayload>(cfg),
                 decl_of::<nession_protocol::contracts::session::v1::SessionCapturePreviewResponse>(cfg),
@@ -604,27 +672,40 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
         },
         Unit {
             owner: "core",
-            id: "session.relay.begin",
+            id: "server.session.relay.begin",
             version: 1,
-            wires: &["client.session.relay.begin"],
+wires: &["server.session.relay.begin"],
             decls: vec![],
             request: None,
             response: None,
         },
         Unit {
             owner: "core",
-            id: "session.relay.end",
+            id: "server.session.relay.end",
             version: 1,
-            wires: &["client.session.relay.end"],
+wires: &["server.session.relay.end"],
             decls: vec![],
             request: None,
             response: None,
         },
         Unit {
             owner: "core",
-            id: "session.env.apply",
+            id: "server.session.env.apply",
             version: 1,
-            wires: &["client.session.env.apply", "server.session.env.apply"],
+            wires: &["server.session.env.apply"],
+            // Identity only. The Server reads this request's fields out of
+            // `serde_json::Value` and builds its answer with `json!`, so there
+            // is no named shape to point at. Naming one from `contracts/`
+            // would describe a type the handler does not use.
+            decls: vec![],
+            request: None,
+            response: None,
+        },
+        Unit {
+            owner: "core",
+            id: "agent.session.env.apply",
+            version: 1,
+wires: &["agent.session.env.apply"],
             decls: vec![
                 decl_of::<nession_protocol::contracts::session::v1::ClientSessionEnvApplyPayload>(cfg),
                 decl_of::<nession_protocol::contracts::session::v1::ClientSessionEnvResponsePayload>(cfg),
@@ -642,9 +723,22 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
         },
         Unit {
             owner: "core",
-            id: "session.env.unset",
+            id: "server.session.env.unset",
             version: 1,
-            wires: &["client.session.env.unset", "server.session.env.unset"],
+            wires: &["server.session.env.unset"],
+            // Identity only. The Server reads this request's fields out of
+            // `serde_json::Value` and builds its answer with `json!`, so there
+            // is no named shape to point at. Naming one from `contracts/`
+            // would describe a type the handler does not use.
+            decls: vec![],
+            request: None,
+            response: None,
+        },
+        Unit {
+            owner: "core",
+            id: "agent.session.env.unset",
+            version: 1,
+wires: &["agent.session.env.unset"],
             decls: vec![
                 decl_of::<nession_protocol::contracts::session::v1::ClientSessionEnvUnsetPayload>(cfg),
                 decl_of::<nession_protocol::contracts::session::v1::ClientSessionEnvResponsePayload>(cfg),
@@ -662,9 +756,9 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
         },
         Unit {
             owner: "core",
-            id: "session.env.active",
+            id: "server.session.env.active",
             version: 1,
-            wires: &["client.session.env.active"],
+wires: &["server.session.env.active"],
             decls: vec![
                 decl_of::<nession_protocol::contracts::env::v1::ActiveEnvFile>(cfg),
                 decl_of::<nession_protocol::contracts::env::v1::EnvSource>(cfg),
@@ -674,18 +768,31 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
         },
         Unit {
             owner: "core",
-            id: "session.env.query",
+            id: "server.session.env.query",
             version: 1,
-            wires: &["client.session.env.query"],
+            wires: &["server.session.env.query"],
             decls: vec![],
             request: None,
             response: None,
         },
         Unit {
             owner: "core",
-            id: "env.list",
+            id: "server.env.list",
             version: 1,
-            wires: &["client.env.list", "server.env.list"],
+            wires: &["server.env.list"],
+            // Identity only. The Server reads this request's fields out of
+            // `serde_json::Value` and builds its answer with `json!`, so there
+            // is no named shape to point at. Naming one from `contracts/`
+            // would describe a type the handler does not use.
+            decls: vec![],
+            request: None,
+            response: None,
+        },
+        Unit {
+            owner: "core",
+            id: "agent.env.list",
+            version: 1,
+wires: &["agent.env.list"],
             decls: vec![
                 decl_of::<nession_protocol::contracts::env::v1::ClientEnvListPayload>(cfg),
                 decl_of::<nession_protocol::contracts::env::v1::ClientEnvListResponsePayload>(cfg),
@@ -703,9 +810,22 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
         },
         Unit {
             owner: "core",
-            id: "env.get",
+            id: "server.env.get",
             version: 1,
-            wires: &["client.env.get", "server.env.get"],
+            wires: &["server.env.get"],
+            // Identity only. The Server reads this request's fields out of
+            // `serde_json::Value` and builds its answer with `json!`, so there
+            // is no named shape to point at. Naming one from `contracts/`
+            // would describe a type the handler does not use.
+            decls: vec![],
+            request: None,
+            response: None,
+        },
+        Unit {
+            owner: "core",
+            id: "agent.env.get",
+            version: 1,
+wires: &["agent.env.get"],
             decls: vec![
                 decl_of::<nession_protocol::contracts::env::v1::ClientEnvGetPayload>(cfg),
                 decl_of::<nession_protocol::contracts::env::v1::ClientEnvGetResponsePayload>(cfg),
@@ -722,9 +842,22 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
         },
         Unit {
             owner: "core",
-            id: "env.write",
+            id: "server.env.write",
             version: 1,
-            wires: &["client.env.write", "server.env.write"],
+            wires: &["server.env.write"],
+            // Identity only. The Server reads this request's fields out of
+            // `serde_json::Value` and builds its answer with `json!`, so there
+            // is no named shape to point at. Naming one from `contracts/`
+            // would describe a type the handler does not use.
+            decls: vec![],
+            request: None,
+            response: None,
+        },
+        Unit {
+            owner: "core",
+            id: "agent.env.write",
+            version: 1,
+wires: &["agent.env.write"],
             decls: vec![
                 decl_of::<nession_protocol::contracts::env::v1::ClientEnvWritePayload>(cfg),
                 decl_of::<nession_protocol::contracts::env::v1::ClientEnvWriteResponsePayload>(cfg),
@@ -741,9 +874,22 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
         },
         Unit {
             owner: "core",
-            id: "env.delete",
+            id: "server.env.delete",
             version: 1,
-            wires: &["client.env.delete", "server.env.delete"],
+            wires: &["server.env.delete"],
+            // Identity only. The Server reads this request's fields out of
+            // `serde_json::Value` and builds its answer with `json!`, so there
+            // is no named shape to point at. Naming one from `contracts/`
+            // would describe a type the handler does not use.
+            decls: vec![],
+            request: None,
+            response: None,
+        },
+        Unit {
+            owner: "core",
+            id: "agent.env.delete",
+            version: 1,
+wires: &["agent.env.delete"],
             decls: vec![
                 decl_of::<nession_protocol::contracts::env::v1::ClientEnvDeletePayload>(cfg),
                 decl_of::<nession_protocol::contracts::env::v1::ClientEnvDeleteResponsePayload>(cfg),
@@ -758,11 +904,11 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
                 nession_protocol::contracts::env::v1::ClientEnvDeleteResponsePayload::inline,
             )),
         },
-        Unit {
+                Unit {
             owner: "core",
-            id: "env.query",
+            id: "agent.env.query",
             version: 1,
-            wires: &["server.env.query"],
+wires: &["agent.env.query"],
             decls: vec![
                 decl_of::<nession_protocol::contracts::env::v1::ServerEnvQueryPayload>(cfg),
                 decl_of::<nession_protocol::contracts::env::v1::AgentEnvStatePayload>(cfg),
@@ -782,7 +928,7 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
             owner: "core",
             id: "server.info",
             version: 1,
-            wires: &["client.server.info"],
+wires: &["server.info"],
             decls: vec![
                 decl_of::<nession_protocol::contracts::server::v1::ServerInfoRequest>(cfg),
                 decl_of::<nession_protocol::contracts::server::v1::ServerInfoResponse>(cfg),
@@ -802,9 +948,9 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
         },
         Unit {
             owner: "core",
-            id: "commands.list",
+            id: "server.commands.list",
             version: 1,
-            wires: &["client.commands.list"],
+wires: &["server.commands.list"],
             decls: vec![
                 decl_of::<nession_protocol::contracts::commands::v1::ClientCommandsListPayload>(cfg),
                 decl_of::<nession_protocol::contracts::commands::v1::ClientCommandsListResponsePayload>(cfg),
@@ -821,9 +967,9 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
         },
         Unit {
             owner: "core",
-            id: "commands.add",
+            id: "server.commands.add",
             version: 1,
-            wires: &["client.commands.add"],
+wires: &["server.commands.add"],
             decls: vec![
                 decl_of::<nession_protocol::contracts::commands::v1::ClientCommandsAddPayload>(cfg),
                 decl_of::<nession_protocol::contracts::commands::v1::ClientCommandsAddResponsePayload>(cfg),
@@ -839,9 +985,9 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
         },
         Unit {
             owner: "core",
-            id: "commands.remove",
+            id: "server.commands.remove",
             version: 1,
-            wires: &["client.commands.remove"],
+wires: &["server.commands.remove"],
             decls: vec![
                 decl_of::<nession_protocol::contracts::commands::v1::ClientCommandsRemovePayload>(cfg),
                 decl_of::<nession_protocol::contracts::commands::v1::ClientCommandsRemoveResponsePayload>(cfg),
@@ -857,9 +1003,9 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
         },
         Unit {
             owner: "core",
-            id: "commands.update",
+            id: "server.commands.update",
             version: 1,
-            wires: &["client.commands.update"],
+wires: &["server.commands.update"],
             decls: vec![
                 decl_of::<nession_protocol::contracts::commands::v1::ClientCommandsUpdatePayload>(cfg),
                 decl_of::<nession_protocol::contracts::commands::v1::ClientCommandsUpdateResponsePayload>(cfg),
@@ -875,9 +1021,9 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
         },
         Unit {
             owner: "core",
-            id: "terminal.input",
+            id: "agent.terminal.input",
             version: 1,
-            wires: &["terminal.input"],
+wires: &["agent.terminal.input"],
             decls: vec![
                 decl_of::<nession_protocol::contracts::terminal::v1::TerminalInputPayload>(cfg),
             ],
@@ -889,9 +1035,9 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
         },
         Unit {
             owner: "core",
-            id: "terminal.resize",
+            id: "agent.terminal.resize",
             version: 1,
-            wires: &["terminal.resize"],
+wires: &["agent.terminal.resize"],
             decls: vec![
                 decl_of::<nession_protocol::contracts::terminal::v1::TerminalResizePayload>(cfg),
             ],
@@ -903,9 +1049,9 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
         },
         Unit {
             owner: "core",
-            id: "file.list",
+            id: "agent.file.list",
             version: 1,
-            wires: &["file.list"],
+wires: &["agent.file.list"],
             decls: vec![
                 decl_of::<nession_protocol::contracts::file::v1::FileListPayload>(cfg),
                 decl_of::<nession_protocol::contracts::file::v1::FileListResponse>(cfg),
@@ -922,9 +1068,9 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
         },
         Unit {
             owner: "core",
-            id: "file.read",
+            id: "agent.file.read",
             version: 1,
-            wires: &["file.read"],
+wires: &["agent.file.read"],
             decls: vec![
                 decl_of::<nession_protocol::contracts::file::v1::FileReadPayload>(cfg),
                 decl_of::<nession_protocol::contracts::file::v1::FileData>(cfg),
@@ -940,9 +1086,9 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
         },
         Unit {
             owner: "core",
-            id: "file.write",
+            id: "agent.file.write",
             version: 1,
-            wires: &["file.write"],
+wires: &["agent.file.write"],
             decls: vec![
                 decl_of::<nession_protocol::contracts::file::v1::FileWritePayload>(cfg),
                 decl_of::<nession_protocol::contracts::file::v1::FileWriteResponse>(cfg),
@@ -958,9 +1104,9 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
         },
         Unit {
             owner: "core",
-            id: "file.delete",
+            id: "agent.file.delete",
             version: 1,
-            wires: &["file.delete"],
+wires: &["agent.file.delete"],
             decls: vec![
                 decl_of::<nession_protocol::contracts::file::v1::FileDeletePayload>(cfg),
                 decl_of::<nession_protocol::contracts::file::v1::FileMutationResponse>(cfg),
@@ -976,9 +1122,9 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
         },
         Unit {
             owner: "core",
-            id: "file.create-dir",
+            id: "agent.file.create-dir",
             version: 1,
-            wires: &["file.create_dir"],
+wires: &["agent.file.create-dir"],
             decls: vec![
                 decl_of::<nession_protocol::contracts::file::v1::FileCreateDirPayload>(cfg),
                 decl_of::<nession_protocol::contracts::file::v1::FileMutationResponse>(cfg),
@@ -994,9 +1140,9 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
         },
         Unit {
             owner: "core",
-            id: "file.rename",
+            id: "agent.file.rename",
             version: 1,
-            wires: &["file.rename"],
+wires: &["agent.file.rename"],
             decls: vec![
                 decl_of::<nession_protocol::contracts::file::v1::FileRenamePayload>(cfg),
                 decl_of::<nession_protocol::contracts::file::v1::FileRenameResponse>(cfg),
@@ -1012,9 +1158,9 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
         },
         Unit {
             owner: "core",
-            id: "file.cwd",
+            id: "agent.file.cwd",
             version: 1,
-            wires: &["file.cwd"],
+wires: &["agent.file.cwd"],
             decls: vec![
                 decl_of::<nession_protocol::contracts::file::v1::FileCwdPayload>(cfg),
                 decl_of::<nession_protocol::contracts::file::v1::FileCwdResponse>(cfg),
@@ -1030,9 +1176,9 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
         },
         Unit {
             owner: "core",
-            id: "keepalive.ping",
+            id: "agent.keepalive.ping",
             version: 1,
-            wires: &["keepalive.ping"],
+wires: &["agent.keepalive.ping"],
             decls: vec![],
             request: None,
             response: None,

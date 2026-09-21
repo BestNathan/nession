@@ -52,16 +52,16 @@ const INITIAL_RECONNECT_DELAY: Duration = Duration::from_secs(1);
 
 /// Message type constants for agent-to-server protocol.
 pub mod msg_types {
-    pub const AGENT_REGISTER: &str = "agent.register";
-    pub const AGENT_REGISTER_RESPONSE: &str = "agent.register.response";
-    pub const AGENT_HEARTBEAT: &str = "agent.heartbeat";
-    pub const AGENT_SESSION_UPDATE: &str = "agent.session.update";
+    pub const AGENT_REGISTER: &str = "server.agent.register";
+    pub const AGENT_REGISTER_RESPONSE: &str = "server.agent.register.response";
+    pub const AGENT_HEARTBEAT: &str = "server.agent.heartbeat";
+    pub const AGENT_SESSION_UPDATE: &str = "server.agent.session-update";
     pub const SERVER_HEARTBEAT_ACK: &str = "server.heartbeat.ack";
-    pub const AGENT_ADDRESS_UPDATE: &str = "agent.address_update";
+    pub const AGENT_ADDRESS_UPDATE: &str = "server.agent.address-update";
     /// Server asks the agent for its live tmux session list. Used by the web
     /// UI's force-refresh so the server can rebuild its registry from the
     /// agent's actual state instead of waiting for the next watcher poll.
-    pub const SERVER_SESSIONS_LIST: &str = "server.sessions.list";
+    pub const SERVER_SESSIONS_LIST: &str = "agent.session.report";
 }
 
 /// Payload for session update messages.
@@ -655,7 +655,7 @@ impl ServerClient {
                     };
 
                     let response = serde_json::json!({
-                        "msg_type": "agent.session.command.response",
+                        "msg_type": "server.agent.command-response",
                         "id": uuid::Uuid::new_v4().to_string(),
                         "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
                         "payload": {
@@ -819,7 +819,7 @@ mod tests {
 
                 // Send a registration response.
                 let response = serde_json::json!({
-                    "msg_type": "agent.register.response",
+                    "msg_type": "server.agent.register.response",
                     "id": "test-id",
                     "timestamp": 1234567890,
                     "payload": {
@@ -880,7 +880,7 @@ mod tests {
             .expect("no message received");
 
         let parsed: serde_json::Value = serde_json::from_str(&msg).unwrap();
-        assert_eq!(parsed["msg_type"], "agent.register");
+        assert_eq!(parsed["msg_type"], "server.agent.register");
         assert_eq!(parsed["payload"]["agent_id"], "test-agent-1");
         assert_eq!(parsed["payload"]["hostname"], "test-host");
         assert_eq!(parsed["payload"]["port"], 8080);
@@ -934,7 +934,7 @@ mod tests {
             .expect("no message received");
 
         let parsed: serde_json::Value = serde_json::from_str(&msg).unwrap();
-        assert_eq!(parsed["msg_type"], "agent.heartbeat");
+        assert_eq!(parsed["msg_type"], "server.agent.heartbeat");
         assert_eq!(parsed["payload"]["agent_id"], "test-agent-2");
         assert_eq!(parsed["payload"]["status"], "online");
         assert_eq!(parsed["payload"]["session_count"], 5);
@@ -990,7 +990,7 @@ mod tests {
             .expect("no message received");
 
         let parsed: serde_json::Value = serde_json::from_str(&msg).unwrap();
-        assert_eq!(parsed["msg_type"], "agent.session.update");
+        assert_eq!(parsed["msg_type"], "server.agent.session-update");
         assert_eq!(parsed["payload"]["agent_id"], "test-agent-3");
         assert_eq!(parsed["payload"]["session_name"], "test-session");
         assert_eq!(parsed["payload"]["status"], "active");
@@ -1015,7 +1015,7 @@ mod tests {
                 let ws = accept_async(stream).await.expect("failed to accept ws");
                 let (mut sink, mut stream) = ws.split();
                 let response = serde_json::json!({
-                    "msg_type": "agent.register.response",
+                    "msg_type": "server.agent.register.response",
                     "id": "test-id",
                     "timestamp": 1234567890,
                     "payload": {
@@ -1079,7 +1079,7 @@ mod tests {
                     let ws = accept_async(stream).await.expect("accept ws");
                     let (mut sink, mut stream) = ws.split();
                     let response = serde_json::json!({
-                        "msg_type": "agent.register.response",
+                        "msg_type": "server.agent.register.response",
                         "id": "test-id",
                         "timestamp": 1,
                         "payload": { "status": "accepted", "message": "ok" }
@@ -1089,7 +1089,7 @@ mod tests {
                     // Read the register message and report it.
                     if let Some(Ok(WsMessage::Text(text))) = stream.next().await {
                         let parsed: serde_json::Value = serde_json::from_str(&text).unwrap();
-                        if parsed["msg_type"] == "agent.register" {
+                        if parsed["msg_type"] == "server.agent.register" {
                             let _ = re_tx
                                 .send(
                                     parsed["payload"]["agent_id"]
@@ -1176,7 +1176,7 @@ mod tests {
 
                 // Send registration response.
                 let response = serde_json::json!({
-                    "msg_type": "agent.register.response",
+                    "msg_type": "server.agent.register.response",
                     "id": "test-id",
                     "timestamp": 1234567890,
                     "payload": {
@@ -1191,7 +1191,7 @@ mod tests {
 
                 // Send session create command.
                 let create_cmd = serde_json::json!({
-                    "msg_type": "server.session.create",
+                    "msg_type": "agent.session.create",
                     "id": "cmd-1",
                     "timestamp": 1234567891,
                     "payload": {
@@ -1256,7 +1256,7 @@ mod tests {
             .expect("no message received");
 
         let parsed: serde_json::Value = serde_json::from_str(&msg).unwrap();
-        assert_eq!(parsed["msg_type"], "agent.session.command.response");
+        assert_eq!(parsed["msg_type"], "server.agent.command-response");
         assert_eq!(parsed["payload"]["request_id"], "req-123");
         assert_eq!(parsed["payload"]["command"], "session.create");
         assert_eq!(parsed["payload"]["success"], true);
@@ -1291,7 +1291,7 @@ mod tests {
 
                 // Send registration response.
                 let response = serde_json::json!({
-                    "msg_type": "agent.register.response",
+                    "msg_type": "server.agent.register.response",
                     "id": "test-id",
                     "timestamp": 1234567890,
                     "payload": {
@@ -1312,7 +1312,7 @@ mod tests {
 
                 // Send session kill command.
                 let kill_cmd = serde_json::json!({
-                    "msg_type": "server.session.kill",
+                    "msg_type": "agent.session.kill",
                     "id": "cmd-2",
                     "timestamp": 1234567892,
                     "payload": {
@@ -1374,7 +1374,7 @@ mod tests {
             .expect("no message received");
 
         let parsed: serde_json::Value = serde_json::from_str(&msg).unwrap();
-        assert_eq!(parsed["msg_type"], "agent.session.command.response");
+        assert_eq!(parsed["msg_type"], "server.agent.command-response");
         assert_eq!(parsed["payload"]["request_id"], "req-456");
         assert_eq!(parsed["payload"]["command"], "session.kill");
         assert_eq!(parsed["payload"]["success"], true);
@@ -1402,7 +1402,7 @@ mod tests {
 
                 // Send registration response.
                 let response = serde_json::json!({
-                    "msg_type": "agent.register.response",
+                    "msg_type": "server.agent.register.response",
                     "id": "test-id",
                     "timestamp": 1234567890,
                     "payload": {
@@ -1711,7 +1711,7 @@ mod tests {
                 let (mut sink, mut stream) = ws.split();
 
                 let response = serde_json::json!({
-                    "msg_type": "agent.register.response",
+                    "msg_type": "server.agent.register.response",
                     "id": "test-id",
                     "timestamp": 1234567890,
                     "payload": { "status": "accepted", "message": "ok" }
@@ -1720,7 +1720,7 @@ mod tests {
                 let _ = stream.next().await;
 
                 let cmd = serde_json::json!({
-                    "msg_type": "server.env.list",
+                    "msg_type": "agent.env.list",
                     "id": "cmd-env-list",
                     "timestamp": 1234567891,
                     "payload": { "request_id": "req-env-list-1" }
@@ -1800,7 +1800,7 @@ mod tests {
                 let (mut sink, mut stream) = ws.split();
 
                 let response = serde_json::json!({
-                    "msg_type": "agent.register.response",
+                    "msg_type": "server.agent.register.response",
                     "id": "test-id",
                     "timestamp": 1234567890,
                     "payload": { "status": "accepted", "message": "ok" }
@@ -1809,7 +1809,7 @@ mod tests {
                 let _ = stream.next().await;
 
                 let cmd = serde_json::json!({
-                    "msg_type": "server.sessions.list",
+                    "msg_type": "agent.session.report",
                     "id": "cmd-sessions-list",
                     "timestamp": 1234567891,
                     "payload": { "request_id": "req-sessions-list-1" }
@@ -1866,7 +1866,7 @@ mod tests {
             .expect("no message received");
 
         let parsed: serde_json::Value = serde_json::from_str(&msg).unwrap();
-        assert_eq!(parsed["msg_type"], "agent.session.command.response");
+        assert_eq!(parsed["msg_type"], "server.agent.command-response");
         assert_eq!(parsed["payload"]["request_id"], "req-sessions-list-1");
         assert_eq!(parsed["payload"]["command"], "sessions.list");
         assert_eq!(parsed["payload"]["success"], true);
@@ -1894,7 +1894,7 @@ mod tests {
                 let (mut sink, mut stream) = ws.split();
 
                 let response = serde_json::json!({
-                    "msg_type": "agent.register.response",
+                    "msg_type": "server.agent.register.response",
                     "id": "test-id",
                     "timestamp": 1234567890,
                     "payload": { "status": "accepted", "message": "ok" }
@@ -1903,7 +1903,7 @@ mod tests {
                 let _ = stream.next().await;
 
                 let cmd = serde_json::json!({
-                    "msg_type": "server.env.query",
+                    "msg_type": "agent.env.query",
                     "id": "cmd-env-query",
                     "timestamp": 1234567891,
                     "payload": { "request_id": "req-env-query-1" }
@@ -1985,7 +1985,7 @@ mod tests {
                 let (mut sink, mut stream) = ws.split();
 
                 let response = serde_json::json!({
-                    "msg_type": "agent.register.response",
+                    "msg_type": "server.agent.register.response",
                     "id": "test-id",
                     "timestamp": 1234567890,
                     "payload": { "status": "accepted", "message": "ok" }
@@ -2000,7 +2000,7 @@ mod tests {
                     .await;
 
                 let cmd = serde_json::json!({
-                    "msg_type": "server.session.env.unset",
+                    "msg_type": "agent.session.env.unset",
                     "id": "cmd-env-unset",
                     "timestamp": 1234567891,
                     "payload": {
@@ -2204,7 +2204,7 @@ mod tests {
                 let (mut sink, mut stream) = ws.split();
 
                 let response = serde_json::json!({
-                    "msg_type": "agent.register.response",
+                    "msg_type": "server.agent.register.response",
                     "id": "test-id",
                     "timestamp": 1234567890,
                     "payload": { "status": "accepted", "message": "ok" }
@@ -2213,7 +2213,7 @@ mod tests {
                 let _ = stream.next().await; // skip registration
 
                 let create_cmd = serde_json::json!({
-                    "msg_type": "server.session.create",
+                    "msg_type": "agent.session.create",
                     "id": "cmd-create",
                     "timestamp": 1234567891,
                     "payload": {
@@ -2226,7 +2226,7 @@ mod tests {
                 let _ = sink.send(WsMessage::Text(create_cmd.to_string())).await;
 
                 let list_cmd = serde_json::json!({
-                    "msg_type": "server.sessions.list",
+                    "msg_type": "agent.session.report",
                     "id": "cmd-list",
                     "timestamp": 1234567892,
                     "payload": { "request_id": "req-list" }
@@ -2307,7 +2307,8 @@ mod tests {
             loop {
                 let msg = msg_rx.recv().await.expect("server closed");
                 let parsed: serde_json::Value = serde_json::from_str(&msg).unwrap();
-                if parsed.get("msg_type").and_then(|v| v.as_str()) == Some("agent.heartbeat") {
+                if parsed.get("msg_type").and_then(|v| v.as_str()) == Some("server.agent.heartbeat")
+                {
                     return;
                 }
             }
@@ -2412,7 +2413,7 @@ mod tests {
 // ── The Protocol Units this agent serves ──
 
 core_routes!(agent, msg, responses;
-    "session.create" => "server.session.create" => {
+    "agent.session.create" => "agent.session.create" => {
                     let payload: ServerSessionCreatePayload =
                         match serde_json::from_value(msg.payload.clone()) {
                             Ok(p) => p,
@@ -2449,7 +2450,7 @@ core_routes!(agent, msg, responses;
                     };
 
                     let response = serde_json::json!({
-                        "msg_type": "agent.session.command.response",
+                        "msg_type": "server.agent.command-response",
                         "id": uuid::Uuid::new_v4().to_string(),
                         "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
                         "payload": {
@@ -2462,7 +2463,7 @@ core_routes!(agent, msg, responses;
                     });
                     responses.send(WsMessage::Text(response.to_string()))?;
     }
-    "env.list" => "server.env.list" => {
+    "agent.env.list" => "agent.env.list" => {
                     let request_id = str_field(&msg.payload, "request_id");
                     let files = agent
                         .env_store
@@ -2470,7 +2471,7 @@ core_routes!(agent, msg, responses;
                         .await
                         .unwrap_or_default();
                     let response = serde_json::json!({
-                        "msg_type": "agent.session.command.response",
+                        "msg_type": "server.agent.command-response",
                         "id": uuid::Uuid::new_v4().to_string(),
                         "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
                         "payload": {
@@ -2482,7 +2483,7 @@ core_routes!(agent, msg, responses;
                     });
                     responses.send(WsMessage::Text(response.to_string()))?;
     }
-    "env.get" => "server.env.get" => {
+    "agent.env.get" => "agent.env.get" => {
                     let request_id = str_field(&msg.payload, "request_id");
                     let name = str_field(&msg.payload, "name");
                     let (success, content, error) = match agent.env_store.read(&name).await {
@@ -2490,7 +2491,7 @@ core_routes!(agent, msg, responses;
                         Err(e) => (false, None, Some(e.to_string())),
                     };
                     let response = serde_json::json!({
-                        "msg_type": "agent.session.command.response",
+                        "msg_type": "server.agent.command-response",
                         "id": uuid::Uuid::new_v4().to_string(),
                         "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
                         "payload": {
@@ -2503,7 +2504,7 @@ core_routes!(agent, msg, responses;
                     });
                     responses.send(WsMessage::Text(response.to_string()))?;
     }
-    "env.write" => "server.env.write" => {
+    "agent.env.write" => "agent.env.write" => {
                     let request_id = str_field(&msg.payload, "request_id");
                     let name = str_field(&msg.payload, "name");
                     let content = str_field(&msg.payload, "content");
@@ -2520,7 +2521,7 @@ core_routes!(agent, msg, responses;
                         };
                     let warnings = nession_common::env_file::parse_env(&content).warnings;
                     let response = serde_json::json!({
-                        "msg_type": "agent.session.command.response",
+                        "msg_type": "server.agent.command-response",
                         "id": uuid::Uuid::new_v4().to_string(),
                         "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
                         "payload": {
@@ -2534,7 +2535,7 @@ core_routes!(agent, msg, responses;
                     });
                     responses.send(WsMessage::Text(response.to_string()))?;
     }
-    "env.delete" => "server.env.delete" => {
+    "agent.env.delete" => "agent.env.delete" => {
                     let request_id = str_field(&msg.payload, "request_id");
                     let name = str_field(&msg.payload, "name");
                     let (success, error) = match agent.env_store.delete(&name).await {
@@ -2542,7 +2543,7 @@ core_routes!(agent, msg, responses;
                         Err(e) => (false, Some(e.to_string())),
                     };
                     let response = serde_json::json!({
-                        "msg_type": "agent.session.command.response",
+                        "msg_type": "server.agent.command-response",
                         "id": uuid::Uuid::new_v4().to_string(),
                         "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
                         "payload": {
@@ -2554,7 +2555,7 @@ core_routes!(agent, msg, responses;
                     });
                     responses.send(WsMessage::Text(response.to_string()))?;
     }
-    "session.env.apply" => "server.session.env.apply" => {
+    "agent.session.env.apply" => "agent.session.env.apply" => {
                     let payload: ServerSessionEnvApplyPayload =
                         match serde_json::from_value(msg.payload.clone()) {
                             Ok(p) => p,
@@ -2589,7 +2590,7 @@ core_routes!(agent, msg, responses;
                         }
                     }
                     let response = serde_json::json!({
-                        "msg_type": "agent.session.command.response",
+                        "msg_type": "server.agent.command-response",
                         "id": uuid::Uuid::new_v4().to_string(),
                         "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
                         "payload": {
@@ -2601,7 +2602,7 @@ core_routes!(agent, msg, responses;
                     });
                     responses.send(WsMessage::Text(response.to_string()))?;
     }
-    "session.env.unset" => "server.session.env.unset" => {
+    "agent.session.env.unset" => "agent.session.env.unset" => {
                     let payload: ServerSessionEnvUnsetPayload =
                         match serde_json::from_value(msg.payload.clone()) {
                             Ok(p) => p,
@@ -2622,7 +2623,7 @@ core_routes!(agent, msg, responses;
                         error = Some(e.to_string());
                     }
                     let response = serde_json::json!({
-                        "msg_type": "agent.session.command.response",
+                        "msg_type": "server.agent.command-response",
                         "id": uuid::Uuid::new_v4().to_string(),
                         "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
                         "payload": {
@@ -2634,11 +2635,11 @@ core_routes!(agent, msg, responses;
                     });
                     responses.send(WsMessage::Text(response.to_string()))?;
     }
-    "env.query" => "server.env.query" => {
+    "agent.env.query" => "agent.env.query" => {
                     let request_id = str_field(&msg.payload, "request_id");
                     let sourced_files = agent.get_sourced_env_files();
                     let response = serde_json::json!({
-                        "msg_type": "agent.session.command.response",
+                        "msg_type": "server.agent.command-response",
                         "id": uuid::Uuid::new_v4().to_string(),
                         "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
                         "payload": {
@@ -2650,7 +2651,7 @@ core_routes!(agent, msg, responses;
                     });
                     responses.send(WsMessage::Text(response.to_string()))?;
     }
-    "session.kill" => "server.session.kill" => {
+    "agent.session.kill" => "agent.session.kill" => {
                     let request_id = msg
                         .payload
                         .get("request_id")
@@ -2672,7 +2673,7 @@ core_routes!(agent, msg, responses;
                     };
 
                     let response = serde_json::json!({
-                        "msg_type": "agent.session.command.response",
+                        "msg_type": "server.agent.command-response",
                         "id": uuid::Uuid::new_v4().to_string(),
                         "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
                         "payload": {
@@ -2684,7 +2685,7 @@ core_routes!(agent, msg, responses;
                     });
                     responses.send(WsMessage::Text(response.to_string()))?;
     }
-    "session.capture-preview" => "session.capture_preview" => {
+    "agent.session.capture-preview" => "agent.session.capture-preview" => {
                     let request_id = str_field(&msg.payload, "request_id");
                     let session_name = str_field(&msg.payload, "session_name");
                     let lines = u32::try_from(
@@ -2748,12 +2749,12 @@ core_routes!(agent, msg, responses;
                     };
 
                     let response = serde_json::json!({
-                        "msg_type": "agent.session.command.response",
+                        "msg_type": "server.agent.command-response",
                         "id": uuid::Uuid::new_v4().to_string(),
                         "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
                         "payload": {
                             "request_id": request_id,
-                            "command": "session.capture_preview",
+                            "command": "agent.session.capture-preview",
                             "success": success,
                             "ansi_b64": ansi_b64,
                             "cols": cols,
@@ -2763,7 +2764,7 @@ core_routes!(agent, msg, responses;
                     });
                     responses.send(WsMessage::Text(response.to_string()))?;
     }
-    "session.list" => "server.sessions.list" => {
+    "agent.session.report" => "agent.session.report" => {
                     let request_id = str_field(&msg.payload, "request_id");
 
                     // An empty list is a legitimate answer ("no sessions here"),
@@ -2798,7 +2799,7 @@ core_routes!(agent, msg, responses;
                         .collect();
 
                     let response = serde_json::json!({
-                        "msg_type": "agent.session.command.response",
+                        "msg_type": "server.agent.command-response",
                         "id": uuid::Uuid::new_v4().to_string(),
                         "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
                         "payload": {

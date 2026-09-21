@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::protocol::read::Scope;
 use crate::protocol::v1_descriptor;
 
-pub const WIRE: &str = "extension.claude_code.list";
+pub const WIRE: &str = "claude-code.list";
 
 #[derive(Debug, Clone, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
@@ -111,10 +111,7 @@ mod tests {
         let d = descriptor().unwrap();
         assert_eq!(d.id.as_str(), "claude-code.list");
         assert_eq!(d.owner, "nession-claude-code");
-        assert_eq!(
-            d.contracts[0].wire,
-            vec!["extension.claude_code.list".to_string()]
-        );
+        assert_eq!(d.contracts[0].wire, vec!["claude-code.list".to_string()]);
         assert!(d.validate().is_ok());
     }
 }

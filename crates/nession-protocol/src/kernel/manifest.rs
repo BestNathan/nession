@@ -276,7 +276,7 @@ mod tests {
                 "agent-a",
                 &[
                     unit("git.status", "nession-git", &[V1]),
-                    unit("agent.register", "nession-protocol", &[V1]),
+                    unit("server.agent.register", "nession-protocol", &[V1]),
                     unit("claude-code.read", "nession-claude-code", &[V1]),
                 ],
             )
@@ -301,7 +301,7 @@ mod tests {
                 ProtocolDescriptor::new(
                     "session.create",
                     "nession-agent",
-                    vec![ContractDescriptor::new(V1, &["server.session.create"])],
+                    vec![ContractDescriptor::new(V1, &["agent.session.create"])],
                 )
                 .unwrap(),
                 ProtocolDescriptor::new(
@@ -313,7 +313,7 @@ mod tests {
             ],
         );
 
-        assert!(manifest.carries("server.session.create"));
+        assert!(manifest.carries("agent.session.create"));
         assert!(
             manifest.carries("session.create"),
             "the second descriptor's wire must survive the first"

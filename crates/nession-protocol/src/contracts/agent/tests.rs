@@ -7,7 +7,7 @@ fn an_agent_register_rides_in_the_envelope_and_comes_back_intact() {
     // contract payload in it*, which is the pair every real message is. A
     // rename on either side that the other's tests do not see fails here.
     let msg: ProtocolMessage<AgentRegisterPayload> = Message {
-        msg_type: "agent.register".to_string(),
+        msg_type: "server.agent.register".to_string(),
         id: "msg-99".to_string(),
         timestamp: 1700000000,
         payload: AgentRegisterPayload {
@@ -31,7 +31,7 @@ fn an_agent_register_rides_in_the_envelope_and_comes_back_intact() {
 
     let json = serde_json::to_string(&msg).unwrap();
     let decoded: ProtocolMessage<AgentRegisterPayload> = serde_json::from_str(&json).unwrap();
-    assert_eq!(decoded.msg_type, "agent.register");
+    assert_eq!(decoded.msg_type, "server.agent.register");
     assert_eq!(decoded.id, "msg-99");
     assert_eq!(decoded.payload.agent_id, "a1");
     assert_eq!(decoded.payload.metadata.tmux_version, "3.3");

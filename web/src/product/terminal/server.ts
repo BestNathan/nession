@@ -68,10 +68,10 @@ export class TerminalServerPlugin implements TransportPlugin, TerminalServerApi 
     this.connection = connection;
 
     const unsubs = [
-      connection.subscribe('terminal.output', (payload) => {
+      connection.subscribe('agent.terminal.output', (payload) => {
         this.handleRelayOutput(payload as Record<string, unknown>);
       }),
-      connection.subscribe('terminal.resize', (payload) => {
+      connection.subscribe('agent.terminal.resize', (payload) => {
         this.handleRelayResize(payload as Record<string, unknown>);
       }),
     ];
@@ -105,20 +105,20 @@ export class TerminalServerPlugin implements TransportPlugin, TerminalServerApi 
     if (rows !== undefined) {
       payload.rows = rows;
     }
-    this.requireConnection().send('client.session.relay.begin', payload);
+    this.requireConnection().send('server.session.relay.begin', payload);
   }
 
   endRelay(sessionId: string): void {
-    this.requireConnection().send('client.session.relay.end', { session_id: sessionId });
+    this.requireConnection().send('server.session.relay.end', { session_id: sessionId });
   }
 
   sendRelayInput(sessionName: string, data: string): void {
     const encoded = encodeBase64(data);
-    this.requireConnection().send('terminal.input', { session_name: sessionName, data: encoded });
+    this.requireConnection().send('agent.terminal.input', { session_name: sessionName, data: encoded });
   }
 
   sendRelayResize(sessionName: string, cols: number, rows: number): void {
-    this.requireConnection().send('terminal.resize', { session_name: sessionName, cols, rows });
+    this.requireConnection().send('agent.terminal.resize', { session_name: sessionName, cols, rows });
   }
 
   onRelayOutput(sessionName: string, cb: RelayOutputCallback): () => void {

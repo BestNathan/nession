@@ -16,14 +16,14 @@ describe('MessageRouterImpl', () => {
   });
 
   it('correlates response by message id', async () => {
-    const p = router.request<{ ok: boolean }>('file.list', { path: '/' });
-    router.handleIncoming({ msg_type: 'file.list', id: 'id-1', timestamp: 0, payload: { ok: true } });
+    const p = router.request<{ ok: boolean }>('agent.file.list', { path: '/' });
+    router.handleIncoming({ msg_type: 'agent.file.list', id: 'id-1', timestamp: 0, payload: { ok: true } });
     await expect(p).resolves.toEqual({ ok: true });
   });
 
   it('rejects on timeout', async () => {
     vi.useFakeTimers();
-    const p = router.request('file.read', {}, { timeoutMs: 100 });
+    const p = router.request('agent.file.read', {}, { timeoutMs: 100 });
     vi.advanceTimersByTime(101);
     await expect(p).rejects.toThrow('Request timeout');
     vi.useRealTimers();
@@ -31,9 +31,9 @@ describe('MessageRouterImpl', () => {
 
   it('dispatches typed handlers without consuming correlated responses', async () => {
     const handler = vi.fn();
-    router.subscribe('terminal.output', handler);
-    router.handleIncoming({ msg_type: 'terminal.output', id: 'x', timestamp: 0, payload: 'data' });
-    expect(handler).toHaveBeenCalledWith('data', expect.objectContaining({ msg_type: 'terminal.output' }));
+    router.subscribe('agent.terminal.output', handler);
+    router.handleIncoming({ msg_type: 'agent.terminal.output', id: 'x', timestamp: 0, payload: 'data' });
+    expect(handler).toHaveBeenCalledWith('data', expect.objectContaining({ msg_type: 'agent.terminal.output' }));
   });
 
   it('passes binary without JSON parse', () => {
@@ -45,7 +45,7 @@ describe('MessageRouterImpl', () => {
   });
 
   it('rejects correlated error responses', async () => {
-    const p = router.request('file.read', { path: '/missing' });
+    const p = router.request('agent.file.read', { path: '/missing' });
     router.handleIncoming({
       msg_type: 'error',
       id: 'id-1',
@@ -56,20 +56,20 @@ describe('MessageRouterImpl', () => {
   });
 
   it('rejects pending requests on dispose', async () => {
-    const p = router.request('file.read', {});
+    const p = router.request('agent.file.read', {});
     router.dispose();
     await expect(p).rejects.toThrow('MessageRouter disposed');
   });
 
   it('failPending rejects in-flight requests immediately', async () => {
-    const p = router.request('file.read', {});
+    const p = router.request('agent.file.read', {});
     router.failPending(new Error('Connection lost'));
     await expect(p).rejects.toThrow('Connection lost');
   });
 
   it('rejects request immediately when already disposed', async () => {
     router.dispose();
-    await expect(router.request('file.read', {})).rejects.toThrow('MessageRouter disposed');
+    await expect(router.request('agent.file.read', {})).rejects.toThrow('MessageRouter disposed');
     expect(sendFn).not.toHaveBeenCalled();
   });
 });

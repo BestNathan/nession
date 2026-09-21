@@ -28,7 +28,7 @@ describe('CommandsPlugin', () => {
       const pending = plugin.listCommands();
       expect(surfaceA.requests).toHaveLength(0);
       expect(surfaceB.requests).toHaveLength(1);
-      surfaceB.resolveNext('client.commands.list', { commands: [] });
+      surfaceB.resolveNext('server.commands.list', { commands: [] });
       await expect(pending).resolves.toEqual({ commands: [] });
 
       // Consumers registered under B receive events through B.
@@ -104,9 +104,9 @@ describe('CommandsPlugin', () => {
 
     it('listCommands sends client.commands.list with an empty payload', async () => {
       const pending = plugin.listCommands();
-      expect(surface.requests[0]).toMatchObject({ type: 'client.commands.list', payload: {} });
+      expect(surface.requests[0]).toMatchObject({ type: 'server.commands.list', payload: {} });
 
-      surface.resolveNext('client.commands.list', {
+      surface.resolveNext('server.commands.list', {
         commands: [{ id: 'c1', label: 'Deploy', command: 'make deploy' }],
       });
       await expect(pending).resolves.toEqual({
@@ -117,11 +117,11 @@ describe('CommandsPlugin', () => {
     it('addCommand defaults raw to false', async () => {
       const pending = plugin.addCommand('Deploy', 'make deploy');
       expect(surface.requests[0]).toMatchObject({
-        type: 'client.commands.add',
+        type: 'server.commands.add',
         payload: { label: 'Deploy', command: 'make deploy', raw: false },
       });
 
-      surface.resolveNext('client.commands.add', { success: true, id: 'c1' });
+      surface.resolveNext('server.commands.add', { success: true, id: 'c1' });
       await expect(pending).resolves.toEqual({ success: true, id: 'c1' });
     });
 
@@ -132,18 +132,18 @@ describe('CommandsPlugin', () => {
         command: 'make deploy',
         raw: true,
       });
-      surface.resolveNext('client.commands.add', { success: false, error: 'dupe' });
+      surface.resolveNext('server.commands.add', { success: false, error: 'dupe' });
       await expect(pending).resolves.toEqual({ success: false, error: 'dupe' });
     });
 
     it('removeCommand sends the id', async () => {
       const pending = plugin.removeCommand('c1');
       expect(surface.requests[0]).toMatchObject({
-        type: 'client.commands.remove',
+        type: 'server.commands.remove',
         payload: { id: 'c1' },
       });
 
-      surface.resolveNext('client.commands.remove', { success: true });
+      surface.resolveNext('server.commands.remove', { success: true });
       await expect(pending).resolves.toEqual({ success: true });
     });
 
@@ -151,20 +151,20 @@ describe('CommandsPlugin', () => {
       const pending = plugin.updateCommand('c1', { label: 'Renamed' });
       expect(surface.requests[0]?.payload).toEqual({ id: 'c1', label: 'Renamed' });
 
-      surface.resolveNext('client.commands.update', { success: true });
+      surface.resolveNext('server.commands.update', { success: true });
       await expect(pending).resolves.toEqual({ success: true });
     });
 
     it('updateCommand forwards raw: false explicitly when requested', async () => {
       const pending = plugin.updateCommand('c1', { raw: false });
       expect(surface.requests[0]?.payload).toEqual({ id: 'c1', raw: false });
-      surface.resolveNext('client.commands.update', { success: true });
+      surface.resolveNext('server.commands.update', { success: true });
       await expect(pending).resolves.toEqual({ success: true });
     });
 
     it('propagates transport rejections', async () => {
       const pending = plugin.listCommands();
-      surface.rejectNext('client.commands.list', new Error('Connection lost'));
+      surface.rejectNext('server.commands.list', new Error('Connection lost'));
       await expect(pending).rejects.toThrow('Connection lost');
     });
   });
