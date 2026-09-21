@@ -35,12 +35,18 @@ generation. A renamed field, a changed unit, a new required field, changed error
 semantics: new contract version. Collapsing those two into one number is how a
 bug fix starts looking like a breaking change.
 
-### Identity is not the message type
+### Identity and the message type
 
-`git.status` is the protocol. `extension.git.status` is the transport projection
-of one of its contracts. They are separately nameable so a transport rename can
-be told apart from a semantic change — only one of those is a breaking event,
-and today both would look like "the string changed".
+`git.status` is the protocol. Its contract also declares the message types it
+travels as — and since `#912` those are the same string, because the wire *is*
+the id. The two remain separately *modelled* so a transport rename can be told
+apart from a semantic change: only one of those is a breaking event, and
+otherwise both would look like "the string changed".
+
+That the separation is currently unexercised is a fact about today's units, not
+a licence to collapse the fields — `protocol-identity.md` records why it is
+kept, and it is what would let one unit answer on a second wire without a second
+identity.
 
 Message types therefore live on the contract as data, never as the only
 definition of a protocol.
@@ -107,7 +113,7 @@ crates/nession-protocol/src/contracts/
 └── server/v1.rs      server.info
 ```
 
-The family is the segment the protocol id names: `client.session.attach`
+The family is the segment the protocol id names: `server.session.attach`
 belongs to `session`, `server.env.list` to `env`. Placement is then a lookup
 rather than a judgement, which is what keeps the directory from decaying into a
 `misc/`. A cross-family reference is normal and expected — an attach response
@@ -184,7 +190,11 @@ carried through the provider as the contract.
    in `nession-protocol` is another crate's DTOs — see "What this crate is not"
    in `lib.rs`, and the ownership test below.
 3. Declare the wire message types on the contract. They are the transport
-   projection and may differ from the id.
+   projection, and since `#912` the wire **is** the id — a unit whose id is not
+   also a wire is one no peer can call. The kernel still models the two
+   separately, because that separation is what makes a transport rename a
+   non-event rather than a semantic change; it is simply not exercised today.
+   `protocol-identity.md` owns the rule and the one boundary it has.
 4. Register the provider at the composition root. The manifest is derived from
    what is composed — nothing advertises a contract no runtime serves.
 
@@ -268,7 +278,7 @@ Consumer Requirements  ∩  Provider Manifest  →  the contract version to use
 
 The Web's copy is `web/src/platform/protocol/` — `resolveContract`,
 `addressedPayload`, and the per-connection `ProtocolDirectory` that
-`product/agent` fills from `client.agents.list`. A capability declares its
+`product/agent` fills from `server.agent.list`. A capability declares its
 requirements next to the wire strings it already owns
 (`capabilities/git/GitPlugin.ts`), because the versions and the DTOs it reads
 them with are the same fact written twice, and today only a comment keeps them
@@ -328,9 +338,9 @@ web/src/generated/protocol/core/session-create/v1.ts   the kernel's
 The directory is the id with the owner's prefix removed and dots as dashes —
 one rule for both kinds. For a provider the prefix *is* the owner, so
 `git.status` under `git` is `status`. The kernel's units are nobody's prefix:
-`session.create` and `client.session.create` are both the kernel's, and
+`server.session.create` and `agent.session.create` are both the kernel's, and
 truncating them to their last segment would put both in `create`, as it would
-`client.attach` and `client.session.attach` in `attach`. Two units writing one
+`agent.attach` and `server.session.attach` in `attach`. Two units writing one
 file fails nothing — the second write wins and the Web imports a contract it did
 not ask for — so `check_paths_are_unique` refuses it rather than letting the
 last writer through.
@@ -419,7 +429,7 @@ is broken by it.
 | One wire type, one claimant, across both halves | `ExtensionRegistry::new` — `DuplicateCoreWireType` names both, whichever side lost |
 | A core unit the agent does not serve is not advertised | the same invocation — `CORE_WIRES` and `core_descriptors()` are the same list |
 | The same holds for the Server's units | `server_routes!` (`crates/nession-server/src/protocol/mod.rs`) — one invocation, and `every_unit_the_server_dispatches_is_in_its_manifest` says so |
-| A client can ask the Server what it serves | `client.server.info` → `ServerInfoResponse.protocol_manifest` |
+| A client can ask the Server what it serves | `server.info` → `ServerInfoResponse.protocol_manifest` |
 | A router can name a protocol without knowing any provider | `ContractSupport.wire` — the projection is declared by the provider, not derived by the router |
 | A target is never asked for a wire type it does not carry | the Server's extension relay, gated on the target's manifest |
 | A peer with no manifest does not connect | `handle_agent_register` — `protocol_manifest` is required, and its absence is a rejection |
@@ -435,12 +445,18 @@ is broken by it.
 
 ### Why the manifest carries the wire projection
 
-The Server relays `extension.git.status` without knowing what `git` is. To gate
-that relay it must answer "does this peer carry this message?", and it cannot
-turn the wire string into the protocol id `git.status` on its own — there is no
-universal rule: the registry's own strip-the-namespace transform yields
-`claude_code.read` where the id is `claude-code.read`. So the mapping is
-**declared** by the provider that owns it and travels in the manifest.
+The Server relays `git.status` without knowing what `git` is. To gate that relay
+it must answer "does this peer carry this message?", and the answer has to come
+from the peer rather than from a transform the router applies to a string: a
+transform is a rule the router would have to know, and knowing it would mean
+knowing the provider. So the mapping is **declared** by the provider that owns
+it and travels in the manifest.
+
+Since `#912` the wire and the id are the same string for every unit in the tree,
+so a derivational shortcut would happen to give the right answer today. It would
+still be the wrong shape — the projection belongs to the contract, and a router
+that computed it would be re-deriving a decision it does not own. The field is
+what makes a transport rename the provider's business rather than the router's.
 
 A manifest whose `wire` is absent — a peer predating the field — answers *no* to
 every wire query. That is the safe direction: **has not said** is not **said
@@ -449,7 +465,7 @@ refusing on its silence.
 
 ### Where a target's support is served
 
-`client.agents.list` carries each agent's manifest as `protocols`, `null` for a
+`server.agent.list` carries each agent's manifest as `protocols`, `null` for a
 peer the server holds no manifest for. It is served from the list rather than a
 query of its own because that is already the discover-agents call — a consumer
 resolving per target gets every manifest without a second round trip per agent.
@@ -525,10 +541,10 @@ all four are declared, two of them on each side:
 
 | Phase 6 unit | Served by | Declared in |
 |---|---|---|
-| `session.create` | the agent for the server (`server.session.create`) **and** the server for a browser (`client.session.create`) | both manifests, one id |
-| `session.attach` | the **server** (`client.session.attach`) | the server's |
-| `agent.register` | the **server** (`agent.register`) | the server's |
-| `agent.heartbeat` | the **server** (`agent.heartbeat`) | the server's |
+| `session.create` | the agent for the server (`agent.session.create`) and the server for a browser (`server.session.create`) — two units, since `#912` gave each side the id its own handler earns | both manifests |
+| `session.attach` | the **server** (`server.session.attach`) | the server's |
+| `agent.register` | the **server** (`server.agent.register`) | the server's |
+| `agent.heartbeat` | the **server** (`server.agent.heartbeat`) | the server's |
 
 ### Where does a core unit's descriptor live?
 
@@ -590,7 +606,7 @@ each declares its own wire projection in `ContractSupport.wire`. That is the
 model working rather than a coincidence — a browser asking for a session and a
 server asking for one are the same operation seen from two sides.
 
-**Where it is read.** `client.server.info` carries it as `protocol_manifest` —
+**Where it is read.** `server.info` carries it as `protocol_manifest` —
 one field on the call a client already makes to ask what this server is, rather
 than a message of its own. The Web already calls it (`platform/server/`), and
 `ServerInfoResponse.protocol_manifest` is the contract.
@@ -613,25 +629,33 @@ types. No `json!` remains on that path.
 
 **One provider, so one list.** `main` unions `core_descriptors()` with
 `p2p_descriptors()` and composes one registry from the result, because it is one
-agent offering one set of units over two wires. `session.create` is the clearest
-case: the relay wire is `server.session.create` and the direct wire is
-`session.create`, and they are the same unit seen from two sides. The manifest's
-`ProtocolManifest::from_descriptors` already unions wire sets by id, so the
-union is what states that rather than a coincidence of ordering.
+agent offering one set of units over two wires. `agent.session.create` is the
+clearest case: the agent answers it on the connection it opens to the server and
+on the socket a browser reaches it by, and it is one unit with one wire on both.
+The manifest's `ProtocolManifest::from_descriptors` already unions wire sets by
+id, so the union is what states that rather than a coincidence of ordering.
 
-**One unit can share a wire name across transports.** `session.capture_preview`
-is claimed by both halves — the server sends it to the agent, and a browser
-connecting directly sends it too. The registry's core-against-core check exists
-so that two *units* cannot claim one wire, which would leave one of them
-advertised and never dispatched; it now compares units rather than wire types
-alone, because the same unit arriving twice is both dispatchers serving it. The
-two payloads differ only by the server's `request_id` correlation — framing, not
-contract semantics.
+What it is *not* is `server.session.create`, which is a different unit. A browser
+asking the Server to create a session and the Server asking the Agent to are
+different protocols answering different questions — that distinction is
+`protocol-identity.md`'s subject, and `#912` is where the tree came to agree
+with it.
+
+**One unit can share a wire name across transports.** `agent.session.capture-preview`
+arrives from both halves — the server sends it to the agent, and a browser
+connecting directly sends it too — and that is one unit, so both dispatchers
+serving it is not a conflict. The registry's core-against-core check exists so
+that two *units* cannot claim one wire, which would leave one of them advertised
+and never dispatched; it compares units rather than wire types alone, because
+the same unit arriving twice is both dispatchers serving it. The two payloads
+differ only by the server's `request_id` correlation — framing, not contract
+semantics.
 
 **What remains here.** The server's own `json!` payloads, which are a larger and
-separate ledger (276 uses in `server/handler.rs`), and `#884` — five wires the
-kernel declares under two different unit ids, one of which carries two different
-payload shapes. Both are recorded rather than implied.
+separate ledger (276 uses in `server/handler.rs`). `#884` is no longer on it:
+the five wires the kernel declared under two unit ids, one of them carrying two
+payload shapes, were resolved by `#912` — every unit now has one id and one
+wire, and the shape difference is gone with the duplicate unit.
 
 **And what no longer does.** This section used to say that `contracts/` did not
 feed the TypeScript codegen at all, so an advertised contract need not have
@@ -658,11 +682,10 @@ check as a test rather than a comment is the reason it stayed true.
 ## Where a protocol's identity comes from
 
 `#678` gave Protocol Units an `id` and left the naming to convention. What the
-convention turned out to be — the sender — cannot express which of two handlers
-is answering, so five wires in this tree carry one name and two different
-handlers (`#884`). The rule that replaces it, what it changes, and where
-`extension.*` does not fit it are in
-[`protocol-identity.md`](protocol-identity.md).
+convention turned out to be — the sender — could not express which of two
+handlers is answering, so five wires in this tree carried one name and two
+different handlers (`#884`). The rule that replaced it, what it changed, and the
+one boundary it has are in [`protocol-identity.md`](protocol-identity.md).
 
 ## Related
 
