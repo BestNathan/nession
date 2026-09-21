@@ -1,0 +1,1 @@
+T01 uses the frozen baseline defect; this marker triggers validation only.
