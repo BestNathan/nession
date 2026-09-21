@@ -30,10 +30,13 @@
 //! contract that can be changed without its tests being read.
 
 pub mod agent;
+
 pub mod client;
 pub mod commands;
 pub mod env;
 pub mod file;
+#[cfg(test)]
+mod fixtures;
 pub mod server;
 pub mod session;
 pub mod terminal;
