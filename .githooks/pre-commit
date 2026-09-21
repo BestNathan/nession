@@ -87,6 +87,36 @@ if [ -n "$STAGED_TMUX_CHECK" ]; then
   fi
 fi
 
+# ── Protocol gate (static, ~0.2s) ──────────────────────────────────────────
+# An unrecognised wire is ignored, not rejected: a sender naming one that no
+# runtime answers gets no error and no reply — it waits. That is what
+# `agent.env.resource` did until #913. Both directions are checked: a wire a
+# call site names must be one a runtime answers, and a protocol nothing calls
+# is reported too.
+STAGED_PROTOCOL=$(git diff --cached --name-only --diff-filter=ACM | grep -E '(\.rs$|^web/src/)' || true)
+if [ -n "$STAGED_PROTOCOL" ]; then
+  echo -e "${YELLOW}→ just check-protocol${NC}"
+  if just check-protocol; then
+    echo -e "${GREEN}✓ just check-protocol${NC}"
+  else
+    echo -e "${RED}✗ just check-protocol — nothing answers the wire named above${NC}"
+    HAS_ERROR=1
+  fi
+fi
+
+# A change to the gate itself must be proven still able to detect each rule,
+# including the shape it was written for.
+STAGED_PROTOCOL_CHECK=$(git diff --cached --name-only --diff-filter=ACM | grep -E '^scripts/protocol-gate' || true)
+if [ -n "$STAGED_PROTOCOL_CHECK" ]; then
+  echo -e "${YELLOW}→ just protocol-check-selftest${NC}"
+  if just protocol-check-selftest; then
+    echo -e "${GREEN}✓ protocol-check-selftest${NC}"
+  else
+    echo -e "${RED}✗ protocol-check-selftest — the gate no longer catches what it claims${NC}"
+    HAS_ERROR=1
+  fi
+fi
+
 # ── Canonical design-system gate (fast profile) ────────────────────────────
 # #759 owns the rule list in design/scripts/design-gate.mjs. Hooks choose a
 # cost profile only; they must not duplicate capsule/token/shadcn rule lists.

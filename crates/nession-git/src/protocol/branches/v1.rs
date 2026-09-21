@@ -12,6 +12,7 @@ use crate::protocol::{v1_descriptor, GitResponseV1, SessionTargetV1};
 /// to say so.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct Branch {
     pub name: String,
@@ -31,6 +32,7 @@ pub struct Branch {
 
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct Branches {
     pub branches: Vec<Branch>,
@@ -44,6 +46,7 @@ pub const WIRE: &str = "git.branches";
 
 #[derive(Debug, Clone, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 pub struct BranchesRequestV1 {
     #[serde(flatten)]
     pub target: SessionTargetV1,
@@ -54,6 +57,7 @@ pub struct BranchesRequestV1 {
 
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 pub struct BranchesOkV1 {
     pub branches: Branches,
 }

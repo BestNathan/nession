@@ -15,6 +15,7 @@ pub const WIRE: &str = "claude-code.read";
 /// — a typo became an empty answer rather than a refusal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum Scope {
     #[default]
@@ -24,6 +25,7 @@ pub enum Scope {
 
 #[derive(Debug, Clone, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 pub struct ReadRequestV1 {
     #[serde(default)]
     pub scope: Scope,
@@ -47,6 +49,7 @@ pub struct ReadRequestV1 {
 /// The success shape.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 pub struct ReadOkV1 {
     pub content: String,
     #[serde(rename = "content_type")]
@@ -65,6 +68,7 @@ pub struct ReadOkV1 {
 /// error object is a contract change, not a migration.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 pub struct ReadFailureV1 {
     pub error: String,
     #[serde(
@@ -113,6 +117,7 @@ impl ReadFailureV1 {
 /// apply here.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[serde(untagged)]
 pub enum ReadResponseV1 {
     Ok(ReadOkV1),

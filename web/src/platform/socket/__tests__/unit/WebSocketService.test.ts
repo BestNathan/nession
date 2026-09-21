@@ -1,3 +1,7 @@
+// not-protocol-file: this file tests the transport — correlation, timeouts and
+// disposal — and names wires like `agents.list` because which wire it is has no
+// bearing on what it proves. The protocol gate prints this exemption on every
+// run so it cannot spread unnoticed.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { WebSocketService } from '@/platform/socket/WebSocketService';
 import { MockWebSocket } from '@/test/mockWebSocket';

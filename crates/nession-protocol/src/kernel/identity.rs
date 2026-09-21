@@ -73,7 +73,9 @@ pub enum IdentityError {
 /// a registry key or a manifest.
 #[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[serde(try_from = "String", into = "String")]
+#[cfg_attr(feature = "codegen", schemars(with = "String"))]
 pub struct ProtocolId(String);
 
 impl ProtocolId {
@@ -175,7 +177,9 @@ impl From<ProtocolId> for String {
 /// looking like a breaking change.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[serde(try_from = "u32", into = "u32")]
+#[cfg_attr(feature = "codegen", schemars(with = "u32"))]
 pub struct ContractVersion(u32);
 
 impl ContractVersion {

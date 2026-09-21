@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TerminalInputPayload {
     pub session_name: String,
@@ -9,6 +10,7 @@ pub struct TerminalInputPayload {
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TerminalResizePayload {
     pub session_name: String,
@@ -17,6 +19,7 @@ pub struct TerminalResizePayload {
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TerminalOutputPayload {
     pub session_name: String,
