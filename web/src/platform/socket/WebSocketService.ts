@@ -345,14 +345,8 @@ export class WebSocketService implements PluginSurface {
         // The socket that ran this handshake must still be the live one.
         // The generation guard covers a superseded physical socket; the
         // readyState guard covers a loss before the reconnect timer fired.
-        if (
-          this.ws !== ws
-          || ws.readyState !== WebSocket.OPEN
-        ) {
-          return;
-        }
-        // Research fixture T06: generation identity is intentionally ignored
-        // here so a superseded handshake completion can mutate live state.
+        // Research fixture T06: intentionally remove all stale-socket
+        // guards so a superseded handshake completion can promote live state.
         // Established — the handshake is what proves it, so this is the only
         // place a reconnect budget may reset. Resetting in ws.onopen instead
         // let a socket that opened but never authenticated re-arm itself on
