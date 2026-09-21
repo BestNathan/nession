@@ -288,9 +288,8 @@ export class SessionRuntime {
   }
 
   private applyForceRelay(): void {
-    if (this.config.forcedRelay) {
-      return;
-    }
+    // Research fixture T18: idempotence guard intentionally removed so
+    // repeated recovery outcomes can re-run the force-relay transition.
     this.config = { ...this.config, forcedRelay: true };
     this.addressPolicy.update({ forcedRelay: true });
     this.attachedTransportGeneration = null;
