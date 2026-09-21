@@ -167,7 +167,7 @@ async fn test_agent_registration_success() {
             "ip_address": "10.0.0.1",
             "port": 9090,
             "auth_token": "secret",
-            "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["extension.git.status"]}}},
+            "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
             "metadata": {
                 "tmux_version": "3.3a",
                 "os_version": "Linux 6.1",
@@ -199,7 +199,7 @@ async fn test_agent_registration_rejected_bad_token() {
             "ip_address": "10.0.0.2",
             "port": 9090,
             "auth_token": "wrong_token",
-            "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["extension.git.status"]}}},
+            "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
             "metadata": {
                 "tmux_version": "3.3a",
                 "os_version": "Linux",
@@ -234,7 +234,7 @@ async fn test_multiple_agents_register_independently() {
                 "ip_address": "127.0.0.1",
                 "port": 8080,
                 "auth_token": "shared_token",
-                "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["extension.git.status"]}}},
+                "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
                 "metadata": {
                     "tmux_version": "3.3a",
                     "os_version": "Linux",
@@ -278,7 +278,7 @@ async fn test_heartbeat_after_registration_is_acked() {
             "ip_address": "10.0.0.5",
             "port": 7070,
             "auth_token": "tok",
-            "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["extension.git.status"]}}},
+            "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
             "metadata": {
                 "tmux_version": "3.3a",
                 "os_version": "Linux",
@@ -356,7 +356,7 @@ async fn test_multiple_heartbeats_accepted() {
             "ip_address": "10.0.0.6",
             "port": 7070,
             "auth_token": "tok",
-            "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["extension.git.status"]}}},
+            "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
             "metadata": {
                 "tmux_version": "3.3a",
                 "os_version": "Linux",
@@ -488,7 +488,7 @@ async fn test_full_workflow_agent_and_client() {
             "ip_address": "10.0.0.10",
             "port": 5050,
             "auth_token": "workflow_token",
-            "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["extension.git.status"]}}},
+            "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
             "metadata": {
                 "tmux_version": "3.3a",
                 "os_version": "macOS 15",
@@ -603,7 +603,7 @@ async fn test_agent_can_register_then_authenticate_as_client() {
             "ip_address": "10.0.0.20",
             "port": 6060,
             "auth_token": "dual_tok",
-            "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["extension.git.status"]}}},
+            "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
             "metadata": {
                 "tmux_version": "3.3a",
                 "os_version": "Linux",
@@ -671,7 +671,7 @@ async fn test_response_preserves_message_id() {
             "ip_address": "10.0.0.30",
             "port": 4040,
             "auth_token": "id_tok",
-            "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["extension.git.status"]}}},
+            "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
             "metadata": {
                 "tmux_version": "3.3a",
                 "os_version": "Linux",
@@ -735,7 +735,7 @@ async fn test_concurrent_agent_registrations() {
                     "ip_address": "127.0.0.1",
                     "port": 3000 + i,
                     "auth_token": "conc_tok",
-                    "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["extension.git.status"]}}},
+                    "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
                     "metadata": {
                         "tmux_version": "3.3a",
                         "os_version": "Linux",
@@ -802,7 +802,7 @@ async fn test_agent_session_update_active() {
             "payload": {
                 "agent_id": "a1", "hostname": "h", "ip_address": "10.0.0.1",
                 "port": 8080, "auth_token": "tok",
-                "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["extension.git.status"]}}},
+                "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
                 "metadata": {"tmux_version":"3.3","os_version":"Linux","nession_version":"0.1"},
             }
         })
@@ -848,7 +848,7 @@ async fn test_agent_session_update_detached() {
             "msg_type": "agent.register","id": "r2","timestamp": current_timestamp(),
             "payload": {"agent_id":"a2","hostname":"h","ip_address":"10.0.0.2",
             "port":8080,"auth_token":"tok",
-            "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["extension.git.status"]}}},
+            "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
             "metadata":{"tmux_version":"3.3","os_version":"Linux","nession_version":"0.1"}}
         })
         .to_string(),
@@ -884,7 +884,7 @@ async fn test_agent_session_update_gone_removes_session() {
             "msg_type": "agent.register","id":"r3","timestamp":current_timestamp(),
             "payload":{"agent_id":"a3","hostname":"h","ip_address":"10.0.0.3",
             "port":8080,"auth_token":"tok",
-            "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["extension.git.status"]}}},
+            "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
             "metadata":{"tmux_version":"3.3","os_version":"Linux","nession_version":"0.1"}}
         })
         .to_string(),
@@ -980,7 +980,7 @@ async fn test_client_agents_list_returns_registered_agents() {
             "msg_type":"agent.register","id":"r-al","timestamp":current_timestamp(),
             "payload":{"agent_id":"list-agent","hostname":"list-host","ip_address":"10.0.0.50",
             "port":8080,"auth_token":"tok",
-            "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["extension.git.status"]}}},
+            "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
             "metadata":{"tmux_version":"3.3","os_version":"Linux","nession_version":"0.1"}}
         })
         .to_string(),
@@ -1067,7 +1067,7 @@ async fn test_client_sessions_list_returns_sessions() {
             "msg_type":"agent.register","id":"r-sl","timestamp":current_timestamp(),
             "payload":{"agent_id":"sess-agent","hostname":"h","ip_address":"10.0.0.60",
             "port":8080,"auth_token":"tok",
-            "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["extension.git.status"]}}},
+            "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
             "metadata":{"tmux_version":"3.3","os_version":"Linux","nession_version":"0.1"}}
         })
         .to_string(),
@@ -1132,7 +1132,7 @@ async fn test_client_sessions_list_filtered_by_agent() {
             "msg_type":"agent.register","id":"r1","timestamp":current_timestamp(),
             "payload":{"agent_id":"agent-x","hostname":"h","ip_address":"10.0.0.70",
             "port":8080,"auth_token":"tok",
-            "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["extension.git.status"]}}},
+            "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
             "metadata":{"tmux_version":"3.3","os_version":"Linux","nession_version":"0.1"}}
         })
         .to_string(),
@@ -1159,7 +1159,7 @@ async fn test_client_sessions_list_filtered_by_agent() {
             "msg_type":"agent.register","id":"r2","timestamp":current_timestamp(),
             "payload":{"agent_id":"agent-y","hostname":"h","ip_address":"10.0.0.71",
             "port":8080,"auth_token":"tok",
-            "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["extension.git.status"]}}},
+            "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
             "metadata":{"tmux_version":"3.3","os_version":"Linux","nession_version":"0.1"}}
         })
         .to_string(),
@@ -1325,7 +1325,7 @@ async fn test_client_session_attach_p2p_mode() {
             "msg_type":"agent.register","id":"r","timestamp":current_timestamp(),
             "payload":{"agent_id":"p2p-agent","hostname":"h","ip_address":"10.0.0.80",
             "port":9090,"auth_token":"tok",
-            "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["extension.git.status"]}}},
+            "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
             "connect_url":"ws://agent.example.com/ws",
             "metadata":{"tmux_version":"3.3","os_version":"Linux","nession_version":"0.1"}}
         })
@@ -1557,7 +1557,7 @@ async fn test_no_auth_mode_accepts_any_agent() {
             "ip_address": "10.0.0.1",
             "port": 8080,
             "auth_token": "anything_works",
-            "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["extension.git.status"]}}},
+            "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
             "metadata": {
                 "tmux_version": "3.3", "os_version": "Linux", "nession_version": "0.1"
             },

@@ -54,7 +54,7 @@ async fn test_session_create_flow() {
             "ip_address": "127.0.0.1",
             "port": 19999,
             "auth_token": "test",
-            "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["extension.git.status"]}}},
+            "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
             "metadata": {"tmux_version": "3.3", "os_version": "Linux", "nession_version": "0.1.0"},
         }
     });
@@ -156,7 +156,7 @@ async fn test_session_kill_flow() {
             "ip_address": "127.0.0.1",
             "port": 19999,
             "auth_token": "test",
-            "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["extension.git.status"]}}},
+            "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
             "metadata": {"tmux_version": "3.3", "os_version": "Linux", "nession_version": "0.1.0"},
         }
     });

@@ -7,7 +7,7 @@
 /** The canonical protocol id. Not the wire type. */
 export const PROTOCOL = 'git.log';
 /** Every transport projection this contract travels as. */
-export const WIRES = ['extension.git.log'] as const;
+export const WIRES = ['git.log'] as const;
 /**
  * The only projection this contract travels as.
  *
@@ -15,7 +15,7 @@ export const WIRES = ['extension.git.log'] as const;
  * has no single wire, and a caller that needs one has to say which it means.
  * `WIRES` is always there.
  */
-export const WIRE = 'extension.git.log';
+export const WIRE = 'git.log';
 /** The contract version these shapes are. */
 export const VERSION = 1;
 

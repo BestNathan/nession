@@ -20,7 +20,7 @@ pub struct FileDiff {
     pub truncated: bool,
 }
 
-pub const WIRE: &str = "extension.git.diff";
+pub const WIRE: &str = "git.diff";
 
 #[derive(Debug, Clone, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
@@ -67,7 +67,7 @@ mod tests {
         let d = descriptor().unwrap();
         assert_eq!(d.id.as_str(), "git.diff");
         assert_eq!(d.owner, "nession-git");
-        assert_eq!(d.contracts[0].wire, vec!["extension.git.diff".to_string()]);
+        assert_eq!(d.contracts[0].wire, vec!["git.diff".to_string()]);
         assert!(d.validate().is_ok());
     }
 }

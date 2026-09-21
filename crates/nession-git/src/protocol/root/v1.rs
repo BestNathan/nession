@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::protocol::{v1_descriptor, GitResponseV1, SessionTargetV1};
 
-pub const WIRE: &str = "extension.git.root";
+pub const WIRE: &str = "git.root";
 
 #[derive(Debug, Clone, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
@@ -68,7 +68,7 @@ mod tests {
     fn the_descriptor_names_this_unit_its_owner_and_its_wire_type() {
         let d = descriptor().unwrap();
         assert_eq!(d.id.as_str(), "git.root");
-        assert_eq!(d.contracts[0].wire, vec!["extension.git.root".to_string()]);
+        assert_eq!(d.contracts[0].wire, vec!["git.root".to_string()]);
         assert!(d.validate().is_ok());
     }
 }

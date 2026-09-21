@@ -86,16 +86,15 @@ mod tests {
     }
 
     #[test]
-    fn the_wire_suffix_is_not_the_protocol_id_and_that_is_fine() {
-        // Pinned because it is surprising: `nession-git`'s ids match their wire
-        // suffixes, so a reader could infer a rule that does not hold. The
-        // registry strips `extension.` and gets `claude_code.read`; the
-        // provider's dispatch must therefore translate rather than compare.
-        assert_eq!(
-            list::v1::WIRE.strip_prefix("extension."),
-            Some("claude_code.list")
-        );
-        assert_ne!(list::v1::WIRE.strip_prefix("extension."), Some(list::ID));
+    fn the_wire_is_the_protocol_id() {
+        // This asserted the opposite — that the wire's suffix was *not* the id —
+        // and pinning it was right while it was true: the id cannot hold an
+        // underscore, the wire did, and the two could never be equal.
+        //
+        // It stopped being true when the namespace went, and the underscore went
+        // with it. The distinction had no job left: it existed so the registry
+        // could strip a prefix that no longer exists.
+        assert_eq!(list::v1::WIRE, list::ID);
         assert_eq!(list::ID, "claude-code.list");
     }
 

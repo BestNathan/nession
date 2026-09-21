@@ -30,7 +30,7 @@ type ClaudeCodeUnit = keyof typeof CONSUMER_REQUIREMENTS;
 
 /**
  * claude-code capability — the Claude Code config-browser extension
- * (`extension.claude_code.list|read`, issue #593). The request objects are
+ * (`claude-code.list|read`, issue #593). The request objects are
  * forwarded whole — the transport never sees individual fields. The wire
  * strings are the generated bindings, not strings written here.
  *

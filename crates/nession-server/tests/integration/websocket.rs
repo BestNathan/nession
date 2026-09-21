@@ -85,7 +85,7 @@ async fn test_agent_registration() {
             "ip_address": "127.0.0.1",
             "port": 8080,
             "auth_token": "test_token",
-            "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["extension.git.status"]}}},
+            "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
             "metadata": {
                 "tmux_version": "3.3a",
                 "os_version": "Linux",
@@ -307,7 +307,7 @@ async fn test_agent_registration_with_connect_url() {
         "payload": {
             "agent_id": "cu-agent", "hostname": "h", "ip_address": "10.0.0.1",
             "port": 9090, "auth_token": "test_token",
-            "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["extension.git.status"]}}},
+            "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
             "connect_url": "wss://custom.example.com/ws",
             "metadata": {
                 "tmux_version": "3.3", "os_version": "Linux", "nession_version": "0.1"

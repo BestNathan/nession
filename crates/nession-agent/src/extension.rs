@@ -36,8 +36,6 @@ use tracing::debug;
 #[derive(Debug, Clone)]
 struct Route {
     extension: usize,
-    /// What `handle_command` receives: the wire type without its namespace.
-    command: String,
     /// The Protocol Unit and contract version this route serves, so a dispatch
     /// can say what it answered rather than only that it answered.
     id: ProtocolId,
@@ -168,11 +166,6 @@ impl ExtensionRegistry {
 
                 for contract in &descriptor.contracts {
                     for wire in &contract.wire {
-                        // The namespace is the transport's, not the protocol's:
-                        // `handle_command` receives what follows it. Derived
-                        // here, once, so no provider re-spells it.
-                        let command = wire.strip_prefix("extension.").unwrap_or(wire);
-
                         if let Some(existing) = routes.get(wire) {
                             let first = extensions
                                 .get(existing.extension)
@@ -188,7 +181,6 @@ impl ExtensionRegistry {
                             wire.clone(),
                             Route {
                                 extension,
-                                command: command.to_string(),
                                 id: descriptor.id.clone(),
                                 version: contract.version,
                             },
@@ -279,14 +271,15 @@ impl ExtensionRegistry {
         let route = self.routes.get(msg_type)?;
         let ext = self.extensions.get(route.extension)?;
         debug!(
-            "Extension dispatch: {} → {} (msg_type: {}, protocol: {}@{})",
+            "Extension dispatch: {} → {} (protocol: {}@{})",
             ext.name(),
-            route.command,
             msg_type,
             route.id,
             route.version
         );
-        Some(ext.handle_command(&route.command, payload).await)
+        // `msg_type` and not a stripped copy of it: the wire *is* the protocol
+        // id now, so the extension is handed exactly the name it declared.
+        Some(ext.handle_command(msg_type, payload).await)
     }
 }
 
@@ -376,11 +369,11 @@ mod tests {
     #[test]
     fn a_well_formed_pair_composes_and_derives_a_manifest() {
         let registry = compose(vec![
-            Box::new(Fake::new("git", "git.status", "extension.git.status")),
+            Box::new(Fake::new("git", "git.status", "git.status")),
             Box::new(Fake::new(
                 "claude_code",
                 "claude-code.read",
-                "extension.claude_code.read",
+                "claude-code.read",
             )),
         ])
         .unwrap();
@@ -400,12 +393,8 @@ mod tests {
         // `handlers.insert`, where the second registration won and the first
         // provider's route vanished without a log line.
         let err = compose(vec![
-            Box::new(Fake::new("git", "git.status", "extension.shared.thing")),
-            Box::new(Fake::new(
-                "claude_code",
-                "claude-code.read",
-                "extension.shared.thing",
-            )),
+            Box::new(Fake::new("git", "git.status", "shared.thing")),
+            Box::new(Fake::new("claude_code", "claude-code.read", "shared.thing")),
         ])
         .unwrap_err();
 
@@ -420,7 +409,7 @@ mod tests {
             "must name the second claimant: {text}"
         );
         assert!(
-            text.contains("extension.shared.thing"),
+            text.contains("shared.thing"),
             "must name the wire type: {text}"
         );
     }
@@ -428,11 +417,11 @@ mod tests {
     #[test]
     fn two_providers_claiming_one_protocol_fail() {
         let err = compose(vec![
-            Box::new(Fake::new("git", "shared.thing", "extension.git.thing")),
+            Box::new(Fake::new("git", "shared.thing", "git.thing")),
             Box::new(Fake::new(
                 "claude_code",
                 "shared.thing",
-                "extension.claude_code.thing",
+                "claude-code.thing",
             )),
         ])
         .unwrap_err();
@@ -463,7 +452,7 @@ mod tests {
         let err = compose(vec![Box::new(Fake::new(
             "git",
             "Not Canonical",
-            "extension.git.thing",
+            "git.thing",
         ))])
         .unwrap_err();
         assert!(
@@ -474,28 +463,27 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dispatch_derives_the_command_suffix_from_the_wire_type() {
-        // The namespace strip happens once, here — no provider re-spells it, and
-        // `claude_code.read` (the suffix) is not `claude-code.read` (the id).
+    async fn a_declared_wire_dispatches_and_an_undeclared_one_falls_through() {
+        // This used to assert the namespace strip — the wire was
+        // `extension.<something>` and the extension was handed the part after
+        // it. There is no strip now: the wire is the protocol id, so what the
+        // extension receives is exactly what it declared.
         let registry = compose(vec![Box::new(Fake::new(
             "claude_code",
             "claude-code.read",
-            "extension.claude_code.read",
+            "claude-code.read",
         ))])
         .unwrap();
 
         assert!(
             registry
-                .dispatch("extension.claude_code.read", Value::Null)
+                .dispatch("claude-code.read", Value::Null)
                 .await
                 .is_some(),
             "a declared wire type must dispatch"
         );
         assert!(
-            registry
-                .dispatch("extension.git.status", Value::Null)
-                .await
-                .is_none(),
+            registry.dispatch("git.status", Value::Null).await.is_none(),
             "an undeclared wire type must fall through, not be swallowed"
         );
     }
@@ -507,11 +495,7 @@ mod tests {
         // resolving against it must see both — otherwise the core half is
         // invisible even though it is the half every agent has.
         let registry = compose_with_core(
-            vec![Box::new(Fake::new(
-                "git",
-                "git.status",
-                "extension.git.status",
-            ))],
+            vec![Box::new(Fake::new("git", "git.status", "git.status"))],
             vec![core("session.create", "server.session.create")],
         )
         .unwrap();
@@ -527,12 +511,8 @@ mod tests {
         // provider that was registered and is unreachable. Having no core units
         // is a different claim: the agent serves only what its extensions
         // declare, which is what a stripped-down build looks like.
-        let registry = compose(vec![Box::new(Fake::new(
-            "git",
-            "git.status",
-            "extension.git.status",
-        ))])
-        .unwrap();
+        let registry =
+            compose(vec![Box::new(Fake::new("git", "git.status", "git.status"))]).unwrap();
 
         let manifest = registry.manifest();
         assert!(!manifest.is_empty());
@@ -549,12 +529,8 @@ mod tests {
         // extension's is dead — with its other wire types still working, so
         // nothing looks broken enough to investigate.
         let err = compose_with_core(
-            vec![Box::new(Fake::new(
-                "git",
-                "git.status",
-                "extension.shared.thing",
-            ))],
-            vec![core("session.create", "extension.shared.thing")],
+            vec![Box::new(Fake::new("git", "git.status", "shared.thing"))],
+            vec![core("session.create", "shared.thing")],
         )
         .unwrap_err();
 
@@ -569,7 +545,7 @@ mod tests {
             "must name the core unit: {text}"
         );
         assert!(
-            text.contains("extension.shared.thing"),
+            text.contains("shared.thing"),
             "must name the wire type: {text}"
         );
     }

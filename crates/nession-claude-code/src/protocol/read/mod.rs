@@ -13,4 +13,4 @@ pub const ID: &str = "claude-code.read";
 ///
 /// Not the id — see the parent module on why this provider translates where
 /// `nession-git` can compare.
-pub const COMMAND: &str = "claude_code.read";
+pub const COMMAND: &str = "claude-code.read";

@@ -12,4 +12,4 @@ pub const ID: &str = "claude-code.list";
 /// change without breaking peers, so this provider translates where
 /// `nession-git` can compare. `the_wire_suffix_is_not_the_protocol_id` in the
 /// parent module pins the difference.
-pub const COMMAND: &str = "claude_code.list";
+pub const COMMAND: &str = "claude-code.list";

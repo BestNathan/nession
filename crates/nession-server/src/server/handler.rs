@@ -149,10 +149,6 @@ impl ConnectionHandler {
                 msg.msg_type, msg.id
             );
         }
-        // Try extension dispatch first (extension.* messages get relayed to agent)
-        if msg.msg_type.starts_with("extension.") {
-            return self.handle_extension_message(msg).await;
-        }
         // One list, not two: `SERVER_WIRES` and `dispatch_server` come from the
         // same `server_routes!` invocation below, so a unit cannot be
         // advertised in the Server's manifest without a handler, or handled
@@ -161,6 +157,33 @@ impl ConnectionHandler {
         // and before this it was the one peer whose offer was invisible.
         if SERVER_WIRES.contains(&msg.msg_type.as_str()) {
             return dispatch_server(self, msg).await;
+        }
+
+        // Not one of ours, so it is either a relay or nothing. The Server's
+        // entire knowledge of an agent's own protocols — including the ones a
+        // plugin provides — is the manifest that agent registered, and this is
+        // where it is consulted.
+        //
+        // It used to be a name test: `starts_with("extension.")`. That carried
+        // a category the Server has no business holding. Whether a protocol is
+        // a plugin is an agent-side fact; the Server's only legitimate question
+        // is "does this target say it can carry this wire?", which is what the
+        // manifest answers. The prefix also could not survive `#565`: a
+        // standalone capability host has nothing to be an "extension" *of*.
+        //
+        // Addressed to an agent, so it is a relay — and the relay decides. The
+        // gate is "does it name a target", not "does the target support it",
+        // deliberately: an agent that registered **no** manifest has to reach
+        // `handle_relayed_message` to get the refusal that names the fix
+        // ("it predates manifests — upgrade it"). Gating on the manifest here
+        // would drop that agent into the no-op below and say nothing.
+        if msg
+            .payload
+            .get("agent_id")
+            .and_then(|v| v.as_str())
+            .is_some_and(|id| !id.is_empty())
+        {
+            return self.handle_relayed_message(msg).await;
         }
 
         // Not a declared unit. Nothing is served here — `client.session.relay.end`
@@ -1995,10 +2018,17 @@ impl ConnectionHandler {
         Ok(HandlerAction::Reply(None))
     }
 
-    /// Relay an extension message (extension.<name>.<action>) to the target agent.
+    /// Relay a message to the agent it names.
+    ///
+    /// Named for what it does rather than for what it used to recognise: the
+    /// caller has already established that this target's manifest carries the
+    /// wire, and nothing here inspects the message type beyond using it as the
+    /// lookup key and echoing it back. Whether the far side implements it with
+    /// a plugin is not visible from here and does not need to be.
+    ///
     /// Uses agent_command() which injects request_id into the payload so the agent
     /// can correlate its response via agent.session.command.response.
-    async fn handle_extension_message(
+    async fn handle_relayed_message(
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
     ) -> anyhow::Result<HandlerAction> {
@@ -3573,11 +3603,8 @@ mod tests {
                 "git.status",
                 "nession-git",
                 vec![
-                    ContractDescriptor::new(ContractVersion::V1, &["extension.git.status"]),
-                    ContractDescriptor::new(
-                        ContractVersion::new(2).unwrap(),
-                        &["extension.git.status.v2"],
-                    ),
+                    ContractDescriptor::new(ContractVersion::V1, &["git.status"]),
+                    ContractDescriptor::new(ContractVersion::new(2).unwrap(), &["git.status.v2"]),
                 ],
             )
             .unwrap()],
@@ -3588,15 +3615,15 @@ mod tests {
     async fn a_target_that_does_not_carry_the_wire_type_is_refused() {
         // The first thing that consults the manifest an agent advertised.
         let mut h = test_handler("").await;
-        register_agent(&h, Some(manifest_carrying("extension.git.status"))).await;
+        register_agent(&h, Some(manifest_carrying("git.status"))).await;
 
-        let payload = relay(&mut h, "extension.git.diff").await;
+        let payload = relay(&mut h, "git.diff").await;
         assert_eq!(payload["error"], "contract_not_supported");
         assert!(
             payload["message"]
                 .as_str()
                 .unwrap_or("")
-                .contains("extension.git.diff"),
+                .contains("git.diff"),
             "the refusal should name what was asked for: {payload}"
         );
     }
@@ -3607,9 +3634,9 @@ mod tests {
         // fails — but it fails *later*, with a different error, which is what
         // proves the manifest check let it through instead of refusing.
         let mut h = test_handler("").await;
-        register_agent(&h, Some(manifest_carrying("extension.git.status"))).await;
+        register_agent(&h, Some(manifest_carrying("git.status"))).await;
 
-        let payload = relay(&mut h, "extension.git.status").await;
+        let payload = relay(&mut h, "git.status").await;
         assert_ne!(
             payload["error"], "contract_not_supported",
             "a carried wire type must not be refused by the manifest check"
@@ -3631,7 +3658,7 @@ mod tests {
         let mut h = test_handler("").await;
         register_agent(&h, None).await;
 
-        let payload = relay(&mut h, "extension.git.diff").await;
+        let payload = relay(&mut h, "git.diff").await;
         assert_eq!(payload["error"], "contract_not_supported");
         assert!(
             payload["message"]
@@ -3671,9 +3698,9 @@ mod tests {
         // `agent_disconnected`. `not_authenticated` is therefore the proof it
         // stopped at the gate rather than somewhere further down.
         let mut h = test_handler("tok").await;
-        register_agent(&h, Some(manifest_carrying("extension.git.status"))).await;
+        register_agent(&h, Some(manifest_carrying("git.status"))).await;
 
-        let payload = relay_unauthenticated(&mut h, "extension.git.status").await;
+        let payload = relay_unauthenticated(&mut h, "git.status").await;
         assert_eq!(payload["error"], "not_authenticated");
         assert_eq!(payload["available"], false);
     }
@@ -3690,13 +3717,13 @@ mod tests {
         // The gate reads nothing from the payload, so the two are not merely
         // similar — they are the same bytes.
         let mut h = test_handler("tok").await;
-        register_agent(&h, Some(manifest_carrying("extension.git.status"))).await;
+        register_agent(&h, Some(manifest_carrying("git.status"))).await;
 
-        let known_target = relay_unauthenticated(&mut h, "extension.git.status").await;
+        let known_target = relay_unauthenticated(&mut h, "git.status").await;
 
         let action = h
             .handle_message(proto_msg(
-                "extension.git.status",
+                "git.status",
                 json!({ "agent_id": "an-agent-that-was-never-registered" }),
             ))
             .await
@@ -3715,9 +3742,9 @@ mod tests {
         // that have not authenticated and nothing else. Without this, deleting
         // the relay would leave the two tests above passing.
         let mut h = test_handler("tok").await;
-        register_agent(&h, Some(manifest_carrying("extension.git.status"))).await;
+        register_agent(&h, Some(manifest_carrying("git.status"))).await;
 
-        let payload = relay(&mut h, "extension.git.status").await;
+        let payload = relay(&mut h, "git.status").await;
         assert_ne!(
             payload["error"], "not_authenticated",
             "an authenticated client must get past the gate"
@@ -3793,14 +3820,14 @@ mod tests {
         // the discover-agents call, so a consumer resolving per target has the
         // manifests in hand without a second round trip per agent.
         let mut h = test_handler("").await;
-        register_agent(&h, Some(manifest_carrying("extension.git.status"))).await;
+        register_agent(&h, Some(manifest_carrying("git.status"))).await;
 
         let protocols = listed_protocols(&mut h).await;
         assert_eq!(protocols["provider"], "agent-a");
         assert_eq!(protocols["protocols"]["git.status"]["versions"][0], 1);
         assert_eq!(
             protocols["protocols"]["git.status"]["wire"][0],
-            "extension.git.status"
+            "git.status"
         );
     }
 
@@ -3817,7 +3844,7 @@ mod tests {
 
         let payload = relay_payload(
             &mut h,
-            "extension.git.status",
+            "git.status",
             json!({"agent_id": "agent-a", "contract_version": 3}),
         )
         .await;
@@ -3845,7 +3872,7 @@ mod tests {
         for version in [1, 2] {
             let payload = relay_payload(
                 &mut h,
-                "extension.git.status",
+                "git.status",
                 json!({"agent_id": "agent-a", "contract_version": version}),
             )
             .await;
@@ -3865,7 +3892,7 @@ mod tests {
         let mut h = test_handler("").await;
         register_agent(&h, Some(manifest_with_two_versions())).await;
 
-        let payload = relay(&mut h, "extension.git.status").await;
+        let payload = relay(&mut h, "git.status").await;
         assert_ne!(payload["error"], "contract_not_supported");
         assert_eq!(payload["error"], "agent_disconnected");
     }
@@ -3918,7 +3945,7 @@ mod tests {
                     "ip_address": "1.2.3.4",
                     "port": 19091,
                     "auth_token": "anything",
-                    "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["extension.git.status"]}}},
+                    "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
                     "addresses": [],
                     "connect_url": null,
                     "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
@@ -3943,7 +3970,7 @@ mod tests {
                     "ip_address": "1.2.3.4",
                     "port": 19091,
                     "auth_token": "secret",
-                    "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["extension.git.status"]}}},
+                    "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
                     "addresses": [],
                     "connect_url": null,
                     "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
@@ -4010,7 +4037,7 @@ mod tests {
                     "ip_address": "1.2.3.4",
                     "port": 19091,
                     "auth_token": "wrong",
-                    "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["extension.git.status"]}}},
+                    "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
                     "addresses": [],
                     "connect_url": null,
                     "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
@@ -4038,7 +4065,7 @@ mod tests {
                     "ip_address": "1.2.3.4",
                     "port": 19091,
                     "auth_token": "",
-                    "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["extension.git.status"]}}},
+                    "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
                     "addresses": [
                         { "url": "ws://1.2.3.4:19091/ws", "network_type": "lan", "label": "" }
                     ],
@@ -4068,7 +4095,7 @@ mod tests {
                 "ip_address": "1.2.3.4",
                 "port": 19091,
                 "auth_token": "",
-                "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["extension.git.status"]}}},
+                "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
                 "addresses": [],
                 "connect_url": null,
                 "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
@@ -4122,7 +4149,7 @@ mod tests {
                 "ip_address": "1.2.3.4",
                 "port": 19091,
                 "auth_token": "",
-                "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["extension.git.status"]}}},
+                "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
                 "addresses": [],
                 "connect_url": null,
                 "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
@@ -4153,7 +4180,7 @@ mod tests {
                 "ip_address": "1.2.3.4",
                 "port": 19091,
                 "auth_token": "",
-                "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["extension.git.status"]}}},
+                "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
                 "addresses": [],
                 "connect_url": null,
                 "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
@@ -4189,7 +4216,7 @@ mod tests {
                 "ip_address": "1.2.3.4",
                 "port": 19091,
                 "auth_token": "",
-                "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["extension.git.status"]}}},
+                "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
                 "addresses": [],
                 "connect_url": null,
                 "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
@@ -4227,7 +4254,7 @@ mod tests {
                 "ip_address": "1.2.3.4",
                 "port": 19091,
                 "auth_token": "",
-                "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["extension.git.status"]}}},
+                "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
                 "addresses": [],
                 "connect_url": null,
                 "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
@@ -4261,7 +4288,7 @@ mod tests {
                 "ip_address": "1.2.3.4",
                 "port": 19091,
                 "auth_token": "",
-                "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["extension.git.status"]}}},
+                "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
                 "addresses": [],
                 "connect_url": null,
                 "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
@@ -4444,7 +4471,7 @@ mod tests {
                 "ip_address": "1.2.3.4",
                 "port": 19091,
                 "auth_token": "",
-                "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["extension.git.status"]}}},
+                "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
                 "addresses": [],
                 "connect_url": null,
                 "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1", "image_tag": "sha-abc123" },
@@ -4494,7 +4521,7 @@ mod tests {
                 "ip_address": "1.2.3.4",
                 "port": 19091,
                 "auth_token": "",
-                "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["extension.git.status"]}}},
+                "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
                 "addresses": [],
                 "connect_url": null,
                 "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
@@ -4546,7 +4573,7 @@ mod tests {
                 "ip_address": "1.2.3.4",
                 "port": 19091,
                 "auth_token": "",
-                "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["extension.git.status"]}}},
+                "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
                 "addresses": [],
                 "connect_url": null,
                 "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
@@ -4889,7 +4916,7 @@ mod tests {
                 "ip_address": "1.2.3.4",
                 "port": 19091,
                 "auth_token": "",
-                "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["extension.git.status"]}}},
+                "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
                 "addresses": [],
                 "connect_url": null,
                 "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
@@ -4943,7 +4970,7 @@ mod tests {
                 "ip_address": "1.2.3.4",
                 "port": 19091,
                 "auth_token": "",
-                "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["extension.git.status"]}}},
+                "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
                 "addresses": [],
                 "connect_url": null,
                 "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
@@ -4997,7 +5024,7 @@ mod tests {
                 "ip_address": "1.2.3.4",
                 "port": 19091,
                 "auth_token": "",
-                "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["extension.git.status"]}}},
+                "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
                 "addresses": [],
                 "connect_url": null,
                 "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
@@ -5163,7 +5190,7 @@ mod tests {
                 "ip_address": "1.2.3.4",
                 "port": 19091,
                 "auth_token": "",
-                "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["extension.git.status"]}}},
+                "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
                 "addresses": [],
                 "connect_url": null,
                 "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
@@ -5214,7 +5241,7 @@ mod tests {
                 "ip_address": "1.2.3.4",
                 "port": 19091,
                 "auth_token": "",
-                "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["extension.git.status"]}}},
+                "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
                 "addresses": [],
                 "connect_url": null,
                 "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
@@ -5906,7 +5933,7 @@ mod tests {
                 "ip_address": "1.2.3.4",
                 "port": 19091,
                 "auth_token": "",
-                "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["extension.git.status"]}}},
+                "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
                 "addresses": [
                     { "url": "ws://1.2.3.4:19091/ws", "network_type": "lan" }
                 ],

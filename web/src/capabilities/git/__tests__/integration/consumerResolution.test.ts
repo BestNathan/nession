@@ -74,7 +74,7 @@ describe('consumer contract resolution end to end', () => {
       session: 'a1:work',
       contract_version: 1,
     });
-    surface.resolveNext('extension.git.status', statusResponse);
+    surface.resolveNext('git.status', statusResponse);
     await expect(pending).resolves.toEqual(statusResponse);
   });
 
@@ -86,7 +86,7 @@ describe('consumer contract resolution end to end', () => {
 
     const pending = git.gitStatus({ agent_id: 'a1', session: 'a1:work' });
     expect(surface.requests[0].payload).toEqual({ agent_id: 'a1', session: 'a1:work' });
-    surface.resolveNext('extension.git.status', statusResponse);
+    surface.resolveNext('git.status', statusResponse);
     await expect(pending).resolves.toEqual(statusResponse);
   });
 
@@ -100,7 +100,7 @@ describe('consumer contract resolution end to end', () => {
 
     const pending = git.gitStatus({ agent_id: 'a2', session: 'a2:work' });
     expect(surface.requests[0].payload).toMatchObject({ contract_version: 1 });
-    surface.resolveNext('extension.git.status', statusResponse);
+    surface.resolveNext('git.status', statusResponse);
     await expect(pending).resolves.toEqual(statusResponse);
   });
 
@@ -113,7 +113,7 @@ describe('consumer contract resolution end to end', () => {
 
     const pending = git.gitStatus({ agent_id: 'a1', session: 'a1:work' });
     expect(surface.requests[0].payload).not.toHaveProperty('contract_version');
-    surface.resolveNext('extension.git.status', statusResponse);
+    surface.resolveNext('git.status', statusResponse);
     await expect(pending).resolves.toEqual(statusResponse);
   });
 });

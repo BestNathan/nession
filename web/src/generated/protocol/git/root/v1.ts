@@ -7,7 +7,7 @@
 /** The canonical protocol id. Not the wire type. */
 export const PROTOCOL = 'git.root';
 /** Every transport projection this contract travels as. */
-export const WIRES = ['extension.git.root'] as const;
+export const WIRES = ['git.root'] as const;
 /**
  * The only projection this contract travels as.
  *
@@ -15,7 +15,7 @@ export const WIRES = ['extension.git.root'] as const;
  * has no single wire, and a caller that needs one has to say which it means.
  * `WIRES` is always there.
  */
-export const WIRE = 'extension.git.root';
+export const WIRE = 'git.root';
 /** The contract version these shapes are. */
 export const VERSION = 1;
 

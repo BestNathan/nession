@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::protocol::v1_descriptor;
 use crate::security::{MAX_CHUNK_SIZE, MAX_FILE_SIZE};
 
-pub const WIRE: &str = "extension.claude_code.read";
+pub const WIRE: &str = "claude-code.read";
 
 /// Which `.claude/` directory the caller means.
 ///
@@ -273,10 +273,7 @@ mod tests {
         let d = descriptor().unwrap();
         assert_eq!(d.id.as_str(), "claude-code.read");
         assert_eq!(d.owner, "nession-claude-code");
-        assert_eq!(
-            d.contracts[0].wire,
-            vec!["extension.claude_code.read".to_string()]
-        );
+        assert_eq!(d.contracts[0].wire, vec!["claude-code.read".to_string()]);
         assert!(d.validate().is_ok());
     }
 }

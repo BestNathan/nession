@@ -332,15 +332,18 @@ mod tests {
     }
 
     #[test]
-    fn the_wire_projection_strips_to_the_protocol_id() {
-        // `ExtensionRegistry::new` does `strip_prefix("extension.")` and hands
-        // the remainder to `handle_command`, which matches on the ids above.
-        // That relation lived only in a comment until this test.
+    fn the_wire_is_the_id_that_handle_command_matches_on() {
+        // This asserted that the wire stripped to the id — the registry used to
+        // do `strip_prefix("extension.")` and hand the remainder to
+        // `handle_command`, which matches on the ids above.
+        //
+        // There is no strip now. The wire *is* the id, and `handle_command`
+        // receives exactly what the contract declared, so this asserts the
+        // equality the strip used to produce rather than the strip.
         for (wire, id) in contracts() {
             assert_eq!(
-                wire.strip_prefix("extension."),
-                Some(id),
-                "`{wire}` must strip to `{id}` for the registry to dispatch it"
+                wire, id,
+                "`handle_command` matches on `{id}`, so the wire must be it"
             );
         }
     }

@@ -12,20 +12,20 @@ import type { Agent, Session } from '@/types';
  * exercised by nothing on the fixture route.
  *
  * The ids are canonical (`git.status`), not wire strings
- * (`extension.git.status`) — the wire spelling is the projection, and this is
+ * (`git.status`) — the wire spelling is the projection, and this is
  * the contract.
  */
 const FIXTURE_MANIFEST: ProtocolManifest = {
   provider: 'fixture',
   protocols: {
-    'git.status': { versions: [1], wire: ['extension.git.status'] },
-    'git.diff': { versions: [1], wire: ['extension.git.diff'] },
-    'git.root': { versions: [1], wire: ['extension.git.root'] },
-    'git.log': { versions: [1], wire: ['extension.git.log'] },
-    'git.branches': { versions: [1], wire: ['extension.git.branches'] },
-    'git.worktrees': { versions: [1], wire: ['extension.git.worktrees'] },
-    'claude-code.list': { versions: [1], wire: ['extension.claude_code.list'] },
-    'claude-code.read': { versions: [1], wire: ['extension.claude_code.read'] },
+    'git.status': { versions: [1], wire: ['git.status'] },
+    'git.diff': { versions: [1], wire: ['git.diff'] },
+    'git.root': { versions: [1], wire: ['git.root'] },
+    'git.log': { versions: [1], wire: ['git.log'] },
+    'git.branches': { versions: [1], wire: ['git.branches'] },
+    'git.worktrees': { versions: [1], wire: ['git.worktrees'] },
+    'claude-code.list': { versions: [1], wire: ['claude-code.list'] },
+    'claude-code.read': { versions: [1], wire: ['claude-code.read'] },
   },
 };
 
