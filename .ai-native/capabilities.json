@@ -1,0 +1,225 @@
+{
+  "version": 1,
+  "generated_from": "0dc28d5e768f3a0421cb17ebc2a88f0e6a84d664",
+  "capabilities": [
+    {
+      "id": "capability://web/transport/reconnect",
+      "name": "web.transport.reconnect",
+      "description": "Owns WebSocket physical connection lifecycle, reconnect budget/backoff, handshake readiness, stale physical-socket suppression, disposal, and connection-state publication.",
+      "aliases": [
+        "websocket reconnect",
+        "socket loss",
+        "handshake",
+        "reconnect budget",
+        "backoff",
+        "physical socket",
+        "disposed transport"
+      ],
+      "owners": [
+        "web/src/platform/socket/WebSocketService.ts",
+        "web/src/platform/socket/types.ts"
+      ],
+      "dependencies": [
+        "capability://terminal/session/visibility-wake",
+        "capability://terminal/session/route-recovery"
+      ],
+      "consumers": [
+        "capability://terminal/session/visibility-wake",
+        "capability://terminal/session/route-recovery"
+      ],
+      "state": [
+        "connectionState",
+        "reconnectAttempts",
+        "socket generation",
+        "disposed/userClosed"
+      ],
+      "invariants": [
+        "stale physical socket callbacks cannot mutate the current connection",
+        "handshake refusal is terminal and does not consume reconnect budget",
+        "reconnect budget resets only after an established connection",
+        "disposed or explicitly closed transports do not reconnect"
+      ],
+      "evidence": [
+        "web/src/platform/socket/__tests__/unit/WebSocketService.test.ts",
+        "web/src/app/__tests__/integration/useAppConnection.test.ts"
+      ]
+    },
+    {
+      "id": "capability://terminal/session/visibility-wake",
+      "name": "terminal.session.visibility-wake",
+      "description": "Owns browser visibility wake behavior that explicitly re-arms an authenticated disconnected terminal transport after background suspension.",
+      "aliases": [
+        "visibility reconnect",
+        "wake reconnect",
+        "tab visible",
+        "background wake",
+        "mobile app switch"
+      ],
+      "owners": [
+        "web/src/app/useVisibilityReconnect.ts"
+      ],
+      "dependencies": [
+        "capability://web/transport/reconnect"
+      ],
+      "consumers": [],
+      "state": [
+        "wasEverAuthed",
+        "document.visibilityState",
+        "transport connectionState",
+        "transport disposed"
+      ],
+      "invariants": [
+        "wake reconnect only acts while visible",
+        "wake reconnect requires a previously authenticated session",
+        "wake reconnect only re-arms a stopped disconnected transport",
+        "wake reconnect never re-arms a disposed transport"
+      ],
+      "evidence": [
+        "web/src/app/__tests__/integration/useAppConnection.test.ts"
+      ]
+    },
+    {
+      "id": "capability://terminal/session/attach-state",
+      "name": "terminal.session.attach-state",
+      "description": "Owns pure attach-phase transitions, reconnect attempt accounting, automatic/manual failure semantics, and explicit transition outputs.",
+      "aliases": [
+        "attach state machine",
+        "attach phase",
+        "reconnect count",
+        "force relay",
+        "retry attach",
+        "transport lost"
+      ],
+      "owners": [
+        "web/src/platform/attach/AttachStateMachine.ts"
+      ],
+      "dependencies": [],
+      "consumers": [
+        "capability://terminal/session/reattach",
+        "capability://terminal/session/route-recovery"
+      ],
+      "state": [
+        "phase",
+        "reconnectCount"
+      ],
+      "invariants": [
+        "manual-route exhaustion fails rather than silently forcing relay",
+        "automatic attach timeout exhaustion requests relay fallback",
+        "transport loss only transitions an eligible attached/connected phase",
+        "successful attach resets reconnect count"
+      ],
+      "evidence": [
+        "web/src/platform/attach/__tests__/unit/AttachStateMachine.test.ts"
+      ]
+    },
+    {
+      "id": "capability://terminal/session/reattach",
+      "name": "terminal.session.reattach",
+      "description": "Owns one P2P attach request lifecycle, attach attempt identity, duplicate suppression per transport generation, attach timeout/error classification, cancellation, and stale-result suppression.",
+      "aliases": [
+        "client.attach",
+        "reattach",
+        "attach timeout",
+        "late attach",
+        "stale attach",
+        "attach generation",
+        "duplicate attach"
+      ],
+      "owners": [
+        "web/src/platform/attach/SessionAttachController.ts"
+      ],
+      "dependencies": [
+        "capability://terminal/session/attach-state"
+      ],
+      "consumers": [
+        "capability://terminal/session/route-recovery"
+      ],
+      "state": [
+        "attachGeneration",
+        "inFlightTransportGen"
+      ],
+      "invariants": [
+        "at most one attach request is in flight per transport generation",
+        "cancelled or superseded attach resolutions are no-ops",
+        "only current attach success can mark the session attached",
+        "transport-level attach failures consume attach recovery budget"
+      ],
+      "evidence": [
+        "web/src/platform/attach/__tests__/unit/SessionAttachController.test.ts"
+      ]
+    },
+    {
+      "id": "capability://terminal/session/route-recovery",
+      "name": "terminal.session.route-recovery",
+      "description": "Owns session-level coordination of transport generation, candidate rotation, P2P re-attach, forced relay convergence, route intent, runtime events, and recovery orchestration.",
+      "aliases": [
+        "session runtime",
+        "route recovery",
+        "candidate rotation",
+        "transport generation",
+        "force relay",
+        "p2p recovery",
+        "route intent"
+      ],
+      "owners": [
+        "web/src/platform/session-runtime/SessionRuntime.ts"
+      ],
+      "dependencies": [
+        "capability://web/transport/reconnect",
+        "capability://terminal/session/attach-state",
+        "capability://terminal/session/reattach"
+      ],
+      "consumers": [
+        "capability://terminal/session/runtime-projection"
+      ],
+      "state": [
+        "transportGeneration",
+        "attachedTransportGeneration",
+        "activeUrl",
+        "forcedRelay",
+        "lastResize",
+        "disconnectHandling"
+      ],
+      "invariants": [
+        "route replacement creates a new transport generation",
+        "repeated loss notification cannot duplicate one recovery transition",
+        "automatic recovery converges to relay once after exhaustion",
+        "manual route exhaustion remains failed until intent changes",
+        "latest known viewport size is used for current attach"
+      ],
+      "evidence": [
+        "web/src/platform/session-runtime/__tests__/unit/SessionRuntime.test.ts"
+      ]
+    },
+    {
+      "id": "capability://terminal/session/runtime-projection",
+      "name": "terminal.session.runtime-projection",
+      "description": "Owns React/product projection of SessionRuntime state and attach orchestration into terminal-facing hooks without owning recovery policy.",
+      "aliases": [
+        "terminal hook",
+        "runtime snapshot",
+        "useTerminalAttach",
+        "terminal orchestration",
+        "react projection"
+      ],
+      "owners": [
+        "web/src/product/terminal/useTerminalAttach.ts",
+        "web/src/product/terminal/useTerminalOrchestration.ts"
+      ],
+      "dependencies": [
+        "capability://terminal/session/route-recovery"
+      ],
+      "consumers": [],
+      "state": [
+        "runtime snapshot projection"
+      ],
+      "invariants": [
+        "product hooks project runtime facts rather than duplicate recovery policy",
+        "terminal-facing state follows current runtime generation"
+      ],
+      "evidence": [
+        "web/src/product/terminal/__tests__/integration/useTerminalAttach.test.ts"
+      ]
+    }
+  ]
+}
