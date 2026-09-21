@@ -40,7 +40,7 @@
         "disposed or explicitly closed transports do not reconnect"
       ],
       "evidence": [
-        "web/src/platform/socket/__tests__/unit/WebSocketService.test.ts",
+        "web/src/units/terminal-session/transport-reconnect/__tests__/service.test.ts",
         "web/src/app/__tests__/integration/useAppConnection.test.ts"
       ]
     },
@@ -109,7 +109,7 @@
         "successful attach resets reconnect count"
       ],
       "evidence": [
-        "web/src/platform/attach/__tests__/unit/AttachStateMachine.test.ts"
+        "web/src/units/terminal-session/attach/__tests__/state.test.ts"
       ]
     },
     {
@@ -145,7 +145,7 @@
         "transport-level attach failures consume attach recovery budget"
       ],
       "evidence": [
-        "web/src/platform/attach/__tests__/unit/SessionAttachController.test.ts"
+        "web/src/units/terminal-session/attach/__tests__/controller.test.ts"
       ]
     },
     {
@@ -188,7 +188,7 @@
         "latest known viewport size is used for current attach"
       ],
       "evidence": [
-        "web/src/platform/session-runtime/__tests__/unit/SessionRuntime.test.ts"
+        "web/src/units/terminal-session/route-recovery/__tests__/runtime.test.ts"
       ]
     },
     {
@@ -218,7 +218,7 @@
         "terminal-facing state follows current runtime generation"
       ],
       "evidence": [
-        "web/src/product/terminal/__tests__/integration/useTerminalAttach.test.ts"
+        "web/src/units/terminal-session/runtime-projection/__tests__/useTerminalAttach.test.ts"
       ]
     }
   ],
