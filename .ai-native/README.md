@@ -1,10 +1,33 @@
-# AI-Native Semantic Index — Treatment B
+# AI-Native Repository Surface — Treatment C
 
 This directory is experimental infrastructure for the Narness repository-architecture study.
 
-Treatment B keeps Nession's implementation topology materially unchanged and adds a machine-queryable semantic layer.
+Treatment C keeps the same stable semantic capability IDs as Treatment B, but moves canonical implementation/evidence ownership into behavior-oriented units.
 
-The semantic layer provides stable capability identities for the selected terminal/session reconnect slice:
+Use the same deterministic resolver:
+
+```bash
+node .ai-native/resolve.mjs "late attach success after route switch"
+node .ai-native/resolve.mjs capability://terminal/session/reattach
+node .ai-native/resolve.mjs --list
+```
+
+## Canonical layout
+
+```text
+web/src/units/terminal-session/
+  transport-reconnect/
+  visibility-wake/
+  attach/
+  route-recovery/
+  runtime-projection/
+```
+
+Legacy paths under `app/`, `platform/`, and `product/terminal/` remain only as compatibility projections where runtime imports still rely on them. They are not semantic owners.
+
+Primary tests for the selected slice are localized beside the canonical units.
+
+## Stable identities
 
 ```text
 capability://web/transport/reconnect
@@ -15,25 +38,15 @@ capability://terminal/session/route-recovery
 capability://terminal/session/runtime-projection
 ```
 
-Use the resolver:
+## Experimental intent
 
-```bash
-node .ai-native/resolve.mjs "late attach success after route switch"
-node .ai-native/resolve.mjs capability://terminal/session/reattach
-node .ai-native/resolve.mjs --list
-```
+A vs B isolates semantic addressability.
 
-The resolver is deliberately deterministic and lexical. The experiment is testing whether stable semantic addresses, explicit ownership, dependency edges, invariants, and evidence mappings improve coding-agent navigation. It is not testing an embedding model.
+B vs C asks whether behavior locality and explicit ownership improve agent navigation and modification efficiency after semantic indexing already exists.
 
-## Constraints
+Do not add benchmark-task-specific hints, Txx references, or solution descriptions to this repository surface.
 
-- Source files are not reorganized in Treatment B.
-- Runtime behavior is not changed by this index.
-- Entries describe stable capabilities, not benchmark task solutions.
-- Paths are projections from semantic identities, not the identities themselves.
-- The same semantic identities are retained in Treatment C even when physical layout changes.
-
-Generated from frozen source:
+Frozen source ancestor:
 
 ```text
 0dc28d5e768f3a0421cb17ebc2a88f0e6a84d664
