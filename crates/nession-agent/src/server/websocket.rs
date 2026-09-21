@@ -31,7 +31,7 @@ use crate::tmux::manager::SessionManager;
 use crate::tmux::session::TmuxSession;
 use anyhow::{Context, Result};
 use futures_util::{SinkExt, StreamExt};
-use nession_common::protocol::EnvSnapshot;
+use nession_protocol::contracts::env::v1::EnvSnapshot;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::pin::Pin;

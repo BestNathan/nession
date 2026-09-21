@@ -12,10 +12,14 @@ use crate::server::command_broker::{CommandBroker, WsMessageSender};
 use crate::server::web_client_registry::WebClientRegistry;
 use nession_common::display_name::validate_display_name;
 use nession_common::env_file::parse_env;
-use nession_common::protocol::{
-    AddressStatus, AgentAddressUpdatePayload, AgentRegisterPayload, AgentTerminalResizePayload,
-    EnvFileRef, EnvSnapshot, EnvSource, ProtocolMessage, ServerTerminalResizePayload,
+use nession_protocol::contracts::agent::v1::{
+    AddressStatus, AgentAddressUpdatePayload, AgentRegisterPayload,
 };
+use nession_protocol::contracts::env::v1::{EnvFileRef, EnvSnapshot, EnvSource};
+use nession_protocol::contracts::session::v1::{
+    AgentTerminalResizePayload, ServerTerminalResizePayload,
+};
+use nession_protocol::ProtocolMessage;
 
 /// Per-agent deadline for the force-refresh session query. Deliberately much
 /// shorter than the general 10s command timeout: a user is watching a spinner,
@@ -1992,7 +1996,7 @@ impl ConnectionHandler {
         let primary_ip = payload
             .addresses
             .iter()
-            .find(|a| a.network_type == nession_common::protocol::NetworkType::Lan)
+            .find(|a| a.network_type == nession_protocol::contracts::agent::v1::NetworkType::Lan)
             .or_else(|| payload.addresses.first())
             .and_then(|a| extract_ip_from_url(&a.url));
 
@@ -2459,7 +2463,7 @@ impl ConnectionHandler {
                     if let Some(arr) = resp.get("files").and_then(|v| v.as_array()) {
                         for f in arr {
                             if let Ok(info) = serde_json::from_value::<
-                                nession_common::protocol::EnvFileInfo,
+                                nession_protocol::contracts::env::v1::EnvFileInfo,
                             >(f.clone())
                             {
                                 files.push(info);
@@ -3449,7 +3453,7 @@ mod tests {
     use crate::registry::{AgentRegistry, SessionRegistry};
     use crate::server::client_registry::ClientRegistry;
     use crate::server::command_broker::CommandBroker;
-    use nession_common::protocol::AgentMetadata;
+    use nession_protocol::contracts::agent::v1::AgentMetadata;
     use nession_protocol::ProtocolManifest;
     use tokio_tungstenite::tungstenite::Message;
 
@@ -5609,7 +5613,7 @@ mod tests {
         // Record usage
         h.env_service.usage.record_create(
             "a1:s1",
-            &[nession_common::protocol::EnvFileRef {
+            &[nession_protocol::contracts::env::v1::EnvFileRef {
                 name: "locked.env".to_string(),
                 source: EnvSource::Server,
                 agent_id: None,
@@ -5740,7 +5744,7 @@ mod tests {
         // Record usage
         h.env_service.usage.record_create(
             "a1:s1",
-            &[nession_common::protocol::EnvFileRef {
+            &[nession_protocol::contracts::env::v1::EnvFileRef {
                 name: "used.env".to_string(),
                 source: EnvSource::Server,
                 agent_id: None,
@@ -5777,7 +5781,7 @@ mod tests {
         // Record usage
         h.env_service.usage.record_create(
             "a1:s1",
-            &[nession_common::protocol::EnvFileRef {
+            &[nession_protocol::contracts::env::v1::EnvFileRef {
                 name: "used.env".to_string(),
                 source: EnvSource::Server,
                 agent_id: None,

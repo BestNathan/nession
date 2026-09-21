@@ -4,7 +4,7 @@
 //! (when accepting a registration or synthesising a legacy list) need the same
 //! rules for normalising, de-duplicating, ordering, and capping addresses.
 
-use crate::protocol::{AgentAddress, NetworkType};
+use nession_protocol::contracts::agent::v1::{AgentAddress, NetworkType};
 
 /// Maximum number of advertised addresses per agent. Beyond this we drop the
 /// lowest-priority entries to keep payloads and probe fan-out bounded.

@@ -12,7 +12,7 @@ use crate::server::client_registry::ClientRegistry;
 use crate::server::command_broker::CommandBroker;
 use crate::server::web_client_registry::WebClientRegistry;
 use nession_common::config::ServerConfig;
-use nession_common::protocol::EnvSnapshot;
+use nession_protocol::contracts::env::v1::EnvSnapshot;
 
 pub struct WebSocketServer {
     config: ServerConfig,

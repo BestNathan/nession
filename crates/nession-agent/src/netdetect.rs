@@ -8,7 +8,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use crate::config::{AdvertiseAddress, AgentConfig};
 use nession_common::address::{finalize_addresses, legacy_to_addresses};
-use nession_common::protocol::{AgentAddress, NetworkType};
+use nession_protocol::contracts::agent::v1::{AgentAddress, NetworkType};
 use tracing::{info, warn};
 
 /// Classify an IP into a coarse [`NetworkType`] for labelling.
