@@ -16,7 +16,8 @@ use nession_protocol::contracts::agent::v1::{
     AddressStatus, AgentAddressUpdatePayload, AgentRegisterPayload,
 };
 use nession_protocol::contracts::env::v1::{
-    ClientEnvListPayload, ClientEnvListResponsePayload, EnvFileRef, EnvSnapshot, EnvSource,
+    ClientEnvGetPayload, ClientEnvGetResponsePayload, ClientEnvListPayload,
+    ClientEnvListResponsePayload, EnvFileRef, EnvSnapshot, EnvSource,
 };
 use nession_protocol::contracts::session::v1::{
     AgentTerminalResizePayload, ServerTerminalResizePayload,
@@ -2497,19 +2498,47 @@ impl ConnectionHandler {
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
     ) -> anyhow::Result<HandlerAction> {
+        // Typed at the contract boundary. `ClientEnvGetPayload::source` carries
+        // a serde default so this accepts exactly what `parse_env_ref` accepted
+        // — a request naming no source is a server file, not a refusal. A
+        // payload with no `name` fails to parse and gets the same reply the
+        // empty-name branch gives, so the wire is unchanged either way.
         if !self.authenticated_client {
-            return Ok(reply_json(
+            return Ok(env_get_reply(
                 &msg.id,
-                "server.env.get.response",
-                json!({ "success": false, "error": "Not authenticated" }),
+                ClientEnvGetResponsePayload {
+                    success: false,
+                    content: None,
+                    in_use_by: None,
+                    error: Some("Not authenticated".to_string()),
+                },
             ));
         }
-        let (name, source, agent_id) = parse_env_ref(&msg.payload);
-        if name.is_empty() {
-            return Ok(reply_json(
+        let Ok(ClientEnvGetPayload {
+            name,
+            source,
+            agent_id,
+        }) = serde_json::from_value(msg.payload)
+        else {
+            return Ok(env_get_reply(
                 &msg.id,
-                "server.env.get.response",
-                json!({ "success": false, "error": "name is required" }),
+                ClientEnvGetResponsePayload {
+                    success: false,
+                    content: None,
+                    in_use_by: None,
+                    error: Some("name is required".to_string()),
+                },
+            ));
+        };
+        if name.is_empty() {
+            return Ok(env_get_reply(
+                &msg.id,
+                ClientEnvGetResponsePayload {
+                    success: false,
+                    content: None,
+                    in_use_by: None,
+                    error: Some("name is required".to_string()),
+                },
             ));
         }
 
@@ -2549,15 +2578,23 @@ impl ConnectionHandler {
         };
 
         match result {
-            Ok(content) => Ok(reply_json(
+            Ok(content) => Ok(env_get_reply(
                 &msg.id,
-                "server.env.get.response",
-                json!({ "success": true, "content": content, "in_use_by": in_use_by }),
+                ClientEnvGetResponsePayload {
+                    success: true,
+                    content: Some(content),
+                    in_use_by: Some(in_use_by),
+                    error: None,
+                },
             )),
-            Err(e) => Ok(reply_json(
+            Err(e) => Ok(env_get_reply(
                 &msg.id,
-                "server.env.get.response",
-                json!({ "success": false, "error": e, "in_use_by": in_use_by }),
+                ClientEnvGetResponsePayload {
+                    success: false,
+                    content: None,
+                    in_use_by: Some(in_use_by),
+                    error: Some(e),
+                },
             )),
         }
     }
@@ -3337,6 +3374,16 @@ mod extract_ip_tests {
 /// `to_value` cannot fail for a struct of these shapes, but the house pattern
 /// keeps a fallback rather than an unwrap — and an empty list is still a valid
 /// payload, so a caller reads "no files" instead of losing the reply.
+/// Serialize a `server.env.get` reply. Same fallback reasoning as
+/// [`env_list_reply`].
+fn env_get_reply(id: &str, payload: ClientEnvGetResponsePayload) -> HandlerAction {
+    reply_json(
+        id,
+        "server.env.get.response",
+        serde_json::to_value(&payload).unwrap_or(json!({ "success": false })),
+    )
+}
+
 fn env_list_reply(id: &str, payload: ClientEnvListResponsePayload) -> HandlerAction {
     reply_json(
         id,
@@ -5321,6 +5368,51 @@ mod tests {
         assert!(
             parsed.error.is_some(),
             "an unauthenticated caller is told why rather than handed an empty list"
+        );
+    }
+
+    #[tokio::test]
+    async fn env_get_reply_is_what_its_contract_says_it_is() {
+        // The same guard as `env_list_reply_is_what_its_contract_says_it_is`,
+        // on the unit whose `in_use_by` had to become optional: two branches
+        // answer before it is computed. Both forms have to round-trip, and
+        // which form each branch produces is the part that is easy to get
+        // wrong by hand.
+        let mut h = test_handler("").await;
+
+        let action = h
+            .handle_message(proto_msg("server.env.get", json!({ "name": "x.env" })))
+            .await
+            .unwrap();
+        let payload = parse_reply(action)["payload"].clone();
+        let parsed: ClientEnvGetResponsePayload = serde_json::from_value(payload.clone())
+            .unwrap_or_else(|e| {
+                panic!("server.env.get replies {payload} but its contract does not accept it: {e}")
+            });
+        assert!(!parsed.success);
+        assert!(
+            parsed.in_use_by.is_none(),
+            "an unauthenticated caller is not told what is in use — absent, not empty"
+        );
+
+        // Authenticated, and past the point where usage is computed.
+        let mut h = test_handler("").await;
+        h.authenticated_client = true;
+        let action = h
+            .handle_message(proto_msg(
+                "server.env.get",
+                json!({ "name": "missing.env" }),
+            ))
+            .await
+            .unwrap();
+        let payload = parse_reply(action)["payload"].clone();
+        let parsed: ClientEnvGetResponsePayload = serde_json::from_value(payload.clone())
+            .unwrap_or_else(|e| {
+                panic!("server.env.get replies {payload} but its contract does not accept it: {e}")
+            });
+        assert!(
+            parsed.in_use_by.is_some(),
+            "a request that reached the lookup reports usage, even when empty"
         );
     }
 

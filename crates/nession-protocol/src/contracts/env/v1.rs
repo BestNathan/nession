@@ -100,12 +100,24 @@ pub struct ClientEnvListResponsePayload {
     pub error: Option<String>,
 }
 
+/// The Server's `parse_env_ref` reads any `source` other than `"agent"` as a
+/// server file — including an absent one, which two tests pin.
+///
+/// The contract says the same rather than being stricter than the code it
+/// describes: a payload the Server accepts today must not start being refused
+/// because a type was attached to it. Relaxing a requirement is allowed only
+/// where the handler already tolerates the absence, and here it does.
+fn default_env_source() -> EnvSource {
+    EnvSource::Server
+}
+
 /// `server.env.get` — read one env file's raw content for editing.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientEnvGetPayload {
     pub name: String,
+    #[serde(default = "default_env_source")]
     pub source: EnvSource,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_id: Option<String>,
@@ -118,9 +130,17 @@ pub struct ClientEnvGetResponsePayload {
     pub success: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
-    /// Session ids currently using this file (empty when not in use).
-    #[serde(default)]
-    pub in_use_by: Vec<String>,
+    /// Session ids currently using this file; an empty list when nothing is.
+    ///
+    /// Optional because two of the Server's branches answer before it is ever
+    /// computed — an unauthenticated caller, and a request naming no file. An
+    /// empty list there would not be a missing value but a false one: "nothing
+    /// is using this file" when the truth is "we never looked".
+    ///
+    /// Both branches already omit it on the wire, so this states what the wire
+    /// does rather than changing it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub in_use_by: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
