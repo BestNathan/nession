@@ -625,13 +625,29 @@ wires: &["agent.session.report"],
             id: "agent.session.list",
             version: 1,
             wires: &["agent.session.list"],
-            // Identity only. The Server reads this request's fields out of
-            // `serde_json::Value` and builds its answer with `json!`, so there
-            // is no named shape to point at. Naming one from `contracts/`
-            // would describe a type the handler does not use.
-            decls: vec![],
-            request: None,
-            response: None,
+            // Typed, and unlike every other unit here the *handler needed no
+            // change*: the agent already built `SessionListResponse` by name —
+            // it was the only side of this protocol that did, and the catalog
+            // had not caught up.
+            //
+            // Its request is *empty*, not absent: the arm reads nothing off the
+            // payload, and `request: None` would claim the unit has no request
+            // — which the catalogue's own invariant refuses, correctly.
+            decls: vec![
+                decl_of::<nession_protocol::contracts::session::v1::AgentSessionListPayload>(cfg),
+                decl_of::<nession_protocol::contracts::session::v1::SessionListResponse>(cfg),
+                decl_of::<nession_protocol::contracts::session::v1::SessionInfo>(cfg),
+            ],
+            request: Some((
+                "AgentSessionListCall",
+                nession_protocol::contracts::session::v1::AgentSessionListPayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::AgentSessionListPayload>,
+            )),
+            response: Some((
+                "SessionListReply",
+                nession_protocol::contracts::session::v1::SessionListResponse::inline,
+                schema_of::<nession_protocol::contracts::session::v1::SessionListResponse>,
+            )),
         },
         Unit {
             owner: "core",
