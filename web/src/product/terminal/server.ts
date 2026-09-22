@@ -1,4 +1,8 @@
 import { decodeTerminalData, encodeBase64 } from './base64';
+import { WIRE as RELAY_BEGIN_WIRE } from '@/generated/protocol/core/server-session-relay-begin/v1';
+import { WIRE as RELAY_END_WIRE } from '@/generated/protocol/core/server-session-relay-end/v1';
+import { WIRE as TERMINAL_INPUT_WIRE } from '@/generated/protocol/core/agent-terminal-input/v1';
+import { WIRE as TERMINAL_RESIZE_WIRE } from '@/generated/protocol/core/agent-terminal-resize/v1';
 import type { TransportPlugin, PluginSurface } from '@/platform/socket/types';
 
 type RelayOutputCallback = (data: Uint8Array) => void;
@@ -22,7 +26,9 @@ function getSessionId(payload: Record<string, unknown>): string {
  * connection. Relay traffic (begin/end, terminal I/O proxied by the server)
  * travels this connection, so the plugin owns both the outbound relay
  * lifecycle and the inbound per-session terminal.output / terminal.resize
- * fan-out. Wire strings live only in this file.
+ * fan-out. The wire strings are the generated bindings, except
+ * `agent.terminal.output` — a notification the agent declares next to its
+ * dispatcher, with no Protocol Unit of its own.
  *
  * Decode semantics: this relay path decodes terminal.output data *tolerantly*
  * (see ./base64) because relay frames arrive via the server's per-connection
@@ -71,7 +77,7 @@ export class TerminalServerPlugin implements TransportPlugin, TerminalServerApi 
       connection.subscribe('agent.terminal.output', (payload) => {
         this.handleRelayOutput(payload as Record<string, unknown>);
       }),
-      connection.subscribe('agent.terminal.resize', (payload) => {
+      connection.subscribe(TERMINAL_RESIZE_WIRE, (payload) => {
         this.handleRelayResize(payload as Record<string, unknown>);
       }),
     ];
@@ -105,20 +111,20 @@ export class TerminalServerPlugin implements TransportPlugin, TerminalServerApi 
     if (rows !== undefined) {
       payload.rows = rows;
     }
-    this.requireConnection().send('server.session.relay.begin', payload);
+    this.requireConnection().send(RELAY_BEGIN_WIRE, payload);
   }
 
   endRelay(sessionId: string): void {
-    this.requireConnection().send('server.session.relay.end', { session_id: sessionId });
+    this.requireConnection().send(RELAY_END_WIRE, { session_id: sessionId });
   }
 
   sendRelayInput(sessionName: string, data: string): void {
     const encoded = encodeBase64(data);
-    this.requireConnection().send('agent.terminal.input', { session_name: sessionName, data: encoded });
+    this.requireConnection().send(TERMINAL_INPUT_WIRE, { session_name: sessionName, data: encoded });
   }
 
   sendRelayResize(sessionName: string, cols: number, rows: number): void {
-    this.requireConnection().send('agent.terminal.resize', { session_name: sessionName, cols, rows });
+    this.requireConnection().send(TERMINAL_RESIZE_WIRE, { session_name: sessionName, cols, rows });
   }
 
   onRelayOutput(sessionName: string, cb: RelayOutputCallback): () => void {
