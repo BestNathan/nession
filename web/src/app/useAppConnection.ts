@@ -3,6 +3,7 @@ import { toast } from 'sonner';
 import { WebSocketService } from '../platform/socket';
 import type { ConnectionState } from '../platform/socket/types';
 import type { AuthResponse } from '../types';
+import { WIRE as AUTH_WIRE } from '@/generated/protocol/core/server-auth/v1';
 import { agentsApi } from '@/product/agent';
 import { sessionsApi } from '@/product/session';
 import { serverApi } from '@/platform/server';
@@ -89,7 +90,7 @@ export function useAppConnection() {
       service = new WebSocketService(serverUrl, SERVER_PLUGINS, {
         maxReconnectAttempts: 5,
         handshake: (surface) => surface
-          .request<AuthResponse>('server.auth', { auth_token: authToken, client_id: clientId })
+          .request<AuthResponse>(AUTH_WIRE, { auth_token: authToken, client_id: clientId })
           .then((res) => {
             if (res.status !== 'success') {
               throw new Error(res.message || 'Authentication failed');

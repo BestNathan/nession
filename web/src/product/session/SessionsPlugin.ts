@@ -1,3 +1,8 @@
+import { WIRE as SESSION_ATTACH_WIRE } from '@/generated/protocol/core/server-session-attach/v1';
+import { WIRE as SESSION_CAPTURE_PREVIEW_WIRE } from '@/generated/protocol/core/server-session-capture-preview/v1';
+import { WIRE as SESSION_CREATE_WIRE } from '@/generated/protocol/core/server-session-create/v1';
+import { WIRE as SESSION_KILL_WIRE } from '@/generated/protocol/core/server-session-kill/v1';
+import { WIRE as SESSION_LIST_WIRE } from '@/generated/protocol/core/server-session-list/v1';
 import type { TransportPlugin, PluginSurface } from '@/platform/socket/types';
 import type {
   AttachInfo,
@@ -17,10 +22,10 @@ interface GenerationEntry<T> {
 }
 
 /**
- * sessions capability — `client.sessions.list` / `client.session.create|kill|
- * attach|capture_preview` plus the two change notifications that keep the UI's
- * session list fresh. Wire strings live only in this file; the typed API is
- * what consumers import (module singleton in index.ts).
+ * sessions capability — `server.session.list` / `server.session.create|kill|
+ * attach|capture-preview` plus the two change notifications that keep the UI's
+ * session list fresh. The wire strings are the generated bindings; the typed
+ * API is what consumers import (module singleton in index.ts).
  */
 export class SessionsPlugin implements TransportPlugin {
   readonly name = 'sessions';
@@ -98,7 +103,7 @@ export class SessionsPlugin implements TransportPlugin {
       payload.force = true;
     }
     const response = await this.requireConnection().request<SessionsListResponse>(
-      'server.session.list',
+      SESSION_LIST_WIRE,
       payload,
     );
     return { sessions: response.sessions, stale_agents: response.stale_agents ?? [] };
@@ -126,7 +131,7 @@ export class SessionsPlugin implements TransportPlugin {
     if (relayUrl) {
       payload.relay_url = relayUrl;
     }
-    return this.requireConnection().request<AttachInfo>('server.session.attach', payload);
+    return this.requireConnection().request<AttachInfo>(SESSION_ATTACH_WIRE, payload);
   }
 
   /** Create a tmux session on an agent, optionally sourcing env files. */
@@ -135,7 +140,7 @@ export class SessionsPlugin implements TransportPlugin {
     name: string,
     envFiles: EnvFileRef[] = [],
   ): Promise<CreateSessionResponse> {
-    return this.requireConnection().request<CreateSessionResponse>('server.session.create', {
+    return this.requireConnection().request<CreateSessionResponse>(SESSION_CREATE_WIRE, {
       agent_id: agentId,
       name,
       env_files: envFiles,
@@ -144,7 +149,7 @@ export class SessionsPlugin implements TransportPlugin {
 
   /** Kill a tmux session (`"agentId:sessionName"`). */
   async killSession(sessionId: string): Promise<KillSessionResponse> {
-    return this.requireConnection().request<KillSessionResponse>('server.session.kill', {
+    return this.requireConnection().request<KillSessionResponse>(SESSION_KILL_WIRE, {
       session_id: sessionId,
     });
   }
@@ -169,7 +174,7 @@ export class SessionsPlugin implements TransportPlugin {
       cols?: number;
       rows?: number;
       error?: string;
-    }>('server.session.capture-preview', { session_id: sessionId, lines });
+    }>(SESSION_CAPTURE_PREVIEW_WIRE, { session_id: sessionId, lines });
     if (response.error) {
       throw new Error(response.error);
     }

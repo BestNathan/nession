@@ -1,4 +1,8 @@
 import { decodeBase64Bytes, encodeBase64 } from './base64';
+import { WIRE as ATTACH_WIRE } from '@/generated/protocol/core/agent-attach/v1';
+import { WIRE as KEEPALIVE_PING_WIRE } from '@/generated/protocol/core/agent-keepalive-ping/v1';
+import { WIRE as TERMINAL_INPUT_WIRE } from '@/generated/protocol/core/agent-terminal-input/v1';
+import { WIRE as TERMINAL_RESIZE_WIRE } from '@/generated/protocol/core/agent-terminal-resize/v1';
 import type { PluginSurface } from '@/platform/socket/types';
 import type { AttachResult, TerminalSize } from './types';
 
@@ -23,7 +27,9 @@ export interface AgentError {
 /**
  * Agent (P2P) terminal capability — bound to one concrete connection, so a
  * factory takes the surface rather than a plugin install (the session
- * runtime owns install timing). Wire strings live only in this file.
+ * runtime owns install timing). The wire strings are the generated bindings,
+ * except `agent.terminal.output` — a notification the agent declares next to
+ * its dispatcher, with no Protocol Unit of its own.
  *
  * The wire shapes mirror `terminal/ConnectionManager.ts`, which now drives
  * this API: attach optionally carries the viewport as width/height,
@@ -71,7 +77,7 @@ export function createTerminalAgentApi(surface: PluginSurface): TerminalAgentApi
       opts?: { timeoutMs?: number },
     ): Promise<AttachResult> => {
       try {
-        await surface.request('agent.attach', {
+        await surface.request(ATTACH_WIRE, {
           session_name: sessionName,
           ...(size ? { width: size.cols, height: size.rows } : {}),
         }, { timeoutMs: opts?.timeoutMs ?? ATTACH_TIMEOUT_MS });
@@ -87,11 +93,11 @@ export function createTerminalAgentApi(surface: PluginSurface): TerminalAgentApi
     },
 
     sendInput: (sessionName: string, data: string): void => {
-      surface.send('agent.terminal.input', { session_name: sessionName, data: encodeBase64(data) });
+      surface.send(TERMINAL_INPUT_WIRE, { session_name: sessionName, data: encodeBase64(data) });
     },
 
     sendResize: (sessionName: string, cols: number, rows: number): void => {
-      surface.send('agent.terminal.resize', { session_name: sessionName, cols, rows });
+      surface.send(TERMINAL_RESIZE_WIRE, { session_name: sessionName, cols, rows });
     },
 
     onOutput: (cb: (data: Uint8Array) => void): (() => void) => {
@@ -106,7 +112,7 @@ export function createTerminalAgentApi(surface: PluginSurface): TerminalAgentApi
     },
 
     onResize: (cb: (cols: number, rows: number) => void): (() => void) => {
-      return surface.subscribe('agent.terminal.resize', (payload) => {
+      return surface.subscribe(TERMINAL_RESIZE_WIRE, (payload) => {
         const { cols, rows } = payload as { cols: number; rows: number };
         cb(cols, rows);
       });
@@ -126,7 +132,7 @@ export function createTerminalAgentApi(surface: PluginSurface): TerminalAgentApi
     },
 
     ping: (): void => {
-      surface.send('agent.keepalive.ping', {});
+      surface.send(KEEPALIVE_PING_WIRE, {});
     },
   };
 }
