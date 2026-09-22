@@ -66,13 +66,28 @@ pub struct Unit {
     pub decls: Vec<Decl>,
     /// The name the request alias takes, and the shape it aliases.
     ///
-    /// Optional, because not every unit has both halves. `agent.heartbeat` is
-    /// sent and acknowledged but the acknowledgement is a different unit's
-    /// shape; `agent.terminal-resize` and `session.relay.begin` are events with
-    /// no request at all. Requiring both would have meant inventing a type for
-    /// the missing half to satisfy the catalog, which is the opposite of what a
-    /// catalog is for — and excluding those units would have put the "two lists
-    /// that drift" problem back, which is the thing this file exists to avoid.
+    /// Optional, though **always `Some` today**: every unit carries a request
+    /// shape, and `every_unit_declares_a_request_shape` fails if one stops. It
+    /// stays an `Option` because the half that is genuinely missing is the other
+    /// one: a unit has no `response` when it is one-way
+    /// (`server.agent.address-update` announces endpoints and nothing answers)
+    /// or when its answer is a **notification** rather than an offer
+    /// (`server.agent.heartbeat` is acknowledged on `server.heartbeat.ack`,
+    /// which is deliberately not a unit — `nession-agent`'s protocol module owns
+    /// that rule).
+    ///
+    /// The examples this comment used to give had gone stale in one direction
+    /// and false in the other: it named `agent.terminal-resize` and
+    /// `session.relay.begin` as events with "no request at all" (both have one
+    /// now — every unit does), and it called the heartbeat's acknowledgement "a
+    /// different unit's shape" when no such unit existed. Both were checkable
+    /// claims nobody checked; the second is what sent someone hunting for a unit
+    /// to add, and the answer is that the unit must *not* exist.
+    ///
+    /// Requiring the absent half would have meant inventing a type for it to
+    /// satisfy the catalog, which is the opposite of what a catalog is for — and
+    /// excluding those units would have put the "two lists that drift" problem
+    /// back, which is the thing this file exists to avoid.
     pub request: Option<Alias>,
     /// The same for the response.
     pub response: Option<Alias>,
@@ -333,9 +348,16 @@ wires: &["server.agent.register"],
             version: 1,
             wires: &["server.agent.heartbeat"],
             // One-way: a heartbeat is sent and not awaited. Its acknowledgement
-            // is a different unit's payload (`server.heartbeat.ack`), which the
-            // `Unit.request` doc comment already called out; `response: None`
-            // here is that, not an omission.
+            // travels on `server.heartbeat.ack` and is deliberately **not a
+            // unit** — a notification is a reply to something the agent sent,
+            // and a manifest advertising one would claim an offer that does not
+            // exist (`nession-agent`'s protocol module owns that rule and states
+            // it). `response: None` here is that, not an omission.
+            //
+            // The comment this replaces called the acknowledgement "a different
+            // unit's payload" and pointed at `Unit.request` for the reasoning.
+            // No such unit exists and none should, which is what sent someone
+            // looking for one to add.
             decls: vec![
                 decl_of::<nession_protocol::contracts::agent::v1::AgentHeartbeatPayload>(cfg),
                 decl_of::<nession_protocol::contracts::agent::v1::AgentStatus>(cfg),
