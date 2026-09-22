@@ -21,12 +21,14 @@ export const VERSION = 1;
 
 // ── Shapes ──
 
+export type ClientSessionKillPayload = { session_id: string, };
+export type WebSessionKillResponse = { success: boolean, error: string | null, };
 
 // ── Operations ──
 
-/**
- * No request alias: the catalog declares no request shape for this unit.
- */
-/**
- * No response alias: the catalog declares no response shape for this unit.
- */
+/** The payload a caller sends. */
+export type SessionKillCall = { session_id: string, };
+
+/** The payload the provider answers with. */
+export type SessionKillReply = { success: boolean, error: string | null, };
+
