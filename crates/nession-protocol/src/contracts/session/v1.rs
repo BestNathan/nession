@@ -175,6 +175,18 @@ pub struct ClientSessionEnvUnsetPayload {
     pub env_files: Vec<EnvFileRef>,
 }
 
+/// `agent.session.list`'s request: empty, and explicitly so.
+///
+/// The arm reads nothing off the payload — the Server asks and the agent
+/// answers from its own tmux. `request: None` would say "this unit has no
+/// request", which is false; it has one and it is empty. #920's edge cases call
+/// this out directly: represent an empty request, do not conflate "empty" with
+/// "no shape".
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AgentSessionListPayload {}
+
 /// `server.session.env.active` — request and reply.
 ///
 /// The reply is **one shape with an optional error**, not two disjoint halves:
