@@ -406,11 +406,53 @@ pub struct WebSessionKillResponse {
     pub error: Option<String>,
 }
 
+/// What the Server says when it refuses a session request before answering it.
+///
+/// The Server has always sent this — eleven handlers reply
+/// `{ "status": "error", "message": "…" }` — and no contract in the catalog
+/// described it. Two consequences followed: a consumer reading the schema saw
+/// only the success shape, and the *second* refusal convention in this tree
+/// stayed invisible. The env family refuses with `{ success, error }`; this
+/// family refuses with `{ status, message }`. Both are real, neither was
+/// declared, and unifying them is a change to a shipped wire that this does not
+/// attempt.
+///
+/// Per family rather than shared, deliberately: `contracts/mod.rs` places a
+/// contract by the family its id names, and a cross-family type has no segment
+/// to look up — it would be the `misc/` that rule exists to prevent. Two
+/// families refusing alike may end up with two identical types; the refusals
+/// already say different things, so that is also where a divergence would go.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionRefusal {
+    /// Always `"error"` today. A string rather than an enum because nothing
+    /// branches on its other values yet, and inventing them would be describing
+    /// a wire that does not exist.
+    pub status: String,
+    pub message: String,
+}
+
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionListResponse {
     pub sessions: Vec<SessionInfo>,
+}
+
+/// `server.session.list`'s reply: the list, or the refusal.
+///
+/// Untagged because the two shapes are **disjoint** — no field is shared, so
+/// there is nothing to discriminate on and nothing ambiguous to resolve.
+/// Modelling them as one struct with optional fields would assert that
+/// `sessions` and `status` can coexist, which they never do.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum SessionListReply {
+    Listed(SessionListResponse),
+    Refused(SessionRefusal),
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
