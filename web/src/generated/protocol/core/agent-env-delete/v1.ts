@@ -21,14 +21,34 @@ export const VERSION = 1;
 
 // ── Shapes ──
 
-export type ClientEnvDeletePayload = { name: string, source: EnvSource, agent_id?: string | null, };
+export type ClientEnvDeletePayload = { name: string, source: EnvSource, agent_id?: string | null, 
+/**
+ * Delete even though a running session has the file sourced.
+ *
+ * The Web has always sent this (`deleteEnvFile`'s `force`, documented as
+ * overriding in-use protection) and the Server has always read it off the
+ * payload — the contract simply did not name it, so a consumer reading the
+ * schema could not know the field existed. `ClientEnvWritePayload` already
+ * carries its own counterpart (`overwrite`); this was the missing half.
+ */
+force: boolean, };
 export type ClientEnvDeleteResponsePayload = { success: boolean, error?: string | null, };
 export type EnvSource = "server" | "agent";
 
 // ── Operations ──
 
 /** The payload a caller sends. */
-export type EnvDeleteCall = { name: string, source: EnvSource, agent_id?: string | null, };
+export type EnvDeleteCall = { name: string, source: EnvSource, agent_id?: string | null, 
+/**
+ * Delete even though a running session has the file sourced.
+ *
+ * The Web has always sent this (`deleteEnvFile`'s `force`, documented as
+ * overriding in-use protection) and the Server has always read it off the
+ * payload — the contract simply did not name it, so a consumer reading the
+ * schema could not know the field existed. `ClientEnvWritePayload` already
+ * carries its own counterpart (`overwrite`); this was the missing half.
+ */
+force: boolean, };
 
 /** The payload the provider answers with. */
 export type EnvDeleteReply = { success: boolean, error?: string | null, };

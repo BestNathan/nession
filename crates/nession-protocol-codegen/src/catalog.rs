@@ -985,13 +985,24 @@ wires: &["agent.env.write"],
             id: "server.env.delete",
             version: 1,
             wires: &["server.env.delete"],
-            // Identity only. The Server reads this request's fields out of
-            // `serde_json::Value` and builds its answer with `json!`, so there
-            // is no named shape to point at. Naming one from `contracts/`
-            // would describe a type the handler does not use.
-            decls: vec![],
-            request: None,
-            response: None,
+            // Typed, like its `agent.env.delete` twin. The only wire change is
+            // that `force` is now named by the contract rather than read from
+            // `Value` beside it — it was always sent.
+            decls: vec![
+                decl_of::<nession_protocol::contracts::env::v1::ClientEnvDeletePayload>(cfg),
+                decl_of::<nession_protocol::contracts::env::v1::ClientEnvDeleteResponsePayload>(cfg),
+                decl_of::<nession_protocol::contracts::env::v1::EnvSource>(cfg),
+            ],
+            request: Some((
+                "ClientEnvDeleteCall",
+                nession_protocol::contracts::env::v1::ClientEnvDeletePayload::inline,
+                schema_of::<nession_protocol::contracts::env::v1::ClientEnvDeletePayload>,
+            )),
+            response: Some((
+                "ClientEnvDeleteReply",
+                nession_protocol::contracts::env::v1::ClientEnvDeleteResponsePayload::inline,
+                schema_of::<nession_protocol::contracts::env::v1::ClientEnvDeleteResponsePayload>,
+            )),
         },
         Unit {
             owner: "core",

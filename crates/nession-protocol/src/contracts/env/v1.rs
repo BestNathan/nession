@@ -181,9 +181,19 @@ pub struct ClientEnvWriteResponsePayload {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientEnvDeletePayload {
     pub name: String,
+    #[serde(default = "default_env_source")]
     pub source: EnvSource,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_id: Option<String>,
+    /// Delete even though a running session has the file sourced.
+    ///
+    /// The Web has always sent this (`deleteEnvFile`'s `force`, documented as
+    /// overriding in-use protection) and the Server has always read it off the
+    /// payload — the contract simply did not name it, so a consumer reading the
+    /// schema could not know the field existed. `ClientEnvWritePayload` already
+    /// carries its own counterpart (`overwrite`); this was the missing half.
+    #[serde(default)]
+    pub force: bool,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
