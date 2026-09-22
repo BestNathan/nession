@@ -22,7 +22,8 @@ use nession_protocol::contracts::env::v1::{
 };
 use nession_protocol::contracts::session::v1::{
     AgentTerminalResizePayload, ClientSessionCapturePreviewPayload, ClientSessionCreatePayload,
-    ClientSessionCreateResponsePayload, ClientSessionKillPayload, ServerSessionListPayload,
+    ClientSessionCreateResponsePayload, ClientSessionEnvApplyPayload,
+    ClientSessionEnvResponsePayload, ClientSessionKillPayload, ServerSessionListPayload,
     ServerSessionListReply, ServerTerminalResizePayload, SessionRefusal, WebSessionInfo,
     WebSessionKillResponse, WebSessionsListResponse,
 };
@@ -2868,24 +2869,27 @@ impl ConnectionHandler {
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
     ) -> anyhow::Result<HandlerAction> {
+        // Typed at the contract boundary. `refs` used to be read beside a
+        // `session_id` also read by hand; both are fields of the payload the
+        // contract already described.
         if !self.authenticated_client {
-            return Ok(reply_json(
+            return Ok(session_env_reply(
                 &msg.id,
                 "server.session.env.apply.response",
-                json!({ "success": false, "error": "Not authenticated" }),
+                ClientSessionEnvResponsePayload {
+                    success: false,
+                    error: Some("Not authenticated".to_string()),
+                    warnings: Vec::new(),
+                },
             ));
         }
-        let session_id = msg
-            .payload
-            .get("session_id")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        let refs: Vec<EnvFileRef> = msg
-            .payload
-            .get("env_files")
-            .and_then(|v| serde_json::from_value(v.clone()).ok())
-            .unwrap_or_default();
+        let ClientSessionEnvApplyPayload {
+            session_id,
+            env_files: refs,
+        } = serde_json::from_value(msg.payload).unwrap_or_else(|_| ClientSessionEnvApplyPayload {
+            session_id: String::new(),
+            env_files: Vec::new(),
+        });
 
         match self.source_env_into_session(&session_id, &refs).await {
             Ok(warnings) => {
@@ -2895,16 +2899,24 @@ impl ConnectionHandler {
                 self.env_service
                     .usage
                     .record_attach(&session_id, &refs, None);
-                Ok(reply_json(
+                Ok(session_env_reply(
                     &msg.id,
                     "server.session.env.apply.response",
-                    json!({ "success": true, "warnings": warnings }),
+                    ClientSessionEnvResponsePayload {
+                        success: true,
+                        error: None,
+                        warnings,
+                    },
                 ))
             }
-            Err(e) => Ok(reply_json(
+            Err(e) => Ok(session_env_reply(
                 &msg.id,
                 "server.session.env.apply.response",
-                json!({ "success": false, "error": e }),
+                ClientSessionEnvResponsePayload {
+                    success: false,
+                    error: Some(e),
+                    warnings: Vec::new(),
+                },
             )),
         }
     }
@@ -3322,6 +3334,20 @@ mod extract_ip_tests {
 /// `to_value` cannot fail for a struct of these shapes, but the house pattern
 /// keeps a fallback rather than an unwrap — and an empty list is still a valid
 /// payload, so a caller reads "no files" instead of losing the reply.
+/// Serialize a session env reply — `apply` and `unset` share one response type
+/// and differ only in the wire, so the caller names it.
+fn session_env_reply(
+    id: &str,
+    msg_type: &str,
+    payload: ClientSessionEnvResponsePayload,
+) -> HandlerAction {
+    reply_json(
+        id,
+        msg_type,
+        serde_json::to_value(&payload).unwrap_or(json!({ "success": false })),
+    )
+}
+
 /// Serialize a `server.session.create` reply. Same fallback reasoning as
 /// [`env_list_reply`].
 fn session_create_reply(id: &str, payload: ClientSessionCreateResponsePayload) -> HandlerAction {

@@ -825,13 +825,31 @@ wires: &["server.session.relay.end"],
             id: "server.session.env.apply",
             version: 1,
             wires: &["server.session.env.apply"],
-            // Identity only. The Server reads this request's fields out of
-            // `serde_json::Value` and builds its answer with `json!`, so there
-            // is no named shape to point at. Naming one from `contracts/`
-            // would describe a type the handler does not use.
-            decls: vec![],
-            request: None,
-            response: None,
+            // Typed. Two of its three replies gain `warnings: []` — the field
+            // is always serialised and those branches produced none, which is
+            // true rather than additive-only.
+            decls: vec![
+                decl_of::<nession_protocol::contracts::session::v1::ClientSessionEnvApplyPayload>(
+                    cfg,
+                ),
+                decl_of::<nession_protocol::contracts::session::v1::ClientSessionEnvResponsePayload>(
+                    cfg,
+                ),
+                decl_of::<nession_protocol::contracts::env::v1::EnvFileRef>(cfg),
+                decl_of::<nession_protocol::contracts::env::v1::EnvSource>(cfg),
+            ],
+            request: Some((
+                "SessionEnvApplyCall",
+                nession_protocol::contracts::session::v1::ClientSessionEnvApplyPayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::ClientSessionEnvApplyPayload>,
+            )),
+            response: Some((
+                "SessionEnvApplyReply",
+                nession_protocol::contracts::session::v1::ClientSessionEnvResponsePayload::inline,
+                schema_of::<
+                    nession_protocol::contracts::session::v1::ClientSessionEnvResponsePayload,
+                >,
+            )),
         },
         Unit {
             owner: "core",
