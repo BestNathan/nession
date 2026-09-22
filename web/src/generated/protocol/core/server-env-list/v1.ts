@@ -21,12 +21,62 @@ export const VERSION = 1;
 
 // ── Shapes ──
 
+export type ClientEnvListPayload = Record<symbol, never>;
+export type ClientEnvListResponsePayload = { files: Array<EnvFileInfo>, 
+/**
+ * Set only when the Server refuses before listing anything — an
+ * unauthenticated caller is told why rather than handed a silently empty
+ * list.
+ *
+ * The Server has always put this on the wire and the Web has always read
+ * it (`EnvListResponse.error` in `capabilities/env/types.ts`); the type
+ * simply did not describe it. Adding it here makes the contract say what
+ * the wire already carries, which is why it changes no behaviour.
+ */
+error?: string | null, };
+export type EnvFileInfo = { 
+/**
+ * Filename including the `.env` suffix (e.g. `staging.env`).
+ */
+name: string, 
+/**
+ * Where the file lives.
+ */
+source: EnvSource, 
+/**
+ * For `EnvSource::Agent`, the owning agent id. `None` for server files.
+ */
+agent_id?: string | null, 
+/**
+ * File size in bytes.
+ */
+size: number, 
+/**
+ * Last-modified time (unix seconds).
+ */
+modified: number, 
+/**
+ * Number of resolved variables (best-effort; excludes malformed lines).
+ */
+var_count: number, };
+export type EnvSource = "server" | "agent";
 
 // ── Operations ──
 
+/** The payload a caller sends. */
+export type ClientEnvListCall = Record<symbol, never>;
+
+/** The payload the provider answers with. */
+export type ClientEnvListReply = { files: Array<EnvFileInfo>, 
 /**
- * No request alias: the catalog declares no request shape for this unit.
+ * Set only when the Server refuses before listing anything — an
+ * unauthenticated caller is told why rather than handed a silently empty
+ * list.
+ *
+ * The Server has always put this on the wire and the Web has always read
+ * it (`EnvListResponse.error` in `capabilities/env/types.ts`); the type
+ * simply did not describe it. Adding it here makes the contract say what
+ * the wire already carries, which is why it changes no behaviour.
  */
-/**
- * No response alias: the catalog declares no response shape for this unit.
- */
+error?: string | null, };
+

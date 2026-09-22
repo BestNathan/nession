@@ -860,13 +860,26 @@ wires: &["server.session.env.active"],
             id: "server.env.list",
             version: 1,
             wires: &["server.env.list"],
-            // Identity only. The Server reads this request's fields out of
-            // `serde_json::Value` and builds its answer with `json!`, so there
-            // is no named shape to point at. Naming one from `contracts/`
-            // would describe a type the handler does not use.
-            decls: vec![],
-            request: None,
-            response: None,
+            // Typed, and the same two types `agent.env.list` already declares a
+            // few lines up — one question, asked of the Server by a browser and
+            // of an agent by the Server. The handler read and wrote `Value`
+            // while these sat unused, which is what "identity only" meant here.
+            decls: vec![
+                decl_of::<nession_protocol::contracts::env::v1::ClientEnvListPayload>(cfg),
+                decl_of::<nession_protocol::contracts::env::v1::ClientEnvListResponsePayload>(cfg),
+                decl_of::<nession_protocol::contracts::env::v1::EnvFileInfo>(cfg),
+                decl_of::<nession_protocol::contracts::env::v1::EnvSource>(cfg),
+            ],
+            request: Some((
+                "ClientEnvListCall",
+                nession_protocol::contracts::env::v1::ClientEnvListPayload::inline,
+                schema_of::<nession_protocol::contracts::env::v1::ClientEnvListPayload>,
+            )),
+            response: Some((
+                "ClientEnvListReply",
+                nession_protocol::contracts::env::v1::ClientEnvListResponsePayload::inline,
+                schema_of::<nession_protocol::contracts::env::v1::ClientEnvListResponsePayload>,
+            )),
         },
         Unit {
             owner: "core",
