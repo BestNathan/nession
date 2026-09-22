@@ -23,10 +23,11 @@ use nession_protocol::contracts::env::v1::{
 use nession_protocol::contracts::session::v1::{
     AgentTerminalResizePayload, ClientSessionCapturePreviewPayload, ClientSessionCreatePayload,
     ClientSessionCreateResponsePayload, ClientSessionEnvActivePayload,
-    ClientSessionEnvApplyPayload, ClientSessionEnvResponsePayload, ClientSessionEnvUnsetPayload,
-    ClientSessionKillPayload, ServerSessionListPayload, ServerSessionListReply,
-    ServerTerminalResizePayload, SessionEnvActiveResponse, SessionRefusal, WebSessionInfo,
-    WebSessionKillResponse, WebSessionsListResponse,
+    ClientSessionEnvApplyPayload, ClientSessionEnvQueryPayload, ClientSessionEnvResponsePayload,
+    ClientSessionEnvUnsetPayload, ClientSessionKillPayload, ServerSessionListPayload,
+    ServerSessionListReply, ServerTerminalResizePayload, SessionEnvActiveResponse,
+    SessionEnvQueryResponse, SessionRefusal, WebSessionInfo, WebSessionKillResponse,
+    WebSessionsListResponse,
 };
 use nession_protocol::ProtocolMessage;
 
@@ -3060,23 +3061,27 @@ impl ConnectionHandler {
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
     ) -> anyhow::Result<HandlerAction> {
+        // Typed at the contract boundary, same shape as `env.active`.
         if !self.authenticated_client {
-            return Ok(reply_json(
+            return Ok(session_env_query_reply(
                 &msg.id,
-                "server.session.env.query.response",
-                json!({ "sourced_files": [], "error": "Not authenticated" }),
+                SessionEnvQueryResponse {
+                    sourced_files: Vec::new(),
+                    error: Some("Not authenticated".to_string()),
+                },
             ));
         }
-        let session_id = msg
-            .payload
-            .get("session_id")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let ClientSessionEnvQueryPayload { session_id } = serde_json::from_value(msg.payload)
+            .unwrap_or_else(|_| ClientSessionEnvQueryPayload {
+                session_id: String::new(),
+            });
         let Some((agent_id, _session_name)) = session_id.split_once(':') else {
-            return Ok(reply_json(
+            return Ok(session_env_query_reply(
                 &msg.id,
-                "server.session.env.query.response",
-                json!({ "sourced_files": [], "error": "Invalid session_id" }),
+                SessionEnvQueryResponse {
+                    sourced_files: Vec::new(),
+                    error: Some("Invalid session_id".to_string()),
+                },
             ));
         };
         let resp = self
@@ -3093,16 +3098,20 @@ impl ConnectionHandler {
                             .collect::<Vec<_>>()
                     })
                     .unwrap_or_default();
-                Ok(reply_json(
+                Ok(session_env_query_reply(
                     &msg.id,
-                    "server.session.env.query.response",
-                    json!({ "sourced_files": sourced }),
+                    SessionEnvQueryResponse {
+                        sourced_files: sourced,
+                        error: None,
+                    },
                 ))
             }
-            Err(e) => Ok(reply_json(
+            Err(e) => Ok(session_env_query_reply(
                 &msg.id,
-                "server.session.env.query.response",
-                json!({ "sourced_files": [], "error": e }),
+                SessionEnvQueryResponse {
+                    sourced_files: Vec::new(),
+                    error: Some(e),
+                },
             )),
         }
     }
@@ -3358,6 +3367,15 @@ mod extract_ip_tests {
 /// `to_value` cannot fail for a struct of these shapes, but the house pattern
 /// keeps a fallback rather than an unwrap — and an empty list is still a valid
 /// payload, so a caller reads "no files" instead of losing the reply.
+/// Serialize a `server.session.env.query` reply.
+fn session_env_query_reply(id: &str, payload: SessionEnvQueryResponse) -> HandlerAction {
+    reply_json(
+        id,
+        "server.session.env.query.response",
+        serde_json::to_value(&payload).unwrap_or(json!({ "sourced_files": [] })),
+    )
+}
+
 /// Serialize a `server.session.env.active` reply.
 fn session_env_active_reply(id: &str, payload: SessionEnvActiveResponse) -> HandlerAction {
     reply_json(

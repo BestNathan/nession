@@ -196,6 +196,31 @@ pub struct SessionEnvActiveResponse {
     pub error: Option<String>,
 }
 
+/// `server.session.env.query` — request and reply.
+///
+/// Same shape as [`SessionEnvActiveResponse`]: one object with an optional
+/// error, not two disjoint halves.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClientSessionEnvQueryPayload {
+    pub session_id: String,
+}
+
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionEnvQueryResponse {
+    /// **Names**, not references — the handler maps the agent's array through
+    /// `as_str`, so this wire carries `["staging.env", …]` and not
+    /// `[{ name, source, agent_id }]`. Written as `Vec<EnvFileRef>` first,
+    /// which is what the field looks like it should be; reading the branch is
+    /// what said otherwise.
+    pub sourced_files: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
