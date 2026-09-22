@@ -331,7 +331,11 @@ wires: &["server.agent.register"],
             owner: "core",
             id: "server.agent.heartbeat",
             version: 1,
-wires: &["server.agent.heartbeat"],
+            wires: &["server.agent.heartbeat"],
+            // One-way: a heartbeat is sent and not awaited. Its acknowledgement
+            // is a different unit's payload (`server.heartbeat.ack`), which the
+            // `Unit.request` doc comment already called out; `response: None`
+            // here is that, not an omission.
             decls: vec![
                 decl_of::<nession_protocol::contracts::agent::v1::AgentHeartbeatPayload>(cfg),
                 decl_of::<nession_protocol::contracts::agent::v1::AgentStatus>(cfg),
@@ -384,7 +388,9 @@ wires: &["server.agent.terminal-resize"],
             owner: "core",
             id: "server.agent.address-update",
             version: 1,
-wires: &["server.agent.address-update"],
+            wires: &["server.agent.address-update"],
+            // One-way: the agent announces its endpoints. Nothing answers, and
+            // no `.response` wire exists.
             decls: vec![
                 decl_of::<nession_protocol::contracts::agent::v1::AgentAddressUpdatePayload>(cfg),
                 decl_of::<nession_protocol::contracts::agent::v1::AgentAddress>(cfg),
@@ -1303,7 +1309,12 @@ wires: &["server.commands.update"],
             owner: "core",
             id: "agent.terminal.input",
             version: 1,
-wires: &["agent.terminal.input"],
+            wires: &["agent.terminal.input"],
+            // One-way, and `response: None` **is** the statement: keystrokes go
+            // to the pty and nothing answers them. Verified rather than
+            // assumed — no `.response` wire for this unit exists anywhere in
+            // the tree. The absence used to be indistinguishable from an
+            // unfinished entry, which is what this comment is for.
             decls: vec![
                 decl_of::<nession_protocol::contracts::terminal::v1::TerminalInputPayload>(cfg),
             ],
@@ -1318,7 +1329,9 @@ wires: &["agent.terminal.input"],
             owner: "core",
             id: "agent.terminal.resize",
             version: 1,
-wires: &["agent.terminal.resize"],
+            wires: &["agent.terminal.resize"],
+            // One-way: a size change is announced, not answered. No `.response`
+            // wire exists for it, so `None` is the model rather than a gap.
             decls: vec![
                 decl_of::<nession_protocol::contracts::terminal::v1::TerminalResizePayload>(cfg),
             ],
