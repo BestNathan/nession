@@ -587,13 +587,26 @@ wires: &["client.auth"],
             id: "server.session.list",
             version: 1,
             wires: &["server.session.list"],
-            // Identity only. The Server reads this request's fields out of
-            // `serde_json::Value` and builds its answer with `json!`, so there
-            // is no named shape to point at. Naming one from `contracts/`
-            // would describe a type the handler does not use.
-            decls: vec![],
-            request: None,
-            response: None,
+            // The first union. This wire has two disjoint shapes — a list and a
+            // refusal — and the refusal half was never declared anywhere,
+            // though eleven handlers reply it.
+            decls: vec![
+                decl_of::<nession_protocol::contracts::session::v1::ServerSessionListPayload>(cfg),
+                decl_of::<nession_protocol::contracts::session::v1::ServerSessionListReply>(cfg),
+                decl_of::<nession_protocol::contracts::session::v1::WebSessionsListResponse>(cfg),
+                decl_of::<nession_protocol::contracts::session::v1::WebSessionInfo>(cfg),
+                decl_of::<nession_protocol::contracts::session::v1::SessionRefusal>(cfg),
+            ],
+            request: Some((
+                "SessionListCall",
+                nession_protocol::contracts::session::v1::ServerSessionListPayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::ServerSessionListPayload>,
+            )),
+            response: Some((
+                "SessionListReply",
+                nession_protocol::contracts::session::v1::ServerSessionListReply::inline,
+                schema_of::<nession_protocol::contracts::session::v1::ServerSessionListReply>,
+            )),
         },
         Unit {
             owner: "core",

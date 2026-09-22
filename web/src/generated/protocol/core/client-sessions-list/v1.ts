@@ -21,8 +21,22 @@ export const VERSION = 1;
 
 // ── Shapes ──
 
-export type WebSessionsListResponse = { sessions: Array<WebSessionInfo>, };
-export type WebSessionInfo = { session_id: string, agent_id: string, session_name: string, status: string, window_count: number, attached_clients: number, last_activity: string, };
+export type WebSessionsListResponse = { sessions: Array<WebSessionInfo>, 
+/**
+ * Agents that did not answer a forced refresh, so the caller knows the
+ * list may be incomplete rather than complete-but-empty. Always on this
+ * branch, and never declared until now.
+ */
+stale_agents: Array<string>, };
+export type WebSessionInfo = { session_id: string, agent_id: string, session_name: string, status: string, window_count: number, attached_clients: number, 
+/**
+ * The active pane's current command. Runtime observation: it changes as
+ * the user runs things and tmux may report nothing.
+ *
+ * On the wire since the list existed; this type did not name it, so a
+ * consumer reading the schema could not know it was there.
+ */
+foreground_command?: string | null, last_activity: string, };
 
 // ── Operations ──
 

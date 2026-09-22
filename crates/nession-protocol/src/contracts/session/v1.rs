@@ -341,6 +341,13 @@ pub struct WebSessionInfo {
     pub status: String,
     pub window_count: u32,
     pub attached_clients: u32,
+    /// The active pane's current command. Runtime observation: it changes as
+    /// the user runs things and tmux may report nothing.
+    ///
+    /// On the wire since the list existed; this type did not name it, so a
+    /// consumer reading the schema could not know it was there.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub foreground_command: Option<String>,
     pub last_activity: String,
 }
 
@@ -349,6 +356,11 @@ pub struct WebSessionInfo {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebSessionsListResponse {
     pub sessions: Vec<WebSessionInfo>,
+    /// Agents that did not answer a forced refresh, so the caller knows the
+    /// list may be incomplete rather than complete-but-empty. Always on this
+    /// branch, and never declared until now.
+    #[serde(default)]
+    pub stale_agents: Vec<String>,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
@@ -406,11 +418,87 @@ pub struct WebSessionKillResponse {
     pub error: Option<String>,
 }
 
+/// What the Server says when it refuses a session request before answering it.
+///
+/// The Server has always sent this — eleven handlers reply
+/// `{ "status": "error", "message": "…" }` — and no contract in the catalog
+/// described it. Two consequences followed: a consumer reading the schema saw
+/// only the success shape, and the *second* refusal convention in this tree
+/// stayed invisible. The env family refuses with `{ success, error }`; this
+/// family refuses with `{ status, message }`. Both are real, neither was
+/// declared, and unifying them is a change to a shipped wire that this does not
+/// attempt.
+///
+/// Per family rather than shared, deliberately: `contracts/mod.rs` places a
+/// contract by the family its id names, and a cross-family type has no segment
+/// to look up — it would be the `misc/` that rule exists to prevent. Two
+/// families refusing alike may end up with two identical types; the refusals
+/// already say different things, so that is also where a divergence would go.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionRefusal {
+    /// Always `"error"` today. A string rather than an enum because nothing
+    /// branches on its other values yet, and inventing them would be describing
+    /// a wire that does not exist.
+    pub status: String,
+    pub message: String,
+}
+
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionListResponse {
     pub sessions: Vec<SessionInfo>,
+    /// Agents that did not answer a forced refresh, so the caller knows the
+    /// list may be incomplete rather than complete-but-empty.
+    ///
+    /// Always on this branch — the handler builds it on both paths — and it was
+    /// never declared. Its absence from the contract is why `stale_agents`
+    /// looked like a field a consumer could not rely on; it is the opposite,
+    /// it is always there and the caller is meant to act on it.
+    #[serde(default)]
+    pub stale_agents: Vec<String>,
+}
+
+/// `server.session.list`'s request.
+///
+/// Both fields optional: the handler reads a missing `agent_id` as "every
+/// agent" and a missing `force` as false, and it did so before this type
+/// existed. Declaring them required would turn requests the Server accepts into
+/// refusals.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ServerSessionListPayload {
+    /// Scope the list to one agent. Absent means all of them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<String>,
+    /// Ask every online agent for its live sessions before answering, rather
+    /// than answering from the registry. Slower, and the reason `stale_agents`
+    /// exists.
+    #[serde(default)]
+    pub force: bool,
+}
+
+/// `server.session.list`'s reply: the list, or the refusal.
+///
+/// Untagged because the two shapes are **disjoint** — no field is shared, so
+/// there is nothing to discriminate on and nothing ambiguous to resolve.
+/// Modelling them as one struct with optional fields would assert that
+/// `sessions` and `status` can coexist, which they never do.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ServerSessionListReply {
+    /// `WebSessionsListResponse`, not `SessionListResponse`. The two look like
+    /// the same idea and are not: `session_to_json` sends
+    /// `session_id`/`session_name`/`status`/`last_activity`, while
+    /// `SessionInfo` uses `name`/`created_at`/`width`/`height`. Naming the
+    /// wrong one would have asserted a shape the handler has never produced.
+    Listed(WebSessionsListResponse),
+    Refused(SessionRefusal),
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
