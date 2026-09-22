@@ -124,7 +124,7 @@ impl CommandBroker {
             agent_id, request_id
         );
 
-        let msg = nession_common::protocol::Message {
+        let msg = nession_protocol::Message {
             msg_type: msg_type.to_string(),
             id: uuid::Uuid::new_v4().to_string(),
             timestamp: std::time::SystemTime::now()

@@ -21,21 +21,13 @@ export const VERSION = 1;
 
 // ── Shapes ──
 
-export type SessionListResponse = { sessions: Array<SessionInfo>, };
-export type SessionInfo = { name: string, created_at: number, window_count: number, attached_clients: number, width: number, height: number, 
-/**
- * Foreground command of the session's active pane (`#{pane_current_command}`).
- *
- * Runtime observation, not durable session metadata: it changes as the user
- * runs things, and it is absent when tmux reports nothing.
- */
-foreground_command: string | null, };
+export type ServerSessionReportPayload = { request_id: string, };
 
 // ── Operations ──
 
-/**
- * No request alias: the catalog declares no request shape for this unit.
- */
+/** The payload a caller sends. */
+export type ServerSessionReportCall = { request_id: string, };
+
 /**
  * No response alias: the catalog declares no response shape for this unit.
  */

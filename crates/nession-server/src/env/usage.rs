@@ -11,7 +11,7 @@
 //! server restart all sessions are re-synced as `recovering`, so stale locks
 //! never outlive the process.
 
-use nession_common::protocol::{ActiveEnvFile, EnvFileRef, EnvSource};
+use nession_protocol::contracts::env::v1::{ActiveEnvFile, EnvFileRef, EnvSource};
 use std::collections::HashMap;
 use std::sync::RwLock;
 

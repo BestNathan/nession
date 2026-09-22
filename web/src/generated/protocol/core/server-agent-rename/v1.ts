@@ -21,12 +21,123 @@ export const VERSION = 1;
 
 // ── Shapes ──
 
+export type AgentRenamePayload = { agent_id: string, display_name?: string | null, };
+export type AgentRenameReply = AgentRenameResponse | AgentRenameFailure;
+export type AgentRenameResponse = { 
+/**
+ * On **both** branches, so it is not what the untagged union discriminates
+ * on — `agent` against `error` is. Kept because the wire carries it.
+ */
+success: boolean, agent: WebAgentInfo, };
+export type AgentRenameFailure = { success: boolean, error: string, };
+export type WebAgentInfo = { agent_id: string, hostname: string, ip_address: string, port: number, status: string, session_count: number, last_heartbeat: string, 
+/**
+ * Human-readable name, set by config or a Web UI rename. The UI falls back
+ * to the hostname when absent.
+ */
+display_name?: string | null, active_sessions: number, registered_at: string, 
+/**
+ * The server's probe results, so the item type is `ProbedAddress` and not
+ * `AgentAddress` — the obvious guess, and the wrong one.
+ */
+addresses: Array<ProbedAddress>, 
+/**
+ * What this agent reported it can serve.
+ *
+ * **No `skip_serializing_if`**, deliberately, and `agent_view`'s own test
+ * (`a_peer_with_no_manifest_gets_null_and_not_a_missing_key`) fails if one
+ * is added. A consumer has to tell "no manifest for that peer" from "that
+ * peer advertises nothing", because they resolve differently — and an
+ * absent key cannot say which. Written with the attribute first, having
+ * quoted the rule in this very comment while adding it.
+ */
+protocols: ProtocolManifest | null, metadata: AgentMetadata, };
+export type ProbedAddress = { status: AddressStatus, 
+/**
+ * Round-trip time of the last successful probe, in milliseconds.
+ */
+rtt_ms?: number | null, 
+/**
+ * Complete WebSocket URL, e.g. `ws://192.168.1.5:8080/ws`.
+ */
+url: string, 
+/**
+ * Human-readable label for the UI (e.g. "LAN", "Tunnel"). Optional.
+ */
+label?: string | null, 
+/**
+ * How this address reaches the node.
+ */
+network_type: NetworkType, 
+/**
+ * Connection preference; lower connects first. Defaults from
+ * `NetworkType::default_priority` when not explicitly set.
+ */
+priority: number, };
+export type AgentAddress = { 
+/**
+ * Complete WebSocket URL, e.g. `ws://192.168.1.5:8080/ws`.
+ */
+url: string, 
+/**
+ * Human-readable label for the UI (e.g. "LAN", "Tunnel"). Optional.
+ */
+label?: string | null, 
+/**
+ * How this address reaches the node.
+ */
+network_type: NetworkType, 
+/**
+ * Connection preference; lower connects first. Defaults from
+ * `NetworkType::default_priority` when not explicitly set.
+ */
+priority: number, };
+export type NetworkType = "lan" | "vpn" | "tunnel" | "public" | "custom";
+export type AddressStatus = "unknown" | "reachable" | "unreachable";
+export type AgentMetadata = { tmux_version: string, os_version: string, nession_version: string, 
+/**
+ * Docker image tag (short sha) baked in at build time.
+ * "dev" when running from `cargo run`, "unknown" when not set.
+ */
+image_tag: string, };
+export type ProtocolManifest = { 
+/**
+ * Who offers this set — an agent id, a server, a runtime name.
+ */
+provider: string, protocols: { [key in ProtocolId]: ContractSupport }, 
+/**
+ * Diagnostics only.
+ *
+ * The design forbids resolving compatibility from a software version, and
+ * the way to keep that true is for the resolver to be structurally unable
+ * to see this field: it is not passed to it, and there is a test that
+ * resolution is unchanged when it moves.
+ */
+software_version?: string | null, };
+export type ProtocolId = string;
+export type ContractSupport = { versions: Array<ContractVersion>, 
+/**
+ * The wire message types this contract travels as.
+ *
+ * Carried in the manifest so that a **router which knows no concrete
+ * provider** can still answer "can this peer carry this message?". The
+ * alternative — deriving the protocol id from the wire string — has no
+ * universal rule to derive it with: the registry's own strip-the-namespace
+ * transform yields `claude_code.read` where the id is `claude-code.read`.
+ * The mapping is the provider's to declare, so it is declared here.
+ *
+ * `default` so a manifest from a peer that predates this field still
+ * parses. It then answers "no" to every wire query, which is the safe
+ * direction: the peer is treated as one that has not said.
+ */
+wire: Array<string>, };
+export type ContractVersion = number;
 
 // ── Operations ──
 
-/**
- * No request alias: the catalog declares no request shape for this unit.
- */
-/**
- * No response alias: the catalog declares no response shape for this unit.
- */
+/** The payload a caller sends. */
+export type AgentRenameCall = { agent_id: string, display_name?: string | null, };
+
+/** The payload the provider answers with. */
+export type AgentRenameResult = AgentRenameResponse | AgentRenameFailure;
+

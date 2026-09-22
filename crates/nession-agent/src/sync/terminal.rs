@@ -3,7 +3,8 @@
 //! Provides a helper to construct and send `agent.terminal.resize` messages
 //! over an async WebSocket writer, used when tmux reports window size changes.
 
-use nession_common::protocol::{AgentTerminalResizePayload, Message};
+use nession_protocol::contracts::session::v1::AgentTerminalResizePayload;
+use nession_protocol::Message;
 
 /// Send terminal resize event to server.
 ///

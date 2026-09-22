@@ -12,10 +12,26 @@ use crate::server::command_broker::{CommandBroker, WsMessageSender};
 use crate::server::web_client_registry::WebClientRegistry;
 use nession_common::display_name::validate_display_name;
 use nession_common::env_file::parse_env;
-use nession_common::protocol::{
-    AddressStatus, AgentAddressUpdatePayload, AgentRegisterPayload, AgentTerminalResizePayload,
-    EnvFileRef, EnvSnapshot, EnvSource, ProtocolMessage, ServerTerminalResizePayload,
+use nession_protocol::contracts::agent::v1::{
+    AddressStatus, AgentAddressUpdatePayload, AgentListReply, AgentRefusal, AgentRegisterPayload,
+    AgentRenameFailure, AgentRenameReply, AgentRenameResponse, WebAgentsListResponse,
 };
+use nession_protocol::contracts::client::v1::{AuthResponsePayload, ClientAuthPayload};
+use nession_protocol::contracts::env::v1::{
+    ClientEnvDeletePayload, ClientEnvDeleteResponsePayload, ClientEnvGetPayload,
+    ClientEnvGetResponsePayload, ClientEnvListPayload, ClientEnvListResponsePayload,
+    ClientEnvWritePayload, ClientEnvWriteResponsePayload, EnvFileRef, EnvSnapshot, EnvSource,
+};
+use nession_protocol::contracts::session::v1::{
+    AgentTerminalResizePayload, ClientRelayBeginPayload, ClientSessionCapturePreviewPayload,
+    ClientSessionCreatePayload, ClientSessionCreateResponsePayload, ClientSessionEnvActivePayload,
+    ClientSessionEnvApplyPayload, ClientSessionEnvQueryPayload, ClientSessionEnvResponsePayload,
+    ClientSessionEnvUnsetPayload, ClientSessionKillPayload, ServerSessionListPayload,
+    ServerSessionListReply, ServerTerminalResizePayload, SessionEnvActiveResponse,
+    SessionEnvQueryResponse, SessionRefusal, WebSessionInfo, WebSessionKillResponse,
+    WebSessionsListResponse,
+};
+use nession_protocol::ProtocolMessage;
 
 /// Per-agent deadline for the force-refresh session query. Deliberately much
 /// shorter than the general 10s command timeout: a user is watching a spinner,
@@ -523,15 +539,23 @@ impl ConnectionHandler {
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
     ) -> anyhow::Result<HandlerAction> {
-        let payload: serde_json::Value = msg.payload;
-        let auth_token = payload
-            .get("auth_token")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        // Typed at the contract boundary, and the type is the Agent's
+        // `client.auth` payload: a browser sends the same two fields to
+        // whichever end it is talking to, so the two ends share one shape.
+        //
+        // An unreadable payload becomes an empty token rather than an error,
+        // which is what the old field-by-field read did (`unwrap_or("")`): it
+        // fails authentication except in no-auth mode, and that is the intended
+        // behaviour for a malformed handshake.
+        let payload: ClientAuthPayload =
+            serde_json::from_value(msg.payload).unwrap_or(ClientAuthPayload {
+                auth_token: String::new(),
+                client_id: None,
+            });
 
         // Empty server auth_token means no-auth mode: accept any client
-        let auth_ok =
-            self.config.server_auth_token.is_empty() || auth_token == self.config.server_auth_token;
+        let auth_ok = self.config.server_auth_token.is_empty()
+            || payload.auth_token == self.config.server_auth_token;
 
         if auth_ok {
             self.authenticated_client = true;
@@ -541,33 +565,28 @@ impl ConnectionHandler {
             }
             info!("Client authenticated successfully");
 
-            Ok(HandlerAction::Reply(Some(Message::Text(
-                json!({
-                    "msg_type": "server.auth.response",
-                    "id": msg.id,
-                    "timestamp": current_timestamp(),
-                    "payload": {
-                        "status": "success",
-                        "message": "Authentication successful"
-                    }
-                })
-                .to_string(),
-            ))))
+            Ok(auth_reply(
+                &msg.id,
+                AuthResponsePayload {
+                    status: "success".to_string(),
+                    message: "Authentication successful".to_string(),
+                    // The Server assigns no client id and never did. The
+                    // contract used to require one, which is why the field is
+                    // optional now — this branch has nothing honest to put here.
+                    client_id: None,
+                },
+            ))
         } else {
             info!("Client authentication failed");
 
-            Ok(HandlerAction::Reply(Some(Message::Text(
-                json!({
-                    "msg_type": "server.auth.response",
-                    "id": msg.id,
-                    "timestamp": current_timestamp(),
-                    "payload": {
-                        "status": "failed",
-                        "message": "Invalid auth token"
-                    }
-                })
-                .to_string(),
-            ))))
+            Ok(auth_reply(
+                &msg.id,
+                AuthResponsePayload {
+                    status: "failed".to_string(),
+                    message: "Invalid auth token".to_string(),
+                    client_id: None,
+                },
+            ))
         }
     }
 
@@ -576,43 +595,36 @@ impl ConnectionHandler {
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
     ) -> anyhow::Result<HandlerAction> {
+        // Typed at the contract boundary: the list half is built by
+        // `agent_view`, whose single builder both this and the `agents.changed`
+        // push go through, and the refusal half is `AgentRefusal`.
         if !self.authenticated_client {
             warn!("Unauthenticated client requested agents list");
-            return Ok(HandlerAction::Reply(Some(Message::Text(
-                json!({
-                    "msg_type": "server.agent.list.response",
-                    "id": msg.id,
-                    "timestamp": current_timestamp(),
-                    "payload": {
-                        "status": "error",
-                        "message": "Not authenticated"
-                    }
-                })
-                .to_string(),
-            ))));
+            return Ok(agent_list_reply(
+                &msg.id,
+                AgentListReply::Refused(AgentRefusal {
+                    status: "error".to_string(),
+                    message: "Not authenticated".to_string(),
+                }),
+            ));
         }
 
         let agents = self.agent_registry.list().await;
 
-        let agents_json: Vec<serde_json::Value> =
-            agents.iter().map(super::agent_view::agent_json).collect();
+        let view: Vec<nession_protocol::contracts::agent::v1::WebAgentInfo> = agents
+            .iter()
+            .map(super::agent_view::agent_to_view)
+            .collect();
 
         info!(
             "Client requested agents list, returning {} agents",
-            agents_json.len()
+            view.len()
         );
 
-        Ok(HandlerAction::Reply(Some(Message::Text(
-            json!({
-                "msg_type": "server.agent.list.response",
-                "id": msg.id,
-                "timestamp": current_timestamp(),
-                "payload": {
-                    "agents": agents_json
-                }
-            })
-            .to_string(),
-        ))))
+        Ok(agent_list_reply(
+            &msg.id,
+            AgentListReply::Listed(WebAgentsListResponse { agents: view }),
+        ))
     }
 
     /// Handle `server.info` — return server version, uptime, and stats.
@@ -657,19 +669,20 @@ impl ConnectionHandler {
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
     ) -> anyhow::Result<HandlerAction> {
+        // Typed at the contract boundary. The success branch below now goes
+        // through `agent_view::agent_to_view` like `server.agent.list` does —
+        // it used to build a second agent block by hand, twelve fields against
+        // the builder's thirteen, and it had drifted in exactly the two ways
+        // that builder's doc comment describes as fixed.
+        let refusal = |error: &str| {
+            AgentRenameReply::Refused(AgentRenameFailure {
+                success: false,
+                error: error.to_string(),
+            })
+        };
+
         if !self.authenticated_client {
-            return Ok(HandlerAction::Reply(Some(Message::Text(
-                json!({
-                    "msg_type": "server.agent.rename.response",
-                    "id": msg.id,
-                    "timestamp": current_timestamp(),
-                    "payload": {
-                        "success": false,
-                        "error": "Not authenticated"
-                    }
-                })
-                .to_string(),
-            ))));
+            return Ok(agent_rename_reply(&msg.id, refusal("Not authenticated")));
         }
 
         let agent_id = msg
@@ -679,18 +692,7 @@ impl ConnectionHandler {
             .unwrap_or("");
 
         if agent_id.is_empty() {
-            return Ok(HandlerAction::Reply(Some(Message::Text(
-                json!({
-                    "msg_type": "server.agent.rename.response",
-                    "id": msg.id,
-                    "timestamp": current_timestamp(),
-                    "payload": {
-                        "success": false,
-                        "error": "agent_id is required"
-                    }
-                })
-                .to_string(),
-            ))));
+            return Ok(agent_rename_reply(&msg.id, refusal("agent_id is required")));
         }
 
         // Resolve the new display_name: JSON null → clear, string → validate
@@ -711,18 +713,7 @@ impl ConnectionHandler {
                 Ok(Some(normalized)) => Some(normalized),
                 Ok(None) => None, // empty after trim → clear
                 Err(e) => {
-                    return Ok(HandlerAction::Reply(Some(Message::Text(
-                        json!({
-                            "msg_type": "server.agent.rename.response",
-                            "id": msg.id,
-                            "timestamp": current_timestamp(),
-                            "payload": {
-                                "success": false,
-                                "error": e
-                            }
-                        })
-                        .to_string(),
-                    ))));
+                    return Ok(agent_rename_reply(&msg.id, refusal(&e)));
                 }
             },
             None => None, // explicit null → clear
@@ -743,55 +734,20 @@ impl ConnectionHandler {
             .update_display_name(agent_id, display_name.clone())
             .await
         {
-            Some(updated) => {
-                let agent_json = json!({
-                    "agent_id": updated.agent_id,
-                    "hostname": updated.hostname,
-                    "display_name": updated.display_name,
-                    "ip_address": updated.ip_address,
-                    "port": updated.port,
-                    "status": match updated.status {
-                        AgentStatus::Online => "online",
-                        AgentStatus::Offline => "offline",
-                        AgentStatus::Degraded => "degraded",
-                    },
-                    "session_count": updated.session_count,
-                    "active_sessions": updated.active_sessions,
-                    "last_heartbeat": updated.last_heartbeat.to_rfc3339(),
-                    "registered_at": updated.registered_at.to_rfc3339(),
-                    "addresses": serde_json::to_value(&updated.addresses).unwrap_or(json!([])),
-                    "metadata": {
-                        "nession_version": updated.metadata.nession_version,
-                        "tmux_version": updated.metadata.tmux_version,
-                        "os_version": updated.metadata.os_version,
-                    },
-                });
-
-                Ok(HandlerAction::Reply(Some(Message::Text(
-                    json!({
-                        "msg_type": "server.agent.rename.response",
-                        "id": msg.id,
-                        "timestamp": current_timestamp(),
-                        "payload": {
-                            "success": true,
-                            "agent": agent_json
-                        }
-                    })
-                    .to_string(),
-                ))))
-            }
-            None => Ok(HandlerAction::Reply(Some(Message::Text(
-                json!({
-                    "msg_type": "server.agent.rename.response",
-                    "id": msg.id,
-                    "timestamp": current_timestamp(),
-                    "payload": {
-                        "success": false,
-                        "error": format!("Agent '{}' not found", agent_id)
-                    }
-                })
-                .to_string(),
-            )))),
+            Some(updated) => Ok(agent_rename_reply(
+                &msg.id,
+                AgentRenameReply::Renamed(Box::new(AgentRenameResponse {
+                    success: true,
+                    // The one builder, which is what removes the drift this arm
+                    // used to carry: `protocols` and `metadata.image_tag` were
+                    // both missing from the block that was here.
+                    agent: super::agent_view::agent_to_view(&updated),
+                })),
+            )),
+            None => Ok(agent_rename_reply(
+                &msg.id,
+                refusal(&format!("Agent '{agent_id}' not found")),
+            )),
         }
     }
 
@@ -949,28 +905,24 @@ impl ConnectionHandler {
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
     ) -> anyhow::Result<HandlerAction> {
+        // Typed at the contract boundary. The refusal branch used to be built
+        // by hand because no contract described it — eleven handlers reply this
+        // shape and none of them declared it.
         if !self.authenticated_client {
             warn!("Unauthenticated client requested sessions list");
-            return Ok(HandlerAction::Reply(Some(Message::Text(
-                json!({
-                    "msg_type": "server.session.list.response",
-                    "id": msg.id,
-                    "timestamp": current_timestamp(),
-                    "payload": {
-                        "status": "error",
-                        "message": "Not authenticated"
-                    }
-                })
-                .to_string(),
-            ))));
+            return Ok(session_list_reply(
+                &msg.id,
+                ServerSessionListReply::Refused(SessionRefusal {
+                    status: "error".to_string(),
+                    message: "Not authenticated".to_string(),
+                }),
+            ));
         }
 
-        let agent_id = msg.payload.get("agent_id").and_then(|v| v.as_str());
-        let force = msg
-            .payload
-            .get("force")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false);
+        let payload: ServerSessionListPayload =
+            serde_json::from_value(msg.payload).unwrap_or_default();
+        let agent_id = payload.agent_id.as_deref();
+        let force = payload.force;
 
         let stale_agents = if force {
             let stale = self.refresh_sessions_from_agents(agent_id).await;
@@ -989,6 +941,7 @@ impl ConnectionHandler {
         };
 
         let sessions_json: Vec<serde_json::Value> = sessions.iter().map(session_to_json).collect();
+        let sessions: Vec<WebSessionInfo> = sessions.iter().map(session_to_info).collect();
 
         info!(
             "Client requested sessions list (force: {}), returning {} sessions, {} stale agent(s)",
@@ -997,18 +950,13 @@ impl ConnectionHandler {
             stale_agents.len()
         );
 
-        Ok(HandlerAction::Reply(Some(Message::Text(
-            json!({
-                "msg_type": "server.session.list.response",
-                "id": msg.id,
-                "timestamp": current_timestamp(),
-                "payload": {
-                    "sessions": sessions_json,
-                    "stale_agents": stale_agents,
-                }
-            })
-            .to_string(),
-        ))))
+        Ok(session_list_reply(
+            &msg.id,
+            ServerSessionListReply::Listed(WebSessionsListResponse {
+                sessions,
+                stale_agents,
+            }),
+        ))
     }
 
     /// Query online agents for their live tmux sessions and rebuild the
@@ -1352,68 +1300,70 @@ impl ConnectionHandler {
         msg: ProtocolMessage<serde_json::Value>,
     ) -> anyhow::Result<HandlerAction> {
         if !self.authenticated_client {
-            return Ok(HandlerAction::Reply(Some(Message::Text(
-                json!({
-                    "msg_type": "server.session.relay.begin.response",
-                    "id": msg.id,
-                    "timestamp": current_timestamp(),
-                    "payload": { "status": "error", "message": "Not authenticated" }
-                })
-                .to_string(),
-            ))));
+            return Ok(relay_begin_reply(
+                &msg.id,
+                SessionRefusal {
+                    status: "error".to_string(),
+                    message: "Not authenticated".to_string(),
+                },
+            ));
         }
 
-        let session_id = msg
-            .payload
-            .get("session_id")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        // A payload that does not parse is treated as an unusable session id
+        // rather than as a hard error, which is exactly what the field-by-field
+        // read did (`unwrap_or("")`): it falls through to the "Invalid
+        // session_id format" refusal below, the same way a missing `session_id`
+        // always has. The literals restate the serde defaults so the two cannot
+        // disagree.
+        let payload: ClientRelayBeginPayload =
+            serde_json::from_value(msg.payload).unwrap_or(ClientRelayBeginPayload {
+                session_id: String::new(),
+                relay_url: None,
+                cols: 80,
+                rows: 24,
+            });
+
+        let session_id = payload.session_id.as_str();
         let (agent_id, session_name) = match session_id.split_once(':') {
             Some((aid, sname)) => (aid.to_string(), sname.to_string()),
             None => {
-                return Ok(HandlerAction::Reply(Some(Message::Text(
-                    json!({
-                        "msg_type": "server.session.relay.begin.response",
-                        "id": msg.id,
-                        "timestamp": current_timestamp(),
-                        "payload": { "status": "error", "message": "Invalid session_id format" }
-                    })
-                    .to_string(),
-                ))));
+                return Ok(relay_begin_reply(
+                    &msg.id,
+                    SessionRefusal {
+                        status: "error".to_string(),
+                        message: "Invalid session_id format".to_string(),
+                    },
+                ));
             }
         };
 
         let session = self.session_registry.get(session_id).await;
         if session.is_none() {
-            return Ok(HandlerAction::Reply(Some(Message::Text(
-                json!({
-                    "msg_type": "server.session.relay.begin.response",
-                    "id": msg.id, "timestamp": current_timestamp(),
-                    "payload": { "status": "error", "message": format!("Session not found: {session_id}") }
-                }).to_string(),
-            ))));
+            return Ok(relay_begin_reply(
+                &msg.id,
+                SessionRefusal {
+                    status: "error".to_string(),
+                    message: format!("Session not found: {session_id}"),
+                },
+            ));
         }
 
         let agent = self.agent_registry.get(&agent_id).await;
         let agent = match agent {
             Some(a) if a.status == AgentStatus::Online => a,
             _ => {
-                return Ok(HandlerAction::Reply(Some(Message::Text(
-                    json!({
-                        "msg_type": "server.session.relay.begin.response",
-                        "id": msg.id, "timestamp": current_timestamp(),
-                        "payload": { "status": "error", "message": format!("Agent '{agent_id}' is offline") }
-                    }).to_string(),
-                ))));
+                return Ok(relay_begin_reply(
+                    &msg.id,
+                    SessionRefusal {
+                        status: "error".to_string(),
+                        message: format!("Agent '{agent_id}' is offline"),
+                    },
+                ));
             }
         };
 
         // Manual relay URL override from the browser.
-        let manual_relay_url: Option<String> = msg
-            .payload
-            .get("relay_url")
-            .and_then(|v| v.as_str())
-            .map(str::to_string);
+        let manual_relay_url: Option<String> = payload.relay_url.clone();
 
         // Build URL list: respect manual override, otherwise auto-select.
         let agent_ws_url = crate::registry::legacy_agent_address(&agent.addresses)
@@ -1468,21 +1418,11 @@ impl ConnectionHandler {
         // terminal.output flows back through this WebSocket.
 
         // Terminal dimensions from the browser viewport (via ResizeObserver).
-        // Default to 80×24 if the browser hasn't sent them yet.
-        let cols = u16::try_from(
-            msg.payload
-                .get("cols")
-                .and_then(serde_json::Value::as_u64)
-                .unwrap_or(80),
-        )
-        .unwrap_or(80);
-        let rows = u16::try_from(
-            msg.payload
-                .get("rows")
-                .and_then(serde_json::Value::as_u64)
-                .unwrap_or(24),
-        )
-        .unwrap_or(24);
+        // The 80×24 fallback for a browser that has not measured anything yet
+        // lives on the type now, so a caller that omits them and a caller that
+        // sends them cannot disagree about the default.
+        let cols = payload.cols;
+        let rows = payload.rows;
 
         Ok(HandlerAction::Relay {
             agent_ws_urls: relay_urls,
@@ -1500,105 +1440,72 @@ impl ConnectionHandler {
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
     ) -> anyhow::Result<HandlerAction> {
+        // Typed at the contract boundary. This unit's `error` carries
+        // `skip_serializing_if`, so unlike `session.kill` the type *omits* it
+        // when absent — which is why the created branch below loses an
+        // `error: null` it used to send rather than gaining one.
+        let refusal = |error: &str| ClientSessionCreateResponsePayload {
+            success: false,
+            session_id: None,
+            error: Some(error.to_string()),
+        };
+
         if !self.authenticated_client {
-            return Ok(HandlerAction::Reply(Some(Message::Text(
-                json!({
-                    "msg_type": "server.session.create.response",
-                    "id": msg.id,
-                    "timestamp": current_timestamp(),
-                    "payload": {
-                        "success": false,
-                        "error": "Not authenticated"
-                    }
-                })
-                .to_string(),
-            ))));
+            return Ok(session_create_reply(&msg.id, refusal("Not authenticated")));
         }
 
-        let agent_id = msg
-            .payload
-            .get("agent_id")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let name = msg
-            .payload
-            .get("name")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        // `env_files` is declared now. The handler read it off the payload after
+        // this parse would have moved it, so the compiler showed the contract
+        // was missing a field rather than a reviewer having to notice.
+        let Ok(ClientSessionCreatePayload {
+            agent_id,
+            name,
+            env_files: env_refs,
+        }) = serde_json::from_value::<ClientSessionCreatePayload>(msg.payload)
+        else {
+            return Ok(session_create_reply(
+                &msg.id,
+                refusal("agent_id and name are required"),
+            ));
+        };
 
         if agent_id.is_empty() || name.is_empty() {
-            return Ok(HandlerAction::Reply(Some(Message::Text(
-                json!({
-                    "msg_type": "server.session.create.response",
-                    "id": msg.id,
-                    "timestamp": current_timestamp(),
-                    "payload": {
-                        "success": false,
-                        "error": "agent_id and name are required"
-                    }
-                })
-                .to_string(),
-            ))));
+            return Ok(session_create_reply(
+                &msg.id,
+                refusal("agent_id and name are required"),
+            ));
         }
+        let agent_id = agent_id.as_str();
 
         // Check agent exists and is online
         let agent = self.agent_registry.get(agent_id).await;
         match agent {
             Some(a) if a.status == AgentStatus::Online => {}
             Some(_) => {
-                return Ok(HandlerAction::Reply(Some(Message::Text(
-                    json!({
-                        "msg_type": "server.session.create.response",
-                        "id": msg.id,
-                        "timestamp": current_timestamp(),
-                        "payload": {
-                            "success": false,
-                            "error": format!("Agent '{}' is offline", agent_id)
-                        }
-                    })
-                    .to_string(),
-                ))));
+                return Ok(session_create_reply(
+                    &msg.id,
+                    refusal(&format!("Agent '{agent_id}' is offline")),
+                ));
             }
             None => {
-                return Ok(HandlerAction::Reply(Some(Message::Text(
-                    json!({
-                        "msg_type": "server.session.create.response",
-                        "id": msg.id,
-                        "timestamp": current_timestamp(),
-                        "payload": {
-                            "success": false,
-                            "error": format!("Agent '{}' not found", agent_id)
-                        }
-                    })
-                    .to_string(),
-                ))));
+                return Ok(session_create_reply(
+                    &msg.id,
+                    refusal(&format!("Agent '{agent_id}' not found")),
+                ));
             }
         }
 
         let request_id = uuid::Uuid::new_v4().to_string();
 
-        // Optional env files selected for create-time injection.
-        let env_refs: Vec<EnvFileRef> = msg
-            .payload
-            .get("env_files")
-            .and_then(|v| serde_json::from_value(v.clone()).ok())
-            .unwrap_or_default();
-
+        // `env_refs` came out of the parsed payload above — the create-time
+        // injection selection.
         let env_snapshots = if env_refs.is_empty() {
             Vec::new()
         } else {
             match self.resolve_snapshots(agent_id, &env_refs).await {
                 Ok(s) => s,
                 Err(e) => {
-                    return Ok(HandlerAction::Reply(Some(Message::Text(
-                        json!({
-                            "msg_type": "server.session.create.response",
-                            "id": msg.id,
-                            "timestamp": current_timestamp(),
-                            "payload": { "success": false, "error": e }
-                        })
-                        .to_string(),
-                    ))));
+                    return Ok(session_create_reply(&msg.id, refusal(&e)));
                 }
             }
         };
@@ -1668,44 +1575,20 @@ impl ConnectionHandler {
                     .and_then(|v| v.as_str())
                     .map(std::string::ToString::to_string);
 
-                Ok(HandlerAction::Reply(Some(Message::Text(
-                    json!({
-                        "msg_type": "server.session.create.response",
-                        "id": msg.id,
-                        "timestamp": current_timestamp(),
-                        "payload": {
-                            "success": success,
-                            "session_id": session_id,
-                            "error": error,
-                        }
-                    })
-                    .to_string(),
-                ))))
+                Ok(session_create_reply(
+                    &msg.id,
+                    ClientSessionCreateResponsePayload {
+                        success,
+                        session_id,
+                        error,
+                    },
+                ))
             }
-            Ok(Err(_)) => Ok(HandlerAction::Reply(Some(Message::Text(
-                json!({
-                    "msg_type": "server.session.create.response",
-                    "id": msg.id,
-                    "timestamp": current_timestamp(),
-                    "payload": {
-                        "success": false,
-                        "error": "Agent disconnected"
-                    }
-                })
-                .to_string(),
-            )))),
-            Err(_) => Ok(HandlerAction::Reply(Some(Message::Text(
-                json!({
-                    "msg_type": "server.session.create.response",
-                    "id": msg.id,
-                    "timestamp": current_timestamp(),
-                    "payload": {
-                        "success": false,
-                        "error": "Timeout waiting for agent response"
-                    }
-                })
-                .to_string(),
-            )))),
+            Ok(Err(_)) => Ok(session_create_reply(&msg.id, refusal("Agent disconnected"))),
+            Err(_) => Ok(session_create_reply(
+                &msg.id,
+                refusal("Timeout waiting for agent response"),
+            )),
         }
     }
 
@@ -1714,42 +1597,53 @@ impl ConnectionHandler {
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
     ) -> anyhow::Result<HandlerAction> {
+        // Typed at the contract boundary. No contract change was needed here —
+        // `WebSessionKillResponse` already describes this wire — but one branch
+        // does move: it used to send `{ "success": true }` with no `error` at
+        // all, and the type has no `skip_serializing_if`, so it now sends
+        // `error: null`. True rather than merely additive (a successful kill
+        // had no error), and the Web already declares `error?: string`.
         if !self.authenticated_client {
-            return Ok(HandlerAction::Reply(Some(Message::Text(
-                json!({
-                    "msg_type": "server.session.kill.response",
-                    "id": msg.id,
-                    "timestamp": current_timestamp(),
-                    "payload": {
-                        "success": false,
-                        "error": "Not authenticated"
-                    }
-                })
-                .to_string(),
-            ))));
+            return Ok(session_kill_reply(
+                &msg.id,
+                WebSessionKillResponse {
+                    success: false,
+                    error: Some("Not authenticated".to_string()),
+                },
+            ));
         }
 
-        let session_id = msg
-            .payload
-            .get("session_id")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        // A missing or non-string `session_id` parses to nothing and lands on
+        // the same "Invalid session_id format" reply the empty-string path
+        // already produced, so that behaviour is unchanged.
+        let Ok(ClientSessionKillPayload { session_id }) =
+            serde_json::from_value::<ClientSessionKillPayload>(msg.payload)
+        else {
+            return Ok(session_kill_reply(
+                &msg.id,
+                WebSessionKillResponse {
+                    success: false,
+                    error: Some(
+                        "Invalid session_id format. Expected 'agent_id:session_name'".to_string(),
+                    ),
+                },
+            ));
+        };
+        let session_id = session_id.as_str();
 
         let (agent_id, session_name) = match session_id.split_once(':') {
             Some((aid, sname)) => (aid.to_string(), sname.to_string()),
             None => {
-                return Ok(HandlerAction::Reply(Some(Message::Text(
-                    json!({
-                        "msg_type": "server.session.kill.response",
-                        "id": msg.id,
-                        "timestamp": current_timestamp(),
-                        "payload": {
-                            "success": false,
-                            "error": "Invalid session_id format. Expected 'agent_id:session_name'"
-                        }
-                    })
-                    .to_string(),
-                ))));
+                return Ok(session_kill_reply(
+                    &msg.id,
+                    WebSessionKillResponse {
+                        success: false,
+                        error: Some(
+                            "Invalid session_id format. Expected 'agent_id:session_name'"
+                                .to_string(),
+                        ),
+                    },
+                ));
             }
         };
 
@@ -1760,45 +1654,35 @@ impl ConnectionHandler {
             match agent {
                 Some(a) if a.status != AgentStatus::Online => {
                     self.session_registry.remove(session_id).await;
-                    return Ok(HandlerAction::Reply(Some(Message::Text(
-                        json!({
-                            "msg_type": "server.session.kill.response",
-                            "id": msg.id,
-                            "timestamp": current_timestamp(),
-                            "payload": {
-                                "success": true
-                            }
-                        })
-                        .to_string(),
-                    ))));
+                    // The one branch of this unit whose wire changes: the type
+                    // has no `skip_serializing_if` on `error`, so this reply
+                    // gains `error: null`. True — a successful kill had no
+                    // error — and the Web already declares `error?: string`.
+                    return Ok(session_kill_reply(
+                        &msg.id,
+                        WebSessionKillResponse {
+                            success: true,
+                            error: None,
+                        },
+                    ));
                 }
                 Some(_) => {
-                    return Ok(HandlerAction::Reply(Some(Message::Text(
-                        json!({
-                            "msg_type": "server.session.kill.response",
-                            "id": msg.id,
-                            "timestamp": current_timestamp(),
-                            "payload": {
-                                "success": false,
-                                "error": format!("Session '{}' not found", session_id)
-                            }
-                        })
-                        .to_string(),
-                    ))));
+                    return Ok(session_kill_reply(
+                        &msg.id,
+                        WebSessionKillResponse {
+                            success: false,
+                            error: Some(format!("Session '{session_id}' not found")),
+                        },
+                    ));
                 }
                 None => {
-                    return Ok(HandlerAction::Reply(Some(Message::Text(
-                        json!({
-                            "msg_type": "server.session.kill.response",
-                            "id": msg.id,
-                            "timestamp": current_timestamp(),
-                            "payload": {
-                                "success": false,
-                                "error": format!("Agent '{}' not found", agent_id)
-                            }
-                        })
-                        .to_string(),
-                    ))));
+                    return Ok(session_kill_reply(
+                        &msg.id,
+                        WebSessionKillResponse {
+                            success: false,
+                            error: Some(format!("Agent '{agent_id}' not found")),
+                        },
+                    ));
                 }
             }
         }
@@ -1844,43 +1728,25 @@ impl ConnectionHandler {
                     self.env_service.usage.clear_session(session_id);
                 }
 
-                Ok(HandlerAction::Reply(Some(Message::Text(
-                    json!({
-                        "msg_type": "server.session.kill.response",
-                        "id": msg.id,
-                        "timestamp": current_timestamp(),
-                        "payload": {
-                            "success": success,
-                            "error": error,
-                        }
-                    })
-                    .to_string(),
-                ))))
+                Ok(session_kill_reply(
+                    &msg.id,
+                    WebSessionKillResponse { success, error },
+                ))
             }
-            Ok(Err(_)) => Ok(HandlerAction::Reply(Some(Message::Text(
-                json!({
-                    "msg_type": "server.session.kill.response",
-                    "id": msg.id,
-                    "timestamp": current_timestamp(),
-                    "payload": {
-                        "success": false,
-                        "error": "Agent disconnected"
-                    }
-                })
-                .to_string(),
-            )))),
-            Err(_) => Ok(HandlerAction::Reply(Some(Message::Text(
-                json!({
-                    "msg_type": "server.session.kill.response",
-                    "id": msg.id,
-                    "timestamp": current_timestamp(),
-                    "payload": {
-                        "success": false,
-                        "error": "Timeout waiting for agent response"
-                    }
-                })
-                .to_string(),
-            )))),
+            Ok(Err(_)) => Ok(session_kill_reply(
+                &msg.id,
+                WebSessionKillResponse {
+                    success: false,
+                    error: Some("Agent disconnected".to_string()),
+                },
+            )),
+            Err(_) => Ok(session_kill_reply(
+                &msg.id,
+                WebSessionKillResponse {
+                    success: false,
+                    error: Some("Timeout waiting for agent response".to_string()),
+                },
+            )),
         }
     }
 
@@ -1992,7 +1858,7 @@ impl ConnectionHandler {
         let primary_ip = payload
             .addresses
             .iter()
-            .find(|a| a.network_type == nession_common::protocol::NetworkType::Lan)
+            .find(|a| a.network_type == nession_protocol::contracts::agent::v1::NetworkType::Lan)
             .or_else(|| payload.addresses.first())
             .and_then(|a| extract_ip_from_url(&a.url));
 
@@ -2255,18 +2121,20 @@ impl ConnectionHandler {
             ));
         }
 
-        let session_id = msg
-            .payload
-            .get("session_id")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-
-        let lines_raw = msg
-            .payload
-            .get("lines")
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or(2000);
-        let lines: u32 = u32::try_from(lines_raw).unwrap_or(u32::MAX);
+        // Typed at the contract boundary — the *request* only. This unit's
+        // replies stay hand-built on purpose: five of them are the Server's own
+        // refusals, and the sixth relays whatever the agent answered. The
+        // Server does not read a provider's payload shape, so there is no
+        // Nession-owned response type to build (see `docs/architecture/protocol.md`
+        // on the relay).
+        let ClientSessionCapturePreviewPayload { session_id, lines } =
+            serde_json::from_value(msg.payload).unwrap_or_else(|_| {
+                ClientSessionCapturePreviewPayload {
+                    session_id: String::new(),
+                    lines: 2000,
+                }
+            });
+        let session_id = session_id.as_str();
 
         info!(
             "handle_client_session_capture_preview: session_id={}, lines={}",
@@ -2436,11 +2304,19 @@ impl ConnectionHandler {
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
     ) -> anyhow::Result<HandlerAction> {
+        // Typed at the contract boundary, erased only at the dispatcher. Both
+        // halves of this unit live in `contracts::env::v1`, and the agent's
+        // half of the same protocol (`agent.env.list`) already declares them —
+        // this handler read and wrote `Value` while they sat there unused.
+        let ClientEnvListPayload {} = serde_json::from_value(msg.payload)?;
+
         if !self.authenticated_client {
-            return Ok(reply_json(
+            return Ok(env_list_reply(
                 &msg.id,
-                "server.env.list.response",
-                json!({ "files": [], "error": "Not authenticated" }),
+                ClientEnvListResponsePayload {
+                    files: Vec::new(),
+                    error: Some("Not authenticated".to_string()),
+                },
             ));
         }
 
@@ -2459,7 +2335,7 @@ impl ConnectionHandler {
                     if let Some(arr) = resp.get("files").and_then(|v| v.as_array()) {
                         for f in arr {
                             if let Ok(info) = serde_json::from_value::<
-                                nession_common::protocol::EnvFileInfo,
+                                nession_protocol::contracts::env::v1::EnvFileInfo,
                             >(f.clone())
                             {
                                 files.push(info);
@@ -2471,10 +2347,9 @@ impl ConnectionHandler {
             }
         }
 
-        Ok(reply_json(
+        Ok(env_list_reply(
             &msg.id,
-            "server.env.list.response",
-            json!({ "files": files }),
+            ClientEnvListResponsePayload { files, error: None },
         ))
     }
 
@@ -2484,19 +2359,47 @@ impl ConnectionHandler {
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
     ) -> anyhow::Result<HandlerAction> {
+        // Typed at the contract boundary. `ClientEnvGetPayload::source` carries
+        // a serde default so this accepts exactly what `parse_env_ref` accepted
+        // — a request naming no source is a server file, not a refusal. A
+        // payload with no `name` fails to parse and gets the same reply the
+        // empty-name branch gives, so the wire is unchanged either way.
         if !self.authenticated_client {
-            return Ok(reply_json(
+            return Ok(env_get_reply(
                 &msg.id,
-                "server.env.get.response",
-                json!({ "success": false, "error": "Not authenticated" }),
+                ClientEnvGetResponsePayload {
+                    success: false,
+                    content: None,
+                    in_use_by: None,
+                    error: Some("Not authenticated".to_string()),
+                },
             ));
         }
-        let (name, source, agent_id) = parse_env_ref(&msg.payload);
-        if name.is_empty() {
-            return Ok(reply_json(
+        let Ok(ClientEnvGetPayload {
+            name,
+            source,
+            agent_id,
+        }) = serde_json::from_value(msg.payload)
+        else {
+            return Ok(env_get_reply(
                 &msg.id,
-                "server.env.get.response",
-                json!({ "success": false, "error": "name is required" }),
+                ClientEnvGetResponsePayload {
+                    success: false,
+                    content: None,
+                    in_use_by: None,
+                    error: Some("name is required".to_string()),
+                },
+            ));
+        };
+        if name.is_empty() {
+            return Ok(env_get_reply(
+                &msg.id,
+                ClientEnvGetResponsePayload {
+                    success: false,
+                    content: None,
+                    in_use_by: None,
+                    error: Some("name is required".to_string()),
+                },
             ));
         }
 
@@ -2536,15 +2439,23 @@ impl ConnectionHandler {
         };
 
         match result {
-            Ok(content) => Ok(reply_json(
+            Ok(content) => Ok(env_get_reply(
                 &msg.id,
-                "server.env.get.response",
-                json!({ "success": true, "content": content, "in_use_by": in_use_by }),
+                ClientEnvGetResponsePayload {
+                    success: true,
+                    content: Some(content),
+                    in_use_by: Some(in_use_by),
+                    error: None,
+                },
             )),
-            Err(e) => Ok(reply_json(
+            Err(e) => Ok(env_get_reply(
                 &msg.id,
-                "server.env.get.response",
-                json!({ "success": false, "error": e, "in_use_by": in_use_by }),
+                ClientEnvGetResponsePayload {
+                    success: false,
+                    content: None,
+                    in_use_by: Some(in_use_by),
+                    error: Some(e),
+                },
             )),
         }
     }
@@ -2555,37 +2466,36 @@ impl ConnectionHandler {
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
     ) -> anyhow::Result<HandlerAction> {
+        // Typed at the contract boundary. Three fields used to be read off the
+        // payload beside the parser — `content`, `overwrite` and `force` — and
+        // only the first two were declared.
+        let refusal = |error: &str| ClientEnvWriteResponsePayload {
+            success: false,
+            exists: false,
+            error: Some(error.to_string()),
+            warnings: Vec::new(),
+            in_use_by: None,
+            re_sourced: None,
+            re_source_errors: None,
+        };
+
         if !self.authenticated_client {
-            return Ok(reply_json(
-                &msg.id,
-                "server.env.write.response",
-                json!({ "success": false, "error": "Not authenticated" }),
-            ));
+            return Ok(env_write_reply(&msg.id, refusal("Not authenticated")));
         }
-        let (name, source, agent_id) = parse_env_ref(&msg.payload);
-        let content = msg
-            .payload
-            .get("content")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        let overwrite = msg
-            .payload
-            .get("overwrite")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false);
-        let force = msg
-            .payload
-            .get("force")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false);
+        let Ok(ClientEnvWritePayload {
+            name,
+            source,
+            agent_id,
+            content,
+            overwrite,
+            force,
+        }) = serde_json::from_value(msg.payload)
+        else {
+            return Ok(env_write_reply(&msg.id, refusal("name is required")));
+        };
 
         if name.is_empty() {
-            return Ok(reply_json(
-                &msg.id,
-                "server.env.write.response",
-                json!({ "success": false, "error": "name is required" }),
-            ));
+            return Ok(env_write_reply(&msg.id, refusal("name is required")));
         }
 
         // In-use lock: an overwrite of a file bound to a running session is
@@ -2597,17 +2507,16 @@ impl ConnectionHandler {
                 .usage
                 .sessions_using(&name, source, agent_id.as_deref());
             if !in_use.is_empty() {
-                return Ok(reply_json(
+                return Ok(env_write_reply(
                     &msg.id,
-                    "server.env.write.response",
-                    json!({
-                        "success": false,
-                        "error": format!(
+                    ClientEnvWriteResponsePayload {
+                        error: Some(format!(
                             "This file is in use by session(s): {}. Stop the session or detach before editing.",
                             in_use.join(", ")
-                        ),
-                        "in_use_by": in_use,
-                    }),
+                        )),
+                        in_use_by: Some(in_use),
+                        ..refusal("")
+                    },
                 ));
             }
         }
@@ -2666,27 +2575,34 @@ impl ConnectionHandler {
                     }
                 }
 
-                Ok(reply_json(
+                Ok(env_write_reply(
                     &msg.id,
-                    "server.env.write.response",
-                    json!({
-                        "success": true,
-                        "warnings": warnings,
-                        "re_sourced": re_sourced,
-                        "re_source_errors": re_source_errors,
-                    }),
+                    ClientEnvWriteResponsePayload {
+                        success: true,
+                        exists: false,
+                        error: None,
+                        warnings,
+                        in_use_by: None,
+                        re_sourced: Some(re_sourced),
+                        re_source_errors: Some(re_source_errors),
+                    },
                 ))
             }
-            Ok(false) => Ok(reply_json(
+            // Refused for existing, which carries `exists` and no error — the
+            // UI prompts for confirmation rather than reporting a failure.
+            Ok(false) => Ok(env_write_reply(
                 &msg.id,
-                "server.env.write.response",
-                json!({ "success": false, "exists": true }),
+                ClientEnvWriteResponsePayload {
+                    success: false,
+                    exists: true,
+                    error: None,
+                    warnings: Vec::new(),
+                    in_use_by: None,
+                    re_sourced: None,
+                    re_source_errors: None,
+                },
             )),
-            Err(e) => Ok(reply_json(
-                &msg.id,
-                "server.env.write.response",
-                json!({ "success": false, "error": e }),
-            )),
+            Err(e) => Ok(env_write_reply(&msg.id, refusal(&e))),
         }
     }
 
@@ -2695,24 +2611,40 @@ impl ConnectionHandler {
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
     ) -> anyhow::Result<HandlerAction> {
+        // Typed at the contract boundary. `force` used to be read off the
+        // payload beside the parser because the contract did not name it,
+        // though the Web has always sent it.
         if !self.authenticated_client {
-            return Ok(reply_json(
+            return Ok(env_del_reply(
                 &msg.id,
-                "server.env.delete.response",
-                json!({ "success": false, "error": "Not authenticated" }),
+                ClientEnvDeleteResponsePayload {
+                    success: false,
+                    error: Some("Not authenticated".to_string()),
+                },
             ));
         }
-        let (name, source, agent_id) = parse_env_ref(&msg.payload);
-        let force = msg
-            .payload
-            .get("force")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false);
-        if name.is_empty() {
-            return Ok(reply_json(
+        let Ok(ClientEnvDeletePayload {
+            name,
+            source,
+            agent_id,
+            force,
+        }) = serde_json::from_value(msg.payload)
+        else {
+            return Ok(env_del_reply(
                 &msg.id,
-                "server.env.delete.response",
-                json!({ "success": false, "error": "name is required" }),
+                ClientEnvDeleteResponsePayload {
+                    success: false,
+                    error: Some("name is required".to_string()),
+                },
+            ));
+        };
+        if name.is_empty() {
+            return Ok(env_del_reply(
+                &msg.id,
+                ClientEnvDeleteResponsePayload {
+                    success: false,
+                    error: Some("name is required".to_string()),
+                },
             ));
         }
 
@@ -2724,16 +2656,15 @@ impl ConnectionHandler {
                 .usage
                 .sessions_using(&name, source, agent_id.as_deref());
             if !in_use.is_empty() {
-                return Ok(reply_json(
+                return Ok(env_del_reply(
                     &msg.id,
-                    "server.env.delete.response",
-                    json!({
-                        "success": false,
-                        "error": format!(
+                    ClientEnvDeleteResponsePayload {
+                        success: false,
+                        error: Some(format!(
                             "This file is in use by session(s): {}. Stop the session or detach before deleting.",
                             in_use.join(", ")
-                        )
-                    }),
+                        )),
+                    },
                 ));
             }
         }
@@ -2765,15 +2696,19 @@ impl ConnectionHandler {
         };
 
         match outcome {
-            Ok(()) => Ok(reply_json(
+            Ok(()) => Ok(env_del_reply(
                 &msg.id,
-                "server.env.delete.response",
-                json!({ "success": true }),
+                ClientEnvDeleteResponsePayload {
+                    success: true,
+                    error: None,
+                },
             )),
-            Err(e) => Ok(reply_json(
+            Err(e) => Ok(env_del_reply(
                 &msg.id,
-                "server.env.delete.response",
-                json!({ "success": false, "error": e }),
+                ClientEnvDeleteResponsePayload {
+                    success: false,
+                    error: Some(e),
+                },
             )),
         }
     }
@@ -2870,24 +2805,27 @@ impl ConnectionHandler {
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
     ) -> anyhow::Result<HandlerAction> {
+        // Typed at the contract boundary. `refs` used to be read beside a
+        // `session_id` also read by hand; both are fields of the payload the
+        // contract already described.
         if !self.authenticated_client {
-            return Ok(reply_json(
+            return Ok(session_env_reply(
                 &msg.id,
                 "server.session.env.apply.response",
-                json!({ "success": false, "error": "Not authenticated" }),
+                ClientSessionEnvResponsePayload {
+                    success: false,
+                    error: Some("Not authenticated".to_string()),
+                    warnings: Vec::new(),
+                },
             ));
         }
-        let session_id = msg
-            .payload
-            .get("session_id")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        let refs: Vec<EnvFileRef> = msg
-            .payload
-            .get("env_files")
-            .and_then(|v| serde_json::from_value(v.clone()).ok())
-            .unwrap_or_default();
+        let ClientSessionEnvApplyPayload {
+            session_id,
+            env_files: refs,
+        } = serde_json::from_value(msg.payload).unwrap_or_else(|_| ClientSessionEnvApplyPayload {
+            session_id: String::new(),
+            env_files: Vec::new(),
+        });
 
         match self.source_env_into_session(&session_id, &refs).await {
             Ok(warnings) => {
@@ -2897,16 +2835,24 @@ impl ConnectionHandler {
                 self.env_service
                     .usage
                     .record_attach(&session_id, &refs, None);
-                Ok(reply_json(
+                Ok(session_env_reply(
                     &msg.id,
                     "server.session.env.apply.response",
-                    json!({ "success": true, "warnings": warnings }),
+                    ClientSessionEnvResponsePayload {
+                        success: true,
+                        error: None,
+                        warnings,
+                    },
                 ))
             }
-            Err(e) => Ok(reply_json(
+            Err(e) => Ok(session_env_reply(
                 &msg.id,
                 "server.session.env.apply.response",
-                json!({ "success": false, "error": e }),
+                ClientSessionEnvResponsePayload {
+                    success: false,
+                    error: Some(e),
+                    warnings: Vec::new(),
+                },
             )),
         }
     }
@@ -2917,30 +2863,37 @@ impl ConnectionHandler {
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
     ) -> anyhow::Result<HandlerAction> {
+        // Typed at the contract boundary, same as `env.apply`. Its one wire
+        // change is on the success branch below, which used to send
+        // `{success: true}` with no `warnings` at all.
         if !self.authenticated_client {
-            return Ok(reply_json(
+            return Ok(session_env_reply(
                 &msg.id,
                 "server.session.env.unset.response",
-                json!({ "success": false, "error": "Not authenticated" }),
+                ClientSessionEnvResponsePayload {
+                    success: false,
+                    error: Some("Not authenticated".to_string()),
+                    warnings: Vec::new(),
+                },
             ));
         }
-        let session_id = msg
-            .payload
-            .get("session_id")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        let refs: Vec<EnvFileRef> = msg
-            .payload
-            .get("env_files")
-            .and_then(|v| serde_json::from_value(v.clone()).ok())
-            .unwrap_or_default();
+        let ClientSessionEnvUnsetPayload {
+            session_id,
+            env_files: refs,
+        } = serde_json::from_value(msg.payload).unwrap_or_else(|_| ClientSessionEnvUnsetPayload {
+            session_id: String::new(),
+            env_files: Vec::new(),
+        });
 
         let Some((agent_id, session_name)) = session_id.split_once(':') else {
-            return Ok(reply_json(
+            return Ok(session_env_reply(
                 &msg.id,
                 "server.session.env.unset.response",
-                json!({ "success": false, "error": "Invalid session_id" }),
+                ClientSessionEnvResponsePayload {
+                    success: false,
+                    error: Some("Invalid session_id".to_string()),
+                    warnings: Vec::new(),
+                },
             ));
         };
         let agent_id = agent_id.to_string();
@@ -2973,10 +2926,17 @@ impl ConnectionHandler {
 
         match resp {
             Ok(r) if r.get("success").and_then(serde_json::Value::as_bool) == Some(true) => {
-                Ok(reply_json(
+                // The branch whose wire changes: `warnings` is always
+                // serialised, so a successful unset now says `warnings: []`
+                // where it previously said nothing. True — there were none.
+                Ok(session_env_reply(
                     &msg.id,
                     "server.session.env.unset.response",
-                    json!({ "success": true }),
+                    ClientSessionEnvResponsePayload {
+                        success: true,
+                        error: None,
+                        warnings: Vec::new(),
+                    },
                 ))
             }
             Ok(r) => Ok(reply_json(
@@ -2987,10 +2947,14 @@ impl ConnectionHandler {
                     "error": r.get("error").and_then(|v| v.as_str()).unwrap_or("unset failed")
                 }),
             )),
-            Err(e) => Ok(reply_json(
+            Err(e) => Ok(session_env_reply(
                 &msg.id,
                 "server.session.env.unset.response",
-                json!({ "success": false, "error": e }),
+                ClientSessionEnvResponsePayload {
+                    success: false,
+                    error: Some(e),
+                    warnings: Vec::new(),
+                },
             )),
         }
     }
@@ -3000,23 +2964,28 @@ impl ConnectionHandler {
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
     ) -> anyhow::Result<HandlerAction> {
+        // Typed at the contract boundary. One shape with an optional error, so
+        // unlike the session-list reply there is nothing to discriminate on.
         if !self.authenticated_client {
-            return Ok(reply_json(
+            return Ok(session_env_active_reply(
                 &msg.id,
-                "server.session.env.active.response",
-                json!({ "active": [], "error": "Not authenticated" }),
+                SessionEnvActiveResponse {
+                    active: Vec::new(),
+                    error: Some("Not authenticated".to_string()),
+                },
             ));
         }
-        let session_id = msg
-            .payload
-            .get("session_id")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let active = self.env_service.usage.active_for(session_id);
-        Ok(reply_json(
+        let ClientSessionEnvActivePayload { session_id } = serde_json::from_value(msg.payload)
+            .unwrap_or_else(|_| ClientSessionEnvActivePayload {
+                session_id: String::new(),
+            });
+        let active = self.env_service.usage.active_for(&session_id);
+        Ok(session_env_active_reply(
             &msg.id,
-            "server.session.env.active.response",
-            json!({ "active": active }),
+            SessionEnvActiveResponse {
+                active,
+                error: None,
+            },
         ))
     }
 
@@ -3026,23 +2995,27 @@ impl ConnectionHandler {
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
     ) -> anyhow::Result<HandlerAction> {
+        // Typed at the contract boundary, same shape as `env.active`.
         if !self.authenticated_client {
-            return Ok(reply_json(
+            return Ok(session_env_query_reply(
                 &msg.id,
-                "server.session.env.query.response",
-                json!({ "sourced_files": [], "error": "Not authenticated" }),
+                SessionEnvQueryResponse {
+                    sourced_files: Vec::new(),
+                    error: Some("Not authenticated".to_string()),
+                },
             ));
         }
-        let session_id = msg
-            .payload
-            .get("session_id")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let ClientSessionEnvQueryPayload { session_id } = serde_json::from_value(msg.payload)
+            .unwrap_or_else(|_| ClientSessionEnvQueryPayload {
+                session_id: String::new(),
+            });
         let Some((agent_id, _session_name)) = session_id.split_once(':') else {
-            return Ok(reply_json(
+            return Ok(session_env_query_reply(
                 &msg.id,
-                "server.session.env.query.response",
-                json!({ "sourced_files": [], "error": "Invalid session_id" }),
+                SessionEnvQueryResponse {
+                    sourced_files: Vec::new(),
+                    error: Some("Invalid session_id".to_string()),
+                },
             ));
         };
         let resp = self
@@ -3059,16 +3032,20 @@ impl ConnectionHandler {
                             .collect::<Vec<_>>()
                     })
                     .unwrap_or_default();
-                Ok(reply_json(
+                Ok(session_env_query_reply(
                     &msg.id,
-                    "server.session.env.query.response",
-                    json!({ "sourced_files": sourced }),
+                    SessionEnvQueryResponse {
+                        sourced_files: sourced,
+                        error: None,
+                    },
                 ))
             }
-            Err(e) => Ok(reply_json(
+            Err(e) => Ok(session_env_query_reply(
                 &msg.id,
-                "server.session.env.query.response",
-                json!({ "sourced_files": [], "error": e }),
+                SessionEnvQueryResponse {
+                    sourced_files: Vec::new(),
+                    error: Some(e),
+                },
             )),
         }
     }
@@ -3319,6 +3296,158 @@ mod extract_ip_tests {
     }
 }
 
+/// Serialize a `server.env.list` reply.
+///
+/// `to_value` cannot fail for a struct of these shapes, but the house pattern
+/// keeps a fallback rather than an unwrap — and an empty list is still a valid
+/// payload, so a caller reads "no files" instead of losing the reply.
+/// Serialize a `server.auth` reply.
+///
+/// The same payload type the Agent's `client.auth` answers with — one handshake
+/// at two ends, so one type. This call is the one that has no client id to put
+/// in it, which is why the field is optional rather than required.
+fn auth_reply(id: &str, payload: AuthResponsePayload) -> HandlerAction {
+    reply_json(
+        id,
+        "server.auth.response",
+        serde_json::to_value(&payload)
+            .unwrap_or(json!({ "status": "failed", "message": "serialization failed" })),
+    )
+}
+
+/// Serialize a `server.session.relay.begin` refusal.
+///
+/// A refusal and nothing else, because the success path never reaches here: it
+/// returns `HandlerAction::Relay` and starts forwarding without answering.
+fn relay_begin_reply(id: &str, refusal: SessionRefusal) -> HandlerAction {
+    reply_json(
+        id,
+        "server.session.relay.begin.response",
+        serde_json::to_value(&refusal)
+            .unwrap_or(json!({ "status": "error", "message": "serialization failed" })),
+    )
+}
+
+/// Serialize a `server.agent.rename` reply.
+fn agent_rename_reply(id: &str, reply: AgentRenameReply) -> HandlerAction {
+    reply_json(
+        id,
+        "server.agent.rename.response",
+        serde_json::to_value(&reply).unwrap_or(json!({ "success": false })),
+    )
+}
+
+/// Serialize a `server.agent.list` reply.
+fn agent_list_reply(id: &str, reply: AgentListReply) -> HandlerAction {
+    reply_json(
+        id,
+        "server.agent.list.response",
+        serde_json::to_value(&reply).unwrap_or(json!({ "agents": [] })),
+    )
+}
+
+/// Serialize a `server.session.env.query` reply.
+fn session_env_query_reply(id: &str, payload: SessionEnvQueryResponse) -> HandlerAction {
+    reply_json(
+        id,
+        "server.session.env.query.response",
+        serde_json::to_value(&payload).unwrap_or(json!({ "sourced_files": [] })),
+    )
+}
+
+/// Serialize a `server.session.env.active` reply.
+fn session_env_active_reply(id: &str, payload: SessionEnvActiveResponse) -> HandlerAction {
+    reply_json(
+        id,
+        "server.session.env.active.response",
+        serde_json::to_value(&payload).unwrap_or(json!({ "active": [] })),
+    )
+}
+
+/// Serialize a session env reply — `apply` and `unset` share one response type
+/// and differ only in the wire, so the caller names it.
+fn session_env_reply(
+    id: &str,
+    msg_type: &str,
+    payload: ClientSessionEnvResponsePayload,
+) -> HandlerAction {
+    reply_json(
+        id,
+        msg_type,
+        serde_json::to_value(&payload).unwrap_or(json!({ "success": false })),
+    )
+}
+
+/// Serialize a `server.session.create` reply. Same fallback reasoning as
+/// [`env_list_reply`].
+fn session_create_reply(id: &str, payload: ClientSessionCreateResponsePayload) -> HandlerAction {
+    reply_json(
+        id,
+        "server.session.create.response",
+        serde_json::to_value(&payload).unwrap_or(json!({ "success": false })),
+    )
+}
+
+/// Serialize a `server.session.kill` reply. Same fallback reasoning as
+/// [`env_list_reply`].
+fn session_kill_reply(id: &str, payload: WebSessionKillResponse) -> HandlerAction {
+    reply_json(
+        id,
+        "server.session.kill.response",
+        serde_json::to_value(&payload).unwrap_or(json!({ "success": false })),
+    )
+}
+
+/// Serialize a `server.session.list` reply.
+///
+/// The first unit to use a union: its two branches share no field, so a
+/// discriminated shape would have to invent a tag the wire does not carry.
+fn session_list_reply(id: &str, reply: ServerSessionListReply) -> HandlerAction {
+    reply_json(
+        id,
+        "server.session.list.response",
+        serde_json::to_value(&reply).unwrap_or(json!({ "sessions": [] })),
+    )
+}
+
+/// Serialize a `server.env.write` reply. Same fallback reasoning as
+/// [`env_list_reply`].
+fn env_write_reply(id: &str, payload: ClientEnvWriteResponsePayload) -> HandlerAction {
+    reply_json(
+        id,
+        "server.env.write.response",
+        serde_json::to_value(&payload).unwrap_or(json!({ "success": false })),
+    )
+}
+
+/// Serialize a `server.env.delete` reply. Same fallback reasoning as
+/// [`env_list_reply`].
+fn env_del_reply(id: &str, payload: ClientEnvDeleteResponsePayload) -> HandlerAction {
+    reply_json(
+        id,
+        "server.env.delete.response",
+        serde_json::to_value(&payload).unwrap_or(json!({ "success": false })),
+    )
+}
+
+/// Serialize a `server.env.get` reply. Same fallback reasoning as
+/// [`env_list_reply`].
+fn env_get_reply(id: &str, payload: ClientEnvGetResponsePayload) -> HandlerAction {
+    reply_json(
+        id,
+        "server.env.get.response",
+        serde_json::to_value(&payload).unwrap_or(json!({ "success": false })),
+    )
+}
+
+fn env_list_reply(id: &str, payload: ClientEnvListResponsePayload) -> HandlerAction {
+    reply_json(
+        id,
+        "server.env.list.response",
+        serde_json::to_value(&payload).unwrap_or(json!({ "files": [] })),
+    )
+}
+
 fn reply_json(id: &str, msg_type: &str, payload: serde_json::Value) -> HandlerAction {
     HandlerAction::Reply(Some(Message::Text(
         json!({
@@ -3331,24 +3460,6 @@ fn reply_json(id: &str, msg_type: &str, payload: serde_json::Value) -> HandlerAc
     )))
 }
 
-/// Extract (name, source, agent_id) from an env-file reference payload.
-fn parse_env_ref(payload: &serde_json::Value) -> (String, EnvSource, Option<String>) {
-    let name = payload
-        .get("name")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
-    let source = match payload.get("source").and_then(|v| v.as_str()) {
-        Some("agent") => EnvSource::Agent,
-        _ => EnvSource::Server,
-    };
-    let agent_id = payload
-        .get("agent_id")
-        .and_then(|v| v.as_str())
-        .map(str::to_string);
-    (name, source, agent_id)
-}
-
 fn current_timestamp() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -3359,23 +3470,28 @@ fn current_timestamp() -> u64 {
 /// Serialise a session for the wire. Shared by `server.session.list` and the
 /// `sessions.changed` broadcast so both always agree on the field set — the
 /// web client feeds either straight into the same state setter.
-pub(crate) fn session_to_json(s: &crate::registry::SessionInfo) -> serde_json::Value {
-    json!({
-        "session_id": s.session_id,
-        "agent_id": s.agent_id,
-        "session_name": s.session_name,
-        "status": match s.status {
+pub(crate) fn session_to_info(s: &crate::registry::SessionInfo) -> WebSessionInfo {
+    WebSessionInfo {
+        session_id: s.session_id.clone(),
+        agent_id: s.agent_id.clone(),
+        session_name: s.session_name.clone(),
+        status: match s.status {
             SessionStatus::Active => "active",
             SessionStatus::Detached => "detached",
             SessionStatus::Recovering => "recovering",
             SessionStatus::Orphaned => "orphaned",
             SessionStatus::Zombie => "zombie",
-        },
-        "window_count": s.window_count,
-        "attached_clients": s.attached_clients,
-        "foreground_command": s.foreground_command,
-        "last_activity": s.last_activity.to_rfc3339(),
-    })
+        }
+        .to_string(),
+        window_count: s.window_count,
+        attached_clients: s.attached_clients,
+        foreground_command: s.foreground_command.clone(),
+        last_activity: s.last_activity.to_rfc3339(),
+    }
+}
+
+pub(crate) fn session_to_json(s: &crate::registry::SessionInfo) -> serde_json::Value {
+    serde_json::to_value(session_to_info(s)).unwrap_or(json!({}))
 }
 
 /// Convert an agent's `sessions.list` reply into registry entries.
@@ -3449,7 +3565,7 @@ mod tests {
     use crate::registry::{AgentRegistry, SessionRegistry};
     use crate::server::client_registry::ClientRegistry;
     use crate::server::command_broker::CommandBroker;
-    use nession_common::protocol::AgentMetadata;
+    use nession_protocol::contracts::agent::v1::AgentMetadata;
     use nession_protocol::ProtocolManifest;
     use tokio_tungstenite::tungstenite::Message;
 
@@ -3822,6 +3938,44 @@ mod tests {
             protocols["protocols"]["git.status"]["wire"][0],
             "git.status"
         );
+    }
+
+    #[tokio::test]
+    async fn a_rename_reply_carries_the_manifest_and_the_image_tag() {
+        // The test the defect needed. `server.agent.rename` built its own agent
+        // block, and it carried neither `protocols` nor `metadata.image_tag` —
+        // the two fields `agent_view`'s doc comment names as the drift that
+        // consolidating the builders was supposed to end. The block is gone and
+        // the reply is `WebAgentInfo` now, so this asserts the two fields rather
+        // than the absence of a `json!` call: a future hand-built block would
+        // have to reproduce both to pass.
+        let mut h = test_handler("").await;
+        h.authenticated_client = true;
+        register_agent(&h, Some(manifest_carrying("git.status"))).await;
+
+        let action = h
+            .handle_message(proto_msg(
+                "server.agent.rename",
+                json!({ "agent_id": "agent-a", "display_name": "Renamed" }),
+            ))
+            .await
+            .unwrap();
+        let payload = parse_reply(action)["payload"].clone();
+
+        let parsed: AgentRenameReply = serde_json::from_value(payload.clone())
+            .unwrap_or_else(|e| {
+                panic!("server.agent.rename replies {payload} but its contract does not accept it: {e}")
+            });
+        let AgentRenameReply::Renamed(reply) = parsed else {
+            panic!("a rename of a registered agent is not a refusal: {payload}");
+        };
+
+        assert!(
+            reply.agent.protocols.is_some(),
+            "the reply carries the manifest — losing it makes the Web's next call to this \
+             agent go out unversioned, which looks like nothing being wrong"
+        );
+        assert_eq!(reply.agent.metadata.image_tag, "test");
     }
 
     // ---- a named contract version is checked against the target (#678) ----
@@ -5269,6 +5423,171 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn env_list_reply_is_what_its_contract_says_it_is() {
+        // The test `server.auth` never had. That unit's contract requires a
+        // `client_id` its handler has never sent, so a consumer reading that
+        // reply as its own declared type fails — and nothing noticed, because
+        // the handler built the payload with `json!` and no test ever asked the
+        // type what it expected.
+        //
+        // So this asks: take the reply off the wire and read it the way the
+        // contract says it is. It is the difference between "the handler uses
+        // the type" being a claim about the source and being a checked fact —
+        // and it is what the identity-only entries were missing, since a unit
+        // with `request: None` cannot have this test at all.
+        let mut h = test_handler("").await;
+        let action = h
+            .handle_message(proto_msg("server.env.list", json!({})))
+            .await
+            .unwrap();
+        let payload = parse_reply(action)["payload"].clone();
+        let parsed: ClientEnvListResponsePayload = serde_json::from_value(payload.clone())
+            .unwrap_or_else(|e| {
+                panic!("server.env.list replies {payload} but its contract does not accept it: {e}")
+            });
+
+        assert!(
+            parsed.error.is_some(),
+            "an unauthenticated caller is told why rather than handed an empty list"
+        );
+    }
+
+    #[tokio::test]
+    async fn env_get_reply_is_what_its_contract_says_it_is() {
+        // The same guard as `env_list_reply_is_what_its_contract_says_it_is`,
+        // on the unit whose `in_use_by` had to become optional: two branches
+        // answer before it is computed. Both forms have to round-trip, and
+        // which form each branch produces is the part that is easy to get
+        // wrong by hand.
+        let mut h = test_handler("").await;
+
+        let action = h
+            .handle_message(proto_msg("server.env.get", json!({ "name": "x.env" })))
+            .await
+            .unwrap();
+        let payload = parse_reply(action)["payload"].clone();
+        let parsed: ClientEnvGetResponsePayload = serde_json::from_value(payload.clone())
+            .unwrap_or_else(|e| {
+                panic!("server.env.get replies {payload} but its contract does not accept it: {e}")
+            });
+        assert!(!parsed.success);
+        assert!(
+            parsed.in_use_by.is_none(),
+            "an unauthenticated caller is not told what is in use — absent, not empty"
+        );
+
+        // Authenticated, and past the point where usage is computed.
+        let mut h = test_handler("").await;
+        h.authenticated_client = true;
+        let action = h
+            .handle_message(proto_msg(
+                "server.env.get",
+                json!({ "name": "missing.env" }),
+            ))
+            .await
+            .unwrap();
+        let payload = parse_reply(action)["payload"].clone();
+        let parsed: ClientEnvGetResponsePayload = serde_json::from_value(payload.clone())
+            .unwrap_or_else(|e| {
+                panic!("server.env.get replies {payload} but its contract does not accept it: {e}")
+            });
+        assert!(
+            parsed.in_use_by.is_some(),
+            "a request that reached the lookup reports usage, even when empty"
+        );
+    }
+
+    #[tokio::test]
+    async fn env_delete_reply_and_request_are_what_their_contract_says() {
+        // `delete`'s reply is an exact match on every branch, so unlike the
+        // other two this is a plain regression guard. Its *request* is where
+        // the work was: `force` was read off `Value` beside the parser for
+        // years, and a missing `source` was defaulted.
+        let mut h = test_handler("").await;
+        let action = h
+            .handle_message(proto_msg(
+                "server.env.delete",
+                json!({ "name": "x.env", "force": true }),
+            ))
+            .await
+            .unwrap();
+        let payload = parse_reply(action)["payload"].clone();
+        let parsed: ClientEnvDeleteResponsePayload = serde_json::from_value(payload.clone())
+            .unwrap_or_else(|e| {
+                panic!(
+                    "server.env.delete replies {payload} but its contract does not accept it: {e}"
+                )
+            });
+        assert!(!parsed.success);
+        assert!(parsed.error.is_some(), "an unauthenticated delete says why");
+
+        let with_force: ClientEnvDeletePayload =
+            serde_json::from_value(json!({ "name": "x.env", "force": true }))
+                .expect("`force` is a declared field, and the Web has always sent it");
+        assert!(with_force.force);
+
+        let no_source: ClientEnvDeletePayload = serde_json::from_value(json!({ "name": "x.env" }))
+            .expect("a missing source defaults to the server, as parse_env_ref did");
+        assert_eq!(no_source.source, EnvSource::Server);
+    }
+
+    #[tokio::test]
+    async fn session_list_reply_is_what_its_contract_says_it_is() {
+        // The first unit whose contract is a union of two *disjoint* shapes.
+        // Both halves have to round-trip — the refusal is what eleven handlers
+        // send and what no contract described until now.
+        let mut h = test_handler("").await;
+        let action = h
+            .handle_message(proto_msg("server.session.list", json!({})))
+            .await
+            .unwrap();
+        let payload = parse_reply(action)["payload"].clone();
+        let parsed: ServerSessionListReply = serde_json::from_value(payload.clone())
+            .unwrap_or_else(|e| {
+                panic!("server.session.list replies {payload} but its contract does not accept it: {e}")
+            });
+        assert!(
+            matches!(parsed, ServerSessionListReply::Refused(_)),
+            "an unauthenticated caller is refused, not handed an empty list"
+        );
+
+        let mut h = test_handler("").await;
+        h.authenticated_client = true;
+        let action = h
+            .handle_message(proto_msg("server.session.list", json!({})))
+            .await
+            .unwrap();
+        let payload = parse_reply(action)["payload"].clone();
+        let parsed: ServerSessionListReply = serde_json::from_value(payload.clone())
+            .unwrap_or_else(|e| {
+                panic!("server.session.list replies {payload} but its contract does not accept it: {e}")
+            });
+        assert!(matches!(parsed, ServerSessionListReply::Listed(_)));
+    }
+
+    #[tokio::test]
+    async fn session_kill_reply_is_what_its_contract_says_it_is() {
+        // The one branch worth pinning is the offline-agent one: it used to
+        // send `{ "success": true }` with no `error` field, and the type has no
+        // `skip_serializing_if`, so it now carries `error: null`. That reads as
+        // noise unless you know the Web declares `error?: string` — so this
+        // asserts the field is *present and null*, not merely absent, which is
+        // the difference a typo in the type would silently remove.
+        let mut h = test_handler("").await;
+        let action = h
+            .handle_message(proto_msg("server.session.kill", json!({})))
+            .await
+            .unwrap();
+        let payload = parse_reply(action)["payload"].clone();
+        let parsed: WebSessionKillResponse = serde_json::from_value(payload.clone())
+            .unwrap_or_else(|e| {
+                panic!("server.session.kill replies {payload} but its contract does not accept it: {e}")
+            });
+        assert!(!parsed.success);
+        assert!(parsed.error.is_some(), "a bad session_id says why");
+    }
+
+    #[tokio::test]
     async fn env_get_unauthenticated() {
         let mut h = test_handler("").await;
         let action = h
@@ -5564,33 +5883,36 @@ mod tests {
             .contains("Invalid session_id"));
     }
 
-    // ---- parse_env_ref ----
+    // ---- env payload contracts ----
+    //
+    // These replace the three `parse_env_ref` tests. That helper is gone — the
+    // handlers parse into the contract types now — and the leniency it had is
+    // expressed by those types' serde defaults, so that is what these pin. The
+    // behaviour they describe is unchanged; only the place it is written down
+    // has moved.
 
     #[test]
-    fn parse_env_ref_server_default() {
-        let payload = json!({ "name": "test.env" });
-        let (name, source, agent_id) = parse_env_ref(&payload);
-        assert_eq!(name, "test.env");
-        assert_eq!(source, EnvSource::Server);
-        assert!(agent_id.is_none());
+    fn a_missing_source_is_a_server_file() {
+        let p: ClientEnvWritePayload = serde_json::from_value(json!({ "name": "x.env" })).unwrap();
+        assert_eq!(p.source, EnvSource::Server);
+        assert!(p.agent_id.is_none());
     }
 
     #[test]
-    fn parse_env_ref_agent() {
-        let payload = json!({ "name": "test.env", "source": "agent", "agent_id": "a1" });
-        let (name, source, agent_id) = parse_env_ref(&payload);
-        assert_eq!(name, "test.env");
-        assert_eq!(source, EnvSource::Agent);
-        assert_eq!(agent_id, Some("a1".to_string()));
+    fn an_agent_source_carries_its_agent() {
+        let p: ClientEnvWritePayload =
+            serde_json::from_value(json!({ "name": "x.env", "source": "agent", "agent_id": "a1" }))
+                .unwrap();
+        assert_eq!(p.source, EnvSource::Agent);
+        assert_eq!(p.agent_id.as_deref(), Some("a1"));
     }
 
     #[test]
-    fn parse_env_ref_empty() {
-        let payload = json!({});
-        let (name, source, agent_id) = parse_env_ref(&payload);
-        assert_eq!(name, "");
-        assert_eq!(source, EnvSource::Server);
-        assert!(agent_id.is_none());
+    fn a_payload_with_no_name_does_not_parse() {
+        // `parse_env_ref` returned an empty name and let the handler refuse it.
+        // The type refuses it now, and the handler maps that failure to the
+        // same reply — so the wire is unchanged, which is the point.
+        assert!(serde_json::from_value::<ClientEnvWritePayload>(json!({})).is_err());
     }
 
     // ---- env write in-use lock ----
@@ -5609,7 +5931,7 @@ mod tests {
         // Record usage
         h.env_service.usage.record_create(
             "a1:s1",
-            &[nession_common::protocol::EnvFileRef {
+            &[nession_protocol::contracts::env::v1::EnvFileRef {
                 name: "locked.env".to_string(),
                 source: EnvSource::Server,
                 agent_id: None,
@@ -5740,7 +6062,7 @@ mod tests {
         // Record usage
         h.env_service.usage.record_create(
             "a1:s1",
-            &[nession_common::protocol::EnvFileRef {
+            &[nession_protocol::contracts::env::v1::EnvFileRef {
                 name: "used.env".to_string(),
                 source: EnvSource::Server,
                 agent_id: None,
@@ -5777,7 +6099,7 @@ mod tests {
         // Record usage
         h.env_service.usage.record_create(
             "a1:s1",
-            &[nession_common::protocol::EnvFileRef {
+            &[nession_protocol::contracts::env::v1::EnvFileRef {
                 name: "used.env".to_string(),
                 source: EnvSource::Server,
                 agent_id: None,

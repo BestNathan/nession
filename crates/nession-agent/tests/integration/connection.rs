@@ -7,7 +7,7 @@ use futures_util::{SinkExt, StreamExt};
 use nession_agent::connection::{msg_types, ServerClient};
 use nession_agent::extension::ExtensionRegistry;
 use nession_agent::tmux::manager::SessionManager;
-use nession_common::protocol::{AgentMetadata, AgentStatus};
+use nession_protocol::contracts::agent::v1::{AgentMetadata, AgentStatus};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::TcpListener;

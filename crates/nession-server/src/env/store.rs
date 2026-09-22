@@ -13,7 +13,7 @@
 use crate::db::Database;
 use anyhow::{Context, Result};
 use nession_common::env_file::parse_env;
-use nession_common::protocol::{EnvFileInfo, EnvSource};
+use nession_protocol::contracts::env::v1::{EnvFileInfo, EnvSource};
 use std::path::Path;
 use std::sync::Arc;
 use tokio::fs;

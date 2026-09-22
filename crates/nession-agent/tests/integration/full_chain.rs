@@ -20,7 +20,7 @@ use nession_agent::sync::heartbeat::HeartbeatLoop;
 use nession_agent::sync::session_watcher::SessionWatcher;
 use nession_agent::tmux::manager::SessionManager;
 use nession_common::config::ServerConfig;
-use nession_common::protocol::AgentMetadata;
+use nession_protocol::contracts::agent::v1::AgentMetadata;
 use nession_server::db::Database;
 use nession_server::server::WebSocketServer;
 use std::sync::Arc;

@@ -21,12 +21,49 @@ export const VERSION = 1;
 
 // ── Shapes ──
 
+export type AgentSessionUpdatePayload = { agent_id: string, session_name: string, 
+/**
+ * One of `active`, `detached`, `recovering`, `orphaned`, `zombie`, `gone`.
+ *
+ * A `String` and not an enum, deliberately: the server matches these and
+ * *warns and returns* on anything else, so a closed enum here would
+ * describe a validation the server does not perform. The values are named
+ * so a reader does not have to go and find them.
+ */
+status: string, window_count: number, attached_clients: number, 
+/**
+ * Foreground command of the session's active pane, when tmux reports one.
+ *
+ * `Option` on the wire as well as in the type: the server folds an empty
+ * string to `None` before storing it, so `""` and *absent* already mean the
+ * same thing downstream. The contract says so rather than leaving a caller
+ * to discover it.
+ */
+foreground_command?: string | null, };
 
 // ── Operations ──
 
+/** The payload a caller sends. */
+export type AgentSessionUpdateCall = { agent_id: string, session_name: string, 
 /**
- * No request alias: the catalog declares no request shape for this unit.
+ * One of `active`, `detached`, `recovering`, `orphaned`, `zombie`, `gone`.
+ *
+ * A `String` and not an enum, deliberately: the server matches these and
+ * *warns and returns* on anything else, so a closed enum here would
+ * describe a validation the server does not perform. The values are named
+ * so a reader does not have to go and find them.
  */
+status: string, window_count: number, attached_clients: number, 
+/**
+ * Foreground command of the session's active pane, when tmux reports one.
+ *
+ * `Option` on the wire as well as in the type: the server folds an empty
+ * string to `None` before storing it, so `""` and *absent* already mean the
+ * same thing downstream. The contract says so rather than leaving a caller
+ * to discover it.
+ */
+foreground_command?: string | null, };
+
 /**
  * No response alias: the catalog declares no response shape for this unit.
  */

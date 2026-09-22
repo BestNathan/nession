@@ -21,12 +21,30 @@ export const VERSION = 1;
 
 // ── Shapes ──
 
+export type ClientSessionEnvQueryPayload = { session_id: string, };
+export type SessionEnvQueryResponse = { 
+/**
+ * **Names**, not references — the handler maps the agent's array through
+ * `as_str`, so this wire carries `["staging.env", …]` and not
+ * `[{ name, source, agent_id }]`. Written as `Vec<EnvFileRef>` first,
+ * which is what the field looks like it should be; reading the branch is
+ * what said otherwise.
+ */
+sourced_files: Array<string>, error?: string | null, };
 
 // ── Operations ──
 
+/** The payload a caller sends. */
+export type SessionEnvQueryCall = { session_id: string, };
+
+/** The payload the provider answers with. */
+export type SessionEnvQueryReply = { 
 /**
- * No request alias: the catalog declares no request shape for this unit.
+ * **Names**, not references — the handler maps the agent's array through
+ * `as_str`, so this wire carries `["staging.env", …]` and not
+ * `[{ name, source, agent_id }]`. Written as `Vec<EnvFileRef>` first,
+ * which is what the field looks like it should be; reading the branch is
+ * what said otherwise.
  */
-/**
- * No response alias: the catalog declares no response shape for this unit.
- */
+sourced_files: Array<string>, error?: string | null, };
+

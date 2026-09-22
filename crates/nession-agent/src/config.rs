@@ -1,7 +1,7 @@
 //! Agent configuration.
 
 use nession_common::logging::LoggingConfig;
-use nession_common::protocol::{AgentAddress, NetworkType};
+use nession_protocol::contracts::agent::v1::{AgentAddress, NetworkType};
 use serde::{Deserialize, Serialize};
 
 /// Default listen address for the agent WebSocket server.

@@ -21,12 +21,13 @@ export const VERSION = 1;
 
 // ── Shapes ──
 
+export type ClientRelayEndPayload = { session_id: string, };
 
 // ── Operations ──
 
-/**
- * No request alias: the catalog declares no request shape for this unit.
- */
+/** The payload a caller sends. */
+export type ClientRelayEndCall = { session_id: string, };
+
 /**
  * No response alias: the catalog declares no response shape for this unit.
  */

@@ -88,6 +88,27 @@ pub struct ClientEnvListPayload {}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientEnvListResponsePayload {
     pub files: Vec<EnvFileInfo>,
+    /// Set only when the Server refuses before listing anything — an
+    /// unauthenticated caller is told why rather than handed a silently empty
+    /// list.
+    ///
+    /// The Server has always put this on the wire and the Web has always read
+    /// it (`EnvListResponse.error` in `capabilities/env/types.ts`); the type
+    /// simply did not describe it. Adding it here makes the contract say what
+    /// the wire already carries, which is why it changes no behaviour.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// The Server's `parse_env_ref` reads any `source` other than `"agent"` as a
+/// server file — including an absent one, which two tests pin.
+///
+/// The contract says the same rather than being stricter than the code it
+/// describes: a payload the Server accepts today must not start being refused
+/// because a type was attached to it. Relaxing a requirement is allowed only
+/// where the handler already tolerates the absence, and here it does.
+fn default_env_source() -> EnvSource {
+    EnvSource::Server
 }
 
 /// `server.env.get` — read one env file's raw content for editing.
@@ -96,6 +117,7 @@ pub struct ClientEnvListResponsePayload {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientEnvGetPayload {
     pub name: String,
+    #[serde(default = "default_env_source")]
     pub source: EnvSource,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_id: Option<String>,
@@ -108,9 +130,17 @@ pub struct ClientEnvGetResponsePayload {
     pub success: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
-    /// Session ids currently using this file (empty when not in use).
-    #[serde(default)]
-    pub in_use_by: Vec<String>,
+    /// Session ids currently using this file; an empty list when nothing is.
+    ///
+    /// Optional because two of the Server's branches answer before it is ever
+    /// computed — an unauthenticated caller, and a request naming no file. An
+    /// empty list there would not be a missing value but a false one: "nothing
+    /// is using this file" when the truth is "we never looked".
+    ///
+    /// Both branches already omit it on the wire, so this states what the wire
+    /// does rather than changing it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub in_use_by: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
@@ -121,13 +151,30 @@ pub struct ClientEnvGetResponsePayload {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientEnvWritePayload {
     pub name: String,
+    #[serde(default = "default_env_source")]
     pub source: EnvSource,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_id: Option<String>,
+    /// The file's contents.
+    ///
+    /// Defaulted because the Server has always read a missing `content` as the
+    /// empty string, and a request it accepted yesterday must not start being
+    /// refused because a type was attached to it. That tolerance is worth
+    /// questioning on its own — a write that quietly creates an empty file is a
+    /// footgun — but questioning it is a behaviour change, not a contract one.
+    #[serde(default)]
     pub content: String,
     /// When false, refuse to overwrite an existing file (create-only).
     #[serde(default)]
     pub overwrite: bool,
+    /// Overwrite even though a running session has the file sourced, then
+    /// re-source it.
+    ///
+    /// Read off `Value` beside the parser until now, like `delete`'s `force`
+    /// and for the same reason: the field has always been on the wire and was
+    /// never named here.
+    #[serde(default)]
+    pub force: bool,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
@@ -143,6 +190,22 @@ pub struct ClientEnvWriteResponsePayload {
     pub error: Option<String>,
     #[serde(default)]
     pub warnings: Vec<String>,
+    /// Sessions holding the file, on the refusal that names them.
+    ///
+    /// Optional for the same reason as `ClientEnvGetResponsePayload::in_use_by`
+    /// — it is computed on exactly one branch — and for a blunter one: this
+    /// field was on the wire without being in the contract at all, so any
+    /// consumer reading the schema had no way to know it existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub in_use_by: Option<Vec<String>>,
+    /// Sessions re-sourced after a forced write. Reported on the success branch
+    /// only, because it is the only branch that re-sources anything.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub re_sourced: Option<Vec<String>>,
+    /// Why any of those re-sources failed. Same branch as `re_sourced`, and
+    /// absent for the same reason.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub re_source_errors: Option<Vec<String>>,
 }
 
 /// `server.env.delete` — delete an env file.
@@ -151,9 +214,19 @@ pub struct ClientEnvWriteResponsePayload {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientEnvDeletePayload {
     pub name: String,
+    #[serde(default = "default_env_source")]
     pub source: EnvSource,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_id: Option<String>,
+    /// Delete even though a running session has the file sourced.
+    ///
+    /// The Web has always sent this (`deleteEnvFile`'s `force`, documented as
+    /// overriding in-use protection) and the Server has always read it off the
+    /// payload — the contract simply did not name it, so a consumer reading the
+    /// schema could not know the field existed. `ClientEnvWritePayload` already
+    /// carries its own counterpart (`overwrite`); this was the missing half.
+    #[serde(default)]
+    pub force: bool,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]

@@ -24,9 +24,11 @@ fn units() -> Vec<Unit> {
 /// invocation that dispatches them, so this is the set a runtime actually
 /// composes rather than a list kept in a fifth place.
 ///
-/// Wires are unioned per id, because a unit served on two transports is one
-/// entry with two: `session.create` is answered by the server for a browser and
-/// by the agent for the server, and both belong on its one entry.
+/// Wires are unioned per id, so that a unit answered on more than one transport
+/// keeps both on its one entry. Since `#912` the wire and the id are the same
+/// spelling and every unit has exactly one, so today the union is over a single
+/// element — it stays because the alternative is a lookup that silently drops
+/// the second wire the day a unit grows one.
 fn declared() -> BTreeMap<String, BTreeSet<String>> {
     use std::collections::{BTreeMap, BTreeSet};
 
@@ -171,6 +173,30 @@ fn a_unit_with_a_response_also_has_a_request() {
 }
 
 #[test]
+fn every_unit_declares_a_request_shape() {
+    // The end state of #920, pinned so it cannot quietly regress. Before it, the
+    // last eight units were identity-only: a name, a wire and two `None`s, with
+    // the shape of what they carried living in whichever handler read or built
+    // it — and nothing to compare that against.
+    //
+    // The near-reverse of the test above, and deliberately not the same claim.
+    // That one says *an answering unit must be askable*; this says every unit has
+    // a shape at all. A one-way unit's request is simply its message, so this
+    // holds without contradicting "half the kernel's units are one-way".
+    //
+    // A request and not a response: `agent.keepalive.ping` is request-only for a
+    // reason no amount of typing can fix — it answers on `keepalive.pong`, a wire
+    // the `<wire>.response` convention cannot name.
+    for unit in units() {
+        assert!(
+            unit.request.is_some(),
+            "{} has no request shape, so a caller cannot tell what to send it",
+            unit.id
+        );
+    }
+}
+
+#[test]
 fn an_alias_is_a_shape_and_not_a_reference_to_one() {
     // The aliases come from `inline()`, not `decl()`. `decl()` on a generic
     // returns the *generic* declaration — `type GitResponseV1<T> = …` — which
@@ -301,13 +327,31 @@ fn an_unknown_operation_is_an_empty_catalog_rather_than_an_error() {
 
 #[test]
 fn a_unit_with_no_shape_says_so_instead_of_omitting_the_key() {
-    // `server.env.write` is identity-only: the handler reads raw JSON. Present
-    // and null, so a consumer can tell "no shape" from "this document predates
-    // the field" — the same rule the agent-list wire follows.
-    let doc = crate::schema::document(Some("server.env.write"));
-    let entry = &doc["protocols"]["server.env.write"];
-    assert!(entry["request"].is_null());
-    assert!(entry["response"].is_null());
-    assert_eq!(entry["owner"], "core");
-    assert_eq!(entry["version"], 1);
+    // Present and null, so a consumer can tell "no shape" from "this document
+    // predates the field" — the same rule the agent-list wire follows.
+    //
+    // The subject is named now, and it is a *stable* one rather than whichever
+    // unit happened to be untyped. This test used to pick "whatever identity-only
+    // unit is left" and panic when there was none — it went red with
+    // `#920 finished: no identity-only units remain`, which is how the end of
+    // that work was detected. With nothing left to trip, a name is clearer.
+    //
+    // `agent.keepalive.ping` is request-only **permanently**: the agent answers
+    // on `keepalive.pong`, and no `<wire>.response` wire exists for a response
+    // shape to be attached to. It cannot be typed out of this test the way
+    // `server.env.write` was.
+    let doc = crate::schema::document(None);
+    let unit = units()
+        .into_iter()
+        .find(|u| u.id == "agent.keepalive.ping")
+        .expect("agent.keepalive.ping is declared");
+    assert!(
+        unit.response.is_none(),
+        "the premise moved: agent.keepalive.ping answers now, so this test needs a new subject"
+    );
+    let entry = &doc["protocols"][unit.id];
+    assert!(entry["request"].is_object(), "{} has no request", unit.id);
+    assert!(entry["response"].is_null(), "{} has a response", unit.id);
+    assert_eq!(entry["owner"], unit.owner);
+    assert_eq!(entry["version"], unit.version);
 }

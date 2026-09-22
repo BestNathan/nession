@@ -21,12 +21,57 @@ export const VERSION = 1;
 
 // ── Shapes ──
 
+export type ServerSessionListPayload = { 
+/**
+ * Scope the list to one agent. Absent means all of them.
+ */
+agent_id?: string | null, 
+/**
+ * Ask every online agent for its live sessions before answering, rather
+ * than answering from the registry. Slower, and the reason `stale_agents`
+ * exists.
+ */
+force: boolean, };
+export type ServerSessionListReply = WebSessionsListResponse | SessionRefusal;
+export type WebSessionsListResponse = { sessions: Array<WebSessionInfo>, 
+/**
+ * Agents that did not answer a forced refresh, so the caller knows the
+ * list may be incomplete rather than complete-but-empty. Always on this
+ * branch, and never declared until now.
+ */
+stale_agents: Array<string>, };
+export type WebSessionInfo = { session_id: string, agent_id: string, session_name: string, status: string, window_count: number, attached_clients: number, 
+/**
+ * The active pane's current command. Runtime observation: it changes as
+ * the user runs things and tmux may report nothing.
+ *
+ * On the wire since the list existed; this type did not name it, so a
+ * consumer reading the schema could not know it was there.
+ */
+foreground_command?: string | null, last_activity: string, };
+export type SessionRefusal = { 
+/**
+ * Always `"error"` today. A string rather than an enum because nothing
+ * branches on its other values yet, and inventing them would be describing
+ * a wire that does not exist.
+ */
+status: string, message: string, };
 
 // ── Operations ──
 
+/** The payload a caller sends. */
+export type SessionListCall = { 
 /**
- * No request alias: the catalog declares no request shape for this unit.
+ * Scope the list to one agent. Absent means all of them.
  */
+agent_id?: string | null, 
 /**
- * No response alias: the catalog declares no response shape for this unit.
+ * Ask every online agent for its live sessions before answering, rather
+ * than answering from the registry. Slower, and the reason `stale_agents`
+ * exists.
  */
+force: boolean, };
+
+/** The payload the provider answers with. */
+export type SessionListReply = WebSessionsListResponse | SessionRefusal;
+

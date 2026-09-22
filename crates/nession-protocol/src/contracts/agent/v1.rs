@@ -161,6 +161,98 @@ pub struct AgentMetadata {
     pub image_tag: String,
 }
 
+/// The agent family's refusal, `{ status, message }`.
+///
+/// Per family rather than shared with `session`'s, which is spelled the same:
+/// `contracts/mod.rs` places a contract by the family its id names, and a
+/// cross-family type has no segment to look up. Two families refusing alike
+/// therefore have two types, and that is the accepted cost of placement staying
+/// a lookup.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentRefusal {
+    pub status: String,
+    pub message: String,
+}
+
+/// `server.agent.list`'s reply: the list, or the refusal.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum AgentListReply {
+    Listed(WebAgentsListResponse),
+    Refused(AgentRefusal),
+}
+
+/// `server.agent.list`'s request: empty, and explicitly so — the call reads
+/// nothing and is not permitted to have no request.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AgentListPayload {}
+
+/// `server.agent.rename`'s reply: the renamed agent, or the refusal.
+///
+/// The agent half is [`WebAgentInfo`] — the same type `server.agent.list`
+/// returns — and that is the point of adding it. This call built its own
+/// `json!` block, twelve fields against the builder's thirteen, and had drifted
+/// in exactly the two ways `agent_view`'s doc comment describes as fixed: no
+/// `protocols`, and no `metadata.image_tag`.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentRenameResponse {
+    /// On **both** branches, so it is not what the untagged union discriminates
+    /// on — `agent` against `error` is. Kept because the wire carries it.
+    pub success: bool,
+    pub agent: WebAgentInfo,
+}
+
+/// `server.agent.rename`'s request.
+///
+/// `display_name` is an `Option` because **`null` means clear**, which the arm
+/// distinguishes from "not supplied" before normalising: an absent key leaves
+/// the name alone, an explicit null clears it. Both arrive as `None` here, so
+/// the distinction is the caller's to make — and the contract says the field is
+/// nullable rather than inventing a sentinel for it.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentRenamePayload {
+    pub agent_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+}
+
+/// Rename's refusal — `{ success, error }`, **not** [`AgentRefusal`].
+///
+/// `server.agent.list` refuses with `{status, message}` and `server.agent.rename`
+/// refuses with `{success, error}`, in one family, one call apart. Fourth time
+/// this has turned up: the convention is per handler, and a family is no guide
+/// to which one a unit uses.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentRenameFailure {
+    pub success: bool,
+    pub error: String,
+}
+
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum AgentRenameReply {
+    /// Boxed, and the box is load-bearing: `WebAgentInfo` is far larger than
+    /// `AgentRenameFailure`, and clippy's `large_enum_variant` is right to
+    /// object. The alternative would be an `#[allow]`, which this tree does not
+    /// take — the type is edited rather than the lint.
+    Renamed(Box<AgentRenameResponse>),
+    Refused(AgentRenameFailure),
+}
+
 /// Server → Agent response to `agent.register`.
 ///
 /// On acceptance the server tells the agent which heartbeat interval to use,
@@ -269,6 +361,34 @@ pub struct WebAgentInfo {
     pub status: String,
     pub session_count: u32,
     pub last_heartbeat: String,
+    // The six below were on the wire and not in this type. `agent_view.rs` is
+    // the single builder both `server.agent.list` and the `agents.changed` push
+    // go through — its own doc comment says why — and it has always sent these.
+    //
+    // The type was named right and shaped wrong, which is the fifth time in
+    // this run: `SessionListResponse`, `SessionInfo`, `SessionCapturePreviewPayload`,
+    // `WebSessionInfo`, and now this. Here it is visible at a glance by
+    // counting: seven fields against the builder's thirteen.
+    /// Human-readable name, set by config or a Web UI rename. The UI falls back
+    /// to the hostname when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+    pub active_sessions: u32,
+    pub registered_at: String,
+    /// The server's probe results, so the item type is `ProbedAddress` and not
+    /// `AgentAddress` — the obvious guess, and the wrong one.
+    pub addresses: Vec<ProbedAddress>,
+    /// What this agent reported it can serve.
+    ///
+    /// **No `skip_serializing_if`**, deliberately, and `agent_view`'s own test
+    /// (`a_peer_with_no_manifest_gets_null_and_not_a_missing_key`) fails if one
+    /// is added. A consumer has to tell "no manifest for that peer" from "that
+    /// peer advertises nothing", because they resolve differently — and an
+    /// absent key cannot say which. Written with the attribute first, having
+    /// quoted the rule in this very comment while adding it.
+    #[serde(default)]
+    pub protocols: Option<ProtocolManifest>,
+    pub metadata: AgentMetadata,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
@@ -277,3 +397,26 @@ pub struct WebAgentInfo {
 pub struct WebAgentsListResponse {
     pub agents: Vec<WebAgentInfo>,
 }
+
+/// `agent.keepalive.ping` — the liveness check a P2P client sends an agent.
+///
+/// The request is empty and explicitly so, like [`AgentListPayload`]: a ping
+/// asks "are you there" and has nothing else to say.
+///
+/// **Placement.** `contracts/mod.rs` places a contract by the family its id
+/// names, and this id's subject segment is `keepalive`, which is not a family.
+/// It sits in `agent` because that segment names the runtime that answers —
+/// the same reasoning that puts `server.auth` in `client/` beside `client.auth`
+/// rather than in a family of its own.
+///
+/// **No response, and that is forced rather than chosen.** The agent answers
+/// with an empty payload on the wire **`keepalive.pong`**
+/// (`websocket.rs`'s keepalive arm), not on `agent.keepalive.ping.response`.
+/// A catalog response slot names a shape, and it is the `<wire>.response`
+/// convention that gives that shape a wire — so attaching one would assert a
+/// wire nobody sends. This is the one unit here whose missing half is a wire
+/// naming problem and not a missing type.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct KeepalivePingPayload {}

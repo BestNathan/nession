@@ -47,15 +47,20 @@ pub struct Unit {
     /// The canonical protocol id, `git.status`.
     pub id: &'static str,
     pub version: u32,
-    /// The wire message types this contract travels as.
+    /// The wire message types this contract travels as — **one**, since `#912`.
     ///
-    /// A list rather than one string because a unit can be served on more than
-    /// one transport, and `#678` is explicit that the unit is the semantic
-    /// boundary while the wire is a projection of it. `session.create` is the
-    /// case that forced this: the server answers it for a browser on
-    /// `server.session.create` and the agent answers it for the server on
-    /// `session.create`, and those are one unit seen from two sides. A single
-    /// field would have had to pick one and quietly drop the other.
+    /// This used to say that a unit could be served on two transports, and gave
+    /// `server.session.create` and `agent.session.create` as one unit seen from
+    /// two sides. That was the pre-`#912` model: the wire carried an
+    /// `extension.*` namespace, id and wire were different spellings, and a
+    /// lookup unioned them by id. `#912` made the wire *be* the id, and those
+    /// two are now two units, not one. Every entry here holds exactly one
+    /// string.
+    ///
+    /// Still a slice because the distinction is the model's, not this build's —
+    /// `#678` has the unit as the semantic boundary and the wire as a
+    /// projection of it. Collapsing it to `&'static str` is a separate change
+    /// and would carry the generated `WIRES` with it.
     pub wires: &'static [&'static str],
     /// The declarations this unit's file carries, in emit order.
     pub decls: Vec<Decl>,
@@ -326,7 +331,11 @@ wires: &["server.agent.register"],
             owner: "core",
             id: "server.agent.heartbeat",
             version: 1,
-wires: &["server.agent.heartbeat"],
+            wires: &["server.agent.heartbeat"],
+            // One-way: a heartbeat is sent and not awaited. Its acknowledgement
+            // is a different unit's payload (`server.heartbeat.ack`), which the
+            // `Unit.request` doc comment already called out; `response: None`
+            // here is that, not an omission.
             decls: vec![
                 decl_of::<nession_protocol::contracts::agent::v1::AgentHeartbeatPayload>(cfg),
                 decl_of::<nession_protocol::contracts::agent::v1::AgentStatus>(cfg),
@@ -344,9 +353,19 @@ wires: &["server.agent.heartbeat"],
             owner: "core",
             id: "server.agent.session-update",
             version: 1,
-wires: &["server.agent.session-update"],
-            decls: vec![],
-            request: None,
+            wires: &["server.agent.session-update"],
+            // One-way: the agent reports one session's state and nothing answers.
+            // All five exits of `handle_agent_session_update` are `Reply(None)` —
+            // two of them deliberate early-outs, which is why "answers nothing"
+            // is a different claim from "always succeeds".
+            decls: vec![
+                decl_of::<nession_protocol::contracts::session::v1::AgentSessionUpdatePayload>(cfg),
+            ],
+            request: Some((
+                "AgentSessionUpdateCall",
+                nession_protocol::contracts::session::v1::AgentSessionUpdatePayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::AgentSessionUpdatePayload>,
+            )),
             response: None,
         },
         Unit {
@@ -368,18 +387,31 @@ wires: &["server.agent.command-response"],
             owner: "core",
             id: "server.agent.terminal-resize",
             version: 1,
-wires: &["server.agent.terminal-resize"],
+            wires: &["server.agent.terminal-resize"],
+            // One-way: a size change is announced, not answered. The server
+            // re-broadcasts it to clients and returns `Reply(None)`.
+            //
+            // The type was already declared here and simply not attached as the
+            // `request`, while the handler deserialised into it — so the contract
+            // existed and the catalog did not know. The cheapest unit of the
+            // seven: no new type, only the wire between the two.
             decls: vec![
                 decl_of::<nession_protocol::contracts::session::v1::AgentTerminalResizePayload>(cfg),
             ],
-            request: None,
+            request: Some((
+                "AgentTerminalResizeCall",
+                nession_protocol::contracts::session::v1::AgentTerminalResizePayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::AgentTerminalResizePayload>,
+            )),
             response: None,
         },
         Unit {
             owner: "core",
             id: "server.agent.address-update",
             version: 1,
-wires: &["server.agent.address-update"],
+            wires: &["server.agent.address-update"],
+            // One-way: the agent announces its endpoints. Nothing answers, and
+            // no `.response` wire exists.
             decls: vec![
                 decl_of::<nession_protocol::contracts::agent::v1::AgentAddressUpdatePayload>(cfg),
                 decl_of::<nession_protocol::contracts::agent::v1::AgentAddress>(cfg),
@@ -396,19 +428,76 @@ wires: &["server.agent.address-update"],
             owner: "core",
             id: "server.agent.list",
             version: 1,
-wires: &["server.agent.list"],
-            decls: vec![],
-            request: None,
-            response: None,
+            wires: &["server.agent.list"],
+            // Typed. The view type already existed — with the right name and
+            // seven of the builder's thirteen fields, which is how a
+            // name-matched type hides a shape mismatch: you can see it by
+            // counting.
+            decls: vec![
+                decl_of::<nession_protocol::contracts::agent::v1::AgentListPayload>(cfg),
+                decl_of::<nession_protocol::contracts::agent::v1::AgentListReply>(cfg),
+                decl_of::<nession_protocol::contracts::agent::v1::WebAgentsListResponse>(cfg),
+                decl_of::<nession_protocol::contracts::agent::v1::WebAgentInfo>(cfg),
+                decl_of::<nession_protocol::contracts::agent::v1::AgentRefusal>(cfg),
+                decl_of::<nession_protocol::contracts::agent::v1::ProbedAddress>(cfg),
+                decl_of::<nession_protocol::contracts::agent::v1::AgentAddress>(cfg),
+                decl_of::<nession_protocol::contracts::agent::v1::NetworkType>(cfg),
+                decl_of::<nession_protocol::contracts::agent::v1::AddressStatus>(cfg),
+                decl_of::<nession_protocol::contracts::agent::v1::AgentMetadata>(cfg),
+                decl_of::<nession_protocol::ProtocolManifest>(cfg),
+                // Transitive: the manifest is keyed by id, so declaring it
+                // without this leaves an unresolved reference — which the
+                // generator refuses to write rather than emitting it.
+                decl_of::<nession_protocol::ProtocolId>(cfg),
+                decl_of::<nession_protocol::ContractSupport>(cfg),
+                decl_of::<nession_protocol::ContractVersion>(cfg),
+            ],
+            request: Some((
+                "AgentListCall",
+                nession_protocol::contracts::agent::v1::AgentListPayload::inline,
+                schema_of::<nession_protocol::contracts::agent::v1::AgentListPayload>,
+            )),
+            response: Some((
+                "AgentListResponse",
+                nession_protocol::contracts::agent::v1::AgentListReply::inline,
+                schema_of::<nession_protocol::contracts::agent::v1::AgentListReply>,
+            )),
         },
         Unit {
             owner: "core",
             id: "server.agent.rename",
             version: 1,
-wires: &["server.agent.rename"],
-            decls: vec![],
-            request: None,
-            response: None,
+            wires: &["server.agent.rename"],
+            // Typed, and the reply is `WebAgentInfo` — the same type
+            // `server.agent.list` returns. That is the fix, not a tidy-up: this
+            // arm used to build its own agent block and had drifted in exactly
+            // the two ways those fields are easiest to lose.
+            decls: vec![
+                decl_of::<nession_protocol::contracts::agent::v1::AgentRenamePayload>(cfg),
+                decl_of::<nession_protocol::contracts::agent::v1::AgentRenameReply>(cfg),
+                decl_of::<nession_protocol::contracts::agent::v1::AgentRenameResponse>(cfg),
+                decl_of::<nession_protocol::contracts::agent::v1::AgentRenameFailure>(cfg),
+                decl_of::<nession_protocol::contracts::agent::v1::WebAgentInfo>(cfg),
+                decl_of::<nession_protocol::contracts::agent::v1::ProbedAddress>(cfg),
+                decl_of::<nession_protocol::contracts::agent::v1::AgentAddress>(cfg),
+                decl_of::<nession_protocol::contracts::agent::v1::NetworkType>(cfg),
+                decl_of::<nession_protocol::contracts::agent::v1::AddressStatus>(cfg),
+                decl_of::<nession_protocol::contracts::agent::v1::AgentMetadata>(cfg),
+                decl_of::<nession_protocol::ProtocolManifest>(cfg),
+                decl_of::<nession_protocol::ProtocolId>(cfg),
+                decl_of::<nession_protocol::ContractSupport>(cfg),
+                decl_of::<nession_protocol::ContractVersion>(cfg),
+            ],
+            request: Some((
+                "AgentRenameCall",
+                nession_protocol::contracts::agent::v1::AgentRenamePayload::inline,
+                schema_of::<nession_protocol::contracts::agent::v1::AgentRenamePayload>,
+            )),
+            response: Some((
+                "AgentRenameResult",
+                nession_protocol::contracts::agent::v1::AgentRenameReply::inline,
+                schema_of::<nession_protocol::contracts::agent::v1::AgentRenameReply>,
+            )),
         },
         Unit {
             owner: "core",
@@ -435,13 +524,27 @@ wires: &["server.agent.delete"],
             id: "server.auth",
             version: 1,
             wires: &["server.auth"],
-            // Identity only. The Server reads this request's fields out of
-            // `serde_json::Value` and builds its answer with `json!`, so there
-            // is no named shape to point at. Naming one from `contracts/`
-            // would describe a type the handler does not use.
-            decls: vec![],
-            request: None,
-            response: None,
+            // The client's door at the Server; `client.auth` is the same
+            // handshake at the Agent's. One operation, two ends — which is why
+            // both payload types are shared with it rather than duplicated per
+            // end, and why this unit sits beside it in the `client` family.
+            //
+            // Typed once the handler built its answer from a type instead of
+            // `json!`; before that there was no named shape to point at.
+            decls: vec![
+                decl_of::<nession_protocol::contracts::client::v1::ClientAuthPayload>(cfg),
+                decl_of::<nession_protocol::contracts::client::v1::AuthResponsePayload>(cfg),
+            ],
+            request: Some((
+                "ServerAuthCall",
+                nession_protocol::contracts::client::v1::ClientAuthPayload::inline,
+                schema_of::<nession_protocol::contracts::client::v1::ClientAuthPayload>,
+            )),
+            response: Some((
+                "ServerAuthReply",
+                nession_protocol::contracts::client::v1::AuthResponsePayload::inline,
+                schema_of::<nession_protocol::contracts::client::v1::AuthResponsePayload>,
+            )),
         },
         Unit {
             owner: "core",
@@ -510,12 +613,24 @@ wires: &["client.auth"],
             id: "client.sessions.list",
             version: 1,
             wires: &["client.sessions.list"],
+            // The same pair `agent.session.list` uses, and the same situation:
+            // the agent already built `WebSessionsListResponse` by name, and the
+            // item types were declared here while neither alias was.
             decls: vec![
+                decl_of::<nession_protocol::contracts::session::v1::ClientSessionsListPayload>(cfg),
                 decl_of::<nession_protocol::contracts::session::v1::WebSessionsListResponse>(cfg),
                 decl_of::<nession_protocol::contracts::session::v1::WebSessionInfo>(cfg),
             ],
-            request: None,
-            response: None,
+            request: Some((
+                "ClientSessionsListCall",
+                nession_protocol::contracts::session::v1::ClientSessionsListPayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::ClientSessionsListPayload>,
+            )),
+            response: Some((
+                "WebSessionsListReply",
+                nession_protocol::contracts::session::v1::WebSessionsListResponse::inline,
+                schema_of::<nession_protocol::contracts::session::v1::WebSessionsListResponse>,
+            )),
         },
         Unit {
             owner: "core",
@@ -582,24 +697,50 @@ wires: &["client.auth"],
             id: "server.session.list",
             version: 1,
             wires: &["server.session.list"],
-            // Identity only. The Server reads this request's fields out of
-            // `serde_json::Value` and builds its answer with `json!`, so there
-            // is no named shape to point at. Naming one from `contracts/`
-            // would describe a type the handler does not use.
-            decls: vec![],
-            request: None,
-            response: None,
+            // The first union. This wire has two disjoint shapes — a list and a
+            // refusal — and the refusal half was never declared anywhere,
+            // though eleven handlers reply it.
+            decls: vec![
+                decl_of::<nession_protocol::contracts::session::v1::ServerSessionListPayload>(cfg),
+                decl_of::<nession_protocol::contracts::session::v1::ServerSessionListReply>(cfg),
+                decl_of::<nession_protocol::contracts::session::v1::WebSessionsListResponse>(cfg),
+                decl_of::<nession_protocol::contracts::session::v1::WebSessionInfo>(cfg),
+                decl_of::<nession_protocol::contracts::session::v1::SessionRefusal>(cfg),
+            ],
+            request: Some((
+                "SessionListCall",
+                nession_protocol::contracts::session::v1::ServerSessionListPayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::ServerSessionListPayload>,
+            )),
+            response: Some((
+                "SessionListReply",
+                nession_protocol::contracts::session::v1::ServerSessionListReply::inline,
+                schema_of::<nession_protocol::contracts::session::v1::ServerSessionListReply>,
+            )),
         },
         Unit {
             owner: "core",
             id: "agent.session.report",
             version: 1,
-wires: &["agent.session.report"],
+            wires: &["agent.session.report"],
+            // Request-only: the answer goes out on `server.agent.command-response`
+            // — a unit of its own — because that is what the `command`/`request_id`
+            // protocol is for. A reply declared here would describe a message
+            // nobody sends.
+            //
+            // `SessionListResponse` and `SessionInfo` were declared here and are
+            // gone: this unit's wire carries `{request_id}` and nothing else. The
+            // session list travels on the *answer*, and that belongs to
+            // `server.agent.command-response`. They were decls for a shape this
+            // unit does not carry.
             decls: vec![
-                decl_of::<nession_protocol::contracts::session::v1::SessionListResponse>(cfg),
-                decl_of::<nession_protocol::contracts::session::v1::SessionInfo>(cfg),
+                decl_of::<nession_protocol::contracts::session::v1::ServerSessionReportPayload>(cfg),
             ],
-            request: None,
+            request: Some((
+                "ServerSessionReportCall",
+                nession_protocol::contracts::session::v1::ServerSessionReportPayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::ServerSessionReportPayload>,
+            )),
             response: None,
         },
         Unit {
@@ -607,26 +748,58 @@ wires: &["agent.session.report"],
             id: "agent.session.list",
             version: 1,
             wires: &["agent.session.list"],
-            // Identity only. The Server reads this request's fields out of
-            // `serde_json::Value` and builds its answer with `json!`, so there
-            // is no named shape to point at. Naming one from `contracts/`
-            // would describe a type the handler does not use.
-            decls: vec![],
-            request: None,
-            response: None,
+            // Typed, and unlike every other unit here the *handler needed no
+            // change*: the agent already built `SessionListResponse` by name —
+            // it was the only side of this protocol that did, and the catalog
+            // had not caught up.
+            //
+            // Its request is *empty*, not absent: the arm reads nothing off the
+            // payload, and `request: None` would claim the unit has no request
+            // — which the catalogue's own invariant refuses, correctly.
+            decls: vec![
+                decl_of::<nession_protocol::contracts::session::v1::AgentSessionListPayload>(cfg),
+                decl_of::<nession_protocol::contracts::session::v1::SessionListResponse>(cfg),
+                decl_of::<nession_protocol::contracts::session::v1::SessionInfo>(cfg),
+            ],
+            request: Some((
+                "AgentSessionListCall",
+                nession_protocol::contracts::session::v1::AgentSessionListPayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::AgentSessionListPayload>,
+            )),
+            response: Some((
+                "SessionListReply",
+                nession_protocol::contracts::session::v1::SessionListResponse::inline,
+                schema_of::<nession_protocol::contracts::session::v1::SessionListResponse>,
+            )),
         },
         Unit {
             owner: "core",
             id: "server.session.create",
             version: 1,
             wires: &["server.session.create"],
-            // Identity only. The Server reads this request's fields out of
-            // `serde_json::Value` and builds its answer with `json!`, so there
-            // is no named shape to point at. Naming one from `contracts/`
-            // would describe a type the handler does not use.
-            decls: vec![],
-            request: None,
-            response: None,
+            // Typed. The request gained `env_files`, which the handler read
+            // off the payload and the contract never named — the compiler
+            // pointed at it once the parse started moving the payload.
+            decls: vec![
+                decl_of::<nession_protocol::contracts::session::v1::ClientSessionCreatePayload>(cfg),
+                decl_of::<nession_protocol::contracts::session::v1::ClientSessionCreateResponsePayload>(
+                    cfg,
+                ),
+                decl_of::<nession_protocol::contracts::env::v1::EnvFileRef>(cfg),
+                decl_of::<nession_protocol::contracts::env::v1::EnvSource>(cfg),
+            ],
+            request: Some((
+                "SessionCreateCall",
+                nession_protocol::contracts::session::v1::ClientSessionCreatePayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::ClientSessionCreatePayload>,
+            )),
+            response: Some((
+                "SessionCreateReply",
+                nession_protocol::contracts::session::v1::ClientSessionCreateResponsePayload::inline,
+                schema_of::<
+                    nession_protocol::contracts::session::v1::ClientSessionCreateResponsePayload,
+                >,
+            )),
         },
         Unit {
             owner: "core",
@@ -655,13 +828,25 @@ wires: &["agent.session.create"],
             id: "server.session.kill",
             version: 1,
             wires: &["server.session.kill"],
-            // Identity only. The Server reads this request's fields out of
-            // `serde_json::Value` and builds its answer with `json!`, so there
-            // is no named shape to point at. Naming one from `contracts/`
-            // would describe a type the handler does not use.
-            decls: vec![],
-            request: None,
-            response: None,
+            // Typed. No contract change: `WebSessionKillResponse` already
+            // described this wire exactly, including `error: null` where the
+            // hand-written `json!` produced it. One branch still moves — the
+            // offline-agent success reply gains `error: null` — because that
+            // branch omitted the field rather than the type being wrong.
+            decls: vec![
+                decl_of::<nession_protocol::contracts::session::v1::ClientSessionKillPayload>(cfg),
+                decl_of::<nession_protocol::contracts::session::v1::WebSessionKillResponse>(cfg),
+            ],
+            request: Some((
+                "SessionKillCall",
+                nession_protocol::contracts::session::v1::ClientSessionKillPayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::ClientSessionKillPayload>,
+            )),
+            response: Some((
+                "SessionKillReply",
+                nession_protocol::contracts::session::v1::WebSessionKillResponse::inline,
+                schema_of::<nession_protocol::contracts::session::v1::WebSessionKillResponse>,
+            )),
         },
         Unit {
             owner: "core",
@@ -713,12 +898,27 @@ wires: &["server.session.attach"],
             id: "server.session.capture-preview",
             version: 1,
             wires: &["server.session.capture-preview"],
-            // Identity only. The Server reads this request's fields out of
-            // `serde_json::Value` and builds its answer with `json!`, so there
-            // is no named shape to point at. Naming one from `contracts/`
-            // would describe a type the handler does not use.
-            decls: vec![],
-            request: None,
+            // Request typed; **response deliberately absent**.
+            //
+            // The Server's reply here is the agent's reply, forwarded. The
+            // relay "depends on no concrete provider crate … routes by
+            // manifest, not by knowing a payload schema"
+            // (`docs/architecture/protocol.md`), so the shape on this wire
+            // belongs to `agent.session.capture-preview`'s contract and is not
+            // Nession's to describe from this side. `None` with that reason
+            // beats the silent `None` it used to be.
+            decls: vec![
+                decl_of::<nession_protocol::contracts::session::v1::ClientSessionCapturePreviewPayload>(
+                    cfg,
+                ),
+            ],
+            request: Some((
+                "SessionCapturePreviewCall",
+                nession_protocol::contracts::session::v1::ClientSessionCapturePreviewPayload::inline,
+                schema_of::<
+                    nession_protocol::contracts::session::v1::ClientSessionCapturePreviewPayload,
+                >,
+            )),
             response: None,
         },
         Unit {
@@ -745,18 +945,47 @@ wires: &["agent.session.capture-preview"],
             owner: "core",
             id: "server.session.relay.begin",
             version: 1,
-wires: &["server.session.relay.begin"],
-            decls: vec![],
-            request: None,
-            response: None,
+            wires: &["server.session.relay.begin"],
+            // The reply is a **refusal, and only a refusal** — the success path
+            // returns `HandlerAction::Relay` and sends no message at all. Its own
+            // comment says so: *"No separate response — the server enters relay
+            // forwarding immediately."* So the response is `SessionRefusal`, not
+            // an untagged union: there is no second branch to discriminate
+            // against, and inventing one would describe a message nobody sends.
+            decls: vec![
+                decl_of::<nession_protocol::contracts::session::v1::ClientRelayBeginPayload>(cfg),
+                decl_of::<nession_protocol::contracts::session::v1::SessionRefusal>(cfg),
+            ],
+            request: Some((
+                "ClientRelayBeginCall",
+                nession_protocol::contracts::session::v1::ClientRelayBeginPayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::ClientRelayBeginPayload>,
+            )),
+            response: Some((
+                "ClientRelayBeginReply",
+                nession_protocol::contracts::session::v1::SessionRefusal::inline,
+                schema_of::<nession_protocol::contracts::session::v1::SessionRefusal>,
+            )),
         },
         Unit {
             owner: "core",
             id: "server.session.relay.end",
             version: 1,
-wires: &["server.session.relay.end"],
-            decls: vec![],
-            request: None,
+            wires: &["server.session.relay.end"],
+            // One-way, and routed off the dispatcher: the route table's arm is a
+            // bare `Ok(HandlerAction::Reply(None))` stub, because the real
+            // interception happens inside the relay forwarding loop — by then the
+            // connection is pumped by two `async` blocks and never returns to
+            // `handle_message`. Declared here so the wire has a shape; the
+            // routing lives with the loop that must see it.
+            decls: vec![
+                decl_of::<nession_protocol::contracts::session::v1::ClientRelayEndPayload>(cfg),
+            ],
+            request: Some((
+                "ClientRelayEndCall",
+                nession_protocol::contracts::session::v1::ClientRelayEndPayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::ClientRelayEndPayload>,
+            )),
             response: None,
         },
         Unit {
@@ -764,13 +993,31 @@ wires: &["server.session.relay.end"],
             id: "server.session.env.apply",
             version: 1,
             wires: &["server.session.env.apply"],
-            // Identity only. The Server reads this request's fields out of
-            // `serde_json::Value` and builds its answer with `json!`, so there
-            // is no named shape to point at. Naming one from `contracts/`
-            // would describe a type the handler does not use.
-            decls: vec![],
-            request: None,
-            response: None,
+            // Typed. Two of its three replies gain `warnings: []` — the field
+            // is always serialised and those branches produced none, which is
+            // true rather than additive-only.
+            decls: vec![
+                decl_of::<nession_protocol::contracts::session::v1::ClientSessionEnvApplyPayload>(
+                    cfg,
+                ),
+                decl_of::<nession_protocol::contracts::session::v1::ClientSessionEnvResponsePayload>(
+                    cfg,
+                ),
+                decl_of::<nession_protocol::contracts::env::v1::EnvFileRef>(cfg),
+                decl_of::<nession_protocol::contracts::env::v1::EnvSource>(cfg),
+            ],
+            request: Some((
+                "SessionEnvApplyCall",
+                nession_protocol::contracts::session::v1::ClientSessionEnvApplyPayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::ClientSessionEnvApplyPayload>,
+            )),
+            response: Some((
+                "SessionEnvApplyReply",
+                nession_protocol::contracts::session::v1::ClientSessionEnvResponsePayload::inline,
+                schema_of::<
+                    nession_protocol::contracts::session::v1::ClientSessionEnvResponsePayload,
+                >,
+            )),
         },
         Unit {
             owner: "core",
@@ -799,13 +1046,31 @@ wires: &["agent.session.env.apply"],
             id: "server.session.env.unset",
             version: 1,
             wires: &["server.session.env.unset"],
-            // Identity only. The Server reads this request's fields out of
-            // `serde_json::Value` and builds its answer with `json!`, so there
-            // is no named shape to point at. Naming one from `contracts/`
-            // would describe a type the handler does not use.
-            decls: vec![],
-            request: None,
-            response: None,
+            // Typed, sharing `ClientSessionEnvResponsePayload` with `apply`.
+            // Its success branch gains `warnings: []` — always serialised, and
+            // there were none.
+            decls: vec![
+                decl_of::<nession_protocol::contracts::session::v1::ClientSessionEnvUnsetPayload>(
+                    cfg,
+                ),
+                decl_of::<nession_protocol::contracts::session::v1::ClientSessionEnvResponsePayload>(
+                    cfg,
+                ),
+                decl_of::<nession_protocol::contracts::env::v1::EnvFileRef>(cfg),
+                decl_of::<nession_protocol::contracts::env::v1::EnvSource>(cfg),
+            ],
+            request: Some((
+                "SessionEnvUnsetCall",
+                nession_protocol::contracts::session::v1::ClientSessionEnvUnsetPayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::ClientSessionEnvUnsetPayload>,
+            )),
+            response: Some((
+                "SessionEnvUnsetReply",
+                nession_protocol::contracts::session::v1::ClientSessionEnvResponsePayload::inline,
+                schema_of::<
+                    nession_protocol::contracts::session::v1::ClientSessionEnvResponsePayload,
+                >,
+            )),
         },
         Unit {
             owner: "core",
@@ -833,35 +1098,78 @@ wires: &["agent.session.env.unset"],
             owner: "core",
             id: "server.session.env.active",
             version: 1,
-wires: &["server.session.env.active"],
+            wires: &["server.session.env.active"],
+            // It already declared the item types but neither alias, so the
+            // schema said a shape existed and then named nothing.
             decls: vec![
+                decl_of::<nession_protocol::contracts::session::v1::ClientSessionEnvActivePayload>(
+                    cfg,
+                ),
+                decl_of::<nession_protocol::contracts::session::v1::SessionEnvActiveResponse>(cfg),
                 decl_of::<nession_protocol::contracts::env::v1::ActiveEnvFile>(cfg),
                 decl_of::<nession_protocol::contracts::env::v1::EnvSource>(cfg),
             ],
-            request: None,
-            response: None,
+            request: Some((
+                "SessionEnvActiveCall",
+                nession_protocol::contracts::session::v1::ClientSessionEnvActivePayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::ClientSessionEnvActivePayload>,
+            )),
+            response: Some((
+                "SessionEnvActiveReply",
+                nession_protocol::contracts::session::v1::SessionEnvActiveResponse::inline,
+                schema_of::<nession_protocol::contracts::session::v1::SessionEnvActiveResponse>,
+            )),
         },
         Unit {
             owner: "core",
             id: "server.session.env.query",
             version: 1,
             wires: &["server.session.env.query"],
-            decls: vec![],
-            request: None,
-            response: None,
+            // Typed. `sourced_files` is a list of *names* on this wire, not of
+            // `EnvFileRef`s — the handler maps the agent's array through
+            // `as_str`. Reading the branch is what said so.
+            decls: vec![
+                decl_of::<nession_protocol::contracts::session::v1::ClientSessionEnvQueryPayload>(
+                    cfg,
+                ),
+                decl_of::<nession_protocol::contracts::session::v1::SessionEnvQueryResponse>(cfg),
+            ],
+            request: Some((
+                "SessionEnvQueryCall",
+                nession_protocol::contracts::session::v1::ClientSessionEnvQueryPayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::ClientSessionEnvQueryPayload>,
+            )),
+            response: Some((
+                "SessionEnvQueryReply",
+                nession_protocol::contracts::session::v1::SessionEnvQueryResponse::inline,
+                schema_of::<nession_protocol::contracts::session::v1::SessionEnvQueryResponse>,
+            )),
         },
         Unit {
             owner: "core",
             id: "server.env.list",
             version: 1,
             wires: &["server.env.list"],
-            // Identity only. The Server reads this request's fields out of
-            // `serde_json::Value` and builds its answer with `json!`, so there
-            // is no named shape to point at. Naming one from `contracts/`
-            // would describe a type the handler does not use.
-            decls: vec![],
-            request: None,
-            response: None,
+            // Typed, and the same two types `agent.env.list` already declares a
+            // few lines up — one question, asked of the Server by a browser and
+            // of an agent by the Server. The handler read and wrote `Value`
+            // while these sat unused, which is what "identity only" meant here.
+            decls: vec![
+                decl_of::<nession_protocol::contracts::env::v1::ClientEnvListPayload>(cfg),
+                decl_of::<nession_protocol::contracts::env::v1::ClientEnvListResponsePayload>(cfg),
+                decl_of::<nession_protocol::contracts::env::v1::EnvFileInfo>(cfg),
+                decl_of::<nession_protocol::contracts::env::v1::EnvSource>(cfg),
+            ],
+            request: Some((
+                "ClientEnvListCall",
+                nession_protocol::contracts::env::v1::ClientEnvListPayload::inline,
+                schema_of::<nession_protocol::contracts::env::v1::ClientEnvListPayload>,
+            )),
+            response: Some((
+                "ClientEnvListReply",
+                nession_protocol::contracts::env::v1::ClientEnvListResponsePayload::inline,
+                schema_of::<nession_protocol::contracts::env::v1::ClientEnvListResponsePayload>,
+            )),
         },
         Unit {
             owner: "core",
@@ -890,13 +1198,22 @@ wires: &["agent.env.list"],
             id: "server.env.get",
             version: 1,
             wires: &["server.env.get"],
-            // Identity only. The Server reads this request's fields out of
-            // `serde_json::Value` and builds its answer with `json!`, so there
-            // is no named shape to point at. Naming one from `contracts/`
-            // would describe a type the handler does not use.
-            decls: vec![],
-            request: None,
-            response: None,
+            // Typed, like its `agent.env.get` twin.
+            decls: vec![
+                decl_of::<nession_protocol::contracts::env::v1::ClientEnvGetPayload>(cfg),
+                decl_of::<nession_protocol::contracts::env::v1::ClientEnvGetResponsePayload>(cfg),
+                decl_of::<nession_protocol::contracts::env::v1::EnvSource>(cfg),
+            ],
+            request: Some((
+                "ClientEnvGetCall",
+                nession_protocol::contracts::env::v1::ClientEnvGetPayload::inline,
+                schema_of::<nession_protocol::contracts::env::v1::ClientEnvGetPayload>,
+            )),
+            response: Some((
+                "ClientEnvGetReply",
+                nession_protocol::contracts::env::v1::ClientEnvGetResponsePayload::inline,
+                schema_of::<nession_protocol::contracts::env::v1::ClientEnvGetResponsePayload>,
+            )),
         },
         Unit {
             owner: "core",
@@ -924,13 +1241,26 @@ wires: &["agent.env.get"],
             id: "server.env.write",
             version: 1,
             wires: &["server.env.write"],
-            // Identity only. The Server reads this request's fields out of
-            // `serde_json::Value` and builds its answer with `json!`, so there
-            // is no named shape to point at. Naming one from `contracts/`
-            // would describe a type the handler does not use.
-            decls: vec![],
-            request: None,
-            response: None,
+            // Typed, like its `agent.env.write` twin. The contract gained four
+            // fields the wire has always carried and it never named — `force`
+            // on the request, and `in_use_by` / `re_sourced` /
+            // `re_source_errors` on the reply — each optional so that the
+            // branches which do not carry it are unchanged.
+            decls: vec![
+                decl_of::<nession_protocol::contracts::env::v1::ClientEnvWritePayload>(cfg),
+                decl_of::<nession_protocol::contracts::env::v1::ClientEnvWriteResponsePayload>(cfg),
+                decl_of::<nession_protocol::contracts::env::v1::EnvSource>(cfg),
+            ],
+            request: Some((
+                "ClientEnvWriteCall",
+                nession_protocol::contracts::env::v1::ClientEnvWritePayload::inline,
+                schema_of::<nession_protocol::contracts::env::v1::ClientEnvWritePayload>,
+            )),
+            response: Some((
+                "ClientEnvWriteReply",
+                nession_protocol::contracts::env::v1::ClientEnvWriteResponsePayload::inline,
+                schema_of::<nession_protocol::contracts::env::v1::ClientEnvWriteResponsePayload>,
+            )),
         },
         Unit {
             owner: "core",
@@ -958,13 +1288,24 @@ wires: &["agent.env.write"],
             id: "server.env.delete",
             version: 1,
             wires: &["server.env.delete"],
-            // Identity only. The Server reads this request's fields out of
-            // `serde_json::Value` and builds its answer with `json!`, so there
-            // is no named shape to point at. Naming one from `contracts/`
-            // would describe a type the handler does not use.
-            decls: vec![],
-            request: None,
-            response: None,
+            // Typed, like its `agent.env.delete` twin. The only wire change is
+            // that `force` is now named by the contract rather than read from
+            // `Value` beside it — it was always sent.
+            decls: vec![
+                decl_of::<nession_protocol::contracts::env::v1::ClientEnvDeletePayload>(cfg),
+                decl_of::<nession_protocol::contracts::env::v1::ClientEnvDeleteResponsePayload>(cfg),
+                decl_of::<nession_protocol::contracts::env::v1::EnvSource>(cfg),
+            ],
+            request: Some((
+                "ClientEnvDeleteCall",
+                nession_protocol::contracts::env::v1::ClientEnvDeletePayload::inline,
+                schema_of::<nession_protocol::contracts::env::v1::ClientEnvDeletePayload>,
+            )),
+            response: Some((
+                "ClientEnvDeleteReply",
+                nession_protocol::contracts::env::v1::ClientEnvDeleteResponsePayload::inline,
+                schema_of::<nession_protocol::contracts::env::v1::ClientEnvDeleteResponsePayload>,
+            )),
         },
         Unit {
             owner: "core",
@@ -1118,7 +1459,12 @@ wires: &["server.commands.update"],
             owner: "core",
             id: "agent.terminal.input",
             version: 1,
-wires: &["agent.terminal.input"],
+            wires: &["agent.terminal.input"],
+            // One-way, and `response: None` **is** the statement: keystrokes go
+            // to the pty and nothing answers them. Verified rather than
+            // assumed — no `.response` wire for this unit exists anywhere in
+            // the tree. The absence used to be indistinguishable from an
+            // unfinished entry, which is what this comment is for.
             decls: vec![
                 decl_of::<nession_protocol::contracts::terminal::v1::TerminalInputPayload>(cfg),
             ],
@@ -1133,7 +1479,9 @@ wires: &["agent.terminal.input"],
             owner: "core",
             id: "agent.terminal.resize",
             version: 1,
-wires: &["agent.terminal.resize"],
+            wires: &["agent.terminal.resize"],
+            // One-way: a size change is announced, not answered. No `.response`
+            // wire exists for it, so `None` is the model rather than a gap.
             decls: vec![
                 decl_of::<nession_protocol::contracts::terminal::v1::TerminalResizePayload>(cfg),
             ],
@@ -1289,9 +1637,24 @@ wires: &["agent.file.cwd"],
             owner: "core",
             id: "agent.keepalive.ping",
             version: 1,
-wires: &["agent.keepalive.ping"],
-            decls: vec![],
-            request: None,
+            wires: &["agent.keepalive.ping"],
+            // Request-only, and **forced rather than chosen**: the agent answers
+            // with an empty payload on `keepalive.pong`, not on
+            // `agent.keepalive.ping.response`. The response slot names a shape,
+            // and the `<wire>.response` convention is what gives that shape a
+            // wire — so attaching one would assert a wire nobody sends.
+            //
+            // The one unit here whose missing half is a *naming* problem rather
+            // than a missing type: `keepalive.pong` is a wire the kernel's
+            // `<wire>.response` rule cannot reach.
+            decls: vec![
+                decl_of::<nession_protocol::contracts::agent::v1::KeepalivePingPayload>(cfg),
+            ],
+            request: Some((
+                "KeepalivePingCall",
+                nession_protocol::contracts::agent::v1::KeepalivePingPayload::inline,
+                schema_of::<nession_protocol::contracts::agent::v1::KeepalivePingPayload>,
+            )),
             response: None,
         },
     ]
