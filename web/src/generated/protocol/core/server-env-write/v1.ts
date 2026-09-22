@@ -21,12 +21,109 @@ export const VERSION = 1;
 
 // ── Shapes ──
 
+export type ClientEnvWritePayload = { name: string, source: EnvSource, agent_id?: string | null, 
+/**
+ * The file's contents.
+ *
+ * Defaulted because the Server has always read a missing `content` as the
+ * empty string, and a request it accepted yesterday must not start being
+ * refused because a type was attached to it. That tolerance is worth
+ * questioning on its own — a write that quietly creates an empty file is a
+ * footgun — but questioning it is a behaviour change, not a contract one.
+ */
+content: string, 
+/**
+ * When false, refuse to overwrite an existing file (create-only).
+ */
+overwrite: boolean, 
+/**
+ * Overwrite even though a running session has the file sourced, then
+ * re-source it.
+ *
+ * Read off `Value` beside the parser until now, like `delete`'s `force`
+ * and for the same reason: the field has always been on the wire and was
+ * never named here.
+ */
+force: boolean, };
+export type ClientEnvWriteResponsePayload = { success: boolean, 
+/**
+ * True when the write was refused because the file already exists and
+ * `overwrite` was false (UI prompts for confirmation).
+ */
+exists: boolean, error?: string | null, warnings: Array<string>, 
+/**
+ * Sessions holding the file, on the refusal that names them.
+ *
+ * Optional for the same reason as `ClientEnvGetResponsePayload::in_use_by`
+ * — it is computed on exactly one branch — and for a blunter one: this
+ * field was on the wire without being in the contract at all, so any
+ * consumer reading the schema had no way to know it existed.
+ */
+in_use_by?: Array<string> | null, 
+/**
+ * Sessions re-sourced after a forced write. Reported on the success branch
+ * only, because it is the only branch that re-sources anything.
+ */
+re_sourced?: Array<string> | null, 
+/**
+ * Why any of those re-sources failed. Same branch as `re_sourced`, and
+ * absent for the same reason.
+ */
+re_source_errors?: Array<string> | null, };
+export type EnvSource = "server" | "agent";
 
 // ── Operations ──
 
+/** The payload a caller sends. */
+export type ClientEnvWriteCall = { name: string, source: EnvSource, agent_id?: string | null, 
 /**
- * No request alias: the catalog declares no request shape for this unit.
+ * The file's contents.
+ *
+ * Defaulted because the Server has always read a missing `content` as the
+ * empty string, and a request it accepted yesterday must not start being
+ * refused because a type was attached to it. That tolerance is worth
+ * questioning on its own — a write that quietly creates an empty file is a
+ * footgun — but questioning it is a behaviour change, not a contract one.
  */
+content: string, 
 /**
- * No response alias: the catalog declares no response shape for this unit.
+ * When false, refuse to overwrite an existing file (create-only).
  */
+overwrite: boolean, 
+/**
+ * Overwrite even though a running session has the file sourced, then
+ * re-source it.
+ *
+ * Read off `Value` beside the parser until now, like `delete`'s `force`
+ * and for the same reason: the field has always been on the wire and was
+ * never named here.
+ */
+force: boolean, };
+
+/** The payload the provider answers with. */
+export type ClientEnvWriteReply = { success: boolean, 
+/**
+ * True when the write was refused because the file already exists and
+ * `overwrite` was false (UI prompts for confirmation).
+ */
+exists: boolean, error?: string | null, warnings: Array<string>, 
+/**
+ * Sessions holding the file, on the refusal that names them.
+ *
+ * Optional for the same reason as `ClientEnvGetResponsePayload::in_use_by`
+ * — it is computed on exactly one branch — and for a blunter one: this
+ * field was on the wire without being in the contract at all, so any
+ * consumer reading the schema had no way to know it existed.
+ */
+in_use_by?: Array<string> | null, 
+/**
+ * Sessions re-sourced after a forced write. Reported on the success branch
+ * only, because it is the only branch that re-sources anything.
+ */
+re_sourced?: Array<string> | null, 
+/**
+ * Why any of those re-sources failed. Same branch as `re_sourced`, and
+ * absent for the same reason.
+ */
+re_source_errors?: Array<string> | null, };
+

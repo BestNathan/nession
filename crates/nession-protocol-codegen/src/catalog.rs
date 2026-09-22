@@ -951,13 +951,26 @@ wires: &["agent.env.get"],
             id: "server.env.write",
             version: 1,
             wires: &["server.env.write"],
-            // Identity only. The Server reads this request's fields out of
-            // `serde_json::Value` and builds its answer with `json!`, so there
-            // is no named shape to point at. Naming one from `contracts/`
-            // would describe a type the handler does not use.
-            decls: vec![],
-            request: None,
-            response: None,
+            // Typed, like its `agent.env.write` twin. The contract gained four
+            // fields the wire has always carried and it never named — `force`
+            // on the request, and `in_use_by` / `re_sourced` /
+            // `re_source_errors` on the reply — each optional so that the
+            // branches which do not carry it are unchanged.
+            decls: vec![
+                decl_of::<nession_protocol::contracts::env::v1::ClientEnvWritePayload>(cfg),
+                decl_of::<nession_protocol::contracts::env::v1::ClientEnvWriteResponsePayload>(cfg),
+                decl_of::<nession_protocol::contracts::env::v1::EnvSource>(cfg),
+            ],
+            request: Some((
+                "ClientEnvWriteCall",
+                nession_protocol::contracts::env::v1::ClientEnvWritePayload::inline,
+                schema_of::<nession_protocol::contracts::env::v1::ClientEnvWritePayload>,
+            )),
+            response: Some((
+                "ClientEnvWriteReply",
+                nession_protocol::contracts::env::v1::ClientEnvWriteResponsePayload::inline,
+                schema_of::<nession_protocol::contracts::env::v1::ClientEnvWriteResponsePayload>,
+            )),
         },
         Unit {
             owner: "core",

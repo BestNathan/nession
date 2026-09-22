@@ -17,8 +17,8 @@ use nession_protocol::contracts::agent::v1::{
 };
 use nession_protocol::contracts::env::v1::{
     ClientEnvDeletePayload, ClientEnvDeleteResponsePayload, ClientEnvGetPayload,
-    ClientEnvGetResponsePayload, ClientEnvListPayload, ClientEnvListResponsePayload, EnvFileRef,
-    EnvSnapshot, EnvSource,
+    ClientEnvGetResponsePayload, ClientEnvListPayload, ClientEnvListResponsePayload,
+    ClientEnvWritePayload, ClientEnvWriteResponsePayload, EnvFileRef, EnvSnapshot, EnvSource,
 };
 use nession_protocol::contracts::session::v1::{
     AgentTerminalResizePayload, ServerTerminalResizePayload,
@@ -2606,37 +2606,36 @@ impl ConnectionHandler {
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
     ) -> anyhow::Result<HandlerAction> {
+        // Typed at the contract boundary. Three fields used to be read off the
+        // payload beside the parser — `content`, `overwrite` and `force` — and
+        // only the first two were declared.
+        let refusal = |error: &str| ClientEnvWriteResponsePayload {
+            success: false,
+            exists: false,
+            error: Some(error.to_string()),
+            warnings: Vec::new(),
+            in_use_by: None,
+            re_sourced: None,
+            re_source_errors: None,
+        };
+
         if !self.authenticated_client {
-            return Ok(reply_json(
-                &msg.id,
-                "server.env.write.response",
-                json!({ "success": false, "error": "Not authenticated" }),
-            ));
+            return Ok(env_write_reply(&msg.id, refusal("Not authenticated")));
         }
-        let (name, source, agent_id) = parse_env_ref(&msg.payload);
-        let content = msg
-            .payload
-            .get("content")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        let overwrite = msg
-            .payload
-            .get("overwrite")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false);
-        let force = msg
-            .payload
-            .get("force")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false);
+        let Ok(ClientEnvWritePayload {
+            name,
+            source,
+            agent_id,
+            content,
+            overwrite,
+            force,
+        }) = serde_json::from_value(msg.payload)
+        else {
+            return Ok(env_write_reply(&msg.id, refusal("name is required")));
+        };
 
         if name.is_empty() {
-            return Ok(reply_json(
-                &msg.id,
-                "server.env.write.response",
-                json!({ "success": false, "error": "name is required" }),
-            ));
+            return Ok(env_write_reply(&msg.id, refusal("name is required")));
         }
 
         // In-use lock: an overwrite of a file bound to a running session is
@@ -2648,17 +2647,16 @@ impl ConnectionHandler {
                 .usage
                 .sessions_using(&name, source, agent_id.as_deref());
             if !in_use.is_empty() {
-                return Ok(reply_json(
+                return Ok(env_write_reply(
                     &msg.id,
-                    "server.env.write.response",
-                    json!({
-                        "success": false,
-                        "error": format!(
+                    ClientEnvWriteResponsePayload {
+                        error: Some(format!(
                             "This file is in use by session(s): {}. Stop the session or detach before editing.",
                             in_use.join(", ")
-                        ),
-                        "in_use_by": in_use,
-                    }),
+                        )),
+                        in_use_by: Some(in_use),
+                        ..refusal("")
+                    },
                 ));
             }
         }
@@ -2717,27 +2715,34 @@ impl ConnectionHandler {
                     }
                 }
 
-                Ok(reply_json(
+                Ok(env_write_reply(
                     &msg.id,
-                    "server.env.write.response",
-                    json!({
-                        "success": true,
-                        "warnings": warnings,
-                        "re_sourced": re_sourced,
-                        "re_source_errors": re_source_errors,
-                    }),
+                    ClientEnvWriteResponsePayload {
+                        success: true,
+                        exists: false,
+                        error: None,
+                        warnings,
+                        in_use_by: None,
+                        re_sourced: Some(re_sourced),
+                        re_source_errors: Some(re_source_errors),
+                    },
                 ))
             }
-            Ok(false) => Ok(reply_json(
+            // Refused for existing, which carries `exists` and no error — the
+            // UI prompts for confirmation rather than reporting a failure.
+            Ok(false) => Ok(env_write_reply(
                 &msg.id,
-                "server.env.write.response",
-                json!({ "success": false, "exists": true }),
+                ClientEnvWriteResponsePayload {
+                    success: false,
+                    exists: true,
+                    error: None,
+                    warnings: Vec::new(),
+                    in_use_by: None,
+                    re_sourced: None,
+                    re_source_errors: None,
+                },
             )),
-            Err(e) => Ok(reply_json(
-                &msg.id,
-                "server.env.write.response",
-                json!({ "success": false, "error": e }),
-            )),
+            Err(e) => Ok(env_write_reply(&msg.id, refusal(&e))),
         }
     }
 
@@ -3394,6 +3399,16 @@ mod extract_ip_tests {
 /// `to_value` cannot fail for a struct of these shapes, but the house pattern
 /// keeps a fallback rather than an unwrap — and an empty list is still a valid
 /// payload, so a caller reads "no files" instead of losing the reply.
+/// Serialize a `server.env.write` reply. Same fallback reasoning as
+/// [`env_list_reply`].
+fn env_write_reply(id: &str, payload: ClientEnvWriteResponsePayload) -> HandlerAction {
+    reply_json(
+        id,
+        "server.env.write.response",
+        serde_json::to_value(&payload).unwrap_or(json!({ "success": false })),
+    )
+}
+
 /// Serialize a `server.env.delete` reply. Same fallback reasoning as
 /// [`env_list_reply`].
 fn env_del_reply(id: &str, payload: ClientEnvDeleteResponsePayload) -> HandlerAction {
@@ -3432,24 +3447,6 @@ fn reply_json(id: &str, msg_type: &str, payload: serde_json::Value) -> HandlerAc
         })
         .to_string(),
     )))
-}
-
-/// Extract (name, source, agent_id) from an env-file reference payload.
-fn parse_env_ref(payload: &serde_json::Value) -> (String, EnvSource, Option<String>) {
-    let name = payload
-        .get("name")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
-    let source = match payload.get("source").and_then(|v| v.as_str()) {
-        Some("agent") => EnvSource::Agent,
-        _ => EnvSource::Server,
-    };
-    let agent_id = payload
-        .get("agent_id")
-        .and_then(|v| v.as_str())
-        .map(str::to_string);
-    (name, source, agent_id)
 }
 
 fn current_timestamp() -> u64 {
@@ -5776,33 +5773,36 @@ mod tests {
             .contains("Invalid session_id"));
     }
 
-    // ---- parse_env_ref ----
+    // ---- env payload contracts ----
+    //
+    // These replace the three `parse_env_ref` tests. That helper is gone — the
+    // handlers parse into the contract types now — and the leniency it had is
+    // expressed by those types' serde defaults, so that is what these pin. The
+    // behaviour they describe is unchanged; only the place it is written down
+    // has moved.
 
     #[test]
-    fn parse_env_ref_server_default() {
-        let payload = json!({ "name": "test.env" });
-        let (name, source, agent_id) = parse_env_ref(&payload);
-        assert_eq!(name, "test.env");
-        assert_eq!(source, EnvSource::Server);
-        assert!(agent_id.is_none());
+    fn a_missing_source_is_a_server_file() {
+        let p: ClientEnvWritePayload = serde_json::from_value(json!({ "name": "x.env" })).unwrap();
+        assert_eq!(p.source, EnvSource::Server);
+        assert!(p.agent_id.is_none());
     }
 
     #[test]
-    fn parse_env_ref_agent() {
-        let payload = json!({ "name": "test.env", "source": "agent", "agent_id": "a1" });
-        let (name, source, agent_id) = parse_env_ref(&payload);
-        assert_eq!(name, "test.env");
-        assert_eq!(source, EnvSource::Agent);
-        assert_eq!(agent_id, Some("a1".to_string()));
+    fn an_agent_source_carries_its_agent() {
+        let p: ClientEnvWritePayload =
+            serde_json::from_value(json!({ "name": "x.env", "source": "agent", "agent_id": "a1" }))
+                .unwrap();
+        assert_eq!(p.source, EnvSource::Agent);
+        assert_eq!(p.agent_id.as_deref(), Some("a1"));
     }
 
     #[test]
-    fn parse_env_ref_empty() {
-        let payload = json!({});
-        let (name, source, agent_id) = parse_env_ref(&payload);
-        assert_eq!(name, "");
-        assert_eq!(source, EnvSource::Server);
-        assert!(agent_id.is_none());
+    fn a_payload_with_no_name_does_not_parse() {
+        // `parse_env_ref` returned an empty name and let the handler refuse it.
+        // The type refuses it now, and the handler maps that failure to the
+        // same reply — so the wire is unchanged, which is the point.
+        assert!(serde_json::from_value::<ClientEnvWritePayload>(json!({})).is_err());
     }
 
     // ---- env write in-use lock ----

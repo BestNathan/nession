@@ -303,13 +303,21 @@ fn an_unknown_operation_is_an_empty_catalog_rather_than_an_error() {
 
 #[test]
 fn a_unit_with_no_shape_says_so_instead_of_omitting_the_key() {
-    // `server.env.write` is identity-only: the handler reads raw JSON. Present
-    // and null, so a consumer can tell "no shape" from "this document predates
-    // the field" — the same rule the agent-list wire follows.
-    let doc = crate::schema::document(Some("server.env.write"));
-    let entry = &doc["protocols"]["server.env.write"];
-    assert!(entry["request"].is_null());
-    assert!(entry["response"].is_null());
-    assert_eq!(entry["owner"], "core");
-    assert_eq!(entry["version"], 1);
+    // Present and null, so a consumer can tell "no shape" from "this document
+    // predates the field" — the same rule the agent-list wire follows.
+    //
+    // The unit is *chosen* rather than named. It used to name
+    // `server.env.write`, and went red the moment #920 typed that unit — which
+    // is how this was found, and a fair way to be told the work is progressing.
+    // Naming another one would only move the tripwire, so this takes whatever
+    // identity-only unit is left and says so loudly if there is none.
+    let doc = crate::schema::document(None);
+    let Some(unit) = units().into_iter().find(|u| u.decls.is_empty()) else {
+        panic!("#920 finished: no identity-only units remain, so this has no subject");
+    };
+    let entry = &doc["protocols"][unit.id];
+    assert!(entry["request"].is_null(), "{} has a request", unit.id);
+    assert!(entry["response"].is_null(), "{} has a response", unit.id);
+    assert_eq!(entry["owner"], unit.owner);
+    assert_eq!(entry["version"], unit.version);
 }
