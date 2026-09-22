@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::contracts::agent::v1::ProbedAddress;
-use crate::contracts::env::v1::{EnvFileRef, EnvSnapshot};
+use crate::contracts::env::v1::{ActiveEnvFile, EnvFileRef, EnvSnapshot};
 
 // --- Server → Agent command payloads ---
 
@@ -173,6 +173,27 @@ pub struct ClientSessionEnvUnsetPayload {
     /// The specific files (by name) previously applied by this client that
     /// should now be removed via `tmux set-environment -u`.
     pub env_files: Vec<EnvFileRef>,
+}
+
+/// `server.session.env.active` — request and reply.
+///
+/// The reply is **one shape with an optional error**, not two disjoint halves:
+/// the refusal branches carry an empty list as well. So this needs no union,
+/// unlike `ServerSessionListReply`.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClientSessionEnvActivePayload {
+    pub session_id: String,
+}
+
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionEnvActiveResponse {
+    pub active: Vec<ActiveEnvFile>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]

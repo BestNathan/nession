@@ -21,6 +21,8 @@ export const VERSION = 1;
 
 // ── Shapes ──
 
+export type ClientSessionEnvActivePayload = { session_id: string, };
+export type SessionEnvActiveResponse = { active: Array<ActiveEnvFile>, error?: string | null, };
 export type ActiveEnvFile = { name: string, source: EnvSource, agent_id?: string | null, 
 /**
  * "create" (injected at session creation) or "attach" (applied on attach).
@@ -34,9 +36,9 @@ export type EnvSource = "server" | "agent";
 
 // ── Operations ──
 
-/**
- * No request alias: the catalog declares no request shape for this unit.
- */
-/**
- * No response alias: the catalog declares no response shape for this unit.
- */
+/** The payload a caller sends. */
+export type SessionEnvActiveCall = { session_id: string, };
+
+/** The payload the provider answers with. */
+export type SessionEnvActiveReply = { active: Array<ActiveEnvFile>, error?: string | null, };
+

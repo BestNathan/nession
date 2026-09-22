@@ -930,13 +930,27 @@ wires: &["agent.session.env.unset"],
             owner: "core",
             id: "server.session.env.active",
             version: 1,
-wires: &["server.session.env.active"],
+            wires: &["server.session.env.active"],
+            // It already declared the item types but neither alias, so the
+            // schema said a shape existed and then named nothing.
             decls: vec![
+                decl_of::<nession_protocol::contracts::session::v1::ClientSessionEnvActivePayload>(
+                    cfg,
+                ),
+                decl_of::<nession_protocol::contracts::session::v1::SessionEnvActiveResponse>(cfg),
                 decl_of::<nession_protocol::contracts::env::v1::ActiveEnvFile>(cfg),
                 decl_of::<nession_protocol::contracts::env::v1::EnvSource>(cfg),
             ],
-            request: None,
-            response: None,
+            request: Some((
+                "SessionEnvActiveCall",
+                nession_protocol::contracts::session::v1::ClientSessionEnvActivePayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::ClientSessionEnvActivePayload>,
+            )),
+            response: Some((
+                "SessionEnvActiveReply",
+                nession_protocol::contracts::session::v1::SessionEnvActiveResponse::inline,
+                schema_of::<nession_protocol::contracts::session::v1::SessionEnvActiveResponse>,
+            )),
         },
         Unit {
             owner: "core",
