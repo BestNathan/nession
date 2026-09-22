@@ -88,6 +88,16 @@ pub struct ClientEnvListPayload {}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientEnvListResponsePayload {
     pub files: Vec<EnvFileInfo>,
+    /// Set only when the Server refuses before listing anything — an
+    /// unauthenticated caller is told why rather than handed a silently empty
+    /// list.
+    ///
+    /// The Server has always put this on the wire and the Web has always read
+    /// it (`EnvListResponse.error` in `capabilities/env/types.ts`); the type
+    /// simply did not describe it. Adding it here makes the contract say what
+    /// the wire already carries, which is why it changes no behaviour.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 /// `server.env.get` — read one env file's raw content for editing.

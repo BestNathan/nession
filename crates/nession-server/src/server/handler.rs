@@ -15,7 +15,9 @@ use nession_common::env_file::parse_env;
 use nession_protocol::contracts::agent::v1::{
     AddressStatus, AgentAddressUpdatePayload, AgentRegisterPayload,
 };
-use nession_protocol::contracts::env::v1::{EnvFileRef, EnvSnapshot, EnvSource};
+use nession_protocol::contracts::env::v1::{
+    ClientEnvListPayload, ClientEnvListResponsePayload, EnvFileRef, EnvSnapshot, EnvSource,
+};
 use nession_protocol::contracts::session::v1::{
     AgentTerminalResizePayload, ServerTerminalResizePayload,
 };
@@ -2440,11 +2442,19 @@ impl ConnectionHandler {
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
     ) -> anyhow::Result<HandlerAction> {
+        // Typed at the contract boundary, erased only at the dispatcher. Both
+        // halves of this unit live in `contracts::env::v1`, and the agent's
+        // half of the same protocol (`agent.env.list`) already declares them —
+        // this handler read and wrote `Value` while they sat there unused.
+        let ClientEnvListPayload {} = serde_json::from_value(msg.payload)?;
+
         if !self.authenticated_client {
-            return Ok(reply_json(
+            return Ok(env_list_reply(
                 &msg.id,
-                "server.env.list.response",
-                json!({ "files": [], "error": "Not authenticated" }),
+                ClientEnvListResponsePayload {
+                    files: Vec::new(),
+                    error: Some("Not authenticated".to_string()),
+                },
             ));
         }
 
@@ -2475,10 +2485,9 @@ impl ConnectionHandler {
             }
         }
 
-        Ok(reply_json(
+        Ok(env_list_reply(
             &msg.id,
-            "server.env.list.response",
-            json!({ "files": files }),
+            ClientEnvListResponsePayload { files, error: None },
         ))
     }
 
@@ -3321,6 +3330,19 @@ mod extract_ip_tests {
             Some("tunnel.example.com".into())
         );
     }
+}
+
+/// Serialize a `server.env.list` reply.
+///
+/// `to_value` cannot fail for a struct of these shapes, but the house pattern
+/// keeps a fallback rather than an unwrap — and an empty list is still a valid
+/// payload, so a caller reads "no files" instead of losing the reply.
+fn env_list_reply(id: &str, payload: ClientEnvListResponsePayload) -> HandlerAction {
+    reply_json(
+        id,
+        "server.env.list.response",
+        serde_json::to_value(&payload).unwrap_or(json!({ "files": [] })),
+    )
 }
 
 fn reply_json(id: &str, msg_type: &str, payload: serde_json::Value) -> HandlerAction {
@@ -5270,6 +5292,36 @@ mod tests {
             .unwrap();
         let reply = parse_reply(action);
         assert_eq!(reply["payload"]["error"], "Not authenticated");
+    }
+
+    #[tokio::test]
+    async fn env_list_reply_is_what_its_contract_says_it_is() {
+        // The test `server.auth` never had. That unit's contract requires a
+        // `client_id` its handler has never sent, so a consumer reading that
+        // reply as its own declared type fails — and nothing noticed, because
+        // the handler built the payload with `json!` and no test ever asked the
+        // type what it expected.
+        //
+        // So this asks: take the reply off the wire and read it the way the
+        // contract says it is. It is the difference between "the handler uses
+        // the type" being a claim about the source and being a checked fact —
+        // and it is what the identity-only entries were missing, since a unit
+        // with `request: None` cannot have this test at all.
+        let mut h = test_handler("").await;
+        let action = h
+            .handle_message(proto_msg("server.env.list", json!({})))
+            .await
+            .unwrap();
+        let payload = parse_reply(action)["payload"].clone();
+        let parsed: ClientEnvListResponsePayload = serde_json::from_value(payload.clone())
+            .unwrap_or_else(|e| {
+                panic!("server.env.list replies {payload} but its contract does not accept it: {e}")
+            });
+
+        assert!(
+            parsed.error.is_some(),
+            "an unauthenticated caller is told why rather than handed an empty list"
+        );
     }
 
     #[tokio::test]
