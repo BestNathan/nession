@@ -451,6 +451,16 @@ pub struct WebSessionsListResponse {
     pub stale_agents: Vec<String>,
 }
 
+/// `client.sessions.list`'s request: empty, and explicitly so.
+///
+/// The same list as `agent.session.list`, asked at the browser's compat door.
+/// It reads nothing off the payload either, and `request: None` would claim the
+/// unit has no request rather than an empty one.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ClientSessionsListPayload {}
+
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
