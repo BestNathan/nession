@@ -21,12 +21,23 @@ export const VERSION = 1;
 
 // ── Shapes ──
 
+export type ClientSessionCapturePreviewPayload = { session_id: string, 
+/**
+ * How much scrollback to capture. Absent means 2000 — the value the
+ * handler has always defaulted to.
+ */
+lines: number, };
 
 // ── Operations ──
 
+/** The payload a caller sends. */
+export type SessionCapturePreviewCall = { session_id: string, 
 /**
- * No request alias: the catalog declares no request shape for this unit.
+ * How much scrollback to capture. Absent means 2000 — the value the
+ * handler has always defaulted to.
  */
+lines: number, };
+
 /**
  * No response alias: the catalog declares no response shape for this unit.
  */

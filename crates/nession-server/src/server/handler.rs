@@ -21,10 +21,10 @@ use nession_protocol::contracts::env::v1::{
     ClientEnvWritePayload, ClientEnvWriteResponsePayload, EnvFileRef, EnvSnapshot, EnvSource,
 };
 use nession_protocol::contracts::session::v1::{
-    AgentTerminalResizePayload, ClientSessionCreatePayload, ClientSessionCreateResponsePayload,
-    ClientSessionKillPayload, ServerSessionListPayload, ServerSessionListReply,
-    ServerTerminalResizePayload, SessionRefusal, WebSessionInfo, WebSessionKillResponse,
-    WebSessionsListResponse,
+    AgentTerminalResizePayload, ClientSessionCapturePreviewPayload, ClientSessionCreatePayload,
+    ClientSessionCreateResponsePayload, ClientSessionKillPayload, ServerSessionListPayload,
+    ServerSessionListReply, ServerTerminalResizePayload, SessionRefusal, WebSessionInfo,
+    WebSessionKillResponse, WebSessionsListResponse,
 };
 use nession_protocol::ProtocolMessage;
 
@@ -2184,18 +2184,20 @@ impl ConnectionHandler {
             ));
         }
 
-        let session_id = msg
-            .payload
-            .get("session_id")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-
-        let lines_raw = msg
-            .payload
-            .get("lines")
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or(2000);
-        let lines: u32 = u32::try_from(lines_raw).unwrap_or(u32::MAX);
+        // Typed at the contract boundary — the *request* only. This unit's
+        // replies stay hand-built on purpose: five of them are the Server's own
+        // refusals, and the sixth relays whatever the agent answered. The
+        // Server does not read a provider's payload shape, so there is no
+        // Nession-owned response type to build (see `docs/architecture/protocol.md`
+        // on the relay).
+        let ClientSessionCapturePreviewPayload { session_id, lines } =
+            serde_json::from_value(msg.payload).unwrap_or_else(|_| {
+                ClientSessionCapturePreviewPayload {
+                    session_id: String::new(),
+                    lines: 2000,
+                }
+            });
+        let session_id = session_id.as_str();
 
         info!(
             "handle_client_session_capture_preview: session_id={}, lines={}",
