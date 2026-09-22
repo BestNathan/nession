@@ -638,13 +638,29 @@ wires: &["agent.session.report"],
             id: "server.session.create",
             version: 1,
             wires: &["server.session.create"],
-            // Identity only. The Server reads this request's fields out of
-            // `serde_json::Value` and builds its answer with `json!`, so there
-            // is no named shape to point at. Naming one from `contracts/`
-            // would describe a type the handler does not use.
-            decls: vec![],
-            request: None,
-            response: None,
+            // Typed. The request gained `env_files`, which the handler read
+            // off the payload and the contract never named — the compiler
+            // pointed at it once the parse started moving the payload.
+            decls: vec![
+                decl_of::<nession_protocol::contracts::session::v1::ClientSessionCreatePayload>(cfg),
+                decl_of::<nession_protocol::contracts::session::v1::ClientSessionCreateResponsePayload>(
+                    cfg,
+                ),
+                decl_of::<nession_protocol::contracts::env::v1::EnvFileRef>(cfg),
+                decl_of::<nession_protocol::contracts::env::v1::EnvSource>(cfg),
+            ],
+            request: Some((
+                "SessionCreateCall",
+                nession_protocol::contracts::session::v1::ClientSessionCreatePayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::ClientSessionCreatePayload>,
+            )),
+            response: Some((
+                "SessionCreateReply",
+                nession_protocol::contracts::session::v1::ClientSessionCreateResponsePayload::inline,
+                schema_of::<
+                    nession_protocol::contracts::session::v1::ClientSessionCreateResponsePayload,
+                >,
+            )),
         },
         Unit {
             owner: "core",

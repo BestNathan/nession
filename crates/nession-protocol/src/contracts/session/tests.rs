@@ -136,11 +136,29 @@ fn test_client_session_create_payload() {
     let payload = ClientSessionCreatePayload {
         agent_id: "agent-1".to_string(),
         name: "new-session".to_string(),
+        env_files: Vec::new(),
     };
     let json = serde_json::to_string(&payload).unwrap();
     let decoded: ClientSessionCreatePayload = serde_json::from_str(&json).unwrap();
     assert_eq!(decoded.agent_id, "agent-1");
     assert_eq!(decoded.name, "new-session");
+    assert!(decoded.env_files.is_empty());
+}
+
+#[test]
+fn test_client_session_create_env_files_are_part_of_the_contract() {
+    // `env_files` was read off the payload by the handler for as long as
+    // create-time injection has existed, and was not declared until reading it
+    // stopped compiling — the parse moved the payload and the second read was
+    // left dangling. Pinned here so the contract keeps naming it.
+    let json = serde_json::json!({
+        "agent_id": "agent-1",
+        "name": "new-session",
+        "env_files": [{ "name": "staging.env", "source": "server" }],
+    });
+    let decoded: ClientSessionCreatePayload = serde_json::from_value(json).unwrap();
+    assert_eq!(decoded.env_files.len(), 1);
+    assert_eq!(decoded.env_files.first().unwrap().name, "staging.env");
 }
 
 #[test]

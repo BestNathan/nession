@@ -60,6 +60,15 @@ pub struct AgentCommandResponsePayload {
 pub struct ClientSessionCreatePayload {
     pub agent_id: String,
     pub name: String,
+    /// Env files to source into the session as it is created.
+    ///
+    /// The Server has always read this off the payload and the Web has always
+    /// sent it. It was not declared, and moving the payload into the type is
+    /// what surfaced that — a move is not something a `json!`-style read can
+    /// hide, so the compiler pointed at the second read instead of a reviewer
+    /// having to notice it.
+    #[serde(default)]
+    pub env_files: Vec<EnvFileRef>,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
