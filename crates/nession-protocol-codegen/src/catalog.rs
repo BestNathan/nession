@@ -515,12 +515,24 @@ wires: &["client.auth"],
             id: "client.sessions.list",
             version: 1,
             wires: &["client.sessions.list"],
+            // The same pair `agent.session.list` uses, and the same situation:
+            // the agent already built `WebSessionsListResponse` by name, and the
+            // item types were declared here while neither alias was.
             decls: vec![
+                decl_of::<nession_protocol::contracts::session::v1::ClientSessionsListPayload>(cfg),
                 decl_of::<nession_protocol::contracts::session::v1::WebSessionsListResponse>(cfg),
                 decl_of::<nession_protocol::contracts::session::v1::WebSessionInfo>(cfg),
             ],
-            request: None,
-            response: None,
+            request: Some((
+                "ClientSessionsListCall",
+                nession_protocol::contracts::session::v1::ClientSessionsListPayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::ClientSessionsListPayload>,
+            )),
+            response: Some((
+                "WebSessionsListReply",
+                nession_protocol::contracts::session::v1::WebSessionsListResponse::inline,
+                schema_of::<nession_protocol::contracts::session::v1::WebSessionsListResponse>,
+            )),
         },
         Unit {
             owner: "core",
