@@ -389,10 +389,17 @@ pub struct ClientRelayBeginPayload {
     pub relay_url: Option<String>,
     /// Terminal dimensions from the browser's `ResizeObserver`.
     ///
-    /// Both default to 80×24 rather than being required: the browser may mount
-    /// the Terminal before it has measured anything, and the handler has always
-    /// tolerated that. Relaxed because the absence is already handled, not
-    /// because a caller might forget.
+    /// `serde(default)` here is a **deserializer** tolerance, not an optional
+    /// field, and the difference is visible: a sender that omits them gets the
+    /// 80×24 fallback, but both stay plain `u16`s, so the generated TypeScript
+    /// requires them. The tolerance exists because the browser can mount the
+    /// Terminal before it has measured anything and that has never been an
+    /// error — not as a licence to leave the size unstated.
+    ///
+    /// Worth spelling out because the two readings differ and only one of them
+    /// is what a caller sees: a reader who took "defaults rather than being
+    /// required" at face value would find `cols: number` in the `.ts` and have
+    /// to work out which was lying.
     #[serde(default = "default_cols")]
     pub cols: u16,
     #[serde(default = "default_rows")]
