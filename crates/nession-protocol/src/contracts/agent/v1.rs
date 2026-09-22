@@ -161,6 +161,38 @@ pub struct AgentMetadata {
     pub image_tag: String,
 }
 
+/// The agent family's refusal, `{ status, message }`.
+///
+/// Per family rather than shared with `session`'s, which is spelled the same:
+/// `contracts/mod.rs` places a contract by the family its id names, and a
+/// cross-family type has no segment to look up. Two families refusing alike
+/// therefore have two types, and that is the accepted cost of placement staying
+/// a lookup.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentRefusal {
+    pub status: String,
+    pub message: String,
+}
+
+/// `server.agent.list`'s reply: the list, or the refusal.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum AgentListReply {
+    Listed(WebAgentsListResponse),
+    Refused(AgentRefusal),
+}
+
+/// `server.agent.list`'s request: empty, and explicitly so — the call reads
+/// nothing and is not permitted to have no request.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AgentListPayload {}
+
 /// Server → Agent response to `agent.register`.
 ///
 /// On acceptance the server tells the agent which heartbeat interval to use,
@@ -269,6 +301,34 @@ pub struct WebAgentInfo {
     pub status: String,
     pub session_count: u32,
     pub last_heartbeat: String,
+    // The six below were on the wire and not in this type. `agent_view.rs` is
+    // the single builder both `server.agent.list` and the `agents.changed` push
+    // go through — its own doc comment says why — and it has always sent these.
+    //
+    // The type was named right and shaped wrong, which is the fifth time in
+    // this run: `SessionListResponse`, `SessionInfo`, `SessionCapturePreviewPayload`,
+    // `WebSessionInfo`, and now this. Here it is visible at a glance by
+    // counting: seven fields against the builder's thirteen.
+    /// Human-readable name, set by config or a Web UI rename. The UI falls back
+    /// to the hostname when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+    pub active_sessions: u32,
+    pub registered_at: String,
+    /// The server's probe results, so the item type is `ProbedAddress` and not
+    /// `AgentAddress` — the obvious guess, and the wrong one.
+    pub addresses: Vec<ProbedAddress>,
+    /// What this agent reported it can serve.
+    ///
+    /// **No `skip_serializing_if`**, deliberately, and `agent_view`'s own test
+    /// (`a_peer_with_no_manifest_gets_null_and_not_a_missing_key`) fails if one
+    /// is added. A consumer has to tell "no manifest for that peer" from "that
+    /// peer advertises nothing", because they resolve differently — and an
+    /// absent key cannot say which. Written with the attribute first, having
+    /// quoted the rule in this very comment while adding it.
+    #[serde(default)]
+    pub protocols: Option<ProtocolManifest>,
+    pub metadata: AgentMetadata,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]

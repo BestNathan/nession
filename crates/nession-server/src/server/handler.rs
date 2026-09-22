@@ -13,7 +13,8 @@ use crate::server::web_client_registry::WebClientRegistry;
 use nession_common::display_name::validate_display_name;
 use nession_common::env_file::parse_env;
 use nession_protocol::contracts::agent::v1::{
-    AddressStatus, AgentAddressUpdatePayload, AgentRegisterPayload,
+    AddressStatus, AgentAddressUpdatePayload, AgentListReply, AgentRefusal, AgentRegisterPayload,
+    WebAgentsListResponse,
 };
 use nession_protocol::contracts::env::v1::{
     ClientEnvDeletePayload, ClientEnvDeleteResponsePayload, ClientEnvGetPayload,
@@ -590,43 +591,36 @@ impl ConnectionHandler {
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
     ) -> anyhow::Result<HandlerAction> {
+        // Typed at the contract boundary: the list half is built by
+        // `agent_view`, whose single builder both this and the `agents.changed`
+        // push go through, and the refusal half is `AgentRefusal`.
         if !self.authenticated_client {
             warn!("Unauthenticated client requested agents list");
-            return Ok(HandlerAction::Reply(Some(Message::Text(
-                json!({
-                    "msg_type": "server.agent.list.response",
-                    "id": msg.id,
-                    "timestamp": current_timestamp(),
-                    "payload": {
-                        "status": "error",
-                        "message": "Not authenticated"
-                    }
-                })
-                .to_string(),
-            ))));
+            return Ok(agent_list_reply(
+                &msg.id,
+                AgentListReply::Refused(AgentRefusal {
+                    status: "error".to_string(),
+                    message: "Not authenticated".to_string(),
+                }),
+            ));
         }
 
         let agents = self.agent_registry.list().await;
 
-        let agents_json: Vec<serde_json::Value> =
-            agents.iter().map(super::agent_view::agent_json).collect();
+        let view: Vec<nession_protocol::contracts::agent::v1::WebAgentInfo> = agents
+            .iter()
+            .map(super::agent_view::agent_to_view)
+            .collect();
 
         info!(
             "Client requested agents list, returning {} agents",
-            agents_json.len()
+            view.len()
         );
 
-        Ok(HandlerAction::Reply(Some(Message::Text(
-            json!({
-                "msg_type": "server.agent.list.response",
-                "id": msg.id,
-                "timestamp": current_timestamp(),
-                "payload": {
-                    "agents": agents_json
-                }
-            })
-            .to_string(),
-        ))))
+        Ok(agent_list_reply(
+            &msg.id,
+            AgentListReply::Listed(WebAgentsListResponse { agents: view }),
+        ))
     }
 
     /// Handle `server.info` — return server version, uptime, and stats.
@@ -3367,6 +3361,15 @@ mod extract_ip_tests {
 /// `to_value` cannot fail for a struct of these shapes, but the house pattern
 /// keeps a fallback rather than an unwrap — and an empty list is still a valid
 /// payload, so a caller reads "no files" instead of losing the reply.
+/// Serialize a `server.agent.list` reply.
+fn agent_list_reply(id: &str, reply: AgentListReply) -> HandlerAction {
+    reply_json(
+        id,
+        "server.agent.list.response",
+        serde_json::to_value(&reply).unwrap_or(json!({ "agents": [] })),
+    )
+}
+
 /// Serialize a `server.session.env.query` reply.
 fn session_env_query_reply(id: &str, payload: SessionEnvQueryResponse) -> HandlerAction {
     reply_json(
