@@ -908,13 +908,22 @@ wires: &["agent.env.list"],
             id: "server.env.get",
             version: 1,
             wires: &["server.env.get"],
-            // Identity only. The Server reads this request's fields out of
-            // `serde_json::Value` and builds its answer with `json!`, so there
-            // is no named shape to point at. Naming one from `contracts/`
-            // would describe a type the handler does not use.
-            decls: vec![],
-            request: None,
-            response: None,
+            // Typed, like its `agent.env.get` twin.
+            decls: vec![
+                decl_of::<nession_protocol::contracts::env::v1::ClientEnvGetPayload>(cfg),
+                decl_of::<nession_protocol::contracts::env::v1::ClientEnvGetResponsePayload>(cfg),
+                decl_of::<nession_protocol::contracts::env::v1::EnvSource>(cfg),
+            ],
+            request: Some((
+                "ClientEnvGetCall",
+                nession_protocol::contracts::env::v1::ClientEnvGetPayload::inline,
+                schema_of::<nession_protocol::contracts::env::v1::ClientEnvGetPayload>,
+            )),
+            response: Some((
+                "ClientEnvGetReply",
+                nession_protocol::contracts::env::v1::ClientEnvGetResponsePayload::inline,
+                schema_of::<nession_protocol::contracts::env::v1::ClientEnvGetResponsePayload>,
+            )),
         },
         Unit {
             owner: "core",

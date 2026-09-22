@@ -21,12 +21,39 @@ export const VERSION = 1;
 
 // ── Shapes ──
 
+export type ClientEnvGetPayload = { name: string, source: EnvSource, agent_id?: string | null, };
+export type ClientEnvGetResponsePayload = { success: boolean, content?: string | null, 
+/**
+ * Session ids currently using this file; an empty list when nothing is.
+ *
+ * Optional because two of the Server's branches answer before it is ever
+ * computed — an unauthenticated caller, and a request naming no file. An
+ * empty list there would not be a missing value but a false one: "nothing
+ * is using this file" when the truth is "we never looked".
+ *
+ * Both branches already omit it on the wire, so this states what the wire
+ * does rather than changing it.
+ */
+in_use_by?: Array<string> | null, error?: string | null, };
+export type EnvSource = "server" | "agent";
 
 // ── Operations ──
 
+/** The payload a caller sends. */
+export type ClientEnvGetCall = { name: string, source: EnvSource, agent_id?: string | null, };
+
+/** The payload the provider answers with. */
+export type ClientEnvGetReply = { success: boolean, content?: string | null, 
 /**
- * No request alias: the catalog declares no request shape for this unit.
+ * Session ids currently using this file; an empty list when nothing is.
+ *
+ * Optional because two of the Server's branches answer before it is ever
+ * computed — an unauthenticated caller, and a request naming no file. An
+ * empty list there would not be a missing value but a false one: "nothing
+ * is using this file" when the truth is "we never looked".
+ *
+ * Both branches already omit it on the wire, so this states what the wire
+ * does rather than changing it.
  */
-/**
- * No response alias: the catalog declares no response shape for this unit.
- */
+in_use_by?: Array<string> | null, error?: string | null, };
+
