@@ -878,13 +878,31 @@ wires: &["agent.session.env.apply"],
             id: "server.session.env.unset",
             version: 1,
             wires: &["server.session.env.unset"],
-            // Identity only. The Server reads this request's fields out of
-            // `serde_json::Value` and builds its answer with `json!`, so there
-            // is no named shape to point at. Naming one from `contracts/`
-            // would describe a type the handler does not use.
-            decls: vec![],
-            request: None,
-            response: None,
+            // Typed, sharing `ClientSessionEnvResponsePayload` with `apply`.
+            // Its success branch gains `warnings: []` — always serialised, and
+            // there were none.
+            decls: vec![
+                decl_of::<nession_protocol::contracts::session::v1::ClientSessionEnvUnsetPayload>(
+                    cfg,
+                ),
+                decl_of::<nession_protocol::contracts::session::v1::ClientSessionEnvResponsePayload>(
+                    cfg,
+                ),
+                decl_of::<nession_protocol::contracts::env::v1::EnvFileRef>(cfg),
+                decl_of::<nession_protocol::contracts::env::v1::EnvSource>(cfg),
+            ],
+            request: Some((
+                "SessionEnvUnsetCall",
+                nession_protocol::contracts::session::v1::ClientSessionEnvUnsetPayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::ClientSessionEnvUnsetPayload>,
+            )),
+            response: Some((
+                "SessionEnvUnsetReply",
+                nession_protocol::contracts::session::v1::ClientSessionEnvResponsePayload::inline,
+                schema_of::<
+                    nession_protocol::contracts::session::v1::ClientSessionEnvResponsePayload,
+                >,
+            )),
         },
         Unit {
             owner: "core",
