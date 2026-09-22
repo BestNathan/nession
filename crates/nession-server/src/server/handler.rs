@@ -21,11 +21,9 @@ use nession_protocol::contracts::env::v1::{
     ClientEnvWritePayload, ClientEnvWriteResponsePayload, EnvFileRef, EnvSnapshot, EnvSource,
 };
 use nession_protocol::contracts::session::v1::{
-    AgentTerminalResizePayload, ServerTerminalResizePayload,
-};
-use nession_protocol::contracts::session::v1::{
-    ServerSessionListPayload, ServerSessionListReply, SessionRefusal, WebSessionInfo,
-    WebSessionsListResponse,
+    AgentTerminalResizePayload, ClientSessionKillPayload, ServerSessionListPayload,
+    ServerSessionListReply, ServerTerminalResizePayload, SessionRefusal, WebSessionInfo,
+    WebSessionKillResponse, WebSessionsListResponse,
 };
 use nession_protocol::ProtocolMessage;
 
@@ -1718,42 +1716,53 @@ impl ConnectionHandler {
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
     ) -> anyhow::Result<HandlerAction> {
+        // Typed at the contract boundary. No contract change was needed here —
+        // `WebSessionKillResponse` already describes this wire — but one branch
+        // does move: it used to send `{ "success": true }` with no `error` at
+        // all, and the type has no `skip_serializing_if`, so it now sends
+        // `error: null`. True rather than merely additive (a successful kill
+        // had no error), and the Web already declares `error?: string`.
         if !self.authenticated_client {
-            return Ok(HandlerAction::Reply(Some(Message::Text(
-                json!({
-                    "msg_type": "server.session.kill.response",
-                    "id": msg.id,
-                    "timestamp": current_timestamp(),
-                    "payload": {
-                        "success": false,
-                        "error": "Not authenticated"
-                    }
-                })
-                .to_string(),
-            ))));
+            return Ok(session_kill_reply(
+                &msg.id,
+                WebSessionKillResponse {
+                    success: false,
+                    error: Some("Not authenticated".to_string()),
+                },
+            ));
         }
 
-        let session_id = msg
-            .payload
-            .get("session_id")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        // A missing or non-string `session_id` parses to nothing and lands on
+        // the same "Invalid session_id format" reply the empty-string path
+        // already produced, so that behaviour is unchanged.
+        let Ok(ClientSessionKillPayload { session_id }) =
+            serde_json::from_value::<ClientSessionKillPayload>(msg.payload)
+        else {
+            return Ok(session_kill_reply(
+                &msg.id,
+                WebSessionKillResponse {
+                    success: false,
+                    error: Some(
+                        "Invalid session_id format. Expected 'agent_id:session_name'".to_string(),
+                    ),
+                },
+            ));
+        };
+        let session_id = session_id.as_str();
 
         let (agent_id, session_name) = match session_id.split_once(':') {
             Some((aid, sname)) => (aid.to_string(), sname.to_string()),
             None => {
-                return Ok(HandlerAction::Reply(Some(Message::Text(
-                    json!({
-                        "msg_type": "server.session.kill.response",
-                        "id": msg.id,
-                        "timestamp": current_timestamp(),
-                        "payload": {
-                            "success": false,
-                            "error": "Invalid session_id format. Expected 'agent_id:session_name'"
-                        }
-                    })
-                    .to_string(),
-                ))));
+                return Ok(session_kill_reply(
+                    &msg.id,
+                    WebSessionKillResponse {
+                        success: false,
+                        error: Some(
+                            "Invalid session_id format. Expected 'agent_id:session_name'"
+                                .to_string(),
+                        ),
+                    },
+                ));
             }
         };
 
@@ -1764,45 +1773,35 @@ impl ConnectionHandler {
             match agent {
                 Some(a) if a.status != AgentStatus::Online => {
                     self.session_registry.remove(session_id).await;
-                    return Ok(HandlerAction::Reply(Some(Message::Text(
-                        json!({
-                            "msg_type": "server.session.kill.response",
-                            "id": msg.id,
-                            "timestamp": current_timestamp(),
-                            "payload": {
-                                "success": true
-                            }
-                        })
-                        .to_string(),
-                    ))));
+                    // The one branch of this unit whose wire changes: the type
+                    // has no `skip_serializing_if` on `error`, so this reply
+                    // gains `error: null`. True — a successful kill had no
+                    // error — and the Web already declares `error?: string`.
+                    return Ok(session_kill_reply(
+                        &msg.id,
+                        WebSessionKillResponse {
+                            success: true,
+                            error: None,
+                        },
+                    ));
                 }
                 Some(_) => {
-                    return Ok(HandlerAction::Reply(Some(Message::Text(
-                        json!({
-                            "msg_type": "server.session.kill.response",
-                            "id": msg.id,
-                            "timestamp": current_timestamp(),
-                            "payload": {
-                                "success": false,
-                                "error": format!("Session '{}' not found", session_id)
-                            }
-                        })
-                        .to_string(),
-                    ))));
+                    return Ok(session_kill_reply(
+                        &msg.id,
+                        WebSessionKillResponse {
+                            success: false,
+                            error: Some(format!("Session '{session_id}' not found")),
+                        },
+                    ));
                 }
                 None => {
-                    return Ok(HandlerAction::Reply(Some(Message::Text(
-                        json!({
-                            "msg_type": "server.session.kill.response",
-                            "id": msg.id,
-                            "timestamp": current_timestamp(),
-                            "payload": {
-                                "success": false,
-                                "error": format!("Agent '{}' not found", agent_id)
-                            }
-                        })
-                        .to_string(),
-                    ))));
+                    return Ok(session_kill_reply(
+                        &msg.id,
+                        WebSessionKillResponse {
+                            success: false,
+                            error: Some(format!("Agent '{agent_id}' not found")),
+                        },
+                    ));
                 }
             }
         }
@@ -1848,43 +1847,25 @@ impl ConnectionHandler {
                     self.env_service.usage.clear_session(session_id);
                 }
 
-                Ok(HandlerAction::Reply(Some(Message::Text(
-                    json!({
-                        "msg_type": "server.session.kill.response",
-                        "id": msg.id,
-                        "timestamp": current_timestamp(),
-                        "payload": {
-                            "success": success,
-                            "error": error,
-                        }
-                    })
-                    .to_string(),
-                ))))
+                Ok(session_kill_reply(
+                    &msg.id,
+                    WebSessionKillResponse { success, error },
+                ))
             }
-            Ok(Err(_)) => Ok(HandlerAction::Reply(Some(Message::Text(
-                json!({
-                    "msg_type": "server.session.kill.response",
-                    "id": msg.id,
-                    "timestamp": current_timestamp(),
-                    "payload": {
-                        "success": false,
-                        "error": "Agent disconnected"
-                    }
-                })
-                .to_string(),
-            )))),
-            Err(_) => Ok(HandlerAction::Reply(Some(Message::Text(
-                json!({
-                    "msg_type": "server.session.kill.response",
-                    "id": msg.id,
-                    "timestamp": current_timestamp(),
-                    "payload": {
-                        "success": false,
-                        "error": "Timeout waiting for agent response"
-                    }
-                })
-                .to_string(),
-            )))),
+            Ok(Err(_)) => Ok(session_kill_reply(
+                &msg.id,
+                WebSessionKillResponse {
+                    success: false,
+                    error: Some("Agent disconnected".to_string()),
+                },
+            )),
+            Err(_) => Ok(session_kill_reply(
+                &msg.id,
+                WebSessionKillResponse {
+                    success: false,
+                    error: Some("Timeout waiting for agent response".to_string()),
+                },
+            )),
         }
     }
 
@@ -3395,6 +3376,16 @@ mod extract_ip_tests {
 /// `to_value` cannot fail for a struct of these shapes, but the house pattern
 /// keeps a fallback rather than an unwrap — and an empty list is still a valid
 /// payload, so a caller reads "no files" instead of losing the reply.
+/// Serialize a `server.session.kill` reply. Same fallback reasoning as
+/// [`env_list_reply`].
+fn session_kill_reply(id: &str, payload: WebSessionKillResponse) -> HandlerAction {
+    reply_json(
+        id,
+        "server.session.kill.response",
+        serde_json::to_value(&payload).unwrap_or(json!({ "success": false })),
+    )
+}
+
 /// Serialize a `server.session.list` reply.
 ///
 /// The first unit to use a union: its two branches share no field, so a
@@ -5522,6 +5513,28 @@ mod tests {
                 panic!("server.session.list replies {payload} but its contract does not accept it: {e}")
             });
         assert!(matches!(parsed, ServerSessionListReply::Listed(_)));
+    }
+
+    #[tokio::test]
+    async fn session_kill_reply_is_what_its_contract_says_it_is() {
+        // The one branch worth pinning is the offline-agent one: it used to
+        // send `{ "success": true }` with no `error` field, and the type has no
+        // `skip_serializing_if`, so it now carries `error: null`. That reads as
+        // noise unless you know the Web declares `error?: string` — so this
+        // asserts the field is *present and null*, not merely absent, which is
+        // the difference a typo in the type would silently remove.
+        let mut h = test_handler("").await;
+        let action = h
+            .handle_message(proto_msg("server.session.kill", json!({})))
+            .await
+            .unwrap();
+        let payload = parse_reply(action)["payload"].clone();
+        let parsed: WebSessionKillResponse = serde_json::from_value(payload.clone())
+            .unwrap_or_else(|e| {
+                panic!("server.session.kill replies {payload} but its contract does not accept it: {e}")
+            });
+        assert!(!parsed.success);
+        assert!(parsed.error.is_some(), "a bad session_id says why");
     }
 
     #[tokio::test]

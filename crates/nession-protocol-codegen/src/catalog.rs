@@ -673,13 +673,25 @@ wires: &["agent.session.create"],
             id: "server.session.kill",
             version: 1,
             wires: &["server.session.kill"],
-            // Identity only. The Server reads this request's fields out of
-            // `serde_json::Value` and builds its answer with `json!`, so there
-            // is no named shape to point at. Naming one from `contracts/`
-            // would describe a type the handler does not use.
-            decls: vec![],
-            request: None,
-            response: None,
+            // Typed. No contract change: `WebSessionKillResponse` already
+            // described this wire exactly, including `error: null` where the
+            // hand-written `json!` produced it. One branch still moves — the
+            // offline-agent success reply gains `error: null` — because that
+            // branch omitted the field rather than the type being wrong.
+            decls: vec![
+                decl_of::<nession_protocol::contracts::session::v1::ClientSessionKillPayload>(cfg),
+                decl_of::<nession_protocol::contracts::session::v1::WebSessionKillResponse>(cfg),
+            ],
+            request: Some((
+                "SessionKillCall",
+                nession_protocol::contracts::session::v1::ClientSessionKillPayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::ClientSessionKillPayload>,
+            )),
+            response: Some((
+                "SessionKillReply",
+                nession_protocol::contracts::session::v1::WebSessionKillResponse::inline,
+                schema_of::<nession_protocol::contracts::session::v1::WebSessionKillResponse>,
+            )),
         },
         Unit {
             owner: "core",
