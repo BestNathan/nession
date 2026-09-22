@@ -21,12 +21,72 @@ export const VERSION = 1;
 
 // ── Shapes ──
 
+export type ClientRelayBeginPayload = { 
+/**
+ * `"<agent_id>:<session_name>"` — the same composite the rest of the tree
+ * uses, split by the handler with `split_once(':')`.
+ */
+session_id: string, 
+/**
+ * Manual relay URL override. When present the server uses exactly this URL
+ * instead of ranking the agent's advertised addresses.
+ *
+ * Carries the ranking's *input*, not its output: the field is read before
+ * any address is examined, so on a manual override the address list is
+ * never touched.
+ */
+relay_url?: string | null, 
+/**
+ * Terminal dimensions from the browser's `ResizeObserver`.
+ *
+ * Both default to 80×24 rather than being required: the browser may mount
+ * the Terminal before it has measured anything, and the handler has always
+ * tolerated that. Relaxed because the absence is already handled, not
+ * because a caller might forget.
+ */
+cols: number, rows: number, };
+export type SessionRefusal = { 
+/**
+ * Always `"error"` today. A string rather than an enum because nothing
+ * branches on its other values yet, and inventing them would be describing
+ * a wire that does not exist.
+ */
+status: string, message: string, };
 
 // ── Operations ──
 
+/** The payload a caller sends. */
+export type ClientRelayBeginCall = { 
 /**
- * No request alias: the catalog declares no request shape for this unit.
+ * `"<agent_id>:<session_name>"` — the same composite the rest of the tree
+ * uses, split by the handler with `split_once(':')`.
  */
+session_id: string, 
 /**
- * No response alias: the catalog declares no response shape for this unit.
+ * Manual relay URL override. When present the server uses exactly this URL
+ * instead of ranking the agent's advertised addresses.
+ *
+ * Carries the ranking's *input*, not its output: the field is read before
+ * any address is examined, so on a manual override the address list is
+ * never touched.
  */
+relay_url?: string | null, 
+/**
+ * Terminal dimensions from the browser's `ResizeObserver`.
+ *
+ * Both default to 80×24 rather than being required: the browser may mount
+ * the Terminal before it has measured anything, and the handler has always
+ * tolerated that. Relaxed because the absence is already handled, not
+ * because a caller might forget.
+ */
+cols: number, rows: number, };
+
+/** The payload the provider answers with. */
+export type ClientRelayBeginReply = { 
+/**
+ * Always `"error"` today. A string rather than an enum because nothing
+ * branches on its other values yet, and inventing them would be describing
+ * a wire that does not exist.
+ */
+status: string, message: string, };
+

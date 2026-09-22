@@ -945,7 +945,12 @@ p2p_routes! { ctx, msg_type, payload_value;
                         let resp = AuthResponsePayload {
                             status: "error".to_string(),
                             message: format!("invalid payload: {e}"),
-                            client_id: String::new(),
+                            // There is no client id to report — this branch
+                            // rejected the payload before one was assigned. It
+                            // used to send `String::new()`, which is "absent"
+                            // written in the only dialect a required field
+                            // allows; with the field relaxed it says so.
+                            client_id: None,
                         };
                         return serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
                             .unwrap_or_default();
@@ -966,7 +971,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                 let resp = AuthResponsePayload {
                     status: "success".to_string(),
                     message: "ok".to_string(),
-                    client_id: assigned_client_id,
+                    client_id: Some(assigned_client_id),
                 };
                 serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp)).unwrap_or_default()
             }
@@ -2597,7 +2602,7 @@ mod tests {
 
         assert_eq!(resp.msg_type, msg_types::OK);
         assert_eq!(resp.payload.status, "success");
-        assert_eq!(resp.payload.client_id, "my-client-id");
+        assert_eq!(resp.payload.client_id.as_deref(), Some("my-client-id"));
 
         handle.shutdown().await.ok();
     }
@@ -2617,8 +2622,13 @@ mod tests {
 
         assert_eq!(resp.msg_type, msg_types::OK);
         assert_eq!(resp.payload.status, "success");
-        // Generated client_id should be a valid UUID
-        assert!(uuid::Uuid::parse_str(&resp.payload.client_id).is_ok());
+        // The Agent mints an id when the caller sends none, so the *success*
+        // branch always has one to name — it is a valid UUID, not a placeholder.
+        // `expect` rather than a weaker assertion: a `None` here would mean the
+        // branch that is supposed to mint has stopped, which is the thing this
+        // test exists to catch.
+        let client_id = resp.payload.client_id.expect("success names a client");
+        assert!(uuid::Uuid::parse_str(&client_id).is_ok());
 
         handle.shutdown().await.ok();
     }

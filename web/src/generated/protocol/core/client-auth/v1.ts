@@ -22,7 +22,7 @@ export const VERSION = 1;
 // ── Shapes ──
 
 export type ClientAuthPayload = { auth_token: string, client_id: string | null, };
-export type AuthResponsePayload = { status: string, message: string, client_id: string, };
+export type AuthResponsePayload = { status: string, message: string, client_id?: string | null, };
 
 // ── Operations ──
 
@@ -30,5 +30,5 @@ export type AuthResponsePayload = { status: string, message: string, client_id: 
 export type ClientAuthCall = { auth_token: string, client_id: string | null, };
 
 /** The payload the provider answers with. */
-export type ClientAuthReply = { status: string, message: string, client_id: string, };
+export type ClientAuthReply = { status: string, message: string, client_id?: string | null, };
 
