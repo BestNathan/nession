@@ -21,12 +21,16 @@ export const VERSION = 1;
 
 // ── Shapes ──
 
+export type ClientSessionEnvApplyPayload = { session_id: string, env_files: Array<EnvFileRef>, };
+export type ClientSessionEnvResponsePayload = { success: boolean, error?: string | null, warnings: Array<string>, };
+export type EnvFileRef = { name: string, source: EnvSource, agent_id?: string | null, };
+export type EnvSource = "server" | "agent";
 
 // ── Operations ──
 
-/**
- * No request alias: the catalog declares no request shape for this unit.
- */
-/**
- * No response alias: the catalog declares no response shape for this unit.
- */
+/** The payload a caller sends. */
+export type SessionEnvApplyCall = { session_id: string, env_files: Array<EnvFileRef>, };
+
+/** The payload the provider answers with. */
+export type SessionEnvApplyReply = { success: boolean, error?: string | null, warnings: Array<string>, };
+
