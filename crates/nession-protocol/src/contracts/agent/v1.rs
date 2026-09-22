@@ -193,6 +193,66 @@ pub enum AgentListReply {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AgentListPayload {}
 
+/// `server.agent.rename`'s reply: the renamed agent, or the refusal.
+///
+/// The agent half is [`WebAgentInfo`] — the same type `server.agent.list`
+/// returns — and that is the point of adding it. This call built its own
+/// `json!` block, twelve fields against the builder's thirteen, and had drifted
+/// in exactly the two ways `agent_view`'s doc comment describes as fixed: no
+/// `protocols`, and no `metadata.image_tag`.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentRenameResponse {
+    /// On **both** branches, so it is not what the untagged union discriminates
+    /// on — `agent` against `error` is. Kept because the wire carries it.
+    pub success: bool,
+    pub agent: WebAgentInfo,
+}
+
+/// `server.agent.rename`'s request.
+///
+/// `display_name` is an `Option` because **`null` means clear**, which the arm
+/// distinguishes from "not supplied" before normalising: an absent key leaves
+/// the name alone, an explicit null clears it. Both arrive as `None` here, so
+/// the distinction is the caller's to make — and the contract says the field is
+/// nullable rather than inventing a sentinel for it.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentRenamePayload {
+    pub agent_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+}
+
+/// Rename's refusal — `{ success, error }`, **not** [`AgentRefusal`].
+///
+/// `server.agent.list` refuses with `{status, message}` and `server.agent.rename`
+/// refuses with `{success, error}`, in one family, one call apart. Fourth time
+/// this has turned up: the convention is per handler, and a family is no guide
+/// to which one a unit uses.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentRenameFailure {
+    pub success: bool,
+    pub error: String,
+}
+
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum AgentRenameReply {
+    /// Boxed, and the box is load-bearing: `WebAgentInfo` is far larger than
+    /// `AgentRenameFailure`, and clippy's `large_enum_variant` is right to
+    /// object. The alternative would be an `#[allow]`, which this tree does not
+    /// take — the type is edited rather than the lint.
+    Renamed(Box<AgentRenameResponse>),
+    Refused(AgentRenameFailure),
+}
+
 /// Server → Agent response to `agent.register`.
 ///
 /// On acceptance the server tells the agent which heartbeat interval to use,
