@@ -23,9 +23,9 @@ use nession_protocol::contracts::env::v1::{
 use nession_protocol::contracts::session::v1::{
     AgentTerminalResizePayload, ClientSessionCapturePreviewPayload, ClientSessionCreatePayload,
     ClientSessionCreateResponsePayload, ClientSessionEnvApplyPayload,
-    ClientSessionEnvResponsePayload, ClientSessionKillPayload, ServerSessionListPayload,
-    ServerSessionListReply, ServerTerminalResizePayload, SessionRefusal, WebSessionInfo,
-    WebSessionKillResponse, WebSessionsListResponse,
+    ClientSessionEnvResponsePayload, ClientSessionEnvUnsetPayload, ClientSessionKillPayload,
+    ServerSessionListPayload, ServerSessionListReply, ServerTerminalResizePayload, SessionRefusal,
+    WebSessionInfo, WebSessionKillResponse, WebSessionsListResponse,
 };
 use nession_protocol::ProtocolMessage;
 
@@ -2927,30 +2927,37 @@ impl ConnectionHandler {
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
     ) -> anyhow::Result<HandlerAction> {
+        // Typed at the contract boundary, same as `env.apply`. Its one wire
+        // change is on the success branch below, which used to send
+        // `{success: true}` with no `warnings` at all.
         if !self.authenticated_client {
-            return Ok(reply_json(
+            return Ok(session_env_reply(
                 &msg.id,
                 "server.session.env.unset.response",
-                json!({ "success": false, "error": "Not authenticated" }),
+                ClientSessionEnvResponsePayload {
+                    success: false,
+                    error: Some("Not authenticated".to_string()),
+                    warnings: Vec::new(),
+                },
             ));
         }
-        let session_id = msg
-            .payload
-            .get("session_id")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        let refs: Vec<EnvFileRef> = msg
-            .payload
-            .get("env_files")
-            .and_then(|v| serde_json::from_value(v.clone()).ok())
-            .unwrap_or_default();
+        let ClientSessionEnvUnsetPayload {
+            session_id,
+            env_files: refs,
+        } = serde_json::from_value(msg.payload).unwrap_or_else(|_| ClientSessionEnvUnsetPayload {
+            session_id: String::new(),
+            env_files: Vec::new(),
+        });
 
         let Some((agent_id, session_name)) = session_id.split_once(':') else {
-            return Ok(reply_json(
+            return Ok(session_env_reply(
                 &msg.id,
                 "server.session.env.unset.response",
-                json!({ "success": false, "error": "Invalid session_id" }),
+                ClientSessionEnvResponsePayload {
+                    success: false,
+                    error: Some("Invalid session_id".to_string()),
+                    warnings: Vec::new(),
+                },
             ));
         };
         let agent_id = agent_id.to_string();
@@ -2983,10 +2990,17 @@ impl ConnectionHandler {
 
         match resp {
             Ok(r) if r.get("success").and_then(serde_json::Value::as_bool) == Some(true) => {
-                Ok(reply_json(
+                // The branch whose wire changes: `warnings` is always
+                // serialised, so a successful unset now says `warnings: []`
+                // where it previously said nothing. True — there were none.
+                Ok(session_env_reply(
                     &msg.id,
                     "server.session.env.unset.response",
-                    json!({ "success": true }),
+                    ClientSessionEnvResponsePayload {
+                        success: true,
+                        error: None,
+                        warnings: Vec::new(),
+                    },
                 ))
             }
             Ok(r) => Ok(reply_json(
@@ -2997,10 +3011,14 @@ impl ConnectionHandler {
                     "error": r.get("error").and_then(|v| v.as_str()).unwrap_or("unset failed")
                 }),
             )),
-            Err(e) => Ok(reply_json(
+            Err(e) => Ok(session_env_reply(
                 &msg.id,
                 "server.session.env.unset.response",
-                json!({ "success": false, "error": e }),
+                ClientSessionEnvResponsePayload {
+                    success: false,
+                    error: Some(e),
+                    warnings: Vec::new(),
+                },
             )),
         }
     }

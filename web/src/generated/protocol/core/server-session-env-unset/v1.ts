@@ -21,12 +21,26 @@ export const VERSION = 1;
 
 // ── Shapes ──
 
+export type ClientSessionEnvUnsetPayload = { session_id: string, 
+/**
+ * The specific files (by name) previously applied by this client that
+ * should now be removed via `tmux set-environment -u`.
+ */
+env_files: Array<EnvFileRef>, };
+export type ClientSessionEnvResponsePayload = { success: boolean, error?: string | null, warnings: Array<string>, };
+export type EnvFileRef = { name: string, source: EnvSource, agent_id?: string | null, };
+export type EnvSource = "server" | "agent";
 
 // ── Operations ──
 
+/** The payload a caller sends. */
+export type SessionEnvUnsetCall = { session_id: string, 
 /**
- * No request alias: the catalog declares no request shape for this unit.
+ * The specific files (by name) previously applied by this client that
+ * should now be removed via `tmux set-environment -u`.
  */
-/**
- * No response alias: the catalog declares no response shape for this unit.
- */
+env_files: Array<EnvFileRef>, };
+
+/** The payload the provider answers with. */
+export type SessionEnvUnsetReply = { success: boolean, error?: string | null, warnings: Array<string>, };
+
