@@ -750,6 +750,46 @@ handlers is answering, so five wires in this tree carried one name and two
 different handlers (`#884`). The rule that replaced it, what it changed, and the
 one boundary it has are in [`protocol-identity.md`](protocol-identity.md).
 
+## The routing pipeline, as it actually runs
+
+`handle_relayed_message` (`crates/nession-server/src/server/handler.rs`) is where
+a browser's request reaches an agent, and it is the place a reader is most
+likely to have been told the wrong thing. What it does, in order:
+
+1. **Is this connection authenticated?** Checked *before the payload is read*,
+   deliberately — everything below answers differently depending on the named
+   agent, and an unauthenticated caller must not be able to tell a target that
+   does not exist from one that exists but cannot carry the wire. Both are
+   `contract_not_supported`, with different text. This step was missing until
+   `#877`; the comment above it says so.
+2. **Did the request name an agent?** No `agent_id` is `missing agent_id`.
+3. **Does the target say it can carry this wire?** The target's advertised
+   manifest is consulted. A target with **no** manifest is refused rather than
+   relayed — registration already turns away an agent that advertises nothing,
+   so reaching here means a straggler, and relaying to it would be guessing at a
+   shape nobody declared. The refusal is *unit-scoped*: it answers the one
+   request and leaves the connection alone.
+4. **Relay.**
+
+### There is no authorization step, and that is deliberate
+
+There is no `authorize(principal, target, protocol)` relation in this pipeline,
+and no `principal` at all — the Server's model is single-principal. `#879` asked
+for that relation and is closed; the honest record is that its requirement was
+**superseded rather than implemented**, because the product does not have
+multiple principals to distinguish and the pipeline's job today is
+authentication, not per-principal authorization.
+
+Stated here rather than left implied, because the opposite was previously
+implied: a reader looking for a `authorize` step that the docs described as
+required would find nothing in the source and no statement about why. A
+single-principal allow-all is a decision, and a decision that is not written
+down reads as an omission.
+
+When principals do exist, this is the seam: step 1 becomes "who is this", and the
+relation belongs between steps 3 and 4, where the target and the unit are both
+already resolved.
+
 ## Related
 
 - `#678` — the requirement this document implements.
