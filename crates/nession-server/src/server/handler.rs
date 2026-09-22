@@ -14,7 +14,7 @@ use nession_common::display_name::validate_display_name;
 use nession_common::env_file::parse_env;
 use nession_protocol::contracts::agent::v1::{
     AddressStatus, AgentAddressUpdatePayload, AgentListReply, AgentRefusal, AgentRegisterPayload,
-    WebAgentsListResponse,
+    AgentRenameFailure, AgentRenameReply, AgentRenameResponse, WebAgentsListResponse,
 };
 use nession_protocol::contracts::env::v1::{
     ClientEnvDeletePayload, ClientEnvDeleteResponsePayload, ClientEnvGetPayload,
@@ -665,19 +665,20 @@ impl ConnectionHandler {
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
     ) -> anyhow::Result<HandlerAction> {
+        // Typed at the contract boundary. The success branch below now goes
+        // through `agent_view::agent_to_view` like `server.agent.list` does —
+        // it used to build a second agent block by hand, twelve fields against
+        // the builder's thirteen, and it had drifted in exactly the two ways
+        // that builder's doc comment describes as fixed.
+        let refusal = |error: &str| {
+            AgentRenameReply::Refused(AgentRenameFailure {
+                success: false,
+                error: error.to_string(),
+            })
+        };
+
         if !self.authenticated_client {
-            return Ok(HandlerAction::Reply(Some(Message::Text(
-                json!({
-                    "msg_type": "server.agent.rename.response",
-                    "id": msg.id,
-                    "timestamp": current_timestamp(),
-                    "payload": {
-                        "success": false,
-                        "error": "Not authenticated"
-                    }
-                })
-                .to_string(),
-            ))));
+            return Ok(agent_rename_reply(&msg.id, refusal("Not authenticated")));
         }
 
         let agent_id = msg
@@ -687,18 +688,7 @@ impl ConnectionHandler {
             .unwrap_or("");
 
         if agent_id.is_empty() {
-            return Ok(HandlerAction::Reply(Some(Message::Text(
-                json!({
-                    "msg_type": "server.agent.rename.response",
-                    "id": msg.id,
-                    "timestamp": current_timestamp(),
-                    "payload": {
-                        "success": false,
-                        "error": "agent_id is required"
-                    }
-                })
-                .to_string(),
-            ))));
+            return Ok(agent_rename_reply(&msg.id, refusal("agent_id is required")));
         }
 
         // Resolve the new display_name: JSON null → clear, string → validate
@@ -719,18 +709,7 @@ impl ConnectionHandler {
                 Ok(Some(normalized)) => Some(normalized),
                 Ok(None) => None, // empty after trim → clear
                 Err(e) => {
-                    return Ok(HandlerAction::Reply(Some(Message::Text(
-                        json!({
-                            "msg_type": "server.agent.rename.response",
-                            "id": msg.id,
-                            "timestamp": current_timestamp(),
-                            "payload": {
-                                "success": false,
-                                "error": e
-                            }
-                        })
-                        .to_string(),
-                    ))));
+                    return Ok(agent_rename_reply(&msg.id, refusal(&e)));
                 }
             },
             None => None, // explicit null → clear
@@ -751,55 +730,20 @@ impl ConnectionHandler {
             .update_display_name(agent_id, display_name.clone())
             .await
         {
-            Some(updated) => {
-                let agent_json = json!({
-                    "agent_id": updated.agent_id,
-                    "hostname": updated.hostname,
-                    "display_name": updated.display_name,
-                    "ip_address": updated.ip_address,
-                    "port": updated.port,
-                    "status": match updated.status {
-                        AgentStatus::Online => "online",
-                        AgentStatus::Offline => "offline",
-                        AgentStatus::Degraded => "degraded",
-                    },
-                    "session_count": updated.session_count,
-                    "active_sessions": updated.active_sessions,
-                    "last_heartbeat": updated.last_heartbeat.to_rfc3339(),
-                    "registered_at": updated.registered_at.to_rfc3339(),
-                    "addresses": serde_json::to_value(&updated.addresses).unwrap_or(json!([])),
-                    "metadata": {
-                        "nession_version": updated.metadata.nession_version,
-                        "tmux_version": updated.metadata.tmux_version,
-                        "os_version": updated.metadata.os_version,
-                    },
-                });
-
-                Ok(HandlerAction::Reply(Some(Message::Text(
-                    json!({
-                        "msg_type": "server.agent.rename.response",
-                        "id": msg.id,
-                        "timestamp": current_timestamp(),
-                        "payload": {
-                            "success": true,
-                            "agent": agent_json
-                        }
-                    })
-                    .to_string(),
-                ))))
-            }
-            None => Ok(HandlerAction::Reply(Some(Message::Text(
-                json!({
-                    "msg_type": "server.agent.rename.response",
-                    "id": msg.id,
-                    "timestamp": current_timestamp(),
-                    "payload": {
-                        "success": false,
-                        "error": format!("Agent '{}' not found", agent_id)
-                    }
-                })
-                .to_string(),
-            )))),
+            Some(updated) => Ok(agent_rename_reply(
+                &msg.id,
+                AgentRenameReply::Renamed(Box::new(AgentRenameResponse {
+                    success: true,
+                    // The one builder, which is what removes the drift this arm
+                    // used to carry: `protocols` and `metadata.image_tag` were
+                    // both missing from the block that was here.
+                    agent: super::agent_view::agent_to_view(&updated),
+                })),
+            )),
+            None => Ok(agent_rename_reply(
+                &msg.id,
+                refusal(&format!("Agent '{agent_id}' not found")),
+            )),
         }
     }
 
@@ -3361,6 +3305,15 @@ mod extract_ip_tests {
 /// `to_value` cannot fail for a struct of these shapes, but the house pattern
 /// keeps a fallback rather than an unwrap — and an empty list is still a valid
 /// payload, so a caller reads "no files" instead of losing the reply.
+/// Serialize a `server.agent.rename` reply.
+fn agent_rename_reply(id: &str, reply: AgentRenameReply) -> HandlerAction {
+    reply_json(
+        id,
+        "server.agent.rename.response",
+        serde_json::to_value(&reply).unwrap_or(json!({ "success": false })),
+    )
+}
+
 /// Serialize a `server.agent.list` reply.
 fn agent_list_reply(id: &str, reply: AgentListReply) -> HandlerAction {
     reply_json(
@@ -3962,6 +3915,44 @@ mod tests {
             protocols["protocols"]["git.status"]["wire"][0],
             "git.status"
         );
+    }
+
+    #[tokio::test]
+    async fn a_rename_reply_carries_the_manifest_and_the_image_tag() {
+        // The test the defect needed. `server.agent.rename` built its own agent
+        // block, and it carried neither `protocols` nor `metadata.image_tag` —
+        // the two fields `agent_view`'s doc comment names as the drift that
+        // consolidating the builders was supposed to end. The block is gone and
+        // the reply is `WebAgentInfo` now, so this asserts the two fields rather
+        // than the absence of a `json!` call: a future hand-built block would
+        // have to reproduce both to pass.
+        let mut h = test_handler("").await;
+        h.authenticated_client = true;
+        register_agent(&h, Some(manifest_carrying("git.status"))).await;
+
+        let action = h
+            .handle_message(proto_msg(
+                "server.agent.rename",
+                json!({ "agent_id": "agent-a", "display_name": "Renamed" }),
+            ))
+            .await
+            .unwrap();
+        let payload = parse_reply(action)["payload"].clone();
+
+        let parsed: AgentRenameReply = serde_json::from_value(payload.clone())
+            .unwrap_or_else(|e| {
+                panic!("server.agent.rename replies {payload} but its contract does not accept it: {e}")
+            });
+        let AgentRenameReply::Renamed(reply) = parsed else {
+            panic!("a rename of a registered agent is not a refusal: {payload}");
+        };
+
+        assert!(
+            reply.agent.protocols.is_some(),
+            "the reply carries the manifest — losing it makes the Web's next call to this \
+             agent go out unversioned, which looks like nothing being wrong"
+        );
+        assert_eq!(reply.agent.metadata.image_tag, "test");
     }
 
     // ---- a named contract version is checked against the target (#678) ----

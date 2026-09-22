@@ -446,10 +446,37 @@ wires: &["server.agent.terminal-resize"],
             owner: "core",
             id: "server.agent.rename",
             version: 1,
-wires: &["server.agent.rename"],
-            decls: vec![],
-            request: None,
-            response: None,
+            wires: &["server.agent.rename"],
+            // Typed, and the reply is `WebAgentInfo` — the same type
+            // `server.agent.list` returns. That is the fix, not a tidy-up: this
+            // arm used to build its own agent block and had drifted in exactly
+            // the two ways those fields are easiest to lose.
+            decls: vec![
+                decl_of::<nession_protocol::contracts::agent::v1::AgentRenamePayload>(cfg),
+                decl_of::<nession_protocol::contracts::agent::v1::AgentRenameReply>(cfg),
+                decl_of::<nession_protocol::contracts::agent::v1::AgentRenameResponse>(cfg),
+                decl_of::<nession_protocol::contracts::agent::v1::AgentRenameFailure>(cfg),
+                decl_of::<nession_protocol::contracts::agent::v1::WebAgentInfo>(cfg),
+                decl_of::<nession_protocol::contracts::agent::v1::ProbedAddress>(cfg),
+                decl_of::<nession_protocol::contracts::agent::v1::AgentAddress>(cfg),
+                decl_of::<nession_protocol::contracts::agent::v1::NetworkType>(cfg),
+                decl_of::<nession_protocol::contracts::agent::v1::AddressStatus>(cfg),
+                decl_of::<nession_protocol::contracts::agent::v1::AgentMetadata>(cfg),
+                decl_of::<nession_protocol::ProtocolManifest>(cfg),
+                decl_of::<nession_protocol::ProtocolId>(cfg),
+                decl_of::<nession_protocol::ContractSupport>(cfg),
+                decl_of::<nession_protocol::ContractVersion>(cfg),
+            ],
+            request: Some((
+                "AgentRenameCall",
+                nession_protocol::contracts::agent::v1::AgentRenamePayload::inline,
+                schema_of::<nession_protocol::contracts::agent::v1::AgentRenamePayload>,
+            )),
+            response: Some((
+                "AgentRenameResult",
+                nession_protocol::contracts::agent::v1::AgentRenameReply::inline,
+                schema_of::<nession_protocol::contracts::agent::v1::AgentRenameReply>,
+            )),
         },
         Unit {
             owner: "core",
