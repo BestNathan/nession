@@ -397,3 +397,26 @@ pub struct WebAgentInfo {
 pub struct WebAgentsListResponse {
     pub agents: Vec<WebAgentInfo>,
 }
+
+/// `agent.keepalive.ping` — the liveness check a P2P client sends an agent.
+///
+/// The request is empty and explicitly so, like [`AgentListPayload`]: a ping
+/// asks "are you there" and has nothing else to say.
+///
+/// **Placement.** `contracts/mod.rs` places a contract by the family its id
+/// names, and this id's subject segment is `keepalive`, which is not a family.
+/// It sits in `agent` because that segment names the runtime that answers —
+/// the same reasoning that puts `server.auth` in `client/` beside `client.auth`
+/// rather than in a family of its own.
+///
+/// **No response, and that is forced rather than chosen.** The agent answers
+/// with an empty payload on the wire **`keepalive.pong`**
+/// (`websocket.rs`'s keepalive arm), not on `agent.keepalive.ping.response`.
+/// A catalog response slot names a shape, and it is the `<wire>.response`
+/// convention that gives that shape a wire — so attaching one would assert a
+/// wire nobody sends. This is the one unit here whose missing half is a wire
+/// naming problem and not a missing type.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct KeepalivePingPayload {}

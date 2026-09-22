@@ -25,9 +25,9 @@ export type AgentTerminalResizePayload = { session_id: string, cols: number, row
 
 // ── Operations ──
 
-/**
- * No request alias: the catalog declares no request shape for this unit.
- */
+/** The payload a caller sends. */
+export type AgentTerminalResizeCall = { session_id: string, cols: number, rows: number, };
+
 /**
  * No response alias: the catalog declares no response shape for this unit.
  */

@@ -19,8 +19,8 @@ use nession_protocol::contracts::agent::v1::{
 };
 use nession_protocol::contracts::env::v1::{EnvFileRef, EnvSnapshot};
 use nession_protocol::contracts::session::v1::{
-    AgentTerminalResizePayload, ServerSessionCreatePayload, ServerSessionEnvApplyPayload,
-    ServerSessionEnvUnsetPayload,
+    AgentSessionUpdatePayload, AgentTerminalResizePayload, ServerSessionCreatePayload,
+    ServerSessionEnvApplyPayload, ServerSessionEnvUnsetPayload,
 };
 use nession_protocol::{Message, ProtocolMessage};
 use serde::{Deserialize, Serialize};
@@ -68,18 +68,11 @@ pub mod msg_types {
     pub const SERVER_SESSIONS_LIST: &str = "agent.session.report";
 }
 
-/// Payload for session update messages.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SessionUpdatePayload {
-    pub agent_id: String,
-    pub session_name: String,
-    pub status: String,
-    pub window_count: u32,
-    pub attached_clients: u32,
-    /// Foreground command of the session's active pane, when tmux reports one.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub foreground_command: Option<String>,
-}
+// `SessionUpdatePayload` used to be declared here, beside the code that sends
+// it. It is [`AgentSessionUpdatePayload`] now, in `contracts/session/v1.rs` —
+// a wire type with a private definition is a second answer to a question the
+// contract already owns, and nothing keeps the two agreeing. Its doc comment
+// carries the full account.
 
 /// Payload for registration response from server.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -201,7 +194,7 @@ impl ServerClientHandle {
         attached_clients: u32,
         foreground_command: Option<&str>,
     ) -> Result<()> {
-        let payload = SessionUpdatePayload {
+        let payload = AgentSessionUpdatePayload {
             agent_id: self.agent_id.clone(),
             session_name: session_name.to_string(),
             status: status.to_string(),
@@ -2141,7 +2134,7 @@ mod tests {
 
     #[test]
     fn session_update_payload_serialization() {
-        let payload = SessionUpdatePayload {
+        let payload = AgentSessionUpdatePayload {
             agent_id: "a1".to_string(),
             session_name: "s1".to_string(),
             status: "active".to_string(),

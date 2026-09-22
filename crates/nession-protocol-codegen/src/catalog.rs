@@ -353,9 +353,19 @@ wires: &["server.agent.register"],
             owner: "core",
             id: "server.agent.session-update",
             version: 1,
-wires: &["server.agent.session-update"],
-            decls: vec![],
-            request: None,
+            wires: &["server.agent.session-update"],
+            // One-way: the agent reports one session's state and nothing answers.
+            // All five exits of `handle_agent_session_update` are `Reply(None)` —
+            // two of them deliberate early-outs, which is why "answers nothing"
+            // is a different claim from "always succeeds".
+            decls: vec![
+                decl_of::<nession_protocol::contracts::session::v1::AgentSessionUpdatePayload>(cfg),
+            ],
+            request: Some((
+                "AgentSessionUpdateCall",
+                nession_protocol::contracts::session::v1::AgentSessionUpdatePayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::AgentSessionUpdatePayload>,
+            )),
             response: None,
         },
         Unit {
@@ -377,11 +387,22 @@ wires: &["server.agent.command-response"],
             owner: "core",
             id: "server.agent.terminal-resize",
             version: 1,
-wires: &["server.agent.terminal-resize"],
+            wires: &["server.agent.terminal-resize"],
+            // One-way: a size change is announced, not answered. The server
+            // re-broadcasts it to clients and returns `Reply(None)`.
+            //
+            // The type was already declared here and simply not attached as the
+            // `request`, while the handler deserialised into it — so the contract
+            // existed and the catalog did not know. The cheapest unit of the
+            // seven: no new type, only the wire between the two.
             decls: vec![
                 decl_of::<nession_protocol::contracts::session::v1::AgentTerminalResizePayload>(cfg),
             ],
-            request: None,
+            request: Some((
+                "AgentTerminalResizeCall",
+                nession_protocol::contracts::session::v1::AgentTerminalResizePayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::AgentTerminalResizePayload>,
+            )),
             response: None,
         },
         Unit {
@@ -503,13 +524,27 @@ wires: &["server.agent.delete"],
             id: "server.auth",
             version: 1,
             wires: &["server.auth"],
-            // Identity only. The Server reads this request's fields out of
-            // `serde_json::Value` and builds its answer with `json!`, so there
-            // is no named shape to point at. Naming one from `contracts/`
-            // would describe a type the handler does not use.
-            decls: vec![],
-            request: None,
-            response: None,
+            // The client's door at the Server; `client.auth` is the same
+            // handshake at the Agent's. One operation, two ends — which is why
+            // both payload types are shared with it rather than duplicated per
+            // end, and why this unit sits beside it in the `client` family.
+            //
+            // Typed once the handler built its answer from a type instead of
+            // `json!`; before that there was no named shape to point at.
+            decls: vec![
+                decl_of::<nession_protocol::contracts::client::v1::ClientAuthPayload>(cfg),
+                decl_of::<nession_protocol::contracts::client::v1::AuthResponsePayload>(cfg),
+            ],
+            request: Some((
+                "ServerAuthCall",
+                nession_protocol::contracts::client::v1::ClientAuthPayload::inline,
+                schema_of::<nession_protocol::contracts::client::v1::ClientAuthPayload>,
+            )),
+            response: Some((
+                "ServerAuthReply",
+                nession_protocol::contracts::client::v1::AuthResponsePayload::inline,
+                schema_of::<nession_protocol::contracts::client::v1::AuthResponsePayload>,
+            )),
         },
         Unit {
             owner: "core",
@@ -687,12 +722,25 @@ wires: &["client.auth"],
             owner: "core",
             id: "agent.session.report",
             version: 1,
-wires: &["agent.session.report"],
+            wires: &["agent.session.report"],
+            // Request-only: the answer goes out on `server.agent.command-response`
+            // — a unit of its own — because that is what the `command`/`request_id`
+            // protocol is for. A reply declared here would describe a message
+            // nobody sends.
+            //
+            // `SessionListResponse` and `SessionInfo` were declared here and are
+            // gone: this unit's wire carries `{request_id}` and nothing else. The
+            // session list travels on the *answer*, and that belongs to
+            // `server.agent.command-response`. They were decls for a shape this
+            // unit does not carry.
             decls: vec![
-                decl_of::<nession_protocol::contracts::session::v1::SessionListResponse>(cfg),
-                decl_of::<nession_protocol::contracts::session::v1::SessionInfo>(cfg),
+                decl_of::<nession_protocol::contracts::session::v1::ServerSessionReportPayload>(cfg),
             ],
-            request: None,
+            request: Some((
+                "ServerSessionReportCall",
+                nession_protocol::contracts::session::v1::ServerSessionReportPayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::ServerSessionReportPayload>,
+            )),
             response: None,
         },
         Unit {
@@ -897,18 +945,47 @@ wires: &["agent.session.capture-preview"],
             owner: "core",
             id: "server.session.relay.begin",
             version: 1,
-wires: &["server.session.relay.begin"],
-            decls: vec![],
-            request: None,
-            response: None,
+            wires: &["server.session.relay.begin"],
+            // The reply is a **refusal, and only a refusal** — the success path
+            // returns `HandlerAction::Relay` and sends no message at all. Its own
+            // comment says so: *"No separate response — the server enters relay
+            // forwarding immediately."* So the response is `SessionRefusal`, not
+            // an untagged union: there is no second branch to discriminate
+            // against, and inventing one would describe a message nobody sends.
+            decls: vec![
+                decl_of::<nession_protocol::contracts::session::v1::ClientRelayBeginPayload>(cfg),
+                decl_of::<nession_protocol::contracts::session::v1::SessionRefusal>(cfg),
+            ],
+            request: Some((
+                "ClientRelayBeginCall",
+                nession_protocol::contracts::session::v1::ClientRelayBeginPayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::ClientRelayBeginPayload>,
+            )),
+            response: Some((
+                "ClientRelayBeginReply",
+                nession_protocol::contracts::session::v1::SessionRefusal::inline,
+                schema_of::<nession_protocol::contracts::session::v1::SessionRefusal>,
+            )),
         },
         Unit {
             owner: "core",
             id: "server.session.relay.end",
             version: 1,
-wires: &["server.session.relay.end"],
-            decls: vec![],
-            request: None,
+            wires: &["server.session.relay.end"],
+            // One-way, and routed off the dispatcher: the route table's arm is a
+            // bare `Ok(HandlerAction::Reply(None))` stub, because the real
+            // interception happens inside the relay forwarding loop — by then the
+            // connection is pumped by two `async` blocks and never returns to
+            // `handle_message`. Declared here so the wire has a shape; the
+            // routing lives with the loop that must see it.
+            decls: vec![
+                decl_of::<nession_protocol::contracts::session::v1::ClientRelayEndPayload>(cfg),
+            ],
+            request: Some((
+                "ClientRelayEndCall",
+                nession_protocol::contracts::session::v1::ClientRelayEndPayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::ClientRelayEndPayload>,
+            )),
             response: None,
         },
         Unit {
@@ -1560,9 +1637,24 @@ wires: &["agent.file.cwd"],
             owner: "core",
             id: "agent.keepalive.ping",
             version: 1,
-wires: &["agent.keepalive.ping"],
-            decls: vec![],
-            request: None,
+            wires: &["agent.keepalive.ping"],
+            // Request-only, and **forced rather than chosen**: the agent answers
+            // with an empty payload on `keepalive.pong`, not on
+            // `agent.keepalive.ping.response`. The response slot names a shape,
+            // and the `<wire>.response` convention is what gives that shape a
+            // wire — so attaching one would assert a wire nobody sends.
+            //
+            // The one unit here whose missing half is a *naming* problem rather
+            // than a missing type: `keepalive.pong` is a wire the kernel's
+            // `<wire>.response` rule cannot reach.
+            decls: vec![
+                decl_of::<nession_protocol::contracts::agent::v1::KeepalivePingPayload>(cfg),
+            ],
+            request: Some((
+                "KeepalivePingCall",
+                nession_protocol::contracts::agent::v1::KeepalivePingPayload::inline,
+                schema_of::<nession_protocol::contracts::agent::v1::KeepalivePingPayload>,
+            )),
             response: None,
         },
     ]

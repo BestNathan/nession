@@ -21,12 +21,14 @@ export const VERSION = 1;
 
 // ── Shapes ──
 
+export type ClientAuthPayload = { auth_token: string, client_id: string | null, };
+export type AuthResponsePayload = { status: string, message: string, client_id?: string | null, };
 
 // ── Operations ──
 
-/**
- * No request alias: the catalog declares no request shape for this unit.
- */
-/**
- * No response alias: the catalog declares no response shape for this unit.
- */
+/** The payload a caller sends. */
+export type ServerAuthCall = { auth_token: string, client_id: string | null, };
+
+/** The payload the provider answers with. */
+export type ServerAuthReply = { status: string, message: string, client_id?: string | null, };
+

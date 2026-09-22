@@ -21,12 +21,86 @@ export const VERSION = 1;
 
 // ── Shapes ──
 
+export type ClientRelayBeginPayload = { 
+/**
+ * `"<agent_id>:<session_name>"` — the same composite the rest of the tree
+ * uses, split by the handler with `split_once(':')`.
+ */
+session_id: string, 
+/**
+ * Manual relay URL override. When present the server uses exactly this URL
+ * instead of ranking the agent's advertised addresses.
+ *
+ * Carries the ranking's *input*, not its output: the field is read before
+ * any address is examined, so on a manual override the address list is
+ * never touched.
+ */
+relay_url?: string | null, 
+/**
+ * Terminal dimensions from the browser's `ResizeObserver`.
+ *
+ * `serde(default)` here is a **deserializer** tolerance, not an optional
+ * field, and the difference is visible: a sender that omits them gets the
+ * 80×24 fallback, but both stay plain `u16`s, so the generated TypeScript
+ * requires them. The tolerance exists because the browser can mount the
+ * Terminal before it has measured anything and that has never been an
+ * error — not as a licence to leave the size unstated.
+ *
+ * Worth spelling out because the two readings differ and only one of them
+ * is what a caller sees: a reader who took "defaults rather than being
+ * required" at face value would find `cols: number` in the `.ts` and have
+ * to work out which was lying.
+ */
+cols: number, rows: number, };
+export type SessionRefusal = { 
+/**
+ * Always `"error"` today. A string rather than an enum because nothing
+ * branches on its other values yet, and inventing them would be describing
+ * a wire that does not exist.
+ */
+status: string, message: string, };
 
 // ── Operations ──
 
+/** The payload a caller sends. */
+export type ClientRelayBeginCall = { 
 /**
- * No request alias: the catalog declares no request shape for this unit.
+ * `"<agent_id>:<session_name>"` — the same composite the rest of the tree
+ * uses, split by the handler with `split_once(':')`.
  */
+session_id: string, 
 /**
- * No response alias: the catalog declares no response shape for this unit.
+ * Manual relay URL override. When present the server uses exactly this URL
+ * instead of ranking the agent's advertised addresses.
+ *
+ * Carries the ranking's *input*, not its output: the field is read before
+ * any address is examined, so on a manual override the address list is
+ * never touched.
  */
+relay_url?: string | null, 
+/**
+ * Terminal dimensions from the browser's `ResizeObserver`.
+ *
+ * `serde(default)` here is a **deserializer** tolerance, not an optional
+ * field, and the difference is visible: a sender that omits them gets the
+ * 80×24 fallback, but both stay plain `u16`s, so the generated TypeScript
+ * requires them. The tolerance exists because the browser can mount the
+ * Terminal before it has measured anything and that has never been an
+ * error — not as a licence to leave the size unstated.
+ *
+ * Worth spelling out because the two readings differ and only one of them
+ * is what a caller sees: a reader who took "defaults rather than being
+ * required" at face value would find `cols: number` in the `.ts` and have
+ * to work out which was lying.
+ */
+cols: number, rows: number, };
+
+/** The payload the provider answers with. */
+export type ClientRelayBeginReply = { 
+/**
+ * Always `"error"` today. A string rather than an enum because nothing
+ * branches on its other values yet, and inventing them would be describing
+ * a wire that does not exist.
+ */
+status: string, message: string, };
+

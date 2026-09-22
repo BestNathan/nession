@@ -16,14 +16,15 @@ use nession_protocol::contracts::agent::v1::{
     AddressStatus, AgentAddressUpdatePayload, AgentListReply, AgentRefusal, AgentRegisterPayload,
     AgentRenameFailure, AgentRenameReply, AgentRenameResponse, WebAgentsListResponse,
 };
+use nession_protocol::contracts::client::v1::{AuthResponsePayload, ClientAuthPayload};
 use nession_protocol::contracts::env::v1::{
     ClientEnvDeletePayload, ClientEnvDeleteResponsePayload, ClientEnvGetPayload,
     ClientEnvGetResponsePayload, ClientEnvListPayload, ClientEnvListResponsePayload,
     ClientEnvWritePayload, ClientEnvWriteResponsePayload, EnvFileRef, EnvSnapshot, EnvSource,
 };
 use nession_protocol::contracts::session::v1::{
-    AgentTerminalResizePayload, ClientSessionCapturePreviewPayload, ClientSessionCreatePayload,
-    ClientSessionCreateResponsePayload, ClientSessionEnvActivePayload,
+    AgentTerminalResizePayload, ClientRelayBeginPayload, ClientSessionCapturePreviewPayload,
+    ClientSessionCreatePayload, ClientSessionCreateResponsePayload, ClientSessionEnvActivePayload,
     ClientSessionEnvApplyPayload, ClientSessionEnvQueryPayload, ClientSessionEnvResponsePayload,
     ClientSessionEnvUnsetPayload, ClientSessionKillPayload, ServerSessionListPayload,
     ServerSessionListReply, ServerTerminalResizePayload, SessionEnvActiveResponse,
@@ -538,15 +539,23 @@ impl ConnectionHandler {
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
     ) -> anyhow::Result<HandlerAction> {
-        let payload: serde_json::Value = msg.payload;
-        let auth_token = payload
-            .get("auth_token")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        // Typed at the contract boundary, and the type is the Agent's
+        // `client.auth` payload: a browser sends the same two fields to
+        // whichever end it is talking to, so the two ends share one shape.
+        //
+        // An unreadable payload becomes an empty token rather than an error,
+        // which is what the old field-by-field read did (`unwrap_or("")`): it
+        // fails authentication except in no-auth mode, and that is the intended
+        // behaviour for a malformed handshake.
+        let payload: ClientAuthPayload =
+            serde_json::from_value(msg.payload).unwrap_or(ClientAuthPayload {
+                auth_token: String::new(),
+                client_id: None,
+            });
 
         // Empty server auth_token means no-auth mode: accept any client
-        let auth_ok =
-            self.config.server_auth_token.is_empty() || auth_token == self.config.server_auth_token;
+        let auth_ok = self.config.server_auth_token.is_empty()
+            || payload.auth_token == self.config.server_auth_token;
 
         if auth_ok {
             self.authenticated_client = true;
@@ -556,33 +565,28 @@ impl ConnectionHandler {
             }
             info!("Client authenticated successfully");
 
-            Ok(HandlerAction::Reply(Some(Message::Text(
-                json!({
-                    "msg_type": "server.auth.response",
-                    "id": msg.id,
-                    "timestamp": current_timestamp(),
-                    "payload": {
-                        "status": "success",
-                        "message": "Authentication successful"
-                    }
-                })
-                .to_string(),
-            ))))
+            Ok(auth_reply(
+                &msg.id,
+                AuthResponsePayload {
+                    status: "success".to_string(),
+                    message: "Authentication successful".to_string(),
+                    // The Server assigns no client id and never did. The
+                    // contract used to require one, which is why the field is
+                    // optional now — this branch has nothing honest to put here.
+                    client_id: None,
+                },
+            ))
         } else {
             info!("Client authentication failed");
 
-            Ok(HandlerAction::Reply(Some(Message::Text(
-                json!({
-                    "msg_type": "server.auth.response",
-                    "id": msg.id,
-                    "timestamp": current_timestamp(),
-                    "payload": {
-                        "status": "failed",
-                        "message": "Invalid auth token"
-                    }
-                })
-                .to_string(),
-            ))))
+            Ok(auth_reply(
+                &msg.id,
+                AuthResponsePayload {
+                    status: "failed".to_string(),
+                    message: "Invalid auth token".to_string(),
+                    client_id: None,
+                },
+            ))
         }
     }
 
@@ -1296,68 +1300,70 @@ impl ConnectionHandler {
         msg: ProtocolMessage<serde_json::Value>,
     ) -> anyhow::Result<HandlerAction> {
         if !self.authenticated_client {
-            return Ok(HandlerAction::Reply(Some(Message::Text(
-                json!({
-                    "msg_type": "server.session.relay.begin.response",
-                    "id": msg.id,
-                    "timestamp": current_timestamp(),
-                    "payload": { "status": "error", "message": "Not authenticated" }
-                })
-                .to_string(),
-            ))));
+            return Ok(relay_begin_reply(
+                &msg.id,
+                SessionRefusal {
+                    status: "error".to_string(),
+                    message: "Not authenticated".to_string(),
+                },
+            ));
         }
 
-        let session_id = msg
-            .payload
-            .get("session_id")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        // A payload that does not parse is treated as an unusable session id
+        // rather than as a hard error, which is exactly what the field-by-field
+        // read did (`unwrap_or("")`): it falls through to the "Invalid
+        // session_id format" refusal below, the same way a missing `session_id`
+        // always has. The literals restate the serde defaults so the two cannot
+        // disagree.
+        let payload: ClientRelayBeginPayload =
+            serde_json::from_value(msg.payload).unwrap_or(ClientRelayBeginPayload {
+                session_id: String::new(),
+                relay_url: None,
+                cols: 80,
+                rows: 24,
+            });
+
+        let session_id = payload.session_id.as_str();
         let (agent_id, session_name) = match session_id.split_once(':') {
             Some((aid, sname)) => (aid.to_string(), sname.to_string()),
             None => {
-                return Ok(HandlerAction::Reply(Some(Message::Text(
-                    json!({
-                        "msg_type": "server.session.relay.begin.response",
-                        "id": msg.id,
-                        "timestamp": current_timestamp(),
-                        "payload": { "status": "error", "message": "Invalid session_id format" }
-                    })
-                    .to_string(),
-                ))));
+                return Ok(relay_begin_reply(
+                    &msg.id,
+                    SessionRefusal {
+                        status: "error".to_string(),
+                        message: "Invalid session_id format".to_string(),
+                    },
+                ));
             }
         };
 
         let session = self.session_registry.get(session_id).await;
         if session.is_none() {
-            return Ok(HandlerAction::Reply(Some(Message::Text(
-                json!({
-                    "msg_type": "server.session.relay.begin.response",
-                    "id": msg.id, "timestamp": current_timestamp(),
-                    "payload": { "status": "error", "message": format!("Session not found: {session_id}") }
-                }).to_string(),
-            ))));
+            return Ok(relay_begin_reply(
+                &msg.id,
+                SessionRefusal {
+                    status: "error".to_string(),
+                    message: format!("Session not found: {session_id}"),
+                },
+            ));
         }
 
         let agent = self.agent_registry.get(&agent_id).await;
         let agent = match agent {
             Some(a) if a.status == AgentStatus::Online => a,
             _ => {
-                return Ok(HandlerAction::Reply(Some(Message::Text(
-                    json!({
-                        "msg_type": "server.session.relay.begin.response",
-                        "id": msg.id, "timestamp": current_timestamp(),
-                        "payload": { "status": "error", "message": format!("Agent '{agent_id}' is offline") }
-                    }).to_string(),
-                ))));
+                return Ok(relay_begin_reply(
+                    &msg.id,
+                    SessionRefusal {
+                        status: "error".to_string(),
+                        message: format!("Agent '{agent_id}' is offline"),
+                    },
+                ));
             }
         };
 
         // Manual relay URL override from the browser.
-        let manual_relay_url: Option<String> = msg
-            .payload
-            .get("relay_url")
-            .and_then(|v| v.as_str())
-            .map(str::to_string);
+        let manual_relay_url: Option<String> = payload.relay_url.clone();
 
         // Build URL list: respect manual override, otherwise auto-select.
         let agent_ws_url = crate::registry::legacy_agent_address(&agent.addresses)
@@ -1412,21 +1418,11 @@ impl ConnectionHandler {
         // terminal.output flows back through this WebSocket.
 
         // Terminal dimensions from the browser viewport (via ResizeObserver).
-        // Default to 80×24 if the browser hasn't sent them yet.
-        let cols = u16::try_from(
-            msg.payload
-                .get("cols")
-                .and_then(serde_json::Value::as_u64)
-                .unwrap_or(80),
-        )
-        .unwrap_or(80);
-        let rows = u16::try_from(
-            msg.payload
-                .get("rows")
-                .and_then(serde_json::Value::as_u64)
-                .unwrap_or(24),
-        )
-        .unwrap_or(24);
+        // The 80×24 fallback for a browser that has not measured anything yet
+        // lives on the type now, so a caller that omits them and a caller that
+        // sends them cannot disagree about the default.
+        let cols = payload.cols;
+        let rows = payload.rows;
 
         Ok(HandlerAction::Relay {
             agent_ws_urls: relay_urls,
@@ -3305,6 +3301,33 @@ mod extract_ip_tests {
 /// `to_value` cannot fail for a struct of these shapes, but the house pattern
 /// keeps a fallback rather than an unwrap — and an empty list is still a valid
 /// payload, so a caller reads "no files" instead of losing the reply.
+/// Serialize a `server.auth` reply.
+///
+/// The same payload type the Agent's `client.auth` answers with — one handshake
+/// at two ends, so one type. This call is the one that has no client id to put
+/// in it, which is why the field is optional rather than required.
+fn auth_reply(id: &str, payload: AuthResponsePayload) -> HandlerAction {
+    reply_json(
+        id,
+        "server.auth.response",
+        serde_json::to_value(&payload)
+            .unwrap_or(json!({ "status": "failed", "message": "serialization failed" })),
+    )
+}
+
+/// Serialize a `server.session.relay.begin` refusal.
+///
+/// A refusal and nothing else, because the success path never reaches here: it
+/// returns `HandlerAction::Relay` and starts forwarding without answering.
+fn relay_begin_reply(id: &str, refusal: SessionRefusal) -> HandlerAction {
+    reply_json(
+        id,
+        "server.session.relay.begin.response",
+        serde_json::to_value(&refusal)
+            .unwrap_or(json!({ "status": "error", "message": "serialization failed" })),
+    )
+}
+
 /// Serialize a `server.agent.rename` reply.
 fn agent_rename_reply(id: &str, reply: AgentRenameReply) -> HandlerAction {
     reply_json(

@@ -173,6 +173,30 @@ fn a_unit_with_a_response_also_has_a_request() {
 }
 
 #[test]
+fn every_unit_declares_a_request_shape() {
+    // The end state of #920, pinned so it cannot quietly regress. Before it, the
+    // last eight units were identity-only: a name, a wire and two `None`s, with
+    // the shape of what they carried living in whichever handler read or built
+    // it — and nothing to compare that against.
+    //
+    // The near-reverse of the test above, and deliberately not the same claim.
+    // That one says *an answering unit must be askable*; this says every unit has
+    // a shape at all. A one-way unit's request is simply its message, so this
+    // holds without contradicting "half the kernel's units are one-way".
+    //
+    // A request and not a response: `agent.keepalive.ping` is request-only for a
+    // reason no amount of typing can fix — it answers on `keepalive.pong`, a wire
+    // the `<wire>.response` convention cannot name.
+    for unit in units() {
+        assert!(
+            unit.request.is_some(),
+            "{} has no request shape, so a caller cannot tell what to send it",
+            unit.id
+        );
+    }
+}
+
+#[test]
 fn an_alias_is_a_shape_and_not_a_reference_to_one() {
     // The aliases come from `inline()`, not `decl()`. `decl()` on a generic
     // returns the *generic* declaration — `type GitResponseV1<T> = …` — which
@@ -306,17 +330,27 @@ fn a_unit_with_no_shape_says_so_instead_of_omitting_the_key() {
     // Present and null, so a consumer can tell "no shape" from "this document
     // predates the field" — the same rule the agent-list wire follows.
     //
-    // The unit is *chosen* rather than named. It used to name
-    // `server.env.write`, and went red the moment #920 typed that unit — which
-    // is how this was found, and a fair way to be told the work is progressing.
-    // Naming another one would only move the tripwire, so this takes whatever
-    // identity-only unit is left and says so loudly if there is none.
+    // The subject is named now, and it is a *stable* one rather than whichever
+    // unit happened to be untyped. This test used to pick "whatever identity-only
+    // unit is left" and panic when there was none — it went red with
+    // `#920 finished: no identity-only units remain`, which is how the end of
+    // that work was detected. With nothing left to trip, a name is clearer.
+    //
+    // `agent.keepalive.ping` is request-only **permanently**: the agent answers
+    // on `keepalive.pong`, and no `<wire>.response` wire exists for a response
+    // shape to be attached to. It cannot be typed out of this test the way
+    // `server.env.write` was.
     let doc = crate::schema::document(None);
-    let Some(unit) = units().into_iter().find(|u| u.decls.is_empty()) else {
-        panic!("#920 finished: no identity-only units remain, so this has no subject");
-    };
+    let unit = units()
+        .into_iter()
+        .find(|u| u.id == "agent.keepalive.ping")
+        .expect("agent.keepalive.ping is declared");
+    assert!(
+        unit.response.is_none(),
+        "the premise moved: agent.keepalive.ping answers now, so this test needs a new subject"
+    );
     let entry = &doc["protocols"][unit.id];
-    assert!(entry["request"].is_null(), "{} has a request", unit.id);
+    assert!(entry["request"].is_object(), "{} has no request", unit.id);
     assert!(entry["response"].is_null(), "{} has a response", unit.id);
     assert_eq!(entry["owner"], unit.owner);
     assert_eq!(entry["version"], unit.version);
