@@ -759,12 +759,27 @@ wires: &["server.session.attach"],
             id: "server.session.capture-preview",
             version: 1,
             wires: &["server.session.capture-preview"],
-            // Identity only. The Server reads this request's fields out of
-            // `serde_json::Value` and builds its answer with `json!`, so there
-            // is no named shape to point at. Naming one from `contracts/`
-            // would describe a type the handler does not use.
-            decls: vec![],
-            request: None,
+            // Request typed; **response deliberately absent**.
+            //
+            // The Server's reply here is the agent's reply, forwarded. The
+            // relay "depends on no concrete provider crate … routes by
+            // manifest, not by knowing a payload schema"
+            // (`docs/architecture/protocol.md`), so the shape on this wire
+            // belongs to `agent.session.capture-preview`'s contract and is not
+            // Nession's to describe from this side. `None` with that reason
+            // beats the silent `None` it used to be.
+            decls: vec![
+                decl_of::<nession_protocol::contracts::session::v1::ClientSessionCapturePreviewPayload>(
+                    cfg,
+                ),
+            ],
+            request: Some((
+                "SessionCapturePreviewCall",
+                nession_protocol::contracts::session::v1::ClientSessionCapturePreviewPayload::inline,
+                schema_of::<
+                    nession_protocol::contracts::session::v1::ClientSessionCapturePreviewPayload,
+                >,
+            )),
             response: None,
         },
         Unit {

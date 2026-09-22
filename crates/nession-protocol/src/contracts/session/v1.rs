@@ -329,6 +329,27 @@ pub struct SessionCapturePreviewPayload {
     pub lines: u32,
 }
 
+/// The client's request to `server.session.capture-preview`.
+///
+/// Distinct from [`SessionCapturePreviewPayload`] on purpose: that one is what
+/// the *Server* sends the agent, and it names a `session_name`. The client sends
+/// a `session_id` and may omit `lines`. The two halves of one protocol had
+/// collided on a plausible name, which is why this is not called `…Payload`.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClientSessionCapturePreviewPayload {
+    pub session_id: String,
+    /// How much scrollback to capture. Absent means 2000 — the value the
+    /// handler has always defaulted to.
+    #[serde(default = "default_preview_lines")]
+    pub lines: u32,
+}
+
+pub(crate) fn default_preview_lines() -> u32 {
+    2000
+}
+
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
