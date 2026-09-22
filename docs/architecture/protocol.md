@@ -72,6 +72,8 @@ This is enforced, not documented-and-hoped:
 
 ### What is not a Protocol Unit
 
+- **Notification** — a reply to something the other end sent, on a wire of its
+  own. The one that looks most like a unit; see below.
 - **Product Capability** — a user-visible thing with a presence state (Files,
   Git, Claude Code in the Web UI). It *consumes* contracts; it is not one.
 - **Transport Plugin** — a client-side adapter with no presence. Also not a
@@ -79,8 +81,43 @@ This is enforced, not documented-and-hoped:
 - **Transport mechanism** — TLS, framing, serialisation. These are kernel, and
   they do not get generations.
 
-Three concepts, three names. A sentence where "capability" could mean any of
-them is a sentence to rewrite.
+Four concepts, four names. A sentence where "capability" could mean any of them
+is a sentence to rewrite.
+
+#### A notification is not a unit
+
+The other three are things *around* the protocol. A notification is *inside* it —
+it has a wire, a payload type and a sender — which is why it is the one that gets
+mistaken for a unit. The test is one question:
+
+> **Does anything dispatch it?** A unit is something a dispatcher answers. A
+> notification is a reply to a message *you* sent: no route table has an arm for
+> it, and nothing can ask for it.
+
+`server.agent.heartbeat` is a unit — the server's route table has an arm for it,
+and it answers. Its acknowledgement arrives on `server.heartbeat.ack`, for which
+no route table has an arm; the agent logs it in the plain match beside its
+dispatcher. So the heartbeat is a unit, the ack is not, and the catalog gives the
+heartbeat `response: None`: its answer travels on a wire the `<wire>.response`
+convention cannot name, so there is no wire for a response shape to attach to.
+
+Advertising the ack instead would **claim an offer that does not exist** — the
+manifest is a statement of what you can be asked for, and nobody can ask for an
+acknowledgement.
+
+Two consequences, worth knowing before going to look for a unit to add:
+
+- **The wire is still declared.** A notification's wire appears as a `pub const`
+  beside the dispatcher that handles it, which is how the gate learns it exists.
+  It is not in a route table because no route table can describe it.
+- **Its payload type is carried by no unit**, so `just codegen` never emits it.
+  That is correct when the receiving peer is not the Web — the heartbeat's ack
+  goes to an agent, which is Rust — and worth a second look when it is, because a
+  shape no unit carries gets no generated binding.
+
+The same rule, shortened to the test alone, is on the `Unit` type in
+`crates/nession-protocol-codegen/src/catalog.rs` — which is where someone arrives
+when the schema reports that a unit has no `response`.
 
 ## Directory layout
 
