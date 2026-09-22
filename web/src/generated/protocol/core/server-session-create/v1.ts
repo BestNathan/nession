@@ -21,12 +21,36 @@ export const VERSION = 1;
 
 // ── Shapes ──
 
+export type ClientSessionCreatePayload = { agent_id: string, name: string, 
+/**
+ * Env files to source into the session as it is created.
+ *
+ * The Server has always read this off the payload and the Web has always
+ * sent it. It was not declared, and moving the payload into the type is
+ * what surfaced that — a move is not something a `json!`-style read can
+ * hide, so the compiler pointed at the second read instead of a reviewer
+ * having to notice it.
+ */
+env_files: Array<EnvFileRef>, };
+export type ClientSessionCreateResponsePayload = { success: boolean, session_id?: string | null, error?: string | null, };
+export type EnvFileRef = { name: string, source: EnvSource, agent_id?: string | null, };
+export type EnvSource = "server" | "agent";
 
 // ── Operations ──
 
+/** The payload a caller sends. */
+export type SessionCreateCall = { agent_id: string, name: string, 
 /**
- * No request alias: the catalog declares no request shape for this unit.
+ * Env files to source into the session as it is created.
+ *
+ * The Server has always read this off the payload and the Web has always
+ * sent it. It was not declared, and moving the payload into the type is
+ * what surfaced that — a move is not something a `json!`-style read can
+ * hide, so the compiler pointed at the second read instead of a reviewer
+ * having to notice it.
  */
-/**
- * No response alias: the catalog declares no response shape for this unit.
- */
+env_files: Array<EnvFileRef>, };
+
+/** The payload the provider answers with. */
+export type SessionCreateReply = { success: boolean, session_id?: string | null, error?: string | null, };
+
