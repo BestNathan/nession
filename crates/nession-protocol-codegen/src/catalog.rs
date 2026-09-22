@@ -957,9 +957,25 @@ wires: &["agent.session.env.unset"],
             id: "server.session.env.query",
             version: 1,
             wires: &["server.session.env.query"],
-            decls: vec![],
-            request: None,
-            response: None,
+            // Typed. `sourced_files` is a list of *names* on this wire, not of
+            // `EnvFileRef`s — the handler maps the agent's array through
+            // `as_str`. Reading the branch is what said so.
+            decls: vec![
+                decl_of::<nession_protocol::contracts::session::v1::ClientSessionEnvQueryPayload>(
+                    cfg,
+                ),
+                decl_of::<nession_protocol::contracts::session::v1::SessionEnvQueryResponse>(cfg),
+            ],
+            request: Some((
+                "SessionEnvQueryCall",
+                nession_protocol::contracts::session::v1::ClientSessionEnvQueryPayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::ClientSessionEnvQueryPayload>,
+            )),
+            response: Some((
+                "SessionEnvQueryReply",
+                nession_protocol::contracts::session::v1::SessionEnvQueryResponse::inline,
+                schema_of::<nession_protocol::contracts::session::v1::SessionEnvQueryResponse>,
+            )),
         },
         Unit {
             owner: "core",
