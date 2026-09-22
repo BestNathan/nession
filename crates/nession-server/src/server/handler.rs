@@ -14,7 +14,8 @@ use nession_common::display_name::validate_display_name;
 use nession_common::env_file::parse_env;
 use nession_protocol::contracts::agent::v1::{
     AddressStatus, AgentAddressUpdatePayload, AgentListReply, AgentRefusal, AgentRegisterPayload,
-    AgentRenameFailure, AgentRenameReply, AgentRenameResponse, WebAgentsListResponse,
+    AgentRenameFailure, AgentRenameReply, AgentRenameResponse, ServerHeartbeatAckPayload,
+    WebAgentsListResponse,
 };
 use nession_protocol::contracts::client::v1::{AuthResponsePayload, ClientAuthPayload};
 use nession_protocol::contracts::env::v1::{
@@ -422,19 +423,29 @@ impl ConnectionHandler {
         }
 
         // Acknowledge so the agent can confirm the link is healthy in both
-        // directions and reset its own miss counter.
-        Ok(HandlerAction::Reply(Some(Message::Text(
-            json!({
-                "msg_type": "server.heartbeat.ack",
-                "id": msg.id,
-                "timestamp": current_timestamp(),
-                "payload": {
-                    "agent_id": agent_id,
-                    "server_time": current_timestamp()
-                }
-            })
-            .to_string(),
-        ))))
+        // directions.
+        //
+        // This is a **notification**, not a unit's response — and deliberately
+        // not a unit: it travels on `server.heartbeat.ack`, and a manifest
+        // advertising it would claim an offer that does not exist.
+        // `nession-agent`'s protocol module owns that rule and states it.
+        //
+        // Typed at the contract boundary anyway. `ServerHeartbeatAckPayload` was
+        // declared, derived and unit-tested while being used by nobody: this
+        // block built the same shape by hand, and the agent logs the ack without
+        // parsing it, so nothing kept the two in step.
+        //
+        // The clause about the agent resetting "its own miss counter" is gone —
+        // there is no miss counter, and the agent's handler logs the ack and
+        // returns. A comment promising a mechanism nothing implements is how the
+        // next reader concludes the mechanism exists.
+        Ok(heartbeat_ack_reply(
+            &msg.id,
+            ServerHeartbeatAckPayload {
+                agent_id: agent_id.to_string(),
+                server_time: current_timestamp(),
+            },
+        ))
     }
 
     async fn handle_agent_session_update(
@@ -3301,6 +3312,20 @@ mod extract_ip_tests {
 /// `to_value` cannot fail for a struct of these shapes, but the house pattern
 /// keeps a fallback rather than an unwrap — and an empty list is still a valid
 /// payload, so a caller reads "no files" instead of losing the reply.
+/// Serialize a `server.heartbeat.ack`.
+///
+/// Named a reply because it is one — it carries the heartbeat's own `id` — even
+/// though it is not the heartbeat unit's *response*: it travels on its own wire,
+/// which is why `server.heartbeat.ack` is a unit of its own. See the catalog
+/// entry for the full reasoning.
+fn heartbeat_ack_reply(id: &str, payload: ServerHeartbeatAckPayload) -> HandlerAction {
+    reply_json(
+        id,
+        "server.heartbeat.ack",
+        serde_json::to_value(&payload).unwrap_or(json!({ "agent_id": "", "server_time": 0 })),
+    )
+}
+
 /// Serialize a `server.auth` reply.
 ///
 /// The same payload type the Agent's `client.auth` answers with — one handshake
