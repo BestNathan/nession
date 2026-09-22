@@ -466,6 +466,9 @@ p2p_routes! { ctx, msg_type, payload_value;
                 Ok(sessions_list) => {
                     let payload = SessionListResponse {
                         sessions: sessions_list,
+                        // The agent answers from its own tmux, so nothing is
+                        // stale — this field exists for the Server's fan-out.
+                        stale_agents: Vec::new(),
                     };
                     serde_json::to_string(&make_response(ctx.id, msg_types::OK, payload))
                         .unwrap_or_default()
@@ -984,11 +987,20 @@ p2p_routes! { ctx, msg_type, payload_value;
                                 },
                                 window_count: s.window_count,
                                 attached_clients: s.attached_clients,
+                                // The agent's own `list_sessions` does not
+                                // carry the foreground command; the Server
+                                // fills it in from a later query.
+                                foreground_command: None,
                                 last_activity: chrono::Utc::now().to_rfc3339(),
                             }
                         })
                         .collect();
-                    let resp = WebSessionsListResponse { sessions };
+                    let resp = WebSessionsListResponse {
+                        sessions,
+                        // Nothing to be stale about: this agent answers from
+                        // its own tmux.
+                        stale_agents: Vec::new(),
+                    };
                     serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
                         .unwrap_or_default()
                 }

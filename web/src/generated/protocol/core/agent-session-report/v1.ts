@@ -21,7 +21,17 @@ export const VERSION = 1;
 
 // ── Shapes ──
 
-export type SessionListResponse = { sessions: Array<SessionInfo>, };
+export type SessionListResponse = { sessions: Array<SessionInfo>, 
+/**
+ * Agents that did not answer a forced refresh, so the caller knows the
+ * list may be incomplete rather than complete-but-empty.
+ *
+ * Always on this branch — the handler builds it on both paths — and it was
+ * never declared. Its absence from the contract is why `stale_agents`
+ * looked like a field a consumer could not rely on; it is the opposite,
+ * it is always there and the caller is meant to act on it.
+ */
+stale_agents: Array<string>, };
 export type SessionInfo = { name: string, created_at: number, window_count: number, attached_clients: number, width: number, height: number, 
 /**
  * Foreground command of the session's active pane (`#{pane_current_command}`).

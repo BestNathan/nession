@@ -23,6 +23,10 @@ use nession_protocol::contracts::env::v1::{
 use nession_protocol::contracts::session::v1::{
     AgentTerminalResizePayload, ServerTerminalResizePayload,
 };
+use nession_protocol::contracts::session::v1::{
+    ServerSessionListPayload, ServerSessionListReply, SessionRefusal, WebSessionInfo,
+    WebSessionsListResponse,
+};
 use nession_protocol::ProtocolMessage;
 
 /// Per-agent deadline for the force-refresh session query. Deliberately much
@@ -957,28 +961,24 @@ impl ConnectionHandler {
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
     ) -> anyhow::Result<HandlerAction> {
+        // Typed at the contract boundary. The refusal branch used to be built
+        // by hand because no contract described it — eleven handlers reply this
+        // shape and none of them declared it.
         if !self.authenticated_client {
             warn!("Unauthenticated client requested sessions list");
-            return Ok(HandlerAction::Reply(Some(Message::Text(
-                json!({
-                    "msg_type": "server.session.list.response",
-                    "id": msg.id,
-                    "timestamp": current_timestamp(),
-                    "payload": {
-                        "status": "error",
-                        "message": "Not authenticated"
-                    }
-                })
-                .to_string(),
-            ))));
+            return Ok(session_list_reply(
+                &msg.id,
+                ServerSessionListReply::Refused(SessionRefusal {
+                    status: "error".to_string(),
+                    message: "Not authenticated".to_string(),
+                }),
+            ));
         }
 
-        let agent_id = msg.payload.get("agent_id").and_then(|v| v.as_str());
-        let force = msg
-            .payload
-            .get("force")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false);
+        let payload: ServerSessionListPayload =
+            serde_json::from_value(msg.payload).unwrap_or_default();
+        let agent_id = payload.agent_id.as_deref();
+        let force = payload.force;
 
         let stale_agents = if force {
             let stale = self.refresh_sessions_from_agents(agent_id).await;
@@ -997,6 +997,7 @@ impl ConnectionHandler {
         };
 
         let sessions_json: Vec<serde_json::Value> = sessions.iter().map(session_to_json).collect();
+        let sessions: Vec<WebSessionInfo> = sessions.iter().map(session_to_info).collect();
 
         info!(
             "Client requested sessions list (force: {}), returning {} sessions, {} stale agent(s)",
@@ -1005,18 +1006,13 @@ impl ConnectionHandler {
             stale_agents.len()
         );
 
-        Ok(HandlerAction::Reply(Some(Message::Text(
-            json!({
-                "msg_type": "server.session.list.response",
-                "id": msg.id,
-                "timestamp": current_timestamp(),
-                "payload": {
-                    "sessions": sessions_json,
-                    "stale_agents": stale_agents,
-                }
-            })
-            .to_string(),
-        ))))
+        Ok(session_list_reply(
+            &msg.id,
+            ServerSessionListReply::Listed(WebSessionsListResponse {
+                sessions,
+                stale_agents,
+            }),
+        ))
     }
 
     /// Query online agents for their live tmux sessions and rebuild the
@@ -3399,6 +3395,18 @@ mod extract_ip_tests {
 /// `to_value` cannot fail for a struct of these shapes, but the house pattern
 /// keeps a fallback rather than an unwrap — and an empty list is still a valid
 /// payload, so a caller reads "no files" instead of losing the reply.
+/// Serialize a `server.session.list` reply.
+///
+/// The first unit to use a union: its two branches share no field, so a
+/// discriminated shape would have to invent a tag the wire does not carry.
+fn session_list_reply(id: &str, reply: ServerSessionListReply) -> HandlerAction {
+    reply_json(
+        id,
+        "server.session.list.response",
+        serde_json::to_value(&reply).unwrap_or(json!({ "sessions": [] })),
+    )
+}
+
 /// Serialize a `server.env.write` reply. Same fallback reasoning as
 /// [`env_list_reply`].
 fn env_write_reply(id: &str, payload: ClientEnvWriteResponsePayload) -> HandlerAction {
@@ -3459,23 +3467,28 @@ fn current_timestamp() -> u64 {
 /// Serialise a session for the wire. Shared by `server.session.list` and the
 /// `sessions.changed` broadcast so both always agree on the field set — the
 /// web client feeds either straight into the same state setter.
-pub(crate) fn session_to_json(s: &crate::registry::SessionInfo) -> serde_json::Value {
-    json!({
-        "session_id": s.session_id,
-        "agent_id": s.agent_id,
-        "session_name": s.session_name,
-        "status": match s.status {
+pub(crate) fn session_to_info(s: &crate::registry::SessionInfo) -> WebSessionInfo {
+    WebSessionInfo {
+        session_id: s.session_id.clone(),
+        agent_id: s.agent_id.clone(),
+        session_name: s.session_name.clone(),
+        status: match s.status {
             SessionStatus::Active => "active",
             SessionStatus::Detached => "detached",
             SessionStatus::Recovering => "recovering",
             SessionStatus::Orphaned => "orphaned",
             SessionStatus::Zombie => "zombie",
-        },
-        "window_count": s.window_count,
-        "attached_clients": s.attached_clients,
-        "foreground_command": s.foreground_command,
-        "last_activity": s.last_activity.to_rfc3339(),
-    })
+        }
+        .to_string(),
+        window_count: s.window_count,
+        attached_clients: s.attached_clients,
+        foreground_command: s.foreground_command.clone(),
+        last_activity: s.last_activity.to_rfc3339(),
+    }
+}
+
+pub(crate) fn session_to_json(s: &crate::registry::SessionInfo) -> serde_json::Value {
+    serde_json::to_value(session_to_info(s)).unwrap_or(json!({}))
 }
 
 /// Convert an agent's `sessions.list` reply into registry entries.
@@ -5475,6 +5488,40 @@ mod tests {
         let no_source: ClientEnvDeletePayload = serde_json::from_value(json!({ "name": "x.env" }))
             .expect("a missing source defaults to the server, as parse_env_ref did");
         assert_eq!(no_source.source, EnvSource::Server);
+    }
+
+    #[tokio::test]
+    async fn session_list_reply_is_what_its_contract_says_it_is() {
+        // The first unit whose contract is a union of two *disjoint* shapes.
+        // Both halves have to round-trip — the refusal is what eleven handlers
+        // send and what no contract described until now.
+        let mut h = test_handler("").await;
+        let action = h
+            .handle_message(proto_msg("server.session.list", json!({})))
+            .await
+            .unwrap();
+        let payload = parse_reply(action)["payload"].clone();
+        let parsed: ServerSessionListReply = serde_json::from_value(payload.clone())
+            .unwrap_or_else(|e| {
+                panic!("server.session.list replies {payload} but its contract does not accept it: {e}")
+            });
+        assert!(
+            matches!(parsed, ServerSessionListReply::Refused(_)),
+            "an unauthenticated caller is refused, not handed an empty list"
+        );
+
+        let mut h = test_handler("").await;
+        h.authenticated_client = true;
+        let action = h
+            .handle_message(proto_msg("server.session.list", json!({})))
+            .await
+            .unwrap();
+        let payload = parse_reply(action)["payload"].clone();
+        let parsed: ServerSessionListReply = serde_json::from_value(payload.clone())
+            .unwrap_or_else(|e| {
+                panic!("server.session.list replies {payload} but its contract does not accept it: {e}")
+            });
+        assert!(matches!(parsed, ServerSessionListReply::Listed(_)));
     }
 
     #[tokio::test]
