@@ -151,13 +151,30 @@ pub struct ClientEnvGetResponsePayload {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientEnvWritePayload {
     pub name: String,
+    #[serde(default = "default_env_source")]
     pub source: EnvSource,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_id: Option<String>,
+    /// The file's contents.
+    ///
+    /// Defaulted because the Server has always read a missing `content` as the
+    /// empty string, and a request it accepted yesterday must not start being
+    /// refused because a type was attached to it. That tolerance is worth
+    /// questioning on its own — a write that quietly creates an empty file is a
+    /// footgun — but questioning it is a behaviour change, not a contract one.
+    #[serde(default)]
     pub content: String,
     /// When false, refuse to overwrite an existing file (create-only).
     #[serde(default)]
     pub overwrite: bool,
+    /// Overwrite even though a running session has the file sourced, then
+    /// re-source it.
+    ///
+    /// Read off `Value` beside the parser until now, like `delete`'s `force`
+    /// and for the same reason: the field has always been on the wire and was
+    /// never named here.
+    #[serde(default)]
+    pub force: bool,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
@@ -173,6 +190,22 @@ pub struct ClientEnvWriteResponsePayload {
     pub error: Option<String>,
     #[serde(default)]
     pub warnings: Vec<String>,
+    /// Sessions holding the file, on the refusal that names them.
+    ///
+    /// Optional for the same reason as `ClientEnvGetResponsePayload::in_use_by`
+    /// — it is computed on exactly one branch — and for a blunter one: this
+    /// field was on the wire without being in the contract at all, so any
+    /// consumer reading the schema had no way to know it existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub in_use_by: Option<Vec<String>>,
+    /// Sessions re-sourced after a forced write. Reported on the success branch
+    /// only, because it is the only branch that re-sources anything.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub re_sourced: Option<Vec<String>>,
+    /// Why any of those re-sources failed. Same branch as `re_sourced`, and
+    /// absent for the same reason.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub re_source_errors: Option<Vec<String>>,
 }
 
 /// `server.env.delete` — delete an env file.
