@@ -15,6 +15,7 @@
 //! paths go through the same helper "so both paths always carry an identical
 //! field set". This is that sentence, applied to agents.
 
+use nession_protocol::contracts::agent::v1::WebAgentInfo;
 use serde_json::json;
 
 use crate::registry::{AgentInfo, AgentStatus};
@@ -33,37 +34,41 @@ use crate::registry::{AgentInfo, AgentStatus};
 /// than guessing, so the Web will show a peer whose calls all come back
 /// `contract_not_supported` — which is the honest answer, and the reason the
 /// key is worth keeping rather than collapsing to an empty object.
-pub fn agent_json(a: &AgentInfo) -> serde_json::Value {
-    json!({
-        "agent_id": a.agent_id,
-        "hostname": a.hostname,
-        "display_name": a.display_name,
-        "ip_address": a.ip_address,
-        "port": a.port,
-        "status": match a.status {
+pub fn agent_to_view(a: &AgentInfo) -> WebAgentInfo {
+    WebAgentInfo {
+        agent_id: a.agent_id.clone(),
+        hostname: a.hostname.clone(),
+        display_name: a.display_name.clone(),
+        ip_address: a.ip_address.clone(),
+        port: a.port,
+        status: match a.status {
             AgentStatus::Online => "online",
             AgentStatus::Offline => "offline",
             AgentStatus::Degraded => "degraded",
-        },
-        "session_count": a.session_count,
-        "active_sessions": a.active_sessions,
-        "last_heartbeat": a.last_heartbeat.to_rfc3339(),
-        "registered_at": a.registered_at.to_rfc3339(),
-        "addresses": serde_json::to_value(&a.addresses).unwrap_or(json!([])),
+        }
+        .to_string(),
+        session_count: a.session_count,
+        active_sessions: a.active_sessions,
+        last_heartbeat: a.last_heartbeat.to_rfc3339(),
+        registered_at: a.registered_at.to_rfc3339(),
+        addresses: a.addresses.clone(),
         // What this agent reported it can serve (`#678`).
         //
         // Served from the agent list rather than a query of its own: this is
         // already the "discover agents" call the design's data flow names, so a
         // consumer resolving per target has the manifests in hand without a
         // second round trip per agent.
-        "protocols": a.protocol_manifest.as_ref(),
-        "metadata": {
-            "nession_version": a.metadata.nession_version,
-            "tmux_version": a.metadata.tmux_version,
-            "os_version": a.metadata.os_version,
-            "image_tag": a.metadata.image_tag,
-        },
-    })
+        protocols: a.protocol_manifest.clone(),
+        // Field for field `AgentMetadata`, which the contract already had. The
+        // one in this whole run where the obvious type was the right one.
+        metadata: a.metadata.clone(),
+    }
+}
+
+/// The same view, as `Value` — for the push path, which serialises it straight
+/// into an envelope.
+pub fn agent_json(a: &AgentInfo) -> serde_json::Value {
+    serde_json::to_value(agent_to_view(a)).unwrap_or(json!({}))
 }
 
 #[cfg(test)]

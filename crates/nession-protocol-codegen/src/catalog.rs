@@ -407,10 +407,40 @@ wires: &["server.agent.terminal-resize"],
             owner: "core",
             id: "server.agent.list",
             version: 1,
-wires: &["server.agent.list"],
-            decls: vec![],
-            request: None,
-            response: None,
+            wires: &["server.agent.list"],
+            // Typed. The view type already existed — with the right name and
+            // seven of the builder's thirteen fields, which is how a
+            // name-matched type hides a shape mismatch: you can see it by
+            // counting.
+            decls: vec![
+                decl_of::<nession_protocol::contracts::agent::v1::AgentListPayload>(cfg),
+                decl_of::<nession_protocol::contracts::agent::v1::AgentListReply>(cfg),
+                decl_of::<nession_protocol::contracts::agent::v1::WebAgentsListResponse>(cfg),
+                decl_of::<nession_protocol::contracts::agent::v1::WebAgentInfo>(cfg),
+                decl_of::<nession_protocol::contracts::agent::v1::AgentRefusal>(cfg),
+                decl_of::<nession_protocol::contracts::agent::v1::ProbedAddress>(cfg),
+                decl_of::<nession_protocol::contracts::agent::v1::AgentAddress>(cfg),
+                decl_of::<nession_protocol::contracts::agent::v1::NetworkType>(cfg),
+                decl_of::<nession_protocol::contracts::agent::v1::AddressStatus>(cfg),
+                decl_of::<nession_protocol::contracts::agent::v1::AgentMetadata>(cfg),
+                decl_of::<nession_protocol::ProtocolManifest>(cfg),
+                // Transitive: the manifest is keyed by id, so declaring it
+                // without this leaves an unresolved reference — which the
+                // generator refuses to write rather than emitting it.
+                decl_of::<nession_protocol::ProtocolId>(cfg),
+                decl_of::<nession_protocol::ContractSupport>(cfg),
+                decl_of::<nession_protocol::ContractVersion>(cfg),
+            ],
+            request: Some((
+                "AgentListCall",
+                nession_protocol::contracts::agent::v1::AgentListPayload::inline,
+                schema_of::<nession_protocol::contracts::agent::v1::AgentListPayload>,
+            )),
+            response: Some((
+                "AgentListResponse",
+                nession_protocol::contracts::agent::v1::AgentListReply::inline,
+                schema_of::<nession_protocol::contracts::agent::v1::AgentListReply>,
+            )),
         },
         Unit {
             owner: "core",
