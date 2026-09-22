@@ -16,8 +16,9 @@ use nession_protocol::contracts::agent::v1::{
     AddressStatus, AgentAddressUpdatePayload, AgentRegisterPayload,
 };
 use nession_protocol::contracts::env::v1::{
-    ClientEnvGetPayload, ClientEnvGetResponsePayload, ClientEnvListPayload,
-    ClientEnvListResponsePayload, EnvFileRef, EnvSnapshot, EnvSource,
+    ClientEnvDeletePayload, ClientEnvDeleteResponsePayload, ClientEnvGetPayload,
+    ClientEnvGetResponsePayload, ClientEnvListPayload, ClientEnvListResponsePayload, EnvFileRef,
+    EnvSnapshot, EnvSource,
 };
 use nession_protocol::contracts::session::v1::{
     AgentTerminalResizePayload, ServerTerminalResizePayload,
@@ -2745,24 +2746,40 @@ impl ConnectionHandler {
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
     ) -> anyhow::Result<HandlerAction> {
+        // Typed at the contract boundary. `force` used to be read off the
+        // payload beside the parser because the contract did not name it,
+        // though the Web has always sent it.
         if !self.authenticated_client {
-            return Ok(reply_json(
+            return Ok(env_del_reply(
                 &msg.id,
-                "server.env.delete.response",
-                json!({ "success": false, "error": "Not authenticated" }),
+                ClientEnvDeleteResponsePayload {
+                    success: false,
+                    error: Some("Not authenticated".to_string()),
+                },
             ));
         }
-        let (name, source, agent_id) = parse_env_ref(&msg.payload);
-        let force = msg
-            .payload
-            .get("force")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false);
-        if name.is_empty() {
-            return Ok(reply_json(
+        let Ok(ClientEnvDeletePayload {
+            name,
+            source,
+            agent_id,
+            force,
+        }) = serde_json::from_value(msg.payload)
+        else {
+            return Ok(env_del_reply(
                 &msg.id,
-                "server.env.delete.response",
-                json!({ "success": false, "error": "name is required" }),
+                ClientEnvDeleteResponsePayload {
+                    success: false,
+                    error: Some("name is required".to_string()),
+                },
+            ));
+        };
+        if name.is_empty() {
+            return Ok(env_del_reply(
+                &msg.id,
+                ClientEnvDeleteResponsePayload {
+                    success: false,
+                    error: Some("name is required".to_string()),
+                },
             ));
         }
 
@@ -2774,16 +2791,15 @@ impl ConnectionHandler {
                 .usage
                 .sessions_using(&name, source, agent_id.as_deref());
             if !in_use.is_empty() {
-                return Ok(reply_json(
+                return Ok(env_del_reply(
                     &msg.id,
-                    "server.env.delete.response",
-                    json!({
-                        "success": false,
-                        "error": format!(
+                    ClientEnvDeleteResponsePayload {
+                        success: false,
+                        error: Some(format!(
                             "This file is in use by session(s): {}. Stop the session or detach before deleting.",
                             in_use.join(", ")
-                        )
-                    }),
+                        )),
+                    },
                 ));
             }
         }
@@ -2815,15 +2831,19 @@ impl ConnectionHandler {
         };
 
         match outcome {
-            Ok(()) => Ok(reply_json(
+            Ok(()) => Ok(env_del_reply(
                 &msg.id,
-                "server.env.delete.response",
-                json!({ "success": true }),
+                ClientEnvDeleteResponsePayload {
+                    success: true,
+                    error: None,
+                },
             )),
-            Err(e) => Ok(reply_json(
+            Err(e) => Ok(env_del_reply(
                 &msg.id,
-                "server.env.delete.response",
-                json!({ "success": false, "error": e }),
+                ClientEnvDeleteResponsePayload {
+                    success: false,
+                    error: Some(e),
+                },
             )),
         }
     }
@@ -3374,6 +3394,16 @@ mod extract_ip_tests {
 /// `to_value` cannot fail for a struct of these shapes, but the house pattern
 /// keeps a fallback rather than an unwrap — and an empty list is still a valid
 /// payload, so a caller reads "no files" instead of losing the reply.
+/// Serialize a `server.env.delete` reply. Same fallback reasoning as
+/// [`env_list_reply`].
+fn env_del_reply(id: &str, payload: ClientEnvDeleteResponsePayload) -> HandlerAction {
+    reply_json(
+        id,
+        "server.env.delete.response",
+        serde_json::to_value(&payload).unwrap_or(json!({ "success": false })),
+    )
+}
+
 /// Serialize a `server.env.get` reply. Same fallback reasoning as
 /// [`env_list_reply`].
 fn env_get_reply(id: &str, payload: ClientEnvGetResponsePayload) -> HandlerAction {
@@ -5414,6 +5444,40 @@ mod tests {
             parsed.in_use_by.is_some(),
             "a request that reached the lookup reports usage, even when empty"
         );
+    }
+
+    #[tokio::test]
+    async fn env_delete_reply_and_request_are_what_their_contract_says() {
+        // `delete`'s reply is an exact match on every branch, so unlike the
+        // other two this is a plain regression guard. Its *request* is where
+        // the work was: `force` was read off `Value` beside the parser for
+        // years, and a missing `source` was defaulted.
+        let mut h = test_handler("").await;
+        let action = h
+            .handle_message(proto_msg(
+                "server.env.delete",
+                json!({ "name": "x.env", "force": true }),
+            ))
+            .await
+            .unwrap();
+        let payload = parse_reply(action)["payload"].clone();
+        let parsed: ClientEnvDeleteResponsePayload = serde_json::from_value(payload.clone())
+            .unwrap_or_else(|e| {
+                panic!(
+                    "server.env.delete replies {payload} but its contract does not accept it: {e}"
+                )
+            });
+        assert!(!parsed.success);
+        assert!(parsed.error.is_some(), "an unauthenticated delete says why");
+
+        let with_force: ClientEnvDeletePayload =
+            serde_json::from_value(json!({ "name": "x.env", "force": true }))
+                .expect("`force` is a declared field, and the Web has always sent it");
+        assert!(with_force.force);
+
+        let no_source: ClientEnvDeletePayload = serde_json::from_value(json!({ "name": "x.env" }))
+            .expect("a missing source defaults to the server, as parse_env_ref did");
+        assert_eq!(no_source.source, EnvSource::Server);
     }
 
     #[tokio::test]
