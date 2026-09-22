@@ -41,6 +41,28 @@ fn schema_of<T: schemars::JsonSchema>(gen: &mut schemars::SchemaGenerator) -> sc
 }
 
 /// One Protocol Unit at one contract version.
+///
+/// ## What is *not* one
+///
+/// A **notification** — a reply to something the other end sent, on a wire of
+/// its own. It has a wire, a payload type and a sender, which is exactly why it
+/// is the one thing that gets mistaken for a unit. The test is one question:
+///
+/// > **Does anything dispatch it?** A unit is something a dispatcher answers. A
+/// > notification is a reply to a message *you* sent: no route table has an arm
+/// > for it, and nothing can ask for it.
+///
+/// `server.agent.heartbeat` is a unit; `server.heartbeat.ack` is not. The
+/// heartbeat therefore has `response: None` — its answer travels on a wire the
+/// `<wire>.response` convention cannot name, so there is no wire for a response
+/// shape to attach to. Declaring the ack as a unit instead would make the
+/// manifest **claim an offer that does not exist**, because nobody can ask for
+/// an acknowledgement.
+///
+/// `docs/architecture/protocol.md` § *What is not a Protocol Unit* holds the
+/// same rule in prose, with the two consequences that follow from it. It is
+/// restated here because this is where someone arrives when the schema says a
+/// unit has no `response`.
 pub struct Unit {
     /// The provider's directory name — `git`, `claude-code`.
     pub owner: &'static str,
@@ -72,9 +94,9 @@ pub struct Unit {
     /// one: a unit has no `response` when it is one-way
     /// (`server.agent.address-update` announces endpoints and nothing answers)
     /// or when its answer is a **notification** rather than an offer
-    /// (`server.agent.heartbeat` is acknowledged on `server.heartbeat.ack`,
-    /// which is deliberately not a unit — `nession-agent`'s protocol module owns
-    /// that rule).
+    /// (`server.agent.heartbeat` is acknowledged on `server.heartbeat.ack`, and
+    /// a notification is deliberately not a unit — [`Unit`]'s own doc carries
+    /// the test, rather than pointing at another crate for it).
     ///
     /// The examples this comment used to give had gone stale in one direction
     /// and false in the other: it named `agent.terminal-resize` and
