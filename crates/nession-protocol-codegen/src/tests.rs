@@ -185,8 +185,8 @@ fn every_unit_declares_a_request_shape() {
     // holds without contradicting "half the kernel's units are one-way".
     //
     // A request and not a response: `agent.keepalive.ping` is request-only for a
-    // reason no amount of typing can fix — it answers on `keepalive.pong`, a wire
-    // the `<wire>.response` convention cannot name.
+    // reason no amount of typing can fix — it answers on `keepalive.pong`, a
+    // message of its own rather than a reply under this unit's wire.
     for unit in units() {
         assert!(
             unit.request.is_some(),
@@ -337,9 +337,9 @@ fn a_unit_with_no_shape_says_so_instead_of_omitting_the_key() {
     // that work was detected. With nothing left to trip, a name is clearer.
     //
     // `agent.keepalive.ping` is request-only **permanently**: the agent answers
-    // on `keepalive.pong`, and no `<wire>.response` wire exists for a response
-    // shape to be attached to. It cannot be typed out of this test the way
-    // `server.env.write` was.
+    // on `keepalive.pong`, a one-way message of its own, so there is no reply
+    // under this unit's wire for a response shape to be attached to. It cannot
+    // be typed out of this test the way `server.env.write` was.
     let doc = crate::schema::document(None);
     let unit = units()
         .into_iter()

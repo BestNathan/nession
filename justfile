@@ -52,14 +52,18 @@ check: fmt lint check-tmux-socket check-protocol check-codegen coverage
 #   2. every advertised protocol is named by at least one call site
 #
 # Reads the advertised set from the generated tree (which `just check-codegen`
-# keeps equal to the contracts), from the kernel's `<wire>.response` rule, and
-# from the `pub const` declarations beside each dispatcher. A file that deals
-# in placeholder wires on purpose declares `// not-protocol-file: <reason>` in
-# its header, and every run prints which files do.
+# keeps equal to the contracts) and from the `pub const` declarations beside
+# each dispatcher. A file that deals in placeholder wires on purpose declares
+# `// not-protocol-file: <reason>` in its header, and every run prints which
+# files do.
+#
+# It used to derive `<wire>.response` for every wire as well, back when that was
+# the spelling every reply carried. One wire per operation removed it (#953): a
+# reply carries its request's own name and is correlated by `id`.
 check-protocol:
     node scripts/protocol-gate.mjs
 
-# Every name a call site may use — units, wires, responses and notifications.
+# Every name a call site may use — units, wires and notifications.
 protocol-list:
     node scripts/protocol-gate.mjs --list
 

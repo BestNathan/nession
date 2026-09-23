@@ -312,7 +312,9 @@ pub struct ServerTerminalResizePayload {
 /// `handle_agent_session_update` has five exits and all five are
 /// `Reply(None)` — two of them deliberate early-outs (unregistered agent,
 /// unknown status), which is why "answers nothing" is not the same claim as
-/// "always succeeds". No `.response` wire exists for this id anywhere.
+/// "always succeeds". Nothing answers it anywhere: under one wire per
+/// operation a reply would arrive as `server.agent.session-update` itself, and
+/// no such message is ever sent.
 ///
 /// Hoisted out of `nession-agent`'s `server_client.rs`, which declared it
 /// privately beside the code that sends it. That is the drift the protocol

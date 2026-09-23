@@ -39,7 +39,7 @@ describe('AgentsPlugin', () => {
     });
 
     it('publishes what the list response carried', async () => {
-      // Through `listAgents`, not through a pushed `client.agents.list.response`
+      // Through `listAgents`, not through a pushed `server.agent.list`
       // message. That is not a shortcut in the test: `MessageRouter` hands a
       // correlated reply to its pending request and returns, so the response
       // subscription never sees it. A test that pushed the message instead would
@@ -115,7 +115,7 @@ describe('AgentsPlugin', () => {
       teardown();
 
       surface.pushMessage('agents.changed', { agents: [makeAgent('a1')] });
-      surface.pushMessage('client.agents.list.response', { agents: [makeAgent('a2')] });
+      surface.pushMessage('server.agent.list', { agents: [makeAgent('a2')] });
       expect(cb).not.toHaveBeenCalled();
     });
 
@@ -193,11 +193,11 @@ describe('AgentsPlugin', () => {
       expect(cb).toHaveBeenCalledWith(agents);
     });
 
-    it('fires on client.agents.list.response as well (current double-subscribe behavior)', () => {
+    it('fires on server.agent.list as well (current double-subscribe behavior)', () => {
       const cb = vi.fn();
       plugin.onAgentsChanged(cb);
       const agents = [makeAgent('a2')];
-      surface.pushMessage('client.agents.list.response', { agents });
+      surface.pushMessage('server.agent.list', { agents });
       expect(cb).toHaveBeenCalledWith(agents);
     });
 
@@ -206,7 +206,7 @@ describe('AgentsPlugin', () => {
       plugin.onAgentsChanged(cb);
       surface.pushMessage('agents.changed', {});
       surface.pushMessage('agents.changed', { agents: undefined });
-      surface.pushMessage('client.agents.list.response', { unrelated: true });
+      surface.pushMessage('server.agent.list', { unrelated: true });
       expect(cb).not.toHaveBeenCalled();
     });
 

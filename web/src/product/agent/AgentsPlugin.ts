@@ -51,7 +51,13 @@ export class AgentsPlugin implements TransportPlugin {
           this.notify(agents);
         }
       }),
-      connection.subscribe('client.agents.list.response', (payload) => {
+      // The list's own wire, so a message of this type that is *not* a pending
+      // reply still reaches consumers — a reply whose request already timed
+      // out, say, which `MessageRouter` routes here once its id has left the
+      // pending map. It used to be a hand-written name, which is what let this
+      // subscription drift from the wire the request actually uses; the
+      // generated binding cannot drift.
+      connection.subscribe(AGENT_LIST_WIRE, (payload) => {
         const agents = (payload as { agents?: Agent[] })?.agents;
         if (agents) {
           this.notify(agents);
@@ -80,14 +86,14 @@ export class AgentsPlugin implements TransportPlugin {
    * Fetch the full agent registry.
    *
    * Publishes the manifests it carried before returning, and it has to be here
-   * rather than left to the `client.agents.list.response` subscription below:
+   * rather than left to the `server.agent.list` subscription in {@link install}:
    * `MessageRouter.handleIncoming` **returns** once it has correlated a reply
    * with its pending request, so a response never reaches subscribers. That
-   * subscription therefore does not fire for this call — it is kept for an
-   * unsolicited push of the same type, which nothing sends today. Publishing
-   * only from there would have left the directory permanently empty, and an
-   * empty directory is not a visible failure: every call resolves as a Legacy
-   * Peer and goes out unversioned, which is the pre-`#678` request.
+   * subscription therefore does not fire for this call — it is kept for a
+   * message of the same wire that is *not* a pending reply, which nothing sends
+   * today. Publishing only from there would have left the directory permanently
+   * empty, and an empty directory is not a visible failure: every call resolves
+   * as a Legacy Peer and goes out unversioned, which is the pre-`#678` request.
    */
   async listAgents(): Promise<Agent[]> {
     const response = await this.requireConnection().request<AgentsListResponse>(

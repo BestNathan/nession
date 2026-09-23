@@ -51,6 +51,35 @@ identity.
 Message types therefore live on the contract as data, never as the only
 definition of a protocol.
 
+### One wire per operation
+
+**A request and its reply share the same wire name.** They are told apart by the
+envelope's `id`, never by `msg_type`: a caller holds the id it sent and treats
+the message carrying it as its answer. Everything else — a request that is still
+in flight, a notification, a message whose requester has given up — is routed by
+name as before.
+
+`<unit>.<operation>.response` was the previous spelling, and it is gone. It made
+every operation two names that had to agree, and the second one bought nothing:
+the Web's router has always keyed its pending map by `id`
+(`platform/socket/MessageRouter.ts`), so `msg_type` was never what correlated a
+reply there. The CLI matched `msg_type` against the reply's name, which is the
+one place the suffix was load-bearing — it correlates by `id` now, in the same
+change as the wire names.
+
+Two consequences worth knowing:
+
+- **Pending wins.** When a message arrives whose `id` is in the caller's pending
+  map it *is* the reply, whatever else subscribes to that name. This is not an
+  accident of one implementation: `MessageRouter.handleIncoming` returns as soon
+  as it has correlated, so a reply never reaches subscribers. The edge case is a
+  reply that arrives *after* its request timed out — its id is no longer pending,
+  so it fans out to subscribers as an unsolicited message of that name.
+- **A one-way unit is one wire, not half of two.** A unit whose answer is a
+  message of its own (`agent.keepalive.ping` → `keepalive.pong`) has
+  `response: None`: the reply slot names a *shape under this unit's wire*, so it
+  is the wrong place to describe a different message.
+
 ## Ownership and the dependency rule
 
 ```text
@@ -98,8 +127,9 @@ mistaken for a unit. The test is one question:
 and it answers. Its acknowledgement arrives on `server.heartbeat.ack`, for which
 no route table has an arm; the agent logs it in the plain match beside its
 dispatcher. So the heartbeat is a unit, the ack is not, and the catalog gives the
-heartbeat `response: None`: its answer travels on a wire the `<wire>.response`
-convention cannot name, so there is no wire for a response shape to attach to.
+heartbeat `response: None`: its acknowledgement travels on a wire of its own
+rather than under the heartbeat's, so there is no wire for a response shape to
+attach to.
 
 Advertising the ack instead would **claim an offer that does not exist** — the
 manifest is a statement of what you can be asked for, and nobody can ask for an
@@ -521,10 +551,15 @@ both directions:
   this workspace maintains and cannot use.
 
 The advertised set is not a list the gate keeps. It is read from the generated
-bindings (which `just check-codegen` holds equal to the contracts), from the
-kernel's `<wire>.response` rule, and from the `pub const` declarations beside
-each dispatcher — the notification wires, which no route table can describe
-because nothing answers them.
+bindings (which `just check-codegen` holds equal to the contracts) and from the
+`pub const` declarations beside each dispatcher — the notification wires, which
+no route table can describe because nothing answers them.
+
+It used to be read from a third source as well: `<wire>.response` for every
+wire, which the gate derived itself because that was the spelling every reply
+carried. One wire per operation removed it — see *One wire per operation* above
+— so the gate no longer derives anything, and a call site still naming the
+suffix is reported like any other name nothing answers.
 
 A name is **resolved**, not required to be a literal. `msg_types::AGENT_HEARTBEAT`
 and an imported `WIRE as BRANCHES_WIRE` are both *better* than a literal — they
@@ -632,12 +667,15 @@ projection, which `ContractSupport.wire` already carries.
 
 The implementation made this concrete rather than a matter of taste.
 `core_routes!` covers exactly the arms where the agent **answers** a server-sent
-command. The two arms it left behind — `agent.register.response` and
-`server.heartbeat.ack` — are replies to something the agent itself sent, and
-advertising them would claim an offer that does not exist. So the agent's slice
-of Phase 6 is the units the agent serves, and the other three units the phase
-names are served by the **server** — which composes a manifest of its own, so
-all four are declared, two of them on each side:
+command. The two arms it left behind are replies to something the agent itself
+sent — the server's acceptance of `server.agent.register`, and
+`server.heartbeat.ack` — and advertising them would claim an offer that does not
+exist. `server.agent.register` is a unit all the same: the **server** serves it,
+and its own route table has the arm. The agent only reads the acceptance, under
+the wire name it sent, which is one wire per operation working as intended. So
+the agent's slice of Phase 6 is the units the agent serves, and the other three
+units the phase names are served by the **server** — which composes a manifest of
+its own, so all four are declared, two of them on each side:
 
 | Phase 6 unit | Served by | Declared in |
 |---|---|---|

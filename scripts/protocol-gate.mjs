@@ -31,18 +31,22 @@
 // arguments of the four functions that put a message on a wire keeps the check
 // exact and needs no allowlist for ordinary strings.
 //
-// The advertised set is read from three places, and none of them is a list
+// The advertised set is read from two places, and neither of them is a list
 // kept here:
 //
 //   * `web/src/generated/protocol/**` — the generated bindings, which state
 //     each unit's `PROTOCOL` and `WIRES`. `just check-codegen` is the gate that
 //     keeps this tree equal to the contracts, so reading it is reading the
 //     contracts.
-//   * `<wire>.response` for every wire — the kernel owns that rule, not this
-//     script.
 //   * `pub const X: &str = "…"` in a file that also dispatches (`*_routes!`) —
 //     the notification wires. Nothing answers them, so no route table lists
 //     them, and the file that sends them declares them.
+//
+// There used to be a third source: `<wire>.response` for every wire, derived
+// here because that was the spelling every reply carried. One wire per
+// operation removed it (#953, Rule 1) — a reply now carries its request's own
+// wire name and is correlated by the envelope's `id` — so there is nothing left
+// to derive and deriving it would advertise names no runtime can answer.
 //
 // Usage:
 //   ./scripts/protocol-gate.mjs          # check the tree
@@ -178,8 +182,6 @@ const notifications = notificationWires();
 
 /** Every string a call site may legitimately name. */
 const advertised = new Set([...ids, ...wires]);
-/** `<wire>.response` — the kernel's rule, applied to every wire. */
-for (const w of [...advertised]) advertised.add(`${w}.response`);
 for (const w of notifications.keys()) advertised.add(w);
 
 if (process.argv.includes('--list')) {

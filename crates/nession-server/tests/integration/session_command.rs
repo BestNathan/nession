@@ -134,7 +134,7 @@ async fn test_session_create_flow() {
         _ => panic!("expected text"),
     };
     let client_parsed: serde_json::Value = serde_json::from_str(&client_text).unwrap();
-    assert_eq!(client_parsed["msg_type"], "server.session.create.response");
+    assert_eq!(client_parsed["msg_type"], "server.session.create");
     assert_eq!(client_parsed["payload"]["success"], true);
     assert_eq!(client_parsed["payload"]["session_id"], "agent-1:my-session");
 }
@@ -255,11 +255,11 @@ async fn test_session_kill_flow() {
             _ => panic!("expected text"),
         };
         let v: serde_json::Value = serde_json::from_str(&client_text).unwrap();
-        if v["msg_type"].as_str() == Some("server.session.kill.response") {
+        if v["msg_type"].as_str() == Some("server.session.kill") {
             break v;
         }
     };
-    assert_eq!(client_parsed["msg_type"], "server.session.kill.response");
+    assert_eq!(client_parsed["msg_type"], "server.session.kill");
     assert_eq!(client_parsed["payload"]["success"], true);
 }
 
@@ -303,7 +303,7 @@ async fn test_create_with_offline_agent_returns_error() {
         _ => panic!("expected text"),
     };
     let parsed: serde_json::Value = serde_json::from_str(&text).unwrap();
-    assert_eq!(parsed["msg_type"], "server.session.create.response");
+    assert_eq!(parsed["msg_type"], "server.session.create");
     assert_eq!(parsed["payload"]["success"], false);
     assert!(parsed["payload"]["error"]
         .as_str()

@@ -53,9 +53,9 @@ fn schema_of<T: schemars::JsonSchema>(gen: &mut schemars::SchemaGenerator) -> sc
 /// > for it, and nothing can ask for it.
 ///
 /// `server.agent.heartbeat` is a unit; `server.heartbeat.ack` is not. The
-/// heartbeat therefore has `response: None` — its answer travels on a wire the
-/// `<wire>.response` convention cannot name, so there is no wire for a response
-/// shape to attach to. Declaring the ack as a unit instead would make the
+/// heartbeat therefore has `response: None` — its acknowledgement travels on a
+/// wire of its own rather than under the heartbeat's, so the response slot has
+/// nothing to attach to. Declaring the ack as a unit instead would make the
 /// manifest **claim an offer that does not exist**, because nobody can ask for
 /// an acknowledgement.
 ///
@@ -454,8 +454,8 @@ wires: &["server.agent.command-response"],
             id: "server.agent.address-update",
             version: 1,
             wires: &["server.agent.address-update"],
-            // One-way: the agent announces its endpoints. Nothing answers, and
-            // no `.response` wire exists.
+            // One-way: the agent announces its endpoints. Nothing answers it,
+            // on any wire.
             decls: vec![
                 decl_of::<nession_protocol::contracts::agent::v1::AgentAddressUpdatePayload>(cfg),
                 decl_of::<nession_protocol::contracts::agent::v1::AgentAddress>(cfg),
@@ -1506,9 +1506,10 @@ wires: &["server.commands.update"],
             wires: &["agent.terminal.input"],
             // One-way, and `response: None` **is** the statement: keystrokes go
             // to the pty and nothing answers them. Verified rather than
-            // assumed — no `.response` wire for this unit exists anywhere in
-            // the tree. The absence used to be indistinguishable from an
-            // unfinished entry, which is what this comment is for.
+            // assumed — under one wire per operation a reply would arrive as
+            // `agent.terminal.input` itself, and nothing in the tree sends one.
+            // The absence used to be indistinguishable from an unfinished
+            // entry, which is what this comment is for.
             decls: vec![
                 decl_of::<nession_protocol::contracts::terminal::v1::TerminalInputPayload>(cfg),
             ],
@@ -1524,8 +1525,9 @@ wires: &["server.commands.update"],
             id: "agent.terminal.resize",
             version: 1,
             wires: &["agent.terminal.resize"],
-            // One-way: a size change is announced, not answered. No `.response`
-            // wire exists for it, so `None` is the model rather than a gap.
+            // One-way: a size change is announced, not answered — a reply would
+            // arrive as `agent.terminal.resize` itself, and none is sent. `None`
+            // is the model rather than a gap.
             decls: vec![
                 decl_of::<nession_protocol::contracts::terminal::v1::TerminalResizePayload>(cfg),
             ],
@@ -1682,15 +1684,16 @@ wires: &["agent.file.cwd"],
             id: "agent.keepalive.ping",
             version: 1,
             wires: &["agent.keepalive.ping"],
-            // Request-only, and **forced rather than chosen**: the agent answers
-            // with an empty payload on `keepalive.pong`, not on
-            // `agent.keepalive.ping.response`. The response slot names a shape,
-            // and the `<wire>.response` convention is what gives that shape a
-            // wire — so attaching one would assert a wire nobody sends.
+            // Request-only, and **by classification rather than by omission**:
+            // the agent answers with an empty payload on `keepalive.pong`,
+            // which is a one-way message of its own and not a reply to this
+            // unit. One wire per operation means a reply would arrive as
+            // `agent.keepalive.ping` itself — so attaching a response shape here
+            // would assert a message nobody sends.
             //
-            // The one unit here whose missing half is a *naming* problem rather
-            // than a missing type: `keepalive.pong` is a wire the kernel's
-            // `<wire>.response` rule cannot reach.
+            // The one unit here whose missing half is a *classification* of a
+            // wire that already exists (`keepalive.pong`) rather than a missing
+            // type.
             decls: vec![
                 decl_of::<nession_protocol::contracts::agent::v1::KeepalivePingPayload>(cfg),
             ],

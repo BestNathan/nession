@@ -409,13 +409,15 @@ pub struct WebAgentsListResponse {
 /// the same reasoning that puts `server.auth` in `client/` beside `client.auth`
 /// rather than in a family of its own.
 ///
-/// **No response, and that is forced rather than chosen.** The agent answers
-/// with an empty payload on the wire **`keepalive.pong`**
-/// (`websocket.rs`'s keepalive arm), not on `agent.keepalive.ping.response`.
-/// A catalog response slot names a shape, and it is the `<wire>.response`
-/// convention that gives that shape a wire — so attaching one would assert a
-/// wire nobody sends. This is the one unit here whose missing half is a wire
-/// naming problem and not a missing type.
+/// **No response, and that is a classification rather than a gap.** The agent
+/// answers with an empty payload on the wire **`keepalive.pong`**
+/// (`websocket.rs`'s keepalive arm). That is a message of its own, not a reply
+/// to this one: one wire per operation means a reply would arrive as
+/// `agent.keepalive.ping` itself, and a pong is a second one-way message rather
+/// than an answer. A catalog response slot names a shape and that shape travels
+/// under the unit's own wire, so attaching one here would assert a message
+/// nobody sends — the missing half is a *classification* of `keepalive.pong`,
+/// not a missing type.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

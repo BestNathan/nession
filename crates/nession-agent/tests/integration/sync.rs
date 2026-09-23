@@ -36,7 +36,7 @@ async fn start_mock_server() -> anyhow::Result<(
 
             // Send registration response.
             let response = serde_json::json!({
-                "msg_type": "server.agent.register.response",
+                "msg_type": "server.agent.register",
                 "id": "test-id",
                 "timestamp": 1234567890,
                 "payload": {

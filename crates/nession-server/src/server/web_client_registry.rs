@@ -112,7 +112,7 @@ impl WebClientRegistry {
     /// Web clients only fetch the session list on mount, so without this push
     /// any change made elsewhere (another browser, an agent reconnecting, a
     /// session dying) would stay invisible until a manual refresh. The session
-    /// JSON is produced by the same helper as `server.session.list.response`,
+    /// JSON is produced by the same helper as `server.session.list`,
     /// so both paths always carry an identical field set.
     pub async fn broadcast_sessions_changed(
         &self,
@@ -194,7 +194,7 @@ mod tests {
     }
 
     /// A subscribed web client receives the pushed session list with the same
-    /// field set `server.session.list.response` uses — the browser feeds both
+    /// field set `server.session.list` uses — the browser feeds both
     /// into one state setter, so a mismatch would silently yield `undefined`.
     #[tokio::test]
     async fn broadcast_sessions_changed_reaches_subscriber() {

@@ -101,6 +101,21 @@ export function go(socket: { request(t: string, p: unknown): void }) {
 TS
 expect_fail "rule 1b — a wire no runtime answers" 'no runtime answers `alpha.gone`'
 
+# ── 1b. `<wire>.response` is no longer advertised ───────────────────────────
+# The advertised set used to be extended by the kernel's `<wire>.response` rule.
+# One wire per operation removed the spelling (#953, Rule 1): a reply now carries
+# the request's own wire name. A call site still naming the suffix has to be
+# reported, because the derivation's removal is otherwise invisible — the gate
+# would simply have kept answering "yes" to a name nothing sends.
+reset_fixture
+write_caller <<'TS'
+export function go(socket: { request(t: string, p: unknown): void }) {
+  socket.request('alpha.one.response', {});
+  socket.request('beta.two', {});
+}
+TS
+expect_fail "rule 1b — the removed response-suffix derivation" 'no runtime answers `alpha.one.response`'
+
 # ── 1a. A name that is not an id at all ─────────────────────────────────────
 reset_fixture
 write_caller <<'TS'

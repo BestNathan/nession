@@ -58,7 +58,11 @@ export class SessionsPlugin implements TransportPlugin {
           this.notify(sessions);
         }
       }),
-      connection.subscribe('client.sessions.list.response', (payload) => {
+      // The list's own wire, so a message of this type that is *not* a pending
+      // reply still reaches consumers. It used to be a hand-written name that
+      // nothing sent — the same name the request does not use, which is how a
+      // subscription stops firing without anyone noticing.
+      connection.subscribe(SESSION_LIST_WIRE, (payload) => {
         const sessions = (payload as { sessions?: Session[] })?.sessions;
         if (sessions) {
           this.notify(sessions);

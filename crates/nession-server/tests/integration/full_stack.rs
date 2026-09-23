@@ -179,7 +179,7 @@ async fn test_agent_registration_success() {
     send_text(&mut ws, msg.to_string()).await.unwrap();
     let resp: serde_json::Value = serde_json::from_str(&recv_text(&mut ws).await).unwrap();
 
-    assert_eq!(resp["msg_type"], "server.agent.register.response");
+    assert_eq!(resp["msg_type"], "server.agent.register");
     assert_eq!(resp["payload"]["status"], "accepted");
     assert_eq!(resp["id"], "reg-1");
 }
@@ -211,7 +211,7 @@ async fn test_agent_registration_rejected_bad_token() {
     send_text(&mut ws, msg.to_string()).await.unwrap();
     let resp: serde_json::Value = serde_json::from_str(&recv_text(&mut ws).await).unwrap();
 
-    assert_eq!(resp["msg_type"], "server.agent.register.response");
+    assert_eq!(resp["msg_type"], "server.agent.register");
     assert_eq!(resp["payload"]["status"], "rejected");
 }
 
@@ -413,7 +413,7 @@ async fn test_client_auth_success() {
     send_text(&mut ws, auth.to_string()).await.unwrap();
 
     let resp: serde_json::Value = serde_json::from_str(&recv_text(&mut ws).await).unwrap();
-    assert_eq!(resp["msg_type"], "server.auth.response");
+    assert_eq!(resp["msg_type"], "server.auth");
     assert_eq!(resp["payload"]["status"], "success");
     assert_eq!(resp["id"], "auth-1");
 }
@@ -434,7 +434,7 @@ async fn test_client_auth_failure() {
     send_text(&mut ws, auth.to_string()).await.unwrap();
 
     let resp: serde_json::Value = serde_json::from_str(&recv_text(&mut ws).await).unwrap();
-    assert_eq!(resp["msg_type"], "server.auth.response");
+    assert_eq!(resp["msg_type"], "server.auth");
     assert_eq!(resp["payload"]["status"], "failed");
 }
 
@@ -1015,7 +1015,7 @@ async fn test_client_agents_list_returns_registered_agents() {
     .unwrap();
 
     let resp: serde_json::Value = serde_json::from_str(&recv_text(&mut client_ws).await).unwrap();
-    assert_eq!(resp["msg_type"], "server.agent.list.response");
+    assert_eq!(resp["msg_type"], "server.agent.list");
     let agents = resp["payload"]["agents"].as_array().unwrap();
     assert!(!agents.is_empty());
     assert_eq!(agents[0]["agent_id"], "list-agent");
@@ -1206,11 +1206,11 @@ async fn test_client_sessions_list_filtered_by_agent() {
 
     // The broadcast channel (capacity 16) may still hold stale
     // `sessions.changed` messages from the agent register path.
-    // Skip those so we consume the actual `server.session.list.response`.
+    // Skip those so we consume the actual `server.session.list` reply.
     let list_resp = loop {
         let raw = recv_text(&mut client).await;
         let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
-        if v["msg_type"].as_str() == Some("server.session.list.response") {
+        if v["msg_type"].as_str() == Some("server.session.list") {
             break v;
         }
     };
@@ -1377,7 +1377,7 @@ async fn test_client_session_attach_p2p_mode() {
     let attach_resp = loop {
         let raw = recv_text(&mut client).await;
         let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
-        if v["msg_type"].as_str() == Some("server.session.attach.response") {
+        if v["msg_type"].as_str() == Some("server.session.attach") {
             break v;
         }
     };

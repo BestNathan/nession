@@ -26,10 +26,10 @@
 //!
 //! ## What is not here
 //!
-//! Notifications — `agent.register.response`, `server.heartbeat.ack` — stay in
-//! the match in `server_client`. They are replies to something the agent sent,
-//! not units anyone can call, and a manifest that advertised them would be
-//! claiming an offer that does not exist.
+//! The replies the agent reads itself — the server's answer to
+//! `server.agent.register`, and `server.heartbeat.ack` — stay in the match in
+//! `server_client`. Neither is a unit *this* agent serves: a manifest that
+//! advertised them would be claiming an offer that does not exist.
 //!
 //! That rule is stated canonically in `docs/architecture/protocol.md` § *What is
 //! not a Protocol Unit*, and shortened to its test on the `Unit` type in

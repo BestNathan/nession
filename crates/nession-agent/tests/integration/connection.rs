@@ -62,7 +62,7 @@ fn serve_mock(listener: TcpListener) -> (tokio::task::JoinHandle<()>, mpsc::Rece
 
             // Send a registration response.
             let response = serde_json::json!({
-                "msg_type": "server.agent.register.response",
+                "msg_type": "server.agent.register",
                 "id": "test-id",
                 "timestamp": 1234567890,
                 "payload": {

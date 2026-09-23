@@ -56,8 +56,11 @@ const INITIAL_RECONNECT_DELAY: Duration = Duration::from_secs(1);
 
 /// Message type constants for agent-to-server protocol.
 pub mod msg_types {
+    /// The registration operation, in both directions: the agent sends it, and
+    /// the server's acceptance is a *reply* under the same name. One wire per
+    /// operation — a reply is told from a request by the envelope's `id`, not
+    /// by a `.response` suffix it no longer carries.
     pub const AGENT_REGISTER: &str = "server.agent.register";
-    pub const AGENT_REGISTER_RESPONSE: &str = "server.agent.register.response";
     pub const AGENT_HEARTBEAT: &str = "server.agent.heartbeat";
     pub const AGENT_SESSION_UPDATE: &str = "server.agent.session-update";
     pub const SERVER_HEARTBEAT_ACK: &str = "server.heartbeat.ack";
@@ -502,7 +505,10 @@ impl ServerClient {
                 Some(Ok(WsMessage::Text(text))) => {
                     let resp: ProtocolMessage<serde_json::Value> = serde_json::from_str(&text)
                         .context("failed to parse registration response")?;
-                    if resp.msg_type == msg_types::AGENT_REGISTER_RESPONSE {
+                    // The acceptance arrives under the wire this agent sent,
+                    // which is what makes the name enough here: nothing else
+                    // sends `server.agent.register` to an agent.
+                    if resp.msg_type == msg_types::AGENT_REGISTER {
                         let payload: RegisterResponsePayload =
                             serde_json::from_value(resp.payload)?;
                         if payload.status == "accepted" {
@@ -675,7 +681,7 @@ impl ServerClient {
             return dispatch_core(self, &msg, responses).await;
         }
         match msg.msg_type.as_str() {
-            msg_types::AGENT_REGISTER_RESPONSE => {
+            msg_types::AGENT_REGISTER => {
                 // Already handled during connect; log late/duplicate responses.
                 debug!("Late registration response ignored");
             }
@@ -816,7 +822,7 @@ mod tests {
 
                 // Send a registration response.
                 let response = serde_json::json!({
-                    "msg_type": "server.agent.register.response",
+                    "msg_type": "server.agent.register",
                     "id": "test-id",
                     "timestamp": 1234567890,
                     "payload": {
@@ -1012,7 +1018,7 @@ mod tests {
                 let ws = accept_async(stream).await.expect("failed to accept ws");
                 let (mut sink, mut stream) = ws.split();
                 let response = serde_json::json!({
-                    "msg_type": "server.agent.register.response",
+                    "msg_type": "server.agent.register",
                     "id": "test-id",
                     "timestamp": 1234567890,
                     "payload": {
@@ -1076,7 +1082,7 @@ mod tests {
                     let ws = accept_async(stream).await.expect("accept ws");
                     let (mut sink, mut stream) = ws.split();
                     let response = serde_json::json!({
-                        "msg_type": "server.agent.register.response",
+                        "msg_type": "server.agent.register",
                         "id": "test-id",
                         "timestamp": 1,
                         "payload": { "status": "accepted", "message": "ok" }
@@ -1173,7 +1179,7 @@ mod tests {
 
                 // Send registration response.
                 let response = serde_json::json!({
-                    "msg_type": "server.agent.register.response",
+                    "msg_type": "server.agent.register",
                     "id": "test-id",
                     "timestamp": 1234567890,
                     "payload": {
@@ -1288,7 +1294,7 @@ mod tests {
 
                 // Send registration response.
                 let response = serde_json::json!({
-                    "msg_type": "server.agent.register.response",
+                    "msg_type": "server.agent.register",
                     "id": "test-id",
                     "timestamp": 1234567890,
                     "payload": {
@@ -1399,7 +1405,7 @@ mod tests {
 
                 // Send registration response.
                 let response = serde_json::json!({
-                    "msg_type": "server.agent.register.response",
+                    "msg_type": "server.agent.register",
                     "id": "test-id",
                     "timestamp": 1234567890,
                     "payload": {
@@ -1710,7 +1716,7 @@ mod tests {
                 let (mut sink, mut stream) = ws.split();
 
                 let response = serde_json::json!({
-                    "msg_type": "server.agent.register.response",
+                    "msg_type": "server.agent.register",
                     "id": "test-id",
                     "timestamp": 1234567890,
                     "payload": { "status": "accepted", "message": "ok" }
@@ -1799,7 +1805,7 @@ mod tests {
                 let (mut sink, mut stream) = ws.split();
 
                 let response = serde_json::json!({
-                    "msg_type": "server.agent.register.response",
+                    "msg_type": "server.agent.register",
                     "id": "test-id",
                     "timestamp": 1234567890,
                     "payload": { "status": "accepted", "message": "ok" }
@@ -1893,7 +1899,7 @@ mod tests {
                 let (mut sink, mut stream) = ws.split();
 
                 let response = serde_json::json!({
-                    "msg_type": "server.agent.register.response",
+                    "msg_type": "server.agent.register",
                     "id": "test-id",
                     "timestamp": 1234567890,
                     "payload": { "status": "accepted", "message": "ok" }
@@ -1984,7 +1990,7 @@ mod tests {
                 let (mut sink, mut stream) = ws.split();
 
                 let response = serde_json::json!({
-                    "msg_type": "server.agent.register.response",
+                    "msg_type": "server.agent.register",
                     "id": "test-id",
                     "timestamp": 1234567890,
                     "payload": { "status": "accepted", "message": "ok" }
@@ -2203,7 +2209,7 @@ mod tests {
                 let (mut sink, mut stream) = ws.split();
 
                 let response = serde_json::json!({
-                    "msg_type": "server.agent.register.response",
+                    "msg_type": "server.agent.register",
                     "id": "test-id",
                     "timestamp": 1234567890,
                     "payload": { "status": "accepted", "message": "ok" }

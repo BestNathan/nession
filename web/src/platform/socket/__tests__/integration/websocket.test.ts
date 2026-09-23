@@ -293,7 +293,7 @@ describe('WebSocketService + feature singletons', () => {
       expect(second).toHaveBeenCalledTimes(1); // unsubscribed — push-2 never delivered
     });
 
-    it('sessions.changed and client.sessions.list.response both fan out to onSessionsChanged', async () => {
+    it('sessions.changed and server.session.list both fan out to onSessionsChanged', async () => {
       const service = makeService();
       const socket = await connectAndAuth(service);
 
@@ -305,7 +305,7 @@ describe('WebSocketService + feature singletons', () => {
       expect(callback).toHaveBeenCalledWith(pushed);
 
       const echoed = [makeSession('agent-a', 'work')];
-      socket.message(encodeFrame('client.sessions.list.response', 'push-2', { sessions: echoed }));
+      socket.message(encodeFrame('server.session.list', 'push-2', { sessions: echoed }));
       expect(callback).toHaveBeenCalledWith(echoed);
       expect(callback).toHaveBeenCalledTimes(2);
     });

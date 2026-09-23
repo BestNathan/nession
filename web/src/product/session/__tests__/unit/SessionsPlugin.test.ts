@@ -104,11 +104,11 @@ describe('SessionsPlugin', () => {
       expect(cb).toHaveBeenCalledWith(sessions);
     });
 
-    it('fires on client.sessions.list.response as well (current double-subscribe behavior)', () => {
+    it('fires on server.session.list as well (current double-subscribe behavior)', () => {
       const cb = vi.fn();
       plugin.onSessionsChanged(cb);
       const sessions = [makeSession('a', 's2')];
-      surface.pushMessage('client.sessions.list.response', { sessions });
+      surface.pushMessage('server.session.list', { sessions });
       expect(cb).toHaveBeenCalledWith(sessions);
     });
 
@@ -117,7 +117,7 @@ describe('SessionsPlugin', () => {
       plugin.onSessionsChanged(cb);
       surface.pushMessage('sessions.changed', {});
       surface.pushMessage('sessions.changed', { sessions: undefined });
-      surface.pushMessage('client.sessions.list.response', { unrelated: true });
+      surface.pushMessage('server.session.list', { unrelated: true });
       expect(cb).not.toHaveBeenCalled();
     });
 
