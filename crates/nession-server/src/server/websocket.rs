@@ -114,7 +114,13 @@ impl WebSocketServer {
                     let offline = agent_registry.check_offline_agents().await;
                     for agent_id in offline {
                         info!("Agent {} marked offline (heartbeat timeout)", agent_id);
-                        command_broker.unregister_agent(&agent_id).await;
+                        // A liveness verdict, not a disconnect: nobody is
+                        // heartbeating for this agent, so there is no owner to
+                        // compare against — see `CommandBroker::evict_agent`.
+                        // A connection that is still alive re-claims on its next
+                        // message, which is the only way back for an agent that
+                        // went quiet without dropping its WebSocket.
+                        command_broker.evict_agent(&agent_id).await;
 
                         // Schedule session cleanup after 30s grace period.
                         // If the agent reconnects before the grace period
@@ -365,13 +371,19 @@ where
 
         let action = handler.handle_message(msg).await?;
 
-        // Register the agent's sender with CommandBroker.  Always replace
-        // the previous sender (if any) because on reconnect the old sender
-        // was already unregistered — failing to re-register here causes
-        // "agent not found" on the first command after reconnect.
+        // Point the agent's control channel at this connection.
+        //
+        // Re-asserted on every inbound message from a registered agent
+        // connection, but the broker only lets the **newest** connection hold
+        // an agent (see `CommandBroker::claim_agent`). That matters here and
+        // nowhere else: a reconnect arrives as a brand-new connection, so it
+        // takes the agent over on its first message — which is also what makes
+        // the first command after a reconnect work, the old sender having been
+        // released. A message from a connection that has already been
+        // superseded changes nothing, however late it arrives (#960).
         if let Some(agent_id) = handler.registered_agent_id() {
             command_broker
-                .register_agent(agent_id, sender.clone())
+                .claim_agent(agent_id, handler.connection_generation(), sender.clone())
                 .await;
         }
 
@@ -413,9 +425,14 @@ where
         }
     }
 
-    // Clean up: unregister agent from CommandBroker on disconnect
+    // Clean up: release the agent's control channel, but only if this
+    // connection still owns it. A connection that a reconnect has already
+    // superseded leaves the agent alone — its replacement is serving it — and
+    // an agent that really did drop still fails its in-flight commands here.
     if let Some(agent_id) = handler.registered_agent_id() {
-        command_broker.unregister_agent(agent_id).await;
+        command_broker
+            .release_agent(agent_id, handler.connection_generation())
+            .await;
     }
 
     // Clean up: unregister client from ClientRegistry on disconnect

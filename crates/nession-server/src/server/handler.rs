@@ -8,7 +8,7 @@ use crate::env::EnvService;
 use crate::protocol::server_routes;
 use crate::registry::{AgentInfo, AgentRegistry, AgentStatus, SessionRegistry, SessionStatus};
 use crate::server::client_registry::ClientRegistry;
-use crate::server::command_broker::{CommandBroker, WsMessageSender};
+use crate::server::command_broker::{CommandBroker, ConnectionGeneration, WsMessageSender};
 use crate::server::web_client_registry::WebClientRegistry;
 use nession_common::display_name::validate_display_name;
 use nession_common::env_file::parse_env;
@@ -76,6 +76,14 @@ pub struct ConnectionHandler {
     config: ConnectionHandlerConfig,
     authenticated_client: bool,
     registered_agent_id: Option<String>,
+    /// Identity of the connection this handler serves, taken from the broker at
+    /// construction.
+    ///
+    /// One handler per accepted WebSocket, so this *is* the connection's
+    /// identity: it is what the broker compares when deciding who owns an
+    /// agent, which is how a superseded connection is kept from moving state
+    /// that belongs to its replacement (#960).
+    connection_generation: ConnectionGeneration,
     /// Outgoing message sender for this client connection (set after construction).
     client_sender: Option<WsMessageSender>,
     /// Session this client is attached to via relay (for cleanup on disconnect).
@@ -103,6 +111,9 @@ pub struct ConnectionHandlerDeps {
 
 impl ConnectionHandler {
     pub fn new(deps: ConnectionHandlerDeps, config: ConnectionHandlerConfig) -> Self {
+        // Take this connection's identity from the broker, which is the only
+        // thing that ever compares it.
+        let connection_generation = deps.command_broker.new_connection_generation();
         Self {
             agent_registry: deps.agent_registry,
             session_registry: deps.session_registry,
@@ -114,6 +125,7 @@ impl ConnectionHandler {
             config,
             authenticated_client: false,
             registered_agent_id: None,
+            connection_generation,
             client_sender: None,
             attached_session_id: None,
             attached_client_id: None,
@@ -122,6 +134,55 @@ impl ConnectionHandler {
 
     pub fn registered_agent_id(&self) -> Option<&String> {
         self.registered_agent_id.as_ref()
+    }
+
+    /// Identity of the connection this handler serves.
+    ///
+    /// `server/websocket.rs` hands it back to the broker with every agent
+    /// message it claims, and with the release on disconnect — so the claim
+    /// that ends a reconnect can only ever be released by the connection that
+    /// made it.
+    pub fn connection_generation(&self) -> ConnectionGeneration {
+        self.connection_generation
+    }
+
+    /// The agent this message may speak for, or `None` if it may not speak for
+    /// one.
+    ///
+    /// **Agent identity is established by connection registration**, and that
+    /// registration — not the `agent_id` a payload happens to carry — is the
+    /// authority for everything the connection says afterwards (#960). Agent
+    /// control connections are long-lived and carry the agent's whole state:
+    /// heartbeats, session updates, advertised addresses. Reading the id out of
+    /// each payload would mean a connection registered as `A` could move `B`'s
+    /// state, by bug or by intent, for as long as the id in the payload said
+    /// so.
+    ///
+    /// A payload that *does* name an agent is checked against the bound
+    /// identity, because the two disagreeing means one of them is wrong.
+    /// A message that omits the id is not refused: it claims nothing, and the
+    /// connection supplies the answer. A connection that never registered has
+    /// no authority at all — there is no bound identity to fall back on.
+    ///
+    /// The refusal is message-level, not connection-level: a wrong id is a
+    /// fault in one message, and tearing down a working control connection over
+    /// it would hand any peer a way to disconnect an agent by sending it
+    /// garbage.
+    fn bound_agent_id(&self, payload: &Value, wire: &str) -> Option<String> {
+        let Some(bound) = self.registered_agent_id.as_deref() else {
+            warn!("{wire} from a connection that has not registered an agent");
+            return None;
+        };
+        if let Some(claimed) = payload.get("agent_id").and_then(Value::as_str) {
+            if claimed != bound {
+                warn!(
+                    "{wire} names agent '{claimed}' but this connection is registered as \
+                     '{bound}'; refusing"
+                );
+                return None;
+            }
+        }
+        Some(bound.to_string())
     }
 
     /// Set the outgoing message sender for this client connection.
@@ -360,6 +421,11 @@ impl ConnectionHandler {
         };
 
         self.agent_registry.register(agent_info).await;
+        // Binding *this connection* to the agent: from here on it is the
+        // authority for every agent-originated message it carries, whatever
+        // those payloads name (`bound_agent_id`). The other half of
+        // registration is the broker claim the websocket loop makes for it —
+        // see `server/websocket.rs` on why ownership is keyed on the connection.
         self.registered_agent_id = Some(payload.agent_id.clone());
 
         // Clear any sessions left over from a previous agent instance.
@@ -406,17 +472,19 @@ impl ConnectionHandler {
     /// names one: it used to be `server.agent.heartbeat`, which read as "the
     /// server answers this" and stopped being true when the acknowledgement was
     /// recognised as a message of its own.
+    ///
+    /// The agent it belongs to comes from the connection, not from the payload
+    /// — see `bound_agent_id`.
     async fn handle_control_heartbeat(
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
     ) -> anyhow::Result<HandlerAction> {
         let payload: serde_json::Value = msg.payload;
-        let agent_id = payload
-            .get("agent_id")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let Some(agent_id) = self.bound_agent_id(&payload, "control.heartbeat") else {
+            return Ok(HandlerAction::Reply(None));
+        };
 
-        if self.agent_registry.get(agent_id).await.is_none() {
+        if self.agent_registry.get(&agent_id).await.is_none() {
             warn!("Heartbeat from unregistered agent: {}", agent_id);
             return Ok(HandlerAction::Reply(None));
         }
@@ -449,13 +517,13 @@ impl ConnectionHandler {
             .and_then(|v| serde_json::from_value(v.clone()).ok())
         {
             self.agent_registry
-                .update_metadata(agent_id, agent_meta)
+                .update_metadata(&agent_id, agent_meta)
                 .await;
         }
 
         let changed = self
             .agent_registry
-            .update_heartbeat(agent_id, session_count, active_sessions)
+            .update_heartbeat(&agent_id, session_count, active_sessions)
             .await;
 
         // Push updated agent state to all connected web dashboard clients
@@ -478,22 +546,29 @@ impl ConnectionHandler {
         Ok(HandlerAction::Reply(None))
     }
 
+    /// Handle `server.agent.session-update` — the agent reporting the state of
+    /// one of its tmux sessions.
+    ///
+    /// The agent it belongs to comes from the connection, not from the payload
+    /// — see `bound_agent_id`. Session ids are `agent_id:session_name`, so the
+    /// payload's id decides which *namespace* the update writes into; a
+    /// connection registered as `A` reporting for `B` would otherwise rewrite
+    /// another agent's session list.
     async fn handle_agent_session_update(
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
     ) -> anyhow::Result<HandlerAction> {
         let payload: serde_json::Value = msg.payload;
-        let agent_id = payload
-            .get("agent_id")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let Some(agent_id) = self.bound_agent_id(&payload, "server.agent.session-update") else {
+            return Ok(HandlerAction::Reply(None));
+        };
         let session_name = payload
             .get("session_name")
             .and_then(|v| v.as_str())
             .unwrap_or("");
         let status_str = payload.get("status").and_then(|v| v.as_str()).unwrap_or("");
 
-        if self.agent_registry.get(agent_id).await.is_none() {
+        if self.agent_registry.get(&agent_id).await.is_none() {
             warn!("Session update from unregistered agent: {}", agent_id);
             return Ok(HandlerAction::Reply(None));
         }
@@ -546,7 +621,7 @@ impl ConnectionHandler {
 
         let session_info = crate::registry::session::SessionInfo {
             session_id: session_id.clone(),
-            agent_id: agent_id.to_string(),
+            agent_id: agent_id.clone(),
             session_name: session_name.to_string(),
             status,
             window_count,
@@ -911,10 +986,13 @@ impl ConnectionHandler {
             ))));
         }
 
-        // Remove from in-memory registries.
+        // Remove from in-memory registries. The broker entry goes with them,
+        // but not through the disconnect path: this is a verdict about the
+        // *agent* (it is offline), and it is not the release of a claim — see
+        // `CommandBroker::evict_agent`.
         self.agent_registry.unregister(agent_id).await;
         self.session_registry.remove_by_agent(agent_id).await;
-        self.command_broker.unregister_agent(agent_id).await;
+        self.command_broker.evict_agent(agent_id).await;
 
         // Broadcast updated lists to all connected web clients.
         self.web_client_registry
@@ -1880,16 +1958,26 @@ impl ConnectionHandler {
 
     /// Handle `agent.address_update` — update the agent's advertised
     /// addresses after a network change on the agent host.
+    ///
+    /// The agent it belongs to comes from the connection, not from the payload
+    /// — see `bound_agent_id`.
     async fn handle_agent_address_update(
         &self,
         msg: ProtocolMessage<serde_json::Value>,
     ) -> anyhow::Result<HandlerAction> {
-        let payload: AgentAddressUpdatePayload = serde_json::from_value(msg.payload)?;
+        // The identity is read from the raw payload, before it is consumed by
+        // the typed parse below — the connection's registration is what decides
+        // whose addresses these are, not the id in the body.
+        let value = msg.payload;
+        let Some(agent_id) = self.bound_agent_id(&value, "server.agent.address-update") else {
+            return Ok(HandlerAction::Reply(None));
+        };
+        let payload: AgentAddressUpdatePayload = serde_json::from_value(value)?;
 
-        let Some(mut agent) = self.agent_registry.get(&payload.agent_id).await else {
+        let Some(mut agent) = self.agent_registry.get(&agent_id).await else {
             info!(
                 "agent.address_update from unknown agent '{}'; ignoring",
-                payload.agent_id
+                agent_id
             );
             return Ok(HandlerAction::Reply(None));
         };
@@ -1917,7 +2005,7 @@ impl ConnectionHandler {
         info!(
             "Updated {} address(es) for agent {} (primary ip: {})",
             agent.addresses.len(),
-            payload.agent_id,
+            agent_id,
             agent.ip_address,
         );
 
@@ -3681,9 +3769,22 @@ mod tests {
 
     /// Register an agent, optionally with a manifest that carries one wire type.
     async fn register_agent(h: &ConnectionHandler, manifest: Option<ProtocolManifest>) {
+        register_agent_id(h, "agent-a", manifest).await;
+    }
+
+    /// Put an agent in the *registry* under an explicit id.
+    ///
+    /// Deliberately not the same thing as registering a connection as that
+    /// agent: this is the state a second connection's registration leaves
+    /// behind, reachable by a handler that is bound to somebody else (#960).
+    async fn register_agent_id(
+        h: &ConnectionHandler,
+        agent_id: &str,
+        manifest: Option<ProtocolManifest>,
+    ) {
         h.agent_registry
             .register(AgentInfo {
-                agent_id: "agent-a".to_string(),
+                agent_id: agent_id.to_string(),
                 hostname: "h".to_string(),
                 ip_address: "10.0.0.1".to_string(),
                 port: 8080,
@@ -4894,7 +4995,8 @@ mod tests {
         add_session(&mut h, "a1", "ghost").await;
 
         let (sender, mut rx) = WsMessageSender::new();
-        h.command_broker.register_agent("a1", sender).await;
+        let generation = h.command_broker.new_connection_generation();
+        h.command_broker.claim_agent("a1", generation, sender).await;
 
         let broker = Arc::clone(&h.command_broker);
         let list_fut = h.handle_message(proto_msg("server.session.list", json!({ "force": true })));
@@ -4953,10 +5055,10 @@ mod tests {
             .is_empty());
     }
 
-    /// Regression #743: the agent WebSocket loop re-registers the agent's
-    /// sender on **every** inbound agent message (`server/websocket.rs`), so
-    /// that can happen while a command is in flight. It is a transport update
-    /// and must not cancel the command — otherwise the client is told
+    /// Regression #743: the agent WebSocket loop claims the agent for its
+    /// connection on **every** inbound agent message (`server/websocket.rs`),
+    /// so that can happen while a command is in flight. It is a transport
+    /// update and must not cancel the command — otherwise the client is told
     /// "Agent disconnected" for a session the agent actually created, and the
     /// real response is discarded when it arrives.
     #[tokio::test]
@@ -4964,7 +5066,8 @@ mod tests {
         let mut h = handler_with_online_agent().await;
 
         let (sender, mut rx) = WsMessageSender::new();
-        h.command_broker.register_agent("a1", sender).await;
+        let generation = h.command_broker.new_connection_generation();
+        h.command_broker.claim_agent("a1", generation, sender).await;
 
         let broker = Arc::clone(&h.command_broker);
         let create_fut = h.handle_message(proto_msg(
@@ -4986,9 +5089,11 @@ mod tests {
                 .to_string();
 
             // An unrelated inbound message from the same agent arrives first;
-            // the websocket loop re-registers the sender for it.
+            // the loop claims the agent for the connection that sent it — a
+            // newer one here, standing in for a reconnect.
             let (sender_again, _keepalive) = WsMessageSender::new();
-            broker.register_agent("a1", sender_again).await;
+            let generation = broker.new_connection_generation();
+            broker.claim_agent("a1", generation, sender_again).await;
 
             broker
                 .resolve_command("a1", &request_id, json!({ "success": true }))
@@ -6027,7 +6132,8 @@ mod tests {
 
         // Register an agent control channel so `agent_command` can be answered.
         let (sender, mut rx) = WsMessageSender::new();
-        h.command_broker.register_agent("a1", sender).await;
+        let generation = h.command_broker.new_connection_generation();
+        h.command_broker.claim_agent("a1", generation, sender).await;
 
         // Record usage for a session bound to this file.
         h.env_service.usage.record_create(
@@ -6375,6 +6481,169 @@ mod tests {
             .await
             .unwrap();
         assert!(matches!(action, HandlerAction::Reply(None)));
+    }
+
+    // ---- agent identity is bound to the connection that registered it (#960) ----
+
+    /// Register `agent_id` **through the wire**, the way its own connection
+    /// does. This is the binding: from here on the handler answers as that
+    /// agent, and what its payloads name is checked against it.
+    async fn register_agent_connection(h: &mut ConnectionHandler, agent_id: &str) {
+        let reply = parse_reply(
+            h.handle_message(proto_msg(
+                "server.agent.register",
+                json!({
+                    "agent_id": agent_id,
+                    "hostname": "host",
+                    "ip_address": "1.2.3.4",
+                    "port": 19091,
+                    "auth_token": "",
+                    "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
+                    "addresses": [],
+                    "connect_url": null,
+                    "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
+                }),
+            ))
+            .await
+            .unwrap(),
+        );
+        assert_eq!(reply["payload"]["status"], "accepted");
+    }
+
+    /// A connection registered as `a1` must not move `a2`'s heartbeat state,
+    /// whatever id its payload carries. Heartbeats are what keeps an agent
+    /// online and carry its session counts, so a cross-agent write here is one
+    /// agent silently speaking for another.
+    #[tokio::test]
+    async fn heartbeat_for_another_agent_is_refused() {
+        let mut h = test_handler("").await;
+        register_agent_connection(&mut h, "a1").await;
+        register_agent_id(&h, "a2", None).await;
+
+        let action = h
+            .handle_message(proto_msg(
+                "control.heartbeat",
+                json!({ "agent_id": "a2", "session_count": 9, "active_sessions": 9 }),
+            ))
+            .await
+            .unwrap();
+        assert!(matches!(action, HandlerAction::Reply(None)));
+
+        let a2 = h.agent_registry.get("a2").await.expect("a2 is registered");
+        assert_eq!(
+            a2.session_count, 0,
+            "a1's connection must not write a2's session count"
+        );
+        assert_eq!(a2.active_sessions, 0);
+
+        // The refusal is about identity, not about heartbeats: the same message
+        // for the agent this connection *did* register as still lands.
+        h.handle_message(proto_msg(
+            "control.heartbeat",
+            json!({ "agent_id": "a1", "session_count": 3, "active_sessions": 1 }),
+        ))
+        .await
+        .unwrap();
+        let a1 = h.agent_registry.get("a1").await.expect("a1 is registered");
+        assert_eq!(a1.session_count, 3);
+    }
+
+    /// The other half of the same invariant: a connection that never registered
+    /// has no identity to speak with — not even for an agent the registry
+    /// knows, because registering is what makes a connection authoritative.
+    #[tokio::test]
+    async fn heartbeat_from_a_connection_that_never_registered_is_refused() {
+        let mut h = test_handler("").await;
+        register_agent_id(&h, "a1", None).await;
+
+        h.handle_message(proto_msg(
+            "control.heartbeat",
+            json!({ "agent_id": "a1", "session_count": 9, "active_sessions": 9 }),
+        ))
+        .await
+        .unwrap();
+
+        let a1 = h.agent_registry.get("a1").await.expect("a1 is registered");
+        assert_eq!(
+            a1.session_count, 0,
+            "an unregistered connection has no authority to write agent state"
+        );
+    }
+
+    /// Session ids are `agent_id:session_name`, so the payload's id chooses the
+    /// namespace an update writes into — a connection registered as `a1`
+    /// reporting for `a2` would rewrite another agent's session list.
+    #[tokio::test]
+    async fn session_update_for_another_agent_is_refused() {
+        let mut h = test_handler("").await;
+        register_agent_connection(&mut h, "a1").await;
+        register_agent_id(&h, "a2", None).await;
+
+        h.handle_message(proto_msg(
+            "server.agent.session-update",
+            json!({ "agent_id": "a2", "session_name": "sneaky", "status": "active" }),
+        ))
+        .await
+        .unwrap();
+
+        assert!(
+            h.session_registry
+                .list()
+                .await
+                .iter()
+                .all(|session| !session.session_id.starts_with("a2:")),
+            "a1's connection must not create sessions under a2"
+        );
+    }
+
+    /// A message that names no agent is not lying about one: the connection's
+    /// registered identity supplies the answer, so an agent that sends the id
+    /// only in its registration is still understood.
+    #[tokio::test]
+    async fn session_update_without_an_agent_id_uses_the_connection_identity() {
+        let mut h = test_handler("").await;
+        register_agent_connection(&mut h, "a1").await;
+
+        h.handle_message(proto_msg(
+            "server.agent.session-update",
+            json!({ "session_name": "dev", "status": "active", "window_count": 1 }),
+        ))
+        .await
+        .unwrap();
+
+        assert!(
+            h.session_registry
+                .list()
+                .await
+                .iter()
+                .any(|session| session.session_id == "a1:dev"),
+            "the bound identity must be enough to place the update"
+        );
+    }
+
+    /// Advertised addresses decide where P2P clients dial, so a connection
+    /// registered as `a1` must not be able to point `a2` somewhere else.
+    #[tokio::test]
+    async fn address_update_for_another_agent_is_refused() {
+        let mut h = test_handler("").await;
+        register_agent_connection(&mut h, "a1").await;
+        register_agent_id(&h, "a2", None).await;
+
+        h.handle_message(proto_msg(
+            "server.agent.address-update",
+            json!({
+                "agent_id": "a2",
+                "addresses": [{ "url": "ws://elsewhere.example:19091/ws", "network_type": "lan" }],
+            }),
+        ))
+        .await
+        .unwrap();
+
+        let a2 = h.agent_registry.get("a2").await.expect("a2 is registered");
+        assert!(
+            a2.addresses.is_empty(),
+            "a1's connection must not move a2's advertised addresses"
+        );
     }
 
     // ---- Quick Commands (issue #95, part 3) ----
