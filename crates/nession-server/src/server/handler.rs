@@ -9,9 +9,10 @@ use crate::protocol::server_routes;
 use crate::registry::{AgentInfo, AgentRegistry, AgentStatus, SessionRegistry, SessionStatus};
 use crate::server::client_registry::ClientRegistry;
 use crate::server::command_broker::{CommandBroker, ConnectionGeneration};
-// The three policies by name, because the `server_routes!` invocation at the
+// The four policies by name, because the `server_routes!` invocation at the
 // bottom of this file declares one per unit and the names are the column there.
-use crate::server::execution::ExecutionPolicy::{Inline, Ordered, Query};
+use crate::server::execution::ExecutionPolicy::{Inline, Key, Ordered, Query};
+use crate::server::execution::ResourceKey;
 use crate::server::outbound::WsMessageSender;
 use crate::server::web_client_registry::WebClientRegistry;
 use nession_common::display_name::validate_display_name;
@@ -4140,21 +4141,121 @@ mod tests {
         // the macro. `policy_for_wire` is what the read loop calls, and a `None`
         // there is not a failure: it is how a wire this server does *not* serve
         // is recognised, which is why the negative case is asserted too.
+        //
+        // The payload is empty here because this test is about the *declaration*
+        // and not about any one key: a policy that reads the payload has to
+        // survive being asked about a payload that carries nothing, since a
+        // malformed request is dispatched on a lane like every other frame and
+        // is refused by the handler rather than by the classifier.
+        let nothing = serde_json::json!({});
         for wire in SERVER_WIRES {
             assert!(
-                crate::server::handler::unit_policy(wire).is_some(),
+                crate::server::handler::unit_policy(wire, &nothing).is_some(),
                 "`{wire}` is dispatched but declares no execution policy"
             );
         }
         assert!(
-            crate::server::handler::unit_policy("git.status").is_none(),
+            crate::server::handler::unit_policy("git.status", &nothing).is_none(),
             "a wire this server does not serve must not declare a policy for it"
         );
         assert_eq!(
-            crate::server::execution::policy_for_wire("git.status"),
+            crate::server::execution::policy_for_wire("git.status", &nothing),
             crate::server::execution::ExecutionPolicy::Inline,
             "an undeclared wire is dispatched inline rather than guessed at"
         );
+    }
+
+    #[test]
+    fn a_session_mutation_is_keyed_by_the_session_it_names() {
+        // The two spellings the wire uses for one resource, and the property
+        // that makes the keyed lane mean anything: `create` names a session by
+        // its parts and `kill` names the *same* session joined, so a lane that
+        // keyed them differently would let a kill overtake the create it is
+        // about — the exact ordering `#961` calls out by name.
+        //
+        // Asserted as an equality rather than two literals so that it is the
+        // *agreement* under test.
+        let created = session_by_parts(&serde_json::json!({
+            "agent_id": "a1",
+            "name": "s1",
+        }));
+        let killed = session_by_id(&serde_json::json!({ "session_id": "a1:s1" }));
+        assert_eq!(created, killed);
+        assert_eq!(created.to_string(), "session:a1:s1");
+
+        // And the other direction: two different sessions must not share a key,
+        // which is what makes them independent rather than merely fast.
+        assert_ne!(
+            session_by_parts(&serde_json::json!({ "agent_id": "a1", "name": "s1" })),
+            session_by_parts(&serde_json::json!({ "agent_id": "a1", "name": "s2" }))
+        );
+        assert_ne!(
+            session_by_parts(&serde_json::json!({ "agent_id": "a1", "name": "s1" })),
+            session_by_parts(&serde_json::json!({ "agent_id": "a2", "name": "s1" }))
+        );
+    }
+
+    #[test]
+    fn an_env_file_is_keyed_by_the_source_it_lives_on() {
+        // An agent's `staging.env` and the server's `staging.env` are two files
+        // with one name. Keying them together would serialise two unrelated
+        // writes; keying the *resource* rather than the name is what the
+        // variant is for.
+        assert_eq!(
+            env_file_key(&serde_json::json!({ "name": "staging.env" })).to_string(),
+            "env:staging.env"
+        );
+        assert_eq!(
+            env_file_key(&serde_json::json!({
+                "name": "staging.env",
+                "source": "agent",
+                "agent_id": "a1",
+            }))
+            .to_string(),
+            "env:a1:staging.env"
+        );
+        assert_ne!(
+            env_file_key(&serde_json::json!({ "name": "staging.env" })),
+            env_file_key(&serde_json::json!({
+                "name": "staging.env",
+                "source": "agent",
+                "agent_id": "a1",
+            }))
+        );
+    }
+
+    #[test]
+    fn the_mutations_are_declared_keyed_and_the_queries_are_not() {
+        // The declaration, read back — the stage-E half of the same derivation
+        // the two tests above make for stages C and D. A mutation that someone
+        // later marks `Inline` would run in the reader and lose its ordering
+        // silently, and nothing else in the tree would say so.
+        let nothing = serde_json::json!({});
+        for wire in [
+            "server.session.create",
+            "server.session.kill",
+            "server.session.env.apply",
+            "server.session.env.unset",
+            "server.env.write",
+            "server.env.delete",
+        ] {
+            assert!(
+                matches!(
+                    crate::server::handler::unit_policy(wire, &nothing),
+                    Some(crate::server::execution::ExecutionPolicy::Key(_))
+                ),
+                "`{wire}` mutates a resource and must be declared `Key`"
+            );
+        }
+        for wire in ["server.env.list", "server.env.get", "server.session.list"] {
+            assert!(
+                matches!(
+                    crate::server::handler::unit_policy(wire, &nothing),
+                    Some(crate::server::execution::ExecutionPolicy::Query)
+                ),
+                "`{wire}` reads and must not be declared `Key`"
+            );
+        }
     }
 
     #[tokio::test]
@@ -6935,7 +7036,72 @@ mod tests {
 // declares its own wire projection, which is exactly the model: one contract,
 // several providers, `ContractSupport.wire` carrying the difference.
 
-server_routes!(handler, msg;
+/// The session a payload names by its parts, as the registry names it.
+///
+/// `server.session.create` is the unit that does this: it takes an `agent_id`
+/// and a `name` and joins them, because the session does not exist yet and
+/// there is no id to take. The join is written as the registry writes it
+/// (`{agent_id}:{name}`), which is what makes it the *same key* as
+/// [`session_by_id`] produces for the same session — the property the key lane
+/// exists for, and the one its test pins.
+fn session_by_parts(payload: &Value) -> ResourceKey {
+    let agent_id = payload
+        .get("agent_id")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let name = payload
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    ResourceKey::Session(format!("{agent_id}:{name}"))
+}
+
+/// The session a payload names by its joined id, as the registry names it.
+///
+/// `server.session.kill` and the two `session.env.*` units take the `session_id`
+/// the registry hands out, which is already `agent_id:session_name`.
+///
+/// A payload with neither part in it produces the empty key rather than an
+/// error, and that is deliberate: the frame is still dispatched, still counted,
+/// and still answered — with the refusal its handler has always produced —
+/// while a classifier that refused to produce a key would have to decide what
+/// lane a malformed mutation runs on, and there is no honest answer to that.
+/// Every such frame shares one queue, which is a queue of frames that are about
+/// to be refused.
+fn session_by_id(payload: &Value) -> ResourceKey {
+    ResourceKey::Session(
+        payload
+            .get("session_id")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+    )
+}
+
+/// The env file a payload names, qualified by the side of the fleet it lives on.
+///
+/// `source` decides the spelling, because an agent's `staging.env` and the
+/// Server's `staging.env` are two files with one name: a key that ignored the
+/// source would serialise two unrelated writes, and the variant would be
+/// carrying half of what it says it carries.
+fn env_file_key(payload: &Value) -> ResourceKey {
+    let name = payload
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let agent_source = payload.get("source").and_then(Value::as_str) == Some("agent");
+    if agent_source {
+        let agent_id = payload
+            .get("agent_id")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        ResourceKey::Env(format!("{agent_id}:{name}"))
+    } else {
+        ResourceKey::Env(name.to_string())
+    }
+}
+
+server_routes!(handler, msg, payload;
     "server.agent.register" => "server.agent.register" => Ordered => handler.handle_agent_register(msg).await,
     // `control.heartbeat` is deliberately **not** an arm here. It is a control
     // message, not an operation: nothing answers it (the agent used to read an
@@ -6960,15 +7126,19 @@ server_routes!(handler, msg;
     // other half of the mode transition: leaving relay mode must be as
     // deterministic as entering it.
     "server.session.relay.end" => "server.session.relay.end" => Ordered => Ok(HandlerAction::Reply(None)),
-    "server.session.create" => "server.session.create" => Inline => handler.handle_client_session_create(msg).await,
-    "server.session.kill" => "server.session.kill" => Inline => handler.handle_client_session_kill(msg).await,
+    // The keyed mutations (`#961-E`). Each carries the resource it mutates,
+    // read from its own payload: the session ones by the session they name, the
+    // env ones by the file. Create and kill name one session two ways and must
+    // land on one key — see `session_by_parts` / `session_by_id`.
+    "server.session.create" => "server.session.create" => Key(session_by_parts(payload)) => handler.handle_client_session_create(msg).await,
+    "server.session.kill" => "server.session.kill" => Key(session_by_id(payload)) => handler.handle_client_session_kill(msg).await,
     "server.session.capture-preview" => "server.session.capture-preview" => Query => handler.handle_client_session_capture_preview(msg).await,
     "server.env.list" => "server.env.list" => Query => handler.handle_client_env_list(msg).await,
     "server.env.get" => "server.env.get" => Query => handler.handle_client_env_get(msg).await,
-    "server.env.write" => "server.env.write" => Inline => handler.handle_client_env_write(msg).await,
-    "server.env.delete" => "server.env.delete" => Inline => handler.handle_client_env_delete(msg).await,
-    "server.session.env.apply" => "server.session.env.apply" => Inline => handler.handle_client_session_env_apply(msg).await,
-    "server.session.env.unset" => "server.session.env.unset" => Inline => handler.handle_client_session_env_unset(msg).await,
+    "server.env.write" => "server.env.write" => Key(env_file_key(payload)) => handler.handle_client_env_write(msg).await,
+    "server.env.delete" => "server.env.delete" => Key(env_file_key(payload)) => handler.handle_client_env_delete(msg).await,
+    "server.session.env.apply" => "server.session.env.apply" => Key(session_by_id(payload)) => handler.handle_client_session_env_apply(msg).await,
+    "server.session.env.unset" => "server.session.env.unset" => Key(session_by_id(payload)) => handler.handle_client_session_env_unset(msg).await,
     "server.session.env.active" => "server.session.env.active" => Query => handler.handle_client_session_env_active(msg).await,
     "server.session.env.query" => "server.session.env.query" => Query => handler.handle_client_session_env_query(msg).await,
     "server.info" => "server.info" => Query => handler.handle_client_server_info(msg).await,

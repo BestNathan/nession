@@ -10,6 +10,26 @@
 //! the queue onto whatever connection is currently live; while disconnected,
 //! queued messages are dropped. This means callers never observe a "broken
 //! pipe" — sending always succeeds locally and delivery resumes after reconnect.
+//!
+//! ## The two halves of a live connection (`#961-E`)
+//!
+//! Servicing a connection is two jobs, and until this stage one `select!` loop
+//! did both: reading frames and writing them. That was fine while every frame
+//! became a detached task, because nothing the loop did could block for long —
+//! and it stops being fine the moment dispatch is *bounded*, because the bound
+//! is enforced by not reading, and a loop that stops reading also stops
+//! draining the outbox. A heartbeat is an outbox message, so a reader parked on
+//! a full lane would have been a heartbeat that stops when a session's queue is
+//! full: precisely the regression `#961` says must not happen.
+//!
+//! So they are two tasks now, with one owner each:
+//!
+//! * [`ServerClient::write_loop`] owns the socket, and drains the outbox and
+//!   the response channel. Nothing it does can be parked by business work.
+//! * [`ServerClient::read_loop`] owns the stream and the lanes
+//!   (`connection::execution`), and is the only half that may park on a bound.
+//!
+//! The comments on each say what the split makes true.
 
 use anyhow::{Context, Result};
 use futures_util::{SinkExt, StreamExt};
@@ -34,6 +54,10 @@ use tokio_tungstenite::{
 };
 use tracing::{debug, error, info, warn};
 
+use crate::connection::execution::{self, Lanes, ResourceKey, Work, SHUTDOWN_GRACE};
+// The three policies by name, because the `core_routes!` invocation at the
+// bottom of this file declares one per unit and the names are the column there.
+use crate::connection::execution::ExecutionPolicy::{Inline, Key, Query};
 use crate::env::EnvStore;
 use crate::extension::ExtensionRegistry;
 use crate::protocol::core_routes;
@@ -562,24 +586,30 @@ impl ServerClient {
         Ok((sink, stream, interval))
     }
 
-    /// Service a live connection: forward queued outgoing messages, handle
-    /// incoming server messages, respond to pings, and watch for shutdown.
+    /// Service a live connection until it drops or shutdown.
+    ///
+    /// This half is the **writer**: it owns the socket, drains the outbox
+    /// (heartbeats, session updates) and the response channel onto it, and
+    /// watches for shutdown. The reading half — and everything a frame's
+    /// dispatch can park on — is [`Self::read_loop`], on a task of its own, for
+    /// the reason this module's docs give.
+    ///
     /// Returns whether the loop ended due to shutdown or a dropped connection.
     async fn run_connection(
         self: Arc<Self>,
         mut sink: WsSink,
-        mut stream: WsStreamHalf,
+        stream: WsStreamHalf,
         outbox_rx: &mut mpsc::UnboundedReceiver<WsMessage>,
         shutdown_rx: &mut mpsc::Receiver<()>,
     ) -> ConnectionOutcome {
-        // Handler tasks write their responses here; this loop drains the channel
-        // onto the socket.
+        // Handler tasks write their responses here; this half drains them onto
+        // the socket.
         //
         // Bounded, with the policy of #961's backpressure section: a full queue
-        // makes the *handler* wait, never lose its answer. The handler is a
-        // detached task — one per inbound message, spawned below — so parking it
-        // costs nothing that matters: this loop keeps reading, heartbeats keep
-        // flowing, and the answer goes out as soon as the socket takes it.
+        // makes the *handler* wait, never lose its answer. The handler is one
+        // of the read half's lane tasks — a bounded number of them, see
+        // `connection::execution` — so parking it costs a lane slot rather than
+        // a detached task per message, and this loop keeps writing throughout.
         //
         // The producer side is what the old comment here was protecting, and the
         // bound is chosen to keep protecting it: `AGENT_RESPONSE_QUEUE_SLOTS`
@@ -589,7 +619,17 @@ impl ServerClient {
         // growing its heap for as long as the Server stayed away.
         let (resp_tx, mut resp_rx) = mpsc::channel::<WsMessage>(AGENT_RESPONSE_QUEUE_SLOTS);
 
-        loop {
+        // The reading half, and the signal that says how it ended. A channel
+        // rather than joining the handle here: the handle is only needed to
+        // *stop* a reader that is parked, and a `JoinHandle` polled after it has
+        // completed panics.
+        let (read_done_tx, mut read_done_rx) = mpsc::channel::<ConnectionOutcome>(1);
+        let reader = tokio::spawn(
+            self.clone()
+                .read_loop(stream, resp_tx.clone(), read_done_tx),
+        );
+
+        let outcome = loop {
             tokio::select! {
                 // Outgoing: drain the outbox (heartbeats, session updates).
                 outgoing = outbox_rx.recv() => {
@@ -597,88 +637,176 @@ impl ServerClient {
                         Some(msg) => {
                             if let Err(e) = sink.send(msg).await {
                                 warn!("Failed to send to server: {:#}", e);
-                                return ConnectionOutcome::Disconnected;
+                                break ConnectionOutcome::Disconnected;
                             }
                         }
                         None => {
                             // Outbox closed: handle dropped, treat as shutdown.
-                            return ConnectionOutcome::Shutdown;
+                            break ConnectionOutcome::Shutdown;
                         }
                     }
                 }
-                // Command responses from handler tasks.
+                // Command responses from the reading half's lanes.
                 response = resp_rx.recv() => {
                     match response {
                         Some(msg) => {
                             if let Err(e) = sink.send(msg).await {
                                 warn!("Failed to send to server: {:#}", e);
-                                return ConnectionOutcome::Disconnected;
+                                break ConnectionOutcome::Disconnected;
                             }
                         }
                         None => {
                             // Unreachable while this loop holds a `resp_tx` clone;
                             // kept as a defensive disconnect.
-                            return ConnectionOutcome::Disconnected;
+                            break ConnectionOutcome::Disconnected;
                         }
                     }
                 }
-                // Incoming: server messages, pings, close.
-                incoming = stream.next() => {
-                    match incoming {
-                        Some(Ok(WsMessage::Text(text))) => {
-                            // Handle off the loop so a slow command can't block
-                            // heartbeats or subsequent reads.
-                            let this = self.clone();
-                            let tx = resp_tx.clone();
-                            tokio::spawn(async move {
-                                if let Err(e) = this.handle_server_message(&text, &tx).await {
-                                    warn!("Error handling server message: {:#}", e);
-                                }
-                            });
-                        }
-                        Some(Ok(WsMessage::Ping(data))) => {
-                            let _ = sink.send(WsMessage::Pong(data)).await;
-                        }
-                        Some(Ok(WsMessage::Close(_))) => {
-                            info!("Server closed connection");
-                            return ConnectionOutcome::Disconnected;
-                        }
-                        Some(Ok(_)) => {}
-                        Some(Err(e)) => {
-                            error!("WebSocket error: {:#}", e);
-                            return ConnectionOutcome::Disconnected;
-                        }
-                        None => {
-                            info!("WebSocket stream ended");
-                            return ConnectionOutcome::Disconnected;
-                        }
-                    }
+                // The reading half ended: its stream closed, or a write to
+                // `resp_tx` failed. Either way this connection is over.
+                done = read_done_rx.recv() => {
+                    break done.unwrap_or(ConnectionOutcome::Disconnected);
                 }
                 // Shutdown: close the socket and stop the supervisor.
                 _ = shutdown_rx.recv() => {
                     info!("Shutdown signal received");
                     let _ = sink.send(WsMessage::Close(None)).await;
-                    return ConnectionOutcome::Shutdown;
+                    break ConnectionOutcome::Shutdown;
                 }
             }
-        }
+        };
+
+        // Stop the reader, however this ended. It owns the lanes, and a reader
+        // parked on a full key's queue would otherwise outlive the connection
+        // that owns it — one leaked task per reconnect. Aborting is enough:
+        // dropping the lanes drops their work, and `read_loop` is where the
+        // lanes get the chance to end their own tasks in an orderly way when
+        // the stream ends by itself.
+        reader.abort();
+        let _ = reader.await;
+        outcome
     }
 
-    /// Handle a message received from the server, writing any response to the
-    /// `responses` queue (drained onto the socket by `run_connection`).
+    /// Read this connection's frames and dispatch them, until the stream ends.
+    ///
+    /// The reading half of a live connection, and the only half that may park:
+    /// a lane at its bound is enforced by the reader not reading, which is the
+    /// bound `#961` asks for. It never writes to the socket — answers go to
+    /// `responses`, which `run_connection` drains.
+    ///
+    /// The split is what keeps the two regressions this stage exists around
+    /// from being traded for one another: dispatch is bounded, and the heartbeat
+    /// still flows, because the task that sends heartbeats is not this one.
+    async fn read_loop(
+        self: Arc<Self>,
+        mut stream: WsStreamHalf,
+        responses: mpsc::Sender<WsMessage>,
+        done: mpsc::Sender<ConnectionOutcome>,
+    ) {
+        // The lanes this connection reads into, and the only thing that admits
+        // to them. Dropped with the loop, which is what ends their tasks.
+        let mut lanes = Lanes::new();
+
+        let outcome = loop {
+            match stream.next().await {
+                Some(Ok(WsMessage::Text(text))) => {
+                    // Decoded here rather than in the task that serves it,
+                    // because the unit's execution policy is read from the
+                    // envelope and the dispatch decision comes first. A frame
+                    // that does not decode is ignored and logged, which is what
+                    // it was before: the parse used to happen inside the
+                    // per-message task, and its failure was logged there.
+                    let msg: ProtocolMessage<serde_json::Value> = match serde_json::from_str(&text)
+                    {
+                        Ok(msg) => msg,
+                        Err(e) => {
+                            warn!("Error handling server message: {:#}", e);
+                            continue;
+                        }
+                    };
+
+                    let policy = match core_policy(&msg) {
+                        Some(policy) => policy,
+                        // Not a unit this connection serves. Control is not an
+                        // operation and not a request anybody is waiting on —
+                        // its whole handler is a log line — so it is applied
+                        // where it stands. See `is_control`.
+                        None if is_control(&msg.msg_type) => Inline,
+                        // Everything else is an extension's own command unit:
+                        // a request the Server is waiting for an answer to,
+                        // whose handler does backend I/O. See
+                        // `execution::UNSERVED`.
+                        None => execution::UNSERVED,
+                    };
+
+                    let this = Arc::clone(&self);
+                    let tx = responses.clone();
+                    let work: Work = Box::pin(async move {
+                        if let Err(e) = this.handle_server_message(msg, &tx).await {
+                            warn!("Error handling server message: {:#}", e);
+                        }
+                    });
+
+                    match policy {
+                        Inline => work.await,
+                        Query => lanes.query(work).await,
+                        Key(key) => lanes.key(key, work).await,
+                    }
+                }
+                Some(Ok(WsMessage::Ping(data))) => {
+                    // The pong is handed to the writing half rather than
+                    // written here, because the socket has one owner and this
+                    // is not it. It rides the response channel, which in
+                    // ordinary operation is empty — a full one means the
+                    // Server is not draining, and a pong it is not reading
+                    // would not have kept the connection alive either.
+                    if responses.send(WsMessage::Pong(data)).await.is_err() {
+                        break ConnectionOutcome::Disconnected;
+                    }
+                }
+                Some(Ok(WsMessage::Close(_))) => {
+                    info!("Server closed connection");
+                    break ConnectionOutcome::Disconnected;
+                }
+                Some(Ok(_)) => {}
+                Some(Err(e)) => {
+                    error!("WebSocket error: {:#}", e);
+                    break ConnectionOutcome::Disconnected;
+                }
+                None => {
+                    info!("WebSocket stream ended");
+                    break ConnectionOutcome::Disconnected;
+                }
+            }
+        };
+
+        // End the lanes' work before saying the connection is over. It belongs
+        // to a Server that is gone — or to a connection this agent is closing —
+        // and a mutation parked on a resource nobody is waiting for any more
+        // must not write to a socket that is closing. Queued work that never
+        // started is dropped with the lane.
+        lanes.shutdown(SHUTDOWN_GRACE).await;
+
+        let _ = done.send(outcome).await;
+    }
+
+    /// Handle one message received from the server, writing any response to the
+    /// `responses` queue (drained onto the socket by [`Self::run_connection`]).
+    ///
+    /// Takes the message **decoded**, because its execution policy — which lane
+    /// it is dispatched on, and therefore which task calls this at all — is read
+    /// from the envelope before the dispatch decision is made. See
+    /// [`Self::read_loop`].
     ///
     /// `responses` is bounded, so a send here can wait for room — which is the
-    /// intended policy rather than a hazard: this method runs in a task spawned
-    /// per inbound message, so waiting costs a detached task and never the read
-    /// loop that spawned it. See the queue's construction in `run_connection`.
+    /// intended policy rather than a hazard: this method runs on a lane task,
+    /// and waiting costs a lane slot rather than a detached task per message.
+    /// See the queue's construction in [`Self::run_connection`].
     async fn handle_server_message(
         &self,
-        text: &str,
+        msg: ProtocolMessage<serde_json::Value>,
         responses: &mpsc::Sender<WsMessage>,
     ) -> Result<()> {
-        let msg: ProtocolMessage<serde_json::Value> =
-            serde_json::from_str(text).context("failed to parse server message")?;
-
         // Try extension dispatch first
         if msg.msg_type.starts_with("extension.") {
             if let Some(ref ext_registry) = self.extension_registry {
@@ -2484,14 +2612,20 @@ mod tests {
         server_handle.abort();
     }
 
-    // ── The central connection's execution model (#961 stage A) ─────────────
+    // ── The central connection's execution model (#961 stages A and E) ───────
     //
-    // **Characterization, not aspiration.** The tests below pin what this path
-    // does today — a detached task per server message, no limit and no ordering
-    // — and each names the stage expected to change its answer. What they have
-    // in common is the instrument: a `tmux` that parks every invocation until
-    // the test says otherwise, so "how many mutations are in flight at once" is
-    // a number read off a file rather than an inference from elapsed time.
+    // Stage A wrote these as **characterization**: they pinned what this path
+    // did then — a detached task per server message, no limit and no ordering —
+    // and each named the stage expected to change its answer. Stage E changed
+    // two of the four, and the pair that flipped is the pair the requirement's
+    // success criteria are written against (bounded; ordered per resource key).
+    // The other two are guards, and they are guards *because* the model changed:
+    // see each one's comment.
+    //
+    // What they all have in common is the instrument: a `tmux` that parks every
+    // invocation until the test says otherwise, so "how many mutations are in
+    // flight at once" is a number read off a file rather than an inference from
+    // elapsed time.
 
     /// A `tmux` that logs each mutation it is asked to run and then holds.
     ///
@@ -2776,14 +2910,13 @@ esac"#,
     /// Two mutations for **different** sessions run at the same time.
     ///
     /// Sessions `s1` and `s2` share no state, so this is the concurrency the
-    /// requirement keeps: `#961-E` is expected to bound the total and order by
-    /// resource key, and different keys stay parallel under that model. What
-    /// this pins is that they *are* parallel today, and how: one detached task
-    /// per server message (`run_connection`'s `tokio::spawn`), not a queue.
+    /// requirement keeps: dispatch is bounded and ordered *by resource key*, and
+    /// different keys stay parallel under that model.
     ///
     /// **Must not flip.** It is the "不同 resource keys 可以并行" half of the
     /// success criteria; a red here means a keyed scheduler has collapsed
-    /// unrelated resources onto one lane.
+    /// unrelated resources onto one lane. It has not been changed since stage A
+    /// wrote it, and that is the point — the keyed lane kept it true.
     #[cfg(unix)]
     #[tokio::test]
     async fn mutations_for_different_sessions_run_at_the_same_time() {
@@ -2821,24 +2954,30 @@ esac"#,
         server_handle.abort();
     }
 
-    /// Two mutations for the **same** session are not ordered against each
-    /// other.
+    /// Two mutations for the **same** session run one at a time, in the order
+    /// they arrived.
     ///
     /// `create` then `kill` for one session is the ordering the requirement
     /// calls out by name ("create + kill same session | preserve resource
-    /// ordering"), and today there is none: both are detached tasks, so the
-    /// kill can and does reach tmux while the create is still running. The
-    /// witness is the same file the test above reads — two invocations in
-    /// flight at once, when a keyed lane could only ever have one.
+    /// ordering"). Stage A's name for this test was
+    /// `mutations_for_one_session_are_not_ordered`, and it was true: both were
+    /// detached tasks, so the kill reached tmux while the create was still
+    /// running and the session that survived was whichever task won.
     ///
-    /// **Flips at `#961-E`** (bounded keyed execution on the central
-    /// connection): the expected behaviour is that the second mutation for a
-    /// key does not start until the first has finished, so this assertion
-    /// becomes `1` started until the release, then `2` — and the responses then
-    /// arrive in the order the server sent them.
+    /// `#961-E` flipped it, and the assertion flipped with it: the same
+    /// instrument reads `1` instead of `2`. The witness is the log of tmux
+    /// invocations — the first is parked on a release file the test has not
+    /// written yet, so a second invocation *cannot* exist while the key lane is
+    /// doing its job, and there is nowhere for an overtaking worker to hide.
+    ///
+    /// The bounded window is the negative half and is safe in that direction:
+    /// it can only go red when the second mutation ran while the first was
+    /// still running. The positive half that follows it is deterministic — after
+    /// the release, the second invocation exists, so the ordering is a delay
+    /// rather than a loss.
     #[cfg(unix)]
     #[tokio::test]
-    async fn mutations_for_one_session_are_not_ordered() {
+    async fn mutations_of_one_session_are_ordered() {
         let tmux = BlockingTmux::new();
         let (addr, server_handle, mut msg_rx, _commands) =
             start_mock_server_sending_commands(vec![
@@ -2850,40 +2989,65 @@ esac"#,
 
         let handle = connected_client(addr, "test-agent-same-session", tmux.tmux()).await;
 
+        // The first mutation is in flight and parked.
+        let started = tmux.started_within(1, Duration::from_secs(10)).await;
+        assert_eq!(started, 1, "the first mutation never started");
+
+        // The second is written and read — it is in the key's queue, not on the
+        // wire — and it must not have reached tmux.
+        let started = tmux.started_within(2, Duration::from_millis(500)).await;
+        assert_eq!(
+            started, 1,
+            "the same session's second mutation ran while the first was still \
+             running: {started} tmux invocations, and the first has not been \
+             released"
+        );
+
+        // Releasing the first lets the key's worker take the second.
+        tmux.release();
         let started = tmux.started_within(2, Duration::from_secs(10)).await;
         assert_eq!(
             started, 2,
-            "only {started} tmux invocation(s) started: the same session's second \
-             mutation waited for the first — it is ordered, which is what #961-E \
-             is expected to make true"
+            "the second mutation never ran after the first finished: ordering \
+             turned into a loss"
         );
 
-        tmux.release();
         let responses = collect_responses(&mut msg_rx, 2, Duration::from_secs(15)).await;
-        assert_eq!(responses.len(), 2);
+        let mut answered: Vec<&str> = responses
+            .iter()
+            .filter_map(|r| r["payload"]["request_id"].as_str())
+            .collect();
+        answered.sort_unstable();
+        assert_eq!(answered, vec!["req-1", "req-2"]);
 
         handle.shutdown().await.ok();
         server_handle.abort();
     }
 
-    /// Nothing caps how many commands the central connection runs at once.
+    /// How many commands the central connection runs at once is **bounded**.
     ///
-    /// Every server message becomes a detached task (`tokio::spawn` in
-    /// `run_connection`), so the number of mutations in flight tracks the
-    /// number of messages sent and nothing else. `CONCURRENT_COMMANDS` is 12:
-    /// large enough that no per-connection default reads as a cap, and small
-    /// enough to stay a test.
+    /// Stage A's name for this test was
+    /// `nothing_caps_the_commands_in_flight_on_the_central_connection`, and it
+    /// was true: every server message became a detached task, so the number in
+    /// flight tracked the number of messages and nothing else. `#961-E` replaced
+    /// that with a bounded lane, and this is the assertion it left behind —
+    /// `#961`'s "concurrency upper bound test, 证明 task 数不会随消息无限增长".
     ///
-    /// **Flips at `#961-E`** (global bounded concurrency). The stage picks the
-    /// bound, so what it has to do here is one of two things: if its limit is
-    /// below 12, this assertion moves to "started == limit" and says so; if it
-    /// is above, that number has to move *up* here, because the claim being
-    /// pinned is that dispatch is bounded by nothing at all — and a bound
-    /// larger than the message count has not been shown to exist.
+    /// `CONCURRENT_COMMANDS` stays at 12, above the bound the stage chose
+    /// (`DEFAULT_QUERY_CONCURRENCY`, 8), which is what leaves the bound
+    /// observable at all: a message count at or below the bound could not tell a
+    /// lane from a `tokio::spawn`. Stage A's own note on this test said exactly
+    /// that the number moves only if the bound is above it.
+    ///
+    /// The three phases are the whole policy: the lane fills (positive), a
+    /// twelfth command does not start while it is full (the bound), and
+    /// releasing it lets every remaining command through, each answering its own
+    /// request (a bound that drops would show up as a missing id).
     #[cfg(unix)]
     #[tokio::test]
-    async fn nothing_caps_the_commands_in_flight_on_the_central_connection() {
+    async fn the_central_connection_holds_at_its_bound_and_then_drains() {
         const CONCURRENT_COMMANDS: usize = 12;
+        let bound = crate::connection::execution::DEFAULT_QUERY_CONCURRENCY;
 
         let tmux = BlockingTmux::new();
         let commands: Vec<serde_json::Value> = (0..CONCURRENT_COMMANDS)
@@ -2893,21 +3057,55 @@ esac"#,
             start_mock_server_sending_commands(commands).await;
         tokio::time::sleep(Duration::from_millis(100)).await;
 
-        let handle = connected_client(addr, "test-agent-unbounded", tmux.tmux()).await;
+        let handle = connected_client(addr, "test-agent-bounded", tmux.tmux()).await;
 
+        let started = tmux.started_within(bound, Duration::from_secs(15)).await;
+        assert_eq!(
+            started, bound,
+            "the lane did not fill: {started} of {bound} commands ran"
+        );
+
+        // The bound is what the reader waits on: the command that would exceed
+        // it is not read, so no twelfth invocation can exist.
+        let started = tmux
+            .started_within(CONCURRENT_COMMANDS, Duration::from_millis(500))
+            .await;
+        assert_eq!(
+            started, bound,
+            "{started} of {CONCURRENT_COMMANDS} commands ran at once against a bound \
+             of {bound}: dispatch is not bounded by the lane"
+        );
+
+        tmux.release();
         let started = tmux
             .started_within(CONCURRENT_COMMANDS, Duration::from_secs(15))
             .await;
         assert_eq!(
             started, CONCURRENT_COMMANDS,
-            "only {started} of {CONCURRENT_COMMANDS} commands ran at once — \
-             something is capping the concurrency of a path that has no cap"
+            "only {started} of {CONCURRENT_COMMANDS} commands ever ran: the bound \
+             turned into a loss rather than a delay"
         );
 
-        tmux.release();
         let responses =
             collect_responses(&mut msg_rx, CONCURRENT_COMMANDS, Duration::from_secs(20)).await;
-        assert_eq!(responses.len(), CONCURRENT_COMMANDS);
+        let mut answered: Vec<&str> = responses
+            .iter()
+            .filter_map(|r| r["payload"]["request_id"].as_str())
+            .collect();
+        answered.sort_unstable();
+        // Sorted the same way `answered` is, which is lexicographic and not
+        // numeric: `req-10` sorts before `req-2`, and comparing a sorted list
+        // against an unsorted one would fail on the ordering of the *test's*
+        // own generator rather than on anything the agent did.
+        let mut expected: Vec<String> = (0..CONCURRENT_COMMANDS)
+            .map(|n| format!("req-{n}"))
+            .collect();
+        expected.sort_unstable();
+        assert_eq!(
+            answered,
+            expected.iter().map(String::as_str).collect::<Vec<&str>>(),
+            "a command's answer went missing behind the bound"
+        );
 
         handle.shutdown().await.ok();
         server_handle.abort();
@@ -2995,9 +3193,53 @@ esac"#,
 }
 
 // ── The Protocol Units this agent serves ──
+//
+// The third `=>` of each arm is the **execution policy** (`#961-E`): how the
+// connection's reader hands this unit to a lane. The key helpers above are what
+// the `Key` policies are written in terms of. What the policies mean is
+// `crate::connection::execution`'s to say.
+/// The tmux session a payload names, by the name this agent knows it by.
+///
+/// Every session unit on this connection names its target in a field called
+/// `name` — `session.create`, `session.kill`, and both `session.env.*` — so
+/// unlike the Server's side there is no second spelling to reconcile and no
+/// joined form to agree on. What the helper exists for is the *kind*: the
+/// envelope says `agent.session.kill`, and that is not what turns the string
+/// into a session key.
+fn session_by_name(payload: &serde_json::Value) -> ResourceKey {
+    ResourceKey::Session(str_field(payload, "name"))
+}
+
+/// The locally stored env file a payload names.
+///
+/// A separate function from [`session_by_name`] although it reads the same
+/// field, because the *field* is not the thing: `agent.env.write` names an env
+/// file in `name` and `agent.session.env.apply` names a session in `name`, and
+/// one helper that read `name` for both would be right about the spelling and
+/// wrong about the resource — the two would share a queue, and a write to an
+/// env file would wait behind a mutation of a session that happened to have
+/// that name.
+fn env_file_by_name(payload: &serde_json::Value) -> ResourceKey {
+    ResourceKey::Env(str_field(payload, "name"))
+}
+
+/// Whether a wire is one of the three control messages.
+///
+/// Control is not an operation (`docs/architecture/protocol.md` § *What is not
+/// a Protocol Unit*): nothing offers it, nothing answers it, and every runtime
+/// handles it. The route table below cannot carry it — an arm there is a
+/// descriptor, and a descriptor is an offer this agent would be making — so the
+/// reader reads the category here, beside the constants that name it, rather
+/// than adding a column for something that is not a unit.
+fn is_control(wire: &str) -> bool {
+    matches!(
+        wire,
+        msg_types::CONTROL_HEARTBEAT | msg_types::CONTROL_PING | msg_types::CONTROL_PONG
+    )
+}
 
 core_routes!(agent, msg, responses;
-    "agent.session.create" => "agent.session.create" => {
+    "agent.session.create" => "agent.session.create" => Key(session_by_name(&msg.payload)) => {
                     let payload: ServerSessionCreatePayload =
                         match serde_json::from_value(msg.payload.clone()) {
                             Ok(p) => p,
@@ -3047,7 +3289,7 @@ core_routes!(agent, msg, responses;
                     });
                     responses.send(WsMessage::Text(response.to_string())).await?;
     }
-    "agent.env.list" => "agent.env.list" => {
+    "agent.env.list" => "agent.env.list" => Query => {
                     let request_id = str_field(&msg.payload, "request_id");
                     let files = agent
                         .env_store
@@ -3067,7 +3309,7 @@ core_routes!(agent, msg, responses;
                     });
                     responses.send(WsMessage::Text(response.to_string())).await?;
     }
-    "agent.env.get" => "agent.env.get" => {
+    "agent.env.get" => "agent.env.get" => Query => {
                     let request_id = str_field(&msg.payload, "request_id");
                     let name = str_field(&msg.payload, "name");
                     let (success, content, error) = match agent.env_store.read(&name).await {
@@ -3088,7 +3330,7 @@ core_routes!(agent, msg, responses;
                     });
                     responses.send(WsMessage::Text(response.to_string())).await?;
     }
-    "agent.env.write" => "agent.env.write" => {
+    "agent.env.write" => "agent.env.write" => Key(env_file_by_name(&msg.payload)) => {
                     let request_id = str_field(&msg.payload, "request_id");
                     let name = str_field(&msg.payload, "name");
                     let content = str_field(&msg.payload, "content");
@@ -3119,7 +3361,7 @@ core_routes!(agent, msg, responses;
                     });
                     responses.send(WsMessage::Text(response.to_string())).await?;
     }
-    "agent.env.delete" => "agent.env.delete" => {
+    "agent.env.delete" => "agent.env.delete" => Key(env_file_by_name(&msg.payload)) => {
                     let request_id = str_field(&msg.payload, "request_id");
                     let name = str_field(&msg.payload, "name");
                     let (success, error) = match agent.env_store.delete(&name).await {
@@ -3139,7 +3381,7 @@ core_routes!(agent, msg, responses;
                     });
                     responses.send(WsMessage::Text(response.to_string())).await?;
     }
-    "agent.session.env.apply" => "agent.session.env.apply" => {
+    "agent.session.env.apply" => "agent.session.env.apply" => Key(session_by_name(&msg.payload)) => {
                     let payload: ServerSessionEnvApplyPayload =
                         match serde_json::from_value(msg.payload.clone()) {
                             Ok(p) => p,
@@ -3186,7 +3428,7 @@ core_routes!(agent, msg, responses;
                     });
                     responses.send(WsMessage::Text(response.to_string())).await?;
     }
-    "agent.session.env.unset" => "agent.session.env.unset" => {
+    "agent.session.env.unset" => "agent.session.env.unset" => Key(session_by_name(&msg.payload)) => {
                     let payload: ServerSessionEnvUnsetPayload =
                         match serde_json::from_value(msg.payload.clone()) {
                             Ok(p) => p,
@@ -3219,7 +3461,7 @@ core_routes!(agent, msg, responses;
                     });
                     responses.send(WsMessage::Text(response.to_string())).await?;
     }
-    "agent.env.query" => "agent.env.query" => {
+    "agent.env.query" => "agent.env.query" => Query => {
                     let request_id = str_field(&msg.payload, "request_id");
                     let sourced_files = agent.get_sourced_env_files();
                     let response = serde_json::json!({
@@ -3235,7 +3477,7 @@ core_routes!(agent, msg, responses;
                     });
                     responses.send(WsMessage::Text(response.to_string())).await?;
     }
-    "agent.session.kill" => "agent.session.kill" => {
+    "agent.session.kill" => "agent.session.kill" => Key(session_by_name(&msg.payload)) => {
                     let request_id = msg
                         .payload
                         .get("request_id")
@@ -3269,7 +3511,7 @@ core_routes!(agent, msg, responses;
                     });
                     responses.send(WsMessage::Text(response.to_string())).await?;
     }
-    "agent.session.capture-preview" => "agent.session.capture-preview" => {
+    "agent.session.capture-preview" => "agent.session.capture-preview" => Query => {
                     let request_id = str_field(&msg.payload, "request_id");
                     let session_name = str_field(&msg.payload, "session_name");
                     let lines = u32::try_from(
@@ -3348,7 +3590,7 @@ core_routes!(agent, msg, responses;
                     });
                     responses.send(WsMessage::Text(response.to_string())).await?;
     }
-    "agent.session.report" => "agent.session.report" => {
+    "agent.session.report" => "agent.session.report" => Query => {
                     let request_id = str_field(&msg.payload, "request_id");
 
                     // An empty list is a legitimate answer ("no sessions here"),

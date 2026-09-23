@@ -1534,6 +1534,357 @@ async fn registration_is_ordered_before_the_state_the_agent_reports() -> anyhow:
     }
 }
 
+// ── The keyed mutation lane (#961 stage E) ──────────────────────────────────
+//
+// Two mutations of one resource are ordered against each other and two of
+// different resources are not — the "same session, FIFO" and "different keys,
+// parallel" pair of `#961`'s success criteria, read from the agent's side.
+//
+// The instrument is the agent's own connection, and that is what makes these
+// tests sound rather than lucky: every command the Server brokers to an agent
+// is written on *one* socket, so "the kill had not reached the agent yet" is a
+// statement about the Server's dispatch order and not about two sockets racing.
+// The agent here is the test, so a command is delivered when the test says so.
+
+/// `server.session.create` as a client sends it.
+fn session_create_request(id: &str, agent_id: &str, name: &str) -> serde_json::Value {
+    serde_json::json!({
+        "msg_type": "server.session.create",
+        "id": id,
+        "timestamp": current_timestamp(),
+        "payload": { "agent_id": agent_id, "name": name },
+    })
+}
+
+/// `server.session.kill` as a client sends it, naming the session the way the
+/// registry does — which is the spelling the key lane has to agree with
+/// `create`'s on.
+fn session_kill_request(id: &str, session_id: &str) -> serde_json::Value {
+    serde_json::json!({
+        "msg_type": "server.session.kill",
+        "id": id,
+        "timestamp": current_timestamp(),
+        "payload": { "session_id": session_id },
+    })
+}
+
+/// `server.session.env.apply` as a client sends it, with no files to source.
+///
+/// Used here as the *second* mutation of a session, because it is one that
+/// always reaches the agent: an empty file list still produces an
+/// `agent.session.env.apply` command (`source_env_into_session` sends whether or
+/// not there is anything to source), so "did it reach the agent yet" is a
+/// question the Server's dispatch answers rather than the registry.
+fn session_env_apply_request(id: &str, session_id: &str) -> serde_json::Value {
+    serde_json::json!({
+        "msg_type": "server.session.env.apply",
+        "id": id,
+        "timestamp": current_timestamp(),
+        "payload": { "session_id": session_id, "env_files": [] },
+    })
+}
+
+/// The agent's answer to a brokered command, under the request id it answers.
+///
+/// Generic rather than an echo, because the commands in this section are
+/// *mutations*: `session.create` reads `success` and `session_name` off the
+/// answer and registers the session with them, so a test that echoed something
+/// else would be answering a different question than the handler asked.
+fn command_response(request_id: &str, payload: serde_json::Value) -> serde_json::Value {
+    serde_json::json!({
+        "msg_type": "server.agent.command-response",
+        "id": format!("answer-{request_id}"),
+        "timestamp": current_timestamp(),
+        "payload": payload,
+    })
+}
+
+/// The next command of `wire` the agent is handed, with its request id.
+///
+/// Frames that are not that command are skipped: a registered agent's
+/// connection carries the Server's own pings, and the question here is only
+/// whether the brokered command arrived.
+async fn next_command(
+    agent: &mut TestWs,
+    wire: &str,
+) -> anyhow::Result<(String, serde_json::Value)> {
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        anyhow::ensure!(
+            !remaining.is_zero(),
+            "the agent was never handed a {wire} command"
+        );
+        match tokio::time::timeout(remaining, agent.next()).await {
+            Ok(Some(Ok(tokio_tungstenite::tungstenite::Message::Text(text)))) => {
+                let parsed: serde_json::Value = serde_json::from_str(&text)?;
+                if parsed.get("msg_type").and_then(serde_json::Value::as_str) == Some(wire) {
+                    let payload = parsed
+                        .get("payload")
+                        .cloned()
+                        .unwrap_or(serde_json::Value::Null);
+                    let request_id = payload
+                        .get("request_id")
+                        .and_then(serde_json::Value::as_str)
+                        .ok_or_else(|| anyhow::anyhow!("{wire} carries no request id: {parsed}"))?
+                        .to_string();
+                    return Ok((request_id, payload));
+                }
+            }
+            Ok(Some(Ok(_))) => {}
+            Ok(Some(Err(e))) => return Err(e.into()),
+            Ok(None) => anyhow::bail!("the agent's connection closed while waiting for {wire}"),
+            Err(_) => anyhow::bail!("the agent was never handed a {wire} command"),
+        }
+    }
+}
+
+/// Fail if a command of `wire` reaches the agent within `window`.
+///
+/// The negative half of the ordering claim below, and safe in that direction:
+/// it can only go red when a command the lane should have held back is
+/// forwarded anyway. Frames that are not that command are skipped, because a
+/// registered agent's connection carries the Server's own pings.
+async fn no_command_within(
+    agent: &mut TestWs,
+    wire: &str,
+    window: std::time::Duration,
+) -> anyhow::Result<()> {
+    let deadline = tokio::time::Instant::now() + window;
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return Ok(());
+        }
+        match tokio::time::timeout(remaining, agent.next()).await {
+            Ok(Some(Ok(tokio_tungstenite::tungstenite::Message::Text(text)))) => {
+                let parsed: serde_json::Value = serde_json::from_str(&text)?;
+                anyhow::ensure!(
+                    parsed.get("msg_type").and_then(serde_json::Value::as_str) != Some(wire),
+                    "the agent was handed a {wire} while an earlier mutation of the same \
+                     session was still running: {parsed}"
+                );
+            }
+            Ok(Some(Ok(_))) => {}
+            Ok(Some(Err(e))) => return Err(e.into()),
+            Ok(None) => anyhow::bail!("the agent's connection closed"),
+            Err(_) => return Ok(()),
+        }
+    }
+}
+
+/// Wait until the Server has *read* everything the client wrote before this
+/// call, by waiting for an answer to a frame written after it.
+///
+/// A query written behind a mutation is read by the same reader, in order, so
+/// its reply is proof that the frames before it were read — which is what turns
+/// the negative assertions above from "nothing happened yet" into "nothing
+/// happened although the Server had the frame in hand". The query's own answer
+/// rides the query lane, which is what makes it a synchronized observation of
+/// the *reader* rather than of the mutation it is behind.
+async fn reader_caught_up(client: &mut TestWs, id: &str) -> anyhow::Result<()> {
+    send_json(client, session_list_request(id)).await?;
+    replies_in_arrival_order(client, &[id]).await?;
+    Ok(())
+}
+
+/// Two mutations of one session reach the agent one at a time, in the order the
+/// client wrote them.
+///
+/// A `kill` behind an `env.apply` for one session is the ordering `#961` calls
+/// out by name ("同一 resource mutation 有 FIFO/等价确定性 guarantee"), and it is
+/// the one that matters most: run independently, the second mutation's side
+/// effect can land before the first's, and the session that survives is
+/// whichever task won a scheduling race.
+///
+/// The witness is on the agent's connection, where both commands travel: the
+/// second mutation is written while the first is unanswered, and it must not be
+/// handed to the agent until the first is answered. `reader_caught_up` first
+/// makes sure the Server has the second mutation in hand, so the wait is a
+/// statement about the lane rather than about the socket.
+///
+/// The session is reported by the agent *first*, and that is not decoration:
+/// without it, a `kill` for a session the registry does not know is refused
+/// before it reaches a lane, and this test would be measuring the registry
+/// rather than the dispatch. (Measured: an earlier version of this test drove
+/// `create` → `kill` and the second command never reached the agent under *any*
+/// implementation — the kill was refused with "Session not found" — so the
+/// negative assertion below could not fail, which is not an assertion at all.)
+///
+/// **This is the Server's half of stage A's
+/// `mutations_for_one_session_are_not_ordered`** — the other half is on the
+/// agent's central connection, which is the path the Server's own mutation
+/// travels next, and the two flipped together.
+#[tokio::test]
+async fn mutations_of_one_session_are_ordered() -> anyhow::Result<()> {
+    let (_db_dir, addr, _handle) = start_ownership_server("test_ws_key_lane_order.db").await?;
+
+    let mut agent = connect_agent(addr, "a1").await?;
+    let mut client = connect_client(addr).await?;
+
+    // The session exists, reported the way an agent reports one.
+    send_json(&mut agent, session_update("a1", "s1")).await?;
+    wait_for_session(&mut client, "a1:s1").await?;
+
+    // The first mutation, with no answer.
+    send_json(&mut client, session_kill_request("kill-1", "a1:s1")).await?;
+    let (kill_request, _) = next_command(&mut agent, "agent.session.kill").await?;
+
+    // The second mutation for the same session, written behind it.
+    send_json(&mut client, session_env_apply_request("apply-2", "a1:s1")).await?;
+    reader_caught_up(&mut client, "sync-3").await?;
+
+    no_command_within(
+        &mut agent,
+        "agent.session.env.apply",
+        std::time::Duration::from_millis(300),
+    )
+    .await?;
+
+    // Answering the kill frees the session's queue, and the apply is admitted.
+    send_json(
+        &mut agent,
+        command_response(
+            &kill_request,
+            serde_json::json!({ "request_id": kill_request, "success": true }),
+        ),
+    )
+    .await?;
+    let (apply_request, _) = next_command(&mut agent, "agent.session.env.apply").await?;
+    send_json(
+        &mut agent,
+        command_response(
+            &apply_request,
+            serde_json::json!({ "request_id": apply_request, "success": true }),
+        ),
+    )
+    .await?;
+
+    // And the client sees the two answers in the order it asked: the mutation's
+    // reply cannot overtake the one read before it.
+    let replies = replies_in_arrival_order(&mut client, &["kill-1", "apply-2"]).await?;
+    assert_eq!(
+        ids_of(&replies),
+        vec!["kill-1".to_string(), "apply-2".to_string()],
+        "the session's mutations were answered out of order"
+    );
+    assert_eq!(
+        payload_of(&replies[0], "server.session.kill")?["success"],
+        serde_json::json!(true)
+    );
+    assert_eq!(
+        payload_of(&replies[1], "server.session.env.apply")?["success"],
+        serde_json::json!(true)
+    );
+    Ok(())
+}
+
+/// Two sessions' mutations do not wait for each other.
+///
+/// The witness is positive and needs no window: the agent is handed the second
+/// session's create while the first session's has no answer at all. A lane that
+/// serialised every mutation — one queue, whatever the key — could not produce
+/// that command, which is `#961`'s "不同 resource keys 可以并行" read from the
+/// side that can see it.
+#[tokio::test]
+async fn mutations_for_different_sessions_run_at_the_same_time() -> anyhow::Result<()> {
+    let (_db_dir, addr, _handle) = start_ownership_server("test_ws_key_lane_parallel.db").await?;
+
+    let mut agent = connect_agent(addr, "a1").await?;
+    let mut client = connect_client(addr).await?;
+
+    send_json(&mut client, session_create_request("create-1", "a1", "s1")).await?;
+    let (first_request, _) = next_command(&mut agent, "agent.session.create").await?;
+
+    send_json(&mut client, session_create_request("create-2", "a1", "s2")).await?;
+    let (second_request, second_payload) = next_command(&mut agent, "agent.session.create").await?;
+    assert_eq!(
+        second_payload["name"],
+        serde_json::json!("s2"),
+        "the second create was not the one handed over"
+    );
+    assert_ne!(first_request, second_request);
+
+    // Both answered, and both answers reach their own client.
+    for (request, name) in [(&first_request, "s1"), (&second_request, "s2")] {
+        send_json(
+            &mut agent,
+            command_response(
+                request,
+                serde_json::json!({
+                    "request_id": request,
+                    "success": true,
+                    "session_name": name,
+                }),
+            ),
+        )
+        .await?;
+    }
+
+    let replies = replies_in_arrival_order(&mut client, &["create-1", "create-2"]).await?;
+    for (reply, name) in replies.iter().zip(["s1", "s2"]) {
+        let payload = payload_of(reply, "server.session.create")?;
+        assert_eq!(
+            payload["session_id"],
+            serde_json::json!(format!("a1:{name}")),
+            "a create's answer came back under another session's id: {reply}"
+        );
+    }
+    Ok(())
+}
+
+/// An ordered frame is applied after the mutations read before it.
+///
+/// The barrier in front of `ExecutionPolicy::Ordered` covers both lanes, and
+/// this is the half stage C could not have: `session.attach` must not be
+/// attempted while the `session.create` it is about is still queued, and an
+/// `auth` written behind a mutation must not be applied ahead of it.
+///
+/// The witness is the same one the query-lane version uses, with the mutation
+/// in the place of the query: the auth is written while the create is
+/// unanswered, and its reply cannot arrive before the create's. A reader that
+/// drained only the query lane would apply and answer the auth immediately —
+/// the create has no answer for the whole of that window — and the order of the
+/// two replies is what says which happened.
+#[tokio::test]
+async fn an_ordered_frame_is_applied_after_the_mutations_read_before_it() -> anyhow::Result<()> {
+    let (_db_dir, addr, _handle) = start_ownership_server("test_ws_key_barrier.db").await?;
+
+    let mut agent = connect_agent(addr, "a1").await?;
+    let mut client = connect_client(addr).await?;
+
+    send_json(&mut client, session_create_request("create-1", "a1", "s1")).await?;
+    let (create_request, _) = next_command(&mut agent, "agent.session.create").await?;
+
+    // An ordered frame — authentication — written behind a mutation with no
+    // answer. `server.auth` is idempotent, which is what makes it usable here:
+    // the connection is already authenticated, so what the frame's *reply*
+    // proves is when it was applied rather than whether it was accepted.
+    send_json(&mut client, auth_request("auth-2")).await?;
+    no_reply_for(&mut client, "auth-2", std::time::Duration::from_millis(500)).await?;
+
+    send_json(
+        &mut agent,
+        command_response(
+            &create_request,
+            serde_json::json!({
+                "request_id": create_request,
+                "success": true,
+                "session_name": "s1",
+            }),
+        ),
+    )
+    .await?;
+
+    let replies = replies_in_arrival_order(&mut client, &["create-1", "auth-2"]).await?;
+    assert_eq!(
+        ids_of(&replies),
+        vec!["create-1".to_string(), "auth-2".to_string()],
+        "the ordered frame was applied ahead of the mutation read before it"
+    );
+    Ok(())
+}
+
 /// A client that stops reading **parks dispatch, and loses nothing**.
 ///
 /// Stage A's `a_client_that_stops_reading_neither_stalls_nor_loses_replies`,
