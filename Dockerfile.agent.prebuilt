@@ -4,8 +4,13 @@
 # security pool is gone, so the `apt-get install` below 404s on every package.
 FROM debian:bookworm-slim
 ENV DEBIAN_FRONTEND=noninteractive
+# `git` is here because the agent composes `GitAgentExtension` (`main.rs`) and
+# this image carried no git binary — the capability was live and its tool was
+# missing, so every `git.*` unit failed at the point of running git. Kept in step
+# with `Dockerfile.agent`, which carries the longer note (including why there is
+# deliberately no `openssh-client`).
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends nginx ca-certificates curl gettext-base && \
+    apt-get install -y --no-install-recommends nginx ca-certificates curl gettext-base git && \
     rm -rf /var/lib/apt/lists/* && \
     rm -f /etc/nginx/sites-enabled/default
 
