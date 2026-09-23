@@ -54,16 +54,23 @@ test.describe('Session lifecycle', () => {
     await expect(sessionRow).toBeVisible({ timeout: 15_000 });
     await expect(dialog).not.toBeVisible({ timeout: 5_000 });
 
-    // Meta line format: "shell · {agentLabel} · {relative time}".
+    // Meta line format: "{workload} · {agentLabel} · {relative time}".
     //
     // Selected by testid, not by class. This used to be
     // `span.text-xs.text-muted-foreground`, which is a selector on how the line
     // is *styled* — so any design change to the row breaks a test about its
     // content, and the failure reads as a missing element rather than as a
     // renamed class.
+    //
+    // The workload slot is the session's `foreground_command` — `session-item.md`
+    // names it the workload hint, with `unknown` as the documented fallback. This
+    // assertion read `shell ·` until #958, which pinned a placeholder: the row
+    // rendered the literal string `shell` for *every* Session, so the test was
+    // asserting the defect and any Session whose shell was not the placeholder
+    // would have passed it by accident. CI's session runs bash.
     await expect(
       sessionRow.getByTestId('session-item-meta'),
-    ).toContainText(`shell · ${agentLabel} ·`, { timeout: 5_000 });
+    ).toContainText(`bash · ${agentLabel} ·`, { timeout: 5_000 });
 
     // ── Kill session ──
     // The Kill button is in the same row as the session name.  Use the

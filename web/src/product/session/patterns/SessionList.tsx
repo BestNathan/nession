@@ -66,7 +66,16 @@ export function SessionList({
 
   return (
     <ScrollArea className="min-h-0 flex-1">
-      <div className="flex flex-col divide-y p-2">
+      {/* Rows separate by whitespace, then by the selected fill — no rules.
+          The mockup's `.sess` draws `padding: 7px 8px` and `background:
+          --n-raised` on the selected row, and nothing between rows; a rule per
+          pair would be the *third* cue for a boundary the row's own padding
+          already makes. visual-language.md P7 is the rule this follows ("use the
+          weakest separation cue that works: whitespace -> background shift ->
+          border -> radius -> elevation") and session-list.md §Surface treatment
+          states it for this pattern ("flat navigation surface; whitespace/
+          background shift before borders/elevation"). */}
+      <div className="flex flex-col p-2">
         {sessions.map((session) => {
           const agent = agentById.get(session.agent_id);
           const domain = mapDomainState({

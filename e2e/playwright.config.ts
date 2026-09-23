@@ -72,7 +72,14 @@ export default defineConfig({
 
   use: {
     baseURL: 'http://localhost:4173',
-    trace: 'on-first-retry',
+    // `retain-on-failure`, not `on-first-retry`. A trace only when a retry
+    // happens means the most interesting failures — the deterministic ones —
+    // are the ones with no evidence: `fixture-app.spec.ts` failed on all three
+    // attempts, so every retry produced a trace that the *first* attempt's
+    // failure had already been superseded by, and the artifact upload came back
+    // empty. This also screenshots each failure for free.
+    trace: 'retain-on-failure',
+    screenshot: 'only-on-failure',
   },
 
   webServer: [

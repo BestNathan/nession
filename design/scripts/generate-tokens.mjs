@@ -345,10 +345,19 @@ export function generateAppTs(tokens) {
   return lines.join('\n');
 }
 
+/** Experiences the terminal boundary is rendered in, in emission order. */
+export const TERMINAL_METRIC_EXPERIENCES = ['web', 'app'];
+
 /**
- * The xterm theme, emitted as TS rather than CSS because xterm takes a JS
- * object. No `import type { ITheme }` here: `design/` has no node_modules, so
- * the type must be applied by the consumer, which is where it type-checks.
+ * The xterm boundary, emitted as TS rather than CSS because xterm takes a JS
+ * object. Two things cross that boundary: the ANSI theme, and the surface's own
+ * font metrics — xterm's `fontSize` / `lineHeight` are constructor options, so
+ * the Experience values in `experience.{web,app}.terminal` cannot reach the
+ * rendered terminal as custom properties. Keeping both in one artifact is what
+ * makes `design/generated/terminal.ts` the answer to "what does the terminal
+ * read, and from where". No `import type { ITheme }` here: `design/` has no
+ * node_modules, so the type must be applied by the consumer, which is where it
+ * type-checks.
  */
 export function generateTerminalTs(tokens) {
   const terminal = tokens.primitive?.terminal ?? {};
@@ -370,6 +379,16 @@ export function generateTerminalTs(tokens) {
     lines.push(`  ${slot}: ${JSON.stringify(read(key))},`);
   }
   lines.push('};', '');
+
+  lines.push('export const TERMINAL_METRICS = {');
+  for (const experience of TERMINAL_METRIC_EXPERIENCES) {
+    const node = tokens.experience?.[experience]?.terminal;
+    if (node === undefined) {
+      throw new Error(`missing ref: experience.${experience}.terminal`);
+    }
+    lines.push(`  ${experience}: ${jsLiteral(unwrapExperience(node, tokens), 1)},`);
+  }
+  lines.push('} as const;', '');
   return lines.join('\n');
 }
 

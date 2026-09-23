@@ -152,6 +152,23 @@
       "value": "2px"
     }
   },
+  "terminal": {
+    "$owner": "pattern.terminal-surface",
+    "$description": "The Web work surface's own typography and inset. terminal-surface.md §Resize and typography: 'font/scrollback/control metrics come from Experience tokens, not ad-hoc breakpoint values' — until this group existed the xterm boundary read hardcoded 14px / line-height 1.2 literals that no token owned. The mockup's `.term` draws `font-size: 12.5px; line-height: 1.62; padding: 18px 18px 52px`. Two channels, because xterm is a canvas renderer: the inset is CSS (`--terminal-pad-*`), the font metrics are xterm options read from `TERMINAL_METRICS` in `design/generated/terminal.ts` — xterm takes a JS object, which is the same reason the ANSI theme is emitted there. The mockup's third padding value is deliberately NOT a token: 52px is the capsule's own box (14px bottom margin + 36px capsule + 2), i.e. the clearance `--terminal-content-bottom-inset` already measures, and freezing it would reserve fixed space for chrome that may not be drawn — terminal-surface.md's 'shrink the terminal grid with large fixed padding to reserve hypothetical UI'. Deliberately not a ref to `typography.primary.size`: visual-language.md keeps terminal glyph rendering separate from chrome typography even where the sizes coincide.",
+    "fontSize": {
+      "value": "12.5px"
+    },
+    "lineHeight": {
+      "$description": "Converted, not transcribed — because the unit differs. The mockup's CSS `line-height: 1.62` multiplies the *font size*: 12.5px × 1.62 = a 20.25px line box. xterm's `lineHeight` multiplies the font's *measured box* instead, which for JetBrains Mono is 1.36em — 17px at 12.5px. Handing xterm the mockup's raw `1.62` therefore draws a 27px row, 33% looser than the mockup, so the number that reproduces the mockup's leading is 20.25 ÷ 17 = 1.19. The target is the mockup's *appearance*; its literal number means something else in this unit, and copying it would have been the divergence.",
+      "value": 1.19
+    },
+    "padX": {
+      "value": "18px"
+    },
+    "padY": {
+      "value": "18px"
+    }
+  },
   "terminalCapsule": {
     "$owner": "pattern.terminal-capsule",
     "fontSize": {
