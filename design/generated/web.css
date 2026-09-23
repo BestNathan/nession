@@ -110,7 +110,7 @@
   --focus-ring-width: 2px;
   --focus-ring-offset: 2px;
   --terminal-font-size: 12.5px;
-  --terminal-line-height: 1.62;
+  --terminal-line-height: 1.19;
   --terminal-pad-x: 18px;
   --terminal-pad-y: 18px;
   --terminal-capsule-font-size: 1rem;
@@ -423,7 +423,7 @@
   --touch-target-compact: 28;
   --shell-icon-button-size: 44px;
   --terminal-font-size: 11.5px;
-  --terminal-line-height: 1.7;
+  --terminal-line-height: 1.31;
   --terminal-pad-x: 14px;
   --terminal-pad-y: 14px;
   --terminal-capsule-font-size: 1rem;

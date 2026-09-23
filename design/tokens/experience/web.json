@@ -159,8 +159,8 @@
       "value": "12.5px"
     },
     "lineHeight": {
-      "$description": "The mockup's `line-height: 1.62`. Read the unit before changing it: this is handed to xterm's own `lineHeight`, which multiplies the font's *measured box* rather than `fontSize` the way CSS multiplies the font size. Measured on JetBrains Mono, that box is 1.36em (17px at 12.5px), so 1.62 renders a 27px row where the mockup's CSS draws a 20.25px one — the same ratio in a different unit. The value is transcribed as the mockup states it and the difference is left standing rather than converted: an invented multiplier would be exactly the interpolation this token exists to avoid, and the honest next step is the owner's call between keeping the mockup's ratio, taking the measured equivalent (~1.19), or dropping xterm's leading override altogether.",
-      "value": 1.62
+      "$description": "Converted, not transcribed — because the unit differs. The mockup's CSS `line-height: 1.62` multiplies the *font size*: 12.5px × 1.62 = a 20.25px line box. xterm's `lineHeight` multiplies the font's *measured box* instead, which for JetBrains Mono is 1.36em — 17px at 12.5px. Handing xterm the mockup's raw `1.62` therefore draws a 27px row, 33% looser than the mockup, so the number that reproduces the mockup's leading is 20.25 ÷ 17 = 1.19. The target is the mockup's *appearance*; its literal number means something else in this unit, and copying it would have been the divergence.",
+      "value": 1.19
     },
     "padX": {
       "value": "18px"

@@ -30,13 +30,13 @@ export const TERMINAL_THEME = {
 export const TERMINAL_METRICS = {
   web: {
     fontSize: 12.5,
-    lineHeight: 1.62,
+    lineHeight: 1.19,
     padX: 18,
     padY: 18,
   },
   app: {
     fontSize: 11.5,
-    lineHeight: 1.7,
+    lineHeight: 1.31,
     padX: 14,
     padY: 14,
   },

@@ -56,8 +56,8 @@
       "value": "11.5px"
     },
     "lineHeight": {
-      "$description": "The mockup's `.phone-term` `line-height: 1.7`. Same unit caveat as `experience.web.terminal.lineHeight`: xterm multiplies the font's measured box (1.30em for JetBrains Mono at 11.5px), so 1.7 renders a 25px row where the mockup's CSS draws an 18.63px one.",
-      "value": 1.7
+      "$description": "Converted, not transcribed — same unit difference as `experience.web.terminal.lineHeight`, same method. The mockup's `.phone-term` CSS `line-height: 1.7` multiplies the font size: 11.5px × 1.7 = a 19.55px line box. xterm multiplies the font's measured box instead, 1.30em = 14.95px at 11.5px. The number that reproduces the mockup's leading is therefore 19.55 ÷ 14.95 = 1.31; the mockup's raw `1.7` would draw a 25px row, 28% looser.",
+      "value": 1.31
     },
     "padX": {
       "value": "14px"

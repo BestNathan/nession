@@ -26,7 +26,7 @@ export const shell = {
 } as const;
 export const terminal = {
   fontSize: 11.5,
-  lineHeight: 1.7,
+  lineHeight: 1.31,
   padX: 14,
   padY: 14,
 } as const;
