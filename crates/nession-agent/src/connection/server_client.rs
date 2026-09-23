@@ -2452,6 +2452,515 @@ mod tests {
         handle.shutdown().await.ok();
         server_handle.abort();
     }
+
+    // ── The central connection's execution model (#961 stage A) ─────────────
+    //
+    // **Characterization, not aspiration.** The tests below pin what this path
+    // does today — a detached task per server message, no limit and no ordering
+    // — and each names the stage expected to change its answer. What they have
+    // in common is the instrument: a `tmux` that parks every invocation until
+    // the test says otherwise, so "how many mutations are in flight at once" is
+    // a number read off a file rather than an inference from elapsed time.
+
+    /// A `tmux` that logs each mutation it is asked to run and then holds.
+    ///
+    /// The hold is what makes concurrency observable. With every invocation
+    /// parked, the number of lines in the log *is* the number of mutations the
+    /// agent has in flight at once, and a serialized implementation cannot
+    /// produce the second line while the first is parked — it has nowhere to
+    /// hide. An elapsed-time assertion could not tell "these overlapped" from
+    /// "these were quick".
+    struct BlockingTmux {
+        // Kept alive for the whole test: the shim, the log and the release file
+        // all live in here.
+        _dir: tempfile::TempDir,
+        release_path: std::path::PathBuf,
+        log: std::path::PathBuf,
+        manager: Arc<SessionManager>,
+    }
+
+    impl BlockingTmux {
+        fn new() -> Self {
+            Self::with_timeouts(
+                Duration::from_secs(20),
+                Duration::from_secs(20),
+                Duration::from_secs(20),
+            )
+        }
+
+        /// The same, with a short `create` timeout — for the test about a
+        /// command that gives up while its tmux call is still running.
+        fn with_create_timeout(create: Duration) -> Self {
+            Self::with_timeouts(Duration::from_secs(20), Duration::from_secs(20), create)
+        }
+
+        fn with_timeouts(list: Duration, kill: Duration, create: Duration) -> Self {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let release_path = dir.path().join("release");
+            let log = dir.path().join("tmux-calls");
+
+            // The bound on the wait is the shim's own safety net, not the
+            // test's timing: a test that fails its assertion before releasing
+            // leaves a parked `sh` behind, and this is what stops it lingering
+            // for the rest of the run. 400 × 50 ms is far longer than any of the
+            // deadlines below.
+            let script = format!(
+                r#"case "$1" in
+  new-session|kill-session|list-sessions)
+    printf '%s\n' "$1" >> {log}
+    i=0
+    while [ ! -e {release} ] && [ $i -lt 400 ]; do sleep 0.05; i=$((i+1)); done
+    ;;
+esac"#,
+                log = log.display(),
+                release = release_path.display(),
+            );
+            let shim = write_fake_tmux(dir.path(), &script);
+
+            let mut manager = SessionManager::new();
+            manager
+                .with_tmux_bin(shim)
+                .with_timeouts(list, kill, create);
+
+            Self {
+                _dir: dir,
+                release_path,
+                log,
+                manager: Arc::new(manager),
+            }
+        }
+
+        fn tmux(&self) -> Arc<SessionManager> {
+            Arc::clone(&self.manager)
+        }
+
+        /// How many tmux invocations have started.
+        fn started(&self) -> usize {
+            std::fs::read_to_string(&self.log)
+                .map(|log| log.lines().count())
+                .unwrap_or(0)
+        }
+
+        /// Wait for `n` invocations to start, and report how many ever did.
+        ///
+        /// An invocation either starts or never will, so this waits for a fact;
+        /// the deadline only bounds how long a serialized implementation is
+        /// given to prove that it is one.
+        async fn started_within(&self, n: usize, within: Duration) -> usize {
+            let deadline = std::time::Instant::now() + within;
+            loop {
+                let started = self.started();
+                if started >= n || std::time::Instant::now() >= deadline {
+                    return started;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        }
+
+        /// Let every parked invocation finish.
+        fn release(&self) {
+            std::fs::write(&self.release_path, b"go").expect("write release file");
+        }
+    }
+
+    /// `agent.session.create` as the server sends it.
+    fn create_command(id: &str, request_id: &str, name: &str) -> serde_json::Value {
+        serde_json::json!({
+            "msg_type": "agent.session.create",
+            "id": id,
+            "timestamp": 1,
+            "payload": { "request_id": request_id, "name": name, "width": 80, "height": 24 },
+        })
+    }
+
+    /// `agent.session.kill` as the server sends it.
+    fn kill_command(id: &str, request_id: &str, name: &str) -> serde_json::Value {
+        serde_json::json!({
+            "msg_type": "agent.session.kill",
+            "id": id,
+            "timestamp": 1,
+            "payload": { "request_id": request_id, "name": name },
+        })
+    }
+
+    /// `agent.session.report` — the read-only one, which reaches tmux too.
+    fn sessions_list_command(id: &str, request_id: &str) -> serde_json::Value {
+        serde_json::json!({
+            "msg_type": "agent.session.report",
+            "id": id,
+            "timestamp": 1,
+            "payload": { "request_id": request_id },
+        })
+    }
+
+    /// A mock server that signs `commands` in one burst, then forwards every
+    /// response the agent sends.
+    ///
+    /// The burst is the point: several commands in flight at once is what a
+    /// reader that spawns per message produces and a serialized one cannot.
+    /// Nothing waits between them, so the agent's own dispatch is the only
+    /// thing deciding how many run at once.
+    ///
+    /// The returned sender sends further commands later, which is how a test
+    /// asks a question *after* the answers above it have been observed rather
+    /// than guessing at a delay.
+    async fn start_mock_server_sending_commands(
+        commands: Vec<serde_json::Value>,
+    ) -> MockCommandServer {
+        let (msg_tx, msg_rx) = mpsc::channel(100);
+        let (command_tx, mut command_rx) = mpsc::channel::<serde_json::Value>(10);
+        let keepalive = command_tx.clone();
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("failed to bind mock server");
+        let addr = listener.local_addr().expect("mock server local_addr");
+
+        let handle = tokio::spawn(async move {
+            // Held so `command_rx.recv()` never resolves to `None`, which would
+            // otherwise spin this loop the moment the test's copy is dropped.
+            let _keepalive = keepalive;
+
+            if let Ok((stream, _)) = listener.accept().await {
+                let ws = accept_async(stream).await.expect("failed to accept ws");
+                let (mut sink, mut stream) = ws.split();
+
+                let response = serde_json::json!({
+                    "msg_type": "server.agent.register",
+                    "id": "test-id",
+                    "timestamp": 1234567890,
+                    "payload": { "status": "accepted", "message": "ok" }
+                });
+                let _ = sink.send(WsMessage::Text(response.to_string())).await;
+                let _ = stream.next().await; // skip registration
+
+                for command in commands {
+                    let _ = sink.send(WsMessage::Text(command.to_string())).await;
+                }
+
+                loop {
+                    tokio::select! {
+                        incoming = stream.next() => match incoming {
+                            Some(Ok(WsMessage::Text(text))) => {
+                                let _ = msg_tx.send(text).await;
+                            }
+                            Some(Ok(_)) => {}
+                            _ => break,
+                        },
+                        more = command_rx.recv() => {
+                            let Some(command) = more else { continue };
+                            if sink.send(WsMessage::Text(command.to_string())).await.is_err() {
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        (addr, handle, msg_rx, command_tx)
+    }
+
+    /// A running [`start_mock_server_sending_commands`]: where the agent should
+    /// connect, the handle that keeps the mock alive, the responses it forwards,
+    /// and the channel that sends it more commands.
+    type MockCommandServer = (
+        std::net::SocketAddr,
+        tokio::task::JoinHandle<()>,
+        mpsc::Receiver<String>,
+        mpsc::Sender<serde_json::Value>,
+    );
+
+    /// Every command response that arrives within `window`.
+    async fn responses_within(
+        msg_rx: &mut mpsc::Receiver<String>,
+        window: Duration,
+    ) -> Vec<serde_json::Value> {
+        let mut responses = Vec::new();
+        let deadline = std::time::Instant::now() + window;
+        loop {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            if remaining.is_zero() {
+                return responses;
+            }
+            match tokio::time::timeout(remaining, msg_rx.recv()).await {
+                Ok(Some(text)) => {
+                    let parsed: serde_json::Value =
+                        serde_json::from_str(&text).expect("the agent sends JSON");
+                    if parsed.get("msg_type").and_then(|v| v.as_str())
+                        == Some("server.agent.command-response")
+                    {
+                        responses.push(parsed);
+                    }
+                }
+                Ok(None) | Err(_) => return responses,
+            }
+        }
+    }
+
+    /// Collect `count` command responses, in the order they arrived.
+    async fn collect_responses(
+        msg_rx: &mut mpsc::Receiver<String>,
+        count: usize,
+        within: Duration,
+    ) -> Vec<serde_json::Value> {
+        let mut responses = Vec::new();
+        let deadline = std::time::Instant::now() + within;
+        while responses.len() < count {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            assert!(
+                !remaining.is_zero(),
+                "only {} of {count} command responses arrived",
+                responses.len()
+            );
+            let batch = responses_within(msg_rx, remaining.min(Duration::from_millis(200))).await;
+            responses.extend(batch);
+        }
+        responses
+    }
+
+    /// A `ServerClient` connected to the mock server, using `tmux`.
+    async fn connected_client(
+        addr: std::net::SocketAddr,
+        agent_id: &str,
+        tmux: Arc<SessionManager>,
+    ) -> crate::connection::server_client::ServerClientHandle {
+        let client = ServerClient::new(
+            format!("ws://{addr}"),
+            "test-token",
+            agent_id,
+            "test-host",
+            "127.0.0.1",
+            8080,
+            None,
+            vec![],
+            None,
+            metadata_for_tests(),
+            tmux,
+            "/tmp".to_string(),
+            None,
+        );
+        client.connect_and_run().await.expect("connect failed").0
+    }
+
+    /// Two mutations for **different** sessions run at the same time.
+    ///
+    /// Sessions `s1` and `s2` share no state, so this is the concurrency the
+    /// requirement keeps: `#961-E` is expected to bound the total and order by
+    /// resource key, and different keys stay parallel under that model. What
+    /// this pins is that they *are* parallel today, and how: one detached task
+    /// per server message (`run_connection`'s `tokio::spawn`), not a queue.
+    ///
+    /// **Must not flip.** It is the "不同 resource keys 可以并行" half of the
+    /// success criteria; a red here means a keyed scheduler has collapsed
+    /// unrelated resources onto one lane.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn mutations_for_different_sessions_run_at_the_same_time() {
+        let tmux = BlockingTmux::new();
+        let (addr, server_handle, mut msg_rx, _commands) =
+            start_mock_server_sending_commands(vec![
+                create_command("cmd-1", "req-1", "s1"),
+                create_command("cmd-2", "req-2", "s2"),
+            ])
+            .await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        let handle = connected_client(addr, "test-agent-different-sessions", tmux.tmux()).await;
+
+        // Both tmux invocations start while neither has finished: the first is
+        // parked on a release file the test has not written yet, so a dispatch
+        // that waited for it could never produce the second.
+        let started = tmux.started_within(2, Duration::from_secs(10)).await;
+        assert_eq!(
+            started, 2,
+            "only {started} of 2 tmux invocations started — the second session's \
+             mutation waited for the first"
+        );
+
+        tmux.release();
+        let responses = collect_responses(&mut msg_rx, 2, Duration::from_secs(15)).await;
+        let mut answered: Vec<&str> = responses
+            .iter()
+            .filter_map(|r| r["payload"]["request_id"].as_str())
+            .collect();
+        answered.sort_unstable();
+        assert_eq!(answered, vec!["req-1", "req-2"]);
+
+        handle.shutdown().await.ok();
+        server_handle.abort();
+    }
+
+    /// Two mutations for the **same** session are not ordered against each
+    /// other.
+    ///
+    /// `create` then `kill` for one session is the ordering the requirement
+    /// calls out by name ("create + kill same session | preserve resource
+    /// ordering"), and today there is none: both are detached tasks, so the
+    /// kill can and does reach tmux while the create is still running. The
+    /// witness is the same file the test above reads — two invocations in
+    /// flight at once, when a keyed lane could only ever have one.
+    ///
+    /// **Flips at `#961-E`** (bounded keyed execution on the central
+    /// connection): the expected behaviour is that the second mutation for a
+    /// key does not start until the first has finished, so this assertion
+    /// becomes `1` started until the release, then `2` — and the responses then
+    /// arrive in the order the server sent them.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn mutations_for_one_session_are_not_ordered() {
+        let tmux = BlockingTmux::new();
+        let (addr, server_handle, mut msg_rx, _commands) =
+            start_mock_server_sending_commands(vec![
+                create_command("cmd-1", "req-1", "s1"),
+                kill_command("cmd-2", "req-2", "s1"),
+            ])
+            .await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        let handle = connected_client(addr, "test-agent-same-session", tmux.tmux()).await;
+
+        let started = tmux.started_within(2, Duration::from_secs(10)).await;
+        assert_eq!(
+            started, 2,
+            "only {started} tmux invocation(s) started: the same session's second \
+             mutation waited for the first — it is ordered, which is what #961-E \
+             is expected to make true"
+        );
+
+        tmux.release();
+        let responses = collect_responses(&mut msg_rx, 2, Duration::from_secs(15)).await;
+        assert_eq!(responses.len(), 2);
+
+        handle.shutdown().await.ok();
+        server_handle.abort();
+    }
+
+    /// Nothing caps how many commands the central connection runs at once.
+    ///
+    /// Every server message becomes a detached task (`tokio::spawn` in
+    /// `run_connection`), so the number of mutations in flight tracks the
+    /// number of messages sent and nothing else. `CONCURRENT_COMMANDS` is 12:
+    /// large enough that no per-connection default reads as a cap, and small
+    /// enough to stay a test.
+    ///
+    /// **Flips at `#961-E`** (global bounded concurrency). The stage picks the
+    /// bound, so what it has to do here is one of two things: if its limit is
+    /// below 12, this assertion moves to "started == limit" and says so; if it
+    /// is above, that number has to move *up* here, because the claim being
+    /// pinned is that dispatch is bounded by nothing at all — and a bound
+    /// larger than the message count has not been shown to exist.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn nothing_caps_the_commands_in_flight_on_the_central_connection() {
+        const CONCURRENT_COMMANDS: usize = 12;
+
+        let tmux = BlockingTmux::new();
+        let commands: Vec<serde_json::Value> = (0..CONCURRENT_COMMANDS)
+            .map(|n| sessions_list_command(&format!("cmd-{n}"), &format!("req-{n}")))
+            .collect();
+        let (addr, server_handle, mut msg_rx, _commands) =
+            start_mock_server_sending_commands(commands).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        let handle = connected_client(addr, "test-agent-unbounded", tmux.tmux()).await;
+
+        let started = tmux
+            .started_within(CONCURRENT_COMMANDS, Duration::from_secs(15))
+            .await;
+        assert_eq!(
+            started, CONCURRENT_COMMANDS,
+            "only {started} of {CONCURRENT_COMMANDS} commands ran at once — \
+             something is capping the concurrency of a path that has no cap"
+        );
+
+        tmux.release();
+        let responses =
+            collect_responses(&mut msg_rx, CONCURRENT_COMMANDS, Duration::from_secs(20)).await;
+        assert_eq!(responses.len(), CONCURRENT_COMMANDS);
+
+        handle.shutdown().await.ok();
+        server_handle.abort();
+    }
+
+    /// A command that gives up does not answer twice when its tmux call
+    /// finally finishes.
+    ///
+    /// The edge case is "request timeout but handler finishes later". The
+    /// manager's own timeout ends the command while the tmux process it
+    /// started is still running — `create_session` races the call against
+    /// `create_timeout`, and the child outlives the future that dropped it.
+    ///
+    /// What the agent does with that late completion is nothing at all: the
+    /// response is built from the timed-out call, the child's later exit is
+    /// seen by nobody, and the connection carries on. One response per request
+    /// id, and the next command on the same connection is answered normally.
+    ///
+    /// **Must not flip.** Keyed executors and cancellation ownership are the
+    /// stages most likely to change it, and the requirement's edge-case row is
+    /// explicit that a late completion must not corrupt another request.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_timed_out_command_does_not_answer_twice_when_tmux_finishes() {
+        // A short create timeout, so the manager gives up while its tmux
+        // invocation is still parked on the release file.
+        let tmux = BlockingTmux::with_create_timeout(Duration::from_millis(300));
+        let (addr, server_handle, mut msg_rx, commands) =
+            start_mock_server_sending_commands(vec![create_command("cmd-1", "req-1", "s1")]).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        let handle = connected_client(addr, "test-agent-timeout", tmux.tmux()).await;
+
+        // Only the manager's own timeout can produce this: the tmux call it
+        // started is still running, and nothing but the release file ends it.
+        let responses = collect_responses(&mut msg_rx, 1, Duration::from_secs(10)).await;
+        assert_eq!(
+            responses[0]["payload"]["request_id"],
+            serde_json::json!("req-1")
+        );
+        assert_eq!(
+            responses[0]["payload"]["success"],
+            serde_json::json!(false),
+            "a create that timed out must report failure: {}",
+            responses[0]
+        );
+        assert!(
+            responses[0]["payload"]["error"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("timed out"),
+            "the failure has to say what happened: {}",
+            responses[0]
+        );
+
+        // Now let the abandoned tmux call finish. Nothing correlates it any
+        // more — its response went out when the timeout fired.
+        tmux.release();
+        tokio::time::sleep(Duration::from_millis(300)).await;
+
+        // The connection is still good: a request handled after the late
+        // completion is answered, with its own id.
+        commands
+            .send(sessions_list_command("cmd-2", "req-2"))
+            .await
+            .expect("mock server gone");
+        let responses = collect_responses(&mut msg_rx, 1, Duration::from_secs(10)).await;
+        assert_eq!(
+            responses[0]["payload"]["request_id"],
+            serde_json::json!("req-2")
+        );
+        assert_eq!(responses[0]["payload"]["success"], serde_json::json!(true));
+
+        // And the timed-out command did not answer a second time: another
+        // response for it would have arrived here.
+        let late = responses_within(&mut msg_rx, Duration::from_millis(500)).await;
+        assert!(
+            late.is_empty(),
+            "the late tmux completion produced another response: {late:?}"
+        );
+
+        handle.shutdown().await.ok();
+        server_handle.abort();
+    }
 }
 
 // ── The Protocol Units this agent serves ──

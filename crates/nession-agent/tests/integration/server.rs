@@ -401,3 +401,150 @@ async fn integration_terminal_input_not_attached() {
 
     handle.shutdown().await.ok();
 }
+
+// ---------------------------------------------------------------------------
+// The per-connection execution model (#961 stage A)
+// ---------------------------------------------------------------------------
+//
+// **Characterization, not aspiration.** What is pinned here is what this tree
+// does today, and the stage expected to change it is named with it.
+
+/// The same server, with the directory its file sandbox is rooted in.
+///
+/// The root is the one thing a file-op test must be able to reach into, and
+/// `AgentServer::new` canonicalizes it at construction — so the caller has to
+/// keep the directory alive for as long as the server runs.
+async fn start_server_with_file_root() -> anyhow::Result<(
+    SocketAddr,
+    nession_agent::server::ServerHandle,
+    tempfile::TempDir,
+)> {
+    let root = tempfile::tempdir()?;
+    let (_resize_tx, _resize_rx) = tokio::sync::mpsc::unbounded_channel::<(String, u16, u16)>();
+    let server = AgentServer::new(
+        "127.0.0.1:0",
+        "test-agent",
+        None,
+        "/tmp".to_string(),
+        root.path().to_string_lossy().as_ref(),
+        AttachMode::Plain,
+        _resize_tx,
+    )?;
+    let (handle, addr) = server.start().await?;
+    Ok((addr, handle, root))
+}
+
+/// Create a FIFO. Not tmux, and not spawnable through anything else on this
+/// platform without a crate: `mkfifo(1)` is the one tool that makes one.
+fn make_fifo(path: &std::path::Path) -> anyhow::Result<()> {
+    let status = std::process::Command::new("mkfifo").arg(path).status()?;
+    anyhow::ensure!(status.success(), "mkfifo {path:?} failed");
+    Ok(())
+}
+
+/// The next text frame within `window`, or `None` if none arrived.
+async fn next_frame_within(
+    stream: &mut WsStream,
+    window: std::time::Duration,
+) -> anyhow::Result<Option<serde_json::Value>> {
+    let deadline = tokio::time::Instant::now() + window;
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return Ok(None);
+        }
+        match tokio::time::timeout(remaining, stream.next()).await {
+            Ok(Some(Ok(WsMessage::Text(text)))) => return Ok(Some(serde_json::from_str(&text)?)),
+            Ok(Some(Ok(_))) => {}
+            _ => return Ok(None),
+        }
+    }
+}
+
+/// A file request that is still running holds the whole connection — the
+/// control path included.
+///
+/// The slow request is a read of a FIFO, which is the one file operation whose
+/// duration the test owns: `fs::read` opens it and then reads to end-of-file,
+/// and end-of-file arrives only when the last writer closes. The writer here is
+/// the *test*, opened `O_RDWR` before the request is even sent — opening a FIFO
+/// for writing alone blocks until a reader appears, and `O_RDWR` does not — so
+/// the read is parked until this test drops the handle, with no timing in the
+/// arrangement at all.
+///
+/// The mechanism is `run_message_loop`: `handle_request(...).await` is awaited
+/// inline, so the ping's frame is not even *read* while the file operation is
+/// in flight. Nothing about the two relates them; they are serial because the
+/// connection is.
+///
+/// **Flips at `#961-D`** (Agent P2P: no lock-across-await, then query
+/// concurrency). The expected behaviour is that the ping is answered while the
+/// read is still parked, so the first assertion — no frame at all before the
+/// release — becomes "the pong arrives, and it is the pong" and the ordering
+/// assertion below it becomes `["pong", "read"]`, with each reply still
+/// carrying its own id.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_blocked_file_read_holds_the_peer_connection() {
+    use std::time::Duration;
+
+    let (addr, handle, root) = start_server_with_file_root().await.unwrap();
+    let (mut sink, mut stream) = connect(addr).await.unwrap();
+
+    let fifo = root.path().join("blocked.fifo");
+    make_fifo(&fifo).unwrap();
+    let writer = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&fifo)
+        .expect("hold the fifo open for writing");
+
+    // The slow request, then a control request behind it — written back to
+    // back, with nothing waited on in between.
+    let read = new_message(
+        msg_types::FILE_READ,
+        serde_json::json!({ "path": "blocked.fifo" }),
+    );
+    let ping = new_message(msg_types::CONTROL_PING, serde_json::json!({}));
+    for request in [
+        serde_json::to_value(&read).unwrap(),
+        serde_json::to_value(&ping).unwrap(),
+    ] {
+        sink.send(WsMessage::Text(request.to_string()))
+            .await
+            .expect("send to the agent");
+    }
+
+    // Nothing answers while the read is parked: the ping has not been read yet,
+    // and this connection carries no unsolicited traffic (nothing is attached
+    // to it).
+    let early = next_frame_within(&mut stream, Duration::from_millis(500))
+        .await
+        .unwrap();
+    assert!(
+        early.is_none(),
+        "the control path answered while a file request was still running: {early:?}"
+    );
+
+    // Release the read: closing the last writer is its end-of-file.
+    drop(writer);
+
+    let answered_read = next_frame_within(&mut stream, Duration::from_secs(10))
+        .await
+        .unwrap()
+        .expect("an answer to the file read");
+    let answered_ping = next_frame_within(&mut stream, Duration::from_secs(10))
+        .await
+        .unwrap()
+        .expect("an answer to the control ping");
+
+    assert_eq!(answered_read["id"], serde_json::json!(read.id));
+    assert_eq!(answered_ping["id"], serde_json::json!(ping.id));
+    assert_eq!(
+        answered_ping["msg_type"],
+        serde_json::json!(msg_types::CONTROL_PONG),
+        "the frame behind the read was answered, and it is the pong"
+    );
+
+    handle.shutdown().await.ok();
+}
