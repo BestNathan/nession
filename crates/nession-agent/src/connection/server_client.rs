@@ -54,7 +54,10 @@ use tokio_tungstenite::{
 };
 use tracing::{debug, error, info, warn};
 
-use crate::connection::execution::{self, Lanes, ResourceKey, Work, SHUTDOWN_GRACE};
+use crate::connection::execution::{self, Lanes, ResourceKey, SHUTDOWN_GRACE};
+// The lanes' boxed work is the shared type: the lane that carries it knows
+// nothing about this connection, which is the point of `nession-runtime`.
+use nession_runtime::lane::Work;
 // The three policies by name, because the `core_routes!` invocation at the
 // bottom of this file declares one per unit and the names are the column there.
 use crate::connection::execution::ExecutionPolicy::{Inline, Key, Query};
@@ -705,7 +708,12 @@ impl ServerClient {
     ) {
         // The lanes this connection reads into, and the only thing that admits
         // to them. Dropped with the loop, which is what ends their tasks.
-        let mut lanes = Lanes::new();
+        let mut lanes = Lanes::with_key_worker_budget(
+            execution::DEFAULT_QUERY_CONCURRENCY,
+            execution::DEFAULT_KEY_QUEUE_DEPTH,
+            execution::DEFAULT_KEY_WORKERS,
+            execution::LANE_LABEL,
+        );
 
         let outcome = loop {
             match stream.next().await {
@@ -786,6 +794,19 @@ impl ServerClient {
         // must not write to a socket that is closing. Queued work that never
         // started is dropped with the lane.
         lanes.shutdown(SHUTDOWN_GRACE).await;
+
+        // What this connection's bounds ever did, read by something that is not
+        // a test — `#961`'s "metrics/logging can observe queue saturation,
+        // in-flight count, per-key queue depth". The lane's own saturation
+        // events say *when* a bound was reached and which key reached it; this
+        // says how far the connection ever got.
+        {
+            let (queries, keys) = lanes.snapshot().await;
+            debug!(
+                "central connection closed — lanes: {}",
+                nession_runtime::lane::summary(&queries, &keys)
+            );
+        }
 
         let _ = done.send(outcome).await;
     }

@@ -15,6 +15,9 @@ test-utils = []
 # names a host runtime — see docs/architecture/protocol.md.
 nession-protocol = { path = "../nession-protocol" }
 nession-common = { path = "../nession-common" }
+# The execution primitives this agent's two connections share with the Server's
+# (#961-F). A runtime's, not a provider's — see that crate's Cargo.toml.
+nession-runtime = { path = "../nession-runtime" }
 nession-claude-code = { path = "../nession-claude-code" }
 nession-git = { path = "../nession-git" }
 tokio.workspace = true

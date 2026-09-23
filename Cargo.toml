@@ -5,6 +5,7 @@ members = [
     "crates/nession-git",
     "crates/nession-protocol",
     "crates/nession-protocol-codegen",
+    "crates/nession-runtime",
     "crates/nession-server",
     "crates/nession-agent",
     "crates/nession-cli",

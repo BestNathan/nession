@@ -1884,6 +1884,7 @@ dependencies = [
  "nession-common",
  "nession-git",
  "nession-protocol",
+ "nession-runtime",
  "nession-server",
  "portable-pty",
  "rand 0.8.7",
@@ -2023,6 +2024,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "nession-runtime"
+version = "0.35.0"
+dependencies = [
+ "tokio",
+ "tokio-tungstenite",
+ "tracing",
+]
+
+[[package]]
 name = "nession-server"
 version = "0.35.0"
 dependencies = [
@@ -2033,6 +2043,7 @@ dependencies = [
  "nession-agent",
  "nession-common",
  "nession-protocol",
+ "nession-runtime",
  "rand 0.8.7",
  "rustls 0.22.4",
  "rustls-pemfile",

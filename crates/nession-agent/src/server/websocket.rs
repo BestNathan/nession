@@ -28,7 +28,9 @@ use crate::config::AttachMode;
 use crate::fs::ops::FileOps;
 use crate::protocol::p2p_routes;
 use crate::server::execution::ExecutionPolicy::{Inline, Key, Ordered, Query};
-use crate::server::execution::{ExecutionLanes, ResourceKey, Work, SHUTDOWN_GRACE};
+use crate::server::execution::{ExecutionLanes, ResourceKey, SHUTDOWN_GRACE};
+// The lanes' boxed work is the shared type, and the constructors take this
+// socket's own bounds — see `nession_runtime::lane`.
 use crate::server::outbound::{self, OutboundError, P2pOutbound};
 use crate::server::resize::ResizeReporter;
 use crate::tmux::manager::SessionManager;
@@ -36,6 +38,7 @@ use crate::tmux::session::TmuxSession;
 use anyhow::{Context, Result};
 use futures_util::StreamExt;
 use nession_protocol::contracts::env::v1::EnvSnapshot;
+use nession_runtime::lane::Work;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::pin::Pin;
@@ -2001,7 +2004,11 @@ impl AgentServer {
         let addr = connection.addr;
         // The lanes this connection reads into, and the only thing that admits
         // to them. Dropped with the loop, which is what ends their tasks.
-        let mut lanes = ExecutionLanes::new();
+        let mut lanes = ExecutionLanes::new(
+            crate::server::execution::DEFAULT_QUERY_CONCURRENCY,
+            crate::server::execution::DEFAULT_KEY_QUEUE_DEPTH,
+            crate::server::execution::LANE_LABEL,
+        );
 
         while let Some(msg) = ws_stream.next().await {
             let msg = match msg {
@@ -2086,6 +2093,23 @@ impl AgentServer {
         // `ExecutionLanes::shutdown` for why ending is the policy rather than
         // waiting.
         lanes.shutdown(SHUTDOWN_GRACE).await;
+
+        // What this connection's bounds ever did, read by something that is not
+        // a test — `#961`'s "metrics/logging can observe queue saturation,
+        // in-flight count, per-key queue depth". The lane's own saturation
+        // events say *when* a bound was reached and which key reached it; this
+        // says how far the connection ever got.
+        {
+            let (queries, keys) = lanes.snapshot().await;
+            debug!(
+                "peer-to-peer connection closed — lanes: {}",
+                nession_runtime::lane::summary(&queries, &keys)
+            );
+        }
+        debug!(
+            "peer-to-peer connection closed — outbound: {:?}",
+            connection.outbound.snapshot()
+        );
 
         // Close any tmux sessions that were attached through this
         // connection so that the underlying tmux attach children are
