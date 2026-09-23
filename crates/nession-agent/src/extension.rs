@@ -612,9 +612,9 @@ mod tests {
         let registry = compose_with_core(Vec::new(), served).unwrap();
         let manifest = registry.manifest();
 
-        // 11 core units and 22 peer-to-peer ones, sharing four ids between them
-        // (`session.create`, `session.kill`, `session.list`,
-        // `session.capture-preview`) — so the union is 29, not 33.
+        // 10 core units and 21 peer-to-peer ones, sharing three ids between
+        // them (`session.create`, `session.kill`, `session.capture-preview`) —
+        // so the union is 28, not 31.
         //
         // Spelled as a number on purpose: adding a unit should make someone read
         // this line, and the failure of a relaxed assertion is indistinguishable
@@ -629,13 +629,19 @@ mod tests {
         // — the registry's five-field report against the full `SessionInfo` —
         // so they are two protocols, and only the exception needs justifying.
         //
-        // Both 28 and 29 have been right at different points this week, which
-        // is the argument for the two assertions together: the derived one
-        // catches a wiring mistake, the literal one makes every deliberate
-        // change to the surface say so out loud.
+        // Both this and the derived count above have moved more than once, which
+        // is the argument for keeping the two together: the derived one catches
+        // a wiring mistake, the literal one makes every deliberate change to the
+        // surface say so out loud.
+        //
+        // The last move was down, and it is #953 rather than a unit going
+        // missing: `agent.keepalive.ping` left the peer-to-peer list and
+        // `server.agent.heartbeat` left the core one, because a control wire is
+        // not a unit and a manifest does not describe one. The surface is what
+        // this agent is *asked* for; a heartbeat is not asked for.
         assert_eq!(
             manifest.protocols.len(),
-            29,
+            28,
             "the surface is {:?}",
             manifest.protocols.keys().collect::<Vec<_>>()
         );

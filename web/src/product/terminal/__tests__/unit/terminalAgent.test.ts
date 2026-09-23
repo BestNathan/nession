@@ -195,10 +195,10 @@ describe('createTerminalAgentApi', () => {
   });
 
   describe('ping', () => {
-    it('sends keepalive.ping with an empty payload', () => {
+    it('sends control.ping with an empty payload', () => {
       api.ping();
 
-      expect(surface.sent).toEqual([{ type: 'agent.keepalive.ping', payload: {} }]);
+      expect(surface.sent).toEqual([{ type: 'control.ping', payload: {} }]);
     });
   });
 });

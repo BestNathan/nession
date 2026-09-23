@@ -439,18 +439,6 @@ fn test_agent_status_serialization() {
 }
 
 #[test]
-fn test_server_heartbeat_ack_payload() {
-    let payload = ServerHeartbeatAckPayload {
-        agent_id: "agent-1".to_string(),
-        server_time: 1700000000,
-    };
-    let json = serde_json::to_string(&payload).unwrap();
-    let decoded: ServerHeartbeatAckPayload = serde_json::from_str(&json).unwrap();
-    assert_eq!(decoded.agent_id, "agent-1");
-    assert_eq!(decoded.server_time, 1700000000);
-}
-
-#[test]
 fn a_registration_from_before_manifests_existed_still_decodes() {
     // The compatibility claim `#678` rests on, asserted against bytes rather
     // than against the type: the server refuses a manifest-less peer, and that

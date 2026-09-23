@@ -272,7 +272,7 @@ describe('WebSocketService + feature singletons', () => {
   });
 
   describe('push fan-out into feature subscribers', () => {
-    it('agents.changed reaches onAgentsChanged consumers; unsubscribing stops delivery', async () => {
+    it('server.agents.changed reaches onAgentsChanged consumers; unsubscribing stops delivery', async () => {
       const service = makeService();
       const socket = await connectAndAuth(service);
 
@@ -282,18 +282,18 @@ describe('WebSocketService + feature singletons', () => {
       const unsubscribe = agentsApi.onAgentsChanged(second);
 
       const agents = [makeAgent('agent-1')];
-      socket.message(encodeFrame('agents.changed', 'push-1', { agents }));
+      socket.message(encodeFrame('server.agents.changed', 'push-1', { agents }));
       expect(first).toHaveBeenCalledWith(agents);
       expect(second).toHaveBeenCalledWith(agents);
 
       unsubscribe();
-      socket.message(encodeFrame('agents.changed', 'push-2', { agents: [makeAgent('agent-2')] }));
+      socket.message(encodeFrame('server.agents.changed', 'push-2', { agents: [makeAgent('agent-2')] }));
       expect(first).toHaveBeenCalledTimes(2); // still subscribed — push-2 delivered
       expect(first).toHaveBeenLastCalledWith([makeAgent('agent-2')]);
       expect(second).toHaveBeenCalledTimes(1); // unsubscribed — push-2 never delivered
     });
 
-    it('sessions.changed and client.sessions.list.response both fan out to onSessionsChanged', async () => {
+    it('server.sessions.changed and server.session.list both fan out to onSessionsChanged', async () => {
       const service = makeService();
       const socket = await connectAndAuth(service);
 
@@ -301,11 +301,11 @@ describe('WebSocketService + feature singletons', () => {
       sessionsApi.onSessionsChanged(callback);
 
       const pushed = [makeSession('agent-a', 'main')];
-      socket.message(encodeFrame('sessions.changed', 'push-1', { sessions: pushed }));
+      socket.message(encodeFrame('server.sessions.changed', 'push-1', { sessions: pushed }));
       expect(callback).toHaveBeenCalledWith(pushed);
 
       const echoed = [makeSession('agent-a', 'work')];
-      socket.message(encodeFrame('client.sessions.list.response', 'push-2', { sessions: echoed }));
+      socket.message(encodeFrame('server.session.list', 'push-2', { sessions: echoed }));
       expect(callback).toHaveBeenCalledWith(echoed);
       expect(callback).toHaveBeenCalledTimes(2);
     });
@@ -377,7 +377,7 @@ describe('WebSocketService + feature singletons', () => {
 
       // Pushes over B's socket reach B's consumers only.
       const agents = [makeAgent('agent-1')];
-      socketB.message(encodeFrame('agents.changed', 'push-1', { agents }));
+      socketB.message(encodeFrame('server.agents.changed', 'push-1', { agents }));
       expect(currentConsumer).toHaveBeenCalledWith(agents);
       expect(staleConsumer).not.toHaveBeenCalled();
 

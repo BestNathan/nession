@@ -108,7 +108,7 @@ async fn test_agent_registration() {
     };
 
     let response_msg: serde_json::Value = serde_json::from_str(&response_text).unwrap();
-    assert_eq!(response_msg["msg_type"], "server.agent.register.response");
+    assert_eq!(response_msg["msg_type"], "server.agent.register");
     assert_eq!(response_msg["payload"]["status"], "accepted");
 }
 
@@ -157,7 +157,7 @@ async fn test_invalid_auth_token() {
     };
 
     let response_msg: serde_json::Value = serde_json::from_str(&response_text).unwrap();
-    assert_eq!(response_msg["msg_type"], "server.auth.response");
+    assert_eq!(response_msg["msg_type"], "server.auth");
     assert_eq!(response_msg["payload"]["status"], "failed");
 }
 
@@ -181,7 +181,7 @@ async fn test_heartbeat_without_registration() {
     let (mut ws_stream, _) = connect_async(&url).await.unwrap();
 
     let heartbeat_msg = serde_json::json!({
-        "msg_type": "server.agent.heartbeat",
+        "msg_type": "control.heartbeat",
         "id": "msg_1",
         "timestamp": current_timestamp(),
         "payload": {
@@ -418,6 +418,6 @@ async fn test_client_sessions_list_authenticated() {
     };
 
     let response_msg: serde_json::Value = serde_json::from_str(&response_text).unwrap();
-    assert_eq!(response_msg["msg_type"], "server.session.list.response");
+    assert_eq!(response_msg["msg_type"], "server.session.list");
     assert!(response_msg["payload"]["sessions"].is_array());
 }

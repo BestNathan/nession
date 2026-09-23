@@ -184,9 +184,8 @@ fn every_unit_declares_a_request_shape() {
     // a shape at all. A one-way unit's request is simply its message, so this
     // holds without contradicting "half the kernel's units are one-way".
     //
-    // A request and not a response: `agent.keepalive.ping` is request-only for a
-    // reason no amount of typing can fix — it answers on `keepalive.pong`, a wire
-    // the `<wire>.response` convention cannot name.
+    // A request and not a response: `server.agent.session-update` is one-way by
+    // nature — the agent reports a session's state and nothing answers.
     for unit in units() {
         assert!(
             unit.request.is_some(),
@@ -336,18 +335,23 @@ fn a_unit_with_no_shape_says_so_instead_of_omitting_the_key() {
     // `#920 finished: no identity-only units remain`, which is how the end of
     // that work was detected. With nothing left to trip, a name is clearer.
     //
-    // `agent.keepalive.ping` is request-only **permanently**: the agent answers
-    // on `keepalive.pong`, and no `<wire>.response` wire exists for a response
-    // shape to be attached to. It cannot be typed out of this test the way
-    // `server.env.write` was.
+    // `server.agent.session-update` is one-way **permanently**: the agent
+    // reports one session's state and nothing answers — all five exits of
+    // `handle_agent_session_update` are `Reply(None)`. It cannot be typed out
+    // of this test the way `server.env.write` was.
+    //
+    // The subject moved here from `agent.keepalive.ping`, which is no longer a
+    // unit at all: it is `control.ping`, and control wires are not units, so
+    // there is no entry for this test to read. The premise (`response: None`)
+    // is unchanged; only the name it is read off.
     let doc = crate::schema::document(None);
     let unit = units()
         .into_iter()
-        .find(|u| u.id == "agent.keepalive.ping")
-        .expect("agent.keepalive.ping is declared");
+        .find(|u| u.id == "server.agent.session-update")
+        .expect("server.agent.session-update is declared");
     assert!(
         unit.response.is_none(),
-        "the premise moved: agent.keepalive.ping answers now, so this test needs a new subject"
+        "the premise moved: server.agent.session-update answers now, so this test needs a new subject"
     );
     let entry = &doc["protocols"][unit.id];
     assert!(entry["request"].is_object(), "{} has no request", unit.id);

@@ -26,10 +26,19 @@
 //!
 //! ## What is not here
 //!
-//! Notifications — `agent.register.response`, `server.heartbeat.ack` — stay in
-//! the match in `server_client`. They are replies to something the agent sent,
-//! not units anyone can call, and a manifest that advertised them would be
-//! claiming an offer that does not exist.
+//! What `server_client`'s match beside the dispatcher handles, and what no arm
+//! of this macro may be:
+//!
+//! - the server's acceptance of `server.agent.register`. A reply carries its
+//!   request's own wire name (#953, Rule 1), so the agent reads it under a name
+//!   it already has — and it is not a unit *this* agent serves, because a
+//!   manifest advertising it would claim an offer that does not exist;
+//! - the three **control** wires (`control.heartbeat`, `control.ping`,
+//!   `control.pong`). They are the third category — not operations, which have
+//!   one answerer, and not notifications, which have one emitter — so an arm
+//!   here would be wrong twice over: it would advertise a unit that is not one,
+//!   and it would describe a message as an offer when the whole point is that
+//!   every runtime handles it and nothing answers it.
 //!
 //! That rule is stated canonically in `docs/architecture/protocol.md` § *What is
 //! not a Protocol Unit*, and shortened to its test on the `Unit` type in
@@ -138,11 +147,17 @@ pub(crate) use core_routes;
 ///
 /// ## What is not here
 ///
-/// Same test as [`core_routes`]: is it an offer a peer can call? `keepalive.ping`
-/// passes it, thinly, and is declared — a handler that exists and is not
-/// advertised is one of the two states this macro exists to make
-/// unconstructible, and carving out an exception for the one arm that feels
+/// Same test as [`core_routes`]: is it an offer a peer can call? A handler that
+/// exists and is not advertised is one of the two states this macro exists to
+/// make unconstructible, and carving out an exception for an arm that feels
 /// unworthy would put the list back in someone's memory.
+///
+/// `control.ping` used to be the arm that tested this, kept here thinly because
+/// it had a handler and no honest claim to being an offer. It is gone from this
+/// list, and the test it prompted is now answered by the category rather than
+/// by an exception: control wires are handled beside the route table in
+/// `server::websocket`, and the reason they are not here is that they are not
+/// offers at all.
 macro_rules! p2p_routes {
     ($ctx:ident, $msg_type:ident, $payload:ident $(,)? ; $( $id:literal => $wire:literal => $body:block )* $(,)?) => {
         /// Every Protocol Unit this agent serves on its peer-to-peer socket.

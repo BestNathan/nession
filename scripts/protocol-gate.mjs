@@ -23,6 +23,16 @@
 //      with no caller is a protocol this workspace maintains and cannot use.
 //   3. The transitional `nession_common::protocol` alias path stays gone, and
 //      the module that carried it does not come back.
+//   4. A **notification** declares the runtime that emits it. A declared wire
+//      that no generated binding carries is one of the two non-operation
+//      categories, and a notification is `<emitter>.<subject>.<event>` — the
+//      first segment names the runtime that *sends* it.
+//   5. A **control** wire is dispatched by **every** runtime. That symmetry is
+//      the whole category: an operation has one answerer and a notification
+//      one emitter, and control has neither, so "which runtime handles this?"
+//      has to come back "all of them" or the wire is in the wrong category.
+//      It is also the only thing about the category that is mechanically
+//      checkable — see *The two categories that are not operations* below.
 //
 // Scope is the *call sites*, not the tree. A scan over every dotted string
 // literal was measured first and is unusable: it returns 378 distinct values,
@@ -31,18 +41,25 @@
 // arguments of the four functions that put a message on a wire keeps the check
 // exact and needs no allowlist for ordinary strings.
 //
-// The advertised set is read from three places, and none of them is a list
+// The advertised set is read from two places, and neither of them is a list
 // kept here:
 //
 //   * `web/src/generated/protocol/**` — the generated bindings, which state
 //     each unit's `PROTOCOL` and `WIRES`. `just check-codegen` is the gate that
 //     keeps this tree equal to the contracts, so reading it is reading the
 //     contracts.
-//   * `<wire>.response` for every wire — the kernel owns that rule, not this
-//     script.
-//   * `pub const X: &str = "…"` in a file that also dispatches (`*_routes!`) —
-//     the notification wires. Nothing answers them, so no route table lists
-//     them, and the file that sends them declares them.
+//   * `pub const X: &str = "…"` in a file that routes, or that writes an
+//     envelope's `msg_type` itself ([`declaringFiles`]) — the wires no
+//     contract declares, so no generated binding carries them. A notification
+//     is one (`server.agents.changed` is declared where it is sent); a control
+//     wire is the other. Rules 4 and 5 narrow this set; rule 1 only needs it
+//     to be complete.
+//
+// There used to be a third source: `<wire>.response` for every wire, derived
+// here because that was the spelling every reply carried. One wire per
+// operation removed it (#953, Rule 1) — a reply now carries its request's own
+// wire name and is correlated by the envelope's `id` — so there is nothing left
+// to derive and deriving it would advertise names no runtime can answer.
 //
 // Usage:
 //   ./scripts/protocol-gate.mjs          # check the tree
@@ -131,15 +148,87 @@ function dispatchFiles(dir, out = []) {
   return out;
 }
 
-/** The notification wires, declared next to the dispatcher that sends them. */
-function notificationWires() {
+/**
+ * The files whose wire declarations the gate trusts: the ones that route, and
+ * the ones that write an envelope's `msg_type` themselves.
+ *
+ * A file that routes declares the wires nothing answers. A file that builds an
+ * envelope by hand declares the wires nothing *can* answer — a notification is
+ * carried by no contract, so it goes on a wire through no helper and there is
+ * no other place its name could live. `WebClientRegistry` is the one today: it
+ * is where `server.agents.changed` and its two siblings are sent from, and
+ * until this existed they were declared nowhere the gate looked, which is how
+ * a category with a rule of its own still had no rule that could see it.
+ *
+ * **Not every crate file**, and the difference is not tidiness. Widening this
+ * to the whole tree was written first and measured: it makes any dotted
+ * `pub const` an advertisement, so a misspelled constant — `pub const
+ * AGENT_HEARTBEATT: &str = "server.agent.heartbeatt"` — is accepted at a call
+ * site. That is the #913 failure, and it cost a diagnosis to find the first
+ * time. The `"msg_type":` key is what keeps a declaration evidence of a *wire*
+ * rather than evidence of a string: a unit never looks like this, because
+ * every unit goes out through `proto_msg`, `new_message` or `request`.
+ */
+const ENVELOPE = /"msg_type"\s*:/;
+
+function declaringFiles() {
+  const found = [];
+  const walk = (dir) => {
+    for (const name of readdirSync(dir)) {
+      if (SKIP_DIRS.has(name)) continue;
+      const p = join(dir, name);
+      if (statSync(p).isDirectory()) walk(p);
+      else if (name.endsWith('.rs')) {
+        const text = readFileSync(p, 'utf8');
+        if (ROUTES.test(text) || ENVELOPE.test(text)) found.push(p);
+      }
+    }
+  };
+  walk(join(ROOT, 'crates'));
+  return found;
+}
+
+/**
+ * Every wire those files declare — a `pub const NAME: &str = "…"` whose value
+ * is dotted.
+ *
+ * Larger than the interesting part of it: a dispatcher's own arms name
+ * constants too, so every unit wire appears here as well. The caller narrows
+ * it against the generated tree, which is what says which of them are units.
+ */
+function declaredWires(files) {
   const found = new Map();
-  for (const file of dispatchFiles(join(ROOT, 'crates'))) {
+  for (const file of files) {
     const text = readFileSync(file, 'utf8');
     for (const m of text.matchAll(/pub const ([A-Z_0-9]+): &str = "([^"]+)";/g)) {
       const [, name, wire] = m;
       if (wire.includes('.')) found.set(wire, `${relative(ROOT, file)}:${name}`);
     }
+  }
+  return found;
+}
+
+/**
+ * The wires a dispatch file routes, read off its own `match` arms.
+ *
+ * Only the arms outside the route macros are visible this way — a macro
+ * invocation's arms are tokens the macro consumes, and nothing here expands
+ * them. That is not a gap for what it is used for: the route macros emit a
+ * *descriptor* per arm, so a wire routed there is a unit and is read from the
+ * generated tree instead. What is left is exactly the wires a runtime handles
+ * without offering them, which is the control category.
+ *
+ * A pattern is a string literal or a constant, and both are resolved: the
+ * server's arms are literals (its route table is literals too) while the
+ * agent's are `msg_types::CONTROL_PING`, which is the better spelling of the
+ * same fact.
+ */
+function dispatchedWires(file, consts) {
+  const text = maskComments(readFileSync(file, 'utf8'), 'rs');
+  const found = new Set();
+  for (const m of text.matchAll(/(?:^|\n)[ \t]*(?:"([^"\n]+)"|(?:[A-Za-z_]\w*::)*([A-Z][A-Z_0-9]*))[ \t]*=>/g)) {
+    const wire = m[1] ?? consts.get(m[2]);
+    if (wire) found.add(wire);
   }
   return found;
 }
@@ -173,13 +262,14 @@ function declaredWireConsts() {
   return found;
 }
 
+/** The files that route: one per runtime the gate can see. */
+const dispatchers = dispatchFiles(join(ROOT, 'crates'));
+
 const { ids, wires, bindingOf } = readGenerated();
-const notifications = notificationWires();
+const notifications = declaredWires(declaringFiles());
 
 /** Every string a call site may legitimately name. */
 const advertised = new Set([...ids, ...wires]);
-/** `<wire>.response` — the kernel's rule, applied to every wire. */
-for (const w of [...advertised]) advertised.add(`${w}.response`);
 for (const w of notifications.keys()) advertised.add(w);
 
 if (process.argv.includes('--list')) {
@@ -569,6 +659,72 @@ for (const file of sourceFiles(join(ROOT, 'crates'))) {
     report(relative(ROOT, file), text.slice(0, m.index).split('\n').length,
       'the transitional alias path (rule 3)', '',
       'name the family and version: nession_protocol::contracts::<family>::vN');
+  }
+}
+
+// ── The two categories that are not operations ──────────────────────────────
+//
+// Three categories, told apart by what their name says and what they oblige:
+//
+//   | | wire | who may send | reply | who handles |
+//   |---|---|---|---|---|
+//   | operation    | `<answerer>.<subject>.<operation>` | the caller | paired by `id` | **one** runtime |
+//   | notification | `<emitter>.<subject>.<event>`      | **one** runtime | none | the subscribers |
+//   | control      | `control.<verb>`                   | **any** runtime | none | **every** runtime |
+//
+// The difference is structural rather than stylistic, and it is what the two
+// rules below check. An operation's first segment answers "who answers this?",
+// a notification's answers "who sends it?" — the same position, two different
+// questions, and one wire could not say which it was answering.
+//
+// **A unit is an operation**, and it is the only category a manifest describes
+// (see *Why the manifest carries the wire projection* in
+// `docs/architecture/protocol.md`). So the two non-operation categories are
+// exactly the declared wires the generated tree does not carry: a wire
+// declared by a runtime, with no binding of its own, is either a notification
+// or a control, and the prefix says which.
+const RUNTIMES = new Set(['server', 'agent', 'client']);
+
+const nonOperations = [...notifications].filter(
+  ([wire]) => !ids.has(wire) && !wires.has(wire),
+);
+const controls = nonOperations.filter(([wire]) => wire.startsWith('control.'));
+
+// ── Rule 4: a notification names its emitter ────────────────────────────────
+//
+// `server.agents.changed` says the server pushes it; `agents.changed` said
+// nothing, and a reader had to know which of the three peers sent it. The cost
+// is not the lookup — it is that the same first segment meant "who answers" on
+// an operation and nothing at all here, so a wire's category could not be read
+// off its name.
+for (const [wire, where] of nonOperations) {
+  if (wire.startsWith('control.')) continue;
+  const emitter = wire.split('.')[0];
+  if (RUNTIMES.has(emitter)) continue;
+  report(where.replace(/:\w+$/, ''), 0, `\`${wire}\` does not name the runtime that emits it (rule 4)`, '',
+    `a notification is \`<emitter>.<subject>.<event>\` and the emitter is one of ${[...RUNTIMES].join(', ')} — \`${emitter}\` is none of them`);
+}
+
+// ── Rule 5: a control wire is dispatched by every runtime ────────────────────
+//
+// The category's whole content. An operation has one answerer and a
+// notification has one emitter; control has neither, which is why it is not a
+// unit and why every runtime carries a branch for it whether or not today's
+// senders reach that runtime. That symmetry is the only thing about the
+// category a static check can hold, and it is worth holding precisely because
+// it is the thing the other two categories cannot say.
+//
+// "Every runtime" is every file that routes — the three the tree has: the
+// server's, and the agent's two. A browser runtime has no route table (it
+// subscribes by name), so it is not one of these, and the docs say so rather
+// than leaving the omission to be discovered from a passing run.
+const controlConsts = declaredWireConsts();
+for (const [wire] of controls) {
+  for (const file of dispatchers) {
+    if (dispatchedWires(file, controlConsts).has(wire)) continue;
+    report(relative(ROOT, file), 0,
+      `\`${wire}\` has no branch here (rule 5): a control wire is handled by every runtime`, '',
+      'handle it in this runtime\'s message loop, beside the route table — or, if it is not control, rename it out of the category');
   }
 }
 

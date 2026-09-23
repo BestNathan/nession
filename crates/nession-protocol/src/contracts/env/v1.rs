@@ -308,7 +308,7 @@ pub struct ServerEnvQueryPayload {
 
 /// Agent response to `server.env.query`. The agent reports which env files
 /// it has currently sourced (applied to its environment).
-/// Response message type: `agent.session.command.response` with command="env.query"
+/// Response message type: `server.agent.command-response` with command="env.query"
 /// and this payload structure in the JSON.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]

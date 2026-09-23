@@ -19,19 +19,19 @@ vi.mock('sonner', () => ({
 
 const OriginalWebSocket = globalThis.WebSocket;
 
-/** The first frame a socket sent — the client.auth handshake request. */
+/** The first frame a socket sent — the `server.auth` handshake request. */
 function authRequestOf(socket: MockWebSocket): SocketMessage {
   const raw = socket.send.mock.calls[0]?.[0] as string | undefined;
   return JSON.parse(raw ?? '') as SocketMessage;
 }
 
-/** Reply to the socket's client.auth request, inside an act(). */
+/** Reply to the socket's `server.auth` request, inside an act(). */
 function replyToAuth(socket: MockWebSocket, status: 'success' | 'failed'): void {
   const request = authRequestOf(socket);
   act(() => {
     socket.message(
       JSON.stringify({
-        msg_type: 'client.auth.response',
+        msg_type: 'server.auth',
         id: request.id,
         timestamp: Date.now(),
         payload:
