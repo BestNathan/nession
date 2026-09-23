@@ -3,7 +3,7 @@ use tokio::net::TcpListener;
 use tokio_rustls::TlsAcceptor;
 use tokio_tungstenite::accept_async;
 use tokio_tungstenite::tungstenite::Message;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 use super::handler::{ConnectionHandler, HandlerAction};
 use crate::db::Database;
@@ -11,7 +11,9 @@ use crate::env::EnvService;
 use crate::registry::{AgentRegistry, AgentStatus, SessionRegistry};
 use crate::server::client_registry::ClientRegistry;
 use crate::server::command_broker::CommandBroker;
-use crate::server::execution::{policy_for_wire, ExecutionPolicy, Lanes};
+use crate::server::execution::{
+    answer, policy_for_wire, ExecutionPolicy, Lanes, DEFAULT_KEY_QUEUE_DEPTH,
+};
 use crate::server::outbound::WsMessageSender;
 use crate::server::web_client_registry::WebClientRegistry;
 use nession_common::config::ServerConfig;
@@ -288,7 +290,7 @@ struct ServerContext {
     terminal_stall_grace: std::time::Duration,
     /// How many queries one connection may have in flight (`#961-C`). Bound
     /// here rather than read per frame so a connection's lane is fixed for its
-    /// lifetime: see `server::execution::QueryLane`.
+    /// lifetime: see `nession_runtime::lane::QueryLane`.
     query_concurrency: usize,
 }
 
@@ -403,7 +405,11 @@ where
     // than in this loop, so one unit waiting on an agent does not hold the
     // connection's other frames behind it; `server::execution` owns the bounds
     // and the policies that decide which units those are.
-    let mut lanes = Lanes::new(query_concurrency);
+    let mut lanes = Lanes::new(
+        query_concurrency,
+        DEFAULT_KEY_QUEUE_DEPTH,
+        super::execution::LANE_LABEL,
+    );
 
     while let Some(frame) = read.next().await {
         let frame = frame?;
@@ -437,13 +443,13 @@ where
                 // agent's control channel, and a query may reach for the broker
                 // as soon as its task is scheduled.
                 claim_agent_channel(&handler, &command_broker, &sender).await;
-                // `dispatch_query` waits here when the connection's lane is
+                // `query` waits here when the connection's lane is
                 // full. That wait is the bound the requirement asks for: the
                 // frame that would exceed the lane is not *read* until there is
                 // room for it, so a connection cannot grow tasks with its
                 // message count.
                 lanes
-                    .dispatch_query(handler.clone(), msg, sender.clone())
+                    .query(answer(handler.clone(), msg, sender.clone(), "a query"))
                     .await;
                 continue;
             }
@@ -458,7 +464,10 @@ where
                 // `server::execution`. A mutation for another resource is not
                 // behind it.
                 lanes
-                    .dispatch_mutation(key, handler.clone(), msg, sender.clone())
+                    .key(
+                        key,
+                        Box::pin(answer(handler.clone(), msg, sender.clone(), "a mutation")),
+                    )
                     .await;
                 continue;
             }
@@ -560,6 +569,20 @@ where
     // the peer's TCP stack took to give up, which is the unbounded wait this
     // stage exists to remove.
     lanes.shutdown(terminal_stall_grace).await;
+
+    // What this connection's bounds ever did, read by something that is not a
+    // test — `#961`'s "metrics/logging can observe queue saturation, in-flight
+    // count, per-key queue depth". The lane's own saturation events say *when* a
+    // bound was reached and which key reached it; this says how far the
+    // connection ever got, which is the number that survives the connection.
+    {
+        let (queries, keys) = lanes.snapshot().await;
+        debug!(
+            "connection closed — lanes: {}",
+            nession_runtime::lane::summary(&queries, &keys)
+        );
+    }
+    debug!("connection closed — outbound: {:?}", sender.snapshot());
 
     // Clean up: release the agent's control channel, but only if this
     // connection still owns it. A connection that a reconnect has already

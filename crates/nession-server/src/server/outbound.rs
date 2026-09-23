@@ -1,5 +1,5 @@
-//! One connection's outbound path: a bounded queue, and the policy that governs
-//! each class of message that goes through it.
+//! One Server connection's outbound path, and the policy that governs each
+//! class of message that goes through it.
 //!
 //! Before this module the path was a single `mpsc::unbounded_channel` drained by
 //! a writer task (#961). An unbounded queue is not a policy — it is the absence
@@ -22,6 +22,14 @@
 //! the fourth is about not pretending a terminal is alive when it is not. See
 //! each method for the reasoning, and [`WsMessageSender::snapshot`] for what is
 //! observable while it happens.
+//!
+//! ## The queue itself is shared
+//!
+//! The queue, its two bounds, the three verdicts and the byte arithmetic are the
+//! same mechanism the agent's peer-to-peer socket runs on, so they are one
+//! implementation rather than two: [`nession_runtime::outbound`]. What stays
+//! here is what is the *Server's* answer rather than the mechanism's — which
+//! lanes exist, what each does at the bound, and the counters that record it.
 //!
 //! ## The bound
 //!
@@ -58,9 +66,18 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use tokio::sync::{mpsc, OwnedSemaphorePermit, Semaphore};
+use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 use tracing::{debug, warn};
+
+use nession_runtime::outbound::{Limits, Outbound};
+
+/// The one frame type and the three verdicts, re-exported so a call site names
+/// this runtime's outbound path rather than the shared crate's.
+///
+/// [`charge`] too: a test that states the charge arithmetic states it against
+/// *this* runtime's budget, which is the number it should be written against.
+pub use nession_runtime::outbound::{charge, OutboundError, QueuedFrame};
 
 /// How many bytes one connection may have queued before its producers wait.
 ///
@@ -78,53 +95,8 @@ pub const OUTBOUND_BYTE_BUDGET: usize = 8 * 1024 * 1024;
 /// terminal lane, whose frames are tens of KiB, it is this one.
 pub const OUTBOUND_FRAME_SLOTS: usize = 64;
 
-/// What the WebSocket frame header costs beyond the payload `Message::len`
-/// reports. Charged so a queue full of small frames is priced honestly.
-const FRAME_OVERHEAD: usize = 14;
-
-/// The verdicts this queue can hand a producer.
-///
-/// Deliberately one enum rather than one per method: the call sites differ in
-/// which variants they can see, but "the connection is over", "there is no room
-/// and this lane does not wait", and "there was no room for long enough that the
-/// peer is gone" are the same three facts everywhere.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OutboundError {
-    /// The writer is gone — the connection has ended, and this frame will never
-    /// be written by this path.
-    Closed,
-    /// The queue is at its bound and this lane does not wait for room.
-    Saturated,
-    /// The queue was at its bound for the whole stall grace. The peer has
-    /// stopped draining, which is a statement about the peer and not about us.
-    Stalled,
-}
-
-impl std::fmt::Display for OutboundError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Closed => write!(f, "the connection's outbound path is closed"),
-            Self::Saturated => write!(f, "the outbound queue is at its bound"),
-            Self::Stalled => write!(f, "the outbound queue stayed full for the stall grace"),
-        }
-    }
-}
-
-impl std::error::Error for OutboundError {}
-
-/// One frame waiting to be written, holding the claim on the byte budget that
-/// lets it wait there.
-///
-/// The permit is what makes the queue's bound real: it is released when the
-/// writer drops this struct, i.e. after the frame has been handed to the socket,
-/// so `budget` bytes is the most that can be queued *and* not yet written.
-pub struct QueuedFrame {
-    pub message: WsMessage,
-    /// This frame's share of [`OUTBOUND_BYTE_BUDGET`]. Held until the writer is
-    /// done with it — dropping it early would let producers run ahead of the
-    /// socket the budget exists to bound.
-    pub budget: OwnedSemaphorePermit,
-}
+/// The name this runtime's outbound path puts on its own log lines.
+const NAME: &str = "outbound";
 
 /// What a caller can see about one connection's outbound path (#961: "metrics /
 /// logging can observe queue saturation, in-flight count, per-key queue depth").
@@ -136,8 +108,9 @@ pub struct QueuedFrame {
 /// terminal clients were closed. A policy that could not be observed here would
 /// be indistinguishable from an outage.
 ///
-/// Per-key queue depth is absent because no keyed queue exists yet: this stage
-/// bounds the write path, and the per-key executors are #961-C … #961-E.
+/// The queue's own half is [`nession_runtime::outbound::QueueSnapshot`]; the two
+/// lanes that are *this* runtime's are counted here, because what to do at the
+/// bound — and therefore what to count — is the policy this module owns.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OutboundSnapshot {
     /// Bytes currently queued, including the frame being written.
@@ -159,10 +132,8 @@ pub struct OutboundSnapshot {
 
 #[derive(Default)]
 struct Counters {
-    awaited: AtomicU64,
     dropped_broadcasts: AtomicU64,
     undelivered_commands: AtomicU64,
-    stalled_terminals: AtomicU64,
 }
 
 /// The sending half of one connection's outbound path.
@@ -174,10 +145,8 @@ struct Counters {
 /// *class* of message it is sending.
 #[derive(Clone)]
 pub struct WsMessageSender {
-    tx: mpsc::Sender<QueuedFrame>,
-    budget: Arc<Semaphore>,
+    queue: Outbound,
     counters: Arc<Counters>,
-    terminal_grace: Duration,
 }
 
 impl WsMessageSender {
@@ -191,13 +160,18 @@ impl WsMessageSender {
     /// deployment can trade a slower terminal for a later verdict; tests use it
     /// to reach the verdict without waiting out a production grace).
     pub fn with_terminal_grace(grace: Duration) -> (Self, mpsc::Receiver<QueuedFrame>) {
-        let (tx, rx) = mpsc::channel(OUTBOUND_FRAME_SLOTS);
+        let (queue, rx) = Outbound::new(
+            NAME,
+            Limits {
+                bytes: OUTBOUND_BYTE_BUDGET,
+                frames: OUTBOUND_FRAME_SLOTS,
+            },
+            grace,
+        );
         (
             Self {
-                tx,
-                budget: Arc::new(Semaphore::new(OUTBOUND_BYTE_BUDGET)),
+                queue,
                 counters: Arc::new(Counters::default()),
-                terminal_grace: grace,
             },
             rx,
         )
@@ -213,8 +187,8 @@ impl WsMessageSender {
     /// path through this method that loses the frame, and the cost of the
     /// guarantee is that a peer which never drains parks its producer instead of
     /// growing the heap. The parked task is the connection's reader — reading
-    /// this frame itself, or the query task it admitted to run it (#961-C) —
-    /// and either way waiting stops that connection from reading more: a parked
+    /// this frame itself, or the query task it admitted to run it (#961-C) — and
+    /// either way waiting stops that connection from reading more: a parked
     /// query holds its slot in the query lane, the lane fills, and the reader
     /// parks on the next frame. That is the backpressure the bound exists to
     /// apply, one lane deeper than it was when this was written.
@@ -228,83 +202,21 @@ impl WsMessageSender {
     /// connection's [`Self::send_terminal`], which ends a relay that has stopped
     /// draining.
     pub async fn send_reply(&self, msg: WsMessage) -> Result<(), OutboundError> {
-        let len = msg.len();
-        let (budget, waited) = self.acquire(len).await.ok_or(OutboundError::Closed)?;
-        if waited {
-            debug!(
-                "outbound: no room for a reply, waiting for the writer \
-                 ({} frame(s), {} byte(s) queued)",
-                self.queued_frames(),
-                self.queued_bytes()
-            );
-        }
-        self.enqueue(msg, budget).await
+        self.queue.send_reply(msg).await
     }
 
     /// Relay one terminal frame to the client on the other end of a relay.
     ///
     /// Same lane as [`Self::send_reply`] up to the point where waiting stops
-    /// being reasonable. Terminal bytes have the bottleneck that replies do not:
-    /// they are *steady* — a busy session produces them whether or not anybody
-    /// is watching — so a peer that has stopped draining does not park a
-    /// producer that was going to finish anyway, it pins the relay and the
-    /// agent's output behind it indefinitely.
-    ///
-    /// So this waits for room, and gives up after the stall grace. `Stalled` is
-    /// the caller's cue to end the relay: terminal output cannot be dropped (the
+    /// being reasonable, and it ends there with a verdict: `Stalled` is the
+    /// caller's cue to end the relay. Terminal output cannot be dropped (the
     /// screen would drift) and cannot be buffered without bound (that is the
     /// queue we just replaced), so the only remaining honest answer is that this
     /// client is no longer attached in any useful sense. The caller closes the
     /// connection, and a client that was merely asleep re-attaches and is handed
     /// a redrawn screen.
     pub async fn send_terminal(&self, msg: WsMessage) -> Result<(), OutboundError> {
-        // The grace covers *both* bounds, which is why the whole enqueue is
-        // inside the timeout rather than just the byte reservation: the frame
-        // already in hand can be waiting on the frame count rather than on the
-        // budget (`64` terminal-sized frames are 4 MiB, well inside an 8 MiB
-        // budget), and a lane that gave up on one bound but not the other would
-        // park here exactly as before.
-        match tokio::time::timeout(self.terminal_grace, self.enqueue_reserved(msg)).await {
-            Ok(Ok(())) => Ok(()),
-            Ok(Err(e)) => Err(e),
-            Err(_) => {
-                self.counters
-                    .stalled_terminals
-                    .fetch_add(1, Ordering::Relaxed);
-                warn!(
-                    "outbound: terminal frame waited {:?} for room and never got it — \
-                     the peer has stopped draining ({} frame(s), {} byte(s) queued); \
-                     ending the relay",
-                    self.terminal_grace,
-                    self.queued_frames(),
-                    self.queued_bytes()
-                );
-                Err(OutboundError::Stalled)
-            }
-        }
-    }
-
-    /// Reserve this frame's bytes and hand it to the queue, waiting for both.
-    async fn enqueue_reserved(&self, msg: WsMessage) -> Result<(), OutboundError> {
-        let len = msg.len();
-        let (budget, _) = self.acquire(len).await.ok_or(OutboundError::Closed)?;
-        self.enqueue(msg, budget).await
-    }
-
-    /// Hand a frame that has already reserved its bytes to the queue, waiting for
-    /// a free slot if the count bound is what is full.
-    async fn enqueue(
-        &self,
-        msg: WsMessage,
-        budget: OwnedSemaphorePermit,
-    ) -> Result<(), OutboundError> {
-        self.tx
-            .send(QueuedFrame {
-                message: msg,
-                budget,
-            })
-            .await
-            .map_err(|_| OutboundError::Closed)
+        self.queue.send_terminal(msg).await
     }
 
     /// Send a command to the agent on the other end of this connection.
@@ -344,69 +256,29 @@ impl WsMessageSender {
 
     /// What this connection's outbound path is doing, for logging and tests.
     pub fn snapshot(&self) -> OutboundSnapshot {
+        let queue = self.queue.snapshot();
         OutboundSnapshot {
-            queued_bytes: self.queued_bytes(),
-            queued_frames: self.queued_frames(),
-            byte_budget: OUTBOUND_BYTE_BUDGET,
-            frame_slots: OUTBOUND_FRAME_SLOTS,
-            awaited: self.counters.awaited.load(Ordering::Relaxed),
+            queued_bytes: queue.queued_bytes,
+            queued_frames: queue.queued_frames,
+            byte_budget: queue.byte_budget,
+            frame_slots: queue.frame_slots,
+            awaited: queue.awaited,
             dropped_broadcasts: self.counters.dropped_broadcasts.load(Ordering::Relaxed),
             undelivered_commands: self.counters.undelivered_commands.load(Ordering::Relaxed),
-            stalled_terminals: self.counters.stalled_terminals.load(Ordering::Relaxed),
+            stalled_terminals: queue.stalled_terminals,
         }
     }
 
-    /// Bytes charged so far: the budget minus what is left of it. A frame being
-    /// written still holds its claim, so this includes it.
-    fn queued_bytes(&self) -> usize {
-        OUTBOUND_BYTE_BUDGET.saturating_sub(self.budget.available_permits())
-    }
-
-    fn queued_frames(&self) -> usize {
-        OUTBOUND_FRAME_SLOTS.saturating_sub(self.tx.capacity())
-    }
-
-    /// Wait for room. `None` means the budget is closed, which is the queue's
-    /// other spelling of "the connection is over". The flag says whether this
-    /// call actually had to wait, which is the saturation signal.
+    /// The queue's `try_send`, with this runtime's answer to "there was no room".
     ///
-    /// The `available_permits` check is an observability heuristic, not the
-    /// mechanism: it can count a call that another producer was about to race
-    /// for, or miss one that squeaked in. The bound itself is the semaphore.
-    async fn acquire(&self, len: usize) -> Option<(OwnedSemaphorePermit, bool)> {
-        let waited = self.budget.available_permits() < charge(len);
-        if waited {
-            self.counters.awaited.fetch_add(1, Ordering::Relaxed);
-        }
-        Arc::clone(&self.budget)
-            .acquire_many_owned(permits(charge(len)))
-            .await
-            .ok()
-            .map(|permit| (permit, waited))
-    }
-
+    /// `Closed` passes through: it is not a statement about room, and the caller
+    /// has to be able to tell "this connection is over" from "this connection is
+    /// full".
     fn try_send(&self, msg: WsMessage, lane: Lane) -> Result<(), OutboundError> {
-        let Some(budget) = Arc::clone(&self.budget)
-            .try_acquire_many_owned(permits(charge(msg.len())))
-            .ok()
-        else {
-            return Err(self.note_no_room(lane));
-        };
-        self.tx
-            .try_send(QueuedFrame {
-                message: msg,
-                budget,
-            })
-            .map_err(|e| {
-                // The budget was there and the slots were not — or the writer
-                // is gone. Both are "no room" for the caller's purposes, and
-                // the counters say which lane was refused.
-                if matches!(e, mpsc::error::TrySendError::Closed(_)) {
-                    OutboundError::Closed
-                } else {
-                    self.note_no_room(lane)
-                }
-            })
+        self.queue.try_send(msg).map_err(|e| match e {
+            OutboundError::Saturated => self.note_no_room(lane),
+            e => e,
+        })
     }
 
     fn note_no_room(&self, lane: Lane) -> OutboundError {
@@ -418,7 +290,7 @@ impl WsMessageSender {
                 warn!(
                     "outbound: no room for a command ({} byte(s) queued of {}); \
                      failing the request so its caller answers instead of timing out",
-                    self.queued_bytes(),
+                    self.queue.queued_bytes(),
                     OUTBOUND_BYTE_BUDGET
                 );
                 OutboundError::Saturated
@@ -430,7 +302,7 @@ impl WsMessageSender {
                 debug!(
                     "outbound: no room for a state push ({} byte(s) queued of {}); dropped — \
                      the next push restates it",
-                    self.queued_bytes(),
+                    self.queue.queued_bytes(),
                     OUTBOUND_BYTE_BUDGET
                 );
                 OutboundError::Saturated
@@ -447,32 +319,10 @@ enum Lane {
     Broadcast,
 }
 
-/// What one frame is charged against the connection's byte budget.
-///
-/// A single frame larger than the whole budget is charged the whole budget
-/// rather than refused: the contract caps these at 1 MiB and a refusal would
-/// turn "this reply is big" into "this reply cannot be sent". Charging it
-/// everything means at most one such frame is ever queued, and the next producer
-/// waits for it to be written — which is the same bound, applied to the case the
-/// bound was not sized for.
-fn charge(len: usize) -> usize {
-    (len + FRAME_OVERHEAD).clamp(1, OUTBOUND_BYTE_BUDGET)
-}
-
-/// A byte charge as the permit count a `Semaphore` takes.
-///
-/// `charge` clamps to [`OUTBOUND_BYTE_BUDGET`], which fits in a `u32`, so this
-/// cannot lose anything today — `try_from` rather than `as` so that a budget
-/// raised past `u32::MAX` becomes a saturating question rather than a silent
-/// truncation that would leave a frame holding almost none of the budget it
-/// thinks it holds.
-fn permits(bytes: usize) -> u32 {
-    u32::try_from(bytes).unwrap_or(u32::MAX)
-}
-
 /// The default stall grace: 8 MiB held for 15 s is a floor of ~0.53 MiB/s, below
 /// which a peer is not slow, it is gone. Long enough that a burst of
-/// backpressure is never mistaken for a verdict; see [`WsMessageSender::send_terminal`].
+/// backpressure is never mistaken for a verdict; see
+/// [`WsMessageSender::send_terminal`].
 ///
 /// Derived from the config field of the same name so the two cannot drift: a
 /// deployment that sets `terminal_stall_grace_secs` is choosing this number.
@@ -483,59 +333,14 @@ pub const DEFAULT_TERMINAL_STALL_GRACE: Duration =
 mod tests {
     use super::*;
     use tracing::info;
-    /// The reply lane's whole reason to exist: a send that finds the queue full
-    /// waits, and the frame is there when the consumer catches up. If this ever
-    /// returns `Err` or drops the frame, #961's "must not be silently dropped"
-    /// is violated and the flood test in `tests/integration/websocket.rs` stops
-    /// being an assertion about anything.
-    #[tokio::test]
-    async fn a_reply_waits_for_room_rather_than_being_dropped() {
-        let (sender, mut rx) = WsMessageSender::with_terminal_grace(Duration::from_millis(50));
 
-        // A frame sized so each one takes an equal share of the budget: filling
-        // with these reaches both bounds at once.
-        let share = OUTBOUND_BYTE_BUDGET / OUTBOUND_FRAME_SLOTS - FRAME_OVERHEAD;
-        let frame = WsMessage::Text("x".repeat(share));
-        let mut queued = 0;
-        while sender.try_send(frame.clone(), Lane::Broadcast).is_ok() {
-            queued += 1;
-            assert!(
-                queued <= OUTBOUND_FRAME_SLOTS,
-                "the frame bound never fired"
-            );
-        }
-        assert_eq!(queued, OUTBOUND_FRAME_SLOTS);
-        assert_eq!(sender.snapshot().queued_bytes, OUTBOUND_BYTE_BUDGET);
-
-        // The reply lane parks instead of failing...
-        let waiter = tokio::spawn({
-            let sender = sender.clone();
-            async move { sender.send_reply(WsMessage::Text("held".into())).await }
-        });
-        tokio::time::sleep(Duration::from_millis(50)).await;
-        assert!(
-            !waiter.is_finished(),
-            "a full queue must park the reply lane, not fail it"
-        );
-        assert_eq!(sender.snapshot().awaited, 1);
-
-        // ...and completes, whole, once the writer drains.
-        for n in 0..queued {
-            let written = rx.recv().await.expect("a queued frame went missing");
-            assert_eq!(written.message, frame, "frame {n} was not the one queued");
-        }
-        let last = rx.recv().await.expect("the waiting reply was never queued");
-        assert_eq!(last.message, WsMessage::Text("held".into()));
-        assert_eq!(waiter.await.expect("reply task panicked"), Ok(()));
-        assert_eq!(
-            sender.snapshot().dropped_broadcasts,
-            1,
-            "the one broadcast that found no room was dropped; the reply that found \
-             no room was not — it waited and was delivered"
-        );
-    }
-
-    /// The broadcast lane is the one that drops — and says so in the counters.
+    /// The sibling of `a_reply_waits_for_room_rather_than_being_dropped`
+    /// (`nession_runtime::outbound`), and the half that is this runtime's: the
+    /// two *non-waiting* lanes, and the counters that say which one was refused.
+    ///
+    /// The mechanism — the two bounds, the three verdicts, the oversized frame —
+    /// is tested where it lives. What is tested here is the Server's answer at
+    /// the bound, which is a policy and not a mechanism.
     #[tokio::test]
     async fn a_state_push_is_dropped_when_the_queue_is_full() {
         let (sender, _rx) = WsMessageSender::new();
@@ -551,6 +356,10 @@ mod tests {
         assert_eq!(snapshot.dropped_broadcasts, 1);
         assert_eq!(snapshot.queued_frames, 1);
         assert_eq!(snapshot.queued_bytes, OUTBOUND_BYTE_BUDGET);
+        assert_eq!(
+            snapshot.undelivered_commands, 0,
+            "the broadcast lane is the one that dropped, and the counters say which"
+        );
     }
 
     /// A command that finds no room fails *now*: the caller revokes the pending
@@ -566,106 +375,17 @@ mod tests {
             sender.try_send_command(frame),
             Err(OutboundError::Saturated)
         );
-        assert_eq!(sender.snapshot().undelivered_commands, 1);
-    }
-
-    /// The terminal lane waits like a reply, and ends at the grace with a
-    /// verdict rather than an unbounded park.
-    #[tokio::test]
-    async fn a_terminal_frame_that_never_gets_room_stalls() {
-        let (sender, _rx) = WsMessageSender::with_terminal_grace(Duration::from_millis(50));
-        let frame = WsMessage::Text("t".repeat(OUTBOUND_BYTE_BUDGET));
-        assert_eq!(sender.send_terminal(frame.clone()).await, Ok(()));
-
-        let started = std::time::Instant::now();
+        let snapshot = sender.snapshot();
+        assert_eq!(snapshot.undelivered_commands, 1);
         assert_eq!(
-            sender.send_terminal(frame).await,
-            Err(OutboundError::Stalled)
+            snapshot.dropped_broadcasts, 0,
+            "the command lane failed the request; it did not drop a push"
         );
-        assert!(
-            started.elapsed() >= Duration::from_millis(50),
-            "the verdict must come after the grace, not instead of it"
-        );
-        assert_eq!(sender.snapshot().stalled_terminals, 1);
-    }
-
-    /// A closed writer is reported as such on every lane, so the read loop can
-    /// tell "this connection is over" from "this connection is full".
-    #[tokio::test]
-    async fn a_gone_writer_is_closed_on_every_lane() {
-        let (sender, rx) = WsMessageSender::new();
-        drop(rx);
-
-        assert_eq!(
-            sender.send_reply(WsMessage::Text("a".into())).await,
-            Err(OutboundError::Closed)
-        );
-        assert_eq!(
-            sender.send_terminal(WsMessage::Text("b".into())).await,
-            Err(OutboundError::Closed)
-        );
-        assert_eq!(
-            sender.try_send_command(WsMessage::Text("c".into())),
-            Err(OutboundError::Closed)
-        );
-        assert_eq!(
-            sender.try_send_broadcast(WsMessage::Text("d".into())),
-            Err(OutboundError::Closed)
-        );
-    }
-
-    /// A frame bigger than the budget is not refused: it takes the whole budget,
-    /// so it can still be sent, and the next producer waits for it.
-    #[tokio::test]
-    async fn a_frame_larger_than_the_budget_holds_all_of_it() {
-        assert_eq!(charge(OUTBOUND_BYTE_BUDGET * 2), OUTBOUND_BYTE_BUDGET);
-        assert_eq!(charge(0), FRAME_OVERHEAD);
-
-        let (sender, mut rx) = WsMessageSender::new();
-        let huge = WsMessage::Text("h".repeat(OUTBOUND_BYTE_BUDGET * 2));
-        assert_eq!(sender.send_reply(huge.clone()).await, Ok(()));
-        assert_eq!(sender.snapshot().queued_bytes, OUTBOUND_BYTE_BUDGET);
-
-        let waiter = tokio::spawn({
-            let sender = sender.clone();
-            async move { sender.send_reply(WsMessage::Text("after".into())).await }
-        });
-        tokio::time::sleep(Duration::from_millis(50)).await;
-        assert!(
-            !waiter.is_finished(),
-            "the next producer waits for the oversized frame to be written"
-        );
-        assert_eq!(
-            rx.recv().await.map(|frame| frame.message),
-            Some(huge),
-            "the oversized frame itself is delivered whole"
-        );
-        assert!(rx.recv().await.is_some());
-        assert_eq!(waiter.await.expect("reply task panicked"), Ok(()));
-    }
-
-    /// The budget is released by the *writer*, not by the queued frame: a
-    /// producer may only run as far ahead as the socket has been fed.
-    #[tokio::test]
-    async fn the_budget_is_released_when_the_frame_is_written() {
-        let (sender, mut rx) = WsMessageSender::new();
-        assert_eq!(sender.send_reply(WsMessage::Text("q".into())).await, Ok(()));
-        assert_eq!(sender.snapshot().queued_bytes, charge(1));
-
-        let frame = rx.recv().await.expect("the frame was queued");
-        assert_eq!(
-            sender.snapshot().queued_bytes,
-            charge(1),
-            "the frame is still holding its claim while it is being written"
-        );
-        drop(frame);
-        assert_eq!(sender.snapshot().queued_bytes, 0);
-        assert_eq!(sender.snapshot().queued_frames, 0);
     }
 
     /// `info!`-level observability is not the point of this test; the snapshot
     /// is. Kept so the module has one test that reads a whole snapshot at once,
-    /// which is what an operator or a follow-up metric exporter would do.
+    /// which is what an operator or a metric exporter would do.
     #[tokio::test]
     async fn the_snapshot_names_every_policy() {
         let (sender, _rx) = WsMessageSender::with_terminal_grace(Duration::from_millis(10));
@@ -685,5 +405,17 @@ mod tests {
         assert_eq!(snapshot.dropped_broadcasts, 1);
         assert_eq!(snapshot.undelivered_commands, 1);
         info!("{snapshot:?}");
+    }
+
+    /// The charge arithmetic is stated against *this* runtime's budget, which is
+    /// what makes it this module's test and not the shared crate's: a budget of
+    /// 8 MiB and one of 4 MiB clamp a frame of the same size differently.
+    #[test]
+    fn a_frame_larger_than_this_budget_is_charged_the_whole_of_it() {
+        assert_eq!(
+            charge(OUTBOUND_BYTE_BUDGET * 2, OUTBOUND_BYTE_BUDGET),
+            OUTBOUND_BYTE_BUDGET
+        );
+        assert_eq!(charge(0, OUTBOUND_BYTE_BUDGET), 14);
     }
 }
