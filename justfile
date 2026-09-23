@@ -46,6 +46,12 @@ check: fmt lint check-tmux-socket check-protocol check-codegen coverage
 # forced env write reported a re-source failure and the session kept the old
 # values.
 #
+# The listening half is silent the same way and went unscanned until #949: a
+# misspelled `subscribe` wire never fires its handler, and a handler that never
+# fires looks exactly like a push that never came. Only a dotted literal is read
+# there, because `subscribe` is also the name of every in-process observer in
+# the tree — see the gate's `CALLS`.
+#
 # A wire is one of three categories, and the name says which (#953):
 #
 #   operation      `<answerer>.<subject>.<operation>`   one runtime answers it
@@ -55,7 +61,9 @@ check: fmt lint check-tmux-socket check-protocol check-codegen coverage
 # An operation is a Protocol Unit and the only category a manifest describes.
 # The rules, and the first two are duals:
 #
-#   1. every wire a call site names is well formed and some runtime answers it
+#   1. every wire a call site names is well formed, and some runtime carries it
+#      in the direction the call site is on: a sender's wire must be answered,
+#      a subscriber's must be sent
 #   2. every advertised protocol is named by at least one call site
 #   3. the transitional `nession_common::protocol` alias path stays gone
 #   4. a notification declares the runtime that emits it
