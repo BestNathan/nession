@@ -85,19 +85,6 @@ export const FIXTURE_AGENTS: Agent[] = [
   },
 ];
 
-/**
- * The Session rows.
- *
- * `foreground_command` is the command the agent reports for the pane
- * (`#{pane_current_command}`), which is what the row's workload hint renders.
- * Five rows carry one and the last does not, so the canonical screen shows both
- * the reported hint and the `unknown` fallback the pattern documents — a screen
- * where every row said `unknown` would depict a Session list the agent has
- * never reported on, which is the one state the fixture should not make
- * canonical. These are raw command names rather than product labels because
- * that is what the wire carries; naming the product here would put capability
- * knowledge in the fixture that the product reads from the capability layer.
- */
 export const FIXTURE_SESSIONS: Session[] = [
   {
     session_id: 'devbox-01:fix-terminal-reconnect',
@@ -106,7 +93,6 @@ export const FIXTURE_SESSIONS: Session[] = [
     status: 'active',
     window_count: 1,
     attached_clients: 1,
-    foreground_command: 'claude',
     last_activity: '2026-09-01T08:00:00Z',
   },
   {
@@ -116,7 +102,6 @@ export const FIXTURE_SESSIONS: Session[] = [
     status: 'detached',
     window_count: 1,
     attached_clients: 0,
-    foreground_command: 'codex',
     last_activity: '2026-09-01T07:40:00Z',
   },
   {
@@ -126,7 +111,6 @@ export const FIXTURE_SESSIONS: Session[] = [
     status: 'zombie',
     window_count: 0,
     attached_clients: 0,
-    foreground_command: 'bash',
     last_activity: '2026-09-01T03:30:00Z',
   },
   {
@@ -136,7 +120,6 @@ export const FIXTURE_SESSIONS: Session[] = [
     status: 'active',
     window_count: 2,
     attached_clients: 1,
-    foreground_command: 'claude',
     last_activity: '2026-09-01T07:20:00Z',
   },
   {
@@ -146,7 +129,6 @@ export const FIXTURE_SESSIONS: Session[] = [
     status: 'detached',
     window_count: 1,
     attached_clients: 0,
-    foreground_command: 'zsh',
     last_activity: '2026-09-01T06:10:00Z',
   },
   {
