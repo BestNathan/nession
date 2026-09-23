@@ -31,6 +31,8 @@ export interface TerminalControllerEvents {
 export interface TerminalControllerOptions {
   rendererType: 'webgl' | 'canvas';
   fontSize?: number;
+  /** xterm's line-height: a multiple of the font box, from the Experience tokens. */
+  lineHeight?: number;
   scrollback?: number;
   /**
    * Device class this terminal was built for. 'mobile' swaps xterm's hidden

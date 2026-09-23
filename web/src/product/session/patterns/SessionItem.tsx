@@ -31,6 +31,28 @@ const iconReveal = cn(
   'lg:group-focus-within:opacity-100 lg:group-focus-within:pointer-events-auto',
 );
 
+/**
+ * The row's workload hint — what is running in this Session.
+ *
+ * `session-item.md` §Workload semantics: "a workload hint can be inferred from
+ * foreground process or integration state, but it is not a permanent Session
+ * type", and its vocabulary is open-ended ("other TUI / process"). The agent
+ * already reports the pane's foreground command on every session update
+ * (`session.foreground_command`), so the hint is that value read verbatim
+ * rather than a label this pattern invents — which is what keeps it from
+ * becoming the "mini capability dashboard" the same section warns against. A
+ * mapping table from command to product name would put capability knowledge
+ * (`claude` means Claude Code, and `claude.exe` too) inside a navigation row,
+ * where it would need to be kept in step with the capability that owns it.
+ *
+ * `unknown` is the documented fallback for a Session the agent has not reported
+ * a command for yet; it is in the doc's vocabulary, and it is honest — the row
+ * says it does not know rather than guessing `shell`.
+ */
+function workloadHint(session: Session): string {
+  return session.foreground_command ?? 'unknown';
+}
+
 export interface SessionItemProps {
   session: Session;
   domain: DomainState;
@@ -87,7 +109,7 @@ export function SessionItem({
           data-testid="session-item-meta"
           className="truncate font-mono text-[length:var(--shell-session-row-meta-font-size)] leading-4 text-muted-foreground"
         >
-          shell · {agentLabel} · {formatRelativeTime(session.last_activity)}
+          {workloadHint(session)} · {agentLabel} · {formatRelativeTime(session.last_activity)}
         </span>
         {domain.agent.copy !== null && (
           <span

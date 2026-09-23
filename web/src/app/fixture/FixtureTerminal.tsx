@@ -6,10 +6,13 @@ import {
   NESSION_TERMINAL_THEME,
   TERMINAL_MINIMUM_CONTRAST_RATIO,
 } from '@/platform/terminal-runtime/ThemeManager';
+import { cn } from '@/shared/lib/utils';
+import { DEFAULT_FONT } from '@/platform/terminal-runtime/instance/TerminalInstance';
+import { detectProfile, PROFILES } from '@/platform/terminal-runtime/DeviceProfile';
 import {
-  DEFAULT_FONT,
-  DEFAULT_FONT_SIZE,
-} from '@/platform/terminal-runtime/instance/TerminalInstance';
+  terminalViewportBoxClass,
+  terminalViewportInsetClass,
+} from '@/product/terminal/components/TerminalViewport';
 import { TerminalSurface } from '@/product/terminal/patterns/TerminalSurface';
 import type { TerminalChrome } from '@/app/ShellMain';
 
@@ -52,11 +55,15 @@ const FIXTURE_BUFFER = [
  * sees. Sends are inert anyway — `controller` is null, and
  * `TerminalSurface.capsuleSendText` routes through `controller?.handleInput`.
  *
- * The font stack and the contrast ratio come from the runtime rather than
- * xterm's defaults for the same reason. A bare `new Terminal()` renders in
- * `courier-new`, so the baseline would pin a typeface the product never uses
- * — and cell metrics follow the font, so the terminal's cols/rows would be
- * measured against the wrong one.
+ * The font stack, the type metrics and the contrast ratio come from the
+ * runtime rather than xterm's defaults for the same reason. A bare
+ * `new Terminal()` renders in `courier-new`, so the baseline would pin a
+ * typeface the product never uses — and cell metrics follow the font, so the
+ * terminal's cols/rows would be measured against the wrong one. Size and
+ * leading are the device profile's, selected the same way
+ * `useTerminalOrchestration` selects them, so a baseline at a narrow viewport
+ * pins the App metrics and a wide one pins Web's instead of one hardcoded size
+ * standing in for both.
  */
 export function FixtureTerminal({ chrome }: { chrome?: TerminalChrome }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -66,10 +73,12 @@ export function FixtureTerminal({ chrome }: { chrome?: TerminalChrome }) {
     if (!host) {
       return;
     }
+    const metrics = PROFILES[detectProfile(window.innerWidth)];
     const term = new Terminal({
       theme: NESSION_TERMINAL_THEME,
       fontFamily: DEFAULT_FONT,
-      fontSize: DEFAULT_FONT_SIZE,
+      fontSize: metrics.fontSize,
+      lineHeight: metrics.lineHeight,
       minimumContrastRatio: TERMINAL_MINIMUM_CONTRAST_RATIO,
       convertEol: true,
       cursorBlink: false,
@@ -128,7 +137,15 @@ export function FixtureTerminal({ chrome }: { chrome?: TerminalChrome }) {
       capsuleCapabilities={chrome?.capsuleCapabilities}
       capsuleProjection={chrome?.capsuleProjection}
     >
-      <div data-testid="fixture-terminal" ref={ref} className="h-full w-full" />
+      {/* Same box and inset as the product's viewport, from the product's own
+          class exports — the canonical screens have to draw the well the user
+          gets, or the inset is protected by nothing. */}
+      <div
+        data-testid="fixture-terminal"
+        data-terminal-viewport
+        ref={ref}
+        className={cn(terminalViewportBoxClass, terminalViewportInsetClass)}
+      />
     </TerminalSurface>
   );
 }

@@ -36,6 +36,12 @@ export interface DeviceProfileConfig {
 export interface TerminalInstanceOptions {
   rendererType: 'webgl' | 'canvas';
   fontSize?: number;
+  /**
+   * xterm's own `lineHeight`: a multiple of the terminal font's measured box,
+   * not of `fontSize` the way CSS `line-height` is. Owned by
+   * `experience.{web,app}.terminal.lineHeight`.
+   */
+  lineHeight?: number;
   scrollback?: number;
 }
 

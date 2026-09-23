@@ -72,7 +72,16 @@ export function WorkspaceShell({ ctx, activeCapabilityId }: WorkspaceShellProps)
     <div
       data-testid="workspace-shell"
       data-capability-diagnostics={resolution.diagnostics.length}
-      className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-muted/40"
+      /* The Workspace region's ground is the canvas, not a tint of it.
+         The muted fill at 40% resolved to #F9F9F8 — a value that exists nowhere
+         in the mockup, which draws the work region on its canvas (#FFFFFF) and
+         separates the tree from the editor with the chrome surface (#F6F8FA) on
+         the tree side only, which the Files layout already supplies. The domain
+         `workspace.background` leaf is the canonical token for precisely this
+         ground (domain.json -> `semantic.background`; file-workspace.md's token
+         table names "Workspace/File surfaces -> Domain workspace.*"), and it was
+         declared and consumed by nothing until here. */
+      className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-workspace-background"
     >
       <div data-testid="workspace-tool-content" className="min-h-0 flex-1 overflow-hidden">
         {ActiveLayout ? (

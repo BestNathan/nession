@@ -49,6 +49,23 @@
       "ref": "experience.app.control.md"
     }
   },
+  "terminal": {
+    "$owner": "pattern.terminal-surface",
+    "$description": "The App work surface's own typography and inset — the counterpart of `experience.web.terminal`, so the same leaf names exist on both sides and neither resolves to nothing outside its own experience. The mockup's `.phone-term` draws `font-size: 11.5px; line-height: 1.7; padding: 14px 14px 96px`: a step smaller and a step looser than Web, because the App terminal is read at arm's length on a smaller surface. The 96px bottom is the App capsule's box plus safe area and is therefore measured (`--terminal-content-bottom-inset`), not frozen here — see the same note in `experience/web.json`.",
+    "fontSize": {
+      "value": "11.5px"
+    },
+    "lineHeight": {
+      "$description": "The mockup's `.phone-term` `line-height: 1.7`. Same unit caveat as `experience.web.terminal.lineHeight`: xterm multiplies the font's measured box (1.30em for JetBrains Mono at 11.5px), so 1.7 renders a 25px row where the mockup's CSS draws an 18.63px one.",
+      "value": 1.7
+    },
+    "padX": {
+      "value": "14px"
+    },
+    "padY": {
+      "value": "14px"
+    }
+  },
   "terminalCapsule": {
     "$owner": "pattern.terminal-capsule",
     "fontSize": {

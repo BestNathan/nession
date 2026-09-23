@@ -93,7 +93,11 @@ nession/
 │   └── src/
 │       ├── App.tsx           # Root: auth gate → Shell or LoginPage
 │       ├── main.tsx          # Entry point + Sonner Toaster
-│       ├── index.css         # Tailwind v4 + shadcn/ui dark theme
+│       ├── index.css         # Tailwind v4 + the generated design tokens
+│                             #   (light-only: `.shell` pins color-scheme: light
+│                             #   and nothing applies `.dark`; the dark block in
+│                             #   design/generated/web.css is theme-complete
+│                             #   vocabulary, not shipped UI)
 │       ├── types.ts           # Shared TypeScript types
 │       ├── app/              # App layer (composition root): Shell tree,
 │       │                     #   experiences/{web,app}/, workspace/ tools, fixture/,

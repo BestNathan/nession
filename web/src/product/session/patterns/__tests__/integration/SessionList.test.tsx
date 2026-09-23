@@ -12,6 +12,7 @@ const agent: Agent = {
 const sess: Session = {
   session_id: 'a1:fix', agent_id: 'a1', session_name: 'Fix terminal reconnect',
   status: 'active', window_count: 1, attached_clients: 0,
+  foreground_command: 'claude',
   last_activity: new Date().toISOString(),
 };
 
@@ -48,12 +49,29 @@ describe('SessionList', () => {
       />,
     );
     expect(screen.getByText('Fix terminal reconnect')).toBeInTheDocument();
-    expect(screen.getByText(/shell/)).toBeInTheDocument();
+    // The workload hint is the Session's own foreground command, not a literal
+    // this row supplies (session-item.md §Workload semantics).
+    expect(screen.getByTestId('session-item-meta')).toHaveTextContent(/claude/);
+    expect(screen.getByTestId('session-item-meta')).not.toHaveTextContent(/shell/);
     expect(screen.getByText(/devbox-01/)).toBeInTheDocument();
     expect(screen.getByText(/Agent offline/)).toBeInTheDocument();
     expect(screen.queryByText(/Session offline/i)).not.toBeInTheDocument();
     await userEvent.click(screen.getByTestId('session-item-a1:fix'));
     expect(onSelect).toHaveBeenCalledWith(sess);
+  });
+
+  it('says unknown for a Session with no reported foreground command', () => {
+    const withoutCommand: Session = { ...sess, foreground_command: undefined };
+    render(
+      <SessionList
+        sessions={[withoutCommand]} agents={[agent]} staleAgentIds={[]} selectedId={null}
+        clientSessionId="" attachInFlightId={null} attachFailedId={null}
+        onSelect={vi.fn()}
+      />,
+    );
+    // Not `shell`: an unreported command means the row does not know, and
+    // guessing the most common value is how the literal got there.
+    expect(screen.getByTestId('session-item-meta')).toHaveTextContent(/^unknown/);
   });
 
   it('forwards onConfigure to the row', async () => {
