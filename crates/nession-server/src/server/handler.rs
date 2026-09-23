@@ -9,6 +9,9 @@ use crate::protocol::server_routes;
 use crate::registry::{AgentInfo, AgentRegistry, AgentStatus, SessionRegistry, SessionStatus};
 use crate::server::client_registry::ClientRegistry;
 use crate::server::command_broker::{CommandBroker, ConnectionGeneration};
+// The three policies by name, because the `server_routes!` invocation at the
+// bottom of this file declares one per unit and the names are the column there.
+use crate::server::execution::ExecutionPolicy::{Inline, Ordered, Query};
 use crate::server::outbound::WsMessageSender;
 use crate::server::web_client_registry::WebClientRegistry;
 use nession_common::display_name::validate_display_name;
@@ -91,6 +94,45 @@ pub struct ConnectionHandler {
     attached_session_id: Option<String>,
     /// Unique client id for this relay attachment (for cleanup on disconnect).
     attached_client_id: Option<String>,
+}
+
+/// A clone is a **snapshot of one connection's identity at one moment** — what
+/// a query-lane task is handed (`server::execution`).
+///
+/// The shared services are `Arc`s and clone as themselves, so a clone reads and
+/// writes the same registries, broker and env store as the connection it came
+/// from. The connection-local facts (`authenticated_client`,
+/// `registered_agent_id`, the relay attachment) are values, and a clone gets
+/// them as they were when it was taken — which is exactly the semantics a query
+/// needs, since a query is read *after* the ordered lane applied everything
+/// before it and must not see an identity change that arrives later.
+///
+/// Written out rather than derived because of the second half of that sentence:
+/// a change a *clone* makes to those facts is invisible to the connection, so a
+/// unit declared `Query` that mutates them loses the change. See
+/// `ExecutionPolicy::Query` — a query answers, and it does nothing else.
+impl Clone for ConnectionHandler {
+    fn clone(&self) -> Self {
+        Self {
+            agent_registry: Arc::clone(&self.agent_registry),
+            session_registry: Arc::clone(&self.session_registry),
+            command_broker: Arc::clone(&self.command_broker),
+            client_registry: Arc::clone(&self.client_registry),
+            web_client_registry: Arc::clone(&self.web_client_registry),
+            env_service: Arc::clone(&self.env_service),
+            db: Arc::clone(&self.db),
+            config: ConnectionHandlerConfig {
+                server_auth_token: self.config.server_auth_token.clone(),
+                heartbeat_interval_secs: self.config.heartbeat_interval_secs,
+            },
+            authenticated_client: self.authenticated_client,
+            registered_agent_id: self.registered_agent_id.clone(),
+            connection_generation: self.connection_generation,
+            client_sender: self.client_sender.clone(),
+            attached_session_id: self.attached_session_id.clone(),
+            attached_client_id: self.attached_client_id.clone(),
+        }
+    }
 }
 
 /// Immutable per-connection configuration.
@@ -202,6 +244,14 @@ impl ConnectionHandler {
         self.attached_client_id.as_deref()
     }
 
+    /// One frame, decoded here, as the frame-level entry point.
+    ///
+    /// The connection's read loop splits the two halves itself: it decodes the
+    /// envelope first, because that is where the unit's execution policy is read
+    /// from (`server::execution`), and calls [`Self::handle_protocol_message`]
+    /// with the result. This method is what is left for the frames the loop does
+    /// not classify — a close, a ping, a binary frame — and for the handler
+    /// tests, which are about one frame answered.
     pub async fn handle_message(&mut self, msg: Message) -> anyhow::Result<HandlerAction> {
         match msg {
             Message::Text(text) => {
@@ -216,7 +266,12 @@ impl ConnectionHandler {
         }
     }
 
-    async fn handle_protocol_message(
+    /// One decoded protocol message, dispatched.
+    ///
+    /// Visible to the read loop (`server::websocket`), which decodes once so
+    /// that the frame's meaning — including which lane it is dispatched on — is
+    /// read from the envelope it already has.
+    pub(crate) async fn handle_protocol_message(
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
     ) -> anyhow::Result<HandlerAction> {
@@ -4076,6 +4131,32 @@ mod tests {
         }
     }
 
+    #[test]
+    fn every_unit_the_server_dispatches_declares_an_execution_policy() {
+        // The same derivation as the test above, for the column #961-C added:
+        // `unit_policy` is emitted by the same `server_routes!` invocation that
+        // emits `SERVER_WIRES`, so a unit cannot be dispatched without a policy
+        // — and this is the assertion that says so rather than the comment on
+        // the macro. `policy_for_wire` is what the read loop calls, and a `None`
+        // there is not a failure: it is how a wire this server does *not* serve
+        // is recognised, which is why the negative case is asserted too.
+        for wire in SERVER_WIRES {
+            assert!(
+                crate::server::handler::unit_policy(wire).is_some(),
+                "`{wire}` is dispatched but declares no execution policy"
+            );
+        }
+        assert!(
+            crate::server::handler::unit_policy("git.status").is_none(),
+            "a wire this server does not serve must not declare a policy for it"
+        );
+        assert_eq!(
+            crate::server::execution::policy_for_wire("git.status"),
+            crate::server::execution::ExecutionPolicy::Inline,
+            "an undeclared wire is dispatched inline rather than guessed at"
+        );
+    }
+
     #[tokio::test]
     async fn the_agents_list_carries_what_each_agent_can_serve() {
         // Served from the list rather than a query of its own: it is already
@@ -6855,44 +6936,46 @@ mod tests {
 // several providers, `ContractSupport.wire` carrying the difference.
 
 server_routes!(handler, msg;
-    "server.agent.register" => "server.agent.register" => handler.handle_agent_register(msg).await,
+    "server.agent.register" => "server.agent.register" => Ordered => handler.handle_agent_register(msg).await,
     // `control.heartbeat` is deliberately **not** an arm here. It is a control
     // message, not an operation: nothing answers it (the agent used to read an
     // acknowledgement on a wire of its own, and that is gone because control
     // has no acknowledgement), and an arm would put it in the manifest as a
     // unit the server offers. It is handled in `handle_protocol_message`, ahead
     // of the relay path — see the match there for why the position matters.
-    "server.agent.session-update" => "server.agent.session-update" => handler.handle_agent_session_update(msg).await,
-    "server.agent.command-response" => "server.agent.command-response" => handler.handle_agent_command_response(msg).await,
-    "server.agent.terminal-resize" => "server.agent.terminal-resize" => handler.handle_agent_terminal_resize(msg).await,
-    "server.agent.address-update" => "server.agent.address-update" => handler.handle_agent_address_update(msg).await,
-    "server.auth" => "server.auth" => handler.handle_client_auth(msg).await,
-    "server.agent.list" => "server.agent.list" => handler.handle_client_agents_list(msg).await,
-    "server.session.list" => "server.session.list" => handler.handle_client_sessions_list(msg).await,
-    "server.session.attach" => "server.session.attach" => handler.handle_client_session_attach(msg).await,
-    "server.session.relay.begin" => "server.session.relay.begin" => handler.handle_client_session_relay_begin(msg).await,
+    "server.agent.session-update" => "server.agent.session-update" => Inline => handler.handle_agent_session_update(msg).await,
+    "server.agent.command-response" => "server.agent.command-response" => Inline => handler.handle_agent_command_response(msg).await,
+    "server.agent.terminal-resize" => "server.agent.terminal-resize" => Inline => handler.handle_agent_terminal_resize(msg).await,
+    "server.agent.address-update" => "server.agent.address-update" => Inline => handler.handle_agent_address_update(msg).await,
+    "server.auth" => "server.auth" => Ordered => handler.handle_client_auth(msg).await,
+    "server.agent.list" => "server.agent.list" => Query => handler.handle_client_agents_list(msg).await,
+    "server.session.list" => "server.session.list" => Query => handler.handle_client_sessions_list(msg).await,
+    "server.session.attach" => "server.session.attach" => Ordered => handler.handle_client_session_attach(msg).await,
+    "server.session.relay.begin" => "server.session.relay.begin" => Ordered => handler.handle_client_session_relay_begin(msg).await,
     // `server.session.relay.end` is intercepted by the relay function
     // (`relay_bidirectional_via_channel`) and never reaches the dispatcher
     // during active relay. It is declared here anyway, because the Server does
     // serve it — the relay loop is the handler — and a manifest that omitted it
-    // would understate what this peer answers.
-    "server.session.relay.end" => "server.session.relay.end" => Ok(HandlerAction::Reply(None)),
-    "server.session.create" => "server.session.create" => handler.handle_client_session_create(msg).await,
-    "server.session.kill" => "server.session.kill" => handler.handle_client_session_kill(msg).await,
-    "server.session.capture-preview" => "server.session.capture-preview" => handler.handle_client_session_capture_preview(msg).await,
-    "server.env.list" => "server.env.list" => handler.handle_client_env_list(msg).await,
-    "server.env.get" => "server.env.get" => handler.handle_client_env_get(msg).await,
-    "server.env.write" => "server.env.write" => handler.handle_client_env_write(msg).await,
-    "server.env.delete" => "server.env.delete" => handler.handle_client_env_delete(msg).await,
-    "server.session.env.apply" => "server.session.env.apply" => handler.handle_client_session_env_apply(msg).await,
-    "server.session.env.unset" => "server.session.env.unset" => handler.handle_client_session_env_unset(msg).await,
-    "server.session.env.active" => "server.session.env.active" => handler.handle_client_session_env_active(msg).await,
-    "server.session.env.query" => "server.session.env.query" => handler.handle_client_session_env_query(msg).await,
-    "server.info" => "server.info" => handler.handle_client_server_info(msg).await,
-    "server.agent.rename" => "server.agent.rename" => handler.handle_client_agent_rename(msg).await,
-    "server.agent.delete" => "server.agent.delete" => handler.handle_client_agent_delete(msg).await,
-    "server.commands.list" => "server.commands.list" => handler.handle_client_commands_list(msg).await,
-    "server.commands.add" => "server.commands.add" => handler.handle_client_commands_add(msg).await,
-    "server.commands.remove" => "server.commands.remove" => handler.handle_client_commands_remove(msg).await,
-    "server.commands.update" => "server.commands.update" => handler.handle_client_commands_update(msg).await,
+    // would understate what this peer answers. `Ordered`, because it is the
+    // other half of the mode transition: leaving relay mode must be as
+    // deterministic as entering it.
+    "server.session.relay.end" => "server.session.relay.end" => Ordered => Ok(HandlerAction::Reply(None)),
+    "server.session.create" => "server.session.create" => Inline => handler.handle_client_session_create(msg).await,
+    "server.session.kill" => "server.session.kill" => Inline => handler.handle_client_session_kill(msg).await,
+    "server.session.capture-preview" => "server.session.capture-preview" => Query => handler.handle_client_session_capture_preview(msg).await,
+    "server.env.list" => "server.env.list" => Query => handler.handle_client_env_list(msg).await,
+    "server.env.get" => "server.env.get" => Query => handler.handle_client_env_get(msg).await,
+    "server.env.write" => "server.env.write" => Inline => handler.handle_client_env_write(msg).await,
+    "server.env.delete" => "server.env.delete" => Inline => handler.handle_client_env_delete(msg).await,
+    "server.session.env.apply" => "server.session.env.apply" => Inline => handler.handle_client_session_env_apply(msg).await,
+    "server.session.env.unset" => "server.session.env.unset" => Inline => handler.handle_client_session_env_unset(msg).await,
+    "server.session.env.active" => "server.session.env.active" => Query => handler.handle_client_session_env_active(msg).await,
+    "server.session.env.query" => "server.session.env.query" => Query => handler.handle_client_session_env_query(msg).await,
+    "server.info" => "server.info" => Query => handler.handle_client_server_info(msg).await,
+    "server.agent.rename" => "server.agent.rename" => Inline => handler.handle_client_agent_rename(msg).await,
+    "server.agent.delete" => "server.agent.delete" => Inline => handler.handle_client_agent_delete(msg).await,
+    "server.commands.list" => "server.commands.list" => Query => handler.handle_client_commands_list(msg).await,
+    "server.commands.add" => "server.commands.add" => Inline => handler.handle_client_commands_add(msg).await,
+    "server.commands.remove" => "server.commands.remove" => Inline => handler.handle_client_commands_remove(msg).await,
+    "server.commands.update" => "server.commands.update" => Inline => handler.handle_client_commands_update(msg).await,
 );
