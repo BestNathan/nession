@@ -61,7 +61,9 @@ async fn test_register_and_send_command() {
         }
     });
 
-    broker.register_agent("agent-1", sender).await;
+    broker
+        .claim_agent("agent-1", broker.new_connection_generation(), sender)
+        .await;
 
     let _rx = broker
         .send_command(
@@ -99,7 +101,9 @@ async fn test_resolve_command() {
         }
     });
 
-    broker.register_agent("agent-1", sender).await;
+    broker
+        .claim_agent("agent-1", broker.new_connection_generation(), sender)
+        .await;
 
     let rx = broker
         .send_command(
@@ -128,7 +132,7 @@ async fn test_resolve_command() {
 }
 
 #[tokio::test]
-async fn test_unregister_agent_resolves_pending() {
+async fn test_release_agent_resolves_pending() {
     let (addr, _captured, _handle) = start_mock_agent().await.unwrap();
     let broker = CommandBroker::new();
 
@@ -145,7 +149,10 @@ async fn test_unregister_agent_resolves_pending() {
         }
     });
 
-    broker.register_agent("agent-1", sender).await;
+    // The connection this sender belongs to, so the disconnect below can be
+    // its own release rather than an anonymous removal.
+    let generation = broker.new_connection_generation();
+    broker.claim_agent("agent-1", generation, sender).await;
 
     let rx = broker
         .send_command(
@@ -156,7 +163,7 @@ async fn test_unregister_agent_resolves_pending() {
         )
         .await;
 
-    broker.unregister_agent("agent-1").await;
+    broker.release_agent("agent-1", generation).await;
 
     let result = rx.await;
     assert!(result.is_err(), "should fail when agent disconnects");
@@ -197,7 +204,9 @@ async fn test_multiple_concurrent_commands() {
         }
     });
 
-    broker.register_agent("agent-1", sender).await;
+    broker
+        .claim_agent("agent-1", broker.new_connection_generation(), sender)
+        .await;
 
     let rx1 = broker
         .send_command(
