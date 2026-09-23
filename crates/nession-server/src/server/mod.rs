@@ -1,6 +1,7 @@
 mod agent_view;
 pub mod client_registry;
 pub mod command_broker;
+pub mod execution;
 mod handler;
 pub mod outbound;
 

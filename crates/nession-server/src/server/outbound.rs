@@ -212,9 +212,12 @@ impl WsMessageSender {
     /// waiting is what makes that true rather than merely likely: there is no
     /// path through this method that loses the frame, and the cost of the
     /// guarantee is that a peer which never drains parks its producer instead of
-    /// growing the heap. The parked task is the connection's own read loop, so
-    /// waiting also stops that connection from reading more, which is the
-    /// backpressure the bound exists to apply.
+    /// growing the heap. The parked task is the connection's reader — reading
+    /// this frame itself, or the query task it admitted to run it (#961-C) —
+    /// and either way waiting stops that connection from reading more: a parked
+    /// query holds its slot in the query lane, the lane fills, and the reader
+    /// parks on the next frame. That is the backpressure the bound exists to
+    /// apply, one lane deeper than it was when this was written.
     ///
     /// Relay terminal bytes come through here too. They are on this lane for the
     /// same reason as replies — dropping bytes out of a terminal stream leaves

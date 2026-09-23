@@ -464,7 +464,34 @@ async fn start_ownership_server_with_grace(
     stall_grace_secs: u64,
 ) -> anyhow::Result<OwnershipServer> {
     let (db_dir, db_path) = test_db(db_name)?;
-    let config = nession_common::config::ServerConfig {
+    let mut config = ownership_server_config(db_path);
+    config.terminal_stall_grace_secs = stall_grace_secs;
+    let (addr, handle) = start_test_server(config).await?;
+    Ok((db_dir, addr, handle))
+}
+
+/// The same, with `#961-C`'s query lane bound set by the test.
+///
+/// The production default is a policy number (see
+/// `DEFAULT_QUERY_CONCURRENCY_PER_CONNECTION`); a test that is *about* the bound
+/// wants one it can count on one hand, and setting it here changes nothing else
+/// about the connection.
+async fn start_ownership_server_with_queries(
+    db_name: &str,
+    query_concurrency: usize,
+) -> anyhow::Result<OwnershipServer> {
+    let (db_dir, db_path) = test_db(db_name)?;
+    let mut config = ownership_server_config(db_path);
+    config.query_concurrency_per_connection = query_concurrency;
+    let (addr, handle) = start_test_server(config).await?;
+    Ok((db_dir, addr, handle))
+}
+
+/// What these tests run their server with: no TLS, a known token, the default
+/// heartbeat cadence, and the production policy numbers unless a test says
+/// otherwise.
+fn ownership_server_config(db_path: String) -> nession_common::config::ServerConfig {
+    nession_common::config::ServerConfig {
         listen_address: "127.0.0.1:0".to_string(),
         tls_cert_path: String::new(),
         tls_key_path: String::new(),
@@ -472,11 +499,8 @@ async fn start_ownership_server_with_grace(
         heartbeat_interval_secs: 10,
         heartbeat_timeout_secs: 30,
         db_path,
-        terminal_stall_grace_secs: stall_grace_secs,
         ..Default::default()
-    };
-    let (addr, handle) = start_test_server(config).await?;
-    Ok((db_dir, addr, handle))
+    }
 }
 
 /// The next frame as JSON. `Err` for anything else: these tests assert on
@@ -797,6 +821,18 @@ fn session_list_request(id: &str) -> serde_json::Value {
     })
 }
 
+/// An authentication frame, for a connection that may already be authenticated
+/// (`server.auth` is idempotent, and answering it again is what makes it usable
+/// as an ordered frame a test can place anywhere).
+fn auth_request(id: &str) -> serde_json::Value {
+    serde_json::json!({
+        "msg_type": "server.auth",
+        "id": id,
+        "timestamp": current_timestamp(),
+        "payload": { "auth_token": "test_token" },
+    })
+}
+
 /// The same for the agent registry.
 fn agent_list_request(id: &str) -> serde_json::Value {
     serde_json::json!({
@@ -870,6 +906,128 @@ async fn replies_in_arrival_order(
     Ok(seen)
 }
 
+/// The next capture command the agent is handed, as `(request_id, session)`.
+///
+/// The request id is the Server's own correlation for the brokered command —
+/// the agent answers with it and the Server routes the answer back to whoever
+/// asked. `session` is what the client named, which is how a test tells one
+/// request's answer from another's at the far end.
+async fn next_capture_command(agent: &mut TestWs) -> anyhow::Result<(String, String)> {
+    let command = tokio::time::timeout(std::time::Duration::from_secs(5), next_json(agent))
+        .await
+        .map_err(|_| anyhow::anyhow!("the server never forwarded the capture command"))??;
+    let payload = payload_of(&command, "agent.session.capture-preview")?;
+    let request_id = payload
+        .get("request_id")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| anyhow::anyhow!("the command carries no request id: {command}"))?
+        .to_string();
+    let session = payload
+        .get("session_name")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    Ok((request_id, session))
+}
+
+/// Assert that no further capture command reaches the agent within `window`.
+///
+/// The negative half of the query lane's bound, and safe in that direction: it
+/// can only go red when a command the lane should have held back is forwarded
+/// anyway. Frames that are not capture commands are skipped, because a
+/// connection that is open at all carries pings.
+async fn no_capture_command_within(
+    agent: &mut TestWs,
+    window: std::time::Duration,
+) -> anyhow::Result<()> {
+    let deadline = tokio::time::Instant::now() + window;
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return Ok(());
+        }
+        match tokio::time::timeout(remaining, agent.next()).await {
+            Ok(Some(Ok(tokio_tungstenite::tungstenite::Message::Text(text)))) => {
+                let parsed: serde_json::Value = serde_json::from_str(&text)?;
+                anyhow::ensure!(
+                    parsed.get("msg_type").and_then(serde_json::Value::as_str)
+                        != Some("agent.session.capture-preview"),
+                    "the lane forwarded a command while it was full: {parsed}"
+                );
+            }
+            Ok(Some(Ok(_))) => {}
+            Ok(Some(Err(e))) => return Err(e.into()),
+            Ok(None) => anyhow::bail!("the agent's connection closed"),
+            Err(_) => return Ok(()),
+        }
+    }
+}
+
+/// Whether the connection ended within `window`, read from the client's side.
+///
+/// A close, an EOF and a transport error all count as "the connection is over":
+/// they are three spellings of the same fact and which one arrives depends on
+/// how the Server dropped the socket. Anything else is a frame the connection
+/// was still live enough to send, and is skipped past.
+async fn ends_within(client: &mut TestWs, window: std::time::Duration) -> bool {
+    let deadline = tokio::time::Instant::now() + window;
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return false;
+        }
+        match tokio::time::timeout(remaining, client.next()).await {
+            Ok(Some(Ok(tokio_tungstenite::tungstenite::Message::Close(_)))) | Ok(None) => {
+                return true
+            }
+            Ok(Some(Err(_))) => return true,
+            Ok(Some(Ok(_))) => {}
+            Err(_) => return false,
+        }
+    }
+}
+
+/// The next reply carrying one of `candidates`, whatever else arrives first.
+///
+/// The single-frame form of [`replies_in_arrival_order`], for the tests that
+/// assert on *which* reply came first rather than on the set. It is deliberately
+/// not built on that helper: waiting for a set means waiting for its last
+/// member, and the answer to "which came first" must not require the second one
+/// to be there.
+async fn next_reply(
+    client: &mut TestWs,
+    candidates: &[&str],
+    within: std::time::Duration,
+) -> anyhow::Result<serde_json::Value> {
+    let deadline = tokio::time::Instant::now() + within;
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        anyhow::ensure!(
+            !remaining.is_zero(),
+            "no reply among {candidates:?} arrived within {within:?}"
+        );
+        match tokio::time::timeout(remaining, client.next()).await {
+            Ok(Some(Ok(tokio_tungstenite::tungstenite::Message::Text(text)))) => {
+                let parsed: serde_json::Value = serde_json::from_str(&text)?;
+                let named = parsed
+                    .get("id")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|id| candidates.contains(&id));
+                if named {
+                    return Ok(parsed);
+                }
+            }
+            Ok(Some(Ok(tokio_tungstenite::tungstenite::Message::Close(frame)))) => {
+                anyhow::bail!("connection closed while waiting for {candidates:?}: {frame:?}")
+            }
+            Ok(Some(Ok(_))) => {}
+            Ok(Some(Err(e))) => return Err(e.into()),
+            Ok(None) => anyhow::bail!("connection closed while waiting for {candidates:?}"),
+            Err(_) => anyhow::bail!("no reply among {candidates:?} arrived within {within:?}"),
+        }
+    }
+}
+
 /// The ids of a set of frames, in order.
 fn ids_of(frames: &[serde_json::Value]) -> Vec<String> {
     frames
@@ -879,64 +1037,356 @@ fn ids_of(frames: &[serde_json::Value]) -> Vec<String> {
         .collect()
 }
 
-/// A request that waits on an agent holds every later request on the same
-/// connection — the independent ones included.
+/// A request that waits on an agent does **not** hold the connection it arrived
+/// on: an independent query is answered while the slow one is still unanswered.
 ///
-/// The slow request is brokered, so the test is the agent: it holds the answer
-/// until it has already sent the fast request, which is what makes "the fast
-/// one answered second" a property of the test rather than of the machine.
+/// This is stage A's `a_slow_command_holds_the_connection_it_arrived_on` with
+/// its assertion flipped, and `#961-C` — the Server query lane — is the stage it
+/// named. The mechanism paragraph of the old doc comment is the one that
+/// changed: `handle_ws_stream` still reads one frame at a time, but a read-only
+/// unit is no longer awaited inline. It is admitted to the connection's query
+/// lane and run on its own task, so the next frame is read while the capture is
+/// outstanding. Both requests here are read-only, which is what the lane is for.
 ///
-/// The mechanism is `handle_ws_stream`'s loop — `handler.handle_message(msg).await`
-/// is awaited inline, so the second frame is not *read* while the first is in
-/// flight. Nothing about the two requests relates them; they are serialized
-/// because the connection is.
+/// What makes the flip *deterministic* is the sequencing rather than the clock:
+/// the agent does not answer the capture until the list has been read back, so
+/// "the list was served while the capture had no answer at all" is a statement
+/// about what the Server dispatched, not about how fast anything ran. A tree
+/// that awaits the handler inline cannot produce that reply — it has not read
+/// the frame — which is what the mutation check for this test does.
 ///
-/// **Flips at `#961-C`** (Server query lane). Both requests are read-only — a
-/// capture preview is named there explicitly — so the expected behaviour is
-/// that the list is answered while the capture is still outstanding, and this
-/// assertion becomes `["fast-1", "slow-1"]` with each reply still carrying its
-/// own id.
+/// The *order* the two replies arrive in is not asserted as a property of the
+/// machine: replies to two queries are ordered by completion, and here that
+/// order is the test holding the agent quiet (`#961`: correlated by id, not by
+/// arrival position).
 #[tokio::test]
-async fn a_slow_command_holds_the_connection_it_arrived_on() -> anyhow::Result<()> {
-    let (_db_dir, addr, _handle) = start_ownership_server("test_ws_hol_blocking.db").await?;
+async fn a_slow_query_does_not_hold_the_connection_it_arrived_on() -> anyhow::Result<()> {
+    let (_db_dir, addr, _handle) = start_ownership_server("test_ws_query_lane.db").await?;
 
     let mut agent = connect_agent(addr, "a1").await?;
     let mut client = connect_client(addr).await?;
 
-    // The slow one goes first, and stays unanswered: the Server is inside this
-    // handler for as long as the test keeps quiet.
+    // The slow one goes first, and stays unanswered: the Server is inside that
+    // request until the test lets the agent speak.
     send_json(&mut client, capture_preview_request("slow-1", "a1:dev")).await?;
-    let command = tokio::time::timeout(std::time::Duration::from_secs(5), next_json(&mut agent))
-        .await
-        .map_err(|_| anyhow::anyhow!("the server never forwarded the capture command"))??;
-    let request_id = payload_of(&command, "agent.session.capture-preview")?
-        .get("request_id")
-        .and_then(serde_json::Value::as_str)
-        .ok_or_else(|| anyhow::anyhow!("the command carries no request id: {command}"))?
-        .to_string();
+    let (request_id, _) = next_capture_command(&mut agent).await?;
 
-    // The fast, independent one — written while the slow one is in flight.
+    // The fast, independent one — written while the slow one is outstanding.
     send_json(&mut client, session_list_request("fast-1")).await?;
 
-    // Now the agent answers the first.
-    send_json(&mut agent, command_answer(&request_id, "slow-1-answered")).await?;
-
-    let replies = replies_in_arrival_order(&mut client, &["slow-1", "fast-1"]).await?;
-
+    // The witness: the *first* answer on the connection is the list's, while
+    // the capture has no answer at all — the agent has not spoken, so a reply
+    // for `fast-1` cannot exist unless that frame was read and dispatched behind
+    // the capture. Both ids are candidates so that whichever answer the Server
+    // produces first is the one the failure names: the serial tree, which never
+    // reads the fast frame at all, fails this wait for both of them.
+    let fast = next_reply(
+        &mut client,
+        &["fast-1", "slow-1"],
+        std::time::Duration::from_secs(10),
+    )
+    .await?;
     assert_eq!(
-        ids_of(&replies),
-        vec!["slow-1".to_string(), "fast-1".to_string()],
-        "the list was answered out of order — the connection is no longer serial"
+        fast["id"],
+        serde_json::json!("fast-1"),
+        "the independent list was not the first answer — the slow capture held the \
+         connection it arrived on: {fast}"
     );
+    assert_eq!(fast["msg_type"], "server.session.list");
+    anyhow::ensure!(
+        fast["payload"]["sessions"].is_array(),
+        "the fast reply is not a session list: {fast}"
+    );
+
+    // Now the agent answers the capture — and it comes back to its own id, with
+    // its own answer, however long it was held.
+    send_json(&mut agent, command_answer(&request_id, "slow-1-answered")).await?;
+    let slow = next_reply(&mut client, &["slow-1"], std::time::Duration::from_secs(10)).await?;
     assert_eq!(
-        replies[0]["payload"]["echo"],
+        slow["payload"]["echo"],
+        serde_json::json!("slow-1-answered"),
+        "the capture's answer came back under the capture's id"
+    );
+    Ok(())
+}
+
+/// Two queries waiting on the *same* agent run at the same time.
+///
+/// The witness is positive and needs no window: the agent is handed the second
+/// capture command while it has not answered the first. That cannot happen
+/// unless the second request was read and dispatched while the first was still
+/// in flight — the same mechanism as the test above, observed from the agent's
+/// side instead of the client's, and impossible in stage A's tree for the same
+/// reason.
+///
+/// The answers are sent back in reverse order, so the replies cannot be matched
+/// by arrival: each one has to carry the answer to the request it answers, which
+/// is `#961`'s "response correlated by id, not by completion order".
+#[tokio::test]
+async fn two_queries_waiting_on_an_agent_run_at_the_same_time() -> anyhow::Result<()> {
+    let (_db_dir, addr, _handle) = start_ownership_server("test_ws_query_overlap.db").await?;
+
+    let mut agent = connect_agent(addr, "a1").await?;
+    let mut client = connect_client(addr).await?;
+
+    send_json(&mut client, capture_preview_request("slow-1", "a1:dev-1")).await?;
+    send_json(&mut client, capture_preview_request("slow-2", "a1:dev-2")).await?;
+
+    // Both commands, with neither answered: the second arriving at all is the
+    // proof of overlap.
+    let (first_id, first_name) = next_capture_command(&mut agent).await?;
+    let (second_id, second_name) = next_capture_command(&mut agent).await?;
+    assert_eq!(
+        (first_name.as_str(), second_name.as_str()),
+        ("dev-1", "dev-2"),
+        "the commands reached the agent in the order the client wrote them"
+    );
+
+    // Answered in reverse: completion order and arrival order are now different
+    // from each other, and the ids are the only thing that can sort them out.
+    send_json(&mut agent, command_answer(&second_id, "dev-2-answered")).await?;
+    send_json(&mut agent, command_answer(&first_id, "dev-1-answered")).await?;
+
+    let replies = replies_in_arrival_order(&mut client, &["slow-1", "slow-2"]).await?;
+    let echo_of = |id: &str| {
+        replies
+            .iter()
+            .find(|reply| reply["id"] == serde_json::json!(id))
+            .map(|reply| reply["payload"]["echo"].clone())
+            .unwrap_or_default()
+    };
+    assert_eq!(echo_of("slow-1"), serde_json::json!("dev-1-answered"));
+    assert_eq!(echo_of("slow-2"), serde_json::json!("dev-2-answered"));
+    Ok(())
+}
+
+/// The lane's bound is real: a connection that fills it stops being read.
+///
+/// This is `#961`'s "concurrency upper bound" test for the Server — the
+/// requirement's goal 5 is that a task count must not grow with a message count,
+/// and the way this lane enforces it is that the frame which would exceed the
+/// bound is never read. Five requests against a lane of two, with an agent that
+/// answers nothing: exactly two commands exist to be forwarded, and the
+/// assertion that no third arrives is what the bound *is*.
+///
+/// Then the other half, which is why the bound is a delay and not a loss: as the
+/// two are answered the reader is admitted again, the remaining three commands
+/// flow, and all five replies come back carrying the answer to their own
+/// request. A bound that dropped the overflow would show up here as a missing
+/// id or an echo addressed to the wrong request.
+#[tokio::test]
+async fn the_query_lane_holds_a_connection_at_its_bound_and_then_drains() -> anyhow::Result<()> {
+    const BOUND: usize = 2;
+    const REQUESTS: usize = 5;
+
+    let (_db_dir, addr, _handle) =
+        start_ownership_server_with_queries("test_ws_query_bound.db", BOUND).await?;
+
+    let mut agent = connect_agent(addr, "a1").await?;
+    let mut client = connect_client(addr).await?;
+
+    let ids: Vec<String> = (0..REQUESTS).map(|n| format!("q-{n}")).collect();
+    for (n, id) in ids.iter().enumerate() {
+        send_json(
+            &mut client,
+            capture_preview_request(id, &format!("a1:dev-{n}")),
+        )
+        .await?;
+    }
+
+    // The lane's worth, and nothing beyond it.
+    let mut forwarded = Vec::new();
+    for _ in 0..BOUND {
+        forwarded.push(next_capture_command(&mut agent).await?);
+    }
+    no_capture_command_within(&mut agent, std::time::Duration::from_millis(500)).await?;
+
+    // Answering frees the slots the reader is waiting for, one command at a
+    // time. The order the answers go back in is deliberately not the order the
+    // commands arrived.
+    for (request_id, name) in forwarded.iter().rev() {
+        send_json(&mut agent, command_answer(request_id, name)).await?;
+    }
+    for _ in BOUND..REQUESTS {
+        let (request_id, name) = next_capture_command(&mut agent).await?;
+        send_json(&mut agent, command_answer(&request_id, &name)).await?;
+    }
+
+    let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+    let replies = replies_in_arrival_order(&mut client, &refs).await?;
+    for reply in &replies {
+        let id = reply["id"].as_str().unwrap_or_default();
+        let session = id.trim_start_matches("q-");
+        assert_eq!(
+            reply["payload"]["echo"],
+            serde_json::json!(format!("dev-{session}")),
+            "reply `{id}` carries the answer to another request: {reply}"
+        );
+    }
+    Ok(())
+}
+
+/// An independent mutation is not held behind a slow query either.
+///
+/// The same mechanism as the tests above, seen through a frame that is *not*
+/// read-only: a mutation is serial with the connection's other ordered frames,
+/// but not ordered against the queries in flight, so the agent is renamed and
+/// the client is answered while the capture still has no answer.
+///
+/// A mutation cannot depend on a query — queries have no effects — which is what
+/// makes not waiting for them safe. The frame that *would* have to wait is one
+/// that takes effect on the connection itself, and those are the ordered ones.
+#[tokio::test]
+async fn a_mutation_is_not_held_behind_a_slow_query() -> anyhow::Result<()> {
+    let (_db_dir, addr, _handle) = start_ownership_server("test_ws_query_mutation.db").await?;
+
+    let mut agent = connect_agent(addr, "a1").await?;
+    let mut client = connect_client(addr).await?;
+
+    send_json(&mut client, capture_preview_request("slow-1", "a1:dev")).await?;
+    let (request_id, _) = next_capture_command(&mut agent).await?;
+
+    send_json(
+        &mut client,
+        serde_json::json!({
+            "msg_type": "server.agent.rename",
+            "id": "rename-1",
+            "timestamp": current_timestamp(),
+            "payload": { "agent_id": "a1", "display_name": "Renamed" },
+        }),
+    )
+    .await?;
+
+    // The first answer on the connection has to be the rename's: the capture is
+    // unanswered, so its reply cannot be the one that overtook it, which is what
+    // makes this an assertion about dispatch rather than about speed.
+    let renamed = next_reply(
+        &mut client,
+        &["rename-1", "slow-1"],
+        std::time::Duration::from_secs(10),
+    )
+    .await?;
+    assert_eq!(
+        renamed["id"],
+        serde_json::json!("rename-1"),
+        "the rename was not answered while the capture was outstanding: {renamed}"
+    );
+    let payload = payload_of(&renamed, "server.agent.rename")?;
+    assert_eq!(
+        payload["success"],
+        serde_json::json!(true),
+        "the rename was refused: {payload}"
+    );
+    assert_eq!(payload["agent"]["agent_id"], serde_json::json!("a1"));
+
+    // And the capture still comes back to its own id once the agent speaks.
+    send_json(&mut agent, command_answer(&request_id, "slow-1-answered")).await?;
+    let slow = replies_in_arrival_order(&mut client, &["slow-1"]).await?;
+    assert_eq!(
+        slow[0]["payload"]["echo"],
         serde_json::json!("slow-1-answered")
     );
-    assert_eq!(replies[1]["msg_type"], "server.session.list");
-    anyhow::ensure!(
-        replies[1]["payload"]["sessions"].is_array(),
-        "the second reply is not a session list: {}",
-        replies[1]
+    Ok(())
+}
+
+/// A slow operation does not hold the connection open: a close ends it while the
+/// query it abandoned is still unanswered.
+///
+/// `#961`'s second Server criterion names close explicitly, and this is the one
+/// frame the ordered lane's barrier deliberately does not cover — nothing read
+/// after a close can depend on a query, and waiting for one is how a connection
+/// ends up refusing to end.
+///
+/// The query here is never answered, so what separates the two behaviours is not
+/// a race but the query's own timeout: a Server that ended the connection where
+/// the close was read ends it at once, and one that made the close wait for the
+/// query ends it only after that query gives up (15 s, stated by the capture
+/// contract, three times the window below). The window is therefore a margin
+/// against a *stated* timeout rather than a budget on the machine.
+///
+/// **Two things this test cannot assert, both measured.** The client cannot read
+/// the reply to the query it abandoned: after sending a close frame its own
+/// state machine is closing what it receives, and what it actually saw here was
+/// an RST — so "the query was not finished off behind the close" is not
+/// observable from this side. And a frame written on the *agent's* connection
+/// does not order against one written on the client's, so a test that answered
+/// the capture after closing found the answer had already been processed.
+///
+/// The terminal stall grace is shortened so the writer's own teardown — a
+/// separate question this test is not about, and one where the Server currently
+/// waits out the grace before it is aborted — does not dominate the window.
+#[tokio::test]
+async fn a_slow_query_does_not_hold_the_connection_open() -> anyhow::Result<()> {
+    let (_db_dir, addr, _handle) =
+        start_ownership_server_with_grace("test_ws_query_close.db", 1).await?;
+
+    let mut agent = connect_agent(addr, "a1").await?;
+    let mut client = connect_client(addr).await?;
+
+    // A query the agent will never answer: it is outstanding for the whole of
+    // the test, so nothing but the close can end the connection.
+    send_json(&mut client, capture_preview_request("slow-1", "a1:dev")).await?;
+    let (_request_id, _) = next_capture_command(&mut agent).await?;
+
+    let started = tokio::time::Instant::now();
+    send_frame(
+        &mut client,
+        tokio_tungstenite::tungstenite::Message::Close(None),
+    )
+    .await?;
+
+    assert!(
+        ends_within(&mut client, std::time::Duration::from_secs(5)).await,
+        "the connection was still open {:?} after a close frame, with a query the agent \
+         has not answered in flight: the close was queued behind it (that query gives up \
+         after 15s)",
+        started.elapsed()
+    );
+    Ok(())
+}
+
+/// An ordered frame takes effect — and is answered — after the queries read
+/// before it.
+///
+/// This is the barrier in front of the `Ordered` lane, pinned with the timing
+/// taken out of it. The auth is written while a capture is outstanding and
+/// unanswered, and the witness is that its reply does *not* arrive until the
+/// capture's does: an ordered frame is applied once everything read before it has
+/// finished, which is what keeps authentication, registration and the mode
+/// transitions deterministic on a connection that is no longer serial.
+///
+/// Stage A's guard below (`before / auth / after`) pins the same rule in the
+/// direction that needs no help — the frames are written back to back — but it
+/// is a *race* without the barrier: the refusal is fast, so the assertion
+/// usually holds even when the auth overtook it. Here the query in front of the
+/// auth is held open by the test, so "the auth's reply came second" is a
+/// property of the Server rather than of the scheduler.
+#[tokio::test]
+async fn an_ordered_frame_is_applied_after_the_queries_read_before_it() -> anyhow::Result<()> {
+    let (_db_dir, addr, _handle) = start_ownership_server("test_ws_ordered_barrier.db").await?;
+
+    let mut agent = connect_agent(addr, "a1").await?;
+    let mut client = connect_client(addr).await?;
+
+    send_json(&mut client, capture_preview_request("slow-1", "a1:dev")).await?;
+    let (request_id, _) = next_capture_command(&mut agent).await?;
+
+    // The ordered frame, written behind an unanswered query.
+    send_json(&mut client, auth_request("auth-2")).await?;
+    no_reply_for(&mut client, "auth-2", std::time::Duration::from_millis(500)).await?;
+
+    // The query finishes, and the ordered frame follows it rather than
+    // overtaking it.
+    send_json(&mut agent, command_answer(&request_id, "slow-1-answered")).await?;
+    let replies = replies_in_arrival_order(&mut client, &["slow-1", "auth-2"]).await?;
+    assert_eq!(
+        ids_of(&replies),
+        vec!["slow-1".to_string(), "auth-2".to_string()],
+        "the ordered frame was applied before the query read ahead of it"
+    );
+    assert_eq!(
+        payload_of(&replies[1], "server.auth")?["status"],
+        serde_json::json!("success")
     );
     Ok(())
 }
@@ -1096,25 +1546,41 @@ async fn registration_is_ordered_before_the_state_the_agent_reports() -> anyhow:
 /// The client writes `FLOOD_REQUESTS` brokered requests and then reads nothing,
 /// while the agent answers each one with a payload of `FLOOD_PAYLOAD_BYTES`.
 /// The queued total is larger than the outbound budget, so the bound is reached
-/// and the read loop parks in `send_reply` — a reply is not droppable, so it
-/// waits for room rather than failing or being discarded.
+/// and a reply parks in `send_reply` — a reply is not droppable, so it waits for
+/// room rather than failing or being discarded.
 ///
 /// Both halves are the assertion:
 ///
-/// * the command count **plateaus below `FLOOD_REQUESTS`** — the read loop is
-///   parked on a queue the client is not draining. If every command still got
-///   through, the path is unbounded again, which is the regression this test
-///   exists to catch (measured with the bound in place: 10 of 16, i.e. the 8 MiB
-///   budget's worth of 1 MiB answers plus what the socket buffered).
+/// * the command count **plateaus below `FLOOD_REQUESTS`** — dispatch is parked
+///   on a queue the client is not draining. If every command still got through,
+///   the path is unbounded again, which is the regression this test exists to
+///   catch.
 /// * once the client reads, **the count completes and every reply arrives**,
 ///   whole and distinct — so the park was a park, not a drop. A reply lost to
 ///   the bound would show up here as a missing id or a stalled count.
 ///
 /// The gap between the two halves is also the flow-control claim: the client
 /// draining is what lets dispatch resume, with nothing dropped in between.
+///
+/// ## Why the flood is 48 requests and not 16 (#961-C)
+///
+/// The bound holds either way — what changed is how much traffic it takes to
+/// *see* it. The Server's own hold is the 8 MiB budget; everything past that
+/// sits in kernel socket buffers, which is TCP flow control doing its job and
+/// not something the Server sizes. Stage B's flood of 16 MiB sat entirely
+/// inside queue-plus-socket, so the count never stopped moving; that test was
+/// measuring the pipeline's *depth* rather than the bound. The depth was one
+/// command at a time then (the read loop awaited each handler inline) and is the
+/// query lane's bound now, so a non-draining client gets further before the
+/// Server stops.
+///
+/// Measured on macOS loopback with this payload: **dispatch parks after 17 of
+/// 48** — the 8 MiB budget of 1 MiB answers plus ~9 MiB of socket buffers. The
+/// flood is sized well past that so the plateau is a property of the bound
+/// rather than of the machine's buffers.
 #[tokio::test]
 async fn a_client_that_stops_reading_parks_dispatch_and_loses_nothing() -> anyhow::Result<()> {
-    const FLOOD_REQUESTS: usize = 16;
+    const FLOOD_REQUESTS: usize = 48;
     const FLOOD_PAYLOAD_BYTES: usize = 1024 * 1024;
     /// How long the command count must stop moving before it counts as the
     /// bound rather than as the agent being between commands.

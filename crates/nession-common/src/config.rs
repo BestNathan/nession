@@ -28,6 +28,17 @@ pub struct ServerConfig {
     /// `server::outbound`.
     #[serde(default = "default_terminal_stall_grace")]
     pub terminal_stall_grace_secs: u64,
+    /// How many queries one client connection may have in flight at once
+    /// (#961-C).
+    ///
+    /// The bound on the connection's query lane: read-only units run on their
+    /// own tasks so a query waiting on an agent does not hold the connection's
+    /// other frames behind it, and this is what keeps that from being one task
+    /// per message. Reaching it stops the connection from being *read* until a
+    /// query finishes, so the bound is also the backpressure. See
+    /// `nession_server::server::execution`.
+    #[serde(default = "default_query_concurrency")]
+    pub query_concurrency_per_connection: usize,
     /// Logging configuration (optional). When omitted, defaults to
     /// `level = "info"`, `rotation = "daily"`, `retention_days = 7`.
     #[serde(default)]
@@ -37,6 +48,19 @@ pub struct ServerConfig {
 /// The default for [`ServerConfig::terminal_stall_grace_secs`], published so the
 /// outbound queue's own default cannot drift from the config's.
 pub const DEFAULT_TERMINAL_STALL_GRACE_SECS: u64 = 15;
+
+/// The default for [`ServerConfig::query_concurrency_per_connection`], published
+/// for the same reason: the query lane's own default is this number.
+///
+/// Eight is a policy number, not a tuned one. A connection's queries are the
+/// read-only units a browser asks for — a session list, a capture preview, an
+/// env read — and they are mostly *waiting* on an agent, so the lane is about
+/// how many of those may be outstanding before the Server would rather stop
+/// reading the connection than open another task for it. Large enough that a
+/// UI asking for several things at once is never the reason it stalls, small
+/// enough that a connection which never gets answered costs eight tasks and not
+/// the machine.
+pub const DEFAULT_QUERY_CONCURRENCY_PER_CONNECTION: usize = 8;
 
 impl Default for ServerConfig {
     fn default() -> Self {
@@ -49,6 +73,7 @@ impl Default for ServerConfig {
             heartbeat_timeout_secs: default_heartbeat_timeout(),
             db_path: default_db_path(),
             terminal_stall_grace_secs: default_terminal_stall_grace(),
+            query_concurrency_per_connection: default_query_concurrency(),
             logging: LoggingConfig::default(),
         }
     }
@@ -56,6 +81,10 @@ impl Default for ServerConfig {
 
 fn default_terminal_stall_grace() -> u64 {
     DEFAULT_TERMINAL_STALL_GRACE_SECS
+}
+
+fn default_query_concurrency() -> usize {
+    DEFAULT_QUERY_CONCURRENCY_PER_CONNECTION
 }
 
 fn default_heartbeat_interval() -> u64 {
@@ -156,5 +185,12 @@ mod tests {
                 .to_string_lossy()
                 .into_owned()
         ); // default
+
+        // A config file written before the query lane existed still describes a
+        // connection that runs one (#961-C): the field has to default, not fail.
+        assert_eq!(
+            config.query_concurrency_per_connection,
+            DEFAULT_QUERY_CONCURRENCY_PER_CONNECTION
+        );
     }
 }

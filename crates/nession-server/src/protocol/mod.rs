@@ -46,8 +46,15 @@ pub(crate) fn v1_descriptor(id: &str, wire: &str) -> Result<ProtocolDescriptor, 
 /// in scope — the bodies are the handlers, and they reach into the handler's
 /// state. The macro is defined here so the declaration's identity rules live
 /// with the module that owns them.
+///
+/// Each arm carries the **execution policy** of its unit (`#961-C`), between the
+/// wire type and the body: how the connection's reader dispatches a message of
+/// that unit. It is a column here for the same reason the id and the wire are —
+/// one invocation, so a unit cannot be handled without being advertised, or
+/// advertised without a policy, and the policy acts on a Protocol Unit rather
+/// than on a name prefix. `server::execution` owns what the policies mean.
 macro_rules! server_routes {
-    ($handler:ident, $msg:ident $(,)? ; $( $id:literal => $wire:literal => $body:expr ),* $(,)?) => {
+    ($handler:ident, $msg:ident $(,)? ; $( $id:literal => $wire:literal => $policy:expr => $body:expr ),* $(,)?) => {
         /// Every Protocol Unit this server serves on its client and agent
         /// connections.
         ///
@@ -67,6 +74,19 @@ macro_rules! server_routes {
         /// server does not serve falls through to the tail match rather than
         /// into `dispatch_server`'s empty arm.
         pub(crate) const SERVER_WIRES: &[&str] = &[$( $wire, )*];
+
+        /// How the connection's reader dispatches one wire (`#961-C`).
+        ///
+        /// `None` for a wire this server does not serve — a control wire, a wire
+        /// it only forwards to an agent, or something nobody serves. The
+        /// connection reads that as its declared default rather than guessing
+        /// from the name; see `server::execution`.
+        pub(crate) fn unit_policy(wire: &str) -> Option<$crate::server::execution::ExecutionPolicy> {
+            match wire {
+                $( $wire => Some($policy), )*
+                _ => None,
+            }
+        }
 
         /// Route one message to the handler that serves it.
         ///
