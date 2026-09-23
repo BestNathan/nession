@@ -52,13 +52,20 @@ export class SessionsPlugin implements TransportPlugin {
     this.connection = connection;
 
     const unsubs = [
-      connection.subscribe('sessions.changed', (payload) => {
+      // `<emitter>.<subject>.<event>` — the server pushes this, so the server
+      // is the first segment. It used to be `sessions.changed`, with no
+      // emitter at all; see `AgentsPlugin`'s subscription for what that cost.
+      connection.subscribe('server.sessions.changed', (payload) => {
         const sessions = (payload as { sessions?: Session[] })?.sessions;
         if (sessions) {
           this.notify(sessions);
         }
       }),
-      connection.subscribe('client.sessions.list.response', (payload) => {
+      // The list's own wire, so a message of this type that is *not* a pending
+      // reply still reaches consumers. It used to be a hand-written name that
+      // nothing sent — the same name the request does not use, which is how a
+      // subscription stops firing without anyone noticing.
+      connection.subscribe(SESSION_LIST_WIRE, (payload) => {
         const sessions = (payload as { sessions?: Session[] })?.sessions;
         if (sessions) {
           this.notify(sessions);

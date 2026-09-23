@@ -1,8 +1,14 @@
 //! Broadcast channel for pushing agent state changes to web clients.
 //!
 //! Uses a `tokio::sync::broadcast` channel so every authenticated web
-//! client connection subscribes once and receives `agents.changed` pushes
-//! without the server needing to track individual senders.
+//! client connection subscribes once and receives `server.agents.changed`
+//! pushes without the server needing to track individual senders.
+//!
+//! Every wire sent from here is a **notification**:
+//! `<emitter>.<subject>.<event>`, where the first segment names the runtime
+//! that sends it — this one — and not, as an operation's first segment does,
+//! the runtime that answers. Nothing answers a notification; see
+//! `docs/architecture/protocol.md` § *Notification*.
 
 use std::sync::Arc;
 use tokio::sync::broadcast;
@@ -10,6 +16,21 @@ use tokio_tungstenite::tungstenite::Message as WsMessage;
 use tracing::{debug, error, info};
 
 use super::command_broker::WsMessageSender;
+
+/// The wires this module pushes, declared where they are sent.
+///
+/// A notification is carried by no contract, so `just codegen` emits nothing
+/// for it and there is no binding to import — the declaration beside the
+/// sender is the only statement of the name, and `scripts/protocol-gate.mjs`
+/// reads it as one (rule 1: a call site may name these; rule 4: the first
+/// segment says which runtime emits them, and that is what these constants
+/// make checkable rather than a matter of reading the code).
+///
+/// They are used at the two ends of every push below — the `msg_type` and the
+/// `error!` beside it — so a rename cannot leave half of it behind.
+pub const AGENTS_CHANGED: &str = "server.agents.changed";
+pub const SESSIONS_CHANGED: &str = "server.sessions.changed";
+pub const COMMANDS_CHANGED: &str = "server.commands.changed";
 
 /// Shared broadcast channel for agent state pushes. A single sender is held
 /// by the server; every web-client connection spawns a relay task that
@@ -62,7 +83,7 @@ impl WebClientRegistry {
         );
     }
 
-    /// Push an `agents.changed` JSON payload to all connected web clients.
+    /// Push a `server.agents.changed` JSON payload to all connected web clients.
     /// This is a non-blocking send — slow clients may miss messages (lagged).
     pub fn broadcast(&self, json: String) {
         match self.tx.send(json) {
@@ -74,14 +95,14 @@ impl WebClientRegistry {
         }
     }
 
-    /// Build an `agents.changed` payload from the agent registry and push it.
+    /// Build a `server.agents.changed` payload from the agent registry and push it.
     pub async fn broadcast_agents_changed(
         &self,
         agent_registry: Arc<crate::registry::AgentRegistry>,
     ) {
         let agents = agent_registry.list().await;
         let payload = serde_json::json!({
-            "msg_type": "agents.changed",
+            "msg_type": AGENTS_CHANGED,
             "id": "",
             "timestamp": std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -100,19 +121,19 @@ impl WebClientRegistry {
         match serde_json::to_string(&payload) {
             Ok(json) => self.broadcast(json),
             Err(e) => error!(
-                "WebClientRegistry: failed to serialize agents.changed: {}",
+                "WebClientRegistry: failed to serialize {AGENTS_CHANGED}: {}",
                 e
             ),
         }
     }
 
-    /// Build a `sessions.changed` payload from the session registry and push
+    /// Build a `server.sessions.changed` payload from the session registry and push
     /// it to every connected web client.
     ///
     /// Web clients only fetch the session list on mount, so without this push
     /// any change made elsewhere (another browser, an agent reconnecting, a
     /// session dying) would stay invisible until a manual refresh. The session
-    /// JSON is produced by the same helper as `server.session.list.response`,
+    /// JSON is produced by the same helper as `server.session.list`,
     /// so both paths always carry an identical field set.
     pub async fn broadcast_sessions_changed(
         &self,
@@ -120,7 +141,7 @@ impl WebClientRegistry {
     ) {
         let sessions = session_registry.list().await;
         let payload = serde_json::json!({
-            "msg_type": "sessions.changed",
+            "msg_type": SESSIONS_CHANGED,
             "id": "",
             "timestamp": std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -136,7 +157,7 @@ impl WebClientRegistry {
         match serde_json::to_string(&payload) {
             Ok(json) => self.broadcast(json),
             Err(e) => error!(
-                "WebClientRegistry: failed to serialize sessions.changed: {}",
+                "WebClientRegistry: failed to serialize {SESSIONS_CHANGED}: {}",
                 e
             ),
         }
@@ -146,7 +167,7 @@ impl WebClientRegistry {
     /// notify them that the quick-command list has been modified.
     pub async fn broadcast_commands_changed(&self) {
         let payload = serde_json::json!({
-            "msg_type": "server.commands.changed",
+            "msg_type": COMMANDS_CHANGED,
             "id": "",
             "timestamp": std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -157,7 +178,7 @@ impl WebClientRegistry {
         match serde_json::to_string(&payload) {
             Ok(json) => self.broadcast(json),
             Err(e) => error!(
-                "WebClientRegistry: failed to serialize server.commands.changed: {}",
+                "WebClientRegistry: failed to serialize {COMMANDS_CHANGED}: {}",
                 e
             ),
         }
@@ -194,7 +215,7 @@ mod tests {
     }
 
     /// A subscribed web client receives the pushed session list with the same
-    /// field set `server.session.list.response` uses — the browser feeds both
+    /// field set `server.session.list` uses — the browser feeds both
     /// into one state setter, so a mismatch would silently yield `undefined`.
     #[tokio::test]
     async fn broadcast_sessions_changed_reaches_subscriber() {
@@ -215,7 +236,7 @@ mod tests {
             .expect("channel closed");
         let parsed: serde_json::Value = serde_json::from_str(msg.to_text().unwrap()).unwrap();
 
-        assert_eq!(parsed["msg_type"], "sessions.changed");
+        assert_eq!(parsed["msg_type"], SESSIONS_CHANGED);
         let list = parsed["payload"]["sessions"].as_array().unwrap();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0]["session_id"], "a1:s1");
@@ -245,7 +266,7 @@ mod tests {
             .expect("channel closed");
         let parsed: serde_json::Value = serde_json::from_str(msg.to_text().unwrap()).unwrap();
 
-        assert_eq!(parsed["msg_type"], "sessions.changed");
+        assert_eq!(parsed["msg_type"], SESSIONS_CHANGED);
         assert!(parsed["payload"]["sessions"].as_array().unwrap().is_empty());
     }
 

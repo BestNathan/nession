@@ -48,7 +48,7 @@ describe('SessionsPlugin', () => {
       // Consumers registered under B receive events through B.
       const cb = vi.fn();
       plugin.onSessionsChanged(cb);
-      surfaceB.pushMessage('sessions.changed', { sessions: [makeSession('b', 's2')] });
+      surfaceB.pushMessage('server.sessions.changed', { sessions: [makeSession('b', 's2')] });
       expect(cb).toHaveBeenCalledWith([makeSession('b', 's2')]);
 
       // The final teardown detaches the plugin completely.
@@ -56,7 +56,7 @@ describe('SessionsPlugin', () => {
       await expect(plugin.listSessions()).rejects.toThrow('sessions feature is not connected');
       const lateCb = vi.fn();
       plugin.onSessionsChanged(lateCb);
-      surfaceB.pushMessage('sessions.changed', { sessions: [makeSession('b', 's3')] });
+      surfaceB.pushMessage('server.sessions.changed', { sessions: [makeSession('b', 's3')] });
       expect(cb).toHaveBeenCalledTimes(1); // stale consumers were cleared at teardown
       expect(lateCb).not.toHaveBeenCalled(); // no subscription survives on B
     });
@@ -74,11 +74,11 @@ describe('SessionsPlugin', () => {
       teardownA(); // stale release — must not drop B's consumers
 
       const sessions = [makeSession('b', 's1')];
-      surfaceB.pushMessage('sessions.changed', { sessions });
+      surfaceB.pushMessage('server.sessions.changed', { sessions });
       expect(cb).toHaveBeenCalledWith(sessions);
 
       teardownB(); // current release — the consumer dies with its binding
-      surfaceB.pushMessage('sessions.changed', { sessions: [makeSession('b', 's2')] });
+      surfaceB.pushMessage('server.sessions.changed', { sessions: [makeSession('b', 's2')] });
       expect(cb).toHaveBeenCalledTimes(1);
     });
 
@@ -96,28 +96,28 @@ describe('SessionsPlugin', () => {
       plugin.install(surface);
     });
 
-    it('fires with the unwrapped list on sessions.changed', () => {
+    it('fires with the unwrapped list on server.sessions.changed', () => {
       const cb = vi.fn();
       plugin.onSessionsChanged(cb);
       const sessions = [makeSession('a', 's1')];
-      surface.pushMessage('sessions.changed', { sessions });
+      surface.pushMessage('server.sessions.changed', { sessions });
       expect(cb).toHaveBeenCalledWith(sessions);
     });
 
-    it('fires on client.sessions.list.response as well (current double-subscribe behavior)', () => {
+    it('fires on server.session.list as well (current double-subscribe behavior)', () => {
       const cb = vi.fn();
       plugin.onSessionsChanged(cb);
       const sessions = [makeSession('a', 's2')];
-      surface.pushMessage('client.sessions.list.response', { sessions });
+      surface.pushMessage('server.session.list', { sessions });
       expect(cb).toHaveBeenCalledWith(sessions);
     });
 
     it('ignores payloads without a sessions field', () => {
       const cb = vi.fn();
       plugin.onSessionsChanged(cb);
-      surface.pushMessage('sessions.changed', {});
-      surface.pushMessage('sessions.changed', { sessions: undefined });
-      surface.pushMessage('client.sessions.list.response', { unrelated: true });
+      surface.pushMessage('server.sessions.changed', {});
+      surface.pushMessage('server.sessions.changed', { sessions: undefined });
+      surface.pushMessage('server.session.list', { unrelated: true });
       expect(cb).not.toHaveBeenCalled();
     });
 
@@ -125,7 +125,7 @@ describe('SessionsPlugin', () => {
       const cb = vi.fn();
       const unsub = plugin.onSessionsChanged(cb);
       unsub();
-      surface.pushMessage('sessions.changed', { sessions: [makeSession('a', 's1')] });
+      surface.pushMessage('server.sessions.changed', { sessions: [makeSession('a', 's1')] });
       expect(cb).not.toHaveBeenCalled();
     });
   });

@@ -55,9 +55,17 @@ RUN cargo build --release --bin nession-agent
 # purpose: they install nothing, and a binary linked against glibc 2.31 runs
 # fine on bookworm's 2.36.
 FROM debian:bookworm-slim AS runtime
+# `git` is here because the agent composes `GitAgentExtension` (`main.rs`) and
+# this image carried no git binary — the capability was live and its tool was
+# missing, so every `git.*` unit failed at the point of running git.
+#
+# No `openssh-client` alongside it: the `git.*` units are all **local** reads
+# (`status`, `diff`, `log`, `branches`, `worktrees`, `root`), so nothing fetches
+# or pushes. Add it when write operations (#845) reach the point of talking to a
+# remote, rather than pre-emptively.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        nginx ca-certificates curl gettext-base && \
+        nginx ca-certificates curl gettext-base git && \
     rm -rf /var/lib/apt/lists/*
 
 # Install tmux from static builds (https://github.com/tmux/tmux-builds)

@@ -44,25 +44,30 @@ fn schema_of<T: schemars::JsonSchema>(gen: &mut schemars::SchemaGenerator) -> sc
 ///
 /// ## What is *not* one
 ///
-/// A **notification** — a reply to something the other end sent, on a wire of
-/// its own. It has a wire, a payload type and a sender, which is exactly why it
-/// is the one thing that gets mistaken for a unit. The test is one question:
+/// Two categories, and they are different from each other as well as from a
+/// unit — `docs/architecture/protocol.md` § *What is not a Protocol Unit* holds
+/// the rule in prose. Restated here because this is where someone arrives when
+/// the schema says a unit has no `response`:
 ///
-/// > **Does anything dispatch it?** A unit is something a dispatcher answers. A
-/// > notification is a reply to a message *you* sent: no route table has an arm
-/// > for it, and nothing can ask for it.
+/// * A **notification** — a message a peer pushes on its own initiative, on a
+///   wire of its own (`server.agents.changed`, `agent.terminal.output`). It has
+///   a wire, a payload type and a sender, which is exactly why it is the one
+///   thing that gets mistaken for a unit. The test is one question:
 ///
-/// `server.agent.heartbeat` is a unit; `server.heartbeat.ack` is not. The
-/// heartbeat therefore has `response: None` — its answer travels on a wire the
-/// `<wire>.response` convention cannot name, so there is no wire for a response
-/// shape to attach to. Declaring the ack as a unit instead would make the
-/// manifest **claim an offer that does not exist**, because nobody can ask for
-/// an acknowledgement.
+///   > **Does anything dispatch it?** A unit is something a dispatcher
+///   > *answers*. A notification is one nobody asks for: no route table has an
+///   > arm for it, and nothing can ask for it.
 ///
-/// `docs/architecture/protocol.md` § *What is not a Protocol Unit* holds the
-/// same rule in prose, with the two consequences that follow from it. It is
-/// restated here because this is where someone arrives when the schema says a
-/// unit has no `response`.
+/// * A **control** message (`control.heartbeat`, `control.ping`,
+///   `control.pong`) — the other one. It *is* dispatched by every runtime and
+///   still is not a unit, because the manifest is a statement of what you can
+///   ask a peer for: every peer may *send* a control message and every peer
+///   must *handle* one, so an offer is not the right description of it. Naming
+///   it a unit would also break the operation grammar, whose first segment
+///   names the answerer — and control has no answerer.
+///
+/// `server.heartbeat.ack` is the historical example of getting this wrong: it
+/// was neither, and it has been deleted rather than classified.
 pub struct Unit {
     /// The provider's directory name — `git`, `claude-code`.
     pub owner: &'static str,
@@ -92,11 +97,7 @@ pub struct Unit {
     /// shape, and `every_unit_declares_a_request_shape` fails if one stops. It
     /// stays an `Option` because the half that is genuinely missing is the other
     /// one: a unit has no `response` when it is one-way
-    /// (`server.agent.address-update` announces endpoints and nothing answers)
-    /// or when its answer is a **notification** rather than an offer
-    /// (`server.agent.heartbeat` is acknowledged on `server.heartbeat.ack`, and
-    /// a notification is deliberately not a unit — [`Unit`]'s own doc carries
-    /// the test, rather than pointing at another crate for it).
+    /// (`server.agent.address-update` announces endpoints and nothing answers).
     ///
     /// The examples this comment used to give had gone stale in one direction
     /// and false in the other: it named `agent.terminal-resize` and
@@ -364,35 +365,19 @@ wires: &["server.agent.register"],
                 schema_of::<nession_protocol::contracts::agent::v1::AgentRegisterResponsePayload>,
             )),
         },
-        Unit {
-            owner: "core",
-            id: "server.agent.heartbeat",
-            version: 1,
-            wires: &["server.agent.heartbeat"],
-            // One-way: a heartbeat is sent and not awaited. Its acknowledgement
-            // travels on `server.heartbeat.ack` and is deliberately **not a
-            // unit** — a notification is a reply to something the agent sent,
-            // and a manifest advertising one would claim an offer that does not
-            // exist (`nession-agent`'s protocol module owns that rule and states
-            // it). `response: None` here is that, not an omission.
-            //
-            // The comment this replaces called the acknowledgement "a different
-            // unit's payload" and pointed at `Unit.request` for the reasoning.
-            // No such unit exists and none should, which is what sent someone
-            // looking for one to add.
-            decls: vec![
-                decl_of::<nession_protocol::contracts::agent::v1::AgentHeartbeatPayload>(cfg),
-                decl_of::<nession_protocol::contracts::agent::v1::AgentStatus>(cfg),
-                decl_of::<nession_protocol::contracts::agent::v1::HeartbeatMetadata>(cfg),
-                decl_of::<nession_protocol::contracts::agent::v1::AgentMetadata>(cfg),
-            ],
-            request: Some((
-                "AgentHeartbeatCall",
-                nession_protocol::contracts::agent::v1::AgentHeartbeatPayload::inline,
-                schema_of::<nession_protocol::contracts::agent::v1::AgentHeartbeatPayload>,
-            )),
-            response: None,
-        },
+        // `server.agent.heartbeat` used to be here, as a one-way unit with
+        // `response: None` and a comment explaining that its acknowledgement
+        // travelled on a wire of its own. Both halves of that are gone, and
+        // they went together: the heartbeat is `control.heartbeat` — a control
+        // wire, which is not a unit — and the acknowledgement does not exist,
+        // because control has no acknowledgement.
+        //
+        // The reasoning that put it here is worth keeping, because it is what
+        // the new category replaced. Its `response: None` was read as "the
+        // answer is a *notification*", and the notification was then declared
+        // nowhere, so a reader looking for the unit that carried it found no
+        // unit and concluded one was missing. The missing thing was a
+        // category, not an entry.
         Unit {
             owner: "core",
             id: "server.agent.session-update",
@@ -454,8 +439,8 @@ wires: &["server.agent.command-response"],
             id: "server.agent.address-update",
             version: 1,
             wires: &["server.agent.address-update"],
-            // One-way: the agent announces its endpoints. Nothing answers, and
-            // no `.response` wire exists.
+            // One-way: the agent announces its endpoints. Nothing answers it,
+            // on any wire.
             decls: vec![
                 decl_of::<nession_protocol::contracts::agent::v1::AgentAddressUpdatePayload>(cfg),
                 decl_of::<nession_protocol::contracts::agent::v1::AgentAddress>(cfg),
@@ -1506,9 +1491,10 @@ wires: &["server.commands.update"],
             wires: &["agent.terminal.input"],
             // One-way, and `response: None` **is** the statement: keystrokes go
             // to the pty and nothing answers them. Verified rather than
-            // assumed — no `.response` wire for this unit exists anywhere in
-            // the tree. The absence used to be indistinguishable from an
-            // unfinished entry, which is what this comment is for.
+            // assumed — under one wire per operation a reply would arrive as
+            // `agent.terminal.input` itself, and nothing in the tree sends one.
+            // The absence used to be indistinguishable from an unfinished
+            // entry, which is what this comment is for.
             decls: vec![
                 decl_of::<nession_protocol::contracts::terminal::v1::TerminalInputPayload>(cfg),
             ],
@@ -1524,8 +1510,9 @@ wires: &["server.commands.update"],
             id: "agent.terminal.resize",
             version: 1,
             wires: &["agent.terminal.resize"],
-            // One-way: a size change is announced, not answered. No `.response`
-            // wire exists for it, so `None` is the model rather than a gap.
+            // One-way: a size change is announced, not answered — a reply would
+            // arrive as `agent.terminal.resize` itself, and none is sent. `None`
+            // is the model rather than a gap.
             decls: vec![
                 decl_of::<nession_protocol::contracts::terminal::v1::TerminalResizePayload>(cfg),
             ],
@@ -1677,29 +1664,15 @@ wires: &["agent.file.cwd"],
                 schema_of::<nession_protocol::contracts::file::v1::FileCwdResponse>,
             )),
         },
-        Unit {
-            owner: "core",
-            id: "agent.keepalive.ping",
-            version: 1,
-            wires: &["agent.keepalive.ping"],
-            // Request-only, and **forced rather than chosen**: the agent answers
-            // with an empty payload on `keepalive.pong`, not on
-            // `agent.keepalive.ping.response`. The response slot names a shape,
-            // and the `<wire>.response` convention is what gives that shape a
-            // wire — so attaching one would assert a wire nobody sends.
-            //
-            // The one unit here whose missing half is a *naming* problem rather
-            // than a missing type: `keepalive.pong` is a wire the kernel's
-            // `<wire>.response` rule cannot reach.
-            decls: vec![
-                decl_of::<nession_protocol::contracts::agent::v1::KeepalivePingPayload>(cfg),
-            ],
-            request: Some((
-                "KeepalivePingCall",
-                nession_protocol::contracts::agent::v1::KeepalivePingPayload::inline,
-                schema_of::<nession_protocol::contracts::agent::v1::KeepalivePingPayload>,
-            )),
-            response: None,
-        },
+        // `agent.keepalive.ping` used to be here — the one unit whose missing
+        // half was a *classification* of a wire that already existed
+        // (`keepalive.pong`) rather than a missing type. That was the right
+        // answer to the wrong question: a ping, a pong and a heartbeat are
+        // **control** wires, which are not units at all. Control has no
+        // answerer and no emitter — every peer may send one and every peer must
+        // handle one — so what the catalog was missing was not a response
+        // shape, it was the category. `docs/architecture/protocol.md` is where
+        // the three are defined, and `scripts/protocol-gate.mjs` is what holds
+        // every runtime to handling all of them.
     ]
 }

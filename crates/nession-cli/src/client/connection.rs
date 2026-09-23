@@ -137,12 +137,14 @@ impl ClientConnection {
             match msg {
                 Ok(Message::Text(text)) => {
                     let response: serde_json::Value = serde_json::from_str(&text)?;
-                    let msg_type = response
-                        .get("msg_type")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("");
+                    // Correlated by `id`, never by `msg_type`: the reply to
+                    // `server.auth` arrives *as* `server.auth`, so the name
+                    // cannot tell a reply apart from the request that produced
+                    // it — only this id can. The Web's `MessageRouter` reads
+                    // its pending map the same way.
+                    let reply_id = response.get("id").and_then(|v| v.as_str()).unwrap_or("");
 
-                    if msg_type == "server.auth.response" {
+                    if reply_id == msg_id {
                         let status = response
                             .get("payload")
                             .and_then(|v| v.get("status"))
@@ -163,7 +165,7 @@ impl ClientConnection {
                         }
                     } else {
                         anyhow::bail!(
-                            "Unexpected response: expected server.auth.response, got {msg_type}"
+                            "Unexpected reply: id `{reply_id}` is not the `server.auth` request id `{msg_id}`"
                         )
                     }
                 }
@@ -204,12 +206,9 @@ impl ClientConnection {
             match msg {
                 Ok(Message::Text(text)) => {
                     let response: serde_json::Value = serde_json::from_str(&text)?;
-                    let msg_type = response
-                        .get("msg_type")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("");
+                    let reply_id = response.get("id").and_then(|v| v.as_str()).unwrap_or("");
 
-                    if msg_type == "server.agent.list.response" {
+                    if reply_id == msg_id {
                         let agents: Vec<AgentInfo> = serde_json::from_value(
                             response
                                 .get("payload")
@@ -220,7 +219,7 @@ impl ClientConnection {
                         Ok(agents)
                     } else {
                         anyhow::bail!(
-                            "Unexpected response: expected server.agent.list.response, got {msg_type}"
+                            "Unexpected reply: id `{reply_id}` is not the `server.agent.list` request id `{msg_id}`"
                         )
                     }
                 }
@@ -268,12 +267,9 @@ impl ClientConnection {
             match msg {
                 Ok(Message::Text(text)) => {
                     let response: serde_json::Value = serde_json::from_str(&text)?;
-                    let msg_type = response
-                        .get("msg_type")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("");
+                    let reply_id = response.get("id").and_then(|v| v.as_str()).unwrap_or("");
 
-                    if msg_type == "server.session.list.response" {
+                    if reply_id == msg_id {
                         let sessions: Vec<SessionInfo> = serde_json::from_value(
                             response
                                 .get("payload")
@@ -284,7 +280,7 @@ impl ClientConnection {
                         Ok(sessions)
                     } else {
                         anyhow::bail!(
-                            "Unexpected response: expected server.session.list.response, got {msg_type}"
+                            "Unexpected reply: id `{reply_id}` is not the `server.session.list` request id `{msg_id}`"
                         )
                     }
                 }
@@ -334,14 +330,14 @@ impl ClientConnection {
             match msg {
                 Ok(Message::Text(text)) => {
                     let response: serde_json::Value = serde_json::from_str(&text)?;
-                    let msg_type = response
-                        .get("msg_type")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("");
+                    // Correlated by `id`, never by `msg_type` — the attach reply
+                    // arrives as `server.session.attach`, the name this request
+                    // was sent under.
+                    let reply_id = response.get("id").and_then(|v| v.as_str()).unwrap_or("");
 
-                    if msg_type != "server.session.attach.response" {
+                    if reply_id != msg_id {
                         anyhow::bail!(
-                            "Unexpected response: expected server.session.attach.response, got {msg_type}"
+                            "Unexpected reply: id `{reply_id}` is not the `server.session.attach` request id `{msg_id}`"
                         );
                     }
 
@@ -632,7 +628,7 @@ mod tests {
 
                                 if token == "valid_token" {
                                     json!({
-                                        "msg_type": "server.auth.response",
+                                        "msg_type": "server.auth",
                                         "id": parsed.get("id").unwrap(),
                                         "timestamp": 0,
                                         "payload": {
@@ -643,7 +639,7 @@ mod tests {
                                     })
                                 } else {
                                     json!({
-                                        "msg_type": "server.auth.response",
+                                        "msg_type": "server.auth",
                                         "id": parsed.get("id").unwrap(),
                                         "timestamp": 0,
                                         "payload": {
@@ -655,7 +651,7 @@ mod tests {
                             }
                             "server.agent.list" => {
                                 json!({
-                                    "msg_type": "server.agent.list.response",
+                                    "msg_type": "server.agent.list",
                                     "id": parsed.get("id").unwrap(),
                                     "timestamp": 0,
                                     "payload": {
@@ -675,7 +671,7 @@ mod tests {
                             }
                             "server.session.list" => {
                                 json!({
-                                    "msg_type": "server.session.list.response",
+                                    "msg_type": "server.session.list",
                                     "id": parsed.get("id").unwrap(),
                                     "timestamp": 0,
                                     "payload": {
@@ -701,7 +697,7 @@ mod tests {
 
                                 if preferred_mode == "relay" {
                                     json!({
-                                        "msg_type": "server.session.attach.response",
+                                        "msg_type": "server.session.attach",
                                         "id": parsed.get("id").unwrap(),
                                         "timestamp": 0,
                                         "payload": {
@@ -711,7 +707,7 @@ mod tests {
                                     })
                                 } else {
                                     json!({
-                                        "msg_type": "server.session.attach.response",
+                                        "msg_type": "server.session.attach",
                                         "id": parsed.get("id").unwrap(),
                                         "timestamp": 0,
                                         "payload": {

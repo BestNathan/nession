@@ -39,7 +39,7 @@ belongs to core runtime; layout/selection state belongs to app/workbench.
 | State | Owner today | Lifetime / scope |
 |---|---|---|
 | Session list + loading/error | `features/sessions/hooks/useSessionData` per mount | Composed by `app/useDashboard` (the one app-layer composer; the shell mounts one list copy). Deliberately **no** list atom |
-| Push updates (`sessions.changed`) + refetch on reconnect | `app/useRealtimeUpdates` | Registers `sessionsApi.onSessionsChanged(setSessions)` keyed on `wsService` identity — one subscription bridge for agents+sessions; not moved into the feature while it fuses both domains |
+| Push updates (`server.sessions.changed`) + refetch on reconnect | `app/useRealtimeUpdates` | Registers `sessionsApi.onSessionsChanged(setSessions)` keyed on `wsService` identity — one subscription bridge for agents+sessions; not moved into the feature while it fuses both domains |
 | Filter/sort/search state | `app/useDashboardFilter` | Per mount; types (`StatusFilter`/`SortField`/`SortDirection`) declared in `features/sessions/types.ts` and consumed by `SearchBar` + sidebar chrome `SessionListHeader` |
 | Dialog targets (create/kill/attach) | `app/useDashboardModals` | Per mount; wired by `SessionFirstShell` through `SessionFirstDialogs` |
 | Wire registration | `SessionsPlugin` instance (module singleton `sessionsApi`) | One binding per WebSocketService lifetime; `WebSocketService.use()` re-installs after reconnect with generation-tagged teardown (`SessionsPlugin.ts`) |

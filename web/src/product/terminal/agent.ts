@@ -1,6 +1,5 @@
 import { decodeBase64Bytes, encodeBase64 } from './base64';
 import { WIRE as ATTACH_WIRE } from '@/generated/protocol/core/agent-attach/v1';
-import { WIRE as KEEPALIVE_PING_WIRE } from '@/generated/protocol/core/agent-keepalive-ping/v1';
 import { WIRE as TERMINAL_INPUT_WIRE } from '@/generated/protocol/core/agent-terminal-input/v1';
 import { WIRE as TERMINAL_RESIZE_WIRE } from '@/generated/protocol/core/agent-terminal-resize/v1';
 import type { PluginSurface } from '@/platform/socket/types';
@@ -28,8 +27,10 @@ export interface AgentError {
  * Agent (P2P) terminal capability — bound to one concrete connection, so a
  * factory takes the surface rather than a plugin install (the session
  * runtime owns install timing). The wire strings are the generated bindings,
- * except `agent.terminal.output` — a notification the agent declares next to
- * its dispatcher, with no Protocol Unit of its own.
+ * except two: `agent.terminal.output` — a notification the agent declares
+ * next to its dispatcher, with no Protocol Unit of its own — and
+ * `control.ping`, which is a control wire and so is neither a unit nor a
+ * notification.
  *
  * The wire shapes mirror `terminal/ConnectionManager.ts`, which now drives
  * this API: attach optionally carries the viewport as width/height,
@@ -132,7 +133,13 @@ export function createTerminalAgentApi(surface: PluginSurface): TerminalAgentApi
     },
 
     ping: (): void => {
-      surface.send(KEEPALIVE_PING_WIRE, {});
+      // A literal, not an imported binding, because there is no binding:
+      // `control.ping` is a control wire, and control wires are not Protocol
+      // Units, so `just codegen` emits no file for it. `send` is the right
+      // verb for the same reason — control has no reply mechanism, so nothing
+      // is registered as pending and `control.pong` carries no correlation
+      // back to this call.
+      surface.send('control.ping', {});
     },
   };
 }
