@@ -30,7 +30,7 @@ declare -A THRESHOLDS=(
     ["nession-agent"]=80
     ["nession-server"]=80
     ["nession-cli"]=40
-    ["nession-claude-code"]=55
+    ["nession-claude-code"]=80
     ["nession-git"]=80
     ["nession-protocol"]=80
 )
@@ -50,7 +50,7 @@ declare -A FIX_HINTS=(
     ["nession-agent"]="Add unit tests in crates/nession-agent/src/. Run: cargo test -p nession-agent"
     ["nession-server"]="Add unit tests in crates/nession-server/src/. Run: cargo test -p nession-server"
     ["nession-cli"]="CLI coverage target is 40%. Add tests in crates/nession-cli/."
-    ["nession-claude-code"]="Claude Code extension coverage target is 55% (floor, not the 80% the other crates hold). Add tests in crates/nession-claude-code/. Raising this to 80% is known debt and still has no issue tracking it."
+    ["nession-claude-code"]="Add unit tests in crates/nession-claude-code/src/. Run: cargo test -p nession-claude-code"
     ["nession-git"]="Add unit tests in crates/nession-git/src/ and integration tests in crates/nession-git/tests/ (they build a real temporary repository). Run: cargo test -p nession-git"
     ["nession-protocol"]="Add unit tests in crates/nession-protocol/src/. The kernel is pure data and resolution and the contracts are pure wire shapes, so every rule it enforces has a test that fails when the rule is removed: kernel rules in src/kernel/, a contract's own tests in src/contracts/<family>/tests.rs. Run: cargo test -p nession-protocol"
 )
