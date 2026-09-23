@@ -14,6 +14,8 @@ export interface UseTerminalOptions {
   transportFactory: () => TerminalTransport;
   rendererType?: 'webgl' | 'canvas';
   fontSize?: number;
+  /** xterm's line-height multiplier, from the device profile's Experience tokens. */
+  lineHeight?: number;
   scrollback?: number;
   /** Device class — 'mobile' enables the IME-friendly input textarea. */
   deviceProfile?: DeviceProfile;
@@ -55,6 +57,7 @@ export function useTerminal(options: UseTerminalOptions): TerminalController | n
     transportFactory,
     rendererType,
     fontSize,
+    lineHeight,
     scrollback,
     deviceProfile,
     scrollbackMode = 'legacy',
@@ -85,13 +88,14 @@ export function useTerminal(options: UseTerminalOptions): TerminalController | n
       {
         rendererType: rendererType ?? 'canvas',
         fontSize,
+        lineHeight,
         scrollback,
         deviceProfile,
         scrollbackMode,
         events,
       },
     );
-  }, [sessionId, sessionName, mode, transportFactory, rendererType, fontSize, scrollback, deviceProfile, scrollbackMode, runtime]);
+  }, [sessionId, sessionName, mode, transportFactory, rendererType, fontSize, lineHeight, scrollback, deviceProfile, scrollbackMode, runtime]);
 
   // Dispose replaced controllers (session switch). Never dispose synchronously
   // in cleanup: StrictMode replays effects as unmount→remount and would

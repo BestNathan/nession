@@ -24,6 +24,12 @@ export const touchTarget = {
 export const shell = {
   iconButtonSize: 44,
 } as const;
+export const terminal = {
+  fontSize: 11.5,
+  lineHeight: 1.31,
+  padX: 14,
+  padY: 14,
+} as const;
 export const terminalCapsule = {
   fontSize: "1rem",
   textLineHeight: "1.5rem",

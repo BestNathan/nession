@@ -1,5 +1,6 @@
 import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
+import { TERMINAL_METRICS } from '../../../../../design/generated/terminal';
 import { Renderer } from '../Renderer';
 import { ThemeManager, TERMINAL_MINIMUM_CONTRAST_RATIO } from '../ThemeManager';
 import { FontSizeManager } from '../FontSizeManager';
@@ -16,7 +17,19 @@ interface XtermMountElement extends HTMLElement {
 
 export const DEFAULT_FONT =
   "'JetBrains Mono Variable', ui-monospace, SFMono-Regular, Menlo, monospace";
-export const DEFAULT_FONT_SIZE = 14;
+
+/**
+ * Fallback xterm metrics when no experience selected a profile.
+ *
+ * The terminal's own type size and leading are Experience values
+ * (`experience.web.terminal` / `experience.app.terminal`), crossed to xterm
+ * through `TERMINAL_METRICS` in `design/generated/terminal.ts` because xterm
+ * reads them as JS options rather than as custom properties. Web is the
+ * baseline because it is the experience the shell renders by default
+ * (`ShellMain`'s `experience = 'web'`) and the one a terminal with no caller
+ * profile belongs to.
+ */
+const BASELINE_METRICS = TERMINAL_METRICS.web;
 
 /**
  * Start fetching the terminal face at module load rather than at first paint.
@@ -24,7 +37,7 @@ export const DEFAULT_FONT_SIZE = 14;
  * for the fallback when that still loses the race.
  */
 function warmTerminalFont(): void {
-  void document.fonts?.load(`${DEFAULT_FONT_SIZE}px ${DEFAULT_FONT}`).catch(() => {});
+  void document.fonts?.load(`${BASELINE_METRICS.fontSize}px ${DEFAULT_FONT}`).catch(() => {});
 }
 
 /**
@@ -39,13 +52,17 @@ export class TerminalInstance {
   private fontSizeCallback: () => void = () => {};
 
   constructor(options: TerminalInstanceOptions) {
-    const initialFontSize = options.fontSize ?? DEFAULT_FONT_SIZE;
+    const initialFontSize = options.fontSize ?? BASELINE_METRICS.fontSize;
 
     warmTerminalFont();
 
     this.terminal = new Terminal({
       cursorBlink: true,
       fontSize: initialFontSize,
+      // xterm's `lineHeight` is a multiple of the *measured font box*, not of
+      // `fontSize` the way CSS `line-height` is. The token owns that unit note
+      // (`experience.web.terminal.lineHeight`) — read it before changing this.
+      lineHeight: options.lineHeight ?? BASELINE_METRICS.lineHeight,
       fontFamily: DEFAULT_FONT,
       allowProposedApi: true,
       scrollback: options.scrollback ?? 50000,

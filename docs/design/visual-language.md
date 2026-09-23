@@ -106,24 +106,36 @@ Two rules generate the palette:
 1. **Location is the only chromatic axis.** Everything else is neutral. Local sessions are *colourless*: a user working only on their own machine sees no accent colour at all, because the boundary has not been crossed. `location.local` (warm, hue 55) and `location.remote` (cool, hue 255) share chroma and sit within the JND of each other in lightness, so neither location outranks the other. This implements [workspace.md](workspace.md)'s "making the active or affected location clear only when that distinction matters".
 2. **Colour appears only where P8 licenses it** — state or action — and the neutral ramp carries everything else. It is built to be whisper-quiet near the ground and then jump hard to text, so separation comes from a background shift rather than a border (P2, P7).
 
-Measured against both grounds a foreground can sit on:
+Measured against both grounds a foreground can sit on. The `Value` column is a
+reading of [`design/tokens/primitive.json`](../../design/tokens/primitive.json),
+not a second source of it: the file stores oklch, and both the hex and the ratio
+here are produced from it by the same conversion
+[`token-contrast.test.mjs`](../../design/scripts/token-contrast.test.mjs) uses to
+solve them — so when this table and the test disagree, the test is right and the
+table is stale:
 
-| Token | Value | on canvas `#FFFFFF` | on chrome `#F6F7F9` |
+| Token | Value | on canvas `#FFFFFF` | on chrome `#F6F8FA` |
 |-------|-------|--------------------|---------------------|
-| `neutral.ground` | `#FFFFFF` | — | 1.07:1 |
-| `neutral.surface` | `#F6F7F9` | 1.07:1 | — |
-| `neutral.fill` | `#EDEEF0` | 1.16:1 | 1.08:1 |
-| `neutral.line` | `#E6E7E9` | 1.24:1 | 1.16:1 |
-| `neutral.line-strong` | `#D6D7D9` | 1.44:1 | 1.34:1 |
-| `neutral.text-disabled` | `#8C8F94` | 3.26:1 | 3.05:1 |
-| `neutral.text-muted` | `#6D7179` | 4.87:1 | 4.56:1 |
-| `neutral.text-secondary` | `#54575D` | 7.25:1 | 6.79:1 |
-| `neutral.text-primary` | `#242528` | 15.31:1 | 14.32:1 |
-| `location.local` | `#AD5C15` | 4.86:1 | 4.55:1 |
-| `location.remote` | `#3872BB` | 4.87:1 | 4.56:1 |
-| `action` | `#008250` | 4.88:1 | 4.57:1 |
-| `state.danger` | `#D0383A` | 4.87:1 | 4.56:1 |
-| `state.warning` | `#956900` | 4.87:1 | 4.55:1 |
+| `neutral.ground` | `#FFFFFF` | — | 1.06:1 |
+| `neutral.surface` | `#F6F8FA` | 1.06:1 | — |
+| `neutral.fill` | `#EFEFEE` | 1.15:1 | 1.08:1 |
+| `neutral.line` | `#E7E7E5` | 1.24:1 | 1.16:1 |
+| `neutral.line-strong` | `#D8D8D5` | 1.43:1 | 1.34:1 |
+| `neutral.text-disabled` | `#8C8F94` | 3.26:1 | 3.06:1 |
+| `neutral.text-muted` | `#6F737A` | 4.79:1 | 4.50:1 |
+| `neutral.text-secondary` | `#55575D` | 7.22:1 | 6.78:1 |
+| `neutral.text-primary` | `#232528` | 15.37:1 | 14.44:1 |
+| `location.local` | `#AE5D17` | 4.79:1 | 4.50:1 |
+| `location.remote` | `#3974BC` | 4.79:1 | 4.50:1 |
+| `action` | `#008450` | 4.79:1 | 4.50:1 |
+| `state.danger` | `#D0383A` | 4.87:1 | 4.57:1 |
+| `state.warning` | `#956900` | 4.87:1 | 4.57:1 |
+
+The four accents sit at exactly 4.50:1 on the chrome because that is how they
+were solved: hue and chroma held at the mockup's values, lightness taken to the
+minimum step that clears AA on `surface` rather than on `ground`. A reader who
+finds them "about 4.5" has read the table correctly — the numbers are the
+constraint, not a coincidence.
 
 **The chrome is the binding constraint, not the canvas.** It is the darker ground, so a colour that clears AA on white can still fail on the sidebar — which is where most metadata text actually lives. Every value above is solved against both. `text-disabled` takes the 3:1 floor of a perceivable UI boundary; WCAG 1.4.3 exempts inactive controls from the AA text requirement, and it is not a licence to make them invisible.
 

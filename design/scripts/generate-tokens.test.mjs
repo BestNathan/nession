@@ -58,10 +58,27 @@ const fixture = {
     },
   },
   experience: {
-    web: { control: { sm: { value: '28px' } } },
+    web: {
+      control: { sm: { value: '28px' } },
+      // `generateTerminalTs` requires the group on both sides: the xterm
+      // boundary needs the metrics as JS, and the fixture is what proves it
+      // does not silently emit `undefined` when they are absent.
+      terminal: {
+        fontSize: { value: '12.5px' },
+        lineHeight: { value: 1.62 },
+        padX: { value: '18px' },
+        padY: { value: '18px' },
+      },
+    },
     app: {
       touchTarget: { min: { value: 44 } },
       control: { md: { value: '44px' } },
+      terminal: {
+        fontSize: { value: '11.5px' },
+        lineHeight: { value: 1.7 },
+        padX: { value: '14px' },
+        padY: { value: '14px' },
+      },
     },
   },
 };
@@ -177,6 +194,22 @@ test('generateTerminalTs fills every xterm ITheme colour slot', () => {
     assert.match(src, new RegExp(`\\b${slot}: "#`), `missing slot ${slot}`);
   }
   assert.match(src, /TERMINAL_MINIMUM_CONTRAST_RATIO = 4\.5;/);
+});
+
+test('generateTerminalTs carries both experiences\' terminal metrics as numbers', () => {
+  const src = generateTerminalTs(fixture);
+  // px values arrive as numbers, not strings: xterm takes `fontSize` in px and
+  // `lineHeight` as a multiplier, so a `"12.5px"` string would be unusable.
+  assert.match(src, /export const TERMINAL_METRICS = \{/);
+  assert.match(src, /web: \{\s*fontSize: 12\.5,\s*lineHeight: 1\.62,\s*padX: 18,\s*padY: 18,\s*\}/);
+  assert.match(src, /app: \{\s*fontSize: 11\.5,\s*lineHeight: 1\.7,\s*padX: 14,\s*padY: 14,\s*\}/);
+  assert.match(src, /\} as const;/);
+});
+
+test('generateTerminalTs throws when an experience declares no terminal metrics', () => {
+  const broken = structuredClone(fixture);
+  delete broken.experience.app.terminal;
+  assert.throws(() => generateTerminalTs(broken), /missing ref: experience\.app\.terminal/);
 });
 
 test('generateTerminalTs throws rather than emitting an undefined slot', () => {
