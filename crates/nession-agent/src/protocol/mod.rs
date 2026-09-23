@@ -107,7 +107,7 @@ macro_rules! core_routes {
         pub(crate) async fn dispatch_core(
             $client: &ServerClient,
             $msg: &ProtocolMessage<serde_json::Value>,
-            $responses: &mpsc::UnboundedSender<WsMessage>,
+            $responses: &mpsc::Sender<WsMessage>,
         ) -> Result<()> {
             match $msg.msg_type.as_str() {
                 $( $wire => $body, )*

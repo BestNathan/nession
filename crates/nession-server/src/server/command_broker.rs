@@ -4,28 +4,7 @@ use tokio::sync::{oneshot, RwLock};
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 use tracing::{debug, info, warn};
 
-/// Sender for outgoing WebSocket messages.
-///
-/// Wraps an `mpsc::UnboundedSender` so that the concrete sink type (which differs
-/// between plain-TCP and TLS paths) is hidden behind a transport-agnostic channel.
-/// The WebSocket loop spawns a small relay task that drains the receiver and
-/// forwards each message to the real sink.
-#[derive(Clone)]
-pub struct WsMessageSender(tokio::sync::mpsc::UnboundedSender<WsMessage>);
-
-impl WsMessageSender {
-    pub fn new() -> (Self, tokio::sync::mpsc::UnboundedReceiver<WsMessage>) {
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-        (Self(tx), rx)
-    }
-
-    pub fn send(
-        &self,
-        msg: WsMessage,
-    ) -> Result<(), tokio::sync::mpsc::error::SendError<WsMessage>> {
-        self.0.send(msg)
-    }
-}
+use super::outbound::WsMessageSender;
 
 /// Identity of one accepted WebSocket connection, handed out by
 /// [`CommandBroker::new_connection_generation`].
@@ -281,8 +260,13 @@ impl CommandBroker {
         let aid = agent_id.to_string();
         let mt = msg_type.to_string();
 
-        // Send the command through the channel
-        match sender.send(WsMessage::Text(json)) {
+        // Send the command through the channel. The command lane does not wait:
+        // the connection this is going to belongs to the *agent*, and the caller
+        // waiting here belongs to a browser, so waiting would spread one slow
+        // agent across everyone talking to the Server. `Err` is the answer to
+        // "no room" and to "no connection" alike, and both mean the same thing
+        // to the caller — this command cannot be delivered now.
+        match sender.try_send_command(WsMessage::Text(json)) {
             Ok(_) => {
                 info!(
                     "CommandBroker: sent {} to agent {} (req: {})",
@@ -294,12 +278,13 @@ impl CommandBroker {
                     "CommandBroker: failed to send command to agent {}: {}",
                     aid, e
                 );
-                // The transport is already gone, so this command can never be
-                // answered — and leaving the entry in `pending_commands` is
-                // what made the caller wait out its 10/30s timeout to find out.
-                // Revoking it drops the oneshot sender, resolving the waiter
-                // with `RecvError` now; callers already read that as "Agent
-                // disconnected", which is exactly what this is (#960).
+                // The command can never be answered — the transport is gone, or
+                // the agent has stopped draining it — and leaving the entry in
+                // `pending_commands` is what made the caller wait out its
+                // 10/30s timeout to find out. Revoking it drops the oneshot
+                // sender, resolving the waiter with `RecvError` now; callers
+                // already read that as "Agent disconnected", which is exactly
+                // what this is (#960).
                 //
                 // Request ids are server-generated UUIDs, so this removal can
                 // only ever take back this call's own entry: nothing else can

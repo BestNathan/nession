@@ -54,6 +54,17 @@ const MAX_RECONNECT_DELAY: Duration = Duration::from_secs(30);
 /// Initial delay for exponential backoff (1 second).
 const INITIAL_RECONNECT_DELAY: Duration = Duration::from_secs(1);
 
+/// How many command responses may be waiting for the socket at once (#961).
+///
+/// The queue carries one frame per command the Server sent, and a command is
+/// answered by the handler task that received it — so this is really a bound on
+/// "answers computed but not yet written". Deep enough that an ordinary
+/// request/reply exchange never touches it; shallow enough that a Server which
+/// has stopped reading cannot make the agent hold more than this many answers in
+/// memory. At the extension contracts' 1 MiB read cap that is 32 MiB of frames
+/// rather than the unbounded channel's "as much as the Server can ask for".
+const AGENT_RESPONSE_QUEUE_SLOTS: usize = 32;
+
 /// Message type constants for agent-to-server protocol.
 pub mod msg_types {
     /// The registration operation, in both directions: the agent sends it, and
@@ -562,8 +573,21 @@ impl ServerClient {
         shutdown_rx: &mut mpsc::Receiver<()>,
     ) -> ConnectionOutcome {
         // Handler tasks write their responses here; this loop drains the channel
-        // onto the socket. Unbounded so a handler never blocks on a full queue.
-        let (resp_tx, mut resp_rx) = mpsc::unbounded_channel::<WsMessage>();
+        // onto the socket.
+        //
+        // Bounded, with the policy of #961's backpressure section: a full queue
+        // makes the *handler* wait, never lose its answer. The handler is a
+        // detached task — one per inbound message, spawned below — so parking it
+        // costs nothing that matters: this loop keeps reading, heartbeats keep
+        // flowing, and the answer goes out as soon as the socket takes it.
+        //
+        // The producer side is what the old comment here was protecting, and the
+        // bound is chosen to keep protecting it: `AGENT_RESPONSE_QUEUE_SLOTS`
+        // replies of a few hundred bytes are the ordinary case, and a burst of
+        // those never parks anybody. What is *gone* is the case the unbounded
+        // channel actually existed for — an agent whose Server stopped reading
+        // growing its heap for as long as the Server stayed away.
+        let (resp_tx, mut resp_rx) = mpsc::channel::<WsMessage>(AGENT_RESPONSE_QUEUE_SLOTS);
 
         loop {
             tokio::select! {
@@ -641,11 +665,16 @@ impl ServerClient {
     }
 
     /// Handle a message received from the server, writing any response to the
-    /// `responses` channel (drained onto the socket by `run_connection`).
+    /// `responses` queue (drained onto the socket by `run_connection`).
+    ///
+    /// `responses` is bounded, so a send here can wait for room — which is the
+    /// intended policy rather than a hazard: this method runs in a task spawned
+    /// per inbound message, so waiting costs a detached task and never the read
+    /// loop that spawned it. See the queue's construction in `run_connection`.
     async fn handle_server_message(
         &self,
         text: &str,
-        responses: &mpsc::UnboundedSender<WsMessage>,
+        responses: &mpsc::Sender<WsMessage>,
     ) -> Result<()> {
         let msg: ProtocolMessage<serde_json::Value> =
             serde_json::from_str(text).context("failed to parse server message")?;
@@ -680,7 +709,9 @@ impl ServerClient {
                             "result": payload_value,
                         }
                     });
-                    responses.send(WsMessage::Text(response.to_string()))?;
+                    responses
+                        .send(WsMessage::Text(response.to_string()))
+                        .await?;
                     return Ok(());
                 }
             }
@@ -3014,7 +3045,7 @@ core_routes!(agent, msg, responses;
                             "session_name": session_name,
                         }
                     });
-                    responses.send(WsMessage::Text(response.to_string()))?;
+                    responses.send(WsMessage::Text(response.to_string())).await?;
     }
     "agent.env.list" => "agent.env.list" => {
                     let request_id = str_field(&msg.payload, "request_id");
@@ -3034,7 +3065,7 @@ core_routes!(agent, msg, responses;
                             "files": files,
                         }
                     });
-                    responses.send(WsMessage::Text(response.to_string()))?;
+                    responses.send(WsMessage::Text(response.to_string())).await?;
     }
     "agent.env.get" => "agent.env.get" => {
                     let request_id = str_field(&msg.payload, "request_id");
@@ -3055,7 +3086,7 @@ core_routes!(agent, msg, responses;
                             "error": error,
                         }
                     });
-                    responses.send(WsMessage::Text(response.to_string()))?;
+                    responses.send(WsMessage::Text(response.to_string())).await?;
     }
     "agent.env.write" => "agent.env.write" => {
                     let request_id = str_field(&msg.payload, "request_id");
@@ -3086,7 +3117,7 @@ core_routes!(agent, msg, responses;
                             "warnings": warnings,
                         }
                     });
-                    responses.send(WsMessage::Text(response.to_string()))?;
+                    responses.send(WsMessage::Text(response.to_string())).await?;
     }
     "agent.env.delete" => "agent.env.delete" => {
                     let request_id = str_field(&msg.payload, "request_id");
@@ -3106,7 +3137,7 @@ core_routes!(agent, msg, responses;
                             "error": error,
                         }
                     });
-                    responses.send(WsMessage::Text(response.to_string()))?;
+                    responses.send(WsMessage::Text(response.to_string())).await?;
     }
     "agent.session.env.apply" => "agent.session.env.apply" => {
                     let payload: ServerSessionEnvApplyPayload =
@@ -3153,7 +3184,7 @@ core_routes!(agent, msg, responses;
                             "error": error,
                         }
                     });
-                    responses.send(WsMessage::Text(response.to_string()))?;
+                    responses.send(WsMessage::Text(response.to_string())).await?;
     }
     "agent.session.env.unset" => "agent.session.env.unset" => {
                     let payload: ServerSessionEnvUnsetPayload =
@@ -3186,7 +3217,7 @@ core_routes!(agent, msg, responses;
                             "error": error,
                         }
                     });
-                    responses.send(WsMessage::Text(response.to_string()))?;
+                    responses.send(WsMessage::Text(response.to_string())).await?;
     }
     "agent.env.query" => "agent.env.query" => {
                     let request_id = str_field(&msg.payload, "request_id");
@@ -3202,7 +3233,7 @@ core_routes!(agent, msg, responses;
                             "sourced_files": sourced_files,
                         }
                     });
-                    responses.send(WsMessage::Text(response.to_string()))?;
+                    responses.send(WsMessage::Text(response.to_string())).await?;
     }
     "agent.session.kill" => "agent.session.kill" => {
                     let request_id = msg
@@ -3236,7 +3267,7 @@ core_routes!(agent, msg, responses;
                             "error": error,
                         }
                     });
-                    responses.send(WsMessage::Text(response.to_string()))?;
+                    responses.send(WsMessage::Text(response.to_string())).await?;
     }
     "agent.session.capture-preview" => "agent.session.capture-preview" => {
                     let request_id = str_field(&msg.payload, "request_id");
@@ -3315,7 +3346,7 @@ core_routes!(agent, msg, responses;
                             "error": error,
                         }
                     });
-                    responses.send(WsMessage::Text(response.to_string()))?;
+                    responses.send(WsMessage::Text(response.to_string())).await?;
     }
     "agent.session.report" => "agent.session.report" => {
                     let request_id = str_field(&msg.payload, "request_id");
@@ -3362,6 +3393,6 @@ core_routes!(agent, msg, responses;
                             "sessions": sessions_json,
                         }
                     });
-                    responses.send(WsMessage::Text(response.to_string()))?;
+                    responses.send(WsMessage::Text(response.to_string())).await?;
     }
 );

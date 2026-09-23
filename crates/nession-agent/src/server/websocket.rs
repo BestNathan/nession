@@ -51,9 +51,108 @@ use tracing::{debug, error, info, warn};
 /// control-mode path forwards output directly and leaves this empty.
 struct AttachedSession {
     backend: Box<dyn TmuxSession>,
-    /// Unbounded senders — one per subscribed client.  The broadcast task
-    /// clones output to all of them.
-    subscribers: Vec<tokio::sync::mpsc::UnboundedSender<Vec<u8>>>,
+    /// Bounded senders — one per subscribed client. The broadcast task clones
+    /// output to all of them; see [`SUBSCRIBER_QUEUE_SLOTS`] for what happens to
+    /// one that stops draining.
+    subscribers: Vec<mpsc::Sender<Vec<u8>>>,
+}
+
+/// How much terminal output one attached client may have waiting (#961).
+///
+/// This is the terminal lane's slow-consumer policy, and the depth is the
+/// policy. The backend's own hop is bounded at 64 chunks of up to 4 KiB
+/// ([`crate::tmux::pty`]) before it reaches the broadcast task, so a client that
+/// can absorb what tmux produces never fills this: 64 chunks is the same depth
+/// the session itself buffers, about 256 KiB.
+///
+/// What this buys is that the *slowest* client cannot become the pace of the
+/// session for everybody else. The broadcast task fans one session's output out
+/// to every attached client, so a `send().await` here would park the fan-out on
+/// whichever client is behind — the other clients and the PTY reader behind it.
+/// A client with a full queue is therefore detached instead: its queue is
+/// dropped, its forwarding task sees the receiver close and closes the
+/// connection, and it re-attaches to a redrawn screen. That is the same verdict
+/// the Server reaches for a relayed client (`server::outbound::send_terminal`),
+/// applied where the terminal is actually served.
+const SUBSCRIBER_QUEUE_SLOTS: usize = 64;
+
+/// Fan one chunk of terminal output out to every subscriber of a session.
+///
+/// Returns the number of subscribers **detached** by this call, i.e. dropped
+/// for having no room. A subscriber whose queue is closed is pruned too but not
+/// counted: that one's connection has already ended, and `spawn_output_forwarder`
+/// is on its way out.
+///
+/// Never waits, and that is the policy rather than an optimisation — see
+/// [`SUBSCRIBER_QUEUE_SLOTS`]. A free function so the policy can be tested
+/// without a socket, a PTY, or a session: the three cases (room, full, closed)
+/// are the whole of it.
+fn fan_out(subscribers: &mut Vec<mpsc::Sender<Vec<u8>>>, chunk: &[u8]) -> usize {
+    let mut detached = 0usize;
+    subscribers.retain(|tx| match tx.try_send(chunk.to_vec()) {
+        Ok(()) => true,
+        Err(mpsc::error::TrySendError::Full(_)) => {
+            detached += 1;
+            false
+        }
+        Err(mpsc::error::TrySendError::Closed(_)) => false,
+    });
+    detached
+}
+
+/// Forward one subscriber's terminal output to this connection's sink, and —
+/// when this subscriber was detached for not draining it — close the connection.
+///
+/// The queue ends in two ways, and they are not the same event:
+///
+/// * **the session ended** (the PTY or the control-mode reader closed and the
+///   fan-out task went with it). This connection may be serving other sessions,
+///   so nothing is closed here: the other attachments are still running, and
+///   ending their socket because one session exited would be a bug of its own.
+/// * **this subscriber was detached** for having no room ([`SUBSCRIBER_QUEUE_SLOTS`]),
+///   which is the one case where the client must be told. The session is still
+///   there — that is how the two are told apart, by asking the map — and what
+///   the client is holding is a terminal that has stopped moving with nothing
+///   coming to say so. A `Close` is the only thing this path can say it with,
+///   and the client's own reconnect is what turns it into a redrawn screen.
+///
+/// It used to be one task per subscriber inline in the attach arms, twice, and
+/// the only difference between the two was which names the locals had.
+fn spawn_output_forwarder(
+    mut rx: mpsc::Receiver<Vec<u8>>,
+    sink: Arc<Mutex<futures_util::stream::SplitSink<WebSocketStream<TcpOrTls>, WsMessage>>>,
+    sessions: Arc<Mutex<SessionMap>>,
+    session_name: String,
+) {
+    tokio::spawn(async move {
+        while let Some(bytes) = rx.recv().await {
+            use base64::Engine;
+            let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
+            let output = TerminalOutputPayload {
+                session_name: session_name.clone(),
+                data: encoded,
+            };
+            let msg = new_message(msg_types::TERMINAL_OUTPUT, output);
+            if let Ok(json) = serde_json::to_string(&msg) {
+                let mut s = sink.lock().await;
+                if s.send(WsMessage::Text(json)).await.is_err() {
+                    return;
+                }
+            }
+        }
+
+        let detached_for_not_draining = sessions.lock().await.contains_key(&session_name);
+        if !detached_for_not_draining {
+            info!("terminal output for session {session_name} ended");
+            return;
+        }
+        info!(
+            "session {session_name}: subscriber was detached for not draining its terminal; \
+             closing the connection"
+        );
+        let mut s = sink.lock().await;
+        let _ = s.send(WsMessage::Close(None)).await;
+    });
 }
 
 /// Per-connection map of attached sessions, keyed by session name.
@@ -626,30 +725,16 @@ p2p_routes! { ctx, msg_type, payload_value;
 
                     if let Some(shared) = sessions_guard.get_mut(&session_name) {
                         // Session already exists: add a new subscriber.
-                        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+                        let (tx, rx) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
                         shared.subscribers.push(tx);
                         drop(sessions_guard);
 
-                        let sink_output = Arc::clone(ctx.sink);
-                        let session_name_output = session_name.clone();
-                        tokio::spawn(async move {
-                            while let Some(bytes) = rx.recv().await {
-                                use base64::Engine;
-                                let encoded =
-                                    base64::engine::general_purpose::STANDARD.encode(&bytes);
-                                let output = TerminalOutputPayload {
-                                    session_name: session_name_output.clone(),
-                                    data: encoded,
-                                };
-                                let msg = new_message(msg_types::TERMINAL_OUTPUT, output);
-                                if let Ok(json) = serde_json::to_string(&msg) {
-                                    let mut s = sink_output.lock().await;
-                                    if s.send(WsMessage::Text(json)).await.is_err() {
-                                        break;
-                                    }
-                                }
-                            }
-                        });
+                        spawn_output_forwarder(
+                            rx,
+                            Arc::clone(ctx.sink),
+                            Arc::clone(ctx.sessions),
+                            session_name.clone(),
+                        );
 
                         let resp = ClientAttachResponse {
                             session_name: payload.session_name,
@@ -665,7 +750,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                         payload.height,
                     ) {
                         Ok((pty_session, mut output_rx)) => {
-                            let (tx, mut first_rx) = tokio::sync::mpsc::unbounded_channel();
+                            let (tx, rx) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
                             let attached = AttachedSession {
                                 backend: Box::new(pty_session),
                                 subscribers: vec![tx],
@@ -674,26 +759,12 @@ p2p_routes! { ctx, msg_type, payload_value;
                             drop(sessions_guard);
 
                             // Spawn forwarding task for the first subscriber.
-                            let sink_first = Arc::clone(ctx.sink);
-                            let session_name_first = session_name.clone();
-                            tokio::spawn(async move {
-                                while let Some(bytes) = first_rx.recv().await {
-                                    use base64::Engine;
-                                    let encoded =
-                                        base64::engine::general_purpose::STANDARD.encode(&bytes);
-                                    let output = TerminalOutputPayload {
-                                        session_name: session_name_first.clone(),
-                                        data: encoded,
-                                    };
-                                    let msg = new_message(msg_types::TERMINAL_OUTPUT, output);
-                                    if let Ok(json) = serde_json::to_string(&msg) {
-                                        let mut s = sink_first.lock().await;
-                                        if s.send(WsMessage::Text(json)).await.is_err() {
-                                            break;
-                                        }
-                                    }
-                                }
-                            });
+                            spawn_output_forwarder(
+                                rx,
+                                Arc::clone(ctx.sink),
+                                Arc::clone(ctx.sessions),
+                                session_name.clone(),
+                            );
 
                             // Spawn ONE broadcast task for this session.
                             // It reads from output_rx and fans out to ALL subscribers.
@@ -703,8 +774,20 @@ p2p_routes! { ctx, msg_type, payload_value;
                                 while let Some(bytes) = output_rx.recv().await {
                                     let mut guard = sessions_clone.lock().await;
                                     if let Some(s) = guard.get_mut(&session_name_clone) {
-                                        // Broadcast to all subscribers; prune dead ones.
-                                        s.subscribers.retain(|tx| tx.send(bytes.clone()).is_ok());
+                                        // Fan out to every subscriber, pruning the
+                                        // ones that are gone — closed because
+                                        // their connection ended, or full because
+                                        // they stopped draining. Either way they
+                                        // are not attached in any useful sense,
+                                        // and the fan-out must not wait for them;
+                                        // see `SUBSCRIBER_QUEUE_SLOTS`.
+                                        let detached = fan_out(&mut s.subscribers, &bytes);
+                                        if detached > 0 {
+                                            warn!(
+                                                "session {session_name_clone}: detached {detached} \
+                                                 subscriber(s) that stopped draining their terminal"
+                                            );
+                                        }
                                         if s.subscribers.is_empty() {
                                             break;
                                         }
@@ -1804,6 +1887,82 @@ mod tests {
         // The send will fail because the receiver is gone, but the server
         // itself is already stopped.
         let _ = handle.shutdown().await;
+    }
+
+    /// The terminal lane's slow-consumer policy, in full (#961).
+    ///
+    /// Three subscribers, three outcomes from one fan-out: the one with room
+    /// gets the chunk, the one that is full is **detached**, and the one whose
+    /// connection is already gone is pruned. The middle case is the policy — it
+    /// is what keeps the slowest client from becoming the pace of the session
+    /// for every other client and for the PTY reader behind them — and it only
+    /// exists because the queues are bounded. With the unbounded senders this
+    /// replaced, the middle subscriber was indistinguishable from the first.
+    #[tokio::test]
+    async fn terminal_output_detaches_a_subscriber_that_stops_draining() {
+        let (healthy, mut healthy_rx) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
+        let (slow, slow_rx) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
+        let (gone, gone_rx) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
+        drop(gone_rx);
+
+        // The slow one is filled to its bound, and its receiver is held but
+        // never polled — a client that has stopped reading.
+        for n in 0..SUBSCRIBER_QUEUE_SLOTS {
+            slow.try_send(vec![0u8])
+                .unwrap_or_else(|_| panic!("the queue must have room for chunk {n}"));
+        }
+
+        let mut subscribers = vec![healthy, slow, gone];
+        assert_eq!(
+            fan_out(&mut subscribers, b"output"),
+            1,
+            "exactly the subscriber with no room is detached"
+        );
+        assert_eq!(
+            subscribers.len(),
+            1,
+            "the detached subscriber and the closed one are both gone"
+        );
+
+        // The one that remains is the healthy one — proved by the chunk it takes
+        // rather than by identity, which senders do not carry.
+        assert_eq!(
+            healthy_rx
+                .try_recv()
+                .expect("the subscriber with room got the chunk"),
+            b"output".to_vec()
+        );
+        subscribers[0]
+            .try_send(b"more".to_vec())
+            .expect("the remaining subscriber still has room");
+        assert_eq!(
+            healthy_rx
+                .try_recv()
+                .expect("the same subscriber got this one"),
+            b"more".to_vec()
+        );
+        drop(slow_rx);
+    }
+
+    /// A subscriber that is keeping up is never touched, however long the
+    /// session runs: the bound is a bound on backlog, not on volume.
+    #[tokio::test]
+    async fn terminal_output_keeps_a_subscriber_that_keeps_up() {
+        let (keeping_up, mut rx) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
+        let mut subscribers = vec![keeping_up];
+
+        for n in 0..(SUBSCRIBER_QUEUE_SLOTS * 4) {
+            assert_eq!(
+                fan_out(&mut subscribers, b"chunk"),
+                0,
+                "detached at chunk {n}"
+            );
+            assert_eq!(
+                rx.try_recv().expect("the subscriber is draining"),
+                b"chunk".to_vec()
+            );
+        }
+        assert_eq!(subscribers.len(), 1);
     }
 
     #[tokio::test]

@@ -222,6 +222,9 @@ impl WebSocketServer {
                 db: Arc::clone(&self.db),
                 auth_token: self.config.auth_token.clone(),
                 heartbeat_interval_secs,
+                terminal_stall_grace: std::time::Duration::from_secs(
+                    self.config.terminal_stall_grace_secs,
+                ),
             };
             let tls_acceptor = tls_acceptor.clone();
 
@@ -278,6 +281,7 @@ struct ServerContext {
     db: Arc<Database>,
     auth_token: String,
     heartbeat_interval_secs: u64,
+    terminal_stall_grace: std::time::Duration,
 }
 
 async fn handle_connection(
@@ -297,7 +301,7 @@ async fn handle_ws_stream<S>(stream: S, ctx: ServerContext) -> anyhow::Result<()
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
 {
-    use crate::server::command_broker::WsMessageSender;
+    use crate::server::outbound::WsMessageSender;
     use futures_util::SinkExt;
     use futures_util::StreamExt;
 
@@ -311,14 +315,17 @@ where
         db,
         auth_token,
         heartbeat_interval_secs,
+        terminal_stall_grace,
     } = ctx;
 
     let ws_stream = accept_async(stream).await?;
     let (mut write, mut read) = ws_stream.split();
 
-    // Create the outgoing-message channel BEFORE the handler so the handler
-    // can register its sender for broadcasts (e.g. terminal resize).
-    let (sender, mut rx) = WsMessageSender::new();
+    // Create the outgoing-message queue BEFORE the handler so the handler can
+    // register its sender for broadcasts (e.g. terminal resize). The queue is
+    // bounded and its policies belong to the messages rather than to the
+    // connection: see `server::outbound`.
+    let (sender, mut rx) = WsMessageSender::with_terminal_grace(terminal_stall_grace);
 
     let mut handler = ConnectionHandler::new(
         crate::server::handler::ConnectionHandlerDeps {
@@ -337,19 +344,35 @@ where
     );
     handler.set_client_sender(sender.clone());
 
-    // Spawn a relay task that drains the receiver and forwards to the actual
+    // Spawn a relay task that drains the queue and forwards to the actual
     // write sink. A periodic WebSocket Ping keeps the TCP path alive through
     // intermediaries and lets us detect a dead peer quickly.
+    //
+    // The task is the queue's **single consumer**, which is what makes the
+    // queue's bound a bound on the socket: a frame holds its claim on the byte
+    // budget until this loop has handed it over, so producers can run ahead of
+    // the socket by exactly one budget and no further.
+    //
+    // The ping is written directly rather than queued: it is connection control,
+    // and a keepalive that a saturated business queue can starve is not a
+    // keepalive. `select!` polls both arms regardless of whether the other is
+    // parked, so a stalled business frame never delays a ping.
     let ping_period = std::time::Duration::from_secs(heartbeat_interval_secs.max(1));
-    let relay_task = tokio::spawn(async move {
+    let mut relay_task = tokio::spawn(async move {
         let mut ping_ticker = tokio::time::interval(ping_period);
         ping_ticker.tick().await; // consume the immediate first tick
         loop {
             tokio::select! {
                 maybe_msg = rx.recv() => {
                     match maybe_msg {
-                        Some(msg) => {
-                            if let Err(e) = write.send(msg).await {
+                        Some(frame) => {
+                            // Split so the budget claim is released *after* the
+                            // write, not before it: `budget` stays alive across
+                            // the await and drops at the end of the arm.
+                            let crate::server::outbound::QueuedFrame { message, budget } = frame;
+                            let written = write.send(message).await;
+                            drop(budget);
+                            if let Err(e) = written {
                                 error!("Failed to send WebSocket message: {}", e);
                                 break;
                             }
@@ -390,7 +413,14 @@ where
 
         match action {
             HandlerAction::Reply(Some(response)) => {
-                sender.send(response)?;
+                // A reply is not droppable, so it waits for room rather than
+                // failing. The only error left is the queue being closed, which
+                // means this connection is over: leave the loop by the normal
+                // exit so the cleanup below still runs, instead of returning
+                // through `?` and skipping it.
+                if sender.send_reply(response).await.is_err() {
+                    break;
+                }
             }
             HandlerAction::Reply(None) => {
                 // No response needed, continue
@@ -404,7 +434,7 @@ where
                 cols,
                 rows,
             } => {
-                relay_bidirectional_via_channel(
+                let outcome = relay_bidirectional_via_channel(
                     &mut read,
                     sender.clone(),
                     &agent_ws_urls,
@@ -413,12 +443,39 @@ where
                     cols,
                     rows,
                 )
-                .await?;
+                .await;
                 // Relay ended — clean up the client registration so the
                 // cleanup block below (WS-close path) doesn't double-free.
                 client_registry.unregister(&session_id, &client_id).await;
-                // Don't break — the WebSocket stays open for dashboard use.
-                continue;
+                match outcome {
+                    Ok(RelayEnd::Ended) => {
+                        // Don't break — the WebSocket stays open for dashboard
+                        // use.
+                        continue;
+                    }
+                    Ok(RelayEnd::ClientStalled) => {
+                        // The client stopped draining its terminal (#961). Every
+                        // remaining answer for it is one it is not reading, and
+                        // the screen it is showing is no longer the session's —
+                        // so the connection ends here rather than sitting open
+                        // on a terminal that has stopped moving. The client
+                        // re-attaches, and is handed a redrawn screen.
+                        //
+                        // The close is the socket's rather than a frame's: a
+                        // `Close` sent through the queue would have to wait for
+                        // room in exactly the queue this client is not draining,
+                        // so the frame that says "you are not reading" would be
+                        // the one that never gets written. Breaking here drops
+                        // the socket, which is the same fact without the wait.
+                        warn!(
+                            "Relay for session '{}' ended: the client stopped draining its \
+                             terminal; closing the connection",
+                            session_name
+                        );
+                        break;
+                    }
+                    Err(e) => return Err(e),
+                }
             }
             HandlerAction::Close => {
                 break;
@@ -444,15 +501,45 @@ where
         client_registry.unregister(&session_id, &client_id).await;
     }
 
-    // Drop the sender to signal the relay task to exit
+    // Drop the sender to signal the relay task to exit, and wait for it — but
+    // not indefinitely.
+    //
+    // The writer can be parked on a socket its peer has stopped reading, and
+    // then it never comes back to notice the closed queue. Waiting on it would
+    // keep this connection's task — and its socket, and its half of the queue —
+    // alive for as long as the peer's TCP stack takes to give up, which is the
+    // same unbounded wait this stage exists to remove, one level down. The grace
+    // here is the terminal stall grace: "how long may a frame wait to be handed
+    // over before we stop waiting" is the same question, asked at shutdown.
     drop(sender);
-    // Wait for the relay task to finish
-    let _ = relay_task.await;
+    if tokio::time::timeout(terminal_stall_grace, &mut relay_task)
+        .await
+        .is_err()
+    {
+        warn!(
+            "outbound: writer still parked after {:?} with frames undelivered; \
+             aborting it so the connection can close",
+            terminal_stall_grace
+        );
+        relay_task.abort();
+    }
 
     Ok(())
 }
 
-/// Relay mode using channel-based sender for client writes.
+/// How a relay ended, for the caller that has to decide what to do with the
+/// connection it ran on (#961).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RelayEnd {
+    /// The relay stopped for an ordinary reason: the client detached, the agent
+    /// closed, or either side's socket ended. The WebSocket stays open.
+    Ended,
+    /// The client stopped draining the terminal lane long enough that the
+    /// Server declared it gone. The caller closes the connection.
+    ClientStalled,
+}
+
+/// Relay mode using the connection's queued outbound path for client writes.
 /// Used when the write sink is managed by a relay task.
 ///
 /// Tries each URL in `agent_ws_urls` with a fast 2s connect timeout
@@ -460,13 +547,13 @@ where
 /// is unreachable (common in k8s where pod IPs are not routable).
 async fn relay_bidirectional_via_channel<RS>(
     client_read: &mut RS,
-    sender: crate::server::command_broker::WsMessageSender,
+    sender: crate::server::outbound::WsMessageSender,
     agent_ws_urls: &[String],
     session_name: &str,
     env_snapshots: &[EnvSnapshot],
     cols: u16,
     rows: u16,
-) -> anyhow::Result<()>
+) -> anyhow::Result<RelayEnd>
 where
     RS: futures_util::Stream<
             Item = Result<
@@ -590,8 +677,13 @@ where
                             })
                             .to_string(),
                         );
-                        let _ = sender.send(client_error);
-                        return Ok(());
+                        if sender.send_reply(client_error).await.is_err() {
+                            // The queue is closed — the client's connection is
+                            // already over, and the error it was going to be
+                            // told about is moot.
+                            return Ok(RelayEnd::Ended);
+                        }
+                        return Ok(RelayEnd::Ended);
                     }
                     info!(
                         "Agent confirmed attach for session '{}' (msg_type={})",
@@ -625,16 +717,30 @@ where
     let client_to_agent =
         forward_client_to_agent(client_read, &mut agent_write, session_name, INPUT_THROTTLE);
 
-    // Forward agent -> client (via channel sender)
+    // Forward agent -> client, through the terminal lane of the outbound queue.
+    //
+    // Terminal bytes are the one stream on this connection that is *steady*: a
+    // session produces them whether or not anybody is watching, so a client that
+    // has stopped draining does not simply park a producer that was about to
+    // finish — it pins the relay, and the agent's output behind it, for as long
+    // as it stays connected. The stall grace is what turns that into a verdict
+    // (`ClientStalled`) instead of an indefinite park; see
+    // `outbound::WsMessageSender::send_terminal`.
+    let mut stalled = false;
     let agent_to_client = async {
         while let Some(msg) = agent_read.next().await {
             match msg {
-                Ok(msg) => {
-                    if let Err(e) = sender.send(msg) {
+                Ok(msg) => match sender.send_terminal(msg).await {
+                    Ok(()) => {}
+                    Err(crate::server::outbound::OutboundError::Stalled) => {
+                        stalled = true;
+                        break;
+                    }
+                    Err(e) => {
                         error!("Failed to forward agent message to client: {}", e);
                         break;
                     }
-                }
+                },
                 Err(e) => {
                     error!("Error reading from agent: {}", e);
                     break;
@@ -689,7 +795,11 @@ where
     }
 
     info!("Relay mode ended for session '{}'", session_name);
-    Ok(())
+    Ok(if stalled {
+        RelayEnd::ClientStalled
+    } else {
+        RelayEnd::Ended
+    })
 }
 
 /// The terminal-input throttle window: a burst of input arriving inside it is

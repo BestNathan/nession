@@ -1,5 +1,6 @@
 use futures_util::{SinkExt, StreamExt};
-use nession_server::server::command_broker::{CommandBroker, WsMessageSender};
+use nession_server::server::command_broker::CommandBroker;
+use nession_server::server::outbound::WsMessageSender;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
@@ -57,7 +58,7 @@ async fn test_register_and_send_command() {
     let (sender, mut ch_rx) = WsMessageSender::new();
     tokio::spawn(async move {
         while let Some(msg) = ch_rx.recv().await {
-            let _ = sink.send(msg).await;
+            let _ = sink.send(msg.message).await;
         }
     });
 
@@ -97,7 +98,7 @@ async fn test_resolve_command() {
     let (sender, mut ch_rx) = WsMessageSender::new();
     tokio::spawn(async move {
         while let Some(msg) = ch_rx.recv().await {
-            let _ = sink.send(msg).await;
+            let _ = sink.send(msg.message).await;
         }
     });
 
@@ -145,7 +146,7 @@ async fn test_release_agent_resolves_pending() {
     let (sender, mut ch_rx) = WsMessageSender::new();
     tokio::spawn(async move {
         while let Some(msg) = ch_rx.recv().await {
-            let _ = sink.send(msg).await;
+            let _ = sink.send(msg.message).await;
         }
     });
 
@@ -200,7 +201,7 @@ async fn test_multiple_concurrent_commands() {
     let (sender, mut ch_rx) = WsMessageSender::new();
     tokio::spawn(async move {
         while let Some(msg) = ch_rx.recv().await {
-            let _ = sink.send(msg).await;
+            let _ = sink.send(msg.message).await;
         }
     });
 

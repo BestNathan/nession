@@ -15,7 +15,7 @@ use tokio::sync::broadcast;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 use tracing::{debug, error, info};
 
-use super::command_broker::WsMessageSender;
+use super::outbound::{OutboundError, WsMessageSender};
 
 /// The wires this module pushes, declared where they are sent.
 ///
@@ -55,15 +55,28 @@ impl WebClientRegistry {
     /// Subscribe a newly-authenticated web client. Spawns a background task
     /// that forwards every broadcast to `sender` until the client disconnects
     /// (the receiver is dropped / lagged).
+    ///
+    /// The last hop is a broadcast too — a dropped push is this registry's
+    /// existing semantic one hop earlier, so a client that has stopped draining
+    /// is skipped rather than waited for. See
+    /// `outbound::WsMessageSender::try_send_broadcast`.
     pub fn subscribe(&self, sender: WsMessageSender) {
         let mut rx = self.tx.subscribe();
         tokio::spawn(async move {
             loop {
                 match rx.recv().await {
                     Ok(json) => {
-                        if sender.send(WsMessage::Text(json)).is_err() {
-                            debug!("WebClientRegistry: subscriber sender closed");
-                            break;
+                        // A closed queue is this subscriber's connection being
+                        // gone: end the task rather than forwarding into a queue
+                        // nobody will ever drain. A full queue is only this
+                        // subscriber being behind, and the next push restates
+                        // the state it missed.
+                        if let Err(e) = sender.try_send_broadcast(WsMessage::Text(json)) {
+                            if e == OutboundError::Closed {
+                                debug!("WebClientRegistry: subscriber sender closed");
+                                break;
+                            }
+                            debug!("WebClientRegistry: subscriber skipped a push: {e}");
                         }
                     }
                     Err(broadcast::error::RecvError::Lagged(n)) => {
@@ -234,7 +247,8 @@ mod tests {
             .await
             .expect("timeout waiting for broadcast")
             .expect("channel closed");
-        let parsed: serde_json::Value = serde_json::from_str(msg.to_text().unwrap()).unwrap();
+        let parsed: serde_json::Value =
+            serde_json::from_str(msg.message.to_text().unwrap()).unwrap();
 
         assert_eq!(parsed["msg_type"], SESSIONS_CHANGED);
         let list = parsed["payload"]["sessions"].as_array().unwrap();
@@ -264,7 +278,8 @@ mod tests {
             .await
             .expect("timeout waiting for broadcast")
             .expect("channel closed");
-        let parsed: serde_json::Value = serde_json::from_str(msg.to_text().unwrap()).unwrap();
+        let parsed: serde_json::Value =
+            serde_json::from_str(msg.message.to_text().unwrap()).unwrap();
 
         assert_eq!(parsed["msg_type"], SESSIONS_CHANGED);
         assert!(parsed["payload"]["sessions"].as_array().unwrap().is_empty());

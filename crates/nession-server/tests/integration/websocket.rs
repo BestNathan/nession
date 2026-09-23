@@ -443,8 +443,26 @@ type OwnershipServer = (
     tokio::task::JoinHandle<()>,
 );
 
-/// A server for these tests: no TLS, a known token, default heartbeat cadence.
+/// A server for these tests: no TLS, a known token, default heartbeat cadence,
+/// the production terminal stall grace.
 async fn start_ownership_server(db_name: &str) -> anyhow::Result<OwnershipServer> {
+    start_ownership_server_with_grace(
+        db_name,
+        nession_common::config::DEFAULT_TERMINAL_STALL_GRACE_SECS,
+    )
+    .await
+}
+
+/// The same, with `#961-B`'s terminal stall grace shortened.
+///
+/// The grace is a production policy number (8 MiB held for 15 s), and a test
+/// that waited it out would be testing the calendar. Shortening it here changes
+/// only *when* the verdict comes, never what it is: the queue's bound still has
+/// to be reached first, which is what the test arranges.
+async fn start_ownership_server_with_grace(
+    db_name: &str,
+    stall_grace_secs: u64,
+) -> anyhow::Result<OwnershipServer> {
     let (db_dir, db_path) = test_db(db_name)?;
     let config = nession_common::config::ServerConfig {
         listen_address: "127.0.0.1:0".to_string(),
@@ -454,6 +472,7 @@ async fn start_ownership_server(db_name: &str) -> anyhow::Result<OwnershipServer
         heartbeat_interval_secs: 10,
         heartbeat_timeout_secs: 30,
         db_path,
+        terminal_stall_grace_secs: stall_grace_secs,
         ..Default::default()
     };
     let (addr, handle) = start_test_server(config).await?;
@@ -1065,29 +1084,41 @@ async fn registration_is_ordered_before_the_state_the_agent_reports() -> anyhow:
     }
 }
 
-/// A client that stops reading neither stalls the connection nor loses replies.
+/// A client that stops reading **parks dispatch, and loses nothing**.
 ///
-/// The client here writes `FLOOD_REQUESTS` brokered requests and then reads
-/// nothing at all, while the agent answers each one with a payload of
-/// `FLOOD_PAYLOAD_BYTES`. The queued total is far larger than any socket
-/// buffer, so the outbound path is saturated in the only sense this tree has:
-/// the writer task is parked on a socket the peer is not draining.
+/// Stage A's `a_client_that_stops_reading_neither_stalls_nor_loses_replies`,
+/// re-asserted for `#961-B`. The first half of that name is no longer true and
+/// this test now asserts the opposite of it: with a bounded outbound path,
+/// dispatch *does* stop when the client stops draining — that is the bound
+/// working, not a regression. The second half survives unchanged, and it is the
+/// half that matters: nothing is lost.
 ///
-/// Both halves are the characterization. The command count proves the *read*
-/// loop never waited for the writer — with a bounded queue that the handler
-/// awaited capacity on, dispatch would have stopped a few MiB in and the last
-/// command would never have gone out. The replies then prove the *outbound*
-/// queue kept everything: one per request, each carrying its own answer.
+/// The client writes `FLOOD_REQUESTS` brokered requests and then reads nothing,
+/// while the agent answers each one with a payload of `FLOOD_PAYLOAD_BYTES`.
+/// The queued total is larger than the outbound budget, so the bound is reached
+/// and the read loop parks in `send_reply` — a reply is not droppable, so it
+/// waits for room rather than failing or being discarded.
 ///
-/// **Flips at `#961-B`** (bounded outbound path with an explicit saturation
-/// policy). What replaces this is not one assertion but the policy itself: a
-/// bounded queue either parks the dispatcher (the count stalls) or fails /
-/// closes the saturated consumer, and the replies stop being a complete set.
-/// Whichever it is, this test goes red — which is what it is for.
+/// Both halves are the assertion:
+///
+/// * the command count **plateaus below `FLOOD_REQUESTS`** — the read loop is
+///   parked on a queue the client is not draining. If every command still got
+///   through, the path is unbounded again, which is the regression this test
+///   exists to catch (measured with the bound in place: 10 of 16, i.e. the 8 MiB
+///   budget's worth of 1 MiB answers plus what the socket buffered).
+/// * once the client reads, **the count completes and every reply arrives**,
+///   whole and distinct — so the park was a park, not a drop. A reply lost to
+///   the bound would show up here as a missing id or a stalled count.
+///
+/// The gap between the two halves is also the flow-control claim: the client
+/// draining is what lets dispatch resume, with nothing dropped in between.
 #[tokio::test]
-async fn a_client_that_stops_reading_neither_stalls_nor_loses_replies() -> anyhow::Result<()> {
+async fn a_client_that_stops_reading_parks_dispatch_and_loses_nothing() -> anyhow::Result<()> {
     const FLOOD_REQUESTS: usize = 16;
     const FLOOD_PAYLOAD_BYTES: usize = 1024 * 1024;
+    /// How long the command count must stop moving before it counts as the
+    /// bound rather than as the agent being between commands.
+    const PLATEAU_HOLD: std::time::Duration = std::time::Duration::from_secs(2);
 
     let (_db_dir, addr, _handle) = start_ownership_server("test_ws_outbound_flood.db").await?;
 
@@ -1101,24 +1132,37 @@ async fn a_client_that_stops_reading_neither_stalls_nor_loses_replies() -> anyho
         Arc::clone(&answered),
     ));
 
-    // Written and never read: the client stays parked here until every request
-    // has been answered, so ~16 MiB is queued against a reader that is not
-    // there.
+    // Written and never read: the client stays parked here until the first half
+    // has been observed, so MiBs pile up against a reader that is not there.
     for n in 0..FLOOD_REQUESTS {
         send_json(&mut client, capture_preview_request(&flood_id(n), "a1:dev")).await?;
     }
 
+    // ── The bound: dispatch stops. ──
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(60);
-    while answered.load(Ordering::SeqCst) < FLOOD_REQUESTS {
+    let mut last = answered.load(Ordering::SeqCst);
+    let mut held_since = tokio::time::Instant::now();
+    while held_since.elapsed() < PLATEAU_HOLD {
         anyhow::ensure!(
             tokio::time::Instant::now() < deadline,
-            "dispatch stopped after {} of {FLOOD_REQUESTS} commands — the read loop \
-             waited on an outbound path the client is not draining",
+            "the command count never stopped moving (reached {} of {FLOOD_REQUESTS})",
             answered.load(Ordering::SeqCst)
         );
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let now = answered.load(Ordering::SeqCst);
+        if now != last {
+            last = now;
+            held_since = tokio::time::Instant::now();
+        }
     }
+    let parked_at = answered.load(Ordering::SeqCst);
+    assert!(
+        parked_at < FLOOD_REQUESTS,
+        "nothing drained {FLOOD_REQUESTS} MiB, yet all {FLOOD_REQUESTS} commands were \
+         dispatched — the outbound path is not bounded"
+    );
 
+    // ── No loss: draining resumes it, and every answer arrives. ──
     let expected: Vec<String> = (0..FLOOD_REQUESTS).map(flood_id).collect();
     let expected_refs: Vec<&str> = expected.iter().map(String::as_str).collect();
     let replies = replies_in_arrival_order(&mut client, &expected_refs).await?;
@@ -1160,6 +1204,20 @@ async fn a_client_that_stops_reading_neither_stalls_nor_loses_replies() -> anyho
         markers, expected_markers,
         "the same command was answered twice, or one answer came back twice"
     );
+
+    // The parked half is what makes the count's completion meaningful: the
+    // commands that had been waiting for room were dispatched *because* the
+    // client started reading, and the agent saw every one of them.
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
+    while answered.load(Ordering::SeqCst) < FLOOD_REQUESTS {
+        anyhow::ensure!(
+            tokio::time::Instant::now() < deadline,
+            "dispatch never resumed after the client drained ({} of {FLOOD_REQUESTS} \
+             commands reached the agent, {parked_at} had when it parked)",
+            answered.load(Ordering::SeqCst)
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
     Ok(())
 }
 
@@ -1295,6 +1353,103 @@ async fn start_mock_agent_endpoint() -> anyhow::Result<MockAgentEndpoint> {
     });
 
     Ok(MockAgentEndpoint { addr, frames })
+}
+
+/// An agent endpoint whose session produces terminal output forever, for the
+/// terminal-lane test: it answers `agent.attach` like the one above, and then
+/// streams `chunk_bytes`-sized frames without ever stopping or waiting to be
+/// asked.
+///
+/// `offered` counts the frames it *has handed to its own sink* — the agent's
+/// side of the backpressure claim, and the reason the test can say "the Server
+/// stopped taking this" rather than only "the client stopped receiving". It is
+/// what an agent with a busy terminal looks like when nobody is draining it: it
+/// keeps producing, and what it can push shrinks to whatever the Server will
+/// still read.
+async fn start_streaming_mock_agent_endpoint(
+    chunk_bytes: usize,
+) -> anyhow::Result<(MockAgentEndpoint, Arc<AtomicUsize>)> {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let addr = listener.local_addr()?;
+    let (tx, frames) = tokio::sync::mpsc::unbounded_channel();
+    let offered = Arc::new(AtomicUsize::new(0));
+
+    let counter = Arc::clone(&offered);
+    tokio::spawn(async move {
+        while let Ok((stream, _)) = listener.accept().await {
+            let tx = tx.clone();
+            let counter = Arc::clone(&counter);
+            tokio::spawn(async move {
+                let Ok(ws) = tokio_tungstenite::accept_async(stream).await else {
+                    return;
+                };
+                let (mut sink, mut stream) = ws.split();
+
+                // Wait for the attach and answer it; nothing else is expected
+                // from the Server on this connection.
+                while let Some(Ok(message)) = stream.next().await {
+                    let tokio_tungstenite::tungstenite::Message::Text(text) = message else {
+                        continue;
+                    };
+                    let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&text) else {
+                        continue;
+                    };
+                    if parsed.get("msg_type").and_then(serde_json::Value::as_str)
+                        == Some("agent.attach")
+                    {
+                        let answer = serde_json::json!({
+                            "msg_type": "agent.attach",
+                            "id": parsed.get("id").cloned().unwrap_or(serde_json::Value::Null),
+                            "timestamp": current_timestamp(),
+                            "payload": parsed
+                                .get("payload")
+                                .cloned()
+                                .unwrap_or(serde_json::Value::Null),
+                        });
+                        if sink
+                            .send(tokio_tungstenite::tungstenite::Message::Text(
+                                answer.to_string(),
+                            ))
+                            .await
+                            .is_err()
+                        {
+                            return;
+                        }
+                        if tx.send(parsed).is_err() {
+                            return;
+                        }
+                        break;
+                    }
+                }
+
+                // The terminal, running whether or not anyone is watching. Each
+                // frame is a fresh chunk so no layer can deduplicate it, and the
+                // loop ends only when the write fails — which is the Server
+                // having closed the connection under it.
+                let chunk = "t".repeat(chunk_bytes);
+                loop {
+                    let frame = serde_json::json!({
+                        "msg_type": "terminal.output",
+                        "id": uuid::Uuid::new_v4().to_string(),
+                        "timestamp": current_timestamp(),
+                        "payload": { "session_name": "dev", "data": chunk },
+                    });
+                    counter.fetch_add(1, Ordering::SeqCst);
+                    if sink
+                        .send(tokio_tungstenite::tungstenite::Message::Text(
+                            frame.to_string(),
+                        ))
+                        .await
+                        .is_err()
+                    {
+                        return;
+                    }
+                }
+            });
+        }
+    });
+
+    Ok((MockAgentEndpoint { addr, frames }, offered))
 }
 
 /// The next frame of a given type the endpoint received, skipping others.
@@ -1508,6 +1663,137 @@ async fn relay_mode_owns_the_connections_frames_until_it_ends() -> anyhow::Resul
         replies[0]["payload"]["sessions"].is_array(),
         "the frame written after the relay ended was not dispatched: {}",
         replies[0]
+    );
+    Ok(())
+}
+
+/// A terminal client that stops draining is closed, not buffered for (#961-B).
+///
+/// This is the terminal lane's own policy, and the lane is the one that cannot
+/// borrow the reply lane's answer: terminal bytes cannot be dropped (the screen
+/// would drift from the session) and cannot be buffered without bound (that is
+/// the queue this stage replaced). What is left is a verdict — the relay
+/// forwards while there is room, and a client that has not taken the queue's
+/// worth within the stall grace is not attached in any useful sense. The Server
+/// ends the relay and closes the connection; the client re-attaches, which is
+/// where a redrawn screen comes from.
+///
+/// The agent here never stops producing: its loop ends only when a write fails,
+/// so "the connection ended" cannot be explained by the agent finishing or
+/// hanging up. What ended it is the policy.
+///
+/// Three things are asserted, and they are three views of the same fact:
+///
+/// * the **agent's own writes stop** — the Server closed that connection too, so
+///   the busy producer is paused while nothing else changes. This is the
+///   backpressure the bound exists to send, and it is the witness that the
+///   verdict landed (`offered` stops moving);
+/// * the client, reading at last, **finds the connection closed** — the Server
+///   ended it while the client had detached nothing and the agent was still
+///   writing;
+/// * everything the client eventually reads is **within the queue's bound plus
+///   socket buffers** — the Server never accumulated more than the bound for a
+///   peer that was not reading it.
+#[tokio::test]
+async fn a_terminal_client_that_stops_draining_is_closed_by_the_bound() -> anyhow::Result<()> {
+    use nession_server::server::outbound::OUTBOUND_BYTE_BUDGET;
+    use tokio_tungstenite::tungstenite::Message;
+
+    const CHUNK_BYTES: usize = 64 * 1024;
+    /// Short enough to reach in a test, and it changes only *when* the verdict
+    /// comes: the queue's bound still has to be reached first, which is what the
+    /// client not reading arranges.
+    const STALL_GRACE_SECS: u64 = 1;
+    /// What the queue cannot hold and the two sockets can. Generous on purpose:
+    /// the claim being tested is that the Server's own accumulation is bounded
+    /// by its queue, not that a kernel buffer has a particular size.
+    const SOCKET_SLACK_BYTES: usize = 4 * 1024 * 1024;
+
+    let (_db_dir, addr, _handle) =
+        start_ownership_server_with_grace("test_ws_relay_stall.db", STALL_GRACE_SECS).await?;
+    let (mut endpoint, offered) = start_streaming_mock_agent_endpoint(CHUNK_BYTES).await?;
+
+    let mut agent = connect_agent_on_port(addr, "a1", endpoint.addr.port()).await?;
+    send_json(&mut agent, session_update("a1", "dev")).await?;
+
+    let mut client = connect_client(addr).await?;
+    wait_for_session(&mut client, "a1:dev").await?;
+    send_json(
+        &mut client,
+        serde_json::json!({
+            "msg_type": "server.session.relay.begin",
+            "id": "begin-1",
+            "timestamp": current_timestamp(),
+            "payload": { "session_id": "a1:dev", "cols": 80, "rows": 24 },
+        }),
+    )
+    .await?;
+
+    // The relay is live: the Server has dialled the agent and been told the
+    // attach succeeded, which is also the start of the stream.
+    expect_frame_of_type(
+        &mut endpoint.frames,
+        "agent.attach",
+        std::time::Duration::from_secs(5),
+    )
+    .await?;
+
+    // From here the client reads nothing at all. The witness that the verdict
+    // has landed is on the agent's side, where nothing else can be happening:
+    // the Server closed that connection, so the streaming write fails and the
+    // frames the agent has offered stop moving.
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
+    let mut last = offered.load(Ordering::SeqCst);
+    let mut held_since = tokio::time::Instant::now();
+    while held_since.elapsed() < std::time::Duration::from_secs(2) {
+        anyhow::ensure!(
+            tokio::time::Instant::now() < deadline,
+            "the agent's stream never stopped: the Server kept taking terminal output \
+             ({last} frame(s) offered) from a client that was not draining it"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let now = offered.load(Ordering::SeqCst);
+        if now != last {
+            last = now;
+            held_since = tokio::time::Instant::now();
+        }
+    }
+    let offered_bytes = last.saturating_mul(CHUNK_BYTES);
+    anyhow::ensure!(
+        offered_bytes > 0,
+        "the agent never streamed anything, so nothing was ever under pressure"
+    );
+
+    // Reading at last: what the client finds is the end of the connection, with
+    // whatever was queued for it still in front of it. The deadline is absolute
+    // rather than per-frame: the agent in this test produces without end, so a
+    // verdict that never came would be an endless stream of frames to read, not
+    // a quiet socket.
+    let mut received_bytes = 0usize;
+    let read_deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
+    let ended = loop {
+        let remaining = read_deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            break false;
+        }
+        match tokio::time::timeout(remaining, client.next()).await {
+            Ok(Some(Ok(Message::Text(text)))) => received_bytes += text.len(),
+            Ok(Some(Ok(Message::Close(_)))) | Ok(None) => break true,
+            Ok(Some(Err(_))) => break true,
+            Ok(Some(Ok(_))) => {}
+            Err(_) => break false,
+        }
+    };
+    assert!(
+        ended,
+        "the Server never closed the connection of a terminal client that stopped \
+         draining (it read {received_bytes} byte(s) and is still open)"
+    );
+    assert!(
+        received_bytes <= OUTBOUND_BYTE_BUDGET + SOCKET_SLACK_BYTES,
+        "the Server held {received_bytes} byte(s) for a client that was not reading — \
+         more than the {OUTBOUND_BYTE_BUDGET}-byte bound plus {SOCKET_SLACK_BYTES} of \
+         socket buffers"
     );
     Ok(())
 }

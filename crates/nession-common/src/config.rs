@@ -17,11 +17,26 @@ pub struct ServerConfig {
     pub heartbeat_timeout_secs: u64,
     #[serde(default = "default_db_path")]
     pub db_path: String,
+    /// How long a relayed terminal frame may wait for room in a client's
+    /// outbound queue before the Server gives up on that client (#961).
+    ///
+    /// A connection's outbound queue holds its bound before its producers wait,
+    /// so this is a floor on the rate a client has to drain to stay attached:
+    /// the effective bound divided by this, which for terminal-sized frames is
+    /// the frame count rather than the byte budget. It is a policy knob rather
+    /// than a tuning one — the arithmetic behind the default is in
+    /// `server::outbound`.
+    #[serde(default = "default_terminal_stall_grace")]
+    pub terminal_stall_grace_secs: u64,
     /// Logging configuration (optional). When omitted, defaults to
     /// `level = "info"`, `rotation = "daily"`, `retention_days = 7`.
     #[serde(default)]
     pub logging: LoggingConfig,
 }
+
+/// The default for [`ServerConfig::terminal_stall_grace_secs`], published so the
+/// outbound queue's own default cannot drift from the config's.
+pub const DEFAULT_TERMINAL_STALL_GRACE_SECS: u64 = 15;
 
 impl Default for ServerConfig {
     fn default() -> Self {
@@ -33,9 +48,14 @@ impl Default for ServerConfig {
             heartbeat_interval_secs: default_heartbeat_interval(),
             heartbeat_timeout_secs: default_heartbeat_timeout(),
             db_path: default_db_path(),
+            terminal_stall_grace_secs: default_terminal_stall_grace(),
             logging: LoggingConfig::default(),
         }
     }
+}
+
+fn default_terminal_stall_grace() -> u64 {
+    DEFAULT_TERMINAL_STALL_GRACE_SECS
 }
 
 fn default_heartbeat_interval() -> u64 {
