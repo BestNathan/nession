@@ -51,6 +51,9 @@ export class AgentsPlugin implements TransportPlugin {
           this.notify(agents);
         }
       }),
+      // not-protocol: `client.agents.list` is not a Protocol Unit, and nothing
+      // sends this wire — the subscription is kept on purpose, and
+      // AgentsPlugin.test.ts covers the double-subscribe behaviour it adds.
       connection.subscribe('client.agents.list.response', (payload) => {
         const agents = (payload as { agents?: Agent[] })?.agents;
         if (agents) {

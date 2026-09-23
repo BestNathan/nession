@@ -18,6 +18,37 @@ pub struct WebClientRegistry {
     tx: broadcast::Sender<String>,
 }
 
+// ── The push wires ──────────────────────────────────────────────────────────
+//
+// A push is *emitted and never answered*: the Web **subscribes** to it, and no
+// route table has an arm for it, so there is nothing to ask for. That is why
+// these three are not Protocol Units — and why they are declared here, beside
+// the code that emits them, rather than in a route table.
+//
+// The declaration is what lets `scripts/protocol-gate.mjs` check the
+// subscriptions: a `subscribe` naming a wire nothing declares is a handler that
+// never fires, and a handler that never fires reports nothing at all — the same
+// silence a misspelled sender gets (#949).
+//
+// Each payload below names its constant instead of repeating the string, so a
+// wire has one spelling in this file rather than two that can drift.
+
+/// The agent registry changed — emitted by [`WebClientRegistry::broadcast_agents_changed`],
+/// subscribed to by `web/src/product/agent/AgentsPlugin.ts`.
+pub const AGENTS_CHANGED: &str = "agents.changed";
+
+/// The session list changed — emitted by [`WebClientRegistry::broadcast_sessions_changed`],
+/// subscribed to by `web/src/product/session/SessionsPlugin.ts`.
+///
+/// The one push with a stated reason to exist: the Web fetches the session list
+/// on mount only, so a change made elsewhere would stay invisible without it.
+pub const SESSIONS_CHANGED: &str = "sessions.changed";
+
+/// The quick-command list changed — emitted by
+/// [`WebClientRegistry::broadcast_commands_changed`], subscribed to by
+/// `web/src/capabilities/commands/CommandsPlugin.ts`.
+pub const SERVER_COMMANDS_CHANGED: &str = "server.commands.changed";
+
 impl Default for WebClientRegistry {
     fn default() -> Self {
         Self::new()
@@ -81,7 +112,7 @@ impl WebClientRegistry {
     ) {
         let agents = agent_registry.list().await;
         let payload = serde_json::json!({
-            "msg_type": "agents.changed",
+            "msg_type": AGENTS_CHANGED,
             "id": "",
             "timestamp": std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -120,7 +151,7 @@ impl WebClientRegistry {
     ) {
         let sessions = session_registry.list().await;
         let payload = serde_json::json!({
-            "msg_type": "sessions.changed",
+            "msg_type": SESSIONS_CHANGED,
             "id": "",
             "timestamp": std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -146,7 +177,7 @@ impl WebClientRegistry {
     /// notify them that the quick-command list has been modified.
     pub async fn broadcast_commands_changed(&self) {
         let payload = serde_json::json!({
-            "msg_type": "server.commands.changed",
+            "msg_type": SERVER_COMMANDS_CHANGED,
             "id": "",
             "timestamp": std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)

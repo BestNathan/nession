@@ -23,13 +23,16 @@
 //      with no caller is a protocol this workspace maintains and cannot use.
 //   3. The transitional `nession_common::protocol` alias path stays gone, and
 //      the module that carried it does not come back.
+//   4. Every wire a *subscription* names is one the protocol declares. A push
+//      is emitted and never answered, so rule 1 asks the wrong question of a
+//      listener — see the rule's own section below.
 //
 // Scope is the *call sites*, not the tree. A scan over every dotted string
 // literal was measured first and is unusable: it returns 378 distinct values,
 // of which the overwhelming majority are filenames (`settings.json`), versions
 // (`0.1.0`), addresses (`127.0.0.1`) and test names. Restricting to the
-// arguments of the four functions that put a message on a wire keeps the check
-// exact and needs no allowlist for ordinary strings.
+// arguments of the functions that put a message on a wire — or wait for one —
+// keeps the check exact and needs no allowlist for ordinary strings.
 //
 // The advertised set is read from three places, and none of them is a list
 // kept here:
@@ -239,6 +242,23 @@ const CALLS = [
   // protocol name. Everywhere else the argument is a wire whatever it says, and
   // a literal with no dot is a malformed one worth reporting.
   { fn: 'send', arg: 0, lang: 'ts', wireOnlyIfDotted: true },
+  // The listener side — `subscribe` waits for a wire rather than naming one it
+  // expects an answer on. Rule 1 asks whether some runtime *answers* a wire,
+  // and a push is answered by nobody: `agents.changed`, `sessions.changed` and
+  // `server.commands.changed` are emitted to every connected client and
+  // dispatched by nothing, so checking subscriptions against the advertised set
+  // would reject exactly the ones that work. They are checked by rule 4
+  // instead, against the set of wires the protocol declares.
+  //
+  // `wireOnlyIfDotted` for `send`'s reason from the other direction:
+  // `subscribe` is a common name on things that are not a socket at all —
+  // `registry.subscribe(listener)`, `store.subscribe(listener)` — so only a
+  // dotted literal is read as a protocol. The flag also stops the scan before
+  // the name-resolution path, so a non-literal argument is not read at all;
+  // that leaves `subscribe(SOME_IMPORTED_WIRE)` unchecked, which is the least
+  // costly of the gaps: a binding the generator produced cannot misspell a
+  // wire, and a misspelling is the whole failure rule 4 exists for.
+  { fn: 'subscribe', arg: 0, lang: 'ts', wireOnlyIfDotted: true, listener: true },
 ];
 
 function sourceFiles(dir, out = []) {
@@ -398,6 +418,7 @@ function excused(lines, line) {
 }
 
 const callers = new Map(); // advertised name -> first call site
+const listeners = []; // a `subscribe` call site, checked by rule 4 after the scan
 const importedBindings = new Set(); // binding paths a consumer imports
 const exemptFiles = []; // files declaring `not-protocol-file` in their header
 const constWires = declaredWireConsts();
@@ -419,7 +440,13 @@ function scanFile(file) {
   // The header is deliberately the only place it is read, and every run prints
   // the files that carry it. That is the difference between this and a silent
   // path exemption: an exemption nobody sees is how a gate stops being one.
-  // Note this covers rule 1 only — a declared-nowhere wire is still reported.
+  //
+  // It covers the two rules that ask what a call site *names* — rule 1 and rule
+  // 4 — because it is a statement about which wires the file's calls are about,
+  // and neither rule's question is meaningful where the answer is "a wire this
+  // file invented to test the transport with". Rule 2's counting is not excused
+  // (an excused sender still names a wire, so it still counts as a caller) and
+  // rule 3 does not go through call sites at all.
   const exempt = lines.slice(0, 5).some((l) => l.includes('not-protocol-file'));
   if (exempt) exemptFiles.push(rel);
 
@@ -451,7 +478,7 @@ function scanFile(file) {
     }
   }
 
-  for (const { fn, arg, lang: wanted, wireOnlyIfDotted } of CALLS) {
+  for (const { fn, arg, lang: wanted, wireOnlyIfDotted, listener } of CALLS) {
     if (wanted !== lang) continue;
     // `.agent_command(` is how every call site is written and `xproto_msg(`
     // is not a call, so a leading dot must be allowed and a word character
@@ -512,8 +539,19 @@ function scanFile(file) {
       const wire = literal[1];
       if (wireOnlyIfDotted && !wire.includes('.')) continue;
       if (unchecked) {
-        // Still a caller — see above. Only the finding is suppressed.
-        if (advertised.has(wire) && !callers.has(wire)) callers.set(wire, `${rel}:${line}`);
+        // Still a caller — see above. Only the finding is suppressed. A
+        // subscription is the exception: it waits for a wire rather than
+        // putting one on the wire, so counting it as a caller would let a
+        // listener declare the wire it listens for, and rule 4 would then
+        // answer its own question.
+        if (!listener && advertised.has(wire) && !callers.has(wire)) callers.set(wire, `${rel}:${line}`);
+        continue;
+      }
+      // A listener is rule 4's to judge, not rule 1's — and the declared set it
+      // is judged against is only complete once every file has been read, so
+      // the site is recorded here and reported after the scan.
+      if (listener) {
+        listeners.push({ rel, line, wire, text: lines[line - 1] ?? '' });
         continue;
       }
       const malformed = grammarError(wire);
@@ -536,6 +574,45 @@ for (const file of sourceFiles(join(ROOT, 'crates'))) scanFile(file);
 for (const file of sourceFiles(join(ROOT, 'web', 'src'))) {
   if (relative(ROOT, file).startsWith(GENERATED)) continue;
   scanFile(file);
+}
+
+// ── Rule 4: a subscription naming a wire nothing declares ───────────────────
+//
+// A misspelled *sender* gets rule 1 and a long wait; a misspelled *listener*
+// gets nothing at all — the handler is registered, the wire never arrives, and
+// no code on either side is ever asked about it (#949). Rule 1 cannot cover it,
+// because it asks whether some runtime *answers* the wire, and a push has no
+// answerer: the server's three pushes are delivered to every connected client
+// and dispatched by nobody, so the advertised set — by design — does not
+// contain them.
+//
+// What a subscription needs is a wire the protocol *declares*, and the declared
+// set is the union of three things, none of them a list kept here:
+//
+//   * a wire some sender names — the `callers` map, every entry of which rule 1
+//     has already held against the advertised set. Only a sender counts: a
+//     listener naming a wire does not declare it, or this rule would answer its
+//     own question.
+//   * the notification wires, declared beside the dispatcher that sends them.
+//   * every `pub const NAME: &str = "wire";` in the tree — how a runtime
+//     declares a wire no route table can describe. The server's three pushes
+//     are declared this way, in `web_client_registry.rs` beside the code that
+//     emits them, and they are reachable no other way.
+//
+// `<wire>.response` is added on top, because that convention is the kernel's
+// rather than this script's: if a wire is declared, its answer is nameable too.
+//
+// Evaluated here rather than inline because the first source is only complete
+// once every file has been read.
+const declared = new Set([...callers.keys(), ...notifications.keys(), ...constWires.values()]);
+for (const w of [...declared]) declared.add(`${w}.response`);
+
+for (const { rel, line, wire, text } of listeners) {
+  if (declared.has(wire)) continue;
+  report(rel, line,
+    `nothing declares \`${wire}\` — no unit, notification or push names it, so a subscription to it waits for a message no runtime can send (rule 4)`,
+    text,
+    'declare it beside the runtime that emits it (`pub const NAME: &str = "<wire>";`) — or mark the line // not-protocol: <reason> if it is deliberately a wire nothing sends');
 }
 
 // ── Rule 2: a protocol nothing calls ────────────────────────────────────────

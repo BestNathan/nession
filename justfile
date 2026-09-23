@@ -46,16 +46,22 @@ check: fmt lint check-tmux-socket check-protocol check-codegen coverage
 # forced env write reported a re-source failure and the session kept the old
 # values.
 #
-# Two rules, and they are duals:
+# Four rules:
 #
 #   1. every wire a call site names is well formed and some runtime answers it
 #   2. every advertised protocol is named by at least one call site
+#   3. the transitional `nession_common::protocol` alias path stays gone
+#   4. every wire a *subscription* names is one the protocol declares — a push
+#      is emitted and never answered, so rule 1 asks the wrong question of a
+#      listener, and a wire nothing declares is a handler that never fires
 #
-# Reads the advertised set from the generated tree (which `just check-codegen`
-# keeps equal to the contracts), from the kernel's `<wire>.response` rule, and
-# from the `pub const` declarations beside each dispatcher. A file that deals
-# in placeholder wires on purpose declares `// not-protocol-file: <reason>` in
-# its header, and every run prints which files do.
+# Rules 1 and 2 are duals. Reads the advertised set from the generated tree
+# (which `just check-codegen` keeps equal to the contracts), from the kernel's
+# `<wire>.response` rule, and from the `pub const` declarations beside each
+# dispatcher — the server's three pushes are declared that way in
+# `web_client_registry.rs`, which is what lets rule 4 see them. A file that
+# deals in placeholder wires on purpose declares `// not-protocol-file: <reason>`
+# in its header, and every run prints which files do.
 check-protocol:
     node scripts/protocol-gate.mjs
 

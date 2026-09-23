@@ -495,6 +495,7 @@ is broken by it.
 | A generated file refers to nothing it does not declare | the same crate's `check_self_contained`, run by the generator *and* as a test |
 | The wire a *call site* names is one some runtime answers | `just check-protocol` (`scripts/protocol-gate.mjs`) — rule 1 |
 | Every advertised protocol has a caller | the same gate — rule 2 |
+| The wire a *subscription* names is one the protocol declares | the same gate — rule 4 (a push is emitted and never answered, so rule 1's question is the wrong one to ask of a listener) |
 | The gate still catches each of those | `just protocol-check-selftest` — each rule injected into a fixture tree, which must fail with that rule named |
 
 ### The one thing two lists cannot see (the gate)
@@ -519,12 +520,26 @@ both directions:
   differ: one is a spelling, the other is a wire that does not exist.
 - **Every advertised protocol has a caller.** A unit nothing calls is a protocol
   this workspace maintains and cannot use.
+- **Every wire a subscription names is one the protocol declares.** The listener
+  half, and the one rule that cannot be a wider first rule: a push is *emitted
+  and never answered* — `agents.changed`, `sessions.changed` and
+  `server.commands.changed` are delivered to every connected client and
+  dispatched by nobody — so the advertised set does not contain the wires a
+  subscription legitimately names. A misspelled listener gets less than a
+  misspelled sender does: the handler is registered, the wire never arrives, and
+  no code on either side is ever asked about it (#949).
 
 The advertised set is not a list the gate keeps. It is read from the generated
 bindings (which `just check-codegen` holds equal to the contracts), from the
 kernel's `<wire>.response` rule, and from the `pub const` declarations beside
 each dispatcher — the notification wires, which no route table can describe
 because nothing answers them.
+
+Rule 4 reads a wider *declared* set: those three sources plus every
+`pub const NAME: &str = "wire";` in the tree. That last one is how a runtime
+declares a wire no route table and no binding can describe — the Server's three
+pushes are declared in `web_client_registry.rs`, beside the code that emits
+them, and that declaration is what the gate reads.
 
 A name is **resolved**, not required to be a literal. `msg_types::AGENT_HEARTBEAT`
 and an imported `WIRE as BRANCHES_WIRE` are both *better* than a literal — they
@@ -535,9 +550,13 @@ which is where a misspelling hides.
 Two escape hatches, and both are printed on every run so an exemption cannot
 spread unnoticed: `// not-protocol: <reason>` on a line, and
 `// not-protocol-file: <reason>` in a file's header, for a file whose subject is
-the transport and whose wires are deliberately arbitrary. An excused site is
-still counted as a caller — it is excused from being checked, not from
-existing, which is a distinction the gate first got wrong.
+the transport and whose wires are deliberately arbitrary. Both cover rules 1 and
+4 — the two that ask what a call site *names* — and neither covers rule 2's
+counting or rule 3. An excused *sender* site is still counted as a caller: it is
+excused from being checked, not from existing, which is a distinction the gate
+first got wrong. A subscription is the exception, because a listener does not
+put a wire on the wire — counting it as a caller would let rule 4 answer its own
+question.
 
 `just protocol-check-selftest` injects each rule into a fixture tree and
 requires the gate to fail with that rule named. A gate that has quietly stopped

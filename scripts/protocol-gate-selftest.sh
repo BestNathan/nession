@@ -4,7 +4,8 @@
 # A gate that has quietly stopped matching reports success, and success is
 # indistinguishable from "nothing is wrong". So each rule is injected into a
 # fixture tree and the gate has to fail with that rule named — including the
-# shape that started this: a sender naming a wire no runtime answers (#913).
+# shapes that started this: a sender naming a wire no runtime answers (#913),
+# and a listener subscribing to one nothing declares (#949).
 #
 # The fixture is a tree of its own because the gate reads `process.cwd()`. That
 # also means rule 2 can be exercised at all: on the real tree every unit has a
@@ -241,6 +242,79 @@ export function go(socket: { request(t: string, p: unknown): void }) {
 }
 TS
 expect_fail "rule 3 — an import of the alias path" 'the transitional alias path'
+
+# ── 4. A subscription naming a wire nothing declares ────────────────────────
+# The listener half of the same failure, and the half rule 1 cannot reach: a
+# typo'd sender waits for a reply that never comes, a typo'd listener is silent
+# from the start. Rule 1 asks whether some runtime *answers* the wire, and a
+# push is answered by nobody — so the wires a subscription legitimately names
+# are exactly the ones the advertised set does not contain (#949).
+reset_fixture
+write_caller <<'TS'
+export function go(socket: {
+  request(t: string, p: unknown): void;
+  subscribe(t: string, h: () => void): void;
+}) {
+  socket.request('alpha.one', {});
+  socket.request('beta.two', {});
+  socket.subscribe('alpha.chagned', () => {});
+}
+TS
+expect_fail "rule 4 — a subscription naming a wire nothing declares" 'nothing declares `alpha.chagned`'
+
+# The direction that matters just as much: a subscription to a push is the
+# *normal* case, so a rule that flagged it would be worse than no rule at all.
+# The fixture declares the push the way the server does — a `pub const` beside
+# the code that emits it, and nothing at a sender call site, because a push is
+# never sent as a request.
+reset_fixture
+cat > "$WORK/tree/crates/thing/src/lib.rs" <<'RS'
+pub const ALPHA_CHANGED: &str = "alpha.changed";
+RS
+write_caller <<'TS'
+export function go(socket: {
+  request(t: string, p: unknown): void;
+  subscribe(t: string, h: () => void): void;
+}) {
+  socket.request('alpha.one', {});
+  socket.request('beta.two', {});
+  socket.subscribe('alpha.changed', () => {});
+}
+TS
+expect_pass "a subscription to a declared push is not a violation"
+
+# The other source of the declared set — a wire some sender names. A request and
+# a subscription naming the same wire is what a request/response pair looks like
+# from the listener's side, and it has to stay clean.
+reset_fixture
+write_caller <<'TS'
+export function go(socket: {
+  request(t: string, p: unknown): void;
+  subscribe(t: string, h: () => void): void;
+}) {
+  socket.request('alpha.one', {});
+  socket.request('beta.two', {});
+  socket.subscribe('alpha.one', () => {});
+}
+TS
+expect_pass "a subscription to a wire a sender names is not a violation"
+
+# …and the line escape covers rule 4, which is what keeps `AgentsPlugin.ts`'s
+# deliberately-tested non-protocol subscription from failing the gate. Only
+# where it is written: the unmarked site above is still a violation.
+reset_fixture
+write_caller <<'TS'
+export function go(socket: {
+  request(t: string, p: unknown): void;
+  subscribe(t: string, h: () => void): void;
+}) {
+  socket.request('alpha.one', {});
+  socket.request('beta.two', {});
+  // not-protocol: a wire nothing sends, kept on purpose.
+  socket.subscribe('alpha.chagned', () => {});
+}
+TS
+expect_pass "a marked subscription is excused"
 
 echo
 if [[ $failures -eq 0 ]]; then
