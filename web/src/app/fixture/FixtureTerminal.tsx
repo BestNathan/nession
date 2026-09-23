@@ -137,21 +137,14 @@ export function FixtureTerminal({ chrome }: { chrome?: TerminalChrome }) {
       capsuleCapabilities={chrome?.capsuleCapabilities}
       capsuleProjection={chrome?.capsuleProjection}
     >
-      {/* Same box and **all four sides** of inset as the product's viewport, from
-          the product's own exports — the canonical screens have to draw the well
-          the user gets, or the inset is protected by nothing.
-
-          The fourth side is the one that was missing. The class carries `px` and
-          `pt`; the bottom comes from `--terminal-content-bottom-inset`, which the
-          product spends as an inline `padding-bottom` and this fixture did not —
-          so the fixture's well was 56.375px taller than the one the user sees,
-          and every measurement taken here was of a box that does not ship. */}
+      {/* Same box and inset as the product's viewport, from the product's own
+          class exports — the canonical screens have to draw the well the user
+          gets, or the inset is protected by nothing. */}
       <div
         data-testid="fixture-terminal"
         data-terminal-viewport
         ref={ref}
         className={cn(terminalViewportBoxClass, terminalViewportInsetClass)}
-        style={{ paddingBottom: 'var(--terminal-content-bottom-inset, 0px)' }}
       />
     </TerminalSurface>
   );
