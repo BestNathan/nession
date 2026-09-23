@@ -1,3 +1,7 @@
+import { WIRE as COMMANDS_ADD_WIRE } from '@/generated/protocol/core/server-commands-add/v1';
+import { WIRE as COMMANDS_LIST_WIRE } from '@/generated/protocol/core/server-commands-list/v1';
+import { WIRE as COMMANDS_REMOVE_WIRE } from '@/generated/protocol/core/server-commands-remove/v1';
+import { WIRE as COMMANDS_UPDATE_WIRE } from '@/generated/protocol/core/server-commands-update/v1';
 import type { TransportPlugin, PluginSurface } from '@/platform/socket/types';
 import type {
   CommandsAddResponse,
@@ -7,10 +11,12 @@ import type {
 } from './types';
 
 /**
- * commands capability — `client.commands.list|add|remove|update` (quick
+ * commands capability — `server.commands.list|add|remove|update` (quick
  * commands, issue #95) plus the `server.commands.changed` push that keeps the
- * UI's command palette fresh. Wire strings live only in this file; the typed
- * API is what consumers import (module singleton in index.ts).
+ * UI's command palette fresh. The wire strings are the generated bindings
+ * (except `server.commands.changed`, a notification the server broadcasts
+ * without a Protocol Unit); the typed API is what consumers import (module
+ * singleton in index.ts).
  */
 /** One registration, tagged with the install generation that created it. */
 interface GenerationEntry<T> {
@@ -63,7 +69,7 @@ export class CommandsPlugin implements TransportPlugin {
 
   /** Fetch all quick commands in display order. */
   async listCommands(): Promise<CommandsListResponse> {
-    return this.requireConnection().request<CommandsListResponse>('server.commands.list', {});
+    return this.requireConnection().request<CommandsListResponse>(COMMANDS_LIST_WIRE, {});
   }
 
   /** Add a quick command. `raw: true` disables shell quoting/expansion. */
@@ -72,7 +78,7 @@ export class CommandsPlugin implements TransportPlugin {
     command: string,
     raw = false,
   ): Promise<CommandsAddResponse> {
-    return this.requireConnection().request<CommandsAddResponse>('server.commands.add', {
+    return this.requireConnection().request<CommandsAddResponse>(COMMANDS_ADD_WIRE, {
       label,
       command,
       raw,
@@ -81,7 +87,7 @@ export class CommandsPlugin implements TransportPlugin {
 
   /** Remove a quick command by id. */
   async removeCommand(id: string): Promise<CommandsRemoveResponse> {
-    return this.requireConnection().request<CommandsRemoveResponse>('server.commands.remove', {
+    return this.requireConnection().request<CommandsRemoveResponse>(COMMANDS_REMOVE_WIRE, {
       id,
     });
   }
@@ -91,7 +97,7 @@ export class CommandsPlugin implements TransportPlugin {
     id: string,
     fields: { label?: string; command?: string; raw?: boolean },
   ): Promise<CommandsUpdateResponse> {
-    return this.requireConnection().request<CommandsUpdateResponse>('server.commands.update', {
+    return this.requireConnection().request<CommandsUpdateResponse>(COMMANDS_UPDATE_WIRE, {
       id,
       ...fields,
     });

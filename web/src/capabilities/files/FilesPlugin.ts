@@ -1,3 +1,10 @@
+import { WIRE as FILE_CREATE_DIR_WIRE } from '@/generated/protocol/core/agent-file-create-dir/v1';
+import { WIRE as FILE_CWD_WIRE } from '@/generated/protocol/core/agent-file-cwd/v1';
+import { WIRE as FILE_DELETE_WIRE } from '@/generated/protocol/core/agent-file-delete/v1';
+import { WIRE as FILE_LIST_WIRE } from '@/generated/protocol/core/agent-file-list/v1';
+import { WIRE as FILE_READ_WIRE } from '@/generated/protocol/core/agent-file-read/v1';
+import { WIRE as FILE_RENAME_WIRE } from '@/generated/protocol/core/agent-file-rename/v1';
+import { WIRE as FILE_WRITE_WIRE } from '@/generated/protocol/core/agent-file-write/v1';
 import type { TransportPlugin, PluginSurface } from '@/platform/socket/types';
 import type { ChunkedReadResult, FileData, FileEntry, FileOps } from './types';
 
@@ -112,31 +119,31 @@ export class FilesPlugin implements TransportPlugin, FileApi {
   }
 
   listDir(path: string): Promise<{ entries: FileEntry[] }> {
-    return this.request('agent.file.list', { path });
+    return this.request(FILE_LIST_WIRE, { path });
   }
 
   readFile(path: string, options?: { offset?: number; limit?: number }): Promise<FileData> {
-    return this.request('agent.file.read', { path, ...options });
+    return this.request(FILE_READ_WIRE, { path, ...options });
   }
 
   writeFile(path: string, contentB64: string): Promise<{ path: string; written: number }> {
-    return this.request('agent.file.write', { path, content: contentB64 });
+    return this.request(FILE_WRITE_WIRE, { path, content: contentB64 });
   }
 
   deleteFile(path: string, recursive = false): Promise<{ path: string; success: boolean }> {
-    return this.request('agent.file.delete', { path, recursive });
+    return this.request(FILE_DELETE_WIRE, { path, recursive });
   }
 
   createDir(path: string): Promise<{ path: string; success: boolean }> {
-    return this.request('agent.file.create-dir', { path });
+    return this.request(FILE_CREATE_DIR_WIRE, { path });
   }
 
   renameFile(from: string, to: string): Promise<{ from: string; to: string; success: boolean }> {
-    return this.request('agent.file.rename', { from, to });
+    return this.request(FILE_RENAME_WIRE, { from, to });
   }
 
   getCwd(sessionId: string): Promise<{ path: string }> {
-    return this.request('agent.file.cwd', { session_id: sessionId });
+    return this.request(FILE_CWD_WIRE, { session_id: sessionId });
   }
 
   /** Read a local file and upload its base64 content as `file.write`. */
@@ -178,8 +185,8 @@ export class FilesPlugin implements TransportPlugin, FileApi {
     if (!connection) {
       throw new Error('files feature is not connected');
     }
-    // not-protocol: the pass-through. Every caller names a wire literal, and
-    // those are the sites the protocol gate reads.
+    // not-protocol: the pass-through. Every caller names a wire, and those
+    // are the sites the protocol gate reads.
     return connection.request<T>(type, payload);
   }
 }

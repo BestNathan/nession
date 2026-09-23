@@ -1,9 +1,10 @@
+import { WIRE as SERVER_INFO_WIRE } from '@/generated/protocol/core/server-info/v1';
 import type { TransportPlugin, PluginSurface } from '@/platform/socket/types';
 import type { ServerInfo } from '@/types';
 
 /**
- * server capability — `client.server.info`. Wire strings live only in this
- * file; the typed API is what consumers import (module singleton in
+ * server capability — `server.info`. The wire string is the generated
+ * binding; the typed API is what consumers import (module singleton in
  * index.ts).
  */
 export class ServerPlugin implements TransportPlugin {
@@ -30,7 +31,7 @@ export class ServerPlugin implements TransportPlugin {
 
   /** Fetch server info (version, uptime, counts). */
   async serverInfo(): Promise<ServerInfo> {
-    return this.requireConnection().request<ServerInfo>('server.info', {});
+    return this.requireConnection().request<ServerInfo>(SERVER_INFO_WIRE, {});
   }
 
   private requireConnection(): PluginSurface {

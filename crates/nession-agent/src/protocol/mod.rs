@@ -30,6 +30,12 @@
 //! the match in `server_client`. They are replies to something the agent sent,
 //! not units anyone can call, and a manifest that advertised them would be
 //! claiming an offer that does not exist.
+//!
+//! That rule is stated canonically in `docs/architecture/protocol.md` § *What is
+//! not a Protocol Unit*, and shortened to its test on the `Unit` type in
+//! `catalog.rs`. It is repeated here only because this is where it explains a
+//! local absence — if the three ever disagree, those two are right and this is a
+//! stale copy.
 
 use nession_protocol::{ContractDescriptor, ContractVersion, IdentityError, ProtocolDescriptor};
 

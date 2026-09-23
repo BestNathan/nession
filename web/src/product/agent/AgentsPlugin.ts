@@ -1,3 +1,6 @@
+import { WIRE as AGENT_DELETE_WIRE } from '@/generated/protocol/core/server-agent-delete/v1';
+import { WIRE as AGENT_LIST_WIRE } from '@/generated/protocol/core/server-agent-list/v1';
+import { WIRE as AGENT_RENAME_WIRE } from '@/generated/protocol/core/server-agent-rename/v1';
 import { manifestsOf } from '@/platform/protocol';
 import type { TransportPlugin, PluginSurface } from '@/platform/socket/types';
 import type { Agent } from '@/types';
@@ -12,10 +15,10 @@ interface GenerationEntry<T> {
 }
 
 /**
- * agents capability — `client.agents.list` / `client.agent.rename` /
- * `client.agent.delete` plus the two change notifications that keep the UI's
- * agent list fresh. Wire strings live only in this file; the typed API is
- * what consumers import (module singleton in index.ts).
+ * agents capability — `server.agent.list` / `server.agent.rename` /
+ * `server.agent.delete` plus the two change notifications that keep the UI's
+ * agent list fresh. The wire strings are the generated bindings; the typed API
+ * is what consumers import (module singleton in index.ts).
  */
 export class AgentsPlugin implements TransportPlugin {
   readonly name = 'agents';
@@ -88,7 +91,7 @@ export class AgentsPlugin implements TransportPlugin {
    */
   async listAgents(): Promise<Agent[]> {
     const response = await this.requireConnection().request<AgentsListResponse>(
-      'server.agent.list',
+      AGENT_LIST_WIRE,
       {},
     );
     this.publishProtocols(response.agents);
@@ -98,7 +101,7 @@ export class AgentsPlugin implements TransportPlugin {
   /** Rename an agent's display name. Pass null to clear (reset to config/hostname). */
   async renameAgent(agentId: string, displayName: string | null): Promise<Agent> {
     const response = await this.requireConnection().request<AgentRenameResponse>(
-      'server.agent.rename',
+      AGENT_RENAME_WIRE,
       { agent_id: agentId, display_name: displayName },
     );
     if (!response.success || !response.agent) {
@@ -110,7 +113,7 @@ export class AgentsPlugin implements TransportPlugin {
   /** Delete an offline agent and all its sessions. Rejects if agent is online. */
   async deleteAgent(agentId: string): Promise<void> {
     const response = await this.requireConnection().request<AgentDeleteResponse>(
-      'server.agent.delete',
+      AGENT_DELETE_WIRE,
       { agent_id: agentId },
     );
     if (!response.success) {
