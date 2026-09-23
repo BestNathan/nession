@@ -8,7 +8,8 @@ use crate::env::EnvService;
 use crate::protocol::server_routes;
 use crate::registry::{AgentInfo, AgentRegistry, AgentStatus, SessionRegistry, SessionStatus};
 use crate::server::client_registry::ClientRegistry;
-use crate::server::command_broker::{CommandBroker, ConnectionGeneration, WsMessageSender};
+use crate::server::command_broker::{CommandBroker, ConnectionGeneration};
+use crate::server::outbound::WsMessageSender;
 use crate::server::web_client_registry::WebClientRegistry;
 use nession_common::display_name::validate_display_name;
 use nession_common::env_file::parse_env;
@@ -1372,7 +1373,13 @@ impl ConnectionHandler {
                     })
                     .to_string(),
                 );
-                let _ = sender.send(response);
+                // The browser's `requestAttach()` is waiting on this frame, so
+                // it goes out on the reply lane: `relay.begin` only arrives once
+                // the Terminal is mounted, and until then there is nothing else
+                // on this connection to answer it. A queue that is closed means
+                // the browser is already gone, which `let _` here and nowhere
+                // else.
+                let _ = sender.send_reply(response).await;
             }
 
             // Phase 1 complete — relay info returned to browser.
@@ -5005,6 +5012,7 @@ mod tests {
                 .recv()
                 .await
                 .expect("agent should receive sessions.list")
+                .message
                 .to_text()
                 .unwrap()
                 .to_string();
@@ -5079,6 +5087,7 @@ mod tests {
                 .recv()
                 .await
                 .expect("agent should receive session.create")
+                .message
                 .to_text()
                 .unwrap()
                 .to_string();
@@ -5368,7 +5377,7 @@ mod tests {
         // The phase-1 response goes over the client sender channel and must
         // identify the session (the web client keys on attachInfo.session_id).
         let phase1 = relay_rx.try_recv().expect("phase 1 response not sent");
-        let Message::Text(phase1_text) = phase1 else {
+        let Message::Text(phase1_text) = phase1.message else {
             panic!("expected Text message");
         };
         let phase1: serde_json::Value = serde_json::from_str(&phase1_text).unwrap();
@@ -6117,7 +6126,7 @@ mod tests {
 
     #[tokio::test]
     async fn env_write_force_skips_lock_and_re_sources() {
-        use crate::server::command_broker::WsMessageSender;
+        use crate::server::outbound::WsMessageSender;
 
         let mut h = test_handler("").await;
         h.authenticated_client = true;
@@ -6164,6 +6173,7 @@ mod tests {
                 .recv()
                 .await
                 .expect("agent should receive a command")
+                .message
                 .to_text()
                 .unwrap()
                 .to_string();
@@ -6337,7 +6347,7 @@ mod tests {
 
     #[tokio::test]
     async fn agent_terminal_resize_broadcasts_to_attached_clients() {
-        use crate::server::command_broker::WsMessageSender;
+        use crate::server::outbound::WsMessageSender;
 
         let mut h = test_handler("").await;
 
@@ -6368,8 +6378,10 @@ mod tests {
         let msg1 = rx1.try_recv().unwrap();
         let msg2 = rx2.try_recv().unwrap();
 
-        let parsed1: serde_json::Value = serde_json::from_str(msg1.to_text().unwrap()).unwrap();
-        let parsed2: serde_json::Value = serde_json::from_str(msg2.to_text().unwrap()).unwrap();
+        let parsed1: serde_json::Value =
+            serde_json::from_str(msg1.message.to_text().unwrap()).unwrap();
+        let parsed2: serde_json::Value =
+            serde_json::from_str(msg2.message.to_text().unwrap()).unwrap();
 
         assert_eq!(parsed1["msg_type"], "terminal.resize");
         assert_eq!(parsed1["payload"]["session_id"], "a1:dev");
