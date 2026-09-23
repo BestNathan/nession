@@ -29,11 +29,12 @@ use crate::fs::ops::FileOps;
 use crate::protocol::p2p_routes;
 use crate::server::execution::ExecutionPolicy::{Inline, Key, Ordered, Query};
 use crate::server::execution::{ExecutionLanes, ResourceKey, Work, SHUTDOWN_GRACE};
+use crate::server::outbound::{self, OutboundError, P2pOutbound};
 use crate::server::resize::ResizeReporter;
 use crate::tmux::manager::SessionManager;
 use crate::tmux::session::TmuxSession;
 use anyhow::{Context, Result};
-use futures_util::{SinkExt, StreamExt};
+use futures_util::StreamExt;
 use nession_protocol::contracts::env::v1::EnvSnapshot;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
@@ -45,12 +46,11 @@ use tokio_tungstenite::tungstenite::Message as WsMessage;
 use tokio_tungstenite::WebSocketStream;
 use tracing::{debug, error, info, warn};
 
-/// One connection's WebSocket sink, shared by everything that answers on it.
-///
-/// A mutex because a `SplitSink` is one object and a write is one operation —
-/// replies come from the reader and from every lane's task at once, and the
-/// frames must not interleave inside a socket write.
-type SharedSink = Arc<Mutex<futures_util::stream::SplitSink<WebSocketStream<TcpOrTls>, WsMessage>>>;
+// The socket itself belongs to `crate::server::outbound`'s writer, and every
+// caller here holds a `P2pOutbound` handle: a bounded queue with a policy per
+// lane (`#961-E`). It used to be a bare `Arc<Mutex<SplitSink>>` — see that
+// module for what an unbounded socket write turns into, and why the writer task
+// is a task rather than a lock.
 
 /// A tmux attach session, shared by all clients attached through this
 /// connection. Created on first attach, destroyed on last detach.
@@ -142,7 +142,7 @@ fn fan_out(subscribers: &mut Vec<mpsc::Sender<Vec<u8>>>, chunk: &[u8]) -> usize 
 /// the only difference between the two was which names the locals had.
 fn spawn_output_forwarder(
     mut rx: mpsc::Receiver<Vec<u8>>,
-    sink: SharedSink,
+    outbound: P2pOutbound,
     sessions: Arc<SessionMapLock>,
     session_name: String,
 ) {
@@ -156,9 +156,18 @@ fn spawn_output_forwarder(
             };
             let msg = new_message(msg_types::TERMINAL_OUTPUT, output);
             if let Ok(json) = serde_json::to_string(&msg) {
-                let mut s = sink.lock().await;
-                if s.send(WsMessage::Text(json)).await.is_err() {
-                    return;
+                // Terminal output goes on the terminal lane, which waits for
+                // room and gives up at the stall grace. A verdict there is not
+                // this forwarder's to act on twice — another session's
+                // forwarder may reach it first — so the connection is closed
+                // and this task ends with it.
+                match outbound.send_terminal(WsMessage::Text(json)).await {
+                    Ok(()) => {}
+                    Err(OutboundError::Stalled) => {
+                        outbound.close();
+                        return;
+                    }
+                    Err(_) => return,
                 }
             }
         }
@@ -172,8 +181,7 @@ fn spawn_output_forwarder(
             "session {session_name}: subscriber was detached for not draining its terminal; \
              closing the connection"
         );
-        let mut s = sink.lock().await;
-        let _ = s.send(WsMessage::Close(None)).await;
+        outbound.close();
     });
 }
 
@@ -438,11 +446,17 @@ async fn query_window_size(session_name: &str) -> Result<(u16, u16)> {
     Ok((cols, rows))
 }
 
-/// Send a single `terminal.resize` message on the shared WebSocket sink.
-/// Returns `true` on success, `false` if the sink is closed (in which case
-/// the caller should stop forwarding).
+/// Send a single `terminal.resize` message on this connection's outbound path.
+/// Returns `true` while the connection is usable, `false` once it is over.
+///
+/// A resize is a *level*, so it rides the lane that is allowed to drop it
+/// ([`outbound::P2pOutbound::try_send_state`]): a client too far behind to take
+/// one is too far behind to render the frame it changes, and it restates its own
+/// size when its viewport moves or when it re-attaches. `Saturated` is therefore
+/// not a failure — the connection is still good — which is why only `Closed`
+/// stops the caller.
 async fn send_terminal_resize_msg(
-    sink: &Arc<Mutex<futures_util::stream::SplitSink<WebSocketStream<TcpOrTls>, WsMessage>>>,
+    outbound: &P2pOutbound,
     session_name: &str,
     cols: u16,
     rows: u16,
@@ -456,8 +470,10 @@ async fn send_terminal_resize_msg(
     let Ok(json) = serde_json::to_string(&msg) else {
         return true;
     };
-    let mut s = sink.lock().await;
-    s.send(WsMessage::Text(json)).await.is_ok()
+    !matches!(
+        outbound.try_send_state(WsMessage::Text(json)),
+        Err(OutboundError::Closed)
+    )
 }
 
 pub fn new_message<P: Serialize>(msg_type: &str, payload: P) -> Message<P> {
@@ -607,7 +623,7 @@ pub(crate) struct P2pRequest<'a> {
     tmux: &'a Arc<SessionManager>,
     sessions: &'a Arc<SessionMapLock>,
     client_id: &'a Arc<Mutex<Option<String>>>,
-    sink: &'a SharedSink,
+    outbound: &'a P2pOutbound,
     default_working_dir: &'a str,
     file_ops: &'a Arc<FileOps>,
     listen_address: &'a str,
@@ -651,7 +667,7 @@ struct Connection {
     tmux: Arc<SessionManager>,
     sessions: Arc<SessionMapLock>,
     client_id: Arc<Mutex<Option<String>>>,
-    sink: SharedSink,
+    outbound: P2pOutbound,
     default_working_dir: String,
     file_ops: Arc<FileOps>,
     listen_address: String,
@@ -779,7 +795,7 @@ impl Frame {
             tmux: &connection.tmux,
             sessions: &connection.sessions,
             client_id: &connection.client_id,
-            sink: &connection.sink,
+            outbound: &connection.outbound,
             default_working_dir: &connection.default_working_dir,
             file_ops: &connection.file_ops,
             listen_address: &connection.listen_address,
@@ -809,14 +825,20 @@ fn lane_work(frame: Frame) -> Work {
 ///
 /// `None` is a control wire that needs no frame written back; everything else
 /// answers, errors included.
+///
+/// The frame goes on the reply lane, which waits for room and never drops. The
+/// only failure it can report is the connection being over — the one failure a
+/// caller can act on, and the one that used to be spelled "the socket write
+/// returned an error".
 async fn write_frame(connection: &Connection, frame: Option<String>) -> bool {
     let Some(text) = frame else { return true };
-    let mut s = connection.sink.lock().await;
-    if let Err(e) = s.send(WsMessage::Text(text)).await {
-        warn!("WebSocket write error to {}: {:#}", connection.addr, e);
-        return false;
+    match connection.outbound.send_reply(WsMessage::Text(text)).await {
+        Ok(()) => true,
+        Err(e) => {
+            warn!("WebSocket write to {} did not go out: {e}", connection.addr);
+            false
+        }
     }
-    true
 }
 
 // ---------------------------------------------------------------------------
@@ -1086,7 +1108,7 @@ p2p_routes! { ctx, msg_type, payload_value;
 
                         spawn_output_forwarder(
                             rx,
-                            Arc::clone(ctx.sink),
+                            ctx.outbound.clone(),
                             Arc::clone(ctx.sessions),
                             session_name.clone(),
                         );
@@ -1115,7 +1137,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                             // Spawn forwarding task for the first subscriber.
                             spawn_output_forwarder(
                                 rx,
-                                Arc::clone(ctx.sink),
+                                ctx.outbound.clone(),
                                 Arc::clone(ctx.sessions),
                                 session_name.clone(),
                             );
@@ -1218,8 +1240,10 @@ p2p_routes! { ctx, msg_type, payload_value;
                                 };
                                 let msg = new_message(msg_types::TERMINAL_OUTPUT, output);
                                 if let Ok(json) = serde_json::to_string(&msg) {
-                                    let mut s = ctx.sink.lock().await;
-                                    let _ = s.send(WsMessage::Text(json)).await;
+                                    let _ = ctx
+                                        .outbound
+                                        .send_terminal(WsMessage::Text(json))
+                                        .await;
                                 }
                             }
 
@@ -1227,7 +1251,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                             // channel from the control-mode subprocess and
                             // forwards bytes to the client as `terminal.output`
                             // messages.
-                            let sink_clone = Arc::clone(ctx.sink);
+                            let outbound_clone = ctx.outbound.clone();
                             let session_name_clone = session_name.clone();
                             tokio::spawn(async move {
                                 while let Some(bytes) = output_rx.recv().await {
@@ -1240,9 +1264,21 @@ p2p_routes! { ctx, msg_type, payload_value;
                                     };
                                     let msg = new_message(msg_types::TERMINAL_OUTPUT, output);
                                     if let Ok(json) = serde_json::to_string(&msg) {
-                                        let mut s = sink_clone.lock().await;
-                                        if s.send(WsMessage::Text(json)).await.is_err() {
-                                            break;
+                                        // Same terminal lane as the subscriber
+                                        // forwarders, and the same verdict: a
+                                        // control-mode client that has stopped
+                                        // draining loses the connection rather
+                                        // than pinning the tmux reader.
+                                        match outbound_clone
+                                            .send_terminal(WsMessage::Text(json))
+                                            .await
+                                        {
+                                            Ok(()) => {}
+                                            Err(OutboundError::Stalled) => {
+                                                outbound_clone.close();
+                                                return;
+                                            }
+                                            Err(_) => return,
                                         }
                                     }
                                 }
@@ -1270,7 +1306,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                             // central connection that falls behind costs a stale
                             // intermediate size rather than a queue that grows
                             // without bound. See `crate::server::resize`.
-                            let sink_resize = Arc::clone(ctx.sink);
+                            let outbound_resize = ctx.outbound.clone();
                             let session_name_resize = session_name.clone();
                             let resize_reporter = ctx.resize.clone();
                             let agent_id_resize = ctx.agent_id.to_string();
@@ -1282,7 +1318,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                                 match query_window_size(&session_name_resize).await {
                                     Ok((cols, rows)) => {
                                         send_terminal_resize_msg(
-                                            &sink_resize,
+                                            &outbound_resize,
                                             &session_name_resize,
                                             cols,
                                             rows,
@@ -1299,7 +1335,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                                         format!("{agent_id_resize}:{session_name_resize}");
                                     resize_reporter.publish(&full_id, cols, rows);
                                     if !send_terminal_resize_msg(
-                                        &sink_resize,
+                                        &outbound_resize,
                                         &session_name_resize,
                                         cols,
                                         rows,
@@ -1896,10 +1932,14 @@ impl AgentServer {
 
         info!("WebSocket connection from {}", addr);
 
-        // Shared sink so that every lane's task — and the reader — can answer
-        // on this connection; a socket write is one operation, so the sink is
-        // behind a mutex.
-        let sink = Arc::new(Mutex::new(ws_sink));
+        // The outbound path: a bounded queue with a policy per lane, and one
+        // writer task that owns the socket (`#961-E`). Every lane's task — and
+        // the reader — holds a handle to it and says which *class* of message it
+        // is sending, because the classes do not share a failure mode; see
+        // `server::outbound`.
+        let (outbound, outbound_rx) = P2pOutbound::new();
+        let writer = tokio::spawn(outbound::run_writer(ws_sink, outbound_rx, outbound.clone()));
+
         // Per-client attached PTY sessions keyed by session name.
         let sessions: Arc<SessionMapLock> =
             Arc::new(SessionMapLock::new(std::collections::HashMap::new()));
@@ -1913,7 +1953,7 @@ impl AgentServer {
             tmux: tmux_manager,
             sessions,
             client_id,
-            sink,
+            outbound,
             default_working_dir,
             file_ops,
             listen_address: listen_address.to_string(),
@@ -1923,7 +1963,18 @@ impl AgentServer {
             addr,
         });
 
-        Self::run_message_loop(ws_stream, connection).await
+        let result = Self::run_message_loop(ws_stream, connection).await;
+
+        // The connection is over, so the writer goes with it — dropping the sink
+        // and closing the peer's socket. The writer also stops by itself when it
+        // is told to (`P2pOutbound::close`, which is how a stalled terminal lane
+        // ends a connection) or when the socket fails; this is the path where
+        // the *reader* ended first, and without it the task would outlive the
+        // connection it belongs to.
+        writer.abort();
+        let _ = writer.await;
+
+        result
     }
 
     /// Drain incoming WebSocket frames and dispatch them (`#961-D`).
@@ -2018,8 +2069,11 @@ impl AgentServer {
                     break;
                 }
                 WsMessage::Ping(data) => {
-                    let mut s = connection.sink.lock().await;
-                    let _ = s.send(WsMessage::Pong(data)).await;
+                    // A pong rides the state lane, which is allowed to drop it:
+                    // the peer's next ping restates the question, and a
+                    // connection that cannot take a pong has nothing left for
+                    // the pong to keep alive.
+                    let _ = connection.outbound.try_send_state(WsMessage::Pong(data));
                 }
                 // Pong, Binary, and Frame are ignored.
                 _ => {}
@@ -2120,6 +2174,7 @@ mod tests {
     use crate::test_support::TestSession;
     use base64::Engine;
     use futures_util::SinkExt;
+    use std::time::Duration;
     use tokio_tungstenite::connect_async;
     use tokio_tungstenite::tungstenite::Message as WsMessage;
 
@@ -2307,6 +2362,120 @@ mod tests {
             );
         }
         assert_eq!(subscribers.len(), 1);
+    }
+
+    /// The detach above is only a policy if a client ever hears about it.
+    ///
+    /// A detached subscriber's forwarder has exactly one thing left to do:
+    /// close the connection, so the client re-attaches and is handed a redrawn
+    /// screen. This is that half, driven through the real forwarder with a
+    /// session the map still holds — which is the whole test of the map lookup
+    /// that tells "this subscriber was detached" apart from "this session
+    /// ended".
+    ///
+    /// The socket is not real here and does not need to be: what is asserted is
+    /// the *verdict*, and `P2pOutbound::close` is where a verdict becomes a
+    /// connection ending.
+    #[tokio::test]
+    async fn a_detached_subscriber_closes_the_connection() {
+        let (outbound, _rx) = P2pOutbound::new();
+        let (tx, rx) = mpsc::channel::<Vec<u8>>(SUBSCRIBER_QUEUE_SLOTS);
+        let sessions: Arc<SessionMapLock> =
+            Arc::new(SessionMapLock::new(std::collections::HashMap::from([(
+                "s1".to_string(),
+                AttachedSession {
+                    backend: Arc::new(Mutex::new(Box::new(
+                        crate::tmux::pty::PtySession::attach("s1", 80, 24)
+                            .expect("a PTY for the session under test")
+                            .0,
+                    ))),
+                    subscribers: Vec::new(),
+                },
+            )])));
+
+        spawn_output_forwarder(
+            rx,
+            outbound.clone(),
+            Arc::clone(&sessions),
+            "s1".to_string(),
+        );
+
+        // The subscriber is detached: `fan_out` drops its sender, so the
+        // forwarder's receiver ends without the connection having ended.
+        drop(tx);
+        let closed = tokio::time::timeout(Duration::from_secs(5), async {
+            while !outbound.is_closed() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await;
+        assert!(
+            closed.is_ok(),
+            "a detached subscriber left the connection open: the client keeps a \
+             terminal that has stopped moving, with nothing coming to say so"
+        );
+
+        sessions_lock(&sessions)
+            .get_mut("s1")
+            .expect("the session under test")
+            .subscribers
+            .clear();
+    }
+
+    /// A terminal lane that never gets room ends the connection rather than
+    /// parking a forwarder forever.
+    ///
+    /// This is `#961`'s backpressure requirement for this socket, end to end:
+    /// the queue is bounded, the policy at the bound is stated, and the verdict
+    /// reaches the connection. What it replaces is a forwarder parked on an
+    /// unbounded socket write — where the *upper* policy (`SUBSCRIBER_QUEUE_SLOTS`
+    /// detaching this subscriber) could never be delivered, because the
+    /// forwarder never got to observe its own receiver closing.
+    ///
+    /// The queue is saturated with one oversized state frame — `charge` clamps a
+    /// frame larger than the budget to the whole of it — so the next terminal
+    /// frame has no room and the grace is what decides. The grace is shortened
+    /// because waiting out a production number is waiting out the calendar; the
+    /// bound still has to be reached first, which is what the saturation
+    /// arranges.
+    #[tokio::test]
+    async fn a_terminal_forwarder_that_cannot_drain_closes_the_connection() {
+        use crate::server::outbound::OUTBOUND_BYTE_BUDGET;
+
+        let (outbound, _rx) = P2pOutbound::with_terminal_grace(Duration::from_millis(50));
+        assert_eq!(
+            outbound.try_send_state(WsMessage::Text("x".repeat(OUTBOUND_BYTE_BUDGET))),
+            Ok(()),
+            "the whole byte budget is one frame's worth"
+        );
+
+        let (tx, rx) = mpsc::channel::<Vec<u8>>(SUBSCRIBER_QUEUE_SLOTS);
+        let sessions: Arc<SessionMapLock> =
+            Arc::new(SessionMapLock::new(std::collections::HashMap::new()));
+        spawn_output_forwarder(
+            rx,
+            outbound.clone(),
+            Arc::clone(&sessions),
+            "s1".to_string(),
+        );
+
+        tx.send(b"chunk".to_vec()).await.expect("the chunk is sent");
+        let closed = tokio::time::timeout(Duration::from_secs(5), async {
+            while !outbound.is_closed() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await;
+        assert!(
+            closed.is_ok(),
+            "a terminal frame waited out the grace and the connection stayed open: \
+             the forwarder is parked on a queue nobody is draining"
+        );
+        assert_eq!(
+            outbound.snapshot().stalled_terminals,
+            1,
+            "the verdict was reached, and the counter is where it is visible"
+        );
     }
 
     #[tokio::test]

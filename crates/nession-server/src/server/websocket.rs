@@ -11,7 +11,7 @@ use crate::env::EnvService;
 use crate::registry::{AgentRegistry, AgentStatus, SessionRegistry};
 use crate::server::client_registry::ClientRegistry;
 use crate::server::command_broker::CommandBroker;
-use crate::server::execution::{policy_for_wire, ExecutionPolicy, QueryLane};
+use crate::server::execution::{policy_for_wire, ExecutionPolicy, Lanes};
 use crate::server::outbound::WsMessageSender;
 use crate::server::web_client_registry::WebClientRegistry;
 use nession_common::config::ServerConfig;
@@ -398,11 +398,12 @@ where
         }
     });
 
-    // The queries this connection has in flight (#961-C). Read-only units run
-    // here rather than in this loop, so one query waiting on an agent does not
-    // hold the connection's other frames behind it; `server::execution` owns the
-    // bound and the policies that decide which units those are.
-    let mut queries = QueryLane::new(query_concurrency);
+    // The work this connection has in flight (#961-C, #961-E). Read-only units
+    // run on the query lane and mutations on their resource's own queue, rather
+    // than in this loop, so one unit waiting on an agent does not hold the
+    // connection's other frames behind it; `server::execution` owns the bounds
+    // and the policies that decide which units those are.
+    let mut lanes = Lanes::new(query_concurrency);
 
     while let Some(frame) = read.next().await {
         let frame = frame?;
@@ -410,8 +411,8 @@ where
         // Not a protocol message: a close, a ping, a pong, a binary frame.
         // Connection lifecycle, handled where it stands *and ahead of the
         // barrier below*, because a slow operation must not hold the connection
-        // open — the requirement names ping and close explicitly. The queries
-        // still in flight are ended with the connection, further down.
+        // open — the requirement names ping and close explicitly. The work
+        // still in flight is ended with the connection, further down.
         let Message::Text(text) = frame else {
             if let HandlerAction::Close = handler.handle_message(frame).await? {
                 break;
@@ -421,35 +422,56 @@ where
         };
 
         // Decoded once, here: the policy is read from the envelope's own
-        // `msg_type`, and the message that is dispatched below is the one this
-        // decode produced. A frame whose envelope cannot be read ends the
-        // connection — which is what it did when the handler did the decoding
-        // inside the loop, and the reason it is still done inside the loop
-        // instead of inside the task that will run it.
+        // `msg_type` — and, for a mutation, from its payload — and the message
+        // that is dispatched below is the one this decode produced. A frame
+        // whose envelope cannot be read ends the connection — which is what it
+        // did when the handler did the decoding inside the loop, and the reason
+        // it is still done inside the loop instead of inside the task that will
+        // run it.
         let msg: ProtocolMessage<serde_json::Value> = serde_json::from_str(&text)?;
-        let policy = policy_for_wire(&msg.msg_type);
+        let policy = policy_for_wire(&msg.msg_type, &msg.payload);
 
-        if let ExecutionPolicy::Query = policy {
-            // The claim comes first: it is what binds this connection as the
-            // agent's control channel, and a query may reach for the broker as
-            // soon as its task is scheduled.
-            claim_agent_channel(&handler, &command_broker, &sender).await;
-            // `dispatch_query` waits here when the connection's lane is full.
-            // That wait is the bound the requirement asks for: the frame that
-            // would exceed the lane is not *read* until there is room for it,
-            // so a connection cannot grow tasks with its message count.
-            queries
-                .dispatch_query(handler.clone(), msg, sender.clone())
-                .await;
-            continue;
-        }
-
-        // Ordered frames — authentication, agent registration, the relay mode
-        // transitions — are applied, and answered, after everything read before
-        // them, which is what their determinism is made of on a connection that
-        // is no longer serial. See `ExecutionPolicy::Ordered`.
-        if let ExecutionPolicy::Ordered = policy {
-            queries.drain().await;
+        match policy {
+            ExecutionPolicy::Query => {
+                // The claim comes first: it is what binds this connection as the
+                // agent's control channel, and a query may reach for the broker
+                // as soon as its task is scheduled.
+                claim_agent_channel(&handler, &command_broker, &sender).await;
+                // `dispatch_query` waits here when the connection's lane is
+                // full. That wait is the bound the requirement asks for: the
+                // frame that would exceed the lane is not *read* until there is
+                // room for it, so a connection cannot grow tasks with its
+                // message count.
+                lanes
+                    .dispatch_query(handler.clone(), msg, sender.clone())
+                    .await;
+                continue;
+            }
+            ExecutionPolicy::Key(key) => {
+                // Claimed here for the same reason as a query's: the mutation
+                // reaches for the broker as soon as its key's worker runs it,
+                // and the claim is about *this* connection rather than about the
+                // frame that prompted it.
+                claim_agent_channel(&handler, &command_broker, &sender).await;
+                // Waits only when that resource's own queue is at its depth. The
+                // wait parks the reader, which is the backpressure — see
+                // `server::execution`. A mutation for another resource is not
+                // behind it.
+                lanes
+                    .dispatch_mutation(key, handler.clone(), msg, sender.clone())
+                    .await;
+                continue;
+            }
+            ExecutionPolicy::Ordered => {
+                // Authentication, agent registration, the relay mode
+                // transitions — applied, and answered, after everything read
+                // before them, which is what their determinism is made of on a
+                // connection that is no longer serial. The barrier covers both
+                // lanes: an `attach` must not be applied while the `create` it
+                // is about is still queued. See `ExecutionPolicy::Ordered`.
+                lanes.drain().await;
+            }
+            ExecutionPolicy::Inline => {}
         }
 
         let action = handler.handle_protocol_message(msg).await?;
@@ -527,17 +549,17 @@ where
         }
     }
 
-    // End the queries still in flight, before anything below waits on a writer
-    // they may be parked in.
+    // End the work still in flight, before anything below waits on a writer it
+    // may be parked in.
     //
-    // A query that has not finished is a query nobody is waiting for any more:
-    // the connection is over, so its answer would go to a peer that is gone. It
-    // is ended rather than left running because a query parked in `send_reply`
-    // holds a sender, and the writer task only stops once every sender is gone —
-    // so an abandoned query would hold this connection's shutdown open for as
-    // long as the peer's TCP stack took to give up, which is the unbounded wait
-    // this stage exists to remove.
-    queries.shutdown(terminal_stall_grace).await;
+    // A unit that has not finished is one nobody is waiting for any more: the
+    // connection is over, so its answer would go to a peer that is gone. It is
+    // ended rather than left running because a task parked in `send_reply` holds
+    // a sender, and the writer task only stops once every sender is gone — so an
+    // abandoned task would hold this connection's shutdown open for as long as
+    // the peer's TCP stack took to give up, which is the unbounded wait this
+    // stage exists to remove.
+    lanes.shutdown(terminal_stall_grace).await;
 
     // Clean up: release the agent's control channel, but only if this
     // connection still owns it. A connection that a reconnect has already

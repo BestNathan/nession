@@ -76,8 +76,26 @@ pub(crate) fn v1_descriptor(id: &str, wire: &str) -> Result<ProtocolDescriptor, 
 /// body mentions — `self` included, which is why the dispatcher is a free
 /// function taking the client rather than a method, and why the bodies say
 /// `agent` where they used to say `self`.
+///
+/// ## The execution policy column (`#961-E`)
+///
+/// Each arm also states **how the connection's reader dispatches it**, between
+/// the wire type and the body — the same column-on-the-row shape the peer-to-peer
+/// `p2p_routes!` and the Server's `server_routes!` use, and for the same reason:
+/// one invocation, so a unit cannot be handled without being advertised, or
+/// advertised without a lane. What the policies mean is
+/// `crate::connection::execution`'s to say.
+///
+/// As on the peer-to-peer socket, the policy is an *expression over the
+/// payload* rather than a constant, because `Key` carries the resource the
+/// frame mutates and which field of which payload names that resource is a
+/// property of the operation. It matters more here than there: every unit on
+/// this connection names its target in a field called `name`, and only the
+/// operation knows whether that name is a tmux session or an env file. The
+/// payload is a **reference** here for the same reason as there — the policy is
+/// read before the arm runs, and the arm consumes the payload.
 macro_rules! core_routes {
-    ($client:ident, $msg:ident, $responses:ident $(,)? ; $( $id:literal => $wire:literal => $body:block )* $(,)?) => {
+    ($client:ident, $msg:ident, $responses:ident $(,)? ; $( $id:literal => $wire:literal => $policy:expr => $body:block )* $(,)?) => {
         /// Every Protocol Unit this agent serves on its server connection.
         ///
         /// Derived from the same invocation that dispatches them, so this list
@@ -96,6 +114,21 @@ macro_rules! core_routes {
         /// agent does not serve falls through to the notification match rather
         /// than into `dispatch_core`'s empty arm.
         pub(crate) const CORE_WIRES: &[&str] = &[$( $wire, )*];
+
+        /// How the connection's reader dispatches one wire (`#961-E`).
+        ///
+        /// `None` for a wire this agent does not serve on this connection — a
+        /// control wire, an extension's own command unit, or a name nobody
+        /// answers. The reader reads that as its declared default rather than
+        /// guessing from the name; see `crate::connection::execution`.
+        pub(crate) fn core_policy(
+            $msg: &ProtocolMessage<serde_json::Value>,
+        ) -> Option<crate::connection::execution::ExecutionPolicy> {
+            match $msg.msg_type.as_str() {
+                $( $wire => Some($policy), )*
+                _ => None,
+            }
+        }
 
         /// Route one server-sent message to the handler that serves it.
         ///
