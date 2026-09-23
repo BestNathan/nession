@@ -633,7 +633,7 @@ is broken by it.
 | Every advertised contract has generated bindings | `nession-protocol-codegen`'s `every_advertised_contract_is_in_the_catalog`, against all four runtimes' own declarations — the agent's `served_descriptors`, the server's `server_manifest`, and the two providers' `descriptors()` |
 | Two units cannot generate to one file | the same crate's `check_paths_are_unique`, run by the generator |
 | A generated file refers to nothing it does not declare | the same crate's `check_self_contained`, run by the generator *and* as a test |
-| The wire a *call site* names is one some runtime answers | `just check-protocol` (`scripts/protocol-gate.mjs`) — rule 1 |
+| The wire a *call site* names is one some runtime carries, in the direction that call site is on | `just check-protocol` (`scripts/protocol-gate.mjs`) — rule 1, over senders and subscribers alike |
 | Every advertised protocol has a caller | the same gate — rule 2 |
 | A notification's first segment names the runtime that emits it | the same gate — rule 4, over the declared wires no generated binding carries |
 | Every control wire has a branch in every runtime | the same gate — rule 5, over the same set filtered by the `control.` prefix |
@@ -655,10 +655,15 @@ The route tables and the catalog cannot catch that — both are correct. What is
 wrong is a string in a caller. So `just check-protocol` reads the call sites, in
 both directions:
 
-- **Every wire a call site names is one a runtime answers.** A name that is not
-  a valid `ProtocolId` is reported as malformed; a name that is valid but
-  advertised nowhere is reported as unanswered. Kept apart because the fixes
-  differ: one is a spelling, the other is a wire that does not exist.
+- **Every wire a call site names is one a runtime carries, in the direction that
+  call site is on.** A sender — `send`, `request` — names a wire something must
+  *answer*; a subscriber — `subscribe` — names one something must *send*. The
+  listening half was read by nothing at all until #949, which is the same
+  silence from the other end: a handler that never fires is indistinguishable
+  from a push that never came. A name that is not a valid `ProtocolId` is
+  reported as malformed; a name that is valid but advertised nowhere is reported
+  as one no runtime carries. Kept apart because the fixes differ: one is a
+  spelling, the other is a wire that does not exist.
 - **Every advertised protocol has a caller.** A unit nothing calls is a protocol
   this workspace maintains and cannot use.
 
@@ -681,6 +686,18 @@ cannot drift from the contract — so a gate demanding literals would be asking
 for the worse style. What gets reported is a name that resolves to nothing,
 which is where a misspelling hides.
 
+Resolution has one exception, and it is `subscribe`'s. That name is also what
+every in-process observer in the tree is spelled as — `store.subscribe(listener)`,
+`rt.subscribe(changes)`, and the socket layer's own `router.subscribe(type, …)`
+forwarder — and no shape tells a wire subscription from a store subscription. So
+a `subscribe` argument is read only when it is a dotted literal; measured with
+that restriction removed, seven correct call sites were reported. The cost is
+that the four subscriptions written as an imported binding
+(`connection.subscribe(SESSION_LIST_WIRE, …)`) go unread, and that is deliberate
+rather than the gap it resembles: the binding *is* the contract's own output, so
+it resolves to its unit's `PROTOCOL`, which is advertised by construction.
+Resolving it could never produce a finding.
+
 Two escape hatches, and both are printed on every run so an exemption cannot
 spread unnoticed: `// not-protocol: <reason>` on a line, and
 `// not-protocol-file: <reason>` in a file's header, for a file whose subject is
@@ -691,6 +708,12 @@ existing, which is a distinction the gate first got wrong.
 `just protocol-check-selftest` injects each rule into a fixture tree and
 requires the gate to fail with that rule named. A gate that has quietly stopped
 matching reports success, and success looks exactly like nothing being wrong.
+Every rule carries a **negative case** beside its positive one, because a rule
+whose conforming shape is untested regresses into a false-alarm machine — and a
+false alarm teaches people to write exemptions, after which the rule catches
+nothing at all. #949 is the case in point: the first attempt at reading
+subscriptions had only the positive case, and it reported three legitimate push
+subscriptions as violations.
 
 ### Why the manifest carries the wire projection
 
