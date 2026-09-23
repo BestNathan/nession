@@ -124,13 +124,18 @@ async fn main() -> Result<()> {
         .file_root
         .as_deref()
         .unwrap_or(&config.default_working_dir);
-    eprintln!("[DIAGNOSTIC] Creating resize channel...");
-    // Resize forwarding channel: the P2P AgentServer publishes tmux
+    eprintln!("[DIAGNOSTIC] Creating resize lane...");
+    // Resize forwarding lane: the P2P AgentServer publishes tmux
     // `%window-resize` events here (it starts before the central-server
     // connection exists, so it can't hold the handle directly), and the
     // forwarder spawned below drains them into the central server once a
     // live ServerClientHandle is available.
-    let (resize_tx, mut resize_rx) = tokio::sync::mpsc::unbounded_channel::<(String, u16, u16)>();
+    //
+    // A level, not a queue: each session's *latest* size is what the forwarder
+    // is going to send, so the lane keeps one of them per session instead of
+    // every intermediate one a busy pane produces (#961-D). See
+    // `nession_agent::server::resize`.
+    let (resize, mut resize_updates) = nession_agent::server::ResizeReporter::new();
     eprintln!("[DIAGNOSTIC] Creating AgentServer...");
     let agent_server = AgentServer::new(
         &config.listen_address,
@@ -139,7 +144,7 @@ async fn main() -> Result<()> {
         config.default_working_dir.clone(),
         file_root,
         config.attach_mode.clone(),
-        resize_tx,
+        resize,
     )
     .context("failed to create agent server")?;
     eprintln!("[DIAGNOSTIC] AgentServer created, starting...");
@@ -276,20 +281,26 @@ async fn main() -> Result<()> {
     // relay clients (browser → server → agent) receive size updates. Events
     // arriving while disconnected are dropped — the next attach re-syncs the
     // pane size via the initial `query_window_size` flow.
+    //
+    // What a consumer that is behind costs now is a superseded intermediate
+    // size and not a queue: the lane holds one value per session, so a
+    // disconnected or slow central connection can no longer make this the one
+    // place in the agent whose memory grows with how long it stayed away.
     if let Some(ref handle) = client_handle {
         let handle = handle.clone();
         tokio::spawn(async move {
-            while let Some((session_id, cols, rows)) = resize_rx.recv().await {
+            while let Some((session_id, cols, rows)) = resize_updates.next().await {
                 if handle.is_connected() {
                     let _ = handle.send_terminal_resize(&session_id, cols, rows).await;
                 }
             }
         });
     } else {
-        // No central-server connection: drop the receiver so the channel
-        // closes and `resize_tx.send(...)` becomes an ignored `Err`, instead
-        // of accumulating unbounded resize events in a channel with no reader.
-        drop(resize_rx);
+        // No central-server connection: drop the consumer. The agent's P2P
+        // server keeps publishing, and the lane keeps the latest size per
+        // session — bounded by the number of sessions, and overwritten rather
+        // than accumulated, so there is nothing here for a reader to rescue.
+        drop(resize_updates);
     }
 
     // 6. Start HeartbeatLoop

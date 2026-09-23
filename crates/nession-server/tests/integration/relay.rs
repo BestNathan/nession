@@ -103,7 +103,7 @@ async fn start_agent(
     agent_id: &str,
 ) -> anyhow::Result<(std::net::SocketAddr, nession_agent::server::ServerHandle)> {
     let tmp = Box::leak(Box::new(tempfile::tempdir()?));
-    let (_resize_tx, _resize_rx) = tokio::sync::mpsc::unbounded_channel::<(String, u16, u16)>();
+    let (resize, _resize_updates) = nession_agent::server::ResizeReporter::new();
     let server = AgentServer::new(
         "127.0.0.1:0",
         agent_id,
@@ -111,7 +111,7 @@ async fn start_agent(
         "/tmp".to_string(),
         tmp.path().to_string_lossy().as_ref(),
         AttachMode::Plain,
-        _resize_tx,
+        resize,
     )?;
 
     let (handle, addr) = server.start().await?;

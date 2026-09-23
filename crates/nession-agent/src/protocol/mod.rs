@@ -158,8 +158,30 @@ pub(crate) use core_routes;
 /// by an exception: control wires are handled beside the route table in
 /// `server::websocket`, and the reason they are not here is that they are not
 /// offers at all.
+///
+/// ## The execution policy column (`#961-D`)
+///
+/// Each arm also states **how the connection's reader dispatches it**, between
+/// the wire type and the body — the same column-on-the-row shape the Server's
+/// `server_routes!` uses (`nession-server`'s `server::execution`), and for the
+/// same reason: one invocation, so a unit cannot be handled without being
+/// advertised, or advertised without a lane. What the policies mean is
+/// `crate::server::execution`'s to say.
+///
+/// The difference from the Server's column is that this one is an *expression*
+/// over the payload rather than a constant, because two of the four policies
+/// need one: `Key` carries the resource the frame mutates, and which field of
+/// which payload names that resource is a property of the operation — a
+/// `session.kill` names its target `name` and a `terminal.input` names it
+/// `session_name`, and nothing about either wire says so. Deriving the key from
+/// the wire name instead is the `extension.*`-shaped guess the constraints rule
+/// out, so the rule is written where the rest of the operation is.
+///
+/// The payload is a **reference** here, which is the one asymmetry with the
+/// dispatcher below: the policy is read before the arm runs, and the arm
+/// consumes the payload, so this half may only look at it.
 macro_rules! p2p_routes {
-    ($ctx:ident, $msg_type:ident, $payload:ident $(,)? ; $( $id:literal => $wire:literal => $body:block )* $(,)?) => {
+    ($ctx:ident, $msg_type:ident, $payload:ident $(,)? ; $( $id:literal => $wire:literal => $policy:expr => $body:block )* $(,)?) => {
         /// Every Protocol Unit this agent serves on its peer-to-peer socket.
         ///
         /// Unioned with [`crate::connection::core_descriptors`] into the one
@@ -185,6 +207,23 @@ macro_rules! p2p_routes {
         /// unrouted peer-to-peer message to fall through to.
         #[cfg(test)]
         pub(crate) const P2P_WIRES: &[&str] = &[$( $wire, )*];
+
+        /// How the connection's reader dispatches one peer-to-peer frame
+        /// (`#961-D`).
+        ///
+        /// `None` for a wire this agent does not serve on this socket — a
+        /// control wire, or a name nobody answers. The reader reads that as its
+        /// declared default rather than guessing from the name; see
+        /// `crate::server::execution`.
+        pub(crate) fn p2p_policy(
+            $msg_type: &str,
+            $payload: &serde_json::Value,
+        ) -> Option<crate::server::execution::ExecutionPolicy> {
+            match $msg_type {
+                $( $wire => Some($policy), )*
+                _ => None,
+            }
+        }
 
         /// Route one peer-to-peer request to the handler that serves it.
         ///
