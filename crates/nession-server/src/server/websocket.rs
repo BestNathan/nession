@@ -2,6 +2,7 @@ use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio_rustls::TlsAcceptor;
 use tokio_tungstenite::accept_async;
+use tokio_tungstenite::tungstenite::Message;
 use tracing::{error, info, warn};
 
 use super::handler::{ConnectionHandler, HandlerAction};
@@ -621,103 +622,8 @@ where
 
     // ── Step 2: Bidirectional forwarding ──
 
-    // Helper: detect terminal.input JSON messages.
-    fn is_terminal_input(msg: &tokio_tungstenite::tungstenite::Message) -> bool {
-        msg.to_text()
-            .ok()
-            .map(|t| t.contains("\"terminal.input\""))
-            .unwrap_or(false)
-    }
-
-    // Helper: detect server.session.relay.end — client wants to stop the
-    // relay without closing the WebSocket.
-    fn is_relay_end(msg: &tokio_tungstenite::tungstenite::Message) -> bool {
-        msg.to_text()
-            .ok()
-            .map(|t| t.contains("\"server.session.relay.end\""))
-            .unwrap_or(false)
-    }
-
-    // Forward client -> agent, with trailing-edge rate limiting on
-    // terminal.input to protect against mouse-tracking floods.
-    const INPUT_THROTTLE_MS: u64 = 16;
-    let mut last_terminal_input = std::time::Instant::now()
-        .checked_sub(std::time::Duration::from_secs(60))
-        .unwrap_or(std::time::Instant::now());
-
-    let client_to_agent = async {
-        while let Some(msg) = client_read.next().await {
-            let msg = match msg {
-                Ok(m) => m,
-                Err(e) => {
-                    error!("Error reading from client: {}", e);
-                    break;
-                }
-            };
-
-            // Non-terminal.input passes through immediately.
-            if !is_terminal_input(&msg) {
-                // Client wants to stop relay without closing the WebSocket.
-                if is_relay_end(&msg) {
-                    info!("Client requested relay end for session '{}'", session_name);
-                    return;
-                }
-                if let Err(e) = agent_write.send(msg).await {
-                    error!("Failed to forward client message to agent: {}", e);
-                    break;
-                }
-                continue;
-            }
-
-            // Terminal.input: trailing-edge throttle.
-            let elapsed = last_terminal_input.elapsed();
-            if elapsed < std::time::Duration::from_millis(INPUT_THROTTLE_MS) {
-                let drain_deadline =
-                    last_terminal_input + std::time::Duration::from_millis(INPUT_THROTTLE_MS);
-                let mut latest = msg;
-
-                loop {
-                    let remaining =
-                        drain_deadline.saturating_duration_since(std::time::Instant::now());
-                    if remaining.is_zero() {
-                        break;
-                    }
-                    match tokio::time::timeout(remaining, client_read.next()).await {
-                        Ok(Some(Ok(m))) if is_terminal_input(&m) => {
-                            latest = m; // keep only latest mouse event
-                        }
-                        Ok(Some(Ok(m))) => {
-                            // Non-terminal.input message during drain:
-                            // forward it now, then break to send latest.
-                            let _ = agent_write.send(m).await;
-                            break;
-                        }
-                        Ok(Some(Err(e))) => {
-                            error!("Error reading from client: {}", e);
-                            break;
-                        }
-                        Ok(None) | Err(tokio::time::error::Elapsed { .. }) => {
-                            break; // stream ended or timeout
-                        }
-                    }
-                }
-
-                // Send the latest buffered terminal.input.
-                if let Err(e) = agent_write.send(latest).await {
-                    error!("Failed to forward client message to agent: {}", e);
-                    break;
-                }
-                last_terminal_input = std::time::Instant::now();
-            } else {
-                // Outside throttle window — send immediately (leading edge).
-                last_terminal_input = std::time::Instant::now();
-                if let Err(e) = agent_write.send(msg).await {
-                    error!("Failed to forward client message to agent: {}", e);
-                    break;
-                }
-            }
-        }
-    };
+    let client_to_agent =
+        forward_client_to_agent(client_read, &mut agent_write, session_name, INPUT_THROTTLE);
 
     // Forward agent -> client (via channel sender)
     let agent_to_client = async {
@@ -738,8 +644,11 @@ where
     };
 
     tokio::select! {
-        _ = client_to_agent => {
-            info!("Client to agent relay ended for session '{}'", session_name);
+        outcome = client_to_agent => {
+            info!(
+                "Client to agent relay ended for session '{}' ({:?})",
+                session_name, outcome
+            );
         }
         _ = agent_to_client => {
             info!("Agent to client relay ended for session '{}'", session_name);
@@ -781,4 +690,526 @@ where
 
     info!("Relay mode ended for session '{}'", session_name);
     Ok(())
+}
+
+/// The terminal-input throttle window: a burst of input arriving inside it is
+/// collapsed to its newest frame. 16 ms ≈ 60 fps — faster than a mouse-tracking
+/// flood, slower than anything a person types.
+const INPUT_THROTTLE: std::time::Duration = std::time::Duration::from_millis(16);
+
+/// The wire a browser sends keystrokes and mouse reports on. The **Agent**
+/// answers it, so the name carries the Agent's prefix even though the Server is
+/// the one relaying it (`docs/architecture/protocol-identity.md`).
+const TERMINAL_INPUT_WIRE: &str = "agent.terminal.input";
+
+/// Relay-local control: stop the relay without closing the WebSocket. The
+/// Server is the handler — no Agent serves this wire, which is why it must
+/// never be forwarded.
+const RELAY_END_WIRE: &str = "server.session.relay.end";
+
+/// What one client frame means to the relay.
+///
+/// Decided once per frame, from the envelope's own `msg_type`, and reused by
+/// every read path — the main loop and the throttle's drain loop alike. Two
+/// things this fixes, both of them the same defect at different depths: what a
+/// frame means must not depend on *when* it was read, and it must not depend on
+/// what its payload happens to say. The substring matching this replaces read
+/// `"terminal.input"` out of the raw text, so a payload that merely mentioned
+/// the string was routed as protocol identity, while the real frame —
+/// `agent.terminal.input`, since the wire was renamed to name its handler
+/// (#884) — matched nothing at all and the throttle never ran for a frame a
+/// browser can send (#962).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ClientFrame {
+    /// `agent.terminal.input` — terminal data, and the only coalescable kind.
+    TerminalInput,
+    /// `server.session.relay.end` — control: ends the relay, never forwarded.
+    RelayEnd,
+    /// Everything else, forwarded unchanged and in arrival order.
+    Other,
+}
+
+/// The envelope header, and nothing else.
+///
+/// `msg_type` is all the relay routes on, so the rest of the frame is skipped
+/// rather than materialised: this runs on every frame of a mouse flood, where
+/// building a `Value` per frame would be work nobody reads.
+#[derive(serde::Deserialize)]
+struct RelayEnvelope<'a> {
+    #[serde(borrow)]
+    msg_type: Option<&'a str>,
+}
+
+/// Decide what a frame is from the envelope's own field.
+///
+/// A frame that is not text, is not JSON, or carries no `msg_type` is `Other`:
+/// unreadable is not the same as terminal input, and the previous spelling's
+/// answer to "unreadable" was an accident of where the substring landed. A wire
+/// this relay does not recognise is forwarded rather than guessed at, which is
+/// the rule everywhere else in the tree — an unknown wire is ignored, never
+/// rejected.
+fn classify_client_frame(msg: &Message) -> ClientFrame {
+    let Ok(text) = msg.to_text() else {
+        return ClientFrame::Other;
+    };
+    let Ok(envelope) = serde_json::from_str::<RelayEnvelope<'_>>(text) else {
+        return ClientFrame::Other;
+    };
+    match envelope.msg_type {
+        Some(TERMINAL_INPUT_WIRE) => ClientFrame::TerminalInput,
+        Some(RELAY_END_WIRE) => ClientFrame::RelayEnd,
+        _ => ClientFrame::Other,
+    }
+}
+
+/// Why the client → agent half of the relay stopped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ClientToAgent {
+    /// The client asked for it: `server.session.relay.end`. The frame that said
+    /// so is not forwarded to the agent.
+    ClientRequested,
+    /// The client stream ended, or a frame could not be forwarded.
+    Ended,
+}
+
+/// Forward client frames to the agent until the client ends the relay.
+///
+/// Split out of [`relay_bidirectional_via_channel`], and generic over both
+/// halves, so that the throttle's window is reachable from a test without a
+/// socket; production passes the split WebSocket halves unchanged. It returns
+/// *why* it stopped, because "the client asked to detach" and "the connection
+/// dropped" are different events that both stop the loop — and because a test
+/// that only asserted "no frame was lost" could not tell the throttle's drain
+/// loop apart from never entering it.
+///
+/// `input_throttle` is a parameter for the same reason: a test can widen the
+/// window past any scheduling stall, so "the drain loop ran" is a property of
+/// the test rather than of the machine. Production has one value, in
+/// [`INPUT_THROTTLE`].
+async fn forward_client_to_agent<RS, AS>(
+    client_read: &mut RS,
+    agent_write: &mut AS,
+    session_name: &str,
+    input_throttle: std::time::Duration,
+) -> ClientToAgent
+where
+    RS: futures_util::Stream<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
+    AS: futures_util::Sink<Message> + Unpin,
+    AS::Error: std::fmt::Display,
+{
+    use futures_util::SinkExt;
+    use futures_util::StreamExt;
+
+    // 60 s in the past, so the first input of a relay is never throttled: the
+    // keystroke that opens a session must not wait out a window.
+    let mut last_terminal_input = std::time::Instant::now()
+        .checked_sub(std::time::Duration::from_secs(60))
+        .unwrap_or_else(std::time::Instant::now);
+
+    'forward: while let Some(msg) = client_read.next().await {
+        let msg = match msg {
+            Ok(m) => m,
+            Err(e) => {
+                error!("Error reading from client: {}", e);
+                break;
+            }
+        };
+
+        // One classification per frame, before any throttling decision. The
+        // drain loop below calls the same function, which is what keeps this
+        // frame's meaning from depending on when it was read.
+        match classify_client_frame(&msg) {
+            ClientFrame::RelayEnd => {
+                info!("Client requested relay end for session '{}'", session_name);
+                return ClientToAgent::ClientRequested;
+            }
+            ClientFrame::Other => {
+                if let Err(e) = agent_write.send(msg).await {
+                    error!("Failed to forward client message to agent: {}", e);
+                    break;
+                }
+                continue;
+            }
+            ClientFrame::TerminalInput => {}
+        }
+
+        // Terminal input outside the window — forward it now (leading edge).
+        // This is the common path and the one that has to stay zero-latency.
+        if last_terminal_input.elapsed() >= input_throttle {
+            last_terminal_input = std::time::Instant::now();
+            if let Err(e) = agent_write.send(msg).await {
+                error!("Failed to forward client message to agent: {}", e);
+                break;
+            }
+            continue;
+        }
+
+        // Inside the window: hold this frame and keep reading until the window
+        // closes, so a flood collapses to its newest frame. Everything that
+        // arrives in the meantime has to be handled *here* — this loop is the
+        // only reader for as long as it runs.
+        let drain_deadline = last_terminal_input + input_throttle;
+        let mut pending = Some(msg);
+        let mut end_requested = false;
+
+        loop {
+            let remaining = drain_deadline.saturating_duration_since(std::time::Instant::now());
+            if remaining.is_zero() {
+                break;
+            }
+            match tokio::time::timeout(remaining, client_read.next()).await {
+                Ok(Some(Ok(m))) => match classify_client_frame(&m) {
+                    // Coalescable: keep only the newest of the burst.
+                    ClientFrame::TerminalInput => pending = Some(m),
+                    // Control, read inside the window. It ends the relay
+                    // exactly as the main loop ends it, and is not forwarded.
+                    // Without this arm the frame fell through to the
+                    // forward-everything case: relay.end became something the
+                    // Agent received instead of an instruction the Server
+                    // carried out, for any client fast enough to still be in a
+                    // window when it asked to stop (#962).
+                    ClientFrame::RelayEnd => {
+                        end_requested = true;
+                        break;
+                    }
+                    // Not coalescable, and sent *after* the frame being held:
+                    // flush the held frame first, so the agent sees frames in
+                    // the order the client sent them, then hand this one on and
+                    // go back to reading outside the window.
+                    ClientFrame::Other => {
+                        if let Some(held) = pending.take() {
+                            if let Err(e) = agent_write.send(held).await {
+                                error!("Failed to forward client message to agent: {}", e);
+                                break 'forward;
+                            }
+                        }
+                        if let Err(e) = agent_write.send(m).await {
+                            error!("Failed to forward client message to agent: {}", e);
+                            break 'forward;
+                        }
+                        break;
+                    }
+                },
+                Ok(Some(Err(e))) => {
+                    error!("Error reading from client: {}", e);
+                    break;
+                }
+                Ok(None) | Err(tokio::time::error::Elapsed { .. }) => {
+                    break; // stream ended or window closed
+                }
+            }
+        }
+
+        // The trailing edge: whatever the window kept. What the client sent
+        // before a relay.end still goes out, in order — that control frame
+        // holds nothing back. The control frame itself never does.
+        if let Some(latest) = pending.take() {
+            if let Err(e) = agent_write.send(latest).await {
+                error!("Failed to forward client message to agent: {}", e);
+                break;
+            }
+        }
+        if end_requested {
+            info!("Client requested relay end for session '{}'", session_name);
+            return ClientToAgent::ClientRequested;
+        }
+
+        last_terminal_input = std::time::Instant::now();
+    }
+
+    ClientToAgent::Ended
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures_util::Sink;
+    use serde_json::json;
+    use std::pin::Pin;
+    use std::task::{Context, Poll};
+
+    /// A window no scheduling stall can cross.
+    ///
+    /// The real window is 16 ms and these frames are already in memory, so the
+    /// tests below would *usually* be inside it — and "usually" is how a test
+    /// like this passes without ever running the branch it is about. Widening
+    /// the window cannot change any answer here, and it makes "the drain loop
+    /// ran" a property of the test. Every test that needs it also pins the same
+    /// fact down from the other side, by asserting the coalescing only the
+    /// drain loop can produce.
+    const WIDE_WINDOW: std::time::Duration = std::time::Duration::from_secs(5);
+
+    /// Records what the relay forwarded, in order.
+    #[derive(Default)]
+    struct RecordingSink {
+        sent: Vec<Message>,
+    }
+
+    impl Sink<Message> for RecordingSink {
+        type Error = std::convert::Infallible;
+
+        fn poll_ready(
+            self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+        ) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn start_send(self: Pin<&mut Self>, item: Message) -> Result<(), Self::Error> {
+            self.get_mut().sent.push(item);
+            Ok(())
+        }
+
+        fn poll_flush(
+            self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+        ) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(())) // nothing is buffered, so there is nothing to flush
+        }
+
+        fn poll_close(
+            self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+        ) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+    }
+
+    /// A frame as a client sends one.
+    fn frame_with_payload(msg_type: &str, id: &str, payload: serde_json::Value) -> Message {
+        Message::Text(
+            json!({
+                "msg_type": msg_type,
+                "id": id,
+                "timestamp": 0,
+                "payload": payload,
+            })
+            .to_string(),
+        )
+    }
+
+    fn frame(msg_type: &str, id: &str) -> Message {
+        frame_with_payload(msg_type, id, json!({ "session_name": "sess" }))
+    }
+
+    fn terminal_input(id: &str) -> Message {
+        frame(TERMINAL_INPUT_WIRE, id)
+    }
+
+    fn relay_end(id: &str) -> Message {
+        frame(RELAY_END_WIRE, id)
+    }
+
+    /// Drive the pump over frames that are already in memory and report what
+    /// reached the agent, and why the loop stopped.
+    async fn drive(frames: Vec<Message>) -> (Vec<Message>, ClientToAgent) {
+        let items: Vec<Result<Message, tokio_tungstenite::tungstenite::Error>> =
+            frames.into_iter().map(Ok).collect();
+        let mut client_read = futures_util::stream::iter(items);
+        let mut agent_write = RecordingSink::default();
+
+        let outcome =
+            forward_client_to_agent(&mut client_read, &mut agent_write, "sess", WIDE_WINDOW).await;
+
+        (agent_write.sent, outcome)
+    }
+
+    /// #962: a relay end that arrives inside the throttle window ends the relay
+    /// rather than being forwarded to the agent.
+    ///
+    /// The three inputs are what put the control frame inside the window: the
+    /// first is a leading-edge forward, the second opens the window, the third
+    /// replaces it. `in-2` never reaching the agent is what proves the window
+    /// was open when `relay.end` was read — assert on the *set* alone and this
+    /// test would also pass on a machine that never entered the drain loop.
+    #[tokio::test]
+    async fn relay_end_inside_the_drain_window_ends_the_relay() {
+        let first = terminal_input("in-1");
+        let coalesced_away = terminal_input("in-2");
+        let held = terminal_input("in-3");
+        let end = relay_end("end-1");
+
+        let (sent, outcome) = drive(vec![
+            first.clone(),
+            coalesced_away,
+            held.clone(),
+            end.clone(),
+        ])
+        .await;
+
+        assert!(
+            !sent.contains(&end),
+            "relay.end must not reach the agent, but was forwarded: {sent:?}"
+        );
+        assert_eq!(
+            sent,
+            vec![first, held],
+            "the burst collapsed to its newest frame, then flushed in arrival order"
+        );
+        assert_eq!(outcome, ClientToAgent::ClientRequested);
+    }
+
+    /// #962: a frame read during the window is neither lost nor jumped over
+    /// the input that was already being held.
+    ///
+    /// The resize is the frame that matters: it arrives after `in-3` and must
+    /// reach the agent after it. A PTY resized before it receives the bytes
+    /// that were written for the old size is a different session, and the old
+    /// drain loop forwarded the interrupting frame first and the held input
+    /// second. `in-2` is again the witness that the window was open.
+    #[tokio::test]
+    async fn a_frame_read_inside_the_window_keeps_its_place_in_the_order() {
+        let first = terminal_input("in-1");
+        let coalesced_away = terminal_input("in-2");
+        let held = terminal_input("in-3");
+        // The browser relays this one too: `agent.terminal.resize`, sent by the
+        // Server and answered by the Agent.
+        let resize = frame("agent.terminal.resize", "resize-1");
+
+        let (sent, outcome) = drive(vec![
+            first.clone(),
+            coalesced_away,
+            held.clone(),
+            resize.clone(),
+        ])
+        .await;
+
+        assert_eq!(
+            sent,
+            vec![first, held, resize],
+            "the held input goes first, and the frame that interrupted it follows"
+        );
+        assert_eq!(outcome, ClientToAgent::Ended);
+    }
+
+    /// The same control frame read *outside* the window, which the main loop
+    /// always handled. It is here because the pump was restructured around it.
+    #[tokio::test]
+    async fn relay_end_outside_the_window_ends_the_relay() {
+        let first = terminal_input("in-1");
+        let end = relay_end("end-1");
+
+        let (sent, outcome) = drive(vec![first.clone(), end]).await;
+
+        assert_eq!(sent, vec![first], "the input was forwarded");
+        assert_eq!(outcome, ClientToAgent::ClientRequested);
+    }
+
+    /// #962: a payload that *mentions* the relay's control wire is not the
+    /// control wire.
+    ///
+    /// The substring half of the bug, and not a hypothetical one for
+    /// `relay.end`: the old check read the frame's text, so any frame carrying
+    /// that string anywhere — a capture preview of a screen showing it, a
+    /// command line quoting it — ended the user's relay and was dropped.
+    #[tokio::test]
+    async fn a_payload_mentioning_relay_end_is_forwarded_not_obeyed() {
+        let innocent =
+            frame_with_payload("server.info", "info-1", json!({ "note": RELAY_END_WIRE }));
+
+        // The frame has to carry the literal text for this test to mean
+        // anything. serde escapes the quotes, so assert on the wire form the
+        // old check actually read.
+        let text = innocent.to_text().unwrap_or_default().to_string();
+        assert!(
+            text.contains("\"server.session.relay.end\""),
+            "the payload must contain the literal this test is about: {text}"
+        );
+
+        let (sent, outcome) = drive(vec![innocent.clone()]).await;
+
+        assert_eq!(sent, vec![innocent], "forwarded unchanged");
+        assert_eq!(
+            outcome,
+            ClientToAgent::Ended,
+            "the stream ended the relay, not the frame's text"
+        );
+    }
+
+    /// The other half of the same defence: a frame whose payload carries the
+    /// text `terminal.input` must not be coalesced.
+    ///
+    /// The payload is the bare name, not the wire, because that is the string
+    /// the substring check searched for — a payload quoting it was read as
+    /// terminal data, and three of those inside one window lost the middle one.
+    /// Silent data loss on frames that have nothing to do with a terminal.
+    #[tokio::test]
+    async fn a_payload_mentioning_terminal_input_is_not_coalesced() {
+        let each =
+            |id: &str| frame_with_payload("server.info", id, json!({ "note": "terminal.input" }));
+        let (a, b, c) = (each("info-1"), each("info-2"), each("info-3"));
+
+        let text = a.to_text().unwrap_or_default().to_string();
+        assert!(
+            text.contains("\"terminal.input\""),
+            "the payload must contain the literal the old check read: {text}"
+        );
+
+        let (sent, outcome) = drive(vec![a.clone(), b.clone(), c.clone()]).await;
+
+        assert_eq!(
+            sent,
+            vec![a, b, c],
+            "every frame is forwarded, and none is treated as coalescable"
+        );
+        assert_eq!(outcome, ClientToAgent::Ended);
+    }
+
+    /// The classification itself: identity comes from `msg_type`, and nothing
+    /// else about a frame can change it.
+    #[test]
+    fn classification_reads_msg_type_and_nothing_else() {
+        assert_eq!(
+            classify_client_frame(&terminal_input("x")),
+            ClientFrame::TerminalInput
+        );
+        assert_eq!(
+            classify_client_frame(&relay_end("x")),
+            ClientFrame::RelayEnd
+        );
+
+        // Payload text is data. The two literals are the strings the substring
+        // check searched for, quoted bare — a payload carrying either used to
+        // be routed as that protocol.
+        for literal in ["terminal.input", RELAY_END_WIRE] {
+            assert_eq!(
+                classify_client_frame(&frame_with_payload(
+                    "server.info",
+                    "x",
+                    json!({ "note": literal })
+                )),
+                ClientFrame::Other,
+                "a payload quoting {literal} is not {literal}"
+            );
+        }
+
+        // The pre-rename spelling of terminal input is not terminal input. The
+        // wire is the one the Agent answers, and accepting a second spelling
+        // would be the substring fix in a smaller suit — while a frame this
+        // relay does not recognise is forwarded, which is what the tree does
+        // with every unrecognised wire.
+        assert_eq!(
+            classify_client_frame(&frame("terminal.input", "x")),
+            ClientFrame::Other
+        );
+
+        // Not text, not JSON, not a string `msg_type`: all `Other`, never a
+        // guess.
+        assert_eq!(
+            classify_client_frame(&Message::Binary(vec![1, 2, 3])),
+            ClientFrame::Other
+        );
+        assert_eq!(
+            classify_client_frame(&Message::Text("{ not json".to_string())),
+            ClientFrame::Other
+        );
+        assert_eq!(
+            classify_client_frame(&Message::Text("{}".to_string())),
+            ClientFrame::Other
+        );
+        assert_eq!(
+            classify_client_frame(&Message::Text(r#"{"msg_type":7}"#.to_string())),
+            ClientFrame::Other
+        );
+    }
 }
