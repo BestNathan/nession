@@ -45,7 +45,13 @@ export class AgentsPlugin implements TransportPlugin {
     this.connection = connection;
 
     const unsubs = [
-      connection.subscribe('agents.changed', (payload) => {
+      // `<emitter>.<subject>.<event>`: the first segment is the runtime that
+      // *sends* it, which for a notification is the only runtime there is.
+      // It used to be `agents.changed`, with no emitter at all — the one
+      // position where an operation's first segment means "who answers" and a
+      // notification's means "who sends", so the same slot answered two
+      // different questions depending on the wire.
+      connection.subscribe('server.agents.changed', (payload) => {
         const agents = (payload as { agents?: Agent[] })?.agents;
         if (agents) {
           this.notify(agents);
@@ -148,7 +154,7 @@ export class AgentsPlugin implements TransportPlugin {
    * (`#678`, Phase 4).
    *
    * Called from both paths that actually receive an agent list — `listAgents`
-   * and the `agents.changed` push, the latter via {@link notify}. Wholesale
+   * and the `server.agents.changed` push, the latter via {@link notify}. Wholesale
    * replacement, not a merge: this list is a snapshot, and keeping an entry for
    * an agent it no longer contains would resolve against a manifest nobody
    * serves any more.

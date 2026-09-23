@@ -3,7 +3,7 @@
 //! One function, because the field set is one contract.
 //!
 //! It was two hand-built `json!` blocks — `server.agent.list` in `handler.rs`
-//! and the `agents.changed` push in `web_client_registry.rs` — and they had
+//! and the `server.agents.changed` push in `web_client_registry.rs` — and they had
 //! already drifted: the push carried neither `protocols` nor
 //! `metadata.image_tag`. Nothing failed, because nothing read either field off
 //! a push. A client that had resolved a contract version from the list would
@@ -141,7 +141,7 @@ mod tests {
 
     #[test]
     fn the_image_tag_travels_on_every_path() {
-        // The field the `agents.changed` push used to drop. It is asserted
+        // The field the `server.agents.changed` push used to drop. It is asserted
         // here rather than in two places because there is now one builder.
         let json = agent_json(&agent(None));
         assert!(json["metadata"]["image_tag"].is_string());

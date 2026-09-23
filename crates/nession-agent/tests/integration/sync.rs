@@ -120,7 +120,7 @@ async fn test_heartbeat_loop_sends_heartbeat() {
         .expect("no heartbeat message");
 
     let parsed: serde_json::Value = serde_json::from_str(&msg).unwrap();
-    assert_eq!(parsed["msg_type"], "server.agent.heartbeat");
+    assert_eq!(parsed["msg_type"], "control.heartbeat");
     assert_eq!(parsed["payload"]["agent_id"], "test-agent-sync");
     assert_eq!(parsed["payload"]["status"], "online");
 

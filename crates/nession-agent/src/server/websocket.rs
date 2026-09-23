@@ -40,7 +40,7 @@ use tokio::net::TcpListener;
 use tokio::sync::{mpsc, Mutex};
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 use tokio_tungstenite::WebSocketStream;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 /// A tmux attach session, shared by all clients attached through this
 /// connection. Created on first attach, destroyed on last detach.
@@ -144,9 +144,23 @@ pub mod msg_types {
     pub const FILE_RENAME: &str = "agent.file.rename";
     pub const FILE_CWD: &str = "agent.file.cwd";
 
-    // Keepalive (P2P client → agent)
-    pub const KEEPALIVE_PING: &str = "agent.keepalive.ping";
-    pub const KEEPALIVE_PONG: &str = "keepalive.pong";
+    // Control, in both directions. **Not** units, and deliberately not in
+    // `p2p_routes!`: a control message is symmetric — any peer may send one,
+    // every peer must handle one, and the protocol pairs nothing — which is a
+    // different category from an operation (one answerer) or a notification
+    // (one emitter). `control.pong` is therefore not this socket's reply to
+    // `control.ping`; it is a message of its own, and no router derives a pair
+    // from the two. See `docs/architecture/protocol.md` § *Control*.
+    pub const CONTROL_PING: &str = "control.ping";
+    pub const CONTROL_PONG: &str = "control.pong";
+    /// The same wire `connection::server_client::msg_types` declares for the
+    /// server connection, declared again here because this module is where
+    /// this socket's wires live and that module is private. Declaring a wire
+    /// twice is safe in one direction only — `scripts/protocol-gate.mjs`
+    /// requires **every** runtime to carry **every** control wire, so a
+    /// misspelling here is a wire no other runtime has, reported rather than
+    /// silently diverging.
+    pub const CONTROL_HEARTBEAT: &str = "control.heartbeat";
 
     // Agent → Client
     pub const TERMINAL_OUTPUT: &str = "agent.terminal.output";
@@ -1104,12 +1118,6 @@ p2p_routes! { ctx, msg_type, payload_value;
                 }
             }
 
-            // --- Keepalive ---
-            "agent.keepalive.ping" => "agent.keepalive.ping" => {
-                serde_json::to_string(&make_response(ctx.id, msg_types::KEEPALIVE_PONG, ()))
-                    .unwrap_or_default()
-            }
-
             // --- File operations ---
             "agent.file.list" => "agent.file.list" => {
                 let payload: FileListPayload = match serde_json::from_value(payload_value) {
@@ -1478,6 +1486,9 @@ impl AgentServer {
                         resize_tx.clone(),
                     )
                     .await;
+                    // `None` is a control wire that needs no frame written
+                    // back; everything else answers, errors included.
+                    let Some(response) = response else { continue };
                     let mut s = sink.lock().await;
                     if let Err(e) = s.send(WsMessage::Text(response)).await {
                         warn!("WebSocket write error to {}: {:#}", addr, e);
@@ -1533,18 +1544,25 @@ impl AgentServer {
         agent_id: &str,
         attach_mode: AttachMode,
         resize_tx: mpsc::UnboundedSender<(String, u16, u16)>,
-    ) -> String {
+        // `Option`, because a control wire may produce no frame at all:
+        // control has no reply mechanism, so `control.pong` and
+        // `control.heartbeat` are handled and answered with silence. Every
+        // other wire is answered — including the ones whose answer is an
+        // `error` — so `None` is only ever a control arm's return.
+    ) -> Option<String> {
         // Try to extract msg_type and id without fully deserialising the
         // payload — we need those even if the payload type is unknown.
         let raw: serde_json::Value = match serde_json::from_str(text) {
             Ok(v) => v,
             Err(e) => {
-                return serde_json::to_string(&make_error(
-                    "unknown",
-                    "parse_error",
-                    &format!("invalid JSON: {e}"),
-                ))
-                .unwrap_or_default();
+                return Some(
+                    serde_json::to_string(&make_error(
+                        "unknown",
+                        "parse_error",
+                        &format!("invalid JSON: {e}"),
+                    ))
+                    .unwrap_or_default(),
+                );
             }
         };
 
@@ -1582,7 +1600,44 @@ impl AgentServer {
             resize_tx: &resize_tx,
         };
 
-        dispatch_p2p(ctx, msg_type, payload_value).await
+        // Control wires are handled ahead of the route table, and that is a
+        // consequence of the category rather than a preference. `p2p_routes!`
+        // emits a *descriptor* per arm and a control wire is not a unit —
+        // nothing advertises it, because it is not an offer this peer makes to
+        // a caller, it is something every peer must handle. Handling them here
+        // is also what keeps `control.ping` out of `dispatch_p2p`'s
+        // unknown-wire error, which is the only answer that table has for a
+        // name it does not carry.
+        //
+        // One arm per wire rather than a `starts_with("control.")` test:
+        // `scripts/protocol-gate.mjs` checks that every runtime has a branch
+        // for every control wire, and a prefix test is not a branch it can
+        // read. `control.pong` is not this socket's reply to `control.ping` —
+        // the two are independent one-way messages and nothing pairs them —
+        // but the id of the ping is carried on the pong, because the envelope
+        // belongs to the sender and no router derives a pairing from it.
+        match msg_type {
+            msg_types::CONTROL_PING => {
+                return Some(
+                    serde_json::to_string(&make_response(&id, msg_types::CONTROL_PONG, ()))
+                        .unwrap_or_default(),
+                );
+            }
+            msg_types::CONTROL_PONG => {
+                debug!("control.pong received");
+                return None;
+            }
+            // The arm is here because control is symmetric — every runtime
+            // handles every control wire, whether or not today's senders reach
+            // this one. The agent sends its heartbeat on the *other* socket.
+            msg_types::CONTROL_HEARTBEAT => {
+                debug!("control.heartbeat received");
+                return None;
+            }
+            _ => {}
+        }
+
+        Some(dispatch_p2p(ctx, msg_type, payload_value).await)
     }
 
     /// Build a TLS acceptor from PEM file paths. Returns `None` if both
@@ -2053,21 +2108,81 @@ mod tests {
         handle.shutdown().await.ok();
     }
 
+    /// A ping is answered with a pong — and the test says only that, because
+    /// the two are independent one-way messages rather than a request and its
+    /// reply. Nothing in the protocol pairs them; what `send_and_receive` does
+    /// here is wait for *a* frame, and the id it filters on is the envelope's
+    /// id echoed by the sender, not a correlation the receiver derives.
     #[tokio::test]
-    async fn test_keepalive_ping_returns_pong() {
+    async fn a_control_ping_is_met_with_a_control_pong() {
         let (addr, handle) = start_test_server_on(18092).await;
         let (mut sink, mut stream) = connect_client(addr).await;
 
         let req: Message<serde_json::Value> = Message {
-            msg_type: msg_types::KEEPALIVE_PING.to_string(),
+            msg_type: msg_types::CONTROL_PING.to_string(),
             id: "ka-test-123".to_string(),
             timestamp: now_timestamp(),
             payload: serde_json::json!({}),
         };
         let resp: Message<serde_json::Value> = send_and_receive(&mut sink, &mut stream, &req).await;
 
-        assert_eq!(resp.msg_type, msg_types::KEEPALIVE_PONG);
+        assert_eq!(resp.msg_type, msg_types::CONTROL_PONG);
         assert_eq!(resp.id, "ka-test-123");
+
+        handle.shutdown().await.ok();
+    }
+
+    /// Every runtime handles every control wire, and the peer-to-peer socket is
+    /// one of the three runtimes. The two wires below are the ones this socket
+    /// handles without writing anything back — control has no reply mechanism —
+    /// and the assertion is that neither is answered *and* neither is refused
+    /// as an unknown message, which is what `dispatch_p2p` does with a wire it
+    /// does not carry.
+    #[tokio::test]
+    async fn the_other_control_wires_are_handled_and_answered_with_silence() {
+        // The argument is vestigial — `start_test_server_on` ignores it and
+        // binds `127.0.0.1:0` — so it is `0` rather than a number that reads
+        // like a real port.
+        let (addr, handle) = start_test_server_on(0).await;
+        let (mut sink, mut stream) = connect_client(addr).await;
+
+        for wire in [msg_types::CONTROL_PONG, msg_types::CONTROL_HEARTBEAT] {
+            let req: Message<serde_json::Value> = Message {
+                msg_type: wire.to_string(),
+                id: format!("ctl-{wire}"),
+                timestamp: now_timestamp(),
+                payload: serde_json::json!({}),
+            };
+            sink.send(WsMessage::Text(serde_json::to_string(&req).unwrap()))
+                .await
+                .unwrap();
+
+            // Nothing may come back. An unhandled wire would be answered with
+            // `unknown_message_type` — which is the arm `dispatch_p2p` has for
+            // a name it does not carry — so silence is exactly the evidence
+            // wanted, and a follow-up ping would not have supplied it: a
+            // refusal carries the *control* frame's id and so would be skipped
+            // on the way to the pong.
+            let quiet =
+                tokio::time::timeout(std::time::Duration::from_millis(250), stream.next()).await;
+            assert!(
+                quiet.is_err(),
+                "`{wire}` was answered, but a control wire has no reply"
+            );
+
+            // …and the socket is still usable, so the arm consumed the frame
+            // rather than wedging the loop.
+            let ping: Message<serde_json::Value> = Message {
+                msg_type: msg_types::CONTROL_PING.to_string(),
+                id: format!("after-{wire}"),
+                timestamp: now_timestamp(),
+                payload: serde_json::json!({}),
+            };
+            let pong: Message<serde_json::Value> =
+                send_and_receive(&mut sink, &mut stream, &ping).await;
+            assert_eq!(pong.msg_type, msg_types::CONTROL_PONG);
+            assert_eq!(pong.id, format!("after-{wire}"));
+        }
 
         handle.shutdown().await.ok();
     }
@@ -2830,10 +2945,13 @@ mod tests {
     /// Every wire this agent answers on its own socket, as the constants that
     /// name them.
     ///
-    /// The response types in `msg_types` — `ok`, `error`, `terminal.output`,
-    /// `keepalive.pong` — are deliberately absent: they are what an answer
-    /// looks like, not something a peer asks for, and a manifest that offered
-    /// them would be claiming a call that does not exist.
+    /// The response types in `msg_types` — `ok`, `error`, `terminal.output` —
+    /// are deliberately absent: they are what an answer looks like, not
+    /// something a peer asks for, and a manifest that offered them would be
+    /// claiming a call that does not exist. `control.ping` and `control.pong`
+    /// are absent for a different reason: they are not units at all, they are
+    /// handled ahead of the route table, and their symmetry is checked by
+    /// `scripts/protocol-gate.mjs` rather than by a descriptor.
     const REQUEST_WIRES: &[&str] = &[
         msg_types::SESSION_LIST,
         msg_types::SESSION_CREATE,
@@ -2848,7 +2966,6 @@ mod tests {
         msg_types::CLIENT_SESSION_ATTACH,
         msg_types::CLIENT_SESSION_CREATE,
         msg_types::CLIENT_SESSION_KILL,
-        msg_types::KEEPALIVE_PING,
         msg_types::FILE_LIST,
         msg_types::FILE_READ,
         msg_types::FILE_WRITE,

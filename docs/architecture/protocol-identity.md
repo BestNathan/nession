@@ -14,6 +14,13 @@ This document fixes the rule and records what it changes. It is the reason
 `#884` and the naming migration behind it exist; `#678` is the model this rule
 refines, and where the two disagree this document is the later decision.
 
+**Scope: the operation.** Since `#953` a wire is one of three categories —
+operation, notification, control — and this document owns the first. A
+notification's prefix names the runtime that *emits* it, and a control wire has
+no runtime prefix at all; both are in
+[`protocol.md`](protocol.md) § *The three wire categories*. Read that first if
+what you are naming is not a call with an answer.
+
 ---
 
 ## 1. The rule

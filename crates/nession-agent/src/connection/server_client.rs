@@ -61,9 +61,20 @@ pub mod msg_types {
     /// operation — a reply is told from a request by the envelope's `id`, not
     /// by a `.response` suffix it no longer carries.
     pub const AGENT_REGISTER: &str = "server.agent.register";
-    pub const AGENT_HEARTBEAT: &str = "server.agent.heartbeat";
+    /// Control, not an operation: the agent sends it, the server handles it,
+    /// and nothing answers it. It used to be `server.agent.heartbeat` — a
+    /// spelling that read as "the server answers this", which stopped being
+    /// true the moment the acknowledgement was recognised as a message of its
+    /// own rather than a reply. See `docs/architecture/protocol.md` § *Control*.
+    pub const CONTROL_HEARTBEAT: &str = "control.heartbeat";
+    /// Control, same category as the heartbeat, and declared here because this
+    /// module is where the agent's server-connection wires live. The runtime
+    /// that answers a ping with a pong is the peer-to-peer one
+    /// (`server::websocket`), and both of them — and the server — handle all
+    /// three control wires, because control is symmetric.
+    pub const CONTROL_PING: &str = "control.ping";
+    pub const CONTROL_PONG: &str = "control.pong";
     pub const AGENT_SESSION_UPDATE: &str = "server.agent.session-update";
-    pub const SERVER_HEARTBEAT_ACK: &str = "server.heartbeat.ack";
     pub const AGENT_ADDRESS_UPDATE: &str = "server.agent.address-update";
     /// Server asks the agent for its live tmux session list. Used by the web
     /// UI's force-refresh so the server can rebuild its registry from the
@@ -184,7 +195,7 @@ impl ServerClientHandle {
                 agent: Some(self.metadata.clone()),
             },
         };
-        let msg = new_message(msg_types::AGENT_HEARTBEAT, payload);
+        let msg = new_message(msg_types::CONTROL_HEARTBEAT, payload);
         self.enqueue(&msg)
     }
 
@@ -680,13 +691,34 @@ impl ServerClient {
         if CORE_WIRES.contains(&msg.msg_type.as_str()) {
             return dispatch_core(self, &msg, responses).await;
         }
+        // Control wires, handled beside the route table rather than in it:
+        // `core_routes!` emits a descriptor per arm and control wires are not
+        // units — nothing offers one, because a control message is not
+        // something a caller asks *this* peer for, it is something every peer
+        // must handle.
+        //
+        // All three arms are here, including the two this runtime has no
+        // sender for: control is symmetric, so each runtime handles every
+        // control wire whether or not today's senders reach it, and
+        // `scripts/protocol-gate.mjs` holds every runtime to that. The arm for
+        // `control.pong` used to be this loop's `server.heartbeat.ack` arm —
+        // the ack is gone, because control has no acknowledgement, and what
+        // arrives here is now a message a peer sent on its own initiative.
         match msg.msg_type.as_str() {
             msg_types::AGENT_REGISTER => {
                 // Already handled during connect; log late/duplicate responses.
                 debug!("Late registration response ignored");
             }
-            msg_types::SERVER_HEARTBEAT_ACK => {
-                debug!("Heartbeat acknowledged by server");
+            msg_types::CONTROL_HEARTBEAT => {
+                // An agent does not receive its own heartbeat; the arm is the
+                // symmetry above, not a path a sender takes today.
+                debug!("control.heartbeat received");
+            }
+            msg_types::CONTROL_PING => {
+                debug!("control.ping received");
+            }
+            msg_types::CONTROL_PONG => {
+                debug!("control.pong received");
             }
             _ => {}
         }
@@ -937,7 +969,7 @@ mod tests {
             .expect("no message received");
 
         let parsed: serde_json::Value = serde_json::from_str(&msg).unwrap();
-        assert_eq!(parsed["msg_type"], "server.agent.heartbeat");
+        assert_eq!(parsed["msg_type"], "control.heartbeat");
         assert_eq!(parsed["payload"]["agent_id"], "test-agent-2");
         assert_eq!(parsed["payload"]["status"], "online");
         assert_eq!(parsed["payload"]["session_count"], 5);
@@ -1386,8 +1418,8 @@ mod tests {
         server_handle.abort();
     }
 
-    /// Mock server that sends a heartbeat ack after registration.
-    async fn start_mock_server_with_heartbeat_ack() -> (
+    /// Mock server that sends an unsolicited control wire after registration.
+    async fn start_mock_server_with_a_control_wire() -> (
         std::net::SocketAddr,
         tokio::task::JoinHandle<()>,
         mpsc::Receiver<String>,
@@ -1418,14 +1450,20 @@ mod tests {
                 // Skip registration message from client.
                 let _ = stream.next().await;
 
-                // Send heartbeat ack.
-                let ack = serde_json::json!({
-                    "msg_type": "server.heartbeat.ack",
-                    "id": "ack-1",
+                // Send a control wire, unprompted. This used to be the
+                // heartbeat acknowledgement (`server.heartbeat.ack`), which the
+                // server sent on every heartbeat; control has no
+                // acknowledgement, so what the mock exercises now is the
+                // category's other half — a control message arriving at a
+                // runtime that has no sender for it, which every runtime has to
+                // handle anyway.
+                let pong = serde_json::json!({
+                    "msg_type": "control.pong",
+                    "id": "ctl-1",
                     "timestamp": 1234567893,
                     "payload": {}
                 });
-                let _ = sink.send(WsMessage::Text(ack.to_string())).await;
+                let _ = sink.send(WsMessage::Text(pong.to_string())).await;
 
                 // Keep connection alive.
                 while let Some(Ok(_)) = stream.next().await {}
@@ -1436,8 +1474,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_server_heartbeat_ack() {
-        let (addr, server_handle, _msg_rx) = start_mock_server_with_heartbeat_ack().await;
+    async fn a_control_wire_the_agent_sent_nothing_for_is_handled_rather_than_refused() {
+        let (addr, server_handle, _msg_rx) = start_mock_server_with_a_control_wire().await;
         tokio::time::sleep(Duration::from_millis(100)).await;
 
         let metadata = AgentMetadata {
@@ -1450,7 +1488,7 @@ mod tests {
         let client = ServerClient::new(
             format!("ws://{addr}"),
             "test-token",
-            "test-agent-ack",
+            "test-agent-control",
             "test-host",
             "127.0.0.1",
             8080,
@@ -1465,7 +1503,9 @@ mod tests {
 
         let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
 
-        // Just verify the connection stays alive (heartbeat ack is handled internally).
+        // Just verify the connection stays alive — the control arm handled the
+        // frame, and an unhandled wire would be ignored by the same loop, so
+        // what this pins is that the arm exists and does not break the loop.
         tokio::time::sleep(Duration::from_millis(200)).await;
 
         handle.shutdown().await.ok();
@@ -2312,8 +2352,7 @@ mod tests {
             loop {
                 let msg = msg_rx.recv().await.expect("server closed");
                 let parsed: serde_json::Value = serde_json::from_str(&msg).unwrap();
-                if parsed.get("msg_type").and_then(|v| v.as_str()) == Some("server.agent.heartbeat")
-                {
+                if parsed.get("msg_type").and_then(|v| v.as_str()) == Some("control.heartbeat") {
                     return;
                 }
             }

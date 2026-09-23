@@ -270,17 +270,14 @@ pub struct AgentRegisterResponsePayload {
     pub heartbeat_interval_secs: Option<u64>,
 }
 
-/// Server → Agent acknowledgement of a received `agent.heartbeat`.
-#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ServerHeartbeatAckPayload {
-    /// Echoes the agent id the heartbeat was for.
-    pub agent_id: String,
-    /// Server timestamp (unix seconds) when the heartbeat was processed.
-    pub server_time: u64,
-}
-
+/// Agent → Server, on `control.heartbeat`.
+///
+/// A control message's payload, not a unit's request: the wire is
+/// `control.heartbeat`, and control wires are not Protocol Units — every peer
+/// handles one and nothing answers it, so no manifest advertises it and `just
+/// codegen` emits no binding for it. Typed anyway, because both ends of the
+/// connection read the same shape and the alternative is two `json!` blocks
+/// that agree by luck.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -362,7 +359,7 @@ pub struct WebAgentInfo {
     pub session_count: u32,
     pub last_heartbeat: String,
     // The six below were on the wire and not in this type. `agent_view.rs` is
-    // the single builder both `server.agent.list` and the `agents.changed` push
+    // the single builder both `server.agent.list` and the `server.agents.changed` push
     // go through — its own doc comment says why — and it has always sent these.
     //
     // The type was named right and shaped wrong, which is the fifth time in
@@ -398,27 +395,9 @@ pub struct WebAgentsListResponse {
     pub agents: Vec<WebAgentInfo>,
 }
 
-/// `agent.keepalive.ping` — the liveness check a P2P client sends an agent.
-///
-/// The request is empty and explicitly so, like [`AgentListPayload`]: a ping
-/// asks "are you there" and has nothing else to say.
-///
-/// **Placement.** `contracts/mod.rs` places a contract by the family its id
-/// names, and this id's subject segment is `keepalive`, which is not a family.
-/// It sits in `agent` because that segment names the runtime that answers —
-/// the same reasoning that puts `server.auth` in `client/` beside `client.auth`
-/// rather than in a family of its own.
-///
-/// **No response, and that is a classification rather than a gap.** The agent
-/// answers with an empty payload on the wire **`keepalive.pong`**
-/// (`websocket.rs`'s keepalive arm). That is a message of its own, not a reply
-/// to this one: one wire per operation means a reply would arrive as
-/// `agent.keepalive.ping` itself, and a pong is a second one-way message rather
-/// than an answer. A catalog response slot names a shape and that shape travels
-/// under the unit's own wire, so attaching one here would assert a message
-/// nobody sends — the missing half is a *classification* of `keepalive.pong`,
-/// not a missing type.
-#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct KeepalivePingPayload {}
+// `KeepalivePingPayload` was here, and it is gone rather than moved. It was
+// the request shape of `agent.keepalive.ping`, a unit whose life this change
+// ended: the wire is `control.ping` now, control wires are not Protocol Units,
+// and the payload of a ping is the empty object — so the type had no unit to
+// belong to, no consumer left (the catalog was its only one), and nothing to
+// say. A ping's emptiness is stated by the senders, not by a struct.

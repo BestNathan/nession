@@ -68,12 +68,12 @@ describe('AgentsPlugin', () => {
     });
 
     it('publishes from the push as well, because both paths go through notify', async () => {
-      // `agents.changed` is the path a client that never re-lists depends on,
+      // `server.agents.changed` is the path a client that never re-lists depends on,
       // and the server now sends `protocols` on it too. If publishing lived at
       // the call sites instead of in `notify`, this is the one that would be
       // forgotten — and forgetting it looks like nothing, because an empty
       // directory resolves as "Legacy Peer" and the calls keep working.
-      surface.pushMessage('agents.changed', {
+      surface.pushMessage('server.agents.changed', {
         agents: [{ ...makeAgent('a1'), protocols: manifest }],
       });
 
@@ -81,10 +81,10 @@ describe('AgentsPlugin', () => {
     });
 
     it('replaces the snapshot, so an agent the server dropped stops resolving', () => {
-      surface.pushMessage('agents.changed', {
+      surface.pushMessage('server.agents.changed', {
         agents: [{ ...makeAgent('a1'), protocols: manifest }],
       });
-      surface.pushMessage('agents.changed', { agents: [makeAgent('a2')] });
+      surface.pushMessage('server.agents.changed', { agents: [makeAgent('a2')] });
 
       expect(surface.protocols.manifestFor('a1')).toBeNull();
       expect(surface.protocols.manifestFor('a2')).toBeNull();
@@ -98,7 +98,7 @@ describe('AgentsPlugin', () => {
       const other = createMockPluginSurface();
       plugin.install(other);
 
-      other.pushMessage('agents.changed', {
+      other.pushMessage('server.agents.changed', {
         agents: [{ ...makeAgent('a1'), protocols: manifest }],
       });
 
@@ -114,7 +114,7 @@ describe('AgentsPlugin', () => {
       const teardown = plugin.install(surface);
       teardown();
 
-      surface.pushMessage('agents.changed', { agents: [makeAgent('a1')] });
+      surface.pushMessage('server.agents.changed', { agents: [makeAgent('a1')] });
       surface.pushMessage('server.agent.list', { agents: [makeAgent('a2')] });
       expect(cb).not.toHaveBeenCalled();
     });
@@ -137,7 +137,7 @@ describe('AgentsPlugin', () => {
       // Consumers registered under B receive events through B.
       const cb = vi.fn();
       plugin.onAgentsChanged(cb);
-      surfaceB.pushMessage('agents.changed', { agents: [makeAgent('b2')] });
+      surfaceB.pushMessage('server.agents.changed', { agents: [makeAgent('b2')] });
       expect(cb).toHaveBeenCalledWith([makeAgent('b2')]);
 
       // The final teardown detaches the plugin completely.
@@ -145,7 +145,7 @@ describe('AgentsPlugin', () => {
       await expect(plugin.listAgents()).rejects.toThrow('agents feature is not connected');
       const lateCb = vi.fn();
       plugin.onAgentsChanged(lateCb);
-      surfaceB.pushMessage('agents.changed', { agents: [makeAgent('b3')] });
+      surfaceB.pushMessage('server.agents.changed', { agents: [makeAgent('b3')] });
       expect(cb).toHaveBeenCalledTimes(1); // stale consumers were cleared at teardown
       expect(lateCb).not.toHaveBeenCalled(); // no subscription survives on B
     });
@@ -163,11 +163,11 @@ describe('AgentsPlugin', () => {
       teardownA(); // stale release — must not drop B's consumers
 
       const agents = [makeAgent('b1')];
-      surfaceB.pushMessage('agents.changed', { agents });
+      surfaceB.pushMessage('server.agents.changed', { agents });
       expect(cb).toHaveBeenCalledWith(agents);
 
       teardownB(); // current release — the consumer dies with its binding
-      surfaceB.pushMessage('agents.changed', { agents: [makeAgent('b2')] });
+      surfaceB.pushMessage('server.agents.changed', { agents: [makeAgent('b2')] });
       expect(cb).toHaveBeenCalledTimes(1);
     });
 
@@ -185,11 +185,11 @@ describe('AgentsPlugin', () => {
       plugin.install(surface);
     });
 
-    it('fires with the unwrapped list on agents.changed', () => {
+    it('fires with the unwrapped list on server.agents.changed', () => {
       const cb = vi.fn();
       plugin.onAgentsChanged(cb);
       const agents = [makeAgent('a1')];
-      surface.pushMessage('agents.changed', { agents });
+      surface.pushMessage('server.agents.changed', { agents });
       expect(cb).toHaveBeenCalledWith(agents);
     });
 
@@ -204,8 +204,8 @@ describe('AgentsPlugin', () => {
     it('ignores payloads without an agents field', () => {
       const cb = vi.fn();
       plugin.onAgentsChanged(cb);
-      surface.pushMessage('agents.changed', {});
-      surface.pushMessage('agents.changed', { agents: undefined });
+      surface.pushMessage('server.agents.changed', {});
+      surface.pushMessage('server.agents.changed', { agents: undefined });
       surface.pushMessage('server.agent.list', { unrelated: true });
       expect(cb).not.toHaveBeenCalled();
     });
@@ -214,7 +214,7 @@ describe('AgentsPlugin', () => {
       const cb = vi.fn();
       const unsub = plugin.onAgentsChanged(cb);
       unsub();
-      surface.pushMessage('agents.changed', { agents: [makeAgent('a1')] });
+      surface.pushMessage('server.agents.changed', { agents: [makeAgent('a1')] });
       expect(cb).not.toHaveBeenCalled();
     });
   });

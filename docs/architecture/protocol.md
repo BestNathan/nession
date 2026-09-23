@@ -75,10 +75,101 @@ Two consequences worth knowing:
   as it has correlated, so a reply never reaches subscribers. The edge case is a
   reply that arrives *after* its request timed out — its id is no longer pending,
   so it fans out to subscribers as an unsolicited message of that name.
-- **A one-way unit is one wire, not half of two.** A unit whose answer is a
-  message of its own (`agent.keepalive.ping` → `keepalive.pong`) has
-  `response: None`: the reply slot names a *shape under this unit's wire*, so it
-  is the wrong place to describe a different message.
+- **A one-way unit is one wire, not half of two.** A unit that is sent and not
+  waited for (`server.agent.session-update`) has `response: None`: the reply
+  slot names a *shape under this unit's wire*, so it is the wrong place to
+  describe a message that is not an answer at all.
+
+### The three wire categories
+
+Every wire is one of three kinds, and its **name says which**. This is the whole
+of the naming model; the rest of this section is why each row is what it is.
+
+| | wire | who may send | reply | who handles |
+|---|---|---|---|---|
+| **Operation** | `<answerer>.<subject>.<operation>` | the caller | yes — paired by `id` | **one** runtime |
+| **Notification** | `<emitter>.<subject>.<event>` | **one** runtime | none | whoever subscribes |
+| **Control** | `control.<verb>` | **any** runtime | none | **every** runtime |
+
+The difference is structural, not stylistic. An operation has exactly one
+runtime that answers it; a notification has exactly one that sends it; control
+has **neither**, which is why it is not a kind of operation and why it gets a
+prefix instead of a runtime name. The first segment of an operation answers
+"who answers this?", of a notification "who sends it?" — the same position
+answering two different questions is what this model removed, and it is why a
+wire whose category you cannot tell from its name is a wire to rename.
+
+`scripts/protocol-gate.mjs` checks the last two rows (`just check-protocol`):
+a notification's first segment must be a runtime name, and every control wire
+must have a branch in every runtime's dispatch table. Its selftest injects each
+rule, positive and negative, into a fixture tree.
+
+**A unit is an operation**, and it is the only category a manifest describes.
+That is what makes the other two visible to a gate: a declared wire that no
+generated binding carries is a notification or a control, and nothing else.
+
+#### Notification
+
+A message a peer pushes on its own initiative, on a wire of its own:
+
+```text
+server.agents.changed      the server pushes the agent list
+server.sessions.changed    the server pushes the session list
+server.commands.changed    the server pushes the saved-command list
+agent.terminal.output      the agent streams terminal bytes
+```
+
+Nothing answers one, so no route table has an arm for it and no contract carries
+it — which is why `just codegen` emits nothing for it and the Web subscribes to
+the name rather than importing a binding. Its declaration is a `pub const` in
+the file that sends it (`web_client_registry.rs` for the three above).
+
+`sessions.changed` and `agents.changed` were the previous spellings, and the
+emitter segment is not decoration: without it the first segment meant "who
+answers" on an operation and *nothing at all* here, so a reader could not tell
+which peer emitted a wire, or whether it was an offer at all.
+
+#### Control
+
+A message **any peer may send**, that **needs no reply mechanism**, and that
+**every peer must handle**:
+
+```text
+control.heartbeat   the agent tells the server it is alive
+control.ping        a peer asks whether the far end is there
+control.pong        and a peer says it is
+```
+
+The three properties are one property. Because no single runtime owns a control
+message — unlike an operation's answerer or a notification's emitter — there is
+no "who" to name it after, and no counterpart for a reply to travel back to. So
+it takes a prefix that is not a runtime, and carries no reply.
+
+**`control.pong` is not a reply to `control.ping`.** It is a one-way message of
+its own; the protocol performs no pairing for control wires, and nothing derives
+a correlation between the two. A peer *may* answer a ping with a pong, and that
+is two independent messages rather than one request and its response. (The pong
+the agent sends carries the ping's `id` because the envelope's `id` is the
+sender's to set — not because a router reads it as a pairing.)
+
+**There is no acknowledgement.** `server.heartbeat.ack` existed and has been
+deleted rather than renamed: control has no acknowledgement, and the agent's
+handler for it only logged. (An older comment claimed it reset a "miss counter";
+the counter does not exist in `nession-agent`, and never did.)
+
+Because control is symmetric, **every runtime handles every control wire**,
+whether or not today's senders reach it. That is the one thing about the
+category a static check can hold, so `scripts/protocol-gate.mjs` holds it as
+rule 5. "Every runtime" means every runtime with a dispatch table — the three in
+the tree: the server's (`server_routes!`), and the agent's two (`core_routes!`
+for the server connection, `p2p_routes!` for its own socket). A browser has no
+route table (it subscribes by name) and the CLI dispatches nothing, so neither
+is one of these; the check is over what it can see, and that limit is stated
+here rather than left to be discovered from a passing run.
+
+A control wire is handled **beside** the route table, never as an arm of it.
+The macros emit a descriptor per arm, so an arm would advertise a unit — and an
+offer is the wrong description of a message every peer handles.
 
 ## Ownership and the dependency rule
 
@@ -101,8 +192,15 @@ This is enforced, not documented-and-hoped:
 
 ### What is not a Protocol Unit
 
-- **Notification** — a reply to something the other end sent, on a wire of its
-  own. The one that looks most like a unit; see below.
+A **unit is an operation**, and that is the whole of it. Two wire categories are
+not units — **notification** and **control** — and three things are not protocol
+at all:
+
+- **Notification** — one runtime pushes it and nothing answers it. It has a wire
+  and a payload type, which is why it is the one that gets mistaken for a unit.
+- **Control** — any runtime may send it, every runtime must handle it, and
+  nothing pairs it. Also mistaken for a unit, and for a worse reason: it *is*
+  dispatched everywhere, so "something handles it" is true of it.
 - **Product Capability** — a user-visible thing with a presence state (Files,
   Git, Claude Code in the Web UI). It *consumes* contracts; it is not one.
 - **Transport Plugin** — a client-side adapter with no presence. Also not a
@@ -110,44 +208,56 @@ This is enforced, not documented-and-hoped:
 - **Transport mechanism** — TLS, framing, serialisation. These are kernel, and
   they do not get generations.
 
-Four concepts, four names. A sentence where "capability" could mean any of them
+Five concepts, five names. A sentence where "capability" could mean any of them
 is a sentence to rewrite.
 
-#### A notification is not a unit
+#### Why neither is a unit
 
-The other three are things *around* the protocol. A notification is *inside* it —
-it has a wire, a payload type and a sender — which is why it is the one that gets
-mistaken for a unit. The test is one question:
+The two non-operation categories are *inside* the protocol — each has a wire and
+a payload — which is why they are the ones that get mistaken for units. The test
+is one question, and it is about the **manifest**, which is a statement of what
+you can ask a peer for:
 
-> **Does anything dispatch it?** A unit is something a dispatcher answers. A
-> notification is a reply to a message *you* sent: no route table has an arm for
-> it, and nothing can ask for it.
+> **Is it an offer this peer makes to a caller?**
 
-`server.agent.heartbeat` is a unit — the server's route table has an arm for it,
-and it answers. Its acknowledgement arrives on `server.heartbeat.ack`, for which
-no route table has an arm; the agent logs it in the plain match beside its
-dispatcher. So the heartbeat is a unit, the ack is not, and the catalog gives the
-heartbeat `response: None`: its acknowledgement travels on a wire of its own
-rather than under the heartbeat's, so there is no wire for a response shape to
-attach to.
+An operation is. A notification is not — nothing can ask for one, and no route
+table has an arm for it. A control message is not either, and that is the part
+worth stating: every peer *handles* one, so "a dispatcher answers it" is
+half-true of it, but no peer *offers* it and none answers it. Advertising one
+would claim an offer that does not exist in exactly the way advertising an
+acknowledgement would have.
 
-Advertising the ack instead would **claim an offer that does not exist** — the
-manifest is a statement of what you can be asked for, and nobody can ask for an
-acknowledgement.
+Both are still declared. A notification's wire is a `pub const` in the file that
+sends it; a control wire's is a `pub const` beside the code that handles it.
+That declaration is how `scripts/protocol-gate.mjs` knows the wire exists at
+all — nothing else can carry it — and it is why the gate reads declarations
+rather than route tables.
 
-Two consequences, worth knowing before going to look for a unit to add:
+Neither has a generated binding, because `just codegen` emits what the contracts
+declare and neither is a contract. For a notification that is a live concern
+rather than a curiosity when the receiving peer *is* the Web: a shape no unit
+carries gets no binding, so the Web names the wire as a string. `server.agents.
+changed` is that case, and the string is checked by rule 1 like any other.
 
-- **The wire is still declared.** A notification's wire appears as a `pub const`
-  beside the dispatcher that handles it, which is how the gate learns it exists.
-  It is not in a route table because no route table can describe it.
-- **Its payload type is carried by no unit**, so `just codegen` never emits it.
-  That is correct when the receiving peer is not the Web — the heartbeat's ack
-  goes to an agent, which is Rust — and worth a second look when it is, because a
-  shape no unit carries gets no generated binding.
-
-The same rule, shortened to the test alone, is on the `Unit` type in
+The same test, in the form that fits a catalog entry, is on the `Unit` type in
 `crates/nession-protocol-codegen/src/catalog.rs` — which is where someone arrives
 when the schema reports that a unit has no `response`.
+
+#### What the heartbeat taught
+
+`server.agent.heartbeat` was a unit with `response: None`, and its
+acknowledgement travelled on `server.heartbeat.ack`. Read together with rule 1
+(one wire per operation) that arrangement said: the heartbeat is an operation
+whose answer is a *notification*. It was not — nothing answered the heartbeat,
+and the ack's handler on the agent logged and returned.
+
+The unit and the ack are both gone. The heartbeat is `control.heartbeat`, the
+ack does not exist, and the `response: None` that used to explain the ack is no
+longer needed: there is no reply to have a shape. Three separate comments had
+each been written to justify the arrangement — one on the catalog entry, one on
+the agent's protocol module, one on the server's handler — and the cost of it
+was a reader hunting for the unit that carried the ack's payload, which did not
+exist and should not.
 
 ## Directory layout
 
@@ -173,7 +283,7 @@ one file per contract version:
 
 ```text
 crates/nession-protocol/src/contracts/
-├── agent/v1.rs       agent.register, agent.heartbeat, agent.address.update
+├── agent/v1.rs       agent.register, agent.address.update
 ├── session/v1.rs     session.create, session.attach, session.env.apply
 ├── env/v1.rs         env.{list,get,write,delete} at both ends
 ├── commands/v1.rs    commands.{list,add,remove,update}
@@ -517,7 +627,7 @@ is broken by it.
 | A straggler is refused per call, not disconnected | the same gate as any other unsupported unit — `contract_not_supported` |
 | A consumer resolves per target, not per connection | `ProtocolDirectory` is keyed by agent id and replaced wholesale by each agent-list snapshot |
 | A consumer never sends a version it cannot read | `addressedPayload` refuses locally — the server's gate cannot catch this case, because a caller that names nothing is relayed |
-| Every path that learns an agent list publishes it | `AgentsPlugin.listAgents` and the `agents.changed` push, both calling one `publishProtocols` |
+| Every path that learns an agent list publishes it | `AgentsPlugin.listAgents` and the `server.agents.changed` push, both calling one `publishProtocols` |
 | The agent list carries the same fields on every path | `server/agent_view.rs` — one builder, because the two hand-built ones had already drifted |
 | Generated bindings are what the contracts say | `just check-codegen` (`scripts/check-codegen-drift.sh`) — regenerate into a scratch directory, diff |
 | Every advertised contract has generated bindings | `nession-protocol-codegen`'s `every_advertised_contract_is_in_the_catalog`, against all four runtimes' own declarations — the agent's `served_descriptors`, the server's `server_manifest`, and the two providers' `descriptors()` |
@@ -525,7 +635,9 @@ is broken by it.
 | A generated file refers to nothing it does not declare | the same crate's `check_self_contained`, run by the generator *and* as a test |
 | The wire a *call site* names is one some runtime answers | `just check-protocol` (`scripts/protocol-gate.mjs`) — rule 1 |
 | Every advertised protocol has a caller | the same gate — rule 2 |
-| The gate still catches each of those | `just protocol-check-selftest` — each rule injected into a fixture tree, which must fail with that rule named |
+| A notification's first segment names the runtime that emits it | the same gate — rule 4, over the declared wires no generated binding carries |
+| Every control wire has a branch in every runtime | the same gate — rule 5, over the same set filtered by the `control.` prefix |
+| The gate still catches each of those | `just protocol-check-selftest` — each rule injected into a fixture tree, **with a negative case**, and the run must fail with that rule named |
 
 ### The one thing two lists cannot see (the gate)
 
@@ -552,8 +664,10 @@ both directions:
 
 The advertised set is not a list the gate keeps. It is read from the generated
 bindings (which `just check-codegen` holds equal to the contracts) and from the
-`pub const` declarations beside each dispatcher — the notification wires, which
-no route table can describe because nothing answers them.
+`pub const` declarations that stand for the wires no contract carries — the
+notifications, which no route table can describe because nothing answers them,
+and the control wires, which no manifest may describe because every peer handles
+them.
 
 It used to be read from a third source as well: `<wire>.response` for every
 wire, which the gate derived itself because that was the spelling every reply
@@ -561,7 +675,7 @@ carried. One wire per operation removed it — see *One wire per operation* abov
 — so the gate no longer derives anything, and a call site still naming the
 suffix is reported like any other name nothing answers.
 
-A name is **resolved**, not required to be a literal. `msg_types::AGENT_HEARTBEAT`
+A name is **resolved**, not required to be a literal. `msg_types::CONTROL_HEARTBEAT`
 and an imported `WIRE as BRANCHES_WIRE` are both *better* than a literal — they
 cannot drift from the contract — so a gate demanding literals would be asking
 for the worse style. What gets reported is a name that resolves to nothing,
@@ -667,11 +781,11 @@ projection, which `ContractSupport.wire` already carries.
 
 The implementation made this concrete rather than a matter of taste.
 `core_routes!` covers exactly the arms where the agent **answers** a server-sent
-command. The two arms it left behind are replies to something the agent itself
-sent — the server's acceptance of `server.agent.register`, and
-`server.heartbeat.ack` — and advertising them would claim an offer that does not
-exist. `server.agent.register` is a unit all the same: the **server** serves it,
-and its own route table has the arm. The agent only reads the acceptance, under
+command. The arms it left behind are messages the agent does not answer — the server's
+acceptance of `server.agent.register`, and the three control wires — and
+advertising them would claim an offer that does not exist. `server.agent.register`
+is a unit all the same: the **server** serves it, and its own route table has the
+arm. The agent only reads the acceptance, under
 the wire name it sent, which is one wire per operation working as intended. So
 the agent's slice of Phase 6 is the units the agent serves, and the other three
 units the phase names are served by the **server** — which composes a manifest of
@@ -682,7 +796,7 @@ its own, so all four are declared, two of them on each side:
 | `session.create` | the agent for the server (`agent.session.create`) and the server for a browser (`server.session.create`) — two units, since `#912` gave each side the id its own handler earns | both manifests |
 | `session.attach` | the **server** (`server.session.attach`) | the server's |
 | `agent.register` | the **server** (`server.agent.register`) | the server's |
-| `agent.heartbeat` | the **server** (`server.agent.heartbeat`) | the server's |
+| `agent.heartbeat` | the **server** — as `control.heartbeat` it is no longer a unit, and no manifest carries it | — |
 
 ### Where does a core unit's descriptor live?
 

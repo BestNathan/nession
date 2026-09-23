@@ -246,7 +246,7 @@ async fn test_session_kill_flow() {
         .await
         .unwrap();
 
-    // The broadcast channel may hold stale `sessions.changed` messages.
+    // The broadcast channel may hold stale `server.sessions.changed` messages.
     // Skip those to reach the actual kill response.
     let client_parsed = loop {
         let client_msg = client_stream.next().await.unwrap().unwrap();

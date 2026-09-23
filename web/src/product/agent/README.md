@@ -20,7 +20,7 @@ nothing from above `platform`, which the probe does (`agentIdAtom`).
 
 | Module | Responsibility |
 |---|---|
-| `AgentsPlugin.ts`, `types.ts`, `index.ts` | Agent RPC capability (`client.agents.list/rename/delete` + `agents.changed` push) installed per WebSocketService; `agentsApi` module singleton with generation-tagged install/teardown |
+| `AgentsPlugin.ts`, `types.ts`, `index.ts` | Agent RPC capability (`client.agents.list/rename/delete` + `server.agents.changed` push) installed per WebSocketService; `agentsApi` module singleton with generation-tagged install/teardown |
 | `components/AgentDetail.tsx` | Session-workspace agent tool page (read-only info + extension slot `agent-detail` via `@/extensions/registry`) |
 | `components/AgentContext.tsx` | Agent chip in the session header (channel-colored label + offline copy) |
 | `hooks/useAgentData.ts` | Per-mount agent list state, fetch, heartbeat-history Map (capped at 5), dedupe (`agentsEqual`, last_heartbeat excluded) |
@@ -34,7 +34,7 @@ belongs to core runtime; layout/selection state belongs to app/workbench.
 | State | Owner today | Lifetime / scope |
 |---|---|---|
 | Agent list + loading/error + heartbeat history | `features/agents/hooks/useAgentData` per mount | Composed by `app/useDashboard`. Deliberately **no** list atom |
-| Push updates (`agents.changed`) + refetch on reconnect | `app/useRealtimeUpdates` | One bridge for agents+sessions subscriptions keyed on `wsService` identity; kept app-layer while it fuses both domains |
+| Push updates (`server.agents.changed`) + refetch on reconnect | `app/useRealtimeUpdates` | One bridge for agents+sessions subscriptions keyed on `wsService` identity; kept app-layer while it fuses both domains |
 | Probe results / latencies | `product/agent/state/probe.ts` | Written by `useProbePolling` (mounted once per shell), read by the P2P attach domain for route choice. Keyed by `agent_id`, so it is the Agent's state — moved out of `atoms/` in #801 Phase 5 |
 | Wire registration | `AgentsPlugin` instance (module singleton `agentsApi`) | One binding per WebSocketService lifetime; re-install after reconnect with generation-tagged teardown (`AgentsPlugin.ts`) |
 

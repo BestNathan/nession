@@ -263,7 +263,7 @@ async fn test_multiple_agents_register_independently() {
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn test_heartbeat_after_registration_is_acked() {
+async fn test_heartbeat_after_registration_is_handled_and_not_acked() {
     let server = TestServer::start("tok").await.unwrap();
     let mut ws = server.connect().await.unwrap();
 
@@ -291,7 +291,7 @@ async fn test_heartbeat_after_registration_is_acked() {
 
     // Send a heartbeat.
     let hb = serde_json::json!({
-        "msg_type": "server.agent.heartbeat",
+        "msg_type": "control.heartbeat",
         "id": "hb-1",
         "timestamp": current_timestamp(),
         "payload": {
@@ -307,12 +307,16 @@ async fn test_heartbeat_after_registration_is_acked() {
     });
     send_text(&mut ws, hb.to_string()).await.unwrap();
 
-    // The server acknowledges heartbeats so the agent can confirm the link.
+    // Nothing comes back, and that is the assertion: control has no
+    // acknowledgement. This test used to read `server.heartbeat.ack` here — a
+    // wire the server sent on every heartbeat and the agent logged without
+    // parsing. The heartbeat is still *handled*, and the case below for an
+    // unregistered agent is where the registry half of that is read.
     let result = try_recv_text(&mut ws, 500).await;
-    let ack = result.expect("Server should ack heartbeat");
-    let parsed: serde_json::Value = serde_json::from_str(&ack).unwrap();
-    assert_eq!(parsed["msg_type"], "server.heartbeat.ack");
-    assert_eq!(parsed["payload"]["agent_id"], "hb-agent");
+    assert!(
+        result.is_none(),
+        "a heartbeat was answered, but control has no reply mechanism: {result:?}"
+    );
 }
 
 #[tokio::test]
@@ -321,7 +325,7 @@ async fn test_heartbeat_without_registration_is_silent() {
     let mut ws = server.connect().await.unwrap();
 
     let hb = serde_json::json!({
-        "msg_type": "server.agent.heartbeat",
+        "msg_type": "control.heartbeat",
         "id": "hb-unreg",
         "timestamp": current_timestamp(),
         "payload": {
@@ -370,7 +374,7 @@ async fn test_multiple_heartbeats_accepted() {
     // Send several heartbeats.
     for i in 0..5 {
         let hb = serde_json::json!({
-            "msg_type": "server.agent.heartbeat",
+            "msg_type": "control.heartbeat",
             "id": format!("hb-{}", i),
             "timestamp": current_timestamp(),
             "payload": {
@@ -383,14 +387,13 @@ async fn test_multiple_heartbeats_accepted() {
         send_text(&mut ws, hb.to_string()).await.unwrap();
     }
 
-    // Each heartbeat should be acknowledged.
-    for _ in 0..5 {
-        let ack = try_recv_text(&mut ws, 500)
-            .await
-            .expect("expected heartbeat ack");
-        let parsed: serde_json::Value = serde_json::from_str(&ack).unwrap();
-        assert_eq!(parsed["msg_type"], "server.heartbeat.ack");
-    }
+    // None of them is answered. Silence is the assertion, so the read has to be
+    // given the chance to succeed rather than skipped.
+    let answered = try_recv_text(&mut ws, 500).await;
+    assert!(
+        answered.is_none(),
+        "a heartbeat was answered, but control has no reply mechanism: {answered:?}"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -503,7 +506,7 @@ async fn test_full_workflow_agent_and_client() {
 
     // --- Step 2: Agent sends heartbeat ---
     let hb = serde_json::json!({
-        "msg_type": "server.agent.heartbeat",
+        "msg_type": "control.heartbeat",
         "id": "wf-hb",
         "timestamp": current_timestamp(),
         "payload": {
@@ -518,11 +521,10 @@ async fn test_full_workflow_agent_and_client() {
         }
     });
     send_text(&mut agent_ws, hb.to_string()).await.unwrap();
-    // Heartbeats are acknowledged.
-    let hb_result = try_recv_text(&mut agent_ws, 300).await;
-    let ack: serde_json::Value =
-        serde_json::from_str(&hb_result.expect("expected heartbeat ack")).unwrap();
-    assert_eq!(ack["msg_type"], "server.heartbeat.ack");
+    // Heartbeats are not acknowledged — control has no acknowledgement. What
+    // this step asserts is that the server took one and the workflow carried
+    // on to the next step.
+    assert!(try_recv_text(&mut agent_ws, 300).await.is_none());
 
     // --- Step 3: Client authenticates ---
     let mut client_ws = server.connect().await.unwrap();
@@ -541,7 +543,7 @@ async fn test_full_workflow_agent_and_client() {
 
     // --- Step 4: Agent sends another heartbeat after client connected ---
     let hb2 = serde_json::json!({
-        "msg_type": "server.agent.heartbeat",
+        "msg_type": "control.heartbeat",
         "id": "wf-hb-2",
         "timestamp": current_timestamp(),
         "payload": {
@@ -552,10 +554,7 @@ async fn test_full_workflow_agent_and_client() {
         }
     });
     send_text(&mut agent_ws, hb2.to_string()).await.unwrap();
-    let hb2_result = try_recv_text(&mut agent_ws, 300).await;
-    let ack2: serde_json::Value =
-        serde_json::from_str(&hb2_result.expect("expected second heartbeat ack")).unwrap();
-    assert_eq!(ack2["msg_type"], "server.heartbeat.ack");
+    assert!(try_recv_text(&mut agent_ws, 300).await.is_none());
 }
 
 // ---------------------------------------------------------------------------
@@ -1205,7 +1204,7 @@ async fn test_client_sessions_list_filtered_by_agent() {
     .unwrap();
 
     // The broadcast channel (capacity 16) may still hold stale
-    // `sessions.changed` messages from the agent register path.
+    // `server.sessions.changed` messages from the agent register path.
     // Skip those so we consume the actual `server.session.list` reply.
     let list_resp = loop {
         let raw = recv_text(&mut client).await;

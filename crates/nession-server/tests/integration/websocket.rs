@@ -181,7 +181,7 @@ async fn test_heartbeat_without_registration() {
     let (mut ws_stream, _) = connect_async(&url).await.unwrap();
 
     let heartbeat_msg = serde_json::json!({
-        "msg_type": "server.agent.heartbeat",
+        "msg_type": "control.heartbeat",
         "id": "msg_1",
         "timestamp": current_timestamp(),
         "payload": {

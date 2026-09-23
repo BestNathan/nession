@@ -46,14 +46,25 @@ check: fmt lint check-tmux-socket check-protocol check-codegen coverage
 # forced env write reported a re-source failure and the session kept the old
 # values.
 #
-# Two rules, and they are duals:
+# A wire is one of three categories, and the name says which (#953):
+#
+#   operation      `<answerer>.<subject>.<operation>`   one runtime answers it
+#   notification   `<emitter>.<subject>.<event>`        one runtime sends it
+#   control        `control.<verb>`                     every runtime handles it
+#
+# An operation is a Protocol Unit and the only category a manifest describes.
+# The rules, and the first two are duals:
 #
 #   1. every wire a call site names is well formed and some runtime answers it
 #   2. every advertised protocol is named by at least one call site
+#   3. the transitional `nession_common::protocol` alias path stays gone
+#   4. a notification declares the runtime that emits it
+#   5. a control wire is dispatched by every runtime
 #
 # Reads the advertised set from the generated tree (which `just check-codegen`
-# keeps equal to the contracts) and from the `pub const` declarations beside
-# each dispatcher. A file that deals in placeholder wires on purpose declares
+# keeps equal to the contracts) and from the `pub const` declarations that
+# stand for the wires no contract carries — see the gate's `declaringFiles`.
+# A file that deals in placeholder wires on purpose declares
 # `// not-protocol-file: <reason>` in its header, and every run prints which
 # files do.
 #
@@ -63,7 +74,7 @@ check: fmt lint check-tmux-socket check-protocol check-codegen coverage
 check-protocol:
     node scripts/protocol-gate.mjs
 
-# Every name a call site may use — units, wires and notifications.
+# Every name a call site may use — units, wires, notifications and control.
 protocol-list:
     node scripts/protocol-gate.mjs --list
 

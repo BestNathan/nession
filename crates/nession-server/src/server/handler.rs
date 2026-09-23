@@ -2,7 +2,7 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio_tungstenite::tungstenite::Message;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use crate::env::EnvService;
 use crate::protocol::server_routes;
@@ -14,8 +14,7 @@ use nession_common::display_name::validate_display_name;
 use nession_common::env_file::parse_env;
 use nession_protocol::contracts::agent::v1::{
     AddressStatus, AgentAddressUpdatePayload, AgentListReply, AgentRefusal, AgentRegisterPayload,
-    AgentRenameFailure, AgentRenameReply, AgentRenameResponse, ServerHeartbeatAckPayload,
-    WebAgentsListResponse,
+    AgentRenameFailure, AgentRenameReply, AgentRenameResponse, WebAgentsListResponse,
 };
 use nession_protocol::contracts::client::v1::{AuthResponsePayload, ClientAuthPayload};
 use nession_protocol::contracts::env::v1::{
@@ -174,6 +173,46 @@ impl ConnectionHandler {
         // and before this it was the one peer whose offer was invisible.
         if SERVER_WIRES.contains(&msg.msg_type.as_str()) {
             return dispatch_server(self, msg).await;
+        }
+
+        // Control wires, handled beside the route table rather than in it, and
+        // **before the relay path below**. Two reasons, and the second is a
+        // bug rather than a matter of taste:
+        //
+        //   * `server_routes!` emits a descriptor per arm, and a control wire
+        //     is not a unit. Nothing offers one — it is not an offer this peer
+        //     makes to a caller, it is a message every peer must handle.
+        //   * The relay path keys on the payload's `agent_id`, which every
+        //     control payload carries because it is sent *about* an agent.
+        //     Left to fall through, `control.heartbeat` would be relayed to the
+        //     agent that sent it.
+        //
+        // All three arms are here, including the two the server has no sender
+        // for: control is symmetric, so every runtime handles every control
+        // wire, and `scripts/protocol-gate.mjs` holds each runtime to that.
+        //
+        // The wire type is taken out of the message before the match, for the
+        // same reason `server_routes!` does it: the heartbeat arm moves `msg`,
+        // and a borrow held in the scrutinee would conflict with that.
+        let wire = msg.msg_type.clone();
+        match wire.as_str() {
+            "control.heartbeat" => return self.handle_control_heartbeat(msg).await,
+            "control.ping" => {
+                // The server has no keepalive that pings a peer; the arm is the
+                // symmetry above. A peer that pings anyway is not refused — and
+                // is not answered either, because control has no reply
+                // mechanism and the server has nothing to state back.
+                debug!(
+                    "control.ping from a client; the server pings nothing, so it \
+                     answers nothing"
+                );
+                return Ok(HandlerAction::Reply(None));
+            }
+            "control.pong" => {
+                debug!("control.pong received; nothing awaits it");
+                return Ok(HandlerAction::Reply(None));
+            }
+            _ => {}
         }
 
         // Not one of ours, so it is either a relay or nothing. The Server's
@@ -361,7 +400,13 @@ impl ConnectionHandler {
         ))))
     }
 
-    async fn handle_agent_heartbeat(
+    /// Handle `control.heartbeat`.
+    ///
+    /// Named for the wire rather than for the agent, because the wire no longer
+    /// names one: it used to be `server.agent.heartbeat`, which read as "the
+    /// server answers this" and stopped being true when the acknowledgement was
+    /// recognised as a message of its own.
+    async fn handle_control_heartbeat(
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
     ) -> anyhow::Result<HandlerAction> {
@@ -422,30 +467,15 @@ impl ConnectionHandler {
                 .await;
         }
 
-        // Acknowledge so the agent can confirm the link is healthy in both
-        // directions.
-        //
-        // This is a **notification**, not a unit's response — and deliberately
-        // not a unit: it travels on `server.heartbeat.ack`, and a manifest
-        // advertising it would claim an offer that does not exist.
-        // `nession-agent`'s protocol module owns that rule and states it.
-        //
-        // Typed at the contract boundary anyway. `ServerHeartbeatAckPayload` was
-        // declared, derived and unit-tested while being used by nobody: this
-        // block built the same shape by hand, and the agent logs the ack without
-        // parsing it, so nothing kept the two in step.
-        //
-        // The clause about the agent resetting "its own miss counter" is gone —
-        // there is no miss counter, and the agent's handler logs the ack and
-        // returns. A comment promising a mechanism nothing implements is how the
-        // next reader concludes the mechanism exists.
-        Ok(heartbeat_ack_reply(
-            &msg.id,
-            ServerHeartbeatAckPayload {
-                agent_id: agent_id.to_string(),
-                server_time: current_timestamp(),
-            },
-        ))
+        // Nothing is sent back. There used to be an acknowledgement here, on a
+        // wire of its own (`server.heartbeat.ack`), and it was removed rather
+        // than renamed: **control has no acknowledgement**. A heartbeat is a
+        // one-way statement — `control.heartbeat` — so an ack is not a reply
+        // the protocol owes anyone, and the agent's handler for it logged and
+        // returned, which is what a message sent for no one's benefit looks
+        // like. (The "miss counter" an older comment here said the ack reset
+        // does not exist in `nession-agent` either; nothing was reset.)
+        Ok(HandlerAction::Reply(None))
     }
 
     async fn handle_agent_session_update(
@@ -570,7 +600,7 @@ impl ConnectionHandler {
 
         if auth_ok {
             self.authenticated_client = true;
-            // Subscribe web client for real-time push (agents.changed, etc.)
+            // Subscribe web client for real-time push (server.agents.changed, etc.)
             if let Some(ref sender) = self.client_sender {
                 self.web_client_registry.subscribe(sender.clone());
             }
@@ -607,7 +637,7 @@ impl ConnectionHandler {
         msg: ProtocolMessage<serde_json::Value>,
     ) -> anyhow::Result<HandlerAction> {
         // Typed at the contract boundary: the list half is built by
-        // `agent_view`, whose single builder both this and the `agents.changed`
+        // `agent_view`, whose single builder both this and the `server.agents.changed`
         // push go through, and the refusal half is `AgentRefusal`.
         if !self.authenticated_client {
             warn!("Unauthenticated client requested agents list");
@@ -3316,20 +3346,6 @@ mod extract_ip_tests {
 /// `to_value` cannot fail for a struct of these shapes, but the house pattern
 /// keeps a fallback rather than an unwrap — and an empty list is still a valid
 /// payload, so a caller reads "no files" instead of losing the reply.
-/// Serialize a `server.heartbeat.ack`.
-///
-/// Named a reply because it is one — it carries the heartbeat's own `id` — even
-/// though it is not the heartbeat unit's *response*: it travels on its own wire,
-/// which is why `server.heartbeat.ack` is a unit of its own. See the catalog
-/// entry for the full reasoning.
-fn heartbeat_ack_reply(id: &str, payload: ServerHeartbeatAckPayload) -> HandlerAction {
-    reply_json(
-        id,
-        "server.heartbeat.ack",
-        serde_json::to_value(&payload).unwrap_or(json!({ "agent_id": "", "server_time": 0 })),
-    )
-}
-
 /// Serialize a `server.auth` reply.
 ///
 /// The same payload type the Agent's `client.auth` answers with — one handshake
@@ -3497,7 +3513,7 @@ fn current_timestamp() -> u64 {
 }
 
 /// Serialise a session for the wire. Shared by `server.session.list` and the
-/// `sessions.changed` broadcast so both always agree on the field set — the
+/// `server.sessions.changed` broadcast so both always agree on the field set — the
 /// web client feeds either straight into the same state setter.
 pub(crate) fn session_to_info(s: &crate::registry::SessionInfo) -> WebSessionInfo {
     WebSessionInfo {
@@ -4258,10 +4274,10 @@ mod tests {
         assert_eq!(reply["payload"]["heartbeat_interval_secs"], 30);
     }
 
-    // ---- agent.heartbeat ----
+    // ---- control.heartbeat ----
 
     #[tokio::test]
-    async fn agent_heartbeat_registered() {
+    async fn control_heartbeat_registered_is_handled_and_answered_with_nothing() {
         let mut h = test_handler("").await;
         // Register first
         h.handle_message(proto_msg(
@@ -4283,7 +4299,7 @@ mod tests {
 
         let action = h
             .handle_message(proto_msg(
-                "server.agent.heartbeat",
+                "control.heartbeat",
                 json!({
                     "agent_id": "a1",
                     "session_count": 3,
@@ -4292,17 +4308,23 @@ mod tests {
             ))
             .await
             .unwrap();
-        let reply = parse_reply(action);
-        assert_eq!(reply["msg_type"], "server.heartbeat.ack");
-        assert_eq!(reply["payload"]["agent_id"], "a1");
+        // Handled, and answered with nothing: control has no acknowledgement,
+        // so there is no `server.heartbeat.ack` for this to be the request half
+        // of. `Reply(None)` rather than a frame is the whole assertion.
+        assert!(matches!(action, HandlerAction::Reply(None)));
+
+        // The bookkeeping the heartbeat exists for still happened.
+        let agent = h.agent_registry.get("a1").await.expect("registered agent");
+        assert_eq!(agent.session_count, 3);
+        assert_eq!(agent.active_sessions, 1);
     }
 
     #[tokio::test]
-    async fn agent_heartbeat_unregistered_returns_none() {
+    async fn control_heartbeat_unregistered_returns_none() {
         let mut h = test_handler("").await;
         let action = h
             .handle_message(proto_msg(
-                "server.agent.heartbeat",
+                "control.heartbeat",
                 json!({
                     "agent_id": "unknown",
                     "session_count": 0,
@@ -4315,7 +4337,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn agent_heartbeat_missing_fields_defaults_to_zero() {
+    async fn control_heartbeat_missing_fields_defaults_to_zero() {
         let mut h = test_handler("").await;
         // Register
         h.handle_message(proto_msg(
@@ -4336,14 +4358,13 @@ mod tests {
         .unwrap();
         // Heartbeat with no session_count / active_sessions
         let action = h
-            .handle_message(proto_msg(
-                "server.agent.heartbeat",
-                json!({ "agent_id": "a1" }),
-            ))
+            .handle_message(proto_msg("control.heartbeat", json!({ "agent_id": "a1" })))
             .await
             .unwrap();
-        let reply = parse_reply(action);
-        assert_eq!(reply["msg_type"], "server.heartbeat.ack");
+        assert!(matches!(action, HandlerAction::Reply(None)));
+        let agent = h.agent_registry.get("a1").await.expect("registered agent");
+        assert_eq!(agent.session_count, 0);
+        assert_eq!(agent.active_sessions, 0);
     }
 
     // ---- agent.session.update ----
@@ -6554,7 +6575,12 @@ mod tests {
 
 server_routes!(handler, msg;
     "server.agent.register" => "server.agent.register" => handler.handle_agent_register(msg).await,
-    "server.agent.heartbeat" => "server.agent.heartbeat" => handler.handle_agent_heartbeat(msg).await,
+    // `control.heartbeat` is deliberately **not** an arm here. It is a control
+    // message, not an operation: nothing answers it (the agent used to read an
+    // acknowledgement on a wire of its own, and that is gone because control
+    // has no acknowledgement), and an arm would put it in the manifest as a
+    // unit the server offers. It is handled in `handle_protocol_message`, ahead
+    // of the relay path — see the match there for why the position matters.
     "server.agent.session-update" => "server.agent.session-update" => handler.handle_agent_session_update(msg).await,
     "server.agent.command-response" => "server.agent.command-response" => handler.handle_agent_command_response(msg).await,
     "server.agent.terminal-resize" => "server.agent.terminal-resize" => handler.handle_agent_terminal_resize(msg).await,

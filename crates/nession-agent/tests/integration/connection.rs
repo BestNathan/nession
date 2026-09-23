@@ -288,7 +288,7 @@ async fn integration_heartbeat_message_format() {
     let parsed: serde_json::Value = serde_json::from_str(&msg).unwrap();
 
     // Verify message envelope.
-    assert_eq!(parsed["msg_type"], msg_types::AGENT_HEARTBEAT);
+    assert_eq!(parsed["msg_type"], msg_types::CONTROL_HEARTBEAT);
     assert!(parsed["id"].as_str().is_some());
     assert!(parsed["timestamp"].as_u64().is_some());
 
