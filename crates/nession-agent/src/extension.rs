@@ -654,6 +654,53 @@ mod tests {
         assert_eq!(value["handled"], "git.status");
     }
 
+    #[tokio::test]
+    async fn a_consumer_and_a_provider_meet_at_the_highest_common_version() {
+        // The two claims joined, and neither is checkable alone: that a Unit
+        // composes v1+v2 and advertises `[1, 2]`, that a v1-only consumer lands
+        // on v1 while a v2-capable one lands on v2, and that whatever each
+        // resolved is a version this runtime then actually answers.
+        //
+        // Resolution agreeing with a manifest is not the same fact as
+        // resolution agreeing with a runtime — that needs the dispatcher.
+        let registry = compose(vec![Box::new(Versioned {
+            name: "git",
+            id: "git.status",
+            wire: "git.status",
+            versions: vec![v(1), v(2)],
+        })])
+        .unwrap();
+
+        let unit = ProtocolId::new("git.status").unwrap();
+        let manifest = registry.manifest();
+        assert_eq!(
+            manifest.support(&unit).map(|s| s.versions.clone()),
+            Some(vec![v(1), v(2)]),
+            "the manifest has to declare both, or the older one is unreachable"
+        );
+
+        let v1_only = nession_protocol::resolve(&unit, &[v(1)], manifest)
+            .expect("a v1-only consumer shares v1");
+        assert_eq!(v1_only, v(1));
+
+        let v2_capable = nession_protocol::resolve(&unit, &[v(1), v(2)], manifest)
+            .expect("a v2-capable consumer shares v2");
+        assert_eq!(v2_capable, v(2));
+
+        for resolved in [v1_only, v2_capable] {
+            let payload =
+                serde_json::json!({ "contract_version": resolved.get(), "session": "a:work" });
+            let value = registry
+                .dispatch("git.status", payload)
+                .await
+                .expect("the wire is routed")
+                .unwrap_or_else(|e| {
+                    panic!("{resolved} was resolved against this manifest but refused: {e}")
+                });
+            assert_eq!(value["payload"]["contract_version"], resolved.get());
+        }
+    }
+
     #[test]
     fn two_providers_claiming_one_protocol_fail() {
         let err = compose(vec![
