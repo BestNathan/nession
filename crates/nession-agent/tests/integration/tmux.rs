@@ -1,6 +1,6 @@
 use nession_agent::tmux::manager::SessionManager;
 use nession_agent::tmux::ops::TmuxOps;
-use nession_agent::tmux::util::{check_tmux_available, send_keys};
+use nession_agent::tmux::util::check_tmux_available;
 
 use super::{tmux_show_environment, unique_session_name, TestSession};
 
@@ -335,8 +335,12 @@ async fn test_send_keys() {
         .await
         .unwrap();
 
-    // Send keys - should not error
-    send_keys(&session_name, "echo test").await.unwrap();
+    // Send keys - should not error. Required class: a line the caller asked to
+    // be typed reaching nothing is a failure, not a degraded success.
+    TmuxOps::global()
+        .send_keys(&session_name, "echo test")
+        .await
+        .unwrap();
 
     // Clean up
     manager.kill_session(&session_name).await.unwrap();
@@ -346,7 +350,7 @@ async fn test_send_keys() {
 async fn test_send_keys_nonexistent_session() {
     // Sending keys to a non-existent session should fail
     let ghost = unique_session_name("ghost");
-    let result = send_keys(&ghost, "test").await;
+    let result = TmuxOps::global().send_keys(&ghost, "test").await;
     assert!(result.is_err());
 }
 
