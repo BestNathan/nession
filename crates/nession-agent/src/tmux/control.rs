@@ -8,6 +8,17 @@
 //! the new size via `%window-resize` events, which the agent broadcasts to
 //! all attached clients. Last writer wins — the most recent resize sets
 //! the size for everyone.
+//!
+//! **That is a decision, not an accident.**
+//! `2026-08-15-viewport-fit-terminal-migration-design.md` §2 chose it
+//! explicitly ("accept last-writer-wins … No arbitration"), superseding the
+//! earlier fixed-200×60 model. The resource being resized is the tmux
+//! **window**: one per session, one pane, shared by every attached client.
+//!
+//! tmux also has a per-client mechanism (`refresh-client -C`), and this
+//! backend deliberately does not use it — every attached client is fed the
+//! same `%output` byte stream, so per-client viewports could not be rendered
+//! coherently. See [`ControlModeSession::resize`].
 
 use anyhow::{Context, Result};
 use std::process::Stdio;
@@ -25,11 +36,14 @@ const OUTPUT_CHANNEL_CAPACITY: usize = 256;
 /// Buffer capacity for the resize channel — one (cols, rows) tuple per event.
 const RESIZE_CHANNEL_CAPACITY: usize = 16;
 
-/// tmux control mode session — one per attached web client.
+/// tmux control mode session — **one per nession session**, shared by every
+/// attached web client. The agent's session map is keyed by session name, so a
+/// second client attaching joins the existing backend as a subscriber instead
+/// of spawning a second `tmux -C attach` (`server/websocket.rs`).
 ///
 /// Spawns a `tmux -C attach` subprocess and pipes structured messages
 /// (parsed to raw ANSI bytes) through an mpsc channel. The caller drives
-/// input via `write_input` and resizes the tmux window via `resize`.
+/// input via `write_input` and resizes the shared tmux window via `resize`.
 pub struct ControlModeSession {
     session_name: String,
     child: Child,
@@ -135,12 +149,17 @@ impl ControlModeSession {
         Ok(())
     }
 
-    /// Resize the tmux window and trigger a full redraw.
+    /// Resize the tmux **window** and trigger a full redraw.
     ///
     /// Sends two commands via control-mode stdin:
-    /// 1. `resize-window` — changes the window size (affects all clients)
+    /// 1. `resize-window` — changes the window size (**affects all clients**)
     /// 2. `refresh-client` — triggers a full pane redraw so the reflowed
     ///    content is sent as `%output` messages immediately
+    ///
+    /// This is not a per-client viewport: one window, one pane, shared by
+    /// every client on the session, so this moves the pane for all of them and
+    /// the most recent caller wins. The module docs carry the decision and why
+    /// `refresh-client -C` is deliberately not used.
     pub async fn resize(&mut self, width: u16, height: u16) -> Result<()> {
         self.viewport = (width, height);
         let cmd = format!(
@@ -265,8 +284,10 @@ async fn read_output_loop(
     }
 }
 
-// resize() spawns a separate `tmux resize-window` process; covered by
-// integration tests (test_resize_updates_viewport, etc.).
+// `attach` spawns a separate `tmux resize-window` process — it runs *before*
+// the control-mode client exists, so there is no stdin to write to yet.
+// `resize` writes `resize-window` to the control-mode stdin instead. Two
+// routes, one shared window. Covered by tests/integration/control_mode.rs.
 
 #[cfg(test)]
 mod tests {

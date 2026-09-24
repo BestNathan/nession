@@ -23,7 +23,14 @@ pub trait TmuxSession: Send {
     /// Forward raw input bytes to the tmux session.
     async fn write_input(&mut self, data: &[u8]) -> Result<()>;
 
-    /// Resize the session's viewport to `cols` × `rows`.
+    /// Resize the tmux **window** to `cols` × `rows`.
+    ///
+    /// One window per session, one pane, shared by every attached client —
+    /// this is not a per-client viewport, so a resize moves the pane for all of
+    /// them (last write wins; see `tmux::control`'s module docs for the
+    /// decision). The backends reach that one window by different routes — PTY
+    /// size → `SIGWINCH`, or `resize-window` on control-mode stdin — so each
+    /// implementation documents the resource it actually mutates.
     async fn resize(&mut self, cols: u16, rows: u16) -> Result<()>;
 
     /// Current viewport dimensions as `(cols, rows)`.
