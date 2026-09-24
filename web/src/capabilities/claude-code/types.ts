@@ -10,6 +10,10 @@
  */
 
 import type {
+  ConversationRequest,
+  ConversationResponse,
+} from '@/generated/protocol/claude-code/conversation/v1';
+import type {
   ListRequest,
   ListResponse,
 } from '@/generated/protocol/claude-code/list/v1';
@@ -26,10 +30,22 @@ import type {
  */
 export type ClaudeCodeListRequest = ListRequest & { agent_id: string };
 export type ClaudeCodeReadRequest = ReadRequest & { agent_id: string };
+export type ClaudeCodeConversationRequest = ConversationRequest & { agent_id: string };
 
 /** The capability's names for the responses. */
 export type ClaudeCodeListResponse = ListResponse;
 export type ClaudeCodeReadResponse = ReadResponse;
+export type ClaudeCodeConversationResponse = ConversationResponse;
+
+/**
+ * The conversation's state names, narrowed for callers.
+ *
+ * Re-exported rather than written out: the union is the contract's, and a
+ * hand-kept copy of it is the same mistake the `ReadResponse` mirror above
+ * records — the states a client switches on must be the states the provider
+ * can answer with.
+ */
+export type ClaudeCodeConversationState = ConversationResponse['state'];
 
 /**
  * The two halves of `claude-code.read`'s answer.

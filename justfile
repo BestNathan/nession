@@ -42,6 +42,11 @@ check-rustc-wrapper:
 check-worktree-target-seed:
     bash ./scripts/seed-worktree-target-selftest.sh
 
+# Prove the build-cache diagnostic still detects a shared or aliased worktree
+# target rather than always reporting success.
+check-build-cache-verify:
+    bash ./scripts/build-cache-verify-selftest.sh
+
 # Best-effort warm-start for a newly-created worktree. On APFS/reflink-capable
 # filesystems this clone-shares dependency artifacts while keeping a private
 # target directory and then removes all workspace-member artifacts.
@@ -52,9 +57,17 @@ seed-worktree-target:
 build-cache-status:
     bash ./scripts/build-cache-status.sh
 
+# Measure what the local build cache actually does across worktrees: reports the
+# toolchain, whether the wrapper is active, sccache availability, that every
+# worktree keeps a private target, and — the part build-cache-status cannot tell
+# you — whether a second checkout really reuses the first one's compilations.
+# A diagnostic, not a gate (#986 §4).
+build-cache-verify:
+    bash ./scripts/build-cache-verify.sh
+
 # Full CI checks (fmt + lint + tmux-socket gate + protocol gate + codegen drift +
 # coverage — coverage runs all tests)
-check: fmt lint check-rustc-wrapper check-worktree-target-seed check-tmux-socket check-protocol check-codegen coverage
+check: fmt lint check-rustc-wrapper check-worktree-target-seed check-build-cache-verify check-tmux-socket check-protocol check-codegen coverage
 
 # ── Protocol codegen (#678 Phase 5) ─────────────────────────────────────────
 
