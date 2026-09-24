@@ -342,10 +342,11 @@ async fn run_agent_foreground(config: AgentConfig) -> Result<()> {
         .as_deref()
         .unwrap_or(&config.default_working_dir);
     let agent_id = config.agent_id.clone();
-    // Resize forwarding channel: the P2P AgentServer publishes tmux
+    // Resize forwarding lane: the P2P AgentServer publishes tmux
     // `%window-resize` events here, and the forwarder spawned below drains
     // them into the central server once a live ServerClientHandle exists.
-    let (resize_tx, mut resize_rx) = tokio::sync::mpsc::unbounded_channel::<(String, u16, u16)>();
+    // A level-valued lane — see `nession_agent::server::resize`.
+    let (resize, mut resize_updates) = nession_agent::server::ResizeReporter::new();
     let agent_server = AgentServer::new(
         &config.listen_address,
         &agent_id,
@@ -353,7 +354,7 @@ async fn run_agent_foreground(config: AgentConfig) -> Result<()> {
         config.default_working_dir.clone(),
         file_root,
         config.attach_mode.clone(),
-        resize_tx,
+        resize,
     )
     .context("failed to create agent server")?;
     let (server_handle, listen_addr) = agent_server
@@ -444,17 +445,16 @@ async fn run_agent_foreground(config: AgentConfig) -> Result<()> {
     if let Some(ref handle) = client_handle {
         let handle = handle.clone();
         tokio::spawn(async move {
-            while let Some((session_id, cols, rows)) = resize_rx.recv().await {
+            while let Some((session_id, cols, rows)) = resize_updates.next().await {
                 if handle.is_connected() {
                     let _ = handle.send_terminal_resize(&session_id, cols, rows).await;
                 }
             }
         });
     } else {
-        // No central-server connection: drop the receiver so the channel
-        // closes and `resize_tx.send(...)` becomes an ignored `Err`, instead
-        // of accumulating unbounded resize events in a channel with no reader.
-        drop(resize_rx);
+        // No central-server connection: drop the consumer. The lane keeps one
+        // superseded-able size per session and nothing else.
+        drop(resize_updates);
     }
 
     // Start HeartbeatLoop

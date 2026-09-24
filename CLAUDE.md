@@ -37,7 +37,7 @@ Existing code, historical design documents, fixtures, screenshots, and executabl
 
 ```
 nession/
-├── crates/                   # Rust workspace (8 crates)
+├── crates/                   # Rust workspace (9 crates)
 │   ├── nession-protocol/     # The Protocol Kernel (#678) — identity, envelope,
 │   │   └── src/              #   descriptor, manifest, resolver — and, under
 │   │       ├── kernel/       #   `contracts/`, the core Protocol Units Nession
@@ -61,6 +61,16 @@ nession/
 │   │                         #   TypeScript bindings (#678 Phase 5). Depends on
 │   │                         #   the providers because enumerating them is its
 │   │                         #   job; nothing that ships depends on it.
+│   ├── nession-runtime/      # Execution primitives the two *runtime* crates
+│   │   └── src/              #   share (#961-F): the bounded query + keyed
+│   │       ├── lane.rs       #   mutation lanes, and the bounded outbound
+│   │       └── outbound.rs   #   queue with its byte/frame bounds and
+│   │                         #   OutboundError. Depends on tokio (+ tungstenite,
+│   │                         #   for the frame a runtime puts on the queue) —
+│   │                         #   NOT on `nession-common`, because that crate is
+│   │                         #   linked by every provider and a provider runs no
+│   │                         #   connection. Policy (which lane, which bound,
+│   │                         #   which default) stays with the two runtimes.
 │   ├── nession-server/       # Central server — broker, registry, DB
 │   │   └── src/
 │   │       ├── main.rs

@@ -8,7 +8,12 @@ use crate::env::EnvService;
 use crate::protocol::server_routes;
 use crate::registry::{AgentInfo, AgentRegistry, AgentStatus, SessionRegistry, SessionStatus};
 use crate::server::client_registry::ClientRegistry;
-use crate::server::command_broker::{CommandBroker, WsMessageSender};
+use crate::server::command_broker::{CommandBroker, ConnectionGeneration};
+// The four policies by name, because the `server_routes!` invocation at the
+// bottom of this file declares one per unit and the names are the column there.
+use crate::server::execution::ExecutionPolicy::{Inline, Key, Ordered, Query};
+use crate::server::execution::ResourceKey;
+use crate::server::outbound::WsMessageSender;
 use crate::server::web_client_registry::WebClientRegistry;
 use nession_common::display_name::validate_display_name;
 use nession_common::env_file::parse_env;
@@ -76,12 +81,59 @@ pub struct ConnectionHandler {
     config: ConnectionHandlerConfig,
     authenticated_client: bool,
     registered_agent_id: Option<String>,
+    /// Identity of the connection this handler serves, taken from the broker at
+    /// construction.
+    ///
+    /// One handler per accepted WebSocket, so this *is* the connection's
+    /// identity: it is what the broker compares when deciding who owns an
+    /// agent, which is how a superseded connection is kept from moving state
+    /// that belongs to its replacement (#960).
+    connection_generation: ConnectionGeneration,
     /// Outgoing message sender for this client connection (set after construction).
     client_sender: Option<WsMessageSender>,
     /// Session this client is attached to via relay (for cleanup on disconnect).
     attached_session_id: Option<String>,
     /// Unique client id for this relay attachment (for cleanup on disconnect).
     attached_client_id: Option<String>,
+}
+
+/// A clone is a **snapshot of one connection's identity at one moment** — what
+/// a query-lane task is handed (`server::execution`).
+///
+/// The shared services are `Arc`s and clone as themselves, so a clone reads and
+/// writes the same registries, broker and env store as the connection it came
+/// from. The connection-local facts (`authenticated_client`,
+/// `registered_agent_id`, the relay attachment) are values, and a clone gets
+/// them as they were when it was taken — which is exactly the semantics a query
+/// needs, since a query is read *after* the ordered lane applied everything
+/// before it and must not see an identity change that arrives later.
+///
+/// Written out rather than derived because of the second half of that sentence:
+/// a change a *clone* makes to those facts is invisible to the connection, so a
+/// unit declared `Query` that mutates them loses the change. See
+/// `ExecutionPolicy::Query` — a query answers, and it does nothing else.
+impl Clone for ConnectionHandler {
+    fn clone(&self) -> Self {
+        Self {
+            agent_registry: Arc::clone(&self.agent_registry),
+            session_registry: Arc::clone(&self.session_registry),
+            command_broker: Arc::clone(&self.command_broker),
+            client_registry: Arc::clone(&self.client_registry),
+            web_client_registry: Arc::clone(&self.web_client_registry),
+            env_service: Arc::clone(&self.env_service),
+            db: Arc::clone(&self.db),
+            config: ConnectionHandlerConfig {
+                server_auth_token: self.config.server_auth_token.clone(),
+                heartbeat_interval_secs: self.config.heartbeat_interval_secs,
+            },
+            authenticated_client: self.authenticated_client,
+            registered_agent_id: self.registered_agent_id.clone(),
+            connection_generation: self.connection_generation,
+            client_sender: self.client_sender.clone(),
+            attached_session_id: self.attached_session_id.clone(),
+            attached_client_id: self.attached_client_id.clone(),
+        }
+    }
 }
 
 /// Immutable per-connection configuration.
@@ -103,6 +155,9 @@ pub struct ConnectionHandlerDeps {
 
 impl ConnectionHandler {
     pub fn new(deps: ConnectionHandlerDeps, config: ConnectionHandlerConfig) -> Self {
+        // Take this connection's identity from the broker, which is the only
+        // thing that ever compares it.
+        let connection_generation = deps.command_broker.new_connection_generation();
         Self {
             agent_registry: deps.agent_registry,
             session_registry: deps.session_registry,
@@ -114,6 +169,7 @@ impl ConnectionHandler {
             config,
             authenticated_client: false,
             registered_agent_id: None,
+            connection_generation,
             client_sender: None,
             attached_session_id: None,
             attached_client_id: None,
@@ -122,6 +178,55 @@ impl ConnectionHandler {
 
     pub fn registered_agent_id(&self) -> Option<&String> {
         self.registered_agent_id.as_ref()
+    }
+
+    /// Identity of the connection this handler serves.
+    ///
+    /// `server/websocket.rs` hands it back to the broker with every agent
+    /// message it claims, and with the release on disconnect — so the claim
+    /// that ends a reconnect can only ever be released by the connection that
+    /// made it.
+    pub fn connection_generation(&self) -> ConnectionGeneration {
+        self.connection_generation
+    }
+
+    /// The agent this message may speak for, or `None` if it may not speak for
+    /// one.
+    ///
+    /// **Agent identity is established by connection registration**, and that
+    /// registration — not the `agent_id` a payload happens to carry — is the
+    /// authority for everything the connection says afterwards (#960). Agent
+    /// control connections are long-lived and carry the agent's whole state:
+    /// heartbeats, session updates, advertised addresses. Reading the id out of
+    /// each payload would mean a connection registered as `A` could move `B`'s
+    /// state, by bug or by intent, for as long as the id in the payload said
+    /// so.
+    ///
+    /// A payload that *does* name an agent is checked against the bound
+    /// identity, because the two disagreeing means one of them is wrong.
+    /// A message that omits the id is not refused: it claims nothing, and the
+    /// connection supplies the answer. A connection that never registered has
+    /// no authority at all — there is no bound identity to fall back on.
+    ///
+    /// The refusal is message-level, not connection-level: a wrong id is a
+    /// fault in one message, and tearing down a working control connection over
+    /// it would hand any peer a way to disconnect an agent by sending it
+    /// garbage.
+    fn bound_agent_id(&self, payload: &Value, wire: &str) -> Option<String> {
+        let Some(bound) = self.registered_agent_id.as_deref() else {
+            warn!("{wire} from a connection that has not registered an agent");
+            return None;
+        };
+        if let Some(claimed) = payload.get("agent_id").and_then(Value::as_str) {
+            if claimed != bound {
+                warn!(
+                    "{wire} names agent '{claimed}' but this connection is registered as \
+                     '{bound}'; refusing"
+                );
+                return None;
+            }
+        }
+        Some(bound.to_string())
     }
 
     /// Set the outgoing message sender for this client connection.
@@ -140,6 +245,14 @@ impl ConnectionHandler {
         self.attached_client_id.as_deref()
     }
 
+    /// One frame, decoded here, as the frame-level entry point.
+    ///
+    /// The connection's read loop splits the two halves itself: it decodes the
+    /// envelope first, because that is where the unit's execution policy is read
+    /// from (`server::execution`), and calls [`Self::handle_protocol_message`]
+    /// with the result. This method is what is left for the frames the loop does
+    /// not classify — a close, a ping, a binary frame — and for the handler
+    /// tests, which are about one frame answered.
     pub async fn handle_message(&mut self, msg: Message) -> anyhow::Result<HandlerAction> {
         match msg {
             Message::Text(text) => {
@@ -154,7 +267,12 @@ impl ConnectionHandler {
         }
     }
 
-    async fn handle_protocol_message(
+    /// One decoded protocol message, dispatched.
+    ///
+    /// Visible to the read loop (`server::websocket`), which decodes once so
+    /// that the frame's meaning — including which lane it is dispatched on — is
+    /// read from the envelope it already has.
+    pub(crate) async fn handle_protocol_message(
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
     ) -> anyhow::Result<HandlerAction> {
@@ -360,6 +478,11 @@ impl ConnectionHandler {
         };
 
         self.agent_registry.register(agent_info).await;
+        // Binding *this connection* to the agent: from here on it is the
+        // authority for every agent-originated message it carries, whatever
+        // those payloads name (`bound_agent_id`). The other half of
+        // registration is the broker claim the websocket loop makes for it —
+        // see `server/websocket.rs` on why ownership is keyed on the connection.
         self.registered_agent_id = Some(payload.agent_id.clone());
 
         // Clear any sessions left over from a previous agent instance.
@@ -406,17 +529,19 @@ impl ConnectionHandler {
     /// names one: it used to be `server.agent.heartbeat`, which read as "the
     /// server answers this" and stopped being true when the acknowledgement was
     /// recognised as a message of its own.
+    ///
+    /// The agent it belongs to comes from the connection, not from the payload
+    /// — see `bound_agent_id`.
     async fn handle_control_heartbeat(
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
     ) -> anyhow::Result<HandlerAction> {
         let payload: serde_json::Value = msg.payload;
-        let agent_id = payload
-            .get("agent_id")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let Some(agent_id) = self.bound_agent_id(&payload, "control.heartbeat") else {
+            return Ok(HandlerAction::Reply(None));
+        };
 
-        if self.agent_registry.get(agent_id).await.is_none() {
+        if self.agent_registry.get(&agent_id).await.is_none() {
             warn!("Heartbeat from unregistered agent: {}", agent_id);
             return Ok(HandlerAction::Reply(None));
         }
@@ -449,13 +574,13 @@ impl ConnectionHandler {
             .and_then(|v| serde_json::from_value(v.clone()).ok())
         {
             self.agent_registry
-                .update_metadata(agent_id, agent_meta)
+                .update_metadata(&agent_id, agent_meta)
                 .await;
         }
 
         let changed = self
             .agent_registry
-            .update_heartbeat(agent_id, session_count, active_sessions)
+            .update_heartbeat(&agent_id, session_count, active_sessions)
             .await;
 
         // Push updated agent state to all connected web dashboard clients
@@ -478,22 +603,29 @@ impl ConnectionHandler {
         Ok(HandlerAction::Reply(None))
     }
 
+    /// Handle `server.agent.session-update` — the agent reporting the state of
+    /// one of its tmux sessions.
+    ///
+    /// The agent it belongs to comes from the connection, not from the payload
+    /// — see `bound_agent_id`. Session ids are `agent_id:session_name`, so the
+    /// payload's id decides which *namespace* the update writes into; a
+    /// connection registered as `A` reporting for `B` would otherwise rewrite
+    /// another agent's session list.
     async fn handle_agent_session_update(
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
     ) -> anyhow::Result<HandlerAction> {
         let payload: serde_json::Value = msg.payload;
-        let agent_id = payload
-            .get("agent_id")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let Some(agent_id) = self.bound_agent_id(&payload, "server.agent.session-update") else {
+            return Ok(HandlerAction::Reply(None));
+        };
         let session_name = payload
             .get("session_name")
             .and_then(|v| v.as_str())
             .unwrap_or("");
         let status_str = payload.get("status").and_then(|v| v.as_str()).unwrap_or("");
 
-        if self.agent_registry.get(agent_id).await.is_none() {
+        if self.agent_registry.get(&agent_id).await.is_none() {
             warn!("Session update from unregistered agent: {}", agent_id);
             return Ok(HandlerAction::Reply(None));
         }
@@ -546,7 +678,7 @@ impl ConnectionHandler {
 
         let session_info = crate::registry::session::SessionInfo {
             session_id: session_id.clone(),
-            agent_id: agent_id.to_string(),
+            agent_id: agent_id.clone(),
             session_name: session_name.to_string(),
             status,
             window_count,
@@ -911,10 +1043,13 @@ impl ConnectionHandler {
             ))));
         }
 
-        // Remove from in-memory registries.
+        // Remove from in-memory registries. The broker entry goes with them,
+        // but not through the disconnect path: this is a verdict about the
+        // *agent* (it is offline), and it is not the release of a claim — see
+        // `CommandBroker::evict_agent`.
         self.agent_registry.unregister(agent_id).await;
         self.session_registry.remove_by_agent(agent_id).await;
-        self.command_broker.unregister_agent(agent_id).await;
+        self.command_broker.evict_agent(agent_id).await;
 
         // Broadcast updated lists to all connected web clients.
         self.web_client_registry
@@ -1294,7 +1429,13 @@ impl ConnectionHandler {
                     })
                     .to_string(),
                 );
-                let _ = sender.send(response);
+                // The browser's `requestAttach()` is waiting on this frame, so
+                // it goes out on the reply lane: `relay.begin` only arrives once
+                // the Terminal is mounted, and until then there is nothing else
+                // on this connection to answer it. A queue that is closed means
+                // the browser is already gone, which `let _` here and nowhere
+                // else.
+                let _ = sender.send_reply(response).await;
             }
 
             // Phase 1 complete — relay info returned to browser.
@@ -1880,16 +2021,26 @@ impl ConnectionHandler {
 
     /// Handle `agent.address_update` — update the agent's advertised
     /// addresses after a network change on the agent host.
+    ///
+    /// The agent it belongs to comes from the connection, not from the payload
+    /// — see `bound_agent_id`.
     async fn handle_agent_address_update(
         &self,
         msg: ProtocolMessage<serde_json::Value>,
     ) -> anyhow::Result<HandlerAction> {
-        let payload: AgentAddressUpdatePayload = serde_json::from_value(msg.payload)?;
+        // The identity is read from the raw payload, before it is consumed by
+        // the typed parse below — the connection's registration is what decides
+        // whose addresses these are, not the id in the body.
+        let value = msg.payload;
+        let Some(agent_id) = self.bound_agent_id(&value, "server.agent.address-update") else {
+            return Ok(HandlerAction::Reply(None));
+        };
+        let payload: AgentAddressUpdatePayload = serde_json::from_value(value)?;
 
-        let Some(mut agent) = self.agent_registry.get(&payload.agent_id).await else {
+        let Some(mut agent) = self.agent_registry.get(&agent_id).await else {
             info!(
                 "agent.address_update from unknown agent '{}'; ignoring",
-                payload.agent_id
+                agent_id
             );
             return Ok(HandlerAction::Reply(None));
         };
@@ -1917,7 +2068,7 @@ impl ConnectionHandler {
         info!(
             "Updated {} address(es) for agent {} (primary ip: {})",
             agent.addresses.len(),
-            payload.agent_id,
+            agent_id,
             agent.ip_address,
         );
 
@@ -3681,9 +3832,22 @@ mod tests {
 
     /// Register an agent, optionally with a manifest that carries one wire type.
     async fn register_agent(h: &ConnectionHandler, manifest: Option<ProtocolManifest>) {
+        register_agent_id(h, "agent-a", manifest).await;
+    }
+
+    /// Put an agent in the *registry* under an explicit id.
+    ///
+    /// Deliberately not the same thing as registering a connection as that
+    /// agent: this is the state a second connection's registration leaves
+    /// behind, reachable by a handler that is bound to somebody else (#960).
+    async fn register_agent_id(
+        h: &ConnectionHandler,
+        agent_id: &str,
+        manifest: Option<ProtocolManifest>,
+    ) {
         h.agent_registry
             .register(AgentInfo {
-                agent_id: "agent-a".to_string(),
+                agent_id: agent_id.to_string(),
                 hostname: "h".to_string(),
                 ip_address: "10.0.0.1".to_string(),
                 port: 8080,
@@ -3964,6 +4128,132 @@ mod tests {
             assert!(
                 manifest.carries(wire),
                 "`{wire}` is dispatched but not advertised"
+            );
+        }
+    }
+
+    #[test]
+    fn every_unit_the_server_dispatches_declares_an_execution_policy() {
+        // The same derivation as the test above, for the column #961-C added:
+        // `unit_policy` is emitted by the same `server_routes!` invocation that
+        // emits `SERVER_WIRES`, so a unit cannot be dispatched without a policy
+        // — and this is the assertion that says so rather than the comment on
+        // the macro. `policy_for_wire` is what the read loop calls, and a `None`
+        // there is not a failure: it is how a wire this server does *not* serve
+        // is recognised, which is why the negative case is asserted too.
+        //
+        // The payload is empty here because this test is about the *declaration*
+        // and not about any one key: a policy that reads the payload has to
+        // survive being asked about a payload that carries nothing, since a
+        // malformed request is dispatched on a lane like every other frame and
+        // is refused by the handler rather than by the classifier.
+        let nothing = serde_json::json!({});
+        for wire in SERVER_WIRES {
+            assert!(
+                crate::server::handler::unit_policy(wire, &nothing).is_some(),
+                "`{wire}` is dispatched but declares no execution policy"
+            );
+        }
+        assert!(
+            crate::server::handler::unit_policy("git.status", &nothing).is_none(),
+            "a wire this server does not serve must not declare a policy for it"
+        );
+        assert_eq!(
+            crate::server::execution::policy_for_wire("git.status", &nothing),
+            crate::server::execution::ExecutionPolicy::Inline,
+            "an undeclared wire is dispatched inline rather than guessed at"
+        );
+    }
+
+    #[test]
+    fn a_session_mutation_is_keyed_by_the_session_it_names() {
+        // The two spellings the wire uses for one resource, and the property
+        // that makes the keyed lane mean anything: `create` names a session by
+        // its parts and `kill` names the *same* session joined, so a lane that
+        // keyed them differently would let a kill overtake the create it is
+        // about — the exact ordering `#961` calls out by name.
+        //
+        // Asserted as an equality rather than two literals so that it is the
+        // *agreement* under test.
+        let created = session_by_parts(&serde_json::json!({
+            "agent_id": "a1",
+            "name": "s1",
+        }));
+        let killed = session_by_id(&serde_json::json!({ "session_id": "a1:s1" }));
+        assert_eq!(created, killed);
+        assert_eq!(created.to_string(), "session:a1:s1");
+
+        // And the other direction: two different sessions must not share a key,
+        // which is what makes them independent rather than merely fast.
+        assert_ne!(
+            session_by_parts(&serde_json::json!({ "agent_id": "a1", "name": "s1" })),
+            session_by_parts(&serde_json::json!({ "agent_id": "a1", "name": "s2" }))
+        );
+        assert_ne!(
+            session_by_parts(&serde_json::json!({ "agent_id": "a1", "name": "s1" })),
+            session_by_parts(&serde_json::json!({ "agent_id": "a2", "name": "s1" }))
+        );
+    }
+
+    #[test]
+    fn an_env_file_is_keyed_by_the_source_it_lives_on() {
+        // An agent's `staging.env` and the server's `staging.env` are two files
+        // with one name. Keying them together would serialise two unrelated
+        // writes; keying the *resource* rather than the name is what the
+        // variant is for.
+        assert_eq!(
+            env_file_key(&serde_json::json!({ "name": "staging.env" })).to_string(),
+            "env:staging.env"
+        );
+        assert_eq!(
+            env_file_key(&serde_json::json!({
+                "name": "staging.env",
+                "source": "agent",
+                "agent_id": "a1",
+            }))
+            .to_string(),
+            "env:a1:staging.env"
+        );
+        assert_ne!(
+            env_file_key(&serde_json::json!({ "name": "staging.env" })),
+            env_file_key(&serde_json::json!({
+                "name": "staging.env",
+                "source": "agent",
+                "agent_id": "a1",
+            }))
+        );
+    }
+
+    #[test]
+    fn the_mutations_are_declared_keyed_and_the_queries_are_not() {
+        // The declaration, read back — the stage-E half of the same derivation
+        // the two tests above make for stages C and D. A mutation that someone
+        // later marks `Inline` would run in the reader and lose its ordering
+        // silently, and nothing else in the tree would say so.
+        let nothing = serde_json::json!({});
+        for wire in [
+            "server.session.create",
+            "server.session.kill",
+            "server.session.env.apply",
+            "server.session.env.unset",
+            "server.env.write",
+            "server.env.delete",
+        ] {
+            assert!(
+                matches!(
+                    crate::server::handler::unit_policy(wire, &nothing),
+                    Some(crate::server::execution::ExecutionPolicy::Key(_))
+                ),
+                "`{wire}` mutates a resource and must be declared `Key`"
+            );
+        }
+        for wire in ["server.env.list", "server.env.get", "server.session.list"] {
+            assert!(
+                matches!(
+                    crate::server::handler::unit_policy(wire, &nothing),
+                    Some(crate::server::execution::ExecutionPolicy::Query)
+                ),
+                "`{wire}` reads and must not be declared `Key`"
             );
         }
     }
@@ -4894,7 +5184,8 @@ mod tests {
         add_session(&mut h, "a1", "ghost").await;
 
         let (sender, mut rx) = WsMessageSender::new();
-        h.command_broker.register_agent("a1", sender).await;
+        let generation = h.command_broker.new_connection_generation();
+        h.command_broker.claim_agent("a1", generation, sender).await;
 
         let broker = Arc::clone(&h.command_broker);
         let list_fut = h.handle_message(proto_msg("server.session.list", json!({ "force": true })));
@@ -4903,6 +5194,7 @@ mod tests {
                 .recv()
                 .await
                 .expect("agent should receive sessions.list")
+                .message
                 .to_text()
                 .unwrap()
                 .to_string();
@@ -4953,10 +5245,10 @@ mod tests {
             .is_empty());
     }
 
-    /// Regression #743: the agent WebSocket loop re-registers the agent's
-    /// sender on **every** inbound agent message (`server/websocket.rs`), so
-    /// that can happen while a command is in flight. It is a transport update
-    /// and must not cancel the command — otherwise the client is told
+    /// Regression #743: the agent WebSocket loop claims the agent for its
+    /// connection on **every** inbound agent message (`server/websocket.rs`),
+    /// so that can happen while a command is in flight. It is a transport
+    /// update and must not cancel the command — otherwise the client is told
     /// "Agent disconnected" for a session the agent actually created, and the
     /// real response is discarded when it arrives.
     #[tokio::test]
@@ -4964,7 +5256,8 @@ mod tests {
         let mut h = handler_with_online_agent().await;
 
         let (sender, mut rx) = WsMessageSender::new();
-        h.command_broker.register_agent("a1", sender).await;
+        let generation = h.command_broker.new_connection_generation();
+        h.command_broker.claim_agent("a1", generation, sender).await;
 
         let broker = Arc::clone(&h.command_broker);
         let create_fut = h.handle_message(proto_msg(
@@ -4976,6 +5269,7 @@ mod tests {
                 .recv()
                 .await
                 .expect("agent should receive session.create")
+                .message
                 .to_text()
                 .unwrap()
                 .to_string();
@@ -4986,9 +5280,11 @@ mod tests {
                 .to_string();
 
             // An unrelated inbound message from the same agent arrives first;
-            // the websocket loop re-registers the sender for it.
+            // the loop claims the agent for the connection that sent it — a
+            // newer one here, standing in for a reconnect.
             let (sender_again, _keepalive) = WsMessageSender::new();
-            broker.register_agent("a1", sender_again).await;
+            let generation = broker.new_connection_generation();
+            broker.claim_agent("a1", generation, sender_again).await;
 
             broker
                 .resolve_command("a1", &request_id, json!({ "success": true }))
@@ -5263,7 +5559,7 @@ mod tests {
         // The phase-1 response goes over the client sender channel and must
         // identify the session (the web client keys on attachInfo.session_id).
         let phase1 = relay_rx.try_recv().expect("phase 1 response not sent");
-        let Message::Text(phase1_text) = phase1 else {
+        let Message::Text(phase1_text) = phase1.message else {
             panic!("expected Text message");
         };
         let phase1: serde_json::Value = serde_json::from_str(&phase1_text).unwrap();
@@ -6012,7 +6308,7 @@ mod tests {
 
     #[tokio::test]
     async fn env_write_force_skips_lock_and_re_sources() {
-        use crate::server::command_broker::WsMessageSender;
+        use crate::server::outbound::WsMessageSender;
 
         let mut h = test_handler("").await;
         h.authenticated_client = true;
@@ -6027,7 +6323,8 @@ mod tests {
 
         // Register an agent control channel so `agent_command` can be answered.
         let (sender, mut rx) = WsMessageSender::new();
-        h.command_broker.register_agent("a1", sender).await;
+        let generation = h.command_broker.new_connection_generation();
+        h.command_broker.claim_agent("a1", generation, sender).await;
 
         // Record usage for a session bound to this file.
         h.env_service.usage.record_create(
@@ -6058,6 +6355,7 @@ mod tests {
                 .recv()
                 .await
                 .expect("agent should receive a command")
+                .message
                 .to_text()
                 .unwrap()
                 .to_string();
@@ -6231,7 +6529,7 @@ mod tests {
 
     #[tokio::test]
     async fn agent_terminal_resize_broadcasts_to_attached_clients() {
-        use crate::server::command_broker::WsMessageSender;
+        use crate::server::outbound::WsMessageSender;
 
         let mut h = test_handler("").await;
 
@@ -6262,8 +6560,10 @@ mod tests {
         let msg1 = rx1.try_recv().unwrap();
         let msg2 = rx2.try_recv().unwrap();
 
-        let parsed1: serde_json::Value = serde_json::from_str(msg1.to_text().unwrap()).unwrap();
-        let parsed2: serde_json::Value = serde_json::from_str(msg2.to_text().unwrap()).unwrap();
+        let parsed1: serde_json::Value =
+            serde_json::from_str(msg1.message.to_text().unwrap()).unwrap();
+        let parsed2: serde_json::Value =
+            serde_json::from_str(msg2.message.to_text().unwrap()).unwrap();
 
         assert_eq!(parsed1["msg_type"], "terminal.resize");
         assert_eq!(parsed1["payload"]["session_id"], "a1:dev");
@@ -6375,6 +6675,169 @@ mod tests {
             .await
             .unwrap();
         assert!(matches!(action, HandlerAction::Reply(None)));
+    }
+
+    // ---- agent identity is bound to the connection that registered it (#960) ----
+
+    /// Register `agent_id` **through the wire**, the way its own connection
+    /// does. This is the binding: from here on the handler answers as that
+    /// agent, and what its payloads name is checked against it.
+    async fn register_agent_connection(h: &mut ConnectionHandler, agent_id: &str) {
+        let reply = parse_reply(
+            h.handle_message(proto_msg(
+                "server.agent.register",
+                json!({
+                    "agent_id": agent_id,
+                    "hostname": "host",
+                    "ip_address": "1.2.3.4",
+                    "port": 19091,
+                    "auth_token": "",
+                    "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
+                    "addresses": [],
+                    "connect_url": null,
+                    "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
+                }),
+            ))
+            .await
+            .unwrap(),
+        );
+        assert_eq!(reply["payload"]["status"], "accepted");
+    }
+
+    /// A connection registered as `a1` must not move `a2`'s heartbeat state,
+    /// whatever id its payload carries. Heartbeats are what keeps an agent
+    /// online and carry its session counts, so a cross-agent write here is one
+    /// agent silently speaking for another.
+    #[tokio::test]
+    async fn heartbeat_for_another_agent_is_refused() {
+        let mut h = test_handler("").await;
+        register_agent_connection(&mut h, "a1").await;
+        register_agent_id(&h, "a2", None).await;
+
+        let action = h
+            .handle_message(proto_msg(
+                "control.heartbeat",
+                json!({ "agent_id": "a2", "session_count": 9, "active_sessions": 9 }),
+            ))
+            .await
+            .unwrap();
+        assert!(matches!(action, HandlerAction::Reply(None)));
+
+        let a2 = h.agent_registry.get("a2").await.expect("a2 is registered");
+        assert_eq!(
+            a2.session_count, 0,
+            "a1's connection must not write a2's session count"
+        );
+        assert_eq!(a2.active_sessions, 0);
+
+        // The refusal is about identity, not about heartbeats: the same message
+        // for the agent this connection *did* register as still lands.
+        h.handle_message(proto_msg(
+            "control.heartbeat",
+            json!({ "agent_id": "a1", "session_count": 3, "active_sessions": 1 }),
+        ))
+        .await
+        .unwrap();
+        let a1 = h.agent_registry.get("a1").await.expect("a1 is registered");
+        assert_eq!(a1.session_count, 3);
+    }
+
+    /// The other half of the same invariant: a connection that never registered
+    /// has no identity to speak with — not even for an agent the registry
+    /// knows, because registering is what makes a connection authoritative.
+    #[tokio::test]
+    async fn heartbeat_from_a_connection_that_never_registered_is_refused() {
+        let mut h = test_handler("").await;
+        register_agent_id(&h, "a1", None).await;
+
+        h.handle_message(proto_msg(
+            "control.heartbeat",
+            json!({ "agent_id": "a1", "session_count": 9, "active_sessions": 9 }),
+        ))
+        .await
+        .unwrap();
+
+        let a1 = h.agent_registry.get("a1").await.expect("a1 is registered");
+        assert_eq!(
+            a1.session_count, 0,
+            "an unregistered connection has no authority to write agent state"
+        );
+    }
+
+    /// Session ids are `agent_id:session_name`, so the payload's id chooses the
+    /// namespace an update writes into — a connection registered as `a1`
+    /// reporting for `a2` would rewrite another agent's session list.
+    #[tokio::test]
+    async fn session_update_for_another_agent_is_refused() {
+        let mut h = test_handler("").await;
+        register_agent_connection(&mut h, "a1").await;
+        register_agent_id(&h, "a2", None).await;
+
+        h.handle_message(proto_msg(
+            "server.agent.session-update",
+            json!({ "agent_id": "a2", "session_name": "sneaky", "status": "active" }),
+        ))
+        .await
+        .unwrap();
+
+        assert!(
+            h.session_registry
+                .list()
+                .await
+                .iter()
+                .all(|session| !session.session_id.starts_with("a2:")),
+            "a1's connection must not create sessions under a2"
+        );
+    }
+
+    /// A message that names no agent is not lying about one: the connection's
+    /// registered identity supplies the answer, so an agent that sends the id
+    /// only in its registration is still understood.
+    #[tokio::test]
+    async fn session_update_without_an_agent_id_uses_the_connection_identity() {
+        let mut h = test_handler("").await;
+        register_agent_connection(&mut h, "a1").await;
+
+        h.handle_message(proto_msg(
+            "server.agent.session-update",
+            json!({ "session_name": "dev", "status": "active", "window_count": 1 }),
+        ))
+        .await
+        .unwrap();
+
+        assert!(
+            h.session_registry
+                .list()
+                .await
+                .iter()
+                .any(|session| session.session_id == "a1:dev"),
+            "the bound identity must be enough to place the update"
+        );
+    }
+
+    /// Advertised addresses decide where P2P clients dial, so a connection
+    /// registered as `a1` must not be able to point `a2` somewhere else.
+    #[tokio::test]
+    async fn address_update_for_another_agent_is_refused() {
+        let mut h = test_handler("").await;
+        register_agent_connection(&mut h, "a1").await;
+        register_agent_id(&h, "a2", None).await;
+
+        h.handle_message(proto_msg(
+            "server.agent.address-update",
+            json!({
+                "agent_id": "a2",
+                "addresses": [{ "url": "ws://elsewhere.example:19091/ws", "network_type": "lan" }],
+            }),
+        ))
+        .await
+        .unwrap();
+
+        let a2 = h.agent_registry.get("a2").await.expect("a2 is registered");
+        assert!(
+            a2.addresses.is_empty(),
+            "a1's connection must not move a2's advertised addresses"
+        );
     }
 
     // ---- Quick Commands (issue #95, part 3) ----
@@ -6573,45 +7036,116 @@ mod tests {
 // declares its own wire projection, which is exactly the model: one contract,
 // several providers, `ContractSupport.wire` carrying the difference.
 
-server_routes!(handler, msg;
-    "server.agent.register" => "server.agent.register" => handler.handle_agent_register(msg).await,
+/// The session a payload names by its parts, as the registry names it.
+///
+/// `server.session.create` is the unit that does this: it takes an `agent_id`
+/// and a `name` and joins them, because the session does not exist yet and
+/// there is no id to take. The join is written as the registry writes it
+/// (`{agent_id}:{name}`), which is what makes it the *same key* as
+/// [`session_by_id`] produces for the same session — the property the key lane
+/// exists for, and the one its test pins.
+fn session_by_parts(payload: &Value) -> ResourceKey {
+    let agent_id = payload
+        .get("agent_id")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let name = payload
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    ResourceKey::Session(format!("{agent_id}:{name}"))
+}
+
+/// The session a payload names by its joined id, as the registry names it.
+///
+/// `server.session.kill` and the two `session.env.*` units take the `session_id`
+/// the registry hands out, which is already `agent_id:session_name`.
+///
+/// A payload with neither part in it produces the empty key rather than an
+/// error, and that is deliberate: the frame is still dispatched, still counted,
+/// and still answered — with the refusal its handler has always produced —
+/// while a classifier that refused to produce a key would have to decide what
+/// lane a malformed mutation runs on, and there is no honest answer to that.
+/// Every such frame shares one queue, which is a queue of frames that are about
+/// to be refused.
+fn session_by_id(payload: &Value) -> ResourceKey {
+    ResourceKey::Session(
+        payload
+            .get("session_id")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+    )
+}
+
+/// The env file a payload names, qualified by the side of the fleet it lives on.
+///
+/// `source` decides the spelling, because an agent's `staging.env` and the
+/// Server's `staging.env` are two files with one name: a key that ignored the
+/// source would serialise two unrelated writes, and the variant would be
+/// carrying half of what it says it carries.
+fn env_file_key(payload: &Value) -> ResourceKey {
+    let name = payload
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let agent_source = payload.get("source").and_then(Value::as_str) == Some("agent");
+    if agent_source {
+        let agent_id = payload
+            .get("agent_id")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        ResourceKey::Env(format!("{agent_id}:{name}"))
+    } else {
+        ResourceKey::Env(name.to_string())
+    }
+}
+
+server_routes!(handler, msg, payload;
+    "server.agent.register" => "server.agent.register" => Ordered => handler.handle_agent_register(msg).await,
     // `control.heartbeat` is deliberately **not** an arm here. It is a control
     // message, not an operation: nothing answers it (the agent used to read an
     // acknowledgement on a wire of its own, and that is gone because control
     // has no acknowledgement), and an arm would put it in the manifest as a
     // unit the server offers. It is handled in `handle_protocol_message`, ahead
     // of the relay path — see the match there for why the position matters.
-    "server.agent.session-update" => "server.agent.session-update" => handler.handle_agent_session_update(msg).await,
-    "server.agent.command-response" => "server.agent.command-response" => handler.handle_agent_command_response(msg).await,
-    "server.agent.terminal-resize" => "server.agent.terminal-resize" => handler.handle_agent_terminal_resize(msg).await,
-    "server.agent.address-update" => "server.agent.address-update" => handler.handle_agent_address_update(msg).await,
-    "server.auth" => "server.auth" => handler.handle_client_auth(msg).await,
-    "server.agent.list" => "server.agent.list" => handler.handle_client_agents_list(msg).await,
-    "server.session.list" => "server.session.list" => handler.handle_client_sessions_list(msg).await,
-    "server.session.attach" => "server.session.attach" => handler.handle_client_session_attach(msg).await,
-    "server.session.relay.begin" => "server.session.relay.begin" => handler.handle_client_session_relay_begin(msg).await,
+    "server.agent.session-update" => "server.agent.session-update" => Inline => handler.handle_agent_session_update(msg).await,
+    "server.agent.command-response" => "server.agent.command-response" => Inline => handler.handle_agent_command_response(msg).await,
+    "server.agent.terminal-resize" => "server.agent.terminal-resize" => Inline => handler.handle_agent_terminal_resize(msg).await,
+    "server.agent.address-update" => "server.agent.address-update" => Inline => handler.handle_agent_address_update(msg).await,
+    "server.auth" => "server.auth" => Ordered => handler.handle_client_auth(msg).await,
+    "server.agent.list" => "server.agent.list" => Query => handler.handle_client_agents_list(msg).await,
+    "server.session.list" => "server.session.list" => Query => handler.handle_client_sessions_list(msg).await,
+    "server.session.attach" => "server.session.attach" => Ordered => handler.handle_client_session_attach(msg).await,
+    "server.session.relay.begin" => "server.session.relay.begin" => Ordered => handler.handle_client_session_relay_begin(msg).await,
     // `server.session.relay.end` is intercepted by the relay function
     // (`relay_bidirectional_via_channel`) and never reaches the dispatcher
     // during active relay. It is declared here anyway, because the Server does
     // serve it — the relay loop is the handler — and a manifest that omitted it
-    // would understate what this peer answers.
-    "server.session.relay.end" => "server.session.relay.end" => Ok(HandlerAction::Reply(None)),
-    "server.session.create" => "server.session.create" => handler.handle_client_session_create(msg).await,
-    "server.session.kill" => "server.session.kill" => handler.handle_client_session_kill(msg).await,
-    "server.session.capture-preview" => "server.session.capture-preview" => handler.handle_client_session_capture_preview(msg).await,
-    "server.env.list" => "server.env.list" => handler.handle_client_env_list(msg).await,
-    "server.env.get" => "server.env.get" => handler.handle_client_env_get(msg).await,
-    "server.env.write" => "server.env.write" => handler.handle_client_env_write(msg).await,
-    "server.env.delete" => "server.env.delete" => handler.handle_client_env_delete(msg).await,
-    "server.session.env.apply" => "server.session.env.apply" => handler.handle_client_session_env_apply(msg).await,
-    "server.session.env.unset" => "server.session.env.unset" => handler.handle_client_session_env_unset(msg).await,
-    "server.session.env.active" => "server.session.env.active" => handler.handle_client_session_env_active(msg).await,
-    "server.session.env.query" => "server.session.env.query" => handler.handle_client_session_env_query(msg).await,
-    "server.info" => "server.info" => handler.handle_client_server_info(msg).await,
-    "server.agent.rename" => "server.agent.rename" => handler.handle_client_agent_rename(msg).await,
-    "server.agent.delete" => "server.agent.delete" => handler.handle_client_agent_delete(msg).await,
-    "server.commands.list" => "server.commands.list" => handler.handle_client_commands_list(msg).await,
-    "server.commands.add" => "server.commands.add" => handler.handle_client_commands_add(msg).await,
-    "server.commands.remove" => "server.commands.remove" => handler.handle_client_commands_remove(msg).await,
-    "server.commands.update" => "server.commands.update" => handler.handle_client_commands_update(msg).await,
+    // would understate what this peer answers. `Ordered`, because it is the
+    // other half of the mode transition: leaving relay mode must be as
+    // deterministic as entering it.
+    "server.session.relay.end" => "server.session.relay.end" => Ordered => Ok(HandlerAction::Reply(None)),
+    // The keyed mutations (`#961-E`). Each carries the resource it mutates,
+    // read from its own payload: the session ones by the session they name, the
+    // env ones by the file. Create and kill name one session two ways and must
+    // land on one key — see `session_by_parts` / `session_by_id`.
+    "server.session.create" => "server.session.create" => Key(session_by_parts(payload)) => handler.handle_client_session_create(msg).await,
+    "server.session.kill" => "server.session.kill" => Key(session_by_id(payload)) => handler.handle_client_session_kill(msg).await,
+    "server.session.capture-preview" => "server.session.capture-preview" => Query => handler.handle_client_session_capture_preview(msg).await,
+    "server.env.list" => "server.env.list" => Query => handler.handle_client_env_list(msg).await,
+    "server.env.get" => "server.env.get" => Query => handler.handle_client_env_get(msg).await,
+    "server.env.write" => "server.env.write" => Key(env_file_key(payload)) => handler.handle_client_env_write(msg).await,
+    "server.env.delete" => "server.env.delete" => Key(env_file_key(payload)) => handler.handle_client_env_delete(msg).await,
+    "server.session.env.apply" => "server.session.env.apply" => Key(session_by_id(payload)) => handler.handle_client_session_env_apply(msg).await,
+    "server.session.env.unset" => "server.session.env.unset" => Key(session_by_id(payload)) => handler.handle_client_session_env_unset(msg).await,
+    "server.session.env.active" => "server.session.env.active" => Query => handler.handle_client_session_env_active(msg).await,
+    "server.session.env.query" => "server.session.env.query" => Query => handler.handle_client_session_env_query(msg).await,
+    "server.info" => "server.info" => Query => handler.handle_client_server_info(msg).await,
+    "server.agent.rename" => "server.agent.rename" => Inline => handler.handle_client_agent_rename(msg).await,
+    "server.agent.delete" => "server.agent.delete" => Inline => handler.handle_client_agent_delete(msg).await,
+    "server.commands.list" => "server.commands.list" => Query => handler.handle_client_commands_list(msg).await,
+    "server.commands.add" => "server.commands.add" => Inline => handler.handle_client_commands_add(msg).await,
+    "server.commands.remove" => "server.commands.remove" => Inline => handler.handle_client_commands_remove(msg).await,
+    "server.commands.update" => "server.commands.update" => Inline => handler.handle_client_commands_update(msg).await,
 );

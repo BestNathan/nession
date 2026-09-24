@@ -12,6 +12,9 @@ nession-common = { path = "../nession-common" }
 # The Protocol Kernel. The relay holds a peer's manifest without knowing any
 # concrete provider — see docs/architecture/protocol.md.
 nession-protocol = { path = "../nession-protocol" }
+# The execution primitives this Server's connections share with the agent's
+# (#961-F). A runtime's, not a provider's — see that crate's Cargo.toml.
+nession-runtime = { path = "../nession-runtime" }
 tokio.workspace = true
 tokio-tungstenite.workspace = true
 rustls.workspace = true

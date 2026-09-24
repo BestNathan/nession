@@ -27,11 +27,18 @@
 use crate::config::AttachMode;
 use crate::fs::ops::FileOps;
 use crate::protocol::p2p_routes;
+use crate::server::execution::ExecutionPolicy::{Inline, Key, Ordered, Query};
+use crate::server::execution::{ExecutionLanes, ResourceKey, SHUTDOWN_GRACE};
+// The lanes' boxed work is the shared type, and the constructors take this
+// socket's own bounds — see `nession_runtime::lane`.
+use crate::server::outbound::{self, OutboundError, P2pOutbound};
+use crate::server::resize::ResizeReporter;
 use crate::tmux::manager::SessionManager;
 use crate::tmux::session::TmuxSession;
 use anyhow::{Context, Result};
-use futures_util::{SinkExt, StreamExt};
+use futures_util::StreamExt;
 use nession_protocol::contracts::env::v1::EnvSnapshot;
+use nession_runtime::lane::Work;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::pin::Pin;
@@ -42,6 +49,12 @@ use tokio_tungstenite::tungstenite::Message as WsMessage;
 use tokio_tungstenite::WebSocketStream;
 use tracing::{debug, error, info, warn};
 
+// The socket itself belongs to `crate::server::outbound`'s writer, and every
+// caller here holds a `P2pOutbound` handle: a bounded queue with a policy per
+// lane (`#961-E`). It used to be a bare `Arc<Mutex<SplitSink>>` — see that
+// module for what an unbounded socket write turns into, and why the writer task
+// is a task rather than a lock.
+
 /// A tmux attach session, shared by all clients attached through this
 /// connection. Created on first attach, destroyed on last detach.
 ///
@@ -50,14 +63,168 @@ use tracing::{debug, error, info, warn};
 /// `subscribers` fans terminal output out to every attached client; the
 /// control-mode path forwards output directly and leaves this empty.
 struct AttachedSession {
-    backend: Box<dyn TmuxSession>,
-    /// Unbounded senders — one per subscribed client.  The broadcast task
-    /// clones output to all of them.
-    subscribers: Vec<tokio::sync::mpsc::UnboundedSender<Vec<u8>>>,
+    /// The backend, behind its *own* lock (`#961-D`).
+    ///
+    /// This is what keeps the connection's `SessionMap` mutex short: a frame
+    /// takes the map lock only long enough to find the session and clone this
+    /// `Arc`, and the backend's I/O — a PTY write, a control-mode resize, a
+    /// close that kills a tmux child — happens with the map lock released. The
+    /// lock that *is* held across that I/O is this one, and it is the
+    /// per-session resource rather than the connection's index of sessions.
+    ///
+    /// Two frames cannot contend for it: `attach`, `detach`, `terminal.input`
+    /// and `terminal.resize` all carry the same resource key, so the key lane
+    /// runs at most one of them at a time for a given session name.
+    backend: Arc<Mutex<Box<dyn TmuxSession>>>,
+    /// Bounded senders — one per subscribed client. The broadcast task clones
+    /// output to all of them; see [`SUBSCRIBER_QUEUE_SLOTS`] for what happens to
+    /// one that stops draining.
+    subscribers: Vec<mpsc::Sender<Vec<u8>>>,
+}
+
+/// How much terminal output one attached client may have waiting (#961).
+///
+/// This is the terminal lane's slow-consumer policy, and the depth is the
+/// policy. The backend's own hop is bounded at 64 chunks of up to 4 KiB
+/// ([`crate::tmux::pty`]) before it reaches the broadcast task, so a client that
+/// can absorb what tmux produces never fills this: 64 chunks is the same depth
+/// the session itself buffers, about 256 KiB.
+///
+/// What this buys is that the *slowest* client cannot become the pace of the
+/// session for everybody else. The broadcast task fans one session's output out
+/// to every attached client, so a `send().await` here would park the fan-out on
+/// whichever client is behind — the other clients and the PTY reader behind it.
+/// A client with a full queue is therefore detached instead: its queue is
+/// dropped, its forwarding task sees the receiver close and closes the
+/// connection, and it re-attaches to a redrawn screen. That is the same verdict
+/// the Server reaches for a relayed client (`server::outbound::send_terminal`),
+/// applied where the terminal is actually served.
+const SUBSCRIBER_QUEUE_SLOTS: usize = 64;
+
+/// Fan one chunk of terminal output out to every subscriber of a session.
+///
+/// Returns the number of subscribers **detached** by this call, i.e. dropped
+/// for having no room. A subscriber whose queue is closed is pruned too but not
+/// counted: that one's connection has already ended, and `spawn_output_forwarder`
+/// is on its way out.
+///
+/// Never waits, and that is the policy rather than an optimisation — see
+/// [`SUBSCRIBER_QUEUE_SLOTS`]. A free function so the policy can be tested
+/// without a socket, a PTY, or a session: the three cases (room, full, closed)
+/// are the whole of it.
+fn fan_out(subscribers: &mut Vec<mpsc::Sender<Vec<u8>>>, chunk: &[u8]) -> usize {
+    let mut detached = 0usize;
+    subscribers.retain(|tx| match tx.try_send(chunk.to_vec()) {
+        Ok(()) => true,
+        Err(mpsc::error::TrySendError::Full(_)) => {
+            detached += 1;
+            false
+        }
+        Err(mpsc::error::TrySendError::Closed(_)) => false,
+    });
+    detached
+}
+
+/// Forward one subscriber's terminal output to this connection's sink, and —
+/// when this subscriber was detached for not draining it — close the connection.
+///
+/// The queue ends in two ways, and they are not the same event:
+///
+/// * **the session ended** (the PTY or the control-mode reader closed and the
+///   fan-out task went with it). This connection may be serving other sessions,
+///   so nothing is closed here: the other attachments are still running, and
+///   ending their socket because one session exited would be a bug of its own.
+/// * **this subscriber was detached** for having no room ([`SUBSCRIBER_QUEUE_SLOTS`]),
+///   which is the one case where the client must be told. The session is still
+///   there — that is how the two are told apart, by asking the map — and what
+///   the client is holding is a terminal that has stopped moving with nothing
+///   coming to say so. A `Close` is the only thing this path can say it with,
+///   and the client's own reconnect is what turns it into a redrawn screen.
+///
+/// It used to be one task per subscriber inline in the attach arms, twice, and
+/// the only difference between the two was which names the locals had.
+fn spawn_output_forwarder(
+    mut rx: mpsc::Receiver<Vec<u8>>,
+    outbound: P2pOutbound,
+    sessions: Arc<SessionMapLock>,
+    session_name: String,
+) {
+    tokio::spawn(async move {
+        while let Some(bytes) = rx.recv().await {
+            use base64::Engine;
+            let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
+            let output = TerminalOutputPayload {
+                session_name: session_name.clone(),
+                data: encoded,
+            };
+            let msg = new_message(msg_types::TERMINAL_OUTPUT, output);
+            if let Ok(json) = serde_json::to_string(&msg) {
+                // Terminal output goes on the terminal lane, which waits for
+                // room and gives up at the stall grace. A verdict there is not
+                // this forwarder's to act on twice — another session's
+                // forwarder may reach it first — so the connection is closed
+                // and this task ends with it.
+                match outbound.send_terminal(WsMessage::Text(json)).await {
+                    Ok(()) => {}
+                    Err(OutboundError::Stalled) => {
+                        outbound.close();
+                        return;
+                    }
+                    Err(_) => return,
+                }
+            }
+        }
+
+        let detached_for_not_draining = sessions_lock(&sessions).contains_key(&session_name);
+        if !detached_for_not_draining {
+            info!("terminal output for session {session_name} ended");
+            return;
+        }
+        info!(
+            "session {session_name}: subscriber was detached for not draining its terminal; \
+             closing the connection"
+        );
+        outbound.close();
+    });
 }
 
 /// Per-connection map of attached sessions, keyed by session name.
 type SessionMap = std::collections::HashMap<String, AttachedSession>;
+
+/// The connection's map of attached sessions, and the reason it is a **std**
+/// mutex rather than a `tokio` one (`#961-D`).
+///
+/// `#961` asks for a stronger thing than "the map lock is usually short": it
+/// asks that no backend I/O ever happens with the map held, because a `close`
+/// that terminates a tmux child or a PTY write that waits on a full pipe then
+/// becomes a lock that every other frame on the connection waits behind. A
+/// `tokio::sync::Mutex` cannot express that — it is *made* to be held across an
+/// await, and `clippy::await_holding_lock` deliberately does not look at it.
+///
+/// A `std::sync::Mutex` can: its guard is not `Send`, so a guard held across an
+/// await makes the enclosing future non-`Send`, and every task that carries one
+/// of these arms is spawnable only if it is `Send` ([`Work`], and
+/// `tokio::spawn` for the fan-out and forwarder tasks). The discipline is
+/// therefore checked by the compiler and by `clippy::await_holding_lock` (deny
+/// in this workspace) rather than by whoever reads the arm next.
+///
+/// The cost is a second mutex type in one file, and it is paid deliberately:
+/// the sections here are `HashMap` operations, so the blocking is bounded by
+/// another thread's insert — while the thing being prevented has no bound at
+/// all.
+type SessionMapLock = std::sync::Mutex<SessionMap>;
+
+/// Take the connection's session map.
+///
+/// Poisoning is ignored, as in `server::resize`: every section under this lock
+/// is a map operation that cannot leave the map half-written, so a panic
+/// somewhere else must not turn into a connection that can never touch its own
+/// sessions again.
+fn sessions_lock(sessions: &SessionMapLock) -> std::sync::MutexGuard<'_, SessionMap> {
+    sessions
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
 
 /// A stream that can be either plain TCP or TLS-wrapped.
 #[allow(clippy::large_enum_variant)]
@@ -282,11 +449,17 @@ async fn query_window_size(session_name: &str) -> Result<(u16, u16)> {
     Ok((cols, rows))
 }
 
-/// Send a single `terminal.resize` message on the shared WebSocket sink.
-/// Returns `true` on success, `false` if the sink is closed (in which case
-/// the caller should stop forwarding).
+/// Send a single `terminal.resize` message on this connection's outbound path.
+/// Returns `true` while the connection is usable, `false` once it is over.
+///
+/// A resize is a *level*, so it rides the lane that is allowed to drop it
+/// ([`outbound::P2pOutbound::try_send_state`]): a client too far behind to take
+/// one is too far behind to render the frame it changes, and it restates its own
+/// size when its viewport moves or when it re-attaches. `Saturated` is therefore
+/// not a failure — the connection is still good — which is why only `Closed`
+/// stops the caller.
 async fn send_terminal_resize_msg(
-    sink: &Arc<Mutex<futures_util::stream::SplitSink<WebSocketStream<TcpOrTls>, WsMessage>>>,
+    outbound: &P2pOutbound,
     session_name: &str,
     cols: u16,
     rows: u16,
@@ -300,8 +473,10 @@ async fn send_terminal_resize_msg(
     let Ok(json) = serde_json::to_string(&msg) else {
         return true;
     };
-    let mut s = sink.lock().await;
-    s.send(WsMessage::Text(json)).await.is_ok()
+    !matches!(
+        outbound.try_send_state(WsMessage::Text(json)),
+        Err(OutboundError::Closed)
+    )
 }
 
 pub fn new_message<P: Serialize>(msg_type: &str, payload: P) -> Message<P> {
@@ -376,9 +551,12 @@ pub struct AgentServer {
     default_working_dir: String,
     /// How the agent attaches to tmux sessions (plain PTY or control mode).
     attach_mode: AttachMode,
-    /// Sink for forwarding tmux resize events to the central server (relay).
-    /// Carries the FULL session id (`agent:name`), cols, rows.
-    resize_tx: mpsc::UnboundedSender<(String, u16, u16)>,
+    /// The lane tmux resize events are published to for the central server
+    /// (relay). Carries the FULL session id (`agent:name`), cols, rows, and
+    /// keeps only the latest size per session — see [`crate::server::resize`]
+    /// for why a level-valued signal gets a coalescing lane rather than a
+    /// queue.
+    resize: ResizeReporter,
 }
 
 /// Apply env snapshots to a tmux session via `set-environment`.
@@ -446,9 +624,9 @@ pub(crate) struct P2pRequest<'a> {
     /// The request id, echoed on the reply.
     id: &'a str,
     tmux: &'a Arc<SessionManager>,
-    sessions: &'a Arc<Mutex<SessionMap>>,
+    sessions: &'a Arc<SessionMapLock>,
     client_id: &'a Arc<Mutex<Option<String>>>,
-    sink: &'a Arc<Mutex<futures_util::stream::SplitSink<WebSocketStream<TcpOrTls>, WsMessage>>>,
+    outbound: &'a P2pOutbound,
     default_working_dir: &'a str,
     file_ops: &'a Arc<FileOps>,
     listen_address: &'a str,
@@ -457,7 +635,10 @@ pub(crate) struct P2pRequest<'a> {
     /// value would move it out of `handle_request` for every arm that still
     /// names the local directly.
     attach_mode: &'a AttachMode,
-    resize_tx: &'a mpsc::UnboundedSender<(String, u16, u16)>,
+    /// The agent's resize lane, which this socket publishes
+    /// `%window-resize` events into (`#961-D`). See
+    /// [`crate::server::resize`].
+    resize: &'a ResizeReporter,
 }
 
 impl P2pRequest<'_> {
@@ -471,12 +652,292 @@ impl P2pRequest<'_> {
     }
 }
 
+/// Everything one peer-to-peer connection hands every frame it reads.
+///
+/// Owned, and shared by `Arc`: the frames themselves now outlive the reader's
+/// loop iteration — a query runs on its own task, a mutation waits in a key
+/// lane — so what used to be thirteen borrowed locals of the message loop is
+/// ten fields plus an `Arc` clone per frame.
+///
+/// This is as far as `#961`'s `ConnectionContext` split goes here, and the
+/// stopping point is deliberate: what a frame needs is one object, and the
+/// Server's half of that same split converges across stages that are not this
+/// one. The fields are the connection's *resources* — services it borrows for
+/// the length of a frame — while the per-connection state that a reply depends
+/// on (`sessions`, `client_id`) is still owned here, because both are this
+/// connection's and nothing else's.
+struct Connection {
+    tmux: Arc<SessionManager>,
+    sessions: Arc<SessionMapLock>,
+    client_id: Arc<Mutex<Option<String>>>,
+    outbound: P2pOutbound,
+    default_working_dir: String,
+    file_ops: Arc<FileOps>,
+    listen_address: String,
+    agent_id: String,
+    attach_mode: AttachMode,
+    resize: ResizeReporter,
+    addr: SocketAddr,
+}
+
+/// One text frame, parsed as far as routing needs, and the connection it came
+/// in on.
+struct Frame {
+    id: String,
+    msg_type: String,
+    payload: serde_json::Value,
+    connection: Arc<Connection>,
+}
+
+/// What a frame is, before any lane sees it.
+enum Routed {
+    /// Not a control wire: an operation, and it goes to a lane.
+    Operation,
+    /// A control wire with nothing to answer.
+    Silent,
+    /// A control wire with an answer to write.
+    Answer(String),
+}
+
+impl Frame {
+    /// The envelope, or the reply to write for a frame that is not one.
+    ///
+    /// `msg_type` and `id` are extracted without fully deserialising the
+    /// payload, because both are needed even when the payload turns out to be a
+    /// type nobody here knows.
+    fn parse(text: &str, connection: Arc<Connection>) -> Result<Self, String> {
+        let raw: serde_json::Value = match serde_json::from_str(text) {
+            Ok(v) => v,
+            Err(e) => {
+                return Err(serde_json::to_string(&make_error(
+                    "unknown",
+                    "parse_error",
+                    &format!("invalid JSON: {e}"),
+                ))
+                .unwrap_or_default());
+            }
+        };
+
+        Ok(Self {
+            id: raw
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown")
+                .to_string(),
+            msg_type: raw
+                .get("msg_type")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown")
+                .to_string(),
+            // The payload field, for deserialisation. Requests that don't need
+            // a payload (e.g. session.list) can ignore this.
+            payload: raw
+                .get("payload")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null),
+            connection,
+        })
+    }
+
+    /// Control wires are handled ahead of the route table, and that is a
+    /// consequence of the category rather than a preference. `p2p_routes!`
+    /// emits a *descriptor* per arm and a control wire is not a unit —
+    /// nothing advertises it, because it is not an offer this peer makes to
+    /// a caller, it is something every peer must handle. Handling them here
+    /// is also what keeps `control.ping` out of `dispatch_p2p`'s
+    /// unknown-wire error, which is the only answer that table has for a
+    /// name it does not carry — and what keeps a ping from queueing behind a
+    /// file read (`#961-D`): the reader answers this one itself.
+    ///
+    /// One arm per wire rather than a `starts_with("control.")` test:
+    /// `scripts/protocol-gate.mjs` checks that every runtime has a branch
+    /// for every control wire, and a prefix test is not a branch it can
+    /// read. `control.pong` is not this socket's reply to `control.ping` —
+    /// the two are independent one-way messages and nothing pairs them —
+    /// but the id of the ping is carried on the pong, because the envelope
+    /// belongs to the sender and no router derives a pairing from it.
+    fn route(&self) -> Routed {
+        match self.msg_type.as_str() {
+            msg_types::CONTROL_PING => Routed::Answer(
+                serde_json::to_string(&make_response(&self.id, msg_types::CONTROL_PONG, ()))
+                    .unwrap_or_default(),
+            ),
+            msg_types::CONTROL_PONG => {
+                debug!("control.pong received");
+                Routed::Silent
+            }
+            // The arm is here because control is symmetric — every runtime
+            // handles every control wire, whether or not today's senders reach
+            // this one. The agent sends its heartbeat on the *other* socket.
+            msg_types::CONTROL_HEARTBEAT => {
+                debug!("control.heartbeat received");
+                Routed::Silent
+            }
+            _ => Routed::Operation,
+        }
+    }
+
+    /// Answer this frame and write the reply to the connection's sink.
+    ///
+    /// Returns whether the connection is still usable — `false` is a failed
+    /// write, which is the reader's cue to end it. A lane task has no reader to
+    /// tell, so it drops the answer; see [`lane_work`].
+    async fn serve(self) -> bool {
+        let Self {
+            id,
+            msg_type,
+            payload,
+            connection,
+        } = self;
+
+        // Everything an arm needs to read, borrowed once. Before this the arms
+        // named the locals directly, which is how the handler grew a closure
+        // per arm to reach `id`; the struct is the same borrows with names.
+        let ctx = P2pRequest {
+            id: &id,
+            tmux: &connection.tmux,
+            sessions: &connection.sessions,
+            client_id: &connection.client_id,
+            outbound: &connection.outbound,
+            default_working_dir: &connection.default_working_dir,
+            file_ops: &connection.file_ops,
+            listen_address: &connection.listen_address,
+            agent_id: &connection.agent_id,
+            attach_mode: &connection.attach_mode,
+            resize: &connection.resize,
+        };
+
+        let reply = dispatch_p2p(ctx, &msg_type, payload).await;
+        write_frame(&connection, Some(reply)).await
+    }
+}
+
+/// The lane's view of a frame: serve it, and drop the answer.
+///
+/// That answer is "is this connection still usable", and only the reader can
+/// act on it — a lane task has no loop to break out of. A failed write is
+/// logged where it happens, and the reader finds out on its next read, which is
+/// the frame that will not arrive.
+fn lane_work(frame: Frame) -> Work {
+    Box::pin(async move {
+        frame.serve().await;
+    })
+}
+
+/// Write one frame, and say whether the connection is still usable.
+///
+/// `None` is a control wire that needs no frame written back; everything else
+/// answers, errors included.
+///
+/// The frame goes on the reply lane, which waits for room and never drops. The
+/// only failure it can report is the connection being over — the one failure a
+/// caller can act on, and the one that used to be spelled "the socket write
+/// returned an error".
+async fn write_frame(connection: &Connection, frame: Option<String>) -> bool {
+    let Some(text) = frame else { return true };
+    match connection.outbound.send_reply(WsMessage::Text(text)).await {
+        Ok(()) => true,
+        Err(e) => {
+            warn!("WebSocket write to {} did not go out: {e}", connection.addr);
+            false
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Resource keys (`#961-D`)
+// ---------------------------------------------------------------------------
+//
+// Which resource a mutation is ordered against, read from the request's own
+// payload. One function per *field*, not one per wire, because the field is the
+// part that varies: four different session wires name their session
+// `session_name`, two name it `name`, two carry it inside a `session_id`, and
+// the file wires name a path. A single "guess the session out of this JSON"
+// helper would have to try all three spellings and be wrong for whichever wire
+// used the fourth.
+//
+// They are read from the payload *before* it is consumed, so each takes it by
+// reference — see `p2p_routes!` for why the policy half sees a reference where
+// the body sees the value.
+
+/// The session a frame names as `session_name`.
+///
+/// Missing or not a string is the empty key: a malformed payload has no
+/// resource to order against, and one shared key is the honest answer — those
+/// frames are about to be answered `parse_error`, and serialising them against
+/// each other costs nothing.
+fn session_named(payload_value: &serde_json::Value) -> ResourceKey {
+    ResourceKey::Session(
+        payload_value
+            .get("session_name")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string(),
+    )
+}
+
+/// The session a frame names as `name` — `session.create` and `session.kill`,
+/// whose payloads were written around the session rather than around a client.
+fn session_by(payload_value: &serde_json::Value) -> ResourceKey {
+    ResourceKey::Session(
+        payload_value
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string(),
+    )
+}
+
+/// The session a frame names inside a `session_id`, which carries the
+/// `<agent_id>:<name>` form the Web UI speaks.
+fn session_by_id(payload_value: &serde_json::Value) -> ResourceKey {
+    ResourceKey::Session(
+        payload_value
+            .get("session_id")
+            .and_then(|v| v.as_str())
+            .map(extract_session_name)
+            .unwrap_or_default(),
+    )
+}
+
+/// The path a file frame acts on.
+fn file_by_path(payload_value: &serde_json::Value) -> ResourceKey {
+    ResourceKey::File(
+        payload_value
+            .get("path")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string(),
+    )
+}
+
+/// The path a rename reads from.
+///
+/// `from` rather than `to`, and the choice is worth stating: a rename is a
+/// mutation of both paths, and a key has to be one of them. The source is the
+/// one whose *others* are ordered against it — two renames competing for the
+/// same source are the case that must not interleave — while the destination is
+/// written by one rename and read by nobody else's key.
+fn file_by_from(payload_value: &serde_json::Value) -> ResourceKey {
+    ResourceKey::File(
+        payload_value
+            .get("from")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string(),
+    )
+}
+
 // The peer-to-peer surface, declared once (`#678`). Invoked at module scope
 // rather than inside `handle_request` so the context type above and the units
 // below read together: this is what an agent answers on its own socket, and
 // `handle_request` is only the envelope parsing in front of it.
+//
+// The third `=>` of each arm is the **execution policy** (`#961-D`): how the
+// connection's reader hands this unit to a lane. The key helpers above are what
+// the `Key` policies are written in terms of.
 p2p_routes! { ctx, msg_type, payload_value;
-            "agent.session.list" => "agent.session.list" => { match ctx.tmux.list_sessions().await {
+            "agent.session.list" => "agent.session.list" => Query => { match ctx.tmux.list_sessions().await {
                 Ok(sessions_list) => {
                     let payload = SessionListResponse {
                         sessions: sessions_list,
@@ -489,7 +950,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                 }
                 Err(e) => ctx.err("list_failed", &e.to_string()),
             } }
-            "agent.session.create" => "agent.session.create" => {
+            "agent.session.create" => "agent.session.create" => Key(session_by(payload_value)) => {
                 let payload: SessionCreatePayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -525,7 +986,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     Err(e) => ctx.err("create_failed", &e.to_string()),
                 }
             }
-            "agent.session.kill" => "agent.session.kill" => {
+            "agent.session.kill" => "agent.session.kill" => Key(session_by(payload_value)) => {
                 let payload: SessionKillPayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -539,7 +1000,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     Err(e) => ctx.err("kill_failed", &e.to_string()),
                 }
             }
-            "agent.session.capture-preview" => "agent.session.capture-preview" => {
+            "agent.session.capture-preview" => "agent.session.capture-preview" => Query => {
                 info!(
                     "agent: received session.capture_preview request id={}",
                     ctx.id
@@ -600,7 +1061,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     }
                 }
             }
-            "agent.attach" => "agent.attach" => {
+            "agent.attach" => "agent.attach" => Key(session_named(payload_value)) => {
                 let payload: ClientAttachPayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -622,34 +1083,38 @@ p2p_routes! { ctx, msg_type, payload_value;
                         }
                     }
 
-                    let mut sessions_guard = ctx.sessions.lock().await;
+                    // Whether this connection is the session's first subscriber
+                    // is asked and answered under one lock; the PTY itself is
+                    // attached with none held. The gap between the two is not a
+                    // race this arm has to close, and that is a property of the
+                    // lane rather than of this code: `agent.attach`,
+                    // `agent.detach`, `agent.terminal.input` and
+                    // `agent.terminal.resize` all carry the session's own
+                    // resource key, so no two of them run at once for one
+                    // session name.
+                    let already_attached = sessions_lock(ctx.sessions).contains_key(&session_name);
 
-                    if let Some(shared) = sessions_guard.get_mut(&session_name) {
+                    if already_attached {
                         // Session already exists: add a new subscriber.
-                        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-                        shared.subscribers.push(tx);
-                        drop(sessions_guard);
-
-                        let sink_output = Arc::clone(ctx.sink);
-                        let session_name_output = session_name.clone();
-                        tokio::spawn(async move {
-                            while let Some(bytes) = rx.recv().await {
-                                use base64::Engine;
-                                let encoded =
-                                    base64::engine::general_purpose::STANDARD.encode(&bytes);
-                                let output = TerminalOutputPayload {
-                                    session_name: session_name_output.clone(),
-                                    data: encoded,
-                                };
-                                let msg = new_message(msg_types::TERMINAL_OUTPUT, output);
-                                if let Ok(json) = serde_json::to_string(&msg) {
-                                    let mut s = sink_output.lock().await;
-                                    if s.send(WsMessage::Text(json)).await.is_err() {
-                                        break;
-                                    }
-                                }
+                        let (tx, rx) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
+                        {
+                            if let Some(shared) = sessions_lock(ctx.sessions).get_mut(&session_name)
+                            {
+                                shared.subscribers.push(tx);
                             }
-                        });
+                            // A session removed between the two locks has no
+                            // subscribers left and the forwarder below sees a
+                            // channel with no sender: it ends on its first
+                            // `recv` rather than writing to a session that is
+                            // gone.
+                        }
+
+                        spawn_output_forwarder(
+                            rx,
+                            ctx.outbound.clone(),
+                            Arc::clone(ctx.sessions),
+                            session_name.clone(),
+                        );
 
                         let resp = ClientAttachResponse {
                             session_name: payload.session_name,
@@ -665,35 +1130,20 @@ p2p_routes! { ctx, msg_type, payload_value;
                         payload.height,
                     ) {
                         Ok((pty_session, mut output_rx)) => {
-                            let (tx, mut first_rx) = tokio::sync::mpsc::unbounded_channel();
+                            let (tx, rx) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
                             let attached = AttachedSession {
-                                backend: Box::new(pty_session),
+                                backend: Arc::new(Mutex::new(Box::new(pty_session))),
                                 subscribers: vec![tx],
                             };
-                            sessions_guard.insert(session_name.clone(), attached);
-                            drop(sessions_guard);
+                            sessions_lock(ctx.sessions).insert(session_name.clone(), attached);
 
                             // Spawn forwarding task for the first subscriber.
-                            let sink_first = Arc::clone(ctx.sink);
-                            let session_name_first = session_name.clone();
-                            tokio::spawn(async move {
-                                while let Some(bytes) = first_rx.recv().await {
-                                    use base64::Engine;
-                                    let encoded =
-                                        base64::engine::general_purpose::STANDARD.encode(&bytes);
-                                    let output = TerminalOutputPayload {
-                                        session_name: session_name_first.clone(),
-                                        data: encoded,
-                                    };
-                                    let msg = new_message(msg_types::TERMINAL_OUTPUT, output);
-                                    if let Ok(json) = serde_json::to_string(&msg) {
-                                        let mut s = sink_first.lock().await;
-                                        if s.send(WsMessage::Text(json)).await.is_err() {
-                                            break;
-                                        }
-                                    }
-                                }
-                            });
+                            spawn_output_forwarder(
+                                rx,
+                                ctx.outbound.clone(),
+                                Arc::clone(ctx.sessions),
+                                session_name.clone(),
+                            );
 
                             // Spawn ONE broadcast task for this session.
                             // It reads from output_rx and fans out to ALL subscribers.
@@ -701,10 +1151,22 @@ p2p_routes! { ctx, msg_type, payload_value;
                             let session_name_clone = session_name.clone();
                             tokio::spawn(async move {
                                 while let Some(bytes) = output_rx.recv().await {
-                                    let mut guard = sessions_clone.lock().await;
+                                    let mut guard = sessions_lock(&sessions_clone);
                                     if let Some(s) = guard.get_mut(&session_name_clone) {
-                                        // Broadcast to all subscribers; prune dead ones.
-                                        s.subscribers.retain(|tx| tx.send(bytes.clone()).is_ok());
+                                        // Fan out to every subscriber, pruning the
+                                        // ones that are gone — closed because
+                                        // their connection ended, or full because
+                                        // they stopped draining. Either way they
+                                        // are not attached in any useful sense,
+                                        // and the fan-out must not wait for them;
+                                        // see `SUBSCRIBER_QUEUE_SLOTS`.
+                                        let detached = fan_out(&mut s.subscribers, &bytes);
+                                        if detached > 0 {
+                                            warn!(
+                                                "session {session_name_clone}: detached {detached} \
+                                                 subscriber(s) that stopped draining their terminal"
+                                            );
+                                        }
                                         if s.subscribers.is_empty() {
                                             break;
                                         }
@@ -747,10 +1209,14 @@ p2p_routes! { ctx, msg_type, payload_value;
                     {
                         Ok((session, mut output_rx, mut resize_rx)) => {
                             let session_name = payload.session_name.clone();
-                            ctx.sessions.lock().await.insert(
+                            // The insert is its own statement, so the map's
+                            // guard is released before the scrollback capture
+                            // below rather than living until the end of the
+                            // block that holds this arm's locals.
+                            sessions_lock(ctx.sessions).insert(
                                 session_name.clone(),
                                 AttachedSession {
-                                    backend: Box::new(session),
+                                    backend: Arc::new(Mutex::new(Box::new(session))),
                                     subscribers: Vec::new(),
                                 },
                             );
@@ -777,8 +1243,10 @@ p2p_routes! { ctx, msg_type, payload_value;
                                 };
                                 let msg = new_message(msg_types::TERMINAL_OUTPUT, output);
                                 if let Ok(json) = serde_json::to_string(&msg) {
-                                    let mut s = ctx.sink.lock().await;
-                                    let _ = s.send(WsMessage::Text(json)).await;
+                                    let _ = ctx
+                                        .outbound
+                                        .send_terminal(WsMessage::Text(json))
+                                        .await;
                                 }
                             }
 
@@ -786,7 +1254,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                             // channel from the control-mode subprocess and
                             // forwards bytes to the client as `terminal.output`
                             // messages.
-                            let sink_clone = Arc::clone(ctx.sink);
+                            let outbound_clone = ctx.outbound.clone();
                             let session_name_clone = session_name.clone();
                             tokio::spawn(async move {
                                 while let Some(bytes) = output_rx.recv().await {
@@ -799,9 +1267,21 @@ p2p_routes! { ctx, msg_type, payload_value;
                                     };
                                     let msg = new_message(msg_types::TERMINAL_OUTPUT, output);
                                     if let Ok(json) = serde_json::to_string(&msg) {
-                                        let mut s = sink_clone.lock().await;
-                                        if s.send(WsMessage::Text(json)).await.is_err() {
-                                            break;
+                                        // Same terminal lane as the subscriber
+                                        // forwarders, and the same verdict: a
+                                        // control-mode client that has stopped
+                                        // draining loses the connection rather
+                                        // than pinning the tmux reader.
+                                        match outbound_clone
+                                            .send_terminal(WsMessage::Text(json))
+                                            .await
+                                        {
+                                            Ok(()) => {}
+                                            Err(OutboundError::Stalled) => {
+                                                outbound_clone.close();
+                                                return;
+                                            }
+                                            Err(_) => return,
                                         }
                                     }
                                 }
@@ -815,16 +1295,23 @@ p2p_routes! { ctx, msg_type, payload_value;
                             // in) and then forwards ongoing `%window-resize`
                             // events on the same message type.
                             //
-                            // Each resize is ALSO forwarded upstream to the
-                            // central server via `resize_tx` so relay clients
-                            // (browser → server → agent) receive the same size
-                            // updates through the server's `agent.terminal.resize`
-                            // broadcast. The upstream message carries the FULL
-                            // session id (`agent:name`); the P2P sink message
-                            // keeps the bare session name.
-                            let sink_resize = Arc::clone(ctx.sink);
+                            // Each resize is ALSO published to the agent's
+                            // resize lane so relay clients (browser → server →
+                            // agent) receive the same size updates through the
+                            // server's `agent.terminal.resize` broadcast. The
+                            // upstream message carries the FULL session id
+                            // (`agent:name`); the P2P sink message keeps the
+                            // bare session name.
+                            //
+                            // `publish`, not `send`: the upstream half is a
+                            // *level* — the session's current size — and the
+                            // lane keeps only the latest one per session, so a
+                            // central connection that falls behind costs a stale
+                            // intermediate size rather than a queue that grows
+                            // without bound. See `crate::server::resize`.
+                            let outbound_resize = ctx.outbound.clone();
                             let session_name_resize = session_name.clone();
-                            let resize_tx_resize = ctx.resize_tx.clone();
+                            let resize_reporter = ctx.resize.clone();
                             let agent_id_resize = ctx.agent_id.to_string();
                             tokio::spawn(async move {
                                 // Initial resize: query tmux for the pane's
@@ -834,7 +1321,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                                 match query_window_size(&session_name_resize).await {
                                     Ok((cols, rows)) => {
                                         send_terminal_resize_msg(
-                                            &sink_resize,
+                                            &outbound_resize,
                                             &session_name_resize,
                                             cols,
                                             rows,
@@ -849,9 +1336,9 @@ p2p_routes! { ctx, msg_type, payload_value;
                                 while let Some((cols, rows)) = resize_rx.recv().await {
                                     let full_id =
                                         format!("{agent_id_resize}:{session_name_resize}");
-                                    let _ = resize_tx_resize.send((full_id, cols, rows));
+                                    resize_reporter.publish(&full_id, cols, rows);
                                     if !send_terminal_resize_msg(
-                                        &sink_resize,
+                                        &outbound_resize,
                                         &session_name_resize,
                                         cols,
                                         rows,
@@ -873,43 +1360,54 @@ p2p_routes! { ctx, msg_type, payload_value;
                     }
                 }
             }
-            "agent.detach" => "agent.detach" => {
+            "agent.detach" => "agent.detach" => Key(session_named(payload_value)) => {
                 let payload: ClientDetachPayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
                 };
-                let mut sessions_guard = ctx.sessions.lock().await;
-                match sessions_guard.get_mut(&payload.session_name) {
-                    Some(session) => {
-                        // Drop this client's dead subscriber senders. When no
-                        // live subscribers remain (always true for control
-                        // mode, which keeps none), close the backend and
-                        // remove the session so its tmux child is terminated.
-                        session.subscribers.retain(|tx| !tx.is_closed());
-                        if session.subscribers.is_empty() {
-                            if let Some(mut removed) = sessions_guard.remove(&payload.session_name)
-                            {
-                                if let Err(e) = removed.backend.close().await {
-                                    warn!(
-                                        "Error closing session {}: {:#}",
-                                        payload.session_name, e
-                                    );
-                                }
+                // The map's lock is taken to *find and take* the session, and
+                // released before the backend is closed: `close` is backend
+                // I/O — for control mode it terminates a tmux child — and
+                // holding the connection's index of sessions across it is the
+                // lock-across-await `#961-D` exists to remove.
+                let removed = {
+                    let mut sessions_guard = sessions_lock(ctx.sessions);
+                    match sessions_guard.get_mut(&payload.session_name) {
+                        Some(session) => {
+                            // Drop this client's dead subscriber senders. When
+                            // no live subscribers remain (always true for
+                            // control mode, which keeps none), the session is
+                            // taken out of the map so its tmux child can be
+                            // terminated.
+                            session.subscribers.retain(|tx| !tx.is_closed());
+                            if session.subscribers.is_empty() {
+                                sessions_guard.remove(&payload.session_name)
+                            } else {
+                                None
                             }
                         }
-                        let resp = ClientDetachResponse {
-                            session_name: payload.session_name,
-                        };
-                        serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
-                            .unwrap_or_default()
+                        None => {
+                            return ctx.err(
+                                "not_attached",
+                                &format!("not attached to session: {}", payload.session_name),
+                            );
+                        }
                     }
-                    None => ctx.err(
-                        "not_attached",
-                        &format!("not attached to session: {}", payload.session_name),
-                    ),
+                };
+
+                if let Some(removed) = removed {
+                    if let Err(e) = removed.backend.lock().await.close().await {
+                        warn!("Error closing session {}: {:#}", payload.session_name, e);
+                    }
                 }
+
+                let resp = ClientDetachResponse {
+                    session_name: payload.session_name,
+                };
+                serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
+                    .unwrap_or_default()
             }
-            "agent.terminal.input" => "agent.terminal.input" => {
+            "agent.terminal.input" => "agent.terminal.input" => Key(session_named(payload_value)) => {
                 let payload: TerminalInputPayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -919,9 +1417,15 @@ p2p_routes! { ctx, msg_type, payload_value;
                     Ok(d) => d,
                     Err(e) => return ctx.err("decode_error", &e.to_string()),
                 };
-                let mut sessions_guard = ctx.sessions.lock().await;
-                match sessions_guard.get_mut(&payload.session_name) {
-                    Some(session) => match session.backend.write_input(&data).await {
+                // Find the session under the map's lock, then write with it
+                // released. The lock held across the write is the session's own
+                // — see `AttachedSession::backend` — and the key lane is what
+                // makes it uncontended.
+                let backend = sessions_lock(ctx.sessions)
+                    .get(&payload.session_name)
+                    .map(|session| Arc::clone(&session.backend));
+                match backend {
+                    Some(backend) => match backend.lock().await.write_input(&data).await {
                         Ok(_) => serde_json::to_string(&make_ok(ctx.id, "ok")).unwrap_or_default(),
                         Err(e) => ctx.err("write_error", &e.to_string()),
                     },
@@ -931,18 +1435,30 @@ p2p_routes! { ctx, msg_type, payload_value;
                     ),
                 }
             }
-            "agent.terminal.resize" => "agent.terminal.resize" => {
+            "agent.terminal.resize" => "agent.terminal.resize" => Key(session_named(payload_value)) => {
                 let payload: TerminalResizePayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
                 };
-                let mut sessions_guard = ctx.sessions.lock().await;
-                match sessions_guard.get_mut(&payload.session_name) {
-                    Some(session) => match session.backend.resize(payload.cols, payload.rows).await
-                    {
-                        Ok(_) => serde_json::to_string(&make_ok(ctx.id, "ok")).unwrap_or_default(),
-                        Err(e) => ctx.err("resize_error", &e.to_string()),
-                    },
+                // As `terminal.input`: the map is consulted, released, and only
+                // then does the backend do anything.
+                let backend = sessions_lock(ctx.sessions)
+                    .get(&payload.session_name)
+                    .map(|session| Arc::clone(&session.backend));
+                match backend {
+                    Some(backend) => {
+                        match backend
+                            .lock()
+                            .await
+                            .resize(payload.cols, payload.rows)
+                            .await
+                        {
+                            Ok(_) => {
+                                serde_json::to_string(&make_ok(ctx.id, "ok")).unwrap_or_default()
+                            }
+                            Err(e) => ctx.err("resize_error", &e.to_string()),
+                        }
+                    }
                     None => ctx.err(
                         "not_attached",
                         &format!("not attached to session: {}", payload.session_name),
@@ -951,7 +1467,7 @@ p2p_routes! { ctx, msg_type, payload_value;
             }
 
             // --- Web UI compatibility handlers ---
-            "client.auth" => "client.auth" => {
+            "client.auth" => "client.auth" => Ordered => {
                 let payload: ClientAuthPayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => {
@@ -989,7 +1505,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                 };
                 serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp)).unwrap_or_default()
             }
-            "client.sessions.list" => "client.sessions.list" => { match ctx.tmux.list_sessions().await {
+            "client.sessions.list" => "client.sessions.list" => Query => { match ctx.tmux.list_sessions().await {
                 Ok(sessions_list) => {
                     let sessions: Vec<WebSessionInfo> = sessions_list
                         .into_iter()
@@ -1025,7 +1541,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                 }
                 Err(e) => ctx.err("list_failed", &e.to_string()),
             } }
-            "client.session.attach" => "client.session.attach" => {
+            "client.session.attach" => "client.session.attach" => Inline => {
                 let payload: WebSessionAttachPayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -1040,7 +1556,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                 serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
                     .unwrap_or_default()
             }
-            "client.session.create" => "client.session.create" => {
+            "client.session.create" => "client.session.create" => Key(session_by(payload_value)) => {
                 let payload: WebSessionCreatePayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => {
@@ -1085,7 +1601,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     }
                 }
             }
-            "client.session.kill" => "client.session.kill" => {
+            "client.session.kill" => "client.session.kill" => Key(session_by_id(payload_value)) => {
                 let payload: WebSessionKillPayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => {
@@ -1119,7 +1635,7 @@ p2p_routes! { ctx, msg_type, payload_value;
             }
 
             // --- File operations ---
-            "agent.file.list" => "agent.file.list" => {
+            "agent.file.list" => "agent.file.list" => Query => {
                 let payload: FileListPayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -1133,7 +1649,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     Err(e) => ctx.err("list_failed", &format_error_chain(&e)),
                 }
             }
-            "agent.file.read" => "agent.file.read" => {
+            "agent.file.read" => "agent.file.read" => Query => {
                 let payload: FileReadPayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -1159,7 +1675,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     }
                 }
             }
-            "agent.file.write" => "agent.file.write" => {
+            "agent.file.write" => "agent.file.write" => Key(file_by_path(payload_value)) => {
                 let payload: FileWritePayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -1174,7 +1690,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     Err(e) => ctx.err("write_error", &e.to_string()),
                 }
             }
-            "agent.file.delete" => "agent.file.delete" => {
+            "agent.file.delete" => "agent.file.delete" => Key(file_by_path(payload_value)) => {
                 let payload: FileDeletePayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -1192,7 +1708,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     Err(e) => ctx.err("delete_failed", &format_error_chain(&e)),
                 }
             }
-            "agent.file.create-dir" => "agent.file.create-dir" => {
+            "agent.file.create-dir" => "agent.file.create-dir" => Key(file_by_path(payload_value)) => {
                 let payload: FileCreateDirPayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -1210,7 +1726,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     Err(e) => ctx.err("create_dir_failed", &format_error_chain(&e)),
                 }
             }
-            "agent.file.rename" => "agent.file.rename" => {
+            "agent.file.rename" => "agent.file.rename" => Key(file_by_from(payload_value)) => {
                 let payload: FileRenamePayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -1230,7 +1746,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     Err(e) => ctx.err("rename_failed", &e.to_string()),
                 }
             }
-            "agent.file.cwd" => "agent.file.cwd" => {
+            "agent.file.cwd" => "agent.file.cwd" => Query => {
                 let payload: FileCwdPayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -1259,7 +1775,8 @@ impl AgentServer {
     /// `default_working_dir` is the working directory for new tmux sessions.
     /// `file_root` is the sandbox root for file operations.
     /// `attach_mode` controls whether to use plain PTY or control-mode tmux attach.
-    /// `resize_tx` forwards `%window-resize` events to the central server (relay).
+    /// `resize` is the lane `%window-resize` events are published to for the
+    /// central server (relay).
     pub fn new(
         listen_address: impl Into<String>,
         agent_id: impl Into<String>,
@@ -1270,7 +1787,7 @@ impl AgentServer {
         default_working_dir: String,
         file_root: &str,
         attach_mode: AttachMode,
-        resize_tx: mpsc::UnboundedSender<(String, u16, u16)>,
+        resize: ResizeReporter,
     ) -> Result<Self> {
         let tls_acceptor = match tls {
             Some((certs, key)) => {
@@ -1299,7 +1816,7 @@ impl AgentServer {
             agent_id: agent_id.into(),
             default_working_dir,
             attach_mode,
-            resize_tx,
+            resize,
         })
     }
 
@@ -1332,7 +1849,7 @@ impl AgentServer {
         let listen_address = self.listen_address.clone();
         let agent_id = self.agent_id.clone();
         let attach_mode = self.attach_mode.clone();
-        let resize_tx = self.resize_tx.clone();
+        let resize = self.resize.clone();
 
         tokio::spawn(async move {
             let shutdown_rx = Mutex::new(shutdown_rx);
@@ -1354,7 +1871,7 @@ impl AgentServer {
                                 let la = listen_address.clone();
                                 let aid = agent_id.clone();
                                 let am = attach_mode.clone();
-                                let rtx = resize_tx.clone();
+                                let rtx = resize.clone();
                                 tokio::spawn(async move {
                                     if let Err(e) =
                                         Self::handle_connection(stream, addr, tmux, tls, wd, fops, &la, &aid, am, rtx).await
@@ -1396,7 +1913,7 @@ impl AgentServer {
         listen_address: &str,
         agent_id: &str,
         attach_mode: AttachMode,
-        resize_tx: mpsc::UnboundedSender<(String, u16, u16)>,
+        resize: ResizeReporter,
     ) -> Result<()> {
         // Box the underlying stream so that TLS and plain connections
         // share a single WebSocket stream type.
@@ -1418,49 +1935,81 @@ impl AgentServer {
 
         info!("WebSocket connection from {}", addr);
 
-        // Shared sink so that `handle_request` (which may be invoked for
-        // multiple concurrent requests via the terminal I/O task) can
-        // send messages back to the client.
-        let sink = Arc::new(Mutex::new(ws_sink));
+        // The outbound path: a bounded queue with a policy per lane, and one
+        // writer task that owns the socket (`#961-E`). Every lane's task — and
+        // the reader — holds a handle to it and says which *class* of message it
+        // is sending, because the classes do not share a failure mode; see
+        // `server::outbound`.
+        let (outbound, outbound_rx) = P2pOutbound::new();
+        let writer = tokio::spawn(outbound::run_writer(ws_sink, outbound_rx, outbound.clone()));
+
         // Per-client attached PTY sessions keyed by session name.
-        let sessions: Arc<Mutex<SessionMap>> =
-            Arc::new(Mutex::new(std::collections::HashMap::new()));
+        let sessions: Arc<SessionMapLock> =
+            Arc::new(SessionMapLock::new(std::collections::HashMap::new()));
         // Per-connection client ID (set during CLIENT_AUTH handshake)
         let client_id: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
 
-        Self::run_message_loop(
-            ws_stream,
-            sink,
-            tmux_manager,
+        // Everything a frame of this connection needs, owned once and shared by
+        // reference: one `Arc` clone per frame rather than a copy of the ten
+        // things a handler reads.
+        let connection = Arc::new(Connection {
+            tmux: tmux_manager,
             sessions,
-            client_id.clone(),
-            addr,
+            client_id,
+            outbound,
             default_working_dir,
             file_ops,
-            listen_address,
-            agent_id,
+            listen_address: listen_address.to_string(),
+            agent_id: agent_id.to_string(),
             attach_mode,
-            resize_tx,
-        )
-        .await
+            resize,
+            addr,
+        });
+
+        let result = Self::run_message_loop(ws_stream, connection).await;
+
+        // The connection is over, so the writer goes with it — dropping the sink
+        // and closing the peer's socket. The writer also stops by itself when it
+        // is told to (`P2pOutbound::close`, which is how a stalled terminal lane
+        // ends a connection) or when the socket fails; this is the path where
+        // the *reader* ended first, and without it the task would outlive the
+        // connection it belongs to.
+        writer.abort();
+        let _ = writer.await;
+
+        result
     }
 
-    /// Drain incoming WebSocket frames and dispatch them.
-    #[allow(clippy::too_many_arguments)]
+    /// Drain incoming WebSocket frames and dispatch them (`#961-D`).
+    ///
+    /// The reader's job is now **routing and nothing else**. It parses the
+    /// envelope, answers the frames that have to be answered here, and hands
+    /// every other frame to a lane — it never awaits a business handler, which
+    /// is what makes a parked file read invisible to the rest of the
+    /// connection.
+    ///
+    /// What still runs here runs here for a reason:
+    ///
+    /// * a **control** wire, because `control.ping` is the peer asking whether
+    ///   this connection is alive, and answering it from behind a queue would
+    ///   answer a different question;
+    /// * an [`ExecutionPolicy::Ordered`] frame, once the lanes have drained —
+    ///   see that variant for why the barrier is what keeps an identity
+    ///   transition ahead of the operations that depend on it;
+    /// * WebSocket's own ping, which belongs to the transport.
     async fn run_message_loop(
         mut ws_stream: futures_util::stream::SplitStream<WebSocketStream<TcpOrTls>>,
-        sink: Arc<Mutex<futures_util::stream::SplitSink<WebSocketStream<TcpOrTls>, WsMessage>>>,
-        tmux: Arc<SessionManager>,
-        sessions: Arc<Mutex<SessionMap>>,
-        client_id: Arc<Mutex<Option<String>>>,
-        addr: SocketAddr,
-        default_working_dir: String,
-        file_ops: Arc<FileOps>,
-        listen_address: &str,
-        agent_id: &str,
-        attach_mode: AttachMode,
-        resize_tx: mpsc::UnboundedSender<(String, u16, u16)>,
+        connection: Arc<Connection>,
     ) -> Result<()> {
+        let addr = connection.addr;
+        // The lanes this connection reads into, and the only thing that admits
+        // to them. Dropped with the loop, which is what ends their tasks.
+        let mut lanes = ExecutionLanes::new(
+            crate::server::execution::DEFAULT_QUERY_CONCURRENCY,
+            crate::server::execution::DEFAULT_KEY_QUEUE_DEPTH,
+            crate::server::execution::LANE_LABEL,
+        );
+
         while let Some(msg) = ws_stream.next().await {
             let msg = match msg {
                 Ok(m) => m,
@@ -1472,27 +2021,54 @@ impl AgentServer {
 
             match msg {
                 WsMessage::Text(text) => {
-                    let response = Self::handle_request(
-                        &text,
-                        tmux.clone(),
-                        sessions.clone(),
-                        client_id.clone(),
-                        sink.clone(),
-                        &default_working_dir,
-                        file_ops.clone(),
-                        listen_address,
-                        agent_id,
-                        attach_mode.clone(),
-                        resize_tx.clone(),
-                    )
-                    .await;
-                    // `None` is a control wire that needs no frame written
-                    // back; everything else answers, errors included.
-                    let Some(response) = response else { continue };
-                    let mut s = sink.lock().await;
-                    if let Err(e) = s.send(WsMessage::Text(response)).await {
-                        warn!("WebSocket write error to {}: {:#}", addr, e);
-                        break;
+                    let frame = match Frame::parse(&text, Arc::clone(&connection)) {
+                        Ok(frame) => frame,
+                        Err(reply) => {
+                            // A frame that is not JSON has no `id` to echo, so
+                            // the error names `unknown` — there is nothing
+                            // better to say, and it is what this path said when
+                            // it was part of `handle_request`.
+                            if !write_frame(&connection, Some(reply)).await {
+                                break;
+                            }
+                            continue;
+                        }
+                    };
+
+                    match frame.route() {
+                        Routed::Answer(reply) => {
+                            if !write_frame(&connection, Some(reply)).await {
+                                break;
+                            }
+                        }
+                        // A control wire with nothing to answer: handled, and
+                        // deliberately silent.
+                        Routed::Silent => {}
+                        Routed::Operation => {
+                            // The lane is a property of the unit, declared
+                            // beside it in `p2p_routes!`. A wire this socket
+                            // does not serve has no declaration to read, and
+                            // the honest default for a message whose semantics
+                            // belong to someone else is the one that does not
+                            // reorder it.
+                            let policy =
+                                p2p_policy(&frame.msg_type, &frame.payload).unwrap_or(Inline);
+                            match policy {
+                                Ordered => {
+                                    lanes.drain().await;
+                                    if !frame.serve().await {
+                                        break;
+                                    }
+                                }
+                                Inline => {
+                                    if !frame.serve().await {
+                                        break;
+                                    }
+                                }
+                                Query => lanes.query(lane_work(frame)).await,
+                                Key(key) => lanes.key(key, lane_work(frame)).await,
+                            }
+                        }
                     }
                 }
                 WsMessage::Close(_) => {
@@ -1500,144 +2076,73 @@ impl AgentServer {
                     break;
                 }
                 WsMessage::Ping(data) => {
-                    let mut s = sink.lock().await;
-                    let _ = s.send(WsMessage::Pong(data)).await;
+                    // A pong rides the state lane, which is allowed to drop it:
+                    // the peer's next ping restates the question, and a
+                    // connection that cannot take a pong has nothing left for
+                    // the pong to keep alive.
+                    let _ = connection.outbound.try_send_state(WsMessage::Pong(data));
                 }
                 // Pong, Binary, and Frame are ignored.
                 _ => {}
             }
         }
 
+        // End the lanes before the sessions. Work still running would write to
+        // a backend that is about to be closed and to a socket that is closing,
+        // and it belongs to a peer that is gone — see
+        // `ExecutionLanes::shutdown` for why ending is the policy rather than
+        // waiting.
+        lanes.shutdown(SHUTDOWN_GRACE).await;
+
+        // What this connection's bounds ever did, read by something that is not
+        // a test — `#961`'s "metrics/logging can observe queue saturation,
+        // in-flight count, per-key queue depth". The lane's own saturation
+        // events say *when* a bound was reached and which key reached it; this
+        // says how far the connection ever got.
+        {
+            let (queries, keys) = lanes.snapshot().await;
+            debug!(
+                "peer-to-peer connection closed — lanes: {}",
+                nession_runtime::lane::summary(&queries, &keys)
+            );
+        }
+        debug!(
+            "peer-to-peer connection closed — outbound: {:?}",
+            connection.outbound.snapshot()
+        );
+
         // Close any tmux sessions that were attached through this
         // connection so that the underlying tmux attach children are
         // terminated promptly. Closing also drops the subscriber senders,
         // stopping each session's broadcast task.
-        let mut sessions_guard = sessions.lock().await;
-        for (name, mut session) in sessions_guard.drain() {
-            if let Err(e) = session.backend.close().await {
+        //
+        // The map is drained under its lock and the backends are closed outside
+        // it. It used to close them *inside*, so a `close` that takes
+        // milliseconds — it terminates a tmux child — held the connection's
+        // index of sessions for its whole duration (`#961-D`).
+        let drained: Vec<(String, AttachedSession)> = {
+            let mut sessions_guard = sessions_lock(&connection.sessions);
+            sessions_guard.drain().collect()
+        };
+        for (name, session) in drained {
+            if let Err(e) = session.backend.lock().await.close().await {
                 warn!("Error closing session {}: {:#}", name, e);
             }
         }
 
-        // Clean up any env scripts sourced by this client
-        let client_id_guard = client_id.lock().await;
-        if let Some(ref cid) = *client_id_guard {
-            tmux.env().cleanup_client_scripts(cid).await;
+        // Clean up any env scripts sourced by this client. The client id is
+        // taken under the lock and used outside it, for the same reason.
+        let client_id = {
+            let client_id_guard = connection.client_id.lock().await;
+            client_id_guard.clone()
+        };
+        if let Some(cid) = client_id {
+            connection.tmux.env().cleanup_client_scripts(&cid).await;
             info!("Cleaned up env scripts for client {}", cid);
         }
 
         info!("Client {} disconnected", addr);
         Ok(())
-    }
-
-    /// Route a single text request to the appropriate handler.
-    #[allow(clippy::too_many_arguments)]
-    async fn handle_request(
-        text: &str,
-        tmux: Arc<SessionManager>,
-        sessions: Arc<Mutex<SessionMap>>,
-        client_id: Arc<Mutex<Option<String>>>,
-        sink: Arc<Mutex<futures_util::stream::SplitSink<WebSocketStream<TcpOrTls>, WsMessage>>>,
-        default_working_dir: &str,
-        file_ops: Arc<FileOps>,
-        listen_address: &str,
-        agent_id: &str,
-        attach_mode: AttachMode,
-        resize_tx: mpsc::UnboundedSender<(String, u16, u16)>,
-        // `Option`, because a control wire may produce no frame at all:
-        // control has no reply mechanism, so `control.pong` and
-        // `control.heartbeat` are handled and answered with silence. Every
-        // other wire is answered — including the ones whose answer is an
-        // `error` — so `None` is only ever a control arm's return.
-    ) -> Option<String> {
-        // Try to extract msg_type and id without fully deserialising the
-        // payload — we need those even if the payload type is unknown.
-        let raw: serde_json::Value = match serde_json::from_str(text) {
-            Ok(v) => v,
-            Err(e) => {
-                return Some(
-                    serde_json::to_string(&make_error(
-                        "unknown",
-                        "parse_error",
-                        &format!("invalid JSON: {e}"),
-                    ))
-                    .unwrap_or_default(),
-                );
-            }
-        };
-
-        let msg_type = raw
-            .get("msg_type")
-            .and_then(|v| v.as_str())
-            .unwrap_or("unknown");
-        let id = raw
-            .get("id")
-            .and_then(|v| v.as_str())
-            .unwrap_or("unknown")
-            .to_string();
-
-        // Extract the payload field for deserialisation. Requests that
-        // don't need a payload (e.g. session.list) can ignore this.
-        let payload_value = raw
-            .get("payload")
-            .cloned()
-            .unwrap_or(serde_json::Value::Null);
-
-        // Everything an arm needs to read, borrowed once. Before this the arms
-        // named the locals directly, which is how the handler grew a closure
-        // per arm to reach `id`; the struct is the same borrows with names.
-        let ctx = P2pRequest {
-            id: &id,
-            tmux: &tmux,
-            sessions: &sessions,
-            client_id: &client_id,
-            sink: &sink,
-            default_working_dir,
-            file_ops: &file_ops,
-            listen_address,
-            agent_id,
-            attach_mode: &attach_mode,
-            resize_tx: &resize_tx,
-        };
-
-        // Control wires are handled ahead of the route table, and that is a
-        // consequence of the category rather than a preference. `p2p_routes!`
-        // emits a *descriptor* per arm and a control wire is not a unit —
-        // nothing advertises it, because it is not an offer this peer makes to
-        // a caller, it is something every peer must handle. Handling them here
-        // is also what keeps `control.ping` out of `dispatch_p2p`'s
-        // unknown-wire error, which is the only answer that table has for a
-        // name it does not carry.
-        //
-        // One arm per wire rather than a `starts_with("control.")` test:
-        // `scripts/protocol-gate.mjs` checks that every runtime has a branch
-        // for every control wire, and a prefix test is not a branch it can
-        // read. `control.pong` is not this socket's reply to `control.ping` —
-        // the two are independent one-way messages and nothing pairs them —
-        // but the id of the ping is carried on the pong, because the envelope
-        // belongs to the sender and no router derives a pairing from it.
-        match msg_type {
-            msg_types::CONTROL_PING => {
-                return Some(
-                    serde_json::to_string(&make_response(&id, msg_types::CONTROL_PONG, ()))
-                        .unwrap_or_default(),
-                );
-            }
-            msg_types::CONTROL_PONG => {
-                debug!("control.pong received");
-                return None;
-            }
-            // The arm is here because control is symmetric — every runtime
-            // handles every control wire, whether or not today's senders reach
-            // this one. The agent sends its heartbeat on the *other* socket.
-            msg_types::CONTROL_HEARTBEAT => {
-                debug!("control.heartbeat received");
-                return None;
-            }
-            _ => {}
-        }
-
-        Some(dispatch_p2p(ctx, msg_type, payload_value).await)
     }
 
     /// Build a TLS acceptor from PEM file paths. Returns `None` if both
@@ -1693,6 +2198,7 @@ mod tests {
     use crate::test_support::TestSession;
     use base64::Engine;
     use futures_util::SinkExt;
+    use std::time::Duration;
     use tokio_tungstenite::connect_async;
     use tokio_tungstenite::tungstenite::Message as WsMessage;
 
@@ -1700,7 +2206,7 @@ mod tests {
     /// address and a shutdown handle.
     async fn start_test_server_on(_port: u16) -> (SocketAddr, ServerHandle) {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let (_resize_tx, _resize_rx) = mpsc::unbounded_channel::<(String, u16, u16)>();
+        let (resize, _resize_updates) = ResizeReporter::new();
         let server = AgentServer::new(
             "127.0.0.1:0",
             "test-agent",
@@ -1708,7 +2214,7 @@ mod tests {
             "/tmp".to_string(),
             tmp.path().to_string_lossy().as_ref(),
             AttachMode::Plain,
-            _resize_tx,
+            resize,
         )
         .expect("server creation should succeed");
         // Leak the TempDir so the sandbox root persists for the server lifetime.
@@ -1784,7 +2290,7 @@ mod tests {
     #[tokio::test]
     async fn test_server_creation_and_shutdown() {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let (_resize_tx, _resize_rx) = mpsc::unbounded_channel::<(String, u16, u16)>();
+        let (resize, _resize_updates) = ResizeReporter::new();
         let server = AgentServer::new(
             "127.0.0.1:0",
             "test-agent",
@@ -1792,7 +2298,7 @@ mod tests {
             "/tmp".to_string(),
             tmp.path().to_string_lossy().as_ref(),
             AttachMode::Plain,
-            _resize_tx,
+            resize,
         )
         .unwrap();
         let (handle, _addr) = server.start().await.unwrap();
@@ -1804,6 +2310,196 @@ mod tests {
         // The send will fail because the receiver is gone, but the server
         // itself is already stopped.
         let _ = handle.shutdown().await;
+    }
+
+    /// The terminal lane's slow-consumer policy, in full (#961).
+    ///
+    /// Three subscribers, three outcomes from one fan-out: the one with room
+    /// gets the chunk, the one that is full is **detached**, and the one whose
+    /// connection is already gone is pruned. The middle case is the policy — it
+    /// is what keeps the slowest client from becoming the pace of the session
+    /// for every other client and for the PTY reader behind them — and it only
+    /// exists because the queues are bounded. With the unbounded senders this
+    /// replaced, the middle subscriber was indistinguishable from the first.
+    #[tokio::test]
+    async fn terminal_output_detaches_a_subscriber_that_stops_draining() {
+        let (healthy, mut healthy_rx) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
+        let (slow, slow_rx) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
+        let (gone, gone_rx) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
+        drop(gone_rx);
+
+        // The slow one is filled to its bound, and its receiver is held but
+        // never polled — a client that has stopped reading.
+        for n in 0..SUBSCRIBER_QUEUE_SLOTS {
+            slow.try_send(vec![0u8])
+                .unwrap_or_else(|_| panic!("the queue must have room for chunk {n}"));
+        }
+
+        let mut subscribers = vec![healthy, slow, gone];
+        assert_eq!(
+            fan_out(&mut subscribers, b"output"),
+            1,
+            "exactly the subscriber with no room is detached"
+        );
+        assert_eq!(
+            subscribers.len(),
+            1,
+            "the detached subscriber and the closed one are both gone"
+        );
+
+        // The one that remains is the healthy one — proved by the chunk it takes
+        // rather than by identity, which senders do not carry.
+        assert_eq!(
+            healthy_rx
+                .try_recv()
+                .expect("the subscriber with room got the chunk"),
+            b"output".to_vec()
+        );
+        subscribers[0]
+            .try_send(b"more".to_vec())
+            .expect("the remaining subscriber still has room");
+        assert_eq!(
+            healthy_rx
+                .try_recv()
+                .expect("the same subscriber got this one"),
+            b"more".to_vec()
+        );
+        drop(slow_rx);
+    }
+
+    /// A subscriber that is keeping up is never touched, however long the
+    /// session runs: the bound is a bound on backlog, not on volume.
+    #[tokio::test]
+    async fn terminal_output_keeps_a_subscriber_that_keeps_up() {
+        let (keeping_up, mut rx) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
+        let mut subscribers = vec![keeping_up];
+
+        for n in 0..(SUBSCRIBER_QUEUE_SLOTS * 4) {
+            assert_eq!(
+                fan_out(&mut subscribers, b"chunk"),
+                0,
+                "detached at chunk {n}"
+            );
+            assert_eq!(
+                rx.try_recv().expect("the subscriber is draining"),
+                b"chunk".to_vec()
+            );
+        }
+        assert_eq!(subscribers.len(), 1);
+    }
+
+    /// The detach above is only a policy if a client ever hears about it.
+    ///
+    /// A detached subscriber's forwarder has exactly one thing left to do:
+    /// close the connection, so the client re-attaches and is handed a redrawn
+    /// screen. This is that half, driven through the real forwarder with a
+    /// session the map still holds — which is the whole test of the map lookup
+    /// that tells "this subscriber was detached" apart from "this session
+    /// ended".
+    ///
+    /// The socket is not real here and does not need to be: what is asserted is
+    /// the *verdict*, and `P2pOutbound::close` is where a verdict becomes a
+    /// connection ending.
+    #[tokio::test]
+    async fn a_detached_subscriber_closes_the_connection() {
+        let (outbound, _rx) = P2pOutbound::new();
+        let (tx, rx) = mpsc::channel::<Vec<u8>>(SUBSCRIBER_QUEUE_SLOTS);
+        let sessions: Arc<SessionMapLock> =
+            Arc::new(SessionMapLock::new(std::collections::HashMap::from([(
+                "s1".to_string(),
+                AttachedSession {
+                    backend: Arc::new(Mutex::new(Box::new(
+                        crate::tmux::pty::PtySession::attach("s1", 80, 24)
+                            .expect("a PTY for the session under test")
+                            .0,
+                    ))),
+                    subscribers: Vec::new(),
+                },
+            )])));
+
+        spawn_output_forwarder(
+            rx,
+            outbound.clone(),
+            Arc::clone(&sessions),
+            "s1".to_string(),
+        );
+
+        // The subscriber is detached: `fan_out` drops its sender, so the
+        // forwarder's receiver ends without the connection having ended.
+        drop(tx);
+        let closed = tokio::time::timeout(Duration::from_secs(5), async {
+            while !outbound.is_closed() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await;
+        assert!(
+            closed.is_ok(),
+            "a detached subscriber left the connection open: the client keeps a \
+             terminal that has stopped moving, with nothing coming to say so"
+        );
+
+        sessions_lock(&sessions)
+            .get_mut("s1")
+            .expect("the session under test")
+            .subscribers
+            .clear();
+    }
+
+    /// A terminal lane that never gets room ends the connection rather than
+    /// parking a forwarder forever.
+    ///
+    /// This is `#961`'s backpressure requirement for this socket, end to end:
+    /// the queue is bounded, the policy at the bound is stated, and the verdict
+    /// reaches the connection. What it replaces is a forwarder parked on an
+    /// unbounded socket write — where the *upper* policy (`SUBSCRIBER_QUEUE_SLOTS`
+    /// detaching this subscriber) could never be delivered, because the
+    /// forwarder never got to observe its own receiver closing.
+    ///
+    /// The queue is saturated with one oversized state frame — `charge` clamps a
+    /// frame larger than the budget to the whole of it — so the next terminal
+    /// frame has no room and the grace is what decides. The grace is shortened
+    /// because waiting out a production number is waiting out the calendar; the
+    /// bound still has to be reached first, which is what the saturation
+    /// arranges.
+    #[tokio::test]
+    async fn a_terminal_forwarder_that_cannot_drain_closes_the_connection() {
+        use crate::server::outbound::OUTBOUND_BYTE_BUDGET;
+
+        let (outbound, _rx) = P2pOutbound::with_terminal_grace(Duration::from_millis(50));
+        assert_eq!(
+            outbound.try_send_state(WsMessage::Text("x".repeat(OUTBOUND_BYTE_BUDGET))),
+            Ok(()),
+            "the whole byte budget is one frame's worth"
+        );
+
+        let (tx, rx) = mpsc::channel::<Vec<u8>>(SUBSCRIBER_QUEUE_SLOTS);
+        let sessions: Arc<SessionMapLock> =
+            Arc::new(SessionMapLock::new(std::collections::HashMap::new()));
+        spawn_output_forwarder(
+            rx,
+            outbound.clone(),
+            Arc::clone(&sessions),
+            "s1".to_string(),
+        );
+
+        tx.send(b"chunk".to_vec()).await.expect("the chunk is sent");
+        let closed = tokio::time::timeout(Duration::from_secs(5), async {
+            while !outbound.is_closed() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await;
+        assert!(
+            closed.is_ok(),
+            "a terminal frame waited out the grace and the connection stayed open: \
+             the forwarder is parked on a queue nobody is draining"
+        );
+        assert_eq!(
+            outbound.snapshot().stalled_terminals,
+            1,
+            "the verdict was reached, and the counter is where it is visible"
+        );
     }
 
     #[tokio::test]

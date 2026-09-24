@@ -1,7 +1,9 @@
 mod agent_view;
 pub mod client_registry;
 pub mod command_broker;
+pub mod execution;
 mod handler;
+pub mod outbound;
 
 // `server_descriptors` is generated in `handler` because the handlers it
 // describes are that module's private methods; it is re-exported here so

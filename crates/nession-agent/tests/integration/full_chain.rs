@@ -82,7 +82,9 @@ async fn start_test_server(
 async fn start_test_agent_server(
 ) -> anyhow::Result<(std::net::SocketAddr, nession_agent::server::ServerHandle)> {
     let tmp = Box::leak(Box::new(tempfile::tempdir()?));
-    let (_resize_tx, _resize_rx) = tokio::sync::mpsc::unbounded_channel::<(String, u16, u16)>();
+    // Nothing drains this connection's resize lane, which is the point of the
+    // lane: an unread resize costs one superseded value per session.
+    let (resize, _resize_updates) = nession_agent::server::ResizeReporter::new();
     let server = AgentServer::new(
         "127.0.0.1:0",
         "test-agent",
@@ -90,7 +92,7 @@ async fn start_test_agent_server(
         "/tmp".to_string(),
         tmp.path().to_string_lossy().as_ref(),
         AttachMode::Plain,
-        _resize_tx,
+        resize,
     )?;
     let (handle, addr) = server.start().await?;
 

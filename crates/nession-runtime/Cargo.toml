@@ -1,0 +1,25 @@
+[package]
+name = "nession-runtime"
+version.workspace = true
+edition.workspace = true
+
+# The execution primitives the two *runtime* crates share (#961-F).
+#
+# Deliberately not in `nession-common`: that crate is linked by every provider
+# (`nession-git`, `nession-claude-code`), and those answer Protocol Units —
+# they run no connection, schedule no frame, and would be carrying the
+# scheduling machinery of a runtime they are not part of. The dependency list
+# is the ownership rule here for the same reason `nession-protocol`'s says it
+# is there: what a crate can name is what it owns.
+#
+# Not in `nession-agent` either, for the mirror reason: the Server would then be
+# depending on the agent to schedule its own connections.
+[dependencies]
+tokio.workspace = true
+# The frame the queue bounds. This is why the module is a *runtime's* and not
+# `nession-common`'s: only a runtime has a socket.
+tokio-tungstenite.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

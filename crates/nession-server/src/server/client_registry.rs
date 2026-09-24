@@ -3,7 +3,7 @@ use tokio::sync::RwLock;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 use tracing::{debug, warn};
 
-use super::command_broker::WsMessageSender;
+use super::outbound::WsMessageSender;
 
 /// Tracks connected web clients per session, enabling server-initiated
 /// broadcasts (e.g. terminal resize events from the agent).
@@ -58,6 +58,11 @@ impl ClientRegistry {
 
     /// Broadcast a text message to all clients attached to a session.
     /// Returns the number of clients the message was sent to.
+    ///
+    /// The receivers are established connections, not callers waiting on an
+    /// answer: what goes out here is session state (`terminal.resize`), so a
+    /// client too far behind to take it is counted as unsent rather than waited
+    /// for. See `outbound::WsMessageSender::try_send_broadcast`.
     pub async fn broadcast(&self, session_id: &str, msg: String) -> usize {
         let clients = self.clients.read().await;
         let Some(session_clients) = clients.get(session_id) else {
@@ -67,7 +72,7 @@ impl ClientRegistry {
         let ws_msg = WsMessage::Text(msg);
         let mut sent = 0;
         for (client_id, sender) in session_clients {
-            match sender.send(ws_msg.clone()) {
+            match sender.try_send_broadcast(ws_msg.clone()) {
                 Ok(_) => sent += 1,
                 Err(e) => {
                     warn!(

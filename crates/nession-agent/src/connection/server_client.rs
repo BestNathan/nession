@@ -10,6 +10,26 @@
 //! the queue onto whatever connection is currently live; while disconnected,
 //! queued messages are dropped. This means callers never observe a "broken
 //! pipe" — sending always succeeds locally and delivery resumes after reconnect.
+//!
+//! ## The two halves of a live connection (`#961-E`)
+//!
+//! Servicing a connection is two jobs, and until this stage one `select!` loop
+//! did both: reading frames and writing them. That was fine while every frame
+//! became a detached task, because nothing the loop did could block for long —
+//! and it stops being fine the moment dispatch is *bounded*, because the bound
+//! is enforced by not reading, and a loop that stops reading also stops
+//! draining the outbox. A heartbeat is an outbox message, so a reader parked on
+//! a full lane would have been a heartbeat that stops when a session's queue is
+//! full: precisely the regression `#961` says must not happen.
+//!
+//! So they are two tasks now, with one owner each:
+//!
+//! * [`ServerClient::write_loop`] owns the socket, and drains the outbox and
+//!   the response channel. Nothing it does can be parked by business work.
+//! * [`ServerClient::read_loop`] owns the stream and the lanes
+//!   (`connection::execution`), and is the only half that may park on a bound.
+//!
+//! The comments on each say what the split makes true.
 
 use anyhow::{Context, Result};
 use futures_util::{SinkExt, StreamExt};
@@ -34,6 +54,13 @@ use tokio_tungstenite::{
 };
 use tracing::{debug, error, info, warn};
 
+use crate::connection::execution::{self, Lanes, ResourceKey, SHUTDOWN_GRACE};
+// The lanes' boxed work is the shared type: the lane that carries it knows
+// nothing about this connection, which is the point of `nession-runtime`.
+use nession_runtime::lane::Work;
+// The three policies by name, because the `core_routes!` invocation at the
+// bottom of this file declares one per unit and the names are the column there.
+use crate::connection::execution::ExecutionPolicy::{Inline, Key, Query};
 use crate::env::EnvStore;
 use crate::extension::ExtensionRegistry;
 use crate::protocol::core_routes;
@@ -53,6 +80,17 @@ const MAX_RECONNECT_DELAY: Duration = Duration::from_secs(30);
 
 /// Initial delay for exponential backoff (1 second).
 const INITIAL_RECONNECT_DELAY: Duration = Duration::from_secs(1);
+
+/// How many command responses may be waiting for the socket at once (#961).
+///
+/// The queue carries one frame per command the Server sent, and a command is
+/// answered by the handler task that received it — so this is really a bound on
+/// "answers computed but not yet written". Deep enough that an ordinary
+/// request/reply exchange never touches it; shallow enough that a Server which
+/// has stopped reading cannot make the agent hold more than this many answers in
+/// memory. At the extension contracts' 1 MiB read cap that is 32 MiB of frames
+/// rather than the unbounded channel's "as much as the Server can ask for".
+const AGENT_RESPONSE_QUEUE_SLOTS: usize = 32;
 
 /// Message type constants for agent-to-server protocol.
 pub mod msg_types {
@@ -551,21 +589,50 @@ impl ServerClient {
         Ok((sink, stream, interval))
     }
 
-    /// Service a live connection: forward queued outgoing messages, handle
-    /// incoming server messages, respond to pings, and watch for shutdown.
+    /// Service a live connection until it drops or shutdown.
+    ///
+    /// This half is the **writer**: it owns the socket, drains the outbox
+    /// (heartbeats, session updates) and the response channel onto it, and
+    /// watches for shutdown. The reading half — and everything a frame's
+    /// dispatch can park on — is [`Self::read_loop`], on a task of its own, for
+    /// the reason this module's docs give.
+    ///
     /// Returns whether the loop ended due to shutdown or a dropped connection.
     async fn run_connection(
         self: Arc<Self>,
         mut sink: WsSink,
-        mut stream: WsStreamHalf,
+        stream: WsStreamHalf,
         outbox_rx: &mut mpsc::UnboundedReceiver<WsMessage>,
         shutdown_rx: &mut mpsc::Receiver<()>,
     ) -> ConnectionOutcome {
-        // Handler tasks write their responses here; this loop drains the channel
-        // onto the socket. Unbounded so a handler never blocks on a full queue.
-        let (resp_tx, mut resp_rx) = mpsc::unbounded_channel::<WsMessage>();
+        // Handler tasks write their responses here; this half drains them onto
+        // the socket.
+        //
+        // Bounded, with the policy of #961's backpressure section: a full queue
+        // makes the *handler* wait, never lose its answer. The handler is one
+        // of the read half's lane tasks — a bounded number of them, see
+        // `connection::execution` — so parking it costs a lane slot rather than
+        // a detached task per message, and this loop keeps writing throughout.
+        //
+        // The producer side is what the old comment here was protecting, and the
+        // bound is chosen to keep protecting it: `AGENT_RESPONSE_QUEUE_SLOTS`
+        // replies of a few hundred bytes are the ordinary case, and a burst of
+        // those never parks anybody. What is *gone* is the case the unbounded
+        // channel actually existed for — an agent whose Server stopped reading
+        // growing its heap for as long as the Server stayed away.
+        let (resp_tx, mut resp_rx) = mpsc::channel::<WsMessage>(AGENT_RESPONSE_QUEUE_SLOTS);
 
-        loop {
+        // The reading half, and the signal that says how it ended. A channel
+        // rather than joining the handle here: the handle is only needed to
+        // *stop* a reader that is parked, and a `JoinHandle` polled after it has
+        // completed panics.
+        let (read_done_tx, mut read_done_rx) = mpsc::channel::<ConnectionOutcome>(1);
+        let reader = tokio::spawn(
+            self.clone()
+                .read_loop(stream, resp_tx.clone(), read_done_tx),
+        );
+
+        let outcome = loop {
             tokio::select! {
                 // Outgoing: drain the outbox (heartbeats, session updates).
                 outgoing = outbox_rx.recv() => {
@@ -573,83 +640,194 @@ impl ServerClient {
                         Some(msg) => {
                             if let Err(e) = sink.send(msg).await {
                                 warn!("Failed to send to server: {:#}", e);
-                                return ConnectionOutcome::Disconnected;
+                                break ConnectionOutcome::Disconnected;
                             }
                         }
                         None => {
                             // Outbox closed: handle dropped, treat as shutdown.
-                            return ConnectionOutcome::Shutdown;
+                            break ConnectionOutcome::Shutdown;
                         }
                     }
                 }
-                // Command responses from handler tasks.
+                // Command responses from the reading half's lanes.
                 response = resp_rx.recv() => {
                     match response {
                         Some(msg) => {
                             if let Err(e) = sink.send(msg).await {
                                 warn!("Failed to send to server: {:#}", e);
-                                return ConnectionOutcome::Disconnected;
+                                break ConnectionOutcome::Disconnected;
                             }
                         }
                         None => {
                             // Unreachable while this loop holds a `resp_tx` clone;
                             // kept as a defensive disconnect.
-                            return ConnectionOutcome::Disconnected;
+                            break ConnectionOutcome::Disconnected;
                         }
                     }
                 }
-                // Incoming: server messages, pings, close.
-                incoming = stream.next() => {
-                    match incoming {
-                        Some(Ok(WsMessage::Text(text))) => {
-                            // Handle off the loop so a slow command can't block
-                            // heartbeats or subsequent reads.
-                            let this = self.clone();
-                            let tx = resp_tx.clone();
-                            tokio::spawn(async move {
-                                if let Err(e) = this.handle_server_message(&text, &tx).await {
-                                    warn!("Error handling server message: {:#}", e);
-                                }
-                            });
-                        }
-                        Some(Ok(WsMessage::Ping(data))) => {
-                            let _ = sink.send(WsMessage::Pong(data)).await;
-                        }
-                        Some(Ok(WsMessage::Close(_))) => {
-                            info!("Server closed connection");
-                            return ConnectionOutcome::Disconnected;
-                        }
-                        Some(Ok(_)) => {}
-                        Some(Err(e)) => {
-                            error!("WebSocket error: {:#}", e);
-                            return ConnectionOutcome::Disconnected;
-                        }
-                        None => {
-                            info!("WebSocket stream ended");
-                            return ConnectionOutcome::Disconnected;
-                        }
-                    }
+                // The reading half ended: its stream closed, or a write to
+                // `resp_tx` failed. Either way this connection is over.
+                done = read_done_rx.recv() => {
+                    break done.unwrap_or(ConnectionOutcome::Disconnected);
                 }
                 // Shutdown: close the socket and stop the supervisor.
                 _ = shutdown_rx.recv() => {
                     info!("Shutdown signal received");
                     let _ = sink.send(WsMessage::Close(None)).await;
-                    return ConnectionOutcome::Shutdown;
+                    break ConnectionOutcome::Shutdown;
                 }
             }
-        }
+        };
+
+        // Stop the reader, however this ended. It owns the lanes, and a reader
+        // parked on a full key's queue would otherwise outlive the connection
+        // that owns it — one leaked task per reconnect. Aborting is enough:
+        // dropping the lanes drops their work, and `read_loop` is where the
+        // lanes get the chance to end their own tasks in an orderly way when
+        // the stream ends by itself.
+        reader.abort();
+        let _ = reader.await;
+        outcome
     }
 
-    /// Handle a message received from the server, writing any response to the
-    /// `responses` channel (drained onto the socket by `run_connection`).
+    /// Read this connection's frames and dispatch them, until the stream ends.
+    ///
+    /// The reading half of a live connection, and the only half that may park:
+    /// a lane at its bound is enforced by the reader not reading, which is the
+    /// bound `#961` asks for. It never writes to the socket — answers go to
+    /// `responses`, which `run_connection` drains.
+    ///
+    /// The split is what keeps the two regressions this stage exists around
+    /// from being traded for one another: dispatch is bounded, and the heartbeat
+    /// still flows, because the task that sends heartbeats is not this one.
+    async fn read_loop(
+        self: Arc<Self>,
+        mut stream: WsStreamHalf,
+        responses: mpsc::Sender<WsMessage>,
+        done: mpsc::Sender<ConnectionOutcome>,
+    ) {
+        // The lanes this connection reads into, and the only thing that admits
+        // to them. Dropped with the loop, which is what ends their tasks.
+        let mut lanes = Lanes::with_key_worker_budget(
+            execution::DEFAULT_QUERY_CONCURRENCY,
+            execution::DEFAULT_KEY_QUEUE_DEPTH,
+            execution::DEFAULT_KEY_WORKERS,
+            execution::LANE_LABEL,
+        );
+
+        let outcome = loop {
+            match stream.next().await {
+                Some(Ok(WsMessage::Text(text))) => {
+                    // Decoded here rather than in the task that serves it,
+                    // because the unit's execution policy is read from the
+                    // envelope and the dispatch decision comes first. A frame
+                    // that does not decode is ignored and logged, which is what
+                    // it was before: the parse used to happen inside the
+                    // per-message task, and its failure was logged there.
+                    let msg: ProtocolMessage<serde_json::Value> = match serde_json::from_str(&text)
+                    {
+                        Ok(msg) => msg,
+                        Err(e) => {
+                            warn!("Error handling server message: {:#}", e);
+                            continue;
+                        }
+                    };
+
+                    let policy = match core_policy(&msg) {
+                        Some(policy) => policy,
+                        // Not a unit this connection serves. Control is not an
+                        // operation and not a request anybody is waiting on —
+                        // its whole handler is a log line — so it is applied
+                        // where it stands. See `is_control`.
+                        None if is_control(&msg.msg_type) => Inline,
+                        // Everything else is an extension's own command unit:
+                        // a request the Server is waiting for an answer to,
+                        // whose handler does backend I/O. See
+                        // `execution::UNSERVED`.
+                        None => execution::UNSERVED,
+                    };
+
+                    let this = Arc::clone(&self);
+                    let tx = responses.clone();
+                    let work: Work = Box::pin(async move {
+                        if let Err(e) = this.handle_server_message(msg, &tx).await {
+                            warn!("Error handling server message: {:#}", e);
+                        }
+                    });
+
+                    match policy {
+                        Inline => work.await,
+                        Query => lanes.query(work).await,
+                        Key(key) => lanes.key(key, work).await,
+                    }
+                }
+                Some(Ok(WsMessage::Ping(data))) => {
+                    // The pong is handed to the writing half rather than
+                    // written here, because the socket has one owner and this
+                    // is not it. It rides the response channel, which in
+                    // ordinary operation is empty — a full one means the
+                    // Server is not draining, and a pong it is not reading
+                    // would not have kept the connection alive either.
+                    if responses.send(WsMessage::Pong(data)).await.is_err() {
+                        break ConnectionOutcome::Disconnected;
+                    }
+                }
+                Some(Ok(WsMessage::Close(_))) => {
+                    info!("Server closed connection");
+                    break ConnectionOutcome::Disconnected;
+                }
+                Some(Ok(_)) => {}
+                Some(Err(e)) => {
+                    error!("WebSocket error: {:#}", e);
+                    break ConnectionOutcome::Disconnected;
+                }
+                None => {
+                    info!("WebSocket stream ended");
+                    break ConnectionOutcome::Disconnected;
+                }
+            }
+        };
+
+        // End the lanes' work before saying the connection is over. It belongs
+        // to a Server that is gone — or to a connection this agent is closing —
+        // and a mutation parked on a resource nobody is waiting for any more
+        // must not write to a socket that is closing. Queued work that never
+        // started is dropped with the lane.
+        lanes.shutdown(SHUTDOWN_GRACE).await;
+
+        // What this connection's bounds ever did, read by something that is not
+        // a test — `#961`'s "metrics/logging can observe queue saturation,
+        // in-flight count, per-key queue depth". The lane's own saturation
+        // events say *when* a bound was reached and which key reached it; this
+        // says how far the connection ever got.
+        {
+            let (queries, keys) = lanes.snapshot().await;
+            debug!(
+                "central connection closed — lanes: {}",
+                nession_runtime::lane::summary(&queries, &keys)
+            );
+        }
+
+        let _ = done.send(outcome).await;
+    }
+
+    /// Handle one message received from the server, writing any response to the
+    /// `responses` queue (drained onto the socket by [`Self::run_connection`]).
+    ///
+    /// Takes the message **decoded**, because its execution policy — which lane
+    /// it is dispatched on, and therefore which task calls this at all — is read
+    /// from the envelope before the dispatch decision is made. See
+    /// [`Self::read_loop`].
+    ///
+    /// `responses` is bounded, so a send here can wait for room — which is the
+    /// intended policy rather than a hazard: this method runs on a lane task,
+    /// and waiting costs a lane slot rather than a detached task per message.
+    /// See the queue's construction in [`Self::run_connection`].
     async fn handle_server_message(
         &self,
-        text: &str,
-        responses: &mpsc::UnboundedSender<WsMessage>,
+        msg: ProtocolMessage<serde_json::Value>,
+        responses: &mpsc::Sender<WsMessage>,
     ) -> Result<()> {
-        let msg: ProtocolMessage<serde_json::Value> =
-            serde_json::from_str(text).context("failed to parse server message")?;
-
         // Try extension dispatch first
         if msg.msg_type.starts_with("extension.") {
             if let Some(ref ext_registry) = self.extension_registry {
@@ -680,7 +858,9 @@ impl ServerClient {
                             "result": payload_value,
                         }
                     });
-                    responses.send(WsMessage::Text(response.to_string()))?;
+                    responses
+                        .send(WsMessage::Text(response.to_string()))
+                        .await?;
                     return Ok(());
                 }
             }
@@ -2452,12 +2632,635 @@ mod tests {
         handle.shutdown().await.ok();
         server_handle.abort();
     }
+
+    // ── The central connection's execution model (#961 stages A and E) ───────
+    //
+    // Stage A wrote these as **characterization**: they pinned what this path
+    // did then — a detached task per server message, no limit and no ordering —
+    // and each named the stage expected to change its answer. Stage E changed
+    // two of the four, and the pair that flipped is the pair the requirement's
+    // success criteria are written against (bounded; ordered per resource key).
+    // The other two are guards, and they are guards *because* the model changed:
+    // see each one's comment.
+    //
+    // What they all have in common is the instrument: a `tmux` that parks every
+    // invocation until the test says otherwise, so "how many mutations are in
+    // flight at once" is a number read off a file rather than an inference from
+    // elapsed time.
+
+    /// A `tmux` that logs each mutation it is asked to run and then holds.
+    ///
+    /// The hold is what makes concurrency observable. With every invocation
+    /// parked, the number of lines in the log *is* the number of mutations the
+    /// agent has in flight at once, and a serialized implementation cannot
+    /// produce the second line while the first is parked — it has nowhere to
+    /// hide. An elapsed-time assertion could not tell "these overlapped" from
+    /// "these were quick".
+    struct BlockingTmux {
+        // Kept alive for the whole test: the shim, the log and the release file
+        // all live in here.
+        _dir: tempfile::TempDir,
+        release_path: std::path::PathBuf,
+        log: std::path::PathBuf,
+        manager: Arc<SessionManager>,
+    }
+
+    impl BlockingTmux {
+        fn new() -> Self {
+            Self::with_timeouts(
+                Duration::from_secs(20),
+                Duration::from_secs(20),
+                Duration::from_secs(20),
+            )
+        }
+
+        /// The same, with a short `create` timeout — for the test about a
+        /// command that gives up while its tmux call is still running.
+        fn with_create_timeout(create: Duration) -> Self {
+            Self::with_timeouts(Duration::from_secs(20), Duration::from_secs(20), create)
+        }
+
+        fn with_timeouts(list: Duration, kill: Duration, create: Duration) -> Self {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let release_path = dir.path().join("release");
+            let log = dir.path().join("tmux-calls");
+
+            // The bound on the wait is the shim's own safety net, not the
+            // test's timing: a test that fails its assertion before releasing
+            // leaves a parked `sh` behind, and this is what stops it lingering
+            // for the rest of the run. 400 × 50 ms is far longer than any of the
+            // deadlines below.
+            let script = format!(
+                r#"case "$1" in
+  new-session|kill-session|list-sessions)
+    printf '%s\n' "$1" >> {log}
+    i=0
+    while [ ! -e {release} ] && [ $i -lt 400 ]; do sleep 0.05; i=$((i+1)); done
+    ;;
+esac"#,
+                log = log.display(),
+                release = release_path.display(),
+            );
+            let shim = write_fake_tmux(dir.path(), &script);
+
+            let mut manager = SessionManager::new();
+            manager
+                .with_tmux_bin(shim)
+                .with_timeouts(list, kill, create);
+
+            Self {
+                _dir: dir,
+                release_path,
+                log,
+                manager: Arc::new(manager),
+            }
+        }
+
+        fn tmux(&self) -> Arc<SessionManager> {
+            Arc::clone(&self.manager)
+        }
+
+        /// How many tmux invocations have started.
+        fn started(&self) -> usize {
+            std::fs::read_to_string(&self.log)
+                .map(|log| log.lines().count())
+                .unwrap_or(0)
+        }
+
+        /// Wait for `n` invocations to start, and report how many ever did.
+        ///
+        /// An invocation either starts or never will, so this waits for a fact;
+        /// the deadline only bounds how long a serialized implementation is
+        /// given to prove that it is one.
+        async fn started_within(&self, n: usize, within: Duration) -> usize {
+            let deadline = std::time::Instant::now() + within;
+            loop {
+                let started = self.started();
+                if started >= n || std::time::Instant::now() >= deadline {
+                    return started;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        }
+
+        /// Let every parked invocation finish.
+        fn release(&self) {
+            std::fs::write(&self.release_path, b"go").expect("write release file");
+        }
+    }
+
+    /// `agent.session.create` as the server sends it.
+    fn create_command(id: &str, request_id: &str, name: &str) -> serde_json::Value {
+        serde_json::json!({
+            "msg_type": "agent.session.create",
+            "id": id,
+            "timestamp": 1,
+            "payload": { "request_id": request_id, "name": name, "width": 80, "height": 24 },
+        })
+    }
+
+    /// `agent.session.kill` as the server sends it.
+    fn kill_command(id: &str, request_id: &str, name: &str) -> serde_json::Value {
+        serde_json::json!({
+            "msg_type": "agent.session.kill",
+            "id": id,
+            "timestamp": 1,
+            "payload": { "request_id": request_id, "name": name },
+        })
+    }
+
+    /// `agent.session.report` — the read-only one, which reaches tmux too.
+    fn sessions_list_command(id: &str, request_id: &str) -> serde_json::Value {
+        serde_json::json!({
+            "msg_type": "agent.session.report",
+            "id": id,
+            "timestamp": 1,
+            "payload": { "request_id": request_id },
+        })
+    }
+
+    /// A mock server that signs `commands` in one burst, then forwards every
+    /// response the agent sends.
+    ///
+    /// The burst is the point: several commands in flight at once is what a
+    /// reader that spawns per message produces and a serialized one cannot.
+    /// Nothing waits between them, so the agent's own dispatch is the only
+    /// thing deciding how many run at once.
+    ///
+    /// The returned sender sends further commands later, which is how a test
+    /// asks a question *after* the answers above it have been observed rather
+    /// than guessing at a delay.
+    async fn start_mock_server_sending_commands(
+        commands: Vec<serde_json::Value>,
+    ) -> MockCommandServer {
+        let (msg_tx, msg_rx) = mpsc::channel(100);
+        let (command_tx, mut command_rx) = mpsc::channel::<serde_json::Value>(10);
+        let keepalive = command_tx.clone();
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("failed to bind mock server");
+        let addr = listener.local_addr().expect("mock server local_addr");
+
+        let handle = tokio::spawn(async move {
+            // Held so `command_rx.recv()` never resolves to `None`, which would
+            // otherwise spin this loop the moment the test's copy is dropped.
+            let _keepalive = keepalive;
+
+            if let Ok((stream, _)) = listener.accept().await {
+                let ws = accept_async(stream).await.expect("failed to accept ws");
+                let (mut sink, mut stream) = ws.split();
+
+                let response = serde_json::json!({
+                    "msg_type": "server.agent.register",
+                    "id": "test-id",
+                    "timestamp": 1234567890,
+                    "payload": { "status": "accepted", "message": "ok" }
+                });
+                let _ = sink.send(WsMessage::Text(response.to_string())).await;
+                let _ = stream.next().await; // skip registration
+
+                for command in commands {
+                    let _ = sink.send(WsMessage::Text(command.to_string())).await;
+                }
+
+                loop {
+                    tokio::select! {
+                        incoming = stream.next() => match incoming {
+                            Some(Ok(WsMessage::Text(text))) => {
+                                let _ = msg_tx.send(text).await;
+                            }
+                            Some(Ok(_)) => {}
+                            _ => break,
+                        },
+                        more = command_rx.recv() => {
+                            let Some(command) = more else { continue };
+                            if sink.send(WsMessage::Text(command.to_string())).await.is_err() {
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        (addr, handle, msg_rx, command_tx)
+    }
+
+    /// A running [`start_mock_server_sending_commands`]: where the agent should
+    /// connect, the handle that keeps the mock alive, the responses it forwards,
+    /// and the channel that sends it more commands.
+    type MockCommandServer = (
+        std::net::SocketAddr,
+        tokio::task::JoinHandle<()>,
+        mpsc::Receiver<String>,
+        mpsc::Sender<serde_json::Value>,
+    );
+
+    /// Every command response that arrives within `window`.
+    async fn responses_within(
+        msg_rx: &mut mpsc::Receiver<String>,
+        window: Duration,
+    ) -> Vec<serde_json::Value> {
+        let mut responses = Vec::new();
+        let deadline = std::time::Instant::now() + window;
+        loop {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            if remaining.is_zero() {
+                return responses;
+            }
+            match tokio::time::timeout(remaining, msg_rx.recv()).await {
+                Ok(Some(text)) => {
+                    let parsed: serde_json::Value =
+                        serde_json::from_str(&text).expect("the agent sends JSON");
+                    if parsed.get("msg_type").and_then(|v| v.as_str())
+                        == Some("server.agent.command-response")
+                    {
+                        responses.push(parsed);
+                    }
+                }
+                Ok(None) | Err(_) => return responses,
+            }
+        }
+    }
+
+    /// Collect `count` command responses, in the order they arrived.
+    async fn collect_responses(
+        msg_rx: &mut mpsc::Receiver<String>,
+        count: usize,
+        within: Duration,
+    ) -> Vec<serde_json::Value> {
+        let mut responses = Vec::new();
+        let deadline = std::time::Instant::now() + within;
+        while responses.len() < count {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            assert!(
+                !remaining.is_zero(),
+                "only {} of {count} command responses arrived",
+                responses.len()
+            );
+            let batch = responses_within(msg_rx, remaining.min(Duration::from_millis(200))).await;
+            responses.extend(batch);
+        }
+        responses
+    }
+
+    /// A `ServerClient` connected to the mock server, using `tmux`.
+    async fn connected_client(
+        addr: std::net::SocketAddr,
+        agent_id: &str,
+        tmux: Arc<SessionManager>,
+    ) -> crate::connection::server_client::ServerClientHandle {
+        let client = ServerClient::new(
+            format!("ws://{addr}"),
+            "test-token",
+            agent_id,
+            "test-host",
+            "127.0.0.1",
+            8080,
+            None,
+            vec![],
+            None,
+            metadata_for_tests(),
+            tmux,
+            "/tmp".to_string(),
+            None,
+        );
+        client.connect_and_run().await.expect("connect failed").0
+    }
+
+    /// Two mutations for **different** sessions run at the same time.
+    ///
+    /// Sessions `s1` and `s2` share no state, so this is the concurrency the
+    /// requirement keeps: dispatch is bounded and ordered *by resource key*, and
+    /// different keys stay parallel under that model.
+    ///
+    /// **Must not flip.** It is the "不同 resource keys 可以并行" half of the
+    /// success criteria; a red here means a keyed scheduler has collapsed
+    /// unrelated resources onto one lane. It has not been changed since stage A
+    /// wrote it, and that is the point — the keyed lane kept it true.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn mutations_for_different_sessions_run_at_the_same_time() {
+        let tmux = BlockingTmux::new();
+        let (addr, server_handle, mut msg_rx, _commands) =
+            start_mock_server_sending_commands(vec![
+                create_command("cmd-1", "req-1", "s1"),
+                create_command("cmd-2", "req-2", "s2"),
+            ])
+            .await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        let handle = connected_client(addr, "test-agent-different-sessions", tmux.tmux()).await;
+
+        // Both tmux invocations start while neither has finished: the first is
+        // parked on a release file the test has not written yet, so a dispatch
+        // that waited for it could never produce the second.
+        let started = tmux.started_within(2, Duration::from_secs(10)).await;
+        assert_eq!(
+            started, 2,
+            "only {started} of 2 tmux invocations started — the second session's \
+             mutation waited for the first"
+        );
+
+        tmux.release();
+        let responses = collect_responses(&mut msg_rx, 2, Duration::from_secs(15)).await;
+        let mut answered: Vec<&str> = responses
+            .iter()
+            .filter_map(|r| r["payload"]["request_id"].as_str())
+            .collect();
+        answered.sort_unstable();
+        assert_eq!(answered, vec!["req-1", "req-2"]);
+
+        handle.shutdown().await.ok();
+        server_handle.abort();
+    }
+
+    /// Two mutations for the **same** session run one at a time, in the order
+    /// they arrived.
+    ///
+    /// `create` then `kill` for one session is the ordering the requirement
+    /// calls out by name ("create + kill same session | preserve resource
+    /// ordering"). Stage A's name for this test was
+    /// `mutations_for_one_session_are_not_ordered`, and it was true: both were
+    /// detached tasks, so the kill reached tmux while the create was still
+    /// running and the session that survived was whichever task won.
+    ///
+    /// `#961-E` flipped it, and the assertion flipped with it: the same
+    /// instrument reads `1` instead of `2`. The witness is the log of tmux
+    /// invocations — the first is parked on a release file the test has not
+    /// written yet, so a second invocation *cannot* exist while the key lane is
+    /// doing its job, and there is nowhere for an overtaking worker to hide.
+    ///
+    /// The bounded window is the negative half and is safe in that direction:
+    /// it can only go red when the second mutation ran while the first was
+    /// still running. The positive half that follows it is deterministic — after
+    /// the release, the second invocation exists, so the ordering is a delay
+    /// rather than a loss.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn mutations_of_one_session_are_ordered() {
+        let tmux = BlockingTmux::new();
+        let (addr, server_handle, mut msg_rx, _commands) =
+            start_mock_server_sending_commands(vec![
+                create_command("cmd-1", "req-1", "s1"),
+                kill_command("cmd-2", "req-2", "s1"),
+            ])
+            .await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        let handle = connected_client(addr, "test-agent-same-session", tmux.tmux()).await;
+
+        // The first mutation is in flight and parked.
+        let started = tmux.started_within(1, Duration::from_secs(10)).await;
+        assert_eq!(started, 1, "the first mutation never started");
+
+        // The second is written and read — it is in the key's queue, not on the
+        // wire — and it must not have reached tmux.
+        let started = tmux.started_within(2, Duration::from_millis(500)).await;
+        assert_eq!(
+            started, 1,
+            "the same session's second mutation ran while the first was still \
+             running: {started} tmux invocations, and the first has not been \
+             released"
+        );
+
+        // Releasing the first lets the key's worker take the second.
+        tmux.release();
+        let started = tmux.started_within(2, Duration::from_secs(10)).await;
+        assert_eq!(
+            started, 2,
+            "the second mutation never ran after the first finished: ordering \
+             turned into a loss"
+        );
+
+        let responses = collect_responses(&mut msg_rx, 2, Duration::from_secs(15)).await;
+        let mut answered: Vec<&str> = responses
+            .iter()
+            .filter_map(|r| r["payload"]["request_id"].as_str())
+            .collect();
+        answered.sort_unstable();
+        assert_eq!(answered, vec!["req-1", "req-2"]);
+
+        handle.shutdown().await.ok();
+        server_handle.abort();
+    }
+
+    /// How many commands the central connection runs at once is **bounded**.
+    ///
+    /// Stage A's name for this test was
+    /// `nothing_caps_the_commands_in_flight_on_the_central_connection`, and it
+    /// was true: every server message became a detached task, so the number in
+    /// flight tracked the number of messages and nothing else. `#961-E` replaced
+    /// that with a bounded lane, and this is the assertion it left behind —
+    /// `#961`'s "concurrency upper bound test, 证明 task 数不会随消息无限增长".
+    ///
+    /// `CONCURRENT_COMMANDS` stays at 12, above the bound the stage chose
+    /// (`DEFAULT_QUERY_CONCURRENCY`, 8), which is what leaves the bound
+    /// observable at all: a message count at or below the bound could not tell a
+    /// lane from a `tokio::spawn`. Stage A's own note on this test said exactly
+    /// that the number moves only if the bound is above it.
+    ///
+    /// The three phases are the whole policy: the lane fills (positive), a
+    /// twelfth command does not start while it is full (the bound), and
+    /// releasing it lets every remaining command through, each answering its own
+    /// request (a bound that drops would show up as a missing id).
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_central_connection_holds_at_its_bound_and_then_drains() {
+        const CONCURRENT_COMMANDS: usize = 12;
+        let bound = crate::connection::execution::DEFAULT_QUERY_CONCURRENCY;
+
+        let tmux = BlockingTmux::new();
+        let commands: Vec<serde_json::Value> = (0..CONCURRENT_COMMANDS)
+            .map(|n| sessions_list_command(&format!("cmd-{n}"), &format!("req-{n}")))
+            .collect();
+        let (addr, server_handle, mut msg_rx, _commands) =
+            start_mock_server_sending_commands(commands).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        let handle = connected_client(addr, "test-agent-bounded", tmux.tmux()).await;
+
+        let started = tmux.started_within(bound, Duration::from_secs(15)).await;
+        assert_eq!(
+            started, bound,
+            "the lane did not fill: {started} of {bound} commands ran"
+        );
+
+        // The bound is what the reader waits on: the command that would exceed
+        // it is not read, so no twelfth invocation can exist.
+        let started = tmux
+            .started_within(CONCURRENT_COMMANDS, Duration::from_millis(500))
+            .await;
+        assert_eq!(
+            started, bound,
+            "{started} of {CONCURRENT_COMMANDS} commands ran at once against a bound \
+             of {bound}: dispatch is not bounded by the lane"
+        );
+
+        tmux.release();
+        let started = tmux
+            .started_within(CONCURRENT_COMMANDS, Duration::from_secs(15))
+            .await;
+        assert_eq!(
+            started, CONCURRENT_COMMANDS,
+            "only {started} of {CONCURRENT_COMMANDS} commands ever ran: the bound \
+             turned into a loss rather than a delay"
+        );
+
+        let responses =
+            collect_responses(&mut msg_rx, CONCURRENT_COMMANDS, Duration::from_secs(20)).await;
+        let mut answered: Vec<&str> = responses
+            .iter()
+            .filter_map(|r| r["payload"]["request_id"].as_str())
+            .collect();
+        answered.sort_unstable();
+        // Sorted the same way `answered` is, which is lexicographic and not
+        // numeric: `req-10` sorts before `req-2`, and comparing a sorted list
+        // against an unsorted one would fail on the ordering of the *test's*
+        // own generator rather than on anything the agent did.
+        let mut expected: Vec<String> = (0..CONCURRENT_COMMANDS)
+            .map(|n| format!("req-{n}"))
+            .collect();
+        expected.sort_unstable();
+        assert_eq!(
+            answered,
+            expected.iter().map(String::as_str).collect::<Vec<&str>>(),
+            "a command's answer went missing behind the bound"
+        );
+
+        handle.shutdown().await.ok();
+        server_handle.abort();
+    }
+
+    /// A command that gives up does not answer twice when its tmux call
+    /// finally finishes.
+    ///
+    /// The edge case is "request timeout but handler finishes later". The
+    /// manager's own timeout ends the command while the tmux process it
+    /// started is still running — `create_session` races the call against
+    /// `create_timeout`, and the child outlives the future that dropped it.
+    ///
+    /// What the agent does with that late completion is nothing at all: the
+    /// response is built from the timed-out call, the child's later exit is
+    /// seen by nobody, and the connection carries on. One response per request
+    /// id, and the next command on the same connection is answered normally.
+    ///
+    /// **Must not flip.** Keyed executors and cancellation ownership are the
+    /// stages most likely to change it, and the requirement's edge-case row is
+    /// explicit that a late completion must not corrupt another request.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_timed_out_command_does_not_answer_twice_when_tmux_finishes() {
+        // A short create timeout, so the manager gives up while its tmux
+        // invocation is still parked on the release file.
+        let tmux = BlockingTmux::with_create_timeout(Duration::from_millis(300));
+        let (addr, server_handle, mut msg_rx, commands) =
+            start_mock_server_sending_commands(vec![create_command("cmd-1", "req-1", "s1")]).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        let handle = connected_client(addr, "test-agent-timeout", tmux.tmux()).await;
+
+        // Only the manager's own timeout can produce this: the tmux call it
+        // started is still running, and nothing but the release file ends it.
+        let responses = collect_responses(&mut msg_rx, 1, Duration::from_secs(10)).await;
+        assert_eq!(
+            responses[0]["payload"]["request_id"],
+            serde_json::json!("req-1")
+        );
+        assert_eq!(
+            responses[0]["payload"]["success"],
+            serde_json::json!(false),
+            "a create that timed out must report failure: {}",
+            responses[0]
+        );
+        assert!(
+            responses[0]["payload"]["error"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("timed out"),
+            "the failure has to say what happened: {}",
+            responses[0]
+        );
+
+        // Now let the abandoned tmux call finish. Nothing correlates it any
+        // more — its response went out when the timeout fired.
+        tmux.release();
+        tokio::time::sleep(Duration::from_millis(300)).await;
+
+        // The connection is still good: a request handled after the late
+        // completion is answered, with its own id.
+        commands
+            .send(sessions_list_command("cmd-2", "req-2"))
+            .await
+            .expect("mock server gone");
+        let responses = collect_responses(&mut msg_rx, 1, Duration::from_secs(10)).await;
+        assert_eq!(
+            responses[0]["payload"]["request_id"],
+            serde_json::json!("req-2")
+        );
+        assert_eq!(responses[0]["payload"]["success"], serde_json::json!(true));
+
+        // And the timed-out command did not answer a second time: another
+        // response for it would have arrived here.
+        let late = responses_within(&mut msg_rx, Duration::from_millis(500)).await;
+        assert!(
+            late.is_empty(),
+            "the late tmux completion produced another response: {late:?}"
+        );
+
+        handle.shutdown().await.ok();
+        server_handle.abort();
+    }
 }
 
 // ── The Protocol Units this agent serves ──
+//
+// The third `=>` of each arm is the **execution policy** (`#961-E`): how the
+// connection's reader hands this unit to a lane. The key helpers above are what
+// the `Key` policies are written in terms of. What the policies mean is
+// `crate::connection::execution`'s to say.
+/// The tmux session a payload names, by the name this agent knows it by.
+///
+/// Every session unit on this connection names its target in a field called
+/// `name` — `session.create`, `session.kill`, and both `session.env.*` — so
+/// unlike the Server's side there is no second spelling to reconcile and no
+/// joined form to agree on. What the helper exists for is the *kind*: the
+/// envelope says `agent.session.kill`, and that is not what turns the string
+/// into a session key.
+fn session_by_name(payload: &serde_json::Value) -> ResourceKey {
+    ResourceKey::Session(str_field(payload, "name"))
+}
+
+/// The locally stored env file a payload names.
+///
+/// A separate function from [`session_by_name`] although it reads the same
+/// field, because the *field* is not the thing: `agent.env.write` names an env
+/// file in `name` and `agent.session.env.apply` names a session in `name`, and
+/// one helper that read `name` for both would be right about the spelling and
+/// wrong about the resource — the two would share a queue, and a write to an
+/// env file would wait behind a mutation of a session that happened to have
+/// that name.
+fn env_file_by_name(payload: &serde_json::Value) -> ResourceKey {
+    ResourceKey::Env(str_field(payload, "name"))
+}
+
+/// Whether a wire is one of the three control messages.
+///
+/// Control is not an operation (`docs/architecture/protocol.md` § *What is not
+/// a Protocol Unit*): nothing offers it, nothing answers it, and every runtime
+/// handles it. The route table below cannot carry it — an arm there is a
+/// descriptor, and a descriptor is an offer this agent would be making — so the
+/// reader reads the category here, beside the constants that name it, rather
+/// than adding a column for something that is not a unit.
+fn is_control(wire: &str) -> bool {
+    matches!(
+        wire,
+        msg_types::CONTROL_HEARTBEAT | msg_types::CONTROL_PING | msg_types::CONTROL_PONG
+    )
+}
 
 core_routes!(agent, msg, responses;
-    "agent.session.create" => "agent.session.create" => {
+    "agent.session.create" => "agent.session.create" => Key(session_by_name(&msg.payload)) => {
                     let payload: ServerSessionCreatePayload =
                         match serde_json::from_value(msg.payload.clone()) {
                             Ok(p) => p,
@@ -2505,9 +3308,9 @@ core_routes!(agent, msg, responses;
                             "session_name": session_name,
                         }
                     });
-                    responses.send(WsMessage::Text(response.to_string()))?;
+                    responses.send(WsMessage::Text(response.to_string())).await?;
     }
-    "agent.env.list" => "agent.env.list" => {
+    "agent.env.list" => "agent.env.list" => Query => {
                     let request_id = str_field(&msg.payload, "request_id");
                     let files = agent
                         .env_store
@@ -2525,9 +3328,9 @@ core_routes!(agent, msg, responses;
                             "files": files,
                         }
                     });
-                    responses.send(WsMessage::Text(response.to_string()))?;
+                    responses.send(WsMessage::Text(response.to_string())).await?;
     }
-    "agent.env.get" => "agent.env.get" => {
+    "agent.env.get" => "agent.env.get" => Query => {
                     let request_id = str_field(&msg.payload, "request_id");
                     let name = str_field(&msg.payload, "name");
                     let (success, content, error) = match agent.env_store.read(&name).await {
@@ -2546,9 +3349,9 @@ core_routes!(agent, msg, responses;
                             "error": error,
                         }
                     });
-                    responses.send(WsMessage::Text(response.to_string()))?;
+                    responses.send(WsMessage::Text(response.to_string())).await?;
     }
-    "agent.env.write" => "agent.env.write" => {
+    "agent.env.write" => "agent.env.write" => Key(env_file_by_name(&msg.payload)) => {
                     let request_id = str_field(&msg.payload, "request_id");
                     let name = str_field(&msg.payload, "name");
                     let content = str_field(&msg.payload, "content");
@@ -2577,9 +3380,9 @@ core_routes!(agent, msg, responses;
                             "warnings": warnings,
                         }
                     });
-                    responses.send(WsMessage::Text(response.to_string()))?;
+                    responses.send(WsMessage::Text(response.to_string())).await?;
     }
-    "agent.env.delete" => "agent.env.delete" => {
+    "agent.env.delete" => "agent.env.delete" => Key(env_file_by_name(&msg.payload)) => {
                     let request_id = str_field(&msg.payload, "request_id");
                     let name = str_field(&msg.payload, "name");
                     let (success, error) = match agent.env_store.delete(&name).await {
@@ -2597,9 +3400,9 @@ core_routes!(agent, msg, responses;
                             "error": error,
                         }
                     });
-                    responses.send(WsMessage::Text(response.to_string()))?;
+                    responses.send(WsMessage::Text(response.to_string())).await?;
     }
-    "agent.session.env.apply" => "agent.session.env.apply" => {
+    "agent.session.env.apply" => "agent.session.env.apply" => Key(session_by_name(&msg.payload)) => {
                     let payload: ServerSessionEnvApplyPayload =
                         match serde_json::from_value(msg.payload.clone()) {
                             Ok(p) => p,
@@ -2644,9 +3447,9 @@ core_routes!(agent, msg, responses;
                             "error": error,
                         }
                     });
-                    responses.send(WsMessage::Text(response.to_string()))?;
+                    responses.send(WsMessage::Text(response.to_string())).await?;
     }
-    "agent.session.env.unset" => "agent.session.env.unset" => {
+    "agent.session.env.unset" => "agent.session.env.unset" => Key(session_by_name(&msg.payload)) => {
                     let payload: ServerSessionEnvUnsetPayload =
                         match serde_json::from_value(msg.payload.clone()) {
                             Ok(p) => p,
@@ -2677,9 +3480,9 @@ core_routes!(agent, msg, responses;
                             "error": error,
                         }
                     });
-                    responses.send(WsMessage::Text(response.to_string()))?;
+                    responses.send(WsMessage::Text(response.to_string())).await?;
     }
-    "agent.env.query" => "agent.env.query" => {
+    "agent.env.query" => "agent.env.query" => Query => {
                     let request_id = str_field(&msg.payload, "request_id");
                     let sourced_files = agent.get_sourced_env_files();
                     let response = serde_json::json!({
@@ -2693,9 +3496,9 @@ core_routes!(agent, msg, responses;
                             "sourced_files": sourced_files,
                         }
                     });
-                    responses.send(WsMessage::Text(response.to_string()))?;
+                    responses.send(WsMessage::Text(response.to_string())).await?;
     }
-    "agent.session.kill" => "agent.session.kill" => {
+    "agent.session.kill" => "agent.session.kill" => Key(session_by_name(&msg.payload)) => {
                     let request_id = msg
                         .payload
                         .get("request_id")
@@ -2727,9 +3530,9 @@ core_routes!(agent, msg, responses;
                             "error": error,
                         }
                     });
-                    responses.send(WsMessage::Text(response.to_string()))?;
+                    responses.send(WsMessage::Text(response.to_string())).await?;
     }
-    "agent.session.capture-preview" => "agent.session.capture-preview" => {
+    "agent.session.capture-preview" => "agent.session.capture-preview" => Query => {
                     let request_id = str_field(&msg.payload, "request_id");
                     let session_name = str_field(&msg.payload, "session_name");
                     let lines = u32::try_from(
@@ -2806,9 +3609,9 @@ core_routes!(agent, msg, responses;
                             "error": error,
                         }
                     });
-                    responses.send(WsMessage::Text(response.to_string()))?;
+                    responses.send(WsMessage::Text(response.to_string())).await?;
     }
-    "agent.session.report" => "agent.session.report" => {
+    "agent.session.report" => "agent.session.report" => Query => {
                     let request_id = str_field(&msg.payload, "request_id");
 
                     // An empty list is a legitimate answer ("no sessions here"),
@@ -2853,6 +3656,6 @@ core_routes!(agent, msg, responses;
                             "sessions": sessions_json,
                         }
                     });
-                    responses.send(WsMessage::Text(response.to_string()))?;
+                    responses.send(WsMessage::Text(response.to_string())).await?;
     }
 );
