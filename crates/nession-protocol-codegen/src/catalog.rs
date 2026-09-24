@@ -10,6 +10,12 @@
 use ts_rs::TS;
 
 /// One type a contract file carries.
+///
+/// `Clone` so a test can describe a catalog this build does not serve — the
+/// only way to check two versions of one unit survive generation, since no
+/// shipped contract has a second version yet. Every field is a string, a
+/// function pointer or a `Vec`, so this is a derive and not a decision.
+#[derive(Clone)]
 pub struct Decl {
     /// The name the generated TypeScript uses — ts-rs's own identifier for the
     /// type, so a rename cannot leave this string behind.
@@ -68,6 +74,7 @@ fn schema_of<T: schemars::JsonSchema>(gen: &mut schemars::SchemaGenerator) -> sc
 ///
 /// `server.heartbeat.ack` is the historical example of getting this wrong: it
 /// was neither, and it has been deleted rather than classified.
+#[derive(Clone)]
 pub struct Unit {
     /// The provider's directory name — `git`, `claude-code`.
     pub owner: &'static str,

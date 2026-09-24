@@ -29,12 +29,21 @@ fn units() -> Vec<Unit> {
 /// spelling and every unit has exactly one, so today the union is over a single
 /// element — it stays because the alternative is a lookup that silently drops
 /// the second wire the day a unit grows one.
-fn declared() -> BTreeMap<String, BTreeSet<String>> {
+/// Keyed by `(Protocol Unit, Contract Version)` — the identity `#963` fixes,
+/// and not the id alone.
+///
+/// Keying by id collapsed a unit's two versions into one entry here. That is the
+/// worse half of the same bug `schema.rs` had: this map is what the completeness
+/// assertions below compare the catalog *against*, so a collapse would have made
+/// the join agree with itself while the catalog and the providers actually
+/// disagreed — the drift these tests exist to catch, hidden precisely at the
+/// moment a second version appeared.
+fn declared() -> BTreeMap<(String, u32), BTreeSet<String>> {
     use std::collections::{BTreeMap, BTreeSet};
 
-    let mut map: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-    let mut add = |id: &str, wires: &[String]| {
-        map.entry(id.to_string())
+    let mut map: BTreeMap<(String, u32), BTreeSet<String>> = BTreeMap::new();
+    let mut add = |id: &str, version: u32, wires: &[String]| {
+        map.entry((id.to_string(), version))
             .or_default()
             .extend(wires.iter().cloned());
     };
@@ -54,25 +63,32 @@ fn declared() -> BTreeMap<String, BTreeSet<String>> {
         )
     {
         for contract in &d.contracts {
-            add(d.id.as_str(), &contract.wire);
+            add(d.id.as_str(), contract.version.get(), &contract.wire);
         }
     }
 
     // The server's declaration is reachable as the manifest it serves, which is
     // the public surface — `server_descriptors` is `pub(crate)`, deliberately,
     // since nothing outside the crate dispatches by it.
+    //
+    // A manifest entry carries `versions` rather than a descriptor per version,
+    // so each one is expanded here. Reading it as one version would make a
+    // server unit at v1 and v2 look like one contract, which is the collapse
+    // this whole function was rewritten to stop doing.
     for (id, support) in &nession_server::protocol::server_manifest()
         .expect("the server can name what it serves")
         .protocols
     {
-        add(id.as_str(), &support.wire);
+        for version in &support.versions {
+            add(id.as_str(), version.get(), &support.wire);
+        }
     }
 
     map
 }
 
-/// The protocol ids every runtime declares.
-fn advertised() -> Vec<String> {
+/// Every `(id, version)` every runtime declares.
+fn advertised() -> Vec<(String, u32)> {
     declared().into_keys().collect()
 }
 
@@ -82,12 +98,21 @@ fn every_advertised_contract_is_in_the_catalog() {
     // lists, and the design's whole objection to two lists is that they drift
     // silently. This is the join: a contract added to a provider and not to the
     // catalog fails here rather than shipping a Web that cannot name it.
-    let mut catalogued: Vec<String> = units().iter().map(|u| u.id.to_string()).collect();
+    //
+    // Compared as `(id, version)` pairs. Comparing ids made two versions of one
+    // unit indistinguishable from one, so the join would have held while the
+    // catalog emitted a v2 the provider never served — or omitted one it did.
+    let mut catalogued: Vec<(String, u32)> = units()
+        .iter()
+        .map(|u| (u.id.to_string(), u.version))
+        .collect();
     catalogued.sort();
 
+    let mut served = advertised();
+    served.sort();
+
     assert_eq!(
-        catalogued,
-        advertised(),
+        catalogued, served,
         "the catalog and the providers disagree about which contracts exist"
     );
 }
@@ -108,8 +133,11 @@ fn the_catalog_names_the_wires_the_runtimes_declare() {
     // The ids are checked; the wires are checked here.
     let declared = declared();
     for unit in units() {
-        let Some(expected) = declared.get(unit.id) else {
-            panic!("`{}` is in the catalog and no runtime declares it", unit.id);
+        let Some(expected) = declared.get(&(unit.id.to_string(), unit.version)) else {
+            panic!(
+                "`{}` v{} is in the catalog and no runtime declares it",
+                unit.id, unit.version
+            );
         };
 
         let mut actual: Vec<&str> = unit.wires.to_vec();
@@ -240,6 +268,15 @@ fn collect_refs(value: &serde_json::Value, found: &mut BTreeSet<String>) {
     }
 }
 
+/// The key one `(Protocol Unit, Contract Version)` takes under `protocols`.
+///
+/// Spelled here rather than imported from `schema` so the test fails if the
+/// generator's spelling changes — the two agreeing is the property, and calling
+/// the same function would make it true by construction.
+fn protocol_key(unit: &Unit) -> String {
+    format!("{}@v{}", unit.id, unit.version)
+}
+
 #[test]
 fn the_document_covers_every_unit_the_catalog_declares() {
     let doc = crate::schema::document(None);
@@ -249,9 +286,10 @@ fn the_document_covers_every_unit_the_catalog_declares() {
 
     for unit in units() {
         assert!(
-            protocols.contains_key(unit.id),
-            "`{}` is in the catalog but not in the schema",
-            unit.id
+            protocols.contains_key(&protocol_key(&unit)),
+            "`{}` v{} is in the catalog but not in the schema",
+            unit.id,
+            unit.version
         );
     }
     assert_eq!(
@@ -259,6 +297,59 @@ fn the_document_covers_every_unit_the_catalog_declares() {
         units().len(),
         "the schema carries a protocol the catalog does not declare"
     );
+}
+
+#[test]
+fn two_versions_of_one_unit_both_survive_in_the_document() {
+    // The bug this test exists for is a silent one. Keying `protocols` by the
+    // unit id alone meant `Map::insert` replaced: the second version of a unit
+    // did not collide, did not error, and did not appear — one contract was
+    // simply absent from the document, and the only trace was a count nobody
+    // had a reason to take.
+    //
+    // A synthetic catalog, because no shipped contract has a second version
+    // yet, and the failure mode is invisible precisely until one does.
+    let base = units()
+        .into_iter()
+        .find(|u| u.id == "git.status")
+        .expect("git.status is declared");
+    let mut v2 = base.clone();
+    v2.version = 2;
+
+    let doc = crate::schema::document_of(&[base, v2], None);
+    let protocols = doc["protocols"]
+        .as_object()
+        .expect("protocols is an object");
+
+    assert_eq!(
+        protocols.len(),
+        2,
+        "two versions of one unit must be two entries, not one that replaced the other"
+    );
+    assert!(protocols.contains_key("git.status@v1"));
+    assert!(protocols.contains_key("git.status@v2"));
+    assert_eq!(protocols["git.status@v1"]["version"], 1);
+    assert_eq!(protocols["git.status@v2"]["version"], 2);
+}
+
+#[test]
+fn the_bare_id_selects_every_version_of_that_unit() {
+    // `just protocol-schema git.status` has to keep meaning what it always
+    // meant now that a unit can have more than one generation. The qualified
+    // key is the narrower question, for a reader who wants one generation.
+    let base = units()
+        .into_iter()
+        .find(|u| u.id == "git.status")
+        .expect("git.status is declared");
+    let mut v2 = base.clone();
+    v2.version = 2;
+
+    let both = crate::schema::document_of(&[base.clone(), v2.clone()], Some("git.status"));
+    assert_eq!(both["protocols"].as_object().unwrap().len(), 2);
+
+    let one = crate::schema::document_of(&[base, v2], Some("git.status@v2"));
+    assert_eq!(one["protocols"].as_object().unwrap().len(), 1);
+    assert!(one["protocols"]["git.status@v2"].is_object());
 }
 
 #[test]
@@ -353,7 +444,7 @@ fn a_unit_with_no_shape_says_so_instead_of_omitting_the_key() {
         unit.response.is_none(),
         "the premise moved: server.agent.session-update answers now, so this test needs a new subject"
     );
-    let entry = &doc["protocols"][unit.id];
+    let entry = &doc["protocols"][protocol_key(&unit)];
     assert!(entry["request"].is_object(), "{} has no request", unit.id);
     assert!(entry["response"].is_null(), "{} has a response", unit.id);
     assert_eq!(entry["owner"], unit.owner);
