@@ -5,11 +5,15 @@
 //! connection drops for any reason, the supervisor reconnects with exponential
 //! backoff and re-registers — the loop never exits until shutdown is requested.
 //!
-//! Outgoing messages (heartbeats, session updates) are queued on an unbounded
-//! channel rather than written to the socket directly. The supervisor drains
-//! the queue onto whatever connection is currently live; while disconnected,
-//! queued messages are dropped. This means callers never observe a "broken
-//! pipe" — sending always succeeds locally and delivery resumes after reconnect.
+//! Outgoing messages (heartbeats, session updates) are queued on a bounded,
+//! coalescing outbox rather than written to the socket directly — one lane per
+//! class, holding at most one frame per resource, and never blocking the
+//! publisher. The supervisor drains it onto whatever connection is currently
+//! live; while disconnected, queued messages are dropped. This means callers
+//! never observe a "broken pipe" — sending always succeeds locally and delivery
+//! resumes after reconnect. What `#961` added to that is the bound: a socket
+//! that looks connected while its writer is stalled can no longer absorb an
+//! unbounded backlog. See [`outbox`].
 //!
 //! ## The two halves of a live connection (`#961-E`)
 //!
@@ -24,7 +28,7 @@
 //!
 //! So they are two tasks now, with one owner each:
 //!
-//! * [`ServerClient::write_loop`] owns the socket, and drains the outbox and
+//! * [`ServerClient::run_connection`] owns the socket, and drains the outbox and
 //!   the response channel. Nothing it does can be parked by business work.
 //! * [`ServerClient::read_loop`] owns the stream and the lanes
 //!   (`connection::execution`), and is the only half that may park on a bound.
@@ -55,6 +59,7 @@ use tokio_tungstenite::{
 use tracing::{debug, error, info, warn};
 
 use crate::connection::execution::{self, Lanes, ResourceKey, SHUTDOWN_GRACE};
+use crate::connection::outbox::{Outbox, OutboxFrames};
 // The lanes' boxed work is the shared type: the lane that carries it knows
 // nothing about this connection, which is the point of `nession-runtime`.
 use nession_runtime::lane::Work;
@@ -181,7 +186,7 @@ pub struct ServerClient {
 /// the live connection. Sends never fail due to a dropped connection.
 #[derive(Clone)]
 pub struct ServerClientHandle {
-    outbox: mpsc::UnboundedSender<WsMessage>,
+    outbox: Outbox,
     shutdown_tx: mpsc::Sender<()>,
     agent_id: String,
     /// Agent version info — included in each heartbeat.
@@ -207,14 +212,24 @@ impl ServerClientHandle {
     }
 
     /// Returns `true` when the supervisor has an active connection to the server.
-    /// The SessionWatcher uses this to skip sending updates while disconnected,
-    /// avoiding accumulation of stale messages in the outbox channel.
+    /// The SessionWatcher uses this to skip sending updates while disconnected.
+    ///
+    /// This is *not* what bounds the outbox — it cannot be, because a socket can
+    /// look connected while its writer is stalled in `send().await`, which is
+    /// exactly the case `#961`'s backpressure section is about. The bound is the
+    /// outbox's own, per class; this only avoids publishing state nobody will
+    /// write. See `connection::outbox`.
     pub fn is_connected(&self) -> bool {
         self.connected.load(Ordering::SeqCst)
     }
 
     /// Queue a heartbeat message for delivery to the server.
-    pub async fn send_heartbeat(
+    ///
+    /// Publishes into the heartbeat *lane*, which holds one heartbeat: a second
+    /// publish supersedes the first rather than queueing behind it, because a
+    /// heartbeat is a liveness level and the Server wants the latest one. See
+    /// `connection::outbox` — nothing here waits for room or for the socket.
+    pub fn send_heartbeat(
         &self,
         status: AgentStatus,
         session_count: u32,
@@ -234,11 +249,16 @@ impl ServerClientHandle {
             },
         };
         let msg = new_message(msg_types::CONTROL_HEARTBEAT, payload);
-        self.enqueue(&msg)
+        self.outbox.send_heartbeat(frame(&msg)?)
     }
 
     /// Queue a session update message for delivery to the server.
-    pub async fn send_session_update(
+    ///
+    /// Publishes into the session-state lane under the session's name: one
+    /// update per session is pending at a time, and a newer one supersedes the
+    /// older — the Server upserts by session id, so an intermediate state that
+    /// was never sent is not a fact anybody lost.
+    pub fn send_session_update(
         &self,
         session_name: &str,
         status: &str,
@@ -255,21 +275,22 @@ impl ServerClientHandle {
             foreground_command: foreground_command.map(std::string::ToString::to_string),
         };
         let msg = new_message(msg_types::AGENT_SESSION_UPDATE, payload);
-        self.enqueue(&msg)
+        self.outbox.send_session_update(session_name, frame(&msg)?)
     }
 
     /// Queue an address-update message for delivery to the server.
     ///
     /// Called by the network watcher when interfaces change. The server
     /// replaces the agent's advertised address list and re-probes
-    /// reachability.
-    pub async fn send_address_update(&self, addresses: Vec<AgentAddress>) -> Result<()> {
+    /// reachability. One address list is pending at a time: the list is a level,
+    /// and a re-scan has superseded the previous one by definition.
+    pub fn send_address_update(&self, addresses: Vec<AgentAddress>) -> Result<()> {
         let payload = AgentAddressUpdatePayload {
             agent_id: self.agent_id.clone(),
             addresses,
         };
         let msg = new_message(msg_types::AGENT_ADDRESS_UPDATE, payload);
-        self.enqueue(&msg)
+        self.outbox.send_address_update(frame(&msg)?)
     }
 
     /// Queue a terminal resize event for delivery to the central server, which
@@ -277,24 +298,16 @@ impl ServerClientHandle {
     ///
     /// `session_id` is the FULL `agent:name` id — the server's
     /// `handle_agent_terminal_resize` looks up relay clients by `payload.session_id`
-    /// (not the bare session name).
-    pub async fn send_terminal_resize(&self, session_id: &str, cols: u16, rows: u16) -> Result<()> {
+    /// (not the bare session name). It is also this lane's key, so one size per
+    /// session is pending at a time.
+    pub fn send_terminal_resize(&self, session_id: &str, cols: u16, rows: u16) -> Result<()> {
         let payload = AgentTerminalResizePayload {
             session_id: session_id.to_string(),
             cols,
             rows,
         };
         let msg = new_message("agent.terminal.resize", payload);
-        self.enqueue(&msg)
-    }
-
-    /// Serialize and enqueue a protocol message. A closed outbox (supervisor
-    /// gone) is the only failure; a merely-disconnected socket is not.
-    fn enqueue<P: Serialize>(&self, msg: &ProtocolMessage<P>) -> Result<()> {
-        let json = serde_json::to_string(msg)?;
-        self.outbox
-            .send(WsMessage::Text(json))
-            .map_err(|_| anyhow::anyhow!("server client supervisor has stopped"))
+        self.outbox.send_terminal_resize(session_id, frame(&msg)?)
     }
 
     /// Request the client to shut down.
@@ -304,6 +317,15 @@ impl ServerClientHandle {
             .await
             .context("failed to send shutdown signal")
     }
+}
+
+/// One protocol message as the frame the outbox carries.
+///
+/// Serialized at the publish site rather than in the writer, because the
+/// frame's *length* is what the lane charges against its byte budget — a lane
+/// that queued the payload and serialized later would be bounding an estimate.
+fn frame<P: Serialize>(msg: &ProtocolMessage<P>) -> Result<WsMessage> {
+    Ok(WsMessage::Text(serde_json::to_string(msg)?))
 }
 
 impl ServerClient {
@@ -368,7 +390,6 @@ impl ServerClient {
     /// the server's configured cadence; on the (unlikely) event the supervisor
     /// stops before the first registration it falls back to `None`.
     pub async fn connect_and_run(self) -> Result<(ServerClientHandle, Option<u64>)> {
-        let (outbox_tx, outbox_rx) = mpsc::unbounded_channel();
         let (shutdown_tx, shutdown_rx) = mpsc::channel(1);
         // One-shot-ish channel to learn the heartbeat interval from the first
         // registration. Using a bounded channel of 1 keeps it simple.
@@ -379,8 +400,17 @@ impl ServerClient {
         let sync_needed = Arc::new(AtomicBool::new(false));
         let connected = Arc::new(AtomicBool::new(false));
 
+        // The outbox is built here rather than inside the supervisor because the
+        // handle is what publishes into it, and the supervisor is what drains it.
+        // `sync_needed` is handed to both, and deliberately: it is the one flag
+        // that says "the Server's view of this agent may be stale", and the two
+        // things that make it true — a reconnection, and a session-state publish
+        // refused by a full lane — are the same question about the same view. See
+        // `connection::outbox`.
+        let (outbox, outbox_rx) = Outbox::new(Arc::clone(&sync_needed));
+
         let handle = ServerClientHandle {
-            outbox: outbox_tx,
+            outbox,
             shutdown_tx,
             agent_id: self.agent_id.clone(),
             metadata: self.metadata.clone(),
@@ -412,7 +442,7 @@ impl ServerClient {
     /// Supervisor loop: connect → register → service → reconnect, forever.
     async fn supervise(
         self,
-        mut outbox_rx: mpsc::UnboundedReceiver<WsMessage>,
+        mut outbox_rx: OutboxFrames,
         mut shutdown_rx: mpsc::Receiver<()>,
         interval_tx: mpsc::Sender<Result<Option<u64>, String>>,
         sync_needed: Arc<AtomicBool>,
@@ -602,7 +632,7 @@ impl ServerClient {
         self: Arc<Self>,
         mut sink: WsSink,
         stream: WsStreamHalf,
-        outbox_rx: &mut mpsc::UnboundedReceiver<WsMessage>,
+        outbox_rx: &mut OutboxFrames,
         shutdown_rx: &mut mpsc::Receiver<()>,
     ) -> ConnectionOutcome {
         // Handler tasks write their responses here; this half drains them onto
@@ -635,7 +665,13 @@ impl ServerClient {
         let outcome = loop {
             tokio::select! {
                 // Outgoing: drain the outbox (heartbeats, session updates).
-                outgoing = outbox_rx.recv() => {
+                //
+                // Each class on it is bounded and coalescing, so this arm is
+                // never handed an unbounded backlog however long a `send` above
+                // took — and the publish side never waits for room, so a stalled
+                // socket parks a *producer* nowhere it can be seen from here.
+                // See `connection::outbox`.
+                outgoing = outbox_rx.next() => {
                     match outgoing {
                         Some(msg) => {
                             if let Err(e) = sink.send(msg).await {
@@ -644,7 +680,8 @@ impl ServerClient {
                             }
                         }
                         None => {
-                            // Outbox closed: handle dropped, treat as shutdown.
+                            // No publisher is left: the handle was dropped,
+                            // treat as shutdown.
                             break ConnectionOutcome::Shutdown;
                         }
                     }
@@ -687,6 +724,16 @@ impl ServerClient {
         // the stream ends by itself.
         reader.abort();
         let _ = reader.await;
+
+        // What this connection's outbox ever held, in the same breath as the
+        // lanes' summary above and for the same reason (`#961`: "metrics /
+        // logging can observe queue saturation"). The lanes say what a Server
+        // made this agent *do*; this says what the agent had to *say* and how
+        // much of it a slow socket superseded or refused.
+        debug!(
+            "central connection ended — {}",
+            outbox_rx.snapshot().summary()
+        );
         outcome
     }
 
@@ -1140,7 +1187,6 @@ mod tests {
         // Send heartbeat.
         handle
             .send_heartbeat(AgentStatus::Online, 5, 2, 3600, [1.0, 2.0, 3.0])
-            .await
             .expect("heartbeat failed");
 
         let msg = tokio::time::timeout(Duration::from_secs(5), msg_rx.recv())
@@ -1196,7 +1242,6 @@ mod tests {
         // Send session update.
         handle
             .send_session_update("test-session", "active", 3, 1, Some("claude"))
-            .await
             .expect("session update failed");
 
         let msg = tokio::time::timeout(Duration::from_secs(5), msg_rx.recv())
@@ -1800,23 +1845,34 @@ mod tests {
         assert!(msg.timestamp > 0);
     }
 
+    /// A handle with an outbox of its own, and the frames it publishes into.
+    ///
+    /// The receiver comes back with the handle because dropping it is what
+    /// *closes* the outbox — a test that wants a live publisher has to hold it.
+    fn handle_with_outbox() -> (ServerClientHandle, OutboxFrames) {
+        let (outbox, frames) = Outbox::new(Arc::new(AtomicBool::new(false)));
+        let (shutdown_tx, _shutdown_rx) = mpsc::channel(1);
+        (
+            ServerClientHandle {
+                outbox,
+                shutdown_tx,
+                agent_id: "test".to_string(),
+                metadata: AgentMetadata {
+                    tmux_version: String::new(),
+                    os_version: String::new(),
+                    nession_version: String::new(),
+                    image_tag: String::new(),
+                },
+                sync_needed: Arc::new(AtomicBool::new(false)),
+                connected: Arc::new(AtomicBool::new(false)),
+            },
+            frames,
+        )
+    }
+
     #[test]
     fn server_client_handle_sync_needed_flag() {
-        let (outbox_tx, _outbox_rx) = mpsc::unbounded_channel();
-        let (shutdown_tx, _shutdown_rx) = mpsc::channel(1);
-        let handle = ServerClientHandle {
-            outbox: outbox_tx,
-            shutdown_tx,
-            agent_id: "test".to_string(),
-            sync_needed: Arc::new(AtomicBool::new(false)),
-            metadata: AgentMetadata {
-                tmux_version: String::new(),
-                os_version: String::new(),
-                nession_version: String::new(),
-                image_tag: String::new(),
-            },
-            connected: Arc::new(AtomicBool::new(false)),
-        };
+        let (handle, _frames) = handle_with_outbox();
 
         // Initially not sync needed
         assert!(!handle.take_sync_needed());
@@ -1831,21 +1887,7 @@ mod tests {
 
     #[test]
     fn server_client_handle_connected_flag() {
-        let (outbox_tx, _outbox_rx) = mpsc::unbounded_channel();
-        let (shutdown_tx, _shutdown_rx) = mpsc::channel(1);
-        let handle = ServerClientHandle {
-            outbox: outbox_tx,
-            shutdown_tx,
-            agent_id: "test".to_string(),
-            metadata: AgentMetadata {
-                tmux_version: String::new(),
-                os_version: String::new(),
-                nession_version: String::new(),
-                image_tag: String::new(),
-            },
-            sync_needed: Arc::new(AtomicBool::new(false)),
-            connected: Arc::new(AtomicBool::new(false)),
-        };
+        let (handle, _frames) = handle_with_outbox();
 
         assert!(!handle.is_connected());
 
@@ -1857,57 +1899,31 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn server_client_handle_enqueue_after_drop_fails() {
-        let (outbox_tx, outbox_rx) = mpsc::unbounded_channel();
-        let (shutdown_tx, _shutdown_rx) = mpsc::channel(1);
-        let handle = ServerClientHandle {
-            outbox: outbox_tx,
-            shutdown_tx,
-            agent_id: "test".to_string(),
-            metadata: AgentMetadata {
-                tmux_version: String::new(),
-                os_version: String::new(),
-                nession_version: String::new(),
-                image_tag: String::new(),
-            },
-            sync_needed: Arc::new(AtomicBool::new(false)),
-            connected: Arc::new(AtomicBool::new(false)),
-        };
+    async fn server_client_handle_send_after_drop_fails() {
+        let (handle, frames) = handle_with_outbox();
 
-        // Drop the receiver so the channel is closed
-        drop(outbox_rx);
+        // Drop the receiver so the outbox has no writer
+        drop(frames);
 
-        // Enqueue should fail because supervisor is gone.
+        // Publishing should fail because supervisor is gone.
         // not-protocol: this test is about the outbox, not about any wire.
         let msg = new_message("test", serde_json::json!({}));
-        let result = handle.enqueue(&msg);
+        let result = handle.outbox.send_heartbeat(frame(&msg).unwrap());
         assert!(result.is_err());
     }
 
     #[tokio::test]
     async fn server_client_handle_send_terminal_resize() {
-        let (outbox_tx, mut outbox_rx) = mpsc::unbounded_channel();
-        let (shutdown_tx, _shutdown_rx) = mpsc::channel(1);
-        let handle = ServerClientHandle {
-            outbox: outbox_tx,
-            shutdown_tx,
-            agent_id: "test".to_string(),
-            metadata: AgentMetadata {
-                tmux_version: String::new(),
-                os_version: String::new(),
-                nession_version: String::new(),
-                image_tag: String::new(),
-            },
-            sync_needed: Arc::new(AtomicBool::new(false)),
-            connected: Arc::new(AtomicBool::new(false)),
-        };
+        let (handle, mut frames) = handle_with_outbox();
 
         handle
             .send_terminal_resize("agent-1:sess-1", 120, 40)
-            .await
             .unwrap();
 
-        let msg = outbox_rx.recv().await.expect("no message in outbox");
+        // `send_terminal_resize` is not `async` any more: it publishes into a
+        // lane that never waits for room, so the frame is pending by the time it
+        // returns and no await is needed to observe it.
+        let msg = frames.try_next().expect("no message in the outbox");
         let WsMessage::Text(text) = msg else {
             panic!("expected WsMessage::Text, got {msg:?}");
         };
@@ -2524,7 +2540,6 @@ mod tests {
         // Send a heartbeat while list-sessions is still sleeping.
         handle
             .send_heartbeat(AgentStatus::Online, 1, 0, 0, [0.0, 0.0, 0.0])
-            .await
             .unwrap();
 
         // The heartbeat must arrive promptly (well before the 5s hang ends).

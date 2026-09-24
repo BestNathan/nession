@@ -89,7 +89,7 @@ pub fn spawn_watcher(handle: ServerClientHandle, config: AgentConfig, port: u16)
 
             info!("Network addresses changed: {} address(es)", new_addrs.len());
 
-            match handle.send_address_update(new_addrs.clone()).await {
+            match handle.send_address_update(new_addrs.clone()) {
                 Ok(()) => {
                     let mut guard = last_addresses.lock().await;
                     *guard = Some(new_addrs);
