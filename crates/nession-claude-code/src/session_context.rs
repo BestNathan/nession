@@ -22,6 +22,8 @@
 
 use async_trait::async_trait;
 
+use crate::binding::Binding;
+
 /// The host's view of Nession sessions.
 ///
 /// Implemented by the agent host, which is the only thing that owns session
@@ -49,6 +51,23 @@ pub trait SessionContext: Send + Sync {
     /// same signal the Web projection already uses to decide the capability is
     /// `active` — so the two cannot disagree about whether Claude is running.
     async fn session_claude_active(&self, session_id: &str) -> Option<bool>;
+
+    /// The Claude session `session_id` was bound to, when one has reported.
+    ///
+    /// This is the only answer here that resolves *which* conversation a Session
+    /// is in, and it exists because nothing else can. A cwd narrows the field to
+    /// a candidate list and stops there: two Nession sessions in one directory,
+    /// each running Claude, are indistinguishable by directory — and picking one
+    /// of them is the wrong answer `#1005` success criterion 1 forbids. Claude
+    /// reports the identity itself, through the hook the agent installs, so the
+    /// answer is *reported* rather than inferred (see [`crate::binding`]).
+    ///
+    /// `None` means no binding has been written for this session — Claude has not
+    /// started in it yet, the hook has not fired, or the host cannot read the
+    /// agent's state directory. It does **not** mean the session has no
+    /// conversation: the candidate list is still the answer to that, and a caller
+    /// must not read `None` as "nothing here".
+    async fn session_claude_binding(&self, session_id: &str) -> Option<Binding>;
 }
 
 /// A host that knows nothing — every lookup answers `None`.
@@ -69,6 +88,10 @@ impl SessionContext for NoSessionContext {
     async fn session_claude_active(&self, _session_id: &str) -> Option<bool> {
         None
     }
+
+    async fn session_claude_binding(&self, _session_id: &str) -> Option<Binding> {
+        None
+    }
 }
 
 #[cfg(test)]
@@ -78,5 +101,9 @@ mod tests {
     #[tokio::test]
     async fn a_host_that_knows_nothing_says_so_rather_than_guessing() {
         assert_eq!(NoSessionContext.session_cwd("anything").await, None);
+        assert_eq!(
+            NoSessionContext.session_claude_binding("anything").await,
+            None
+        );
     }
 }

@@ -33,6 +33,9 @@ use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
+#[cfg(test)]
+use std::cell::RefCell;
+
 use serde_json::Value;
 
 use crate::protocol::conversation::v1::{
@@ -121,7 +124,49 @@ pub fn conversations_at(cwd: &str) -> Vec<Discovered> {
 
 /// `~/.claude/projects`.
 fn projects_dir() -> Option<PathBuf> {
+    #[cfg(test)]
+    if let Some(root) = PROJECTS_ROOT.with(|cell| cell.borrow().clone()) {
+        return Some(root);
+    }
     crate::security::claude_home_dir().map(|home| home.join("projects"))
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Where discovery looks, for the current test thread.
+    ///
+    /// Thread-local rather than an environment variable, and that is the whole
+    /// point: `HOME` is process-wide, so a test that set it would change the
+    /// answer for every other test running beside it in the same binary — and
+    /// the symptom would be *those* tests failing, seemingly at random.
+    static PROJECTS_ROOT: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
+}
+
+/// Points discovery at a temporary tree for as long as it is alive.
+///
+/// Exists because discovery is otherwise unreachable from a test: it reads
+/// `~/.claude/projects`, and the tests are not allowed to write into the
+/// developer's real one. Without this the only reachable `cwd` is one with no
+/// conversations, so "resolves to the right conversation" could not be asserted
+/// at all.
+#[cfg(test)]
+pub(crate) struct ProjectsRootForTest(Option<PathBuf>);
+
+#[cfg(test)]
+impl ProjectsRootForTest {
+    pub(crate) fn set(root: PathBuf) -> Self {
+        PROJECTS_ROOT.with(|cell| Self(cell.replace(Some(root))))
+    }
+}
+
+#[cfg(test)]
+impl Drop for ProjectsRootForTest {
+    fn drop(&mut self) {
+        let previous = self.0.take();
+        PROJECTS_ROOT.with(|cell| {
+            cell.replace(previous);
+        });
+    }
 }
 
 /// Read just enough of `path` to decide whether it is `cwd`'s conversation.
@@ -603,6 +648,86 @@ mod tests {
     fn truncate_leaves_a_short_string_alone() {
         assert_eq!(truncate("abc", 10), "abc");
         assert_eq!(truncate("abcdef", 3), "abc…");
+    }
+
+    // ---- discovery ------------------------------------------------------
+
+    /// A transcript in the shape `inspect` reads: a `cwd` it can find.
+    fn transcript_at(dir: &Path, name: &str, cwd: &str, last: &str) -> PathBuf {
+        let path = dir.join(name);
+        std::fs::write(
+            &path,
+            format!(
+                r#"{{"type":"user","uuid":"u","timestamp":"{last}","cwd":"{cwd}","sessionId":"{name}","message":{{"role":"user","content":"hi"}}}}"#
+            ),
+        )
+        .expect("write the transcript");
+        path
+    }
+
+    #[test]
+    fn discovery_finds_only_the_transcripts_recorded_at_that_cwd() {
+        // Untested until now, and it is the step every conversation answer
+        // stands on: the whole candidate list comes from here. The two ways to
+        // get it wrong are opposite — matching the *directory name* instead of
+        // the recorded cwd (which is why transcripts in one project folder can
+        // belong to different directories), and matching too loosely.
+        let root = tempfile::tempdir().unwrap();
+        let project = root.path().join("-w");
+        std::fs::create_dir_all(&project).unwrap();
+        transcript_at(&project, "mine.jsonl", "/w", "2026-09-25T00:00:09Z");
+        transcript_at(
+            &project,
+            "other.jsonl",
+            "/somewhere-else",
+            "2026-09-25T00:00:01Z",
+        );
+        // Not a transcript at all, and must not become a candidate.
+        std::fs::write(project.join("notes.txt"), "hello").unwrap();
+
+        let _root = ProjectsRootForTest::set(root.path().to_path_buf());
+        let found = conversations_at("/w");
+
+        assert_eq!(found.len(), 1, "only the cwd's own transcript: {found:?}");
+        assert_eq!(found[0].claude_session_id, "mine.jsonl");
+    }
+
+    #[test]
+    fn discovery_lists_newest_first_and_puts_undated_last() {
+        // The order is a *listing* order, not a selection (#1005 decision 3) —
+        // but it is what the user chooses from, so it has to be the useful one.
+        let root = tempfile::tempdir().unwrap();
+        let project = root.path().join("-w");
+        std::fs::create_dir_all(&project).unwrap();
+        transcript_at(&project, "older.jsonl", "/w", "2026-09-25T00:00:01Z");
+        transcript_at(&project, "newer.jsonl", "/w", "2026-09-25T00:00:09Z");
+        // A real candidate — it has a session id and the right cwd — that
+        // simply carries no timestamp. Nothing to date it by, so it is not
+        // evidence of recency and goes last rather than first.
+        std::fs::write(
+            project.join("undated.jsonl"),
+            r#"{"type":"user","uuid":"u","cwd":"/w","sessionId":"undated.jsonl","message":{"role":"user","content":"hi"}}"#,
+        )
+        .unwrap();
+
+        let _root = ProjectsRootForTest::set(root.path().to_path_buf());
+        let ids: Vec<String> = conversations_at("/w")
+            .into_iter()
+            .map(|c| c.claude_session_id)
+            .collect();
+
+        assert_eq!(ids, vec!["newer.jsonl", "older.jsonl", "undated.jsonl"]);
+    }
+
+    #[test]
+    fn a_projects_root_that_is_not_there_yields_no_candidates() {
+        // Read at startup and after a Claude config change; a missing tree is an
+        // ordinary state, not a failure to report.
+        let root = tempfile::tempdir().unwrap();
+        let absent = root.path().join("never-created");
+        let _root = ProjectsRootForTest::set(absent);
+
+        assert!(conversations_at("/w").is_empty());
     }
 
     // ---- paging ---------------------------------------------------------

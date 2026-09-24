@@ -16,6 +16,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use nession_claude_code::binding::Binding;
 use nession_claude_code::session_context::SessionContext;
 
 use crate::server::websocket::extract_session_name;
@@ -81,6 +82,38 @@ impl SessionContext for TmuxSessionContext {
             }
             Err(err) => {
                 tracing::debug!(session = %name, error = %err, "claude-code: session command unavailable");
+                None
+            }
+        }
+    }
+
+    /// The binding this session's Claude reported, read from the agent's own
+    /// state directory.
+    ///
+    /// The path comes from [`claude_binding::file_for`], which is also what the
+    /// hook was handed — see that module for why the derivation is shared
+    /// rather than repeated. The session id is normalised the same way every
+    /// other lookup here normalises it, so a request naming `agent:s` reads the
+    /// binding filed under `s`.
+    ///
+    /// Nothing is created here. A missing file is the ordinary state for a
+    /// session whose Claude has not started, so this is a read on a path that
+    /// usually does not exist yet — and it must not be the thing that creates
+    /// the directory, because the answer to "is it there" would then always be
+    /// yes.
+    async fn session_claude_binding(&self, session_id: &str) -> Option<Binding> {
+        let name = extract_session_name(session_id);
+        if name.is_empty() {
+            return None;
+        }
+        let path = crate::claude_binding::file_for(&name)?;
+
+        // A small file read, but still file I/O on an async worker — the same
+        // treatment every other blocking read in this crate gets.
+        match tokio::task::spawn_blocking(move || nession_claude_code::binding::read(&path)).await {
+            Ok(binding) => binding,
+            Err(err) => {
+                tracing::debug!(session = %name, error = %err, "claude-code: binding read task failed");
                 None
             }
         }

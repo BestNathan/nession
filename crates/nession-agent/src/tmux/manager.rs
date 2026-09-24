@@ -9,6 +9,27 @@ use super::cmd::{self, TmuxCmd};
 use super::env::EnvManager;
 use super::ops::{TmuxDep, TmuxOps};
 
+/// The environment that tells a Claude Code integration which Nession session it
+/// is in, and where to report what it is doing (`#1005`).
+///
+/// Injected into every session unconditionally. These two are the *only* things
+/// the plugin's hook checks before it acts, and it acts by copying its stdin to
+/// the named file — so a session that lacks them is one where Claude runs and
+/// reports nothing, which is a binding that never appears rather than an error
+/// anyone sees.
+///
+/// The derivation itself lives in [`crate::claude_binding`], which the reader
+/// uses too; see that module for why it is shared rather than written out here.
+/// See it also for why nothing is created here: the hook writes with `cat >`,
+/// but giving session creation a filesystem side effect would put the
+/// developer's real state directory in the path of every test that creates a
+/// session. The agent creates it at startup, beside the plugin whose hook needs
+/// it — the only time it can matter, because the hook cannot run before it is
+/// installed. This function reads no filesystem.
+fn claude_binding_env(session_name: &str) -> Vec<(String, String)> {
+    crate::claude_binding::env_for(session_name)
+}
+
 /// Width a session is created at, **before any client has attached**.
 ///
 /// A starting size, not a lock. tmux's `window-size` defaults to `latest` and
@@ -359,6 +380,10 @@ impl SessionManager {
                 "PROMPT_COMMAND=[ -n \"$NESSON_PS1\" ] && { PS1=\"$NESSON_PS1\"; unset NESSON_PS1; }",
             );
         }
+        let claude_env = claude_binding_env(name);
+        for (key, value) in &claude_env {
+            cmd.arg("-e").arg(format!("{key}={value}"));
+        }
 
         let output = cmd.output().await?;
         let use_e = output.status.success();
@@ -416,6 +441,9 @@ impl SessionManager {
                 init_cmd.push_str(
                     r#"export PROMPT_COMMAND='[ -n "$NESSON_PS1" ] && { PS1="$NESSON_PS1"; unset NESSON_PS1; }';"#,
                 );
+            }
+            for (key, value) in &claude_env {
+                init_cmd.push_str(&format!("export {key}='{}';", value.replace('\'', "'\\''")));
             }
             if !init_cmd.is_empty() {
                 // **Required.** Stage 2 is the path for a tmux without
@@ -937,6 +965,42 @@ mod legacy_stage_two_tests {
             .collect()
     }
 
+    #[tokio::test]
+    async fn the_binding_environment_reaches_the_session_on_the_fallback_path() {
+        // Stage 2 is the tmux < 3.0 path: `new-session -e` is refused and the
+        // live shell is given its environment by a `send-keys` line instead.
+        // That line is built separately, so nothing about stage 1 covers it —
+        // and a session on this path without the variables is one where the
+        // hook silently reports nothing, which is the failure this whole stage
+        // exists to prevent.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let fake = stage_two_fake(dir.path(), "");
+        let mut mgr = SessionManager::new();
+        mgr.with_tmux_bin(fake.bin());
+        let session = crate::test_support::TestSession::new("claude-binding-stage2");
+
+        mgr.create_session(session.name(), SESSION_WIDTH, SESSION_HEIGHT, "/tmp", &[])
+            .await
+            .expect("a refused -e falls back rather than failing");
+
+        let sent = calls_of(&fake, "send-keys")
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join("\n");
+        let id_var = nession_claude_code::binding::SESSION_ID_ENV;
+        let file_var = nession_claude_code::binding::BINDING_FILE_ENV;
+
+        assert!(
+            sent.contains(&format!("{id_var}='{}'", session.name())),
+            "the fallback path must export the session id too: {sent}"
+        );
+        assert!(
+            sent.contains(&format!("{file_var}='")),
+            "the fallback path must name the binding file too: {sent}"
+        );
+    }
+
     #[cfg(unix)]
     #[tokio::test]
     async fn a_refused_stage_two_line_fails_the_create() {
@@ -1092,6 +1156,68 @@ mod injected_tmux_tests {
     }
 
     #[cfg(unix)]
+    #[tokio::test]
+    async fn the_claude_binding_environment_reaches_the_session() {
+        // #1005. The plugin's hook acts only when both are present, so a session
+        // created without them is one where Claude runs and reports nothing —
+        // a binding that never appears, and no error anyone can see.
+        //
+        // The assertion is on the *names* being present with usable values
+        // rather than on an exact path: the path comes from the agent's state
+        // directory, which a test must not pin to whatever the machine running
+        // it happens to have.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let fake = crate::test_support::FakeTmux::new(dir.path(), "exit 0");
+        let mut mgr = SessionManager::new();
+        mgr.with_tmux_bin(fake.bin());
+        let session = crate::test_support::TestSession::new("claude-binding-env");
+
+        mgr.create_session(session.name(), SESSION_WIDTH, SESSION_HEIGHT, "/tmp", &[])
+            .await
+            .expect("create");
+
+        let calls = fake.calls();
+        let create = calls
+            .iter()
+            .find(|args| args.first().map(String::as_str) == Some("new-session"))
+            .expect("the create ran");
+        let argv = create.join("\n");
+
+        let id_var = nession_claude_code::binding::SESSION_ID_ENV;
+        let file_var = nession_claude_code::binding::BINDING_FILE_ENV;
+        // The name tmux was actually given, which `TestSession` makes unique —
+        // asserting the literal passed to it would pass on a machine where no
+        // other test had run, and fail everywhere else.
+        let name = session.name();
+
+        assert!(
+            argv.contains(&format!("{id_var}={name}")),
+            "the session id must be the name tmux was given, or the hook binds \
+             the wrong session: {argv}"
+        );
+        assert!(
+            argv.contains(&format!("{file_var}=")),
+            "the binding file must be named, or the hook has nowhere to write: {argv}"
+        );
+        assert!(
+            argv.contains(&format!("{file_var}=/")),
+            "the binding file must be an absolute path — the hook runs from \
+             whatever cwd Claude was started in: {argv}"
+        );
+        assert!(
+            argv.contains(&format!("{file_var}=/")),
+            "the binding file must be an absolute path: {argv}"
+        );
+        let binding_line = argv
+            .lines()
+            .find(|line| line.starts_with(&format!("{file_var}=")))
+            .expect("the binding file is named");
+        assert!(
+            binding_line.ends_with(&format!("{name}.json")),
+            "the binding file must be this session's, not a shared one: {binding_line}"
+        );
+    }
+
     #[tokio::test]
     async fn best_effort_propagation_reports_a_failure_and_still_creates_the_session() {
         // Stage 3's arm: `propagate_env_best_effort`'s
