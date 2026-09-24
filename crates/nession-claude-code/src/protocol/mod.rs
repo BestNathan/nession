@@ -2,6 +2,7 @@
 //!
 //! ```text
 //! protocol/
+//!   conversation/v1
 //!   list/v1
 //!   read/v1
 //! ```
@@ -37,6 +38,7 @@
 //! a wire change that needs a new contract version and a client update in the
 //! same change, and it is recorded as such rather than smuggled in here.
 
+pub mod conversation;
 pub mod list;
 pub mod read;
 
@@ -107,7 +109,7 @@ mod tests {
     fn a_descriptor_list_is_what_a_manifest_would_advertise() {
         let manifest =
             nession_protocol::ProtocolManifest::from_descriptors(OWNER, &descriptors().unwrap());
-        assert_eq!(manifest.protocols.len(), 2);
+        assert_eq!(manifest.protocols.len(), EXPECTED_IDS.len());
         for id in EXPECTED_IDS {
             let id = nession_protocol::ProtocolId::new(id).unwrap();
             assert!(manifest.offers(&id), "manifest is missing {id}");
