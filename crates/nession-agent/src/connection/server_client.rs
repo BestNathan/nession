@@ -3469,7 +3469,7 @@ fn is_control(wire: &str) -> bool {
 }
 
 core_routes!(agent, msg, responses;
-    "agent.session.create" => "agent.session.create" => Key(session_by_name(&msg.payload)) => {
+    "agent.session.create" => "agent.session.create" => 1 => Key(session_by_name(&msg.payload)) => {
                     let payload: ServerSessionCreatePayload =
                         match serde_json::from_value(msg.payload.clone()) {
                             Ok(p) => p,
@@ -3519,7 +3519,7 @@ core_routes!(agent, msg, responses;
                     });
                     responses.send(WsMessage::Text(response.to_string())).await?;
     }
-    "agent.env.list" => "agent.env.list" => Query => {
+    "agent.env.list" => "agent.env.list" => 1 => Query => {
                     let request_id = str_field(&msg.payload, "request_id");
                     let files = agent
                         .env_store
@@ -3539,7 +3539,7 @@ core_routes!(agent, msg, responses;
                     });
                     responses.send(WsMessage::Text(response.to_string())).await?;
     }
-    "agent.env.get" => "agent.env.get" => Query => {
+    "agent.env.get" => "agent.env.get" => 1 => Query => {
                     let request_id = str_field(&msg.payload, "request_id");
                     let name = str_field(&msg.payload, "name");
                     let (success, content, error) = match agent.env_store.read(&name).await {
@@ -3560,7 +3560,7 @@ core_routes!(agent, msg, responses;
                     });
                     responses.send(WsMessage::Text(response.to_string())).await?;
     }
-    "agent.env.write" => "agent.env.write" => Key(env_file_by_name(&msg.payload)) => {
+    "agent.env.write" => "agent.env.write" => 1 => Key(env_file_by_name(&msg.payload)) => {
                     let request_id = str_field(&msg.payload, "request_id");
                     let name = str_field(&msg.payload, "name");
                     let content = str_field(&msg.payload, "content");
@@ -3591,7 +3591,7 @@ core_routes!(agent, msg, responses;
                     });
                     responses.send(WsMessage::Text(response.to_string())).await?;
     }
-    "agent.env.delete" => "agent.env.delete" => Key(env_file_by_name(&msg.payload)) => {
+    "agent.env.delete" => "agent.env.delete" => 1 => Key(env_file_by_name(&msg.payload)) => {
                     let request_id = str_field(&msg.payload, "request_id");
                     let name = str_field(&msg.payload, "name");
                     let (success, error) = match agent.env_store.delete(&name).await {
@@ -3611,7 +3611,7 @@ core_routes!(agent, msg, responses;
                     });
                     responses.send(WsMessage::Text(response.to_string())).await?;
     }
-    "agent.session.env.apply" => "agent.session.env.apply" => Key(session_by_name(&msg.payload)) => {
+    "agent.session.env.apply" => "agent.session.env.apply" => 1 => Key(session_by_name(&msg.payload)) => {
                     let payload: ServerSessionEnvApplyPayload =
                         match serde_json::from_value(msg.payload.clone()) {
                             Ok(p) => p,
@@ -3658,7 +3658,7 @@ core_routes!(agent, msg, responses;
                     });
                     responses.send(WsMessage::Text(response.to_string())).await?;
     }
-    "agent.session.env.unset" => "agent.session.env.unset" => Key(session_by_name(&msg.payload)) => {
+    "agent.session.env.unset" => "agent.session.env.unset" => 1 => Key(session_by_name(&msg.payload)) => {
                     let payload: ServerSessionEnvUnsetPayload =
                         match serde_json::from_value(msg.payload.clone()) {
                             Ok(p) => p,
@@ -3691,7 +3691,7 @@ core_routes!(agent, msg, responses;
                     });
                     responses.send(WsMessage::Text(response.to_string())).await?;
     }
-    "agent.env.query" => "agent.env.query" => Query => {
+    "agent.env.query" => "agent.env.query" => 1 => Query => {
                     let request_id = str_field(&msg.payload, "request_id");
                     let sourced_files = agent.get_sourced_env_files();
                     let response = serde_json::json!({
@@ -3707,7 +3707,7 @@ core_routes!(agent, msg, responses;
                     });
                     responses.send(WsMessage::Text(response.to_string())).await?;
     }
-    "agent.session.kill" => "agent.session.kill" => Key(session_by_name(&msg.payload)) => {
+    "agent.session.kill" => "agent.session.kill" => 1 => Key(session_by_name(&msg.payload)) => {
                     let request_id = msg
                         .payload
                         .get("request_id")
@@ -3741,7 +3741,7 @@ core_routes!(agent, msg, responses;
                     });
                     responses.send(WsMessage::Text(response.to_string())).await?;
     }
-    "agent.session.capture-preview" => "agent.session.capture-preview" => Query => {
+    "agent.session.capture-preview" => "agent.session.capture-preview" => 1 => Query => {
                     let request_id = str_field(&msg.payload, "request_id");
                     let session_name = str_field(&msg.payload, "session_name");
                     let lines = u32::try_from(
@@ -3820,7 +3820,7 @@ core_routes!(agent, msg, responses;
                     });
                     responses.send(WsMessage::Text(response.to_string())).await?;
     }
-    "agent.session.report" => "agent.session.report" => Query => {
+    "agent.session.report" => "agent.session.report" => 1 => Query => {
                     let request_id = str_field(&msg.payload, "request_id");
 
                     // An empty list is a legitimate answer ("no sessions here"),
@@ -3868,3 +3868,191 @@ core_routes!(agent, msg, responses;
                     responses.send(WsMessage::Text(response.to_string())).await?;
     }
 );
+
+/// A Protocol Unit serving two generations, declared through the real macro.
+///
+/// ## Why this is a synthetic table and not an arm on the real one
+///
+/// The macros generate functions with fixed names, so a second invocation in
+/// the same module collides with the real `core_descriptors`. A separate module
+/// is the only place a two-version arm can exist without the agent actually
+/// advertising a protocol nobody implements — which would be a worse test,
+/// because it would assert on a manifest a real peer could resolve against.
+///
+/// ## Why it lives in this file
+///
+/// `core_routes!` generates a `dispatch_core` taking `&ServerClient`, and
+/// `connection::server_client` is a private module — so the invocation only
+/// compiles in the file that already has one. That is a real constraint on where
+/// a test like this can go, not a preference.
+///
+/// ## What this proves
+///
+/// Both halves. The **routing**: two generations of one unit are two descriptors
+/// the manifest unions to `[1, 2]`, and the version in the payload selects the
+/// arm. And the **dispatch**: `dispatch_core` runs the body the version picked.
+///
+/// The bodies answer with a distinguishable error rather than doing work, which
+/// is what makes "which arm ran" observable without a live connection.
+/// `ServerClient::new` does not connect — `connect_and_run` does — so a client
+/// can be built here and handed to the dispatcher.
+#[cfg(test)]
+mod versioned_routing {
+    use super::*;
+
+    core_routes!(client, msg, responses;
+        "test.thing" => "test.thing" => 1 => Query => {
+            let _ = (client, responses, msg);
+            return Err(anyhow::anyhow!("ran v1"));
+        }
+        "test.thing" => "test.thing" => 2 => Inline => {
+            let _ = (client, responses, msg);
+            return Err(anyhow::anyhow!("ran v2"));
+        }
+    );
+
+    /// A message on the synthetic unit's one wire.
+    fn message(payload: serde_json::Value) -> ProtocolMessage<serde_json::Value> {
+        ProtocolMessage {
+            msg_type: "test.thing".to_string(),
+            id: "test-1".to_string(),
+            timestamp: 0,
+            payload,
+        }
+    }
+
+    /// A client that is constructed but not connected, which is all
+    /// `dispatch_core` needs — it takes the client, it does not talk to one.
+    fn unconnected_client() -> ServerClient {
+        ServerClient::new(
+            "ws://127.0.0.1:1",
+            "test-token",
+            "test-agent-versioned-routing",
+            "test-host",
+            "127.0.0.1",
+            8080,
+            None,
+            vec![],
+            None,
+            AgentMetadata {
+                tmux_version: "3.3".to_string(),
+                os_version: "Linux".to_string(),
+                nession_version: "0.1.0".to_string(),
+                image_tag: "test".to_string(),
+            },
+            Arc::new(SessionManager::new()),
+            "/tmp".to_string(),
+            None,
+        )
+    }
+
+    /// Which body ran, as the error it returned.
+    async fn ran(payload: serde_json::Value) -> String {
+        let client = unconnected_client();
+        let (responses, _rx) = mpsc::channel(1);
+        dispatch_core(&client, &message(payload), &responses)
+            .await
+            .expect_err("the synthetic bodies answer with an error so the arm is visible")
+            .to_string()
+    }
+
+    #[test]
+    fn two_versions_of_one_unit_are_two_descriptors_the_manifest_unions() {
+        let descriptors = core_descriptors().expect("the synthetic table names itself");
+        assert_eq!(descriptors.len(), 2, "one descriptor per arm, not per wire");
+
+        // Both carry the unit's one canonical wire — the wire locates the unit,
+        // the version selects the generation. A second *wire* here would be the
+        // `git.status.v2` spelling `#963` Non-Goal 6 forbids.
+        for descriptor in &descriptors {
+            assert_eq!(descriptor.id.as_str(), "test.thing");
+            assert_eq!(descriptor.contracts.len(), 1);
+            assert_eq!(descriptor.contracts[0].wire, vec!["test.thing".to_string()]);
+        }
+
+        let manifest = nession_protocol::ProtocolManifest::from_descriptors("test", &descriptors);
+        let support = manifest
+            .support(&nession_protocol::ProtocolId::new("test.thing").unwrap())
+            .expect("the unit is advertised");
+        assert_eq!(
+            support.versions,
+            vec![
+                nession_protocol::ContractVersion::V1,
+                nession_protocol::ContractVersion::new(2).unwrap()
+            ],
+            "the union is what makes the older generation reachable"
+        );
+        assert_eq!(support.wire, vec!["test.thing".to_string()]);
+    }
+
+    #[test]
+    fn the_wire_set_covers_both_generations() {
+        // The message loop asks only membership, so a unit at two versions
+        // appearing twice is harmless — and *not* appearing would be the
+        // failure, because a message on a wire the set omits never reaches the
+        // dispatcher at all.
+        assert!(CORE_WIRES.contains(&"test.thing"));
+        assert_eq!(
+            CORE_WIRES.iter().filter(|w| **w == "test.thing").count(),
+            2,
+            "one entry per version, which is what matching on the tuple expects"
+        );
+    }
+
+    #[test]
+    fn the_version_in_the_payload_selects_the_arm() {
+        // Each generation may declare its own policy, and then each gets the one
+        // it declared. An arm for v2 that could not be reached would be the
+        // unreachable-pattern failure this scrutinee shape exists to avoid — so
+        // asserting the two differ is asserting the arm is live.
+        let v1 = core_policy(&message(serde_json::json!({ "contract_version": 1 })));
+        let v2 = core_policy(&message(serde_json::json!({ "contract_version": 2 })));
+
+        assert!(matches!(v1, Some(Query)), "got {v1:?}");
+        assert!(matches!(v2, Some(Inline)), "got {v2:?}");
+    }
+
+    #[tokio::test]
+    async fn dispatch_runs_the_body_the_version_picked() {
+        // The measurement the policy assertions above are only an argument for:
+        // the same `(wire, version)` scrutinee, but the body actually runs.
+        assert_eq!(
+            ran(serde_json::json!({ "contract_version": 1 })).await,
+            "ran v1"
+        );
+        assert_eq!(
+            ran(serde_json::json!({ "contract_version": 2 })).await,
+            "ran v2"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_message_that_names_no_version_runs_v1() {
+        // The rule the tuple match is built on, and not a new one: a caller
+        // naming no version addresses the unit as it was before versions
+        // existed. Pinned because if it ever stops holding, every arm silently
+        // shifts to whichever version sorts first.
+        assert_eq!(
+            ran(serde_json::json!({ "session": "a:work" })).await,
+            "ran v1"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_version_no_arm_declares_falls_through_rather_than_picking_one() {
+        // Not a refusal — `#963` Stage 3 owns that — but it must not silently
+        // run an arm either, or a message written for a generation this table
+        // has never heard of would be handled as whichever arm matched first.
+        let client = unconnected_client();
+        let (responses, _rx) = mpsc::channel(1);
+        let outcome = dispatch_core(
+            &client,
+            &message(serde_json::json!({ "contract_version": 99 })),
+            &responses,
+        )
+        .await;
+
+        assert!(outcome.is_ok(), "no body ran, and nothing errored");
+        assert!(core_policy(&message(serde_json::json!({ "contract_version": 99 }))).is_none());
+    }
+}
