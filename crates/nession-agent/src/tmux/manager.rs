@@ -823,12 +823,20 @@ mod window_size_lock_tests {
 mod legacy_stage_two_tests {
     use super::*;
 
-    /// Separator the fake tmux writes between recorded calls.
+    /// Prefix of the one-directory-per-call records the shim writes.
+    #[cfg(unix)]
+    const CALL_FILE_PREFIX: &str = "call.";
+
+    /// Name of the file inside `call.N` that holds the call's argv.
+    #[cfg(unix)]
+    const CALL_RECORD_NAME: &str = "argv";
+
+    /// Terminator the shim writes after the argv of each recorded call.
     #[cfg(unix)]
     const CALL_SEPARATOR: &str = "==call==";
 
-    /// A fake tmux that records its arguments — one per line, so a call's
-    /// *boundaries* are visible — and fails the first `new-session` so
+    /// A fake tmux that records its arguments — one record per call, so a
+    /// call's *boundaries* are visible — and fails the first `new-session` so
     /// `create_session` takes its legacy stage-2 path (the one for a tmux
     /// without `-e`, i.e. before 3.0).
     ///
@@ -838,22 +846,37 @@ mod legacy_stage_two_tests {
     #[cfg(unix)]
     fn recording_shim(dir: &std::path::Path) -> (String, PathBuf) {
         use std::os::unix::fs::PermissionsExt;
-        let log = dir.join("argv.log");
         let stage1 = dir.join("stage1-ran");
         let path = dir.join("tmux");
         std::fs::write(
             &path,
+            // One file per call, claimed with an O_EXCL create, so two
+            // processes recording at once cannot interleave. The mechanism and
+            // the measurements are documented on `FakeTmux` in
+            // `crate::test_support`; keep this body in step with it.
             format!(
                 "#!/bin/sh\n\
                  if [ \"$1\" = \"-S\" ]; then shift 2; fi\n\
-                 printf '%s\\n' \"$@\" >> \"{log}\"\n\
-                 echo \"{sep}\" >> \"{log}\"\n\
+                 n=0\n\
+                 while true; do\n\
+                 while [ -e \"{dir}/{prefix}$n\" ]; do n=$((n + 1)); done\n\
+                 if mkdir \"{dir}/{prefix}$n\" 2>/dev/null; then break; fi\n\
+                 if [ ! -d \"{dir}/{prefix}$n\" ]; then\n\
+                 echo \"fake tmux: cannot claim {dir}/{prefix}$n\" >&2\n\
+                 exit 1\n\
+                 fi\n\
+                 n=$((n + 1))\n\
+                 done\n\
+                 printf '%s\\n' \"$@\" > \"{dir}/{prefix}$n/{record}\"\n\
+                 echo \"{sep}\" >> \"{dir}/{prefix}$n/{record}\"\n\
                  case \"$1\" in\n\
                    new-session)\n\
                      if [ -f \"{stage1}\" ]; then exit 0; else : > \"{stage1}\"; exit 1; fi;;\n\
                    *) exit 0;;\n\
                  esac\n",
-                log = log.display(),
+                dir = dir.display(),
+                prefix = CALL_FILE_PREFIX,
+                record = CALL_RECORD_NAME,
                 sep = CALL_SEPARATOR,
                 stage1 = stage1.display(),
             ),
@@ -864,18 +887,39 @@ mod legacy_stage_two_tests {
             .permissions();
         perms.set_mode(0o755);
         std::fs::set_permissions(&path, perms).expect("chmod shim");
-        (path.to_string_lossy().into_owned(), log)
+        (path.to_string_lossy().into_owned(), dir.to_path_buf())
     }
 
     /// The recorded calls, each as the list of argv entries tmux received.
     #[cfg(unix)]
-    fn recorded_calls(log: &str) -> Vec<Vec<&str>> {
-        log.split(CALL_SEPARATOR)
-            // The separator is written *after* each call, so every block but
-            // the first opens with the newline that ended the previous one.
-            .map(|block| block.trim_matches('\n').lines().collect::<Vec<&str>>())
-            .filter(|args| !args.is_empty())
-            .collect()
+    fn recorded_calls(dir: &std::path::Path) -> Vec<Vec<String>> {
+        let mut calls = Vec::new();
+        for n in 0.. {
+            let claimed = dir.join(format!("{CALL_FILE_PREFIX}{n}"));
+            // Indices are claimed in order by creating the directory, so the
+            // first unclaimed one means there is nothing after it either.
+            if !claimed.is_dir() {
+                break;
+            }
+            let text = match std::fs::read_to_string(claimed.join(CALL_RECORD_NAME)) {
+                Ok(text) => text,
+                // Claimed, but the argv is not on disk yet — and later indices
+                // may already be complete, so this is not where the scan ends.
+                Err(_) => continue,
+            };
+            let Some(body) = text.trim_end_matches('\n').strip_suffix(CALL_SEPARATOR) else {
+                continue;
+            };
+            let entries: Vec<String> = body
+                .trim_matches('\n')
+                .lines()
+                .map(str::to_string)
+                .collect();
+            if !entries.is_empty() {
+                calls.push(entries);
+            }
+        }
+        calls
     }
 
     #[cfg(unix)]
@@ -892,7 +936,7 @@ mod legacy_stage_two_tests {
         // fail), splitting the line into key names (length), or swapping the
         // `-t` order (the prefix assertion).
         let dir = tempfile::tempdir().expect("tempdir");
-        let (shim, log_path) = recording_shim(dir.path());
+        let (shim, record_dir) = recording_shim(dir.path());
         let mut mgr = SessionManager::new();
         mgr.with_tmux_bin(shim);
         let session = crate::test_support::TestSession::new("stage2-argv");
@@ -901,11 +945,10 @@ mod legacy_stage_two_tests {
             .await
             .expect("against the shim, create takes its legacy stage-2 path");
 
-        let log = std::fs::read_to_string(&log_path).expect("shim recorded its calls");
-        let calls = recorded_calls(&log);
+        let calls = recorded_calls(&record_dir);
         let typed = calls
             .iter()
-            .find(|args| args.first() == Some(&"send-keys"))
+            .find(|args| args.first().map(String::as_str) == Some("send-keys"))
             .unwrap_or_else(|| panic!("stage 2 must type the environment line: {calls:?}"));
 
         assert_eq!(
@@ -915,13 +958,13 @@ mod legacy_stage_two_tests {
              Enter is part of the operation: {typed:?}"
         );
         assert_eq!(
-            &typed[..3],
+            typed[..3].iter().map(String::as_str).collect::<Vec<&str>>(),
             ["send-keys", "-t", session.name()],
             "the session is the target, in the owner's order: {typed:?}"
         );
         assert_eq!(
-            typed.last(),
-            Some(&"Enter"),
+            typed.last().map(String::as_str),
+            Some("Enter"),
             "a line that is typed but never submitted sets nothing: {typed:?}"
         );
         assert!(
