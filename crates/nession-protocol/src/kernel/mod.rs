@@ -38,5 +38,5 @@ pub use descriptor::{ContractDescriptor, DescriptorError, Lifecycle, ProtocolDes
 pub use envelope::{Message, ProtocolMessage};
 pub use error::ProtocolError;
 pub use identity::{ContractVersion, IdentityError, ProtocolId, MAX_ID_LEN};
-pub use manifest::{ContractSupport, ProtocolManifest};
+pub use manifest::{CompositionError, ContractSupport, ProtocolManifest};
 pub use resolver::{resolve, select_version};

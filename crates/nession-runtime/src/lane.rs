@@ -21,6 +21,33 @@
 //! connections is coalesced elsewhere and deliberately (a resize, a state push;
 //! see the runtimes' outbound paths).
 //!
+//! ## Who owns the keyed lane
+//!
+//! A key is a statement about a *resource*, so the lane that orders work by key
+//! belongs at the scope the resource is. [`Lanes::new`] gives a connection a
+//! lane of its own, which is the right answer when its keys name only state that
+//! connection owns. [`Lanes::shared`] gives every connection of one runtime the
+//! *same* lane, and the caller that builds it is the one that owns the
+//! resources the keys name — a session manager, a file sandbox, a registry. A
+//! lane built per connection around runtime-global resources would promise
+//! `same resource + same connection → FIFO`, which says nothing about the case
+//! it is meant to cover: two peers mutating one session.
+//!
+//! The two halves of the lane are not owned at the same scope in
+//! [`Lanes::shared`], and that is the point of it rather than an inconsistency:
+//!
+//! * **ordering** follows the resource — one worker per key, one queue per key,
+//!   for the whole runtime;
+//! * **admission** follows the connection — the bound on how many mutations one
+//!   peer may have in flight is the connection's, because the thing that waits
+//!   is the connection's reader and the number it protects is that
+//!   connection's tasks. A bound shared by every peer is a budget one peer can
+//!   spend on behalf of the others, which is not a bound on the peer at all.
+//!
+//! Both halves are how `#961`'s "并发必须有界" is met: the number of mutations a
+//! connection has in flight is a number, and it is the same number whatever
+//! resources the frames name.
+//!
 //! ## Why the bound is a bound on the *reader*
 //!
 //! [`QueryLane::dispatch`] and [`KeyedLane::enqueue`] wait when the lane they
@@ -31,7 +58,8 @@
 //! exceed it is not read until there is room for it. The bound is per connection
 //! rather than process-wide, because what it protects is the *connection's*
 //! ability to make progress, and one busy browser must not consume the fleet's
-//! budget.
+//! budget — which is why [`Lanes::shared`] keeps its admission bound on the
+//! connection even though the ordering lane it feeds is the runtime's.
 //!
 //! Waiting on a lane does not hold the connection's *writes*: each runtime's
 //! outbound path is its own task with its own bound, so a reader parked on a
@@ -42,9 +70,20 @@
 //! A per-key queue bounds how far ahead of the backend one *resource* may get.
 //! It does not bound how many resources are being mutated at once: one worker
 //! per key still means one worker per resource named, and a peer naming a
-//! thousand sessions has a thousand workers, each inside its own depth. The
-//! global half of the bound is [`KeyedLane::with_worker_budget`], and only the
-//! runtime that needs it asks for it — see that constructor.
+//! thousand sessions has a thousand workers, each inside its own depth. That
+//! second bound is a separate decision and there are two ways to state it, one
+//! per scope:
+//!
+//! * [`KeyedLane::with_worker_budget`] bounds how many resources one *lane* may
+//!   be mutating at once. On a lane a connection owns, that is the connection's
+//!   bound; on a lane the runtime owns, it is the runtime's.
+//! * [`Lanes::shared`] bounds how many mutations one *connection* may have in
+//!   flight while the lane itself stays unbudgeted, which is the same statement
+//!   made where the waiter is.
+//!
+//! Neither is a default, because a per-key queue is a statement about ordering
+//! and a runtime whose resources are few does not need a second bound and would
+//! not have had one — see the constructors.
 //!
 //! ## The label
 //!
@@ -58,7 +97,7 @@ use std::fmt;
 use std::future::Future;
 use std::hash::Hash;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -125,6 +164,13 @@ pub struct KeySnapshot {
 }
 
 /// One line describing what a connection's lanes did, for the teardown log.
+///
+/// The query half is always the connection's. The mutation half is the lane's
+/// own numbers, and on a shared lane ([`Lanes::shared`]) that lane is the
+/// runtime's rather than this connection's — the counters describe every
+/// mutation that went through it. A caller that wants the connection's own
+/// share as well has [`Lanes::admission_waits`], and the two together are the
+/// honest picture: what the lane ever did, and how often this peer waited.
 ///
 /// `#961`'s backpressure section asks that "metrics/logging can observe queue
 /// saturation, in-flight count, per-key queue depth", and until this existed the
@@ -639,6 +685,185 @@ where
     }
 }
 
+/// Where a connection's mutations are ordered.
+///
+/// Two shapes, and which one a runtime uses is a statement about *who owns* the
+/// resources its keys name — see this module's docs. The rest of [`Lanes`] does
+/// not care which: a query is admitted the same way either way, and a mutation
+/// goes to whichever keyed lane the connection has.
+enum Keys<K> {
+    /// The lane belongs to this connection, and dies with it.
+    Own(KeyedLane<K>),
+    /// The lane belongs to the runtime, and outlives every connection that
+    /// dispatches into it.
+    Shared(SharedKeys<K>),
+}
+
+/// One connection's use of a lane the runtime owns.
+///
+/// The lane is shared; the *bound* is not, and this is what keeps the two
+/// statements apart:
+///
+/// * the connection may have at most `slots` mutations in flight — running or
+///   queued — whatever keys they name, which is how "a peer naming a thousand
+///   resources" stops being a thousand workers;
+/// * the connection's reader is what waits for a slot, so a peer that has spent
+///   its own does not spend anyone else's;
+/// * and because a slot is held for exactly as long as one dispatched mutation
+///   has not finished, taking *all* of them is the barrier an ordered frame
+///   stands behind ([`SharedKeys::drain`]). A slot is therefore two things at
+///   once, and deliberately: the count of a connection's unfinished mutations is
+///   what bounds it and what the barrier waits for. Two mechanisms would be two
+///   things to keep in step.
+struct SharedKeys<K> {
+    lane: Arc<KeyedLane<K>>,
+    /// One permit per mutation this connection may have in flight.
+    ///
+    /// An `Arc` because a dispatched mutation takes an *owned* permit: it
+    /// outlives the method that took it, and a borrow of the connection would
+    /// make every mutation borrow the connection it belongs to.
+    slots: Arc<Semaphore>,
+    /// How many permits `slots` was built with, in the width a semaphore counts
+    /// permits in. Kept rather than re-derived so the log line below does not go
+    /// on saying "16" after the constant moved, and because the barrier has to
+    /// ask for exactly this many.
+    bound: u32,
+    /// Tripped when the connection ends, which is how work this connection
+    /// queued into the *shared* lane learns that nobody is waiting for it any
+    /// more. Without it a disconnected peer's queued mutations would still run,
+    /// and a mutation is not something to run on behalf of someone who left.
+    ended: Arc<Ended>,
+    admission_waits: AtomicU64,
+    label: &'static str,
+}
+
+/// A one-way "this is over" signal.
+///
+/// A `Notify` and a flag rather than a token type from a dependency this crate
+/// does not have, and the pair is what makes it safe to await: the flag makes
+/// the state durable (a signal that arrived before anyone waited is not lost)
+/// and the `Notify` makes waking possible. Every awaiter registers *before* it
+/// looks, so the two cannot disagree.
+#[derive(Default)]
+struct Ended {
+    flag: AtomicBool,
+    wake: Notify,
+}
+
+impl Ended {
+    fn end(&self) {
+        self.flag.store(true, Ordering::SeqCst);
+        self.wake.notify_waiters();
+    }
+
+    fn is_ended(&self) -> bool {
+        self.flag.load(Ordering::SeqCst)
+    }
+
+    async fn wait(&self) {
+        loop {
+            let woken = self.wake.notified();
+            tokio::pin!(woken);
+            woken.as_mut().enable();
+            if self.is_ended() {
+                return;
+            }
+            woken.await;
+        }
+    }
+}
+
+impl<K> SharedKeys<K>
+where
+    K: Clone + Eq + Hash + fmt::Display + Send + Sync + 'static,
+{
+    /// Admit one mutation, waiting for a slot if this connection is at its
+    /// bound, and queue it behind its resource's own queue.
+    async fn enqueue(&self, key: K, work: Work) {
+        let permit = self.acquire().await;
+        let ended = Arc::clone(&self.ended);
+        // The slot is released when the mutation has *finished*, which is what
+        // makes the count a count of unfinished mutations rather than of
+        // queued ones — and what makes `drain` a barrier rather than a
+        // statement about the queue. The `select!` is the other half: work this
+        // connection queued before it ended does not become work it never
+        // asked for.
+        let admitted: Work = Box::pin(async move {
+            if !ended.is_ended() {
+                tokio::select! {
+                    () = work => {}
+                    () = ended.wait() => {}
+                }
+            }
+            drop(permit);
+        });
+        self.lane.enqueue(key, admitted).await;
+    }
+
+    /// Take a slot, waiting for one if this connection has none left.
+    ///
+    /// `None` means the semaphore was closed, which nothing in this module does;
+    /// see [`QueryLane::acquire`] for why that arm runs the frame rather than
+    /// dropping it.
+    async fn acquire(&self) -> Option<OwnedSemaphorePermit> {
+        let slots = Arc::clone(&self.slots);
+        if let Ok(permit) = Arc::clone(&slots).try_acquire_owned() {
+            return Some(permit);
+        }
+        self.admission_waits.fetch_add(1, Ordering::Relaxed);
+        debug!(
+            "{}key lane: this connection already has {} mutation(s) in flight; it waits \
+             for one to finish before reading on",
+            self.label, self.bound
+        );
+        slots.acquire_owned().await.ok()
+    }
+
+    /// Wait until nothing this connection dispatched is still running.
+    ///
+    /// Taking every slot is the barrier, and the permits go straight back: this
+    /// is not a shutdown. It is also *only* this connection's work that is
+    /// waited for — the lane is shared, and waiting for it to empty would make
+    /// one connection's ordered frame wait on another connection's mutations,
+    /// which is neither what the barrier is for nor something this connection
+    /// could make progress through.
+    async fn drain(&self) {
+        let Ok(permits) = Arc::clone(&self.slots).acquire_many_owned(self.bound).await else {
+            return;
+        };
+        drop(permits);
+    }
+
+    /// Stop this connection's mutations, waiting at most `grace` for the ones
+    /// that are running to notice.
+    ///
+    /// The lane is not this connection's to end. Ending it would end every other
+    /// connection's mutations, and clearing its queues would drop work that
+    /// belongs to peers that are still here. What ends here is *this
+    /// connection's* work, and the `select!` above is how it ends: a mutation
+    /// already running stops at its next await point, and one still queued skips
+    /// its body when it reaches the front of its key's queue.
+    ///
+    /// The wait is for the slots to come back, and it is bounded because the
+    /// queued half of that wait is not this connection's to bound: a mutation
+    /// queued behind *another* connection's long-running work cannot release its
+    /// slot until that work finishes. Timing out there is not a failure — the
+    /// connection is over either way — which is why it is a debug line rather
+    /// than the warning [`KeyedLane::shutdown`] logs.
+    async fn shutdown(&self, grace: Duration) {
+        self.ended.end();
+        if tokio::time::timeout(grace, self.drain()).await.is_err() {
+            debug!(
+                "{}key lane: {} of this connection's {} mutation(s) were still queued \
+                 behind another resource when it ended",
+                self.label,
+                self.slots.available_permits(),
+                self.bound
+            );
+        }
+    }
+}
+
 /// The lanes one connection's reader dispatches into.
 ///
 /// One object rather than two fields at the call site, because the reader has
@@ -650,7 +875,7 @@ where
 /// exists to provide.
 pub struct Lanes<K> {
     queries: QueryLane,
-    keys: KeyedLane<K>,
+    keys: Keys<K>,
 }
 
 impl<K> Lanes<K>
@@ -658,10 +883,16 @@ where
     K: Clone + Eq + Hash + fmt::Display + Send + Sync + 'static,
 {
     /// The lanes a connection opens with, at the bounds the caller states.
+    ///
+    /// The key lane is the connection's own, which is the right answer exactly
+    /// when the keys name state this connection owns: a lane per connection over
+    /// resources the whole runtime shares would promise ordering between two
+    /// peers' mutations of one session and deliver nothing — see
+    /// [`Lanes::shared`].
     pub fn new(query_bound: usize, key_depth: usize, label: &'static str) -> Self {
         Self {
             queries: QueryLane::new(query_bound, label),
-            keys: KeyedLane::new(key_depth, label),
+            keys: Keys::Own(KeyedLane::new(key_depth, label)),
         }
     }
 
@@ -677,7 +908,44 @@ where
     ) -> Self {
         Self {
             queries: QueryLane::new(query_bound, label),
-            keys: KeyedLane::with_worker_budget(key_depth, key_workers, label),
+            keys: Keys::Own(KeyedLane::with_worker_budget(key_depth, key_workers, label)),
+        }
+    }
+
+    /// The lanes of a connection whose mutations are of the *runtime's*
+    /// resources rather than its own.
+    ///
+    /// `mutations` is the lane the caller built once, and every connection that
+    /// mutates the same resources passes the same one — so `same resource →
+    /// FIFO` is a statement about the resource rather than about which socket
+    /// happened to carry the frame. The caller is whoever owns those resources:
+    /// the object holding the session manager, the file sandbox, the registry.
+    ///
+    /// `mutation_bound` is this connection's own admission bound, and it is this
+    /// connection's for the reasons [`SharedKeys`] states: a peer may not have
+    /// more than that many mutations in flight, whichever resources they name.
+    /// A bound of zero is raised to one, as it is everywhere else here: the value
+    /// comes from the calling runtime, and "this connection may never mutate
+    /// anything" is not a state a deployment can mean. A bound beyond what a
+    /// semaphore can count is clamped to what it can, which is a bound no
+    /// connection reaches.
+    pub fn shared(
+        query_bound: usize,
+        mutations: Arc<KeyedLane<K>>,
+        mutation_bound: usize,
+        label: &'static str,
+    ) -> Self {
+        let bound = u32::try_from(mutation_bound).unwrap_or(u32::MAX).max(1);
+        Self {
+            queries: QueryLane::new(query_bound, label),
+            keys: Keys::Shared(SharedKeys {
+                lane: mutations,
+                slots: Arc::new(Semaphore::new(bound as usize)),
+                bound,
+                ended: Arc::new(Ended::default()),
+                admission_waits: AtomicU64::new(0),
+                label,
+            }),
         }
     }
 
@@ -690,16 +958,23 @@ where
     }
 
     /// Queue one mutation behind its resource's own queue, waiting for room if
-    /// that queue is full.
+    /// that queue is full — and, on a shared lane, for a slot if this
+    /// connection is already at its bound.
     pub async fn key(&mut self, key: K, work: Work) {
-        self.keys.enqueue(key, work).await;
+        match &self.keys {
+            Keys::Own(lane) => lane.enqueue(key, work).await,
+            Keys::Shared(shared) => shared.enqueue(key, work).await,
+        }
     }
 
     /// Wait for everything the lanes have: the barrier in front of an ordered
     /// frame.
     pub async fn drain(&mut self) {
         self.queries.drain().await;
-        self.keys.drain().await;
+        match &mut self.keys {
+            Keys::Own(lane) => lane.drain().await,
+            Keys::Shared(shared) => shared.drain().await,
+        }
     }
 
     /// End everything in flight, waiting at most `grace` for it to stop.
@@ -711,14 +986,50 @@ where
     /// shutdown open for as long as the peer's TCP stack took to give up. The
     /// grace is a ceiling on a wait that should not happen, not a budget anything
     /// is expected to use.
+    ///
+    /// On a shared lane only *this connection's* work is ended; see
+    /// [`SharedKeys::shutdown`].
     pub async fn shutdown(&mut self, grace: Duration) {
         self.queries.shutdown(grace).await;
-        self.keys.shutdown(grace).await;
+        match &mut self.keys {
+            Keys::Own(lane) => lane.shutdown(grace).await,
+            Keys::Shared(shared) => shared.shutdown(grace).await,
+        }
     }
 
     /// What both lanes are doing, for logging and tests.
+    ///
+    /// The query half is always this connection's. The mutation half is the
+    /// connection's own lane when it has one, and the *shared* lane's counters
+    /// when it does not: those numbers describe the runtime's resources, which
+    /// is the scope a mutation of them happens at — see [`Lanes::shared`].
     pub async fn snapshot(&self) -> (LaneSnapshot, KeySnapshot) {
-        (self.queries.snapshot(), self.keys.snapshot().await)
+        let keys = match &self.keys {
+            Keys::Own(lane) => lane.snapshot().await,
+            Keys::Shared(shared) => shared.lane.snapshot().await,
+        };
+        (self.queries.snapshot(), keys)
+    }
+
+    /// How many mutations this connection's reader had to wait to admit.
+    ///
+    /// Not part of [`Lanes::snapshot`], and the reason is the scope: the lane's
+    /// own `admission_waits` counts every wait *the lane* made a reader take,
+    /// which on a shared lane includes waits this connection never had. This is
+    /// the count from this connection's side — its own per-key depth when it
+    /// owns a lane, its own admission slots when the lane is shared — and it is
+    /// the number that says whether *this* peer ever reached its bound.
+    ///
+    /// The two are not the same statement even for a shared lane: a wait this
+    /// connection took because the shared lane's per-key depth was reached is in
+    /// the lane's count and not in this one, because whether that depth was
+    /// reached by this connection or by another is not something the lane
+    /// records.
+    pub async fn admission_waits(&self) -> u64 {
+        match &self.keys {
+            Keys::Own(lane) => lane.snapshot().await.admission_waits,
+            Keys::Shared(shared) => shared.admission_waits.load(Ordering::Relaxed),
+        }
     }
 }
 
@@ -1617,5 +1928,352 @@ mod tests {
             "queued work survived the shutdown that is documented to drop it"
         );
         assert_eq!(keys.keys, 0, "an ended key is still in the map");
+    }
+
+    // ── The shared lane (#961 review, findings 1 and 3) ──────────────────────
+    //
+    // What is tested here is *scope*: who a lane is shared with, and what a
+    // connection still owns when it is. The mechanism — one worker per key, FIFO
+    // within a key, independence across keys — is the same one the tests above
+    // exercise through `Lanes::new`, and those are unchanged.
+
+    /// A mutation that records that it started, parks, and records that it finished.
+    fn parking(
+        started: &Arc<AtomicUsize>,
+        finished: &Arc<AtomicUsize>,
+        held: &Arc<Semaphore>,
+    ) -> Work {
+        let started = Arc::clone(started);
+        let finished = Arc::clone(finished);
+        let held = Arc::clone(held);
+        Box::pin(async move {
+            started.fetch_add(1, Ordering::SeqCst);
+            pass(&held).await;
+            finished.fetch_add(1, Ordering::SeqCst);
+        })
+    }
+
+    /// Wait for a counter to reach `want`.
+    ///
+    /// Admitting a mutation spawns its worker; it does not run it. A test that
+    /// asserted a counter immediately after admitting would be asserting on
+    /// whether the worker had been polled yet, which is a race and not a
+    /// property.
+    async fn wait_for_count(what: &str, counter: &Arc<AtomicUsize>, want: usize) {
+        within_patience(what, async {
+            loop {
+                if counter.load(Ordering::SeqCst) >= want {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(2)).await;
+            }
+        })
+        .await;
+    }
+
+    /// Two connections mutating one resource are ordered against each other, and
+    /// two mutating different ones are not.
+    ///
+    /// This is the guarantee `#961`'s review found missing. A lane per
+    /// connection promises `same resource + same connection → FIFO`; what two
+    /// peers on one session need is `same resource → FIFO`, and with a lane each
+    /// they hold two maps and two sets of workers for one tmux session, neither
+    /// ordering the other's frames.
+    ///
+    /// The witness is the second connection's *own* work: its mutation of the
+    /// first connection's key has not run while that one is parked. The
+    /// counter-assertion keeps this about the key rather than about the
+    /// connections: the second connection's mutation of a *different* key runs at
+    /// once, from the same dispatch loop into the same lane.
+    #[tokio::test]
+    async fn a_shared_lane_orders_two_connections_mutating_one_resource() {
+        let lane = Arc::new(KeyedLane::new(8, ""));
+        let mut first = Lanes::shared(2, Arc::clone(&lane), 4, "");
+        let mut second = Lanes::shared(2, Arc::clone(&lane), 4, "");
+        let held = gate();
+        let started = Arc::new(AtomicUsize::new(0));
+        let finished = Arc::new(AtomicUsize::new(0));
+
+        first
+            .key(session("s1"), parking(&started, &finished, &held))
+            .await;
+        wait_for_count("the first connection's mutation never started", &started, 1).await;
+
+        // The same resource, from the other connection: queued behind it. A
+        // different resource, from the same other connection: not queued at all.
+        second
+            .key(session("s1"), parking(&started, &finished, &held))
+            .await;
+        second
+            .key(session("s2"), parking(&started, &finished, &held))
+            .await;
+
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(
+            started.load(Ordering::SeqCst),
+            2,
+            "a second connection's mutation of the resource the first was mutating ran \
+at the same time as it: the key orders a resource, so this is either a lane that was \
+not shared or one that was not keyed"
+        );
+
+        held.add_permits(8);
+        wait_idle(&lane).await;
+        assert_eq!(
+            started.load(Ordering::SeqCst),
+            3,
+            "the queued mutation never ran: the ordering turned into a loss"
+        );
+        assert_eq!(finished.load(Ordering::SeqCst), 3);
+    }
+
+    /// A flood of *distinct* resources is bounded by the connection's own
+    /// admission, not by how many resources it names.
+    ///
+    /// The bound tests above repeat work for one key, which is the shape
+    /// `#961`'s review says was not enough: a per-key queue bounds how far ahead
+    /// of *one* resource a peer may get, and 64 distinct keys are 64 queues, each
+    /// within its depth, and therefore 64 workers. What bounds that is this
+    /// connection's slots, taken before the work reaches the lane.
+    ///
+    /// The other connection is the second half, and it is why the bound is on the
+    /// connection rather than on the lane: a peer that has spent its own slots
+    /// has spent nobody else's.
+    #[tokio::test]
+    async fn a_flood_of_distinct_resources_is_bounded_per_connection() {
+        const BOUND: usize = 4;
+        const KEYS: usize = 64;
+
+        let lane = Arc::new(KeyedLane::new(8, ""));
+        let mut flood = Lanes::shared(2, Arc::clone(&lane), BOUND, "");
+        let mut elsewhere = Lanes::shared(2, Arc::clone(&lane), BOUND, "");
+        let held = gate();
+        let started = Arc::new(AtomicUsize::new(0));
+        let finished = Arc::new(AtomicUsize::new(0));
+        let neighbour_ran = Arc::new(AtomicUsize::new(0));
+
+        // The flood runs on its own task, because the *reader* is what waits for
+        // a slot: a test that enqueued from its own task would park instead of
+        // observing. That is the property, not an inconvenience.
+        let flooding = tokio::spawn({
+            let started = Arc::clone(&started);
+            let finished = Arc::clone(&finished);
+            let held = Arc::clone(&held);
+            async move {
+                for n in 0..KEYS {
+                    flood
+                        .key(
+                            session(&format!("s{n}")),
+                            parking(&started, &finished, &held),
+                        )
+                        .await;
+                }
+            }
+        });
+
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(
+            started.load(Ordering::SeqCst),
+            BOUND,
+            "a connection naming {KEYS} distinct resources had more of them in flight \
+than its own bound allows: the number of tasks tracks the number of keys, which is the \
+unbounded unique-key growth this bound exists for"
+        );
+
+        // And a second connection is not behind any of it.
+        within_patience(
+            "another connection's mutation waited on a neighbour's flood",
+            async {
+                elsewhere
+                    .key(
+                        session("elsewhere"),
+                        Box::pin({
+                            let neighbour_ran = Arc::clone(&neighbour_ran);
+                            async move {
+                                neighbour_ran.fetch_add(1, Ordering::SeqCst);
+                            }
+                        }),
+                    )
+                    .await;
+            },
+        )
+        .await;
+        wait_for_count(
+            "another connection's mutation never ran behind a neighbour's flood",
+            &neighbour_ran,
+            1,
+        )
+        .await;
+
+        held.add_permits(KEYS * 2);
+        within_patience("the flood never finished", async {
+            flooding.await.expect("the flooding task panicked");
+        })
+        .await;
+        wait_idle(&lane).await;
+        assert_eq!(
+            started.load(Ordering::SeqCst),
+            KEYS,
+            "the bound turned into a loss: a mutation the connection dispatched never ran"
+        );
+        assert_eq!(finished.load(Ordering::SeqCst), KEYS);
+    }
+
+    /// A connection's ordered frame does not wait on another connection's
+    /// mutations.
+    ///
+    /// The barrier in front of an `Ordered` frame is what keeps an auth or an
+    /// attach from being applied before the work read before it. On a shared lane
+    /// "the work read before it" is not "the lane is empty": a barrier that waited
+    /// for the lane would wait for a neighbour's traffic, for as long as that
+    /// neighbour's backend takes — a stall one peer could inflict on another,
+    /// which is what this scope change exists to remove.
+    ///
+    /// What it waits for is the connection's own outstanding mutations, which is
+    /// what the slots count: a connection with nothing in flight drains while a
+    /// neighbour's mutation sits parked in the same lane.
+    #[tokio::test]
+    async fn a_connections_barrier_does_not_wait_for_a_neighbours_mutations() {
+        let lane = Arc::new(KeyedLane::new(8, ""));
+        let mut busy = Lanes::shared(2, Arc::clone(&lane), 4, "");
+        let mut idle = Lanes::shared(2, Arc::clone(&lane), 4, "");
+        let held = gate();
+        // Counted, so the drain below is asserted while the neighbour's mutation
+        // is demonstrably running rather than merely admitted.
+        let ran = Arc::new(AtomicUsize::new(0));
+
+        busy.key(
+            session("s1"),
+            Box::pin({
+                let ran = Arc::clone(&ran);
+                let held = Arc::clone(&held);
+                async move {
+                    ran.fetch_add(1, Ordering::SeqCst);
+                    pass(&held).await;
+                }
+            }),
+        )
+        .await;
+        wait_for_count("the neighbour's mutation never started", &ran, 1).await;
+
+        within_patience(
+            "an idle connection's ordered frame waited on a neighbour's mutation",
+            idle.drain(),
+        )
+        .await;
+
+        // The half that keeps this from being a test of "drain does nothing":
+        // the connection that *did* dispatch still waits for its own work, and
+        // returns once it is done.
+        let finished = Arc::new(AtomicUsize::new(0));
+        busy.key(
+            session("s2"),
+            Box::pin({
+                let finished = Arc::clone(&finished);
+                async move {
+                    finished.fetch_add(1, Ordering::SeqCst);
+                }
+            }),
+        )
+        .await;
+        held.add_permits(8);
+        within_patience("the busy connection never drained", busy.drain()).await;
+        assert_eq!(finished.load(Ordering::SeqCst), 1);
+        idle.shutdown(Duration::from_secs(1)).await;
+    }
+
+    /// Ending a connection stops its own mutations and leaves the lane running.
+    ///
+    /// Two claims, because they are the two halves of "this lane is not mine to
+    /// end". The work a gone peer queued must not run on its behalf; the work a
+    /// neighbour queued into the same lane must not be touched by that.
+    ///
+    /// The leaving connection's first mutation is parked inside its own key, so
+    /// its second is *queued* — the case the cancellation has to reach, since a
+    /// queued frame has no task to abort and no reader to notice.
+    #[tokio::test]
+    async fn ending_a_connection_stops_its_own_mutations_and_not_the_lane() {
+        let lane = Arc::new(KeyedLane::new(8, ""));
+        let mut leaving = Lanes::shared(2, Arc::clone(&lane), 4, "");
+        let mut staying = Lanes::shared(2, Arc::clone(&lane), 4, "");
+        let held = gate();
+        let leaving_started = Arc::new(AtomicUsize::new(0));
+        let leaving_finished = Arc::new(AtomicUsize::new(0));
+        let staying_started = Arc::new(AtomicUsize::new(0));
+        let staying_finished = Arc::new(AtomicUsize::new(0));
+
+        staying
+            .key(
+                session("keep"),
+                parking(&staying_started, &staying_finished, &held),
+            )
+            .await;
+        wait_for_count(
+            "the neighbour's mutation never started",
+            &staying_started,
+            1,
+        )
+        .await;
+
+        leaving
+            .key(
+                session("s1"),
+                parking(&leaving_started, &leaving_finished, &held),
+            )
+            .await;
+        wait_for_count(
+            "the leaving connection's mutation never started",
+            &leaving_started,
+            1,
+        )
+        .await;
+        // Queued behind it: the one the cancellation has to reach.
+        leaving
+            .key(
+                session("s1"),
+                parking(&leaving_started, &leaving_finished, &held),
+            )
+            .await;
+
+        leaving.shutdown(Duration::from_secs(2)).await;
+
+        assert_eq!(
+            leaving_finished.load(Ordering::SeqCst),
+            0,
+            "a running mutation was let through after the connection ended"
+        );
+        assert_eq!(
+            staying_started.load(Ordering::SeqCst),
+            1,
+            "the neighbour's mutation was stopped too: a connection's end must not reach \
+work it did not dispatch"
+        );
+        assert_eq!(staying_finished.load(Ordering::SeqCst), 0);
+
+        // Let the parked work go, so the queue behind it is actually reached. A
+        // test that left it parked would be asserting that a *stopped* worker
+        // never reached the work behind it, which is true whether or not
+        // anything was cancelled — it would pass on an implementation whose
+        // queued mutations run normally the moment their key frees.
+        held.add_permits(4);
+        wait_idle(&lane).await;
+
+        assert_eq!(
+            leaving_started.load(Ordering::SeqCst),
+            1,
+            "a mutation that was still queued when the connection ended ran anyway, on \
+behalf of a peer that is gone"
+        );
+        assert_eq!(
+            leaving_finished.load(Ordering::SeqCst),
+            0,
+            "a running mutation finished after the connection ended"
+        );
+        assert_eq!(
+            staying_finished.load(Ordering::SeqCst),
+            1,
+            "the neighbour's parked mutation did not finish once its gate opened: the \
+lane it is on was ended with the connection that left"
+        );
     }
 }

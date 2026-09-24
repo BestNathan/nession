@@ -193,26 +193,44 @@ impl ConnectionHandler {
     /// The agent this message may speak for, or `None` if it may not speak for
     /// one.
     ///
-    /// **Agent identity is established by connection registration**, and that
-    /// registration — not the `agent_id` a payload happens to carry — is the
-    /// authority for everything the connection says afterwards (#960). Agent
-    /// control connections are long-lived and carry the agent's whole state:
-    /// heartbeats, session updates, advertised addresses. Reading the id out of
-    /// each payload would mean a connection registered as `A` could move `B`'s
-    /// state, by bug or by intent, for as long as the id in the payload said
-    /// so.
+    /// Two questions, one answer, because a message that fails either one has no
+    /// authority to act on:
     ///
-    /// A payload that *does* name an agent is checked against the bound
-    /// identity, because the two disagreeing means one of them is wrong.
-    /// A message that omits the id is not refused: it claims nothing, and the
-    /// connection supplies the answer. A connection that never registered has
-    /// no authority at all — there is no bound identity to fall back on.
+    /// **Identity.** Agent identity is established by connection registration,
+    /// and that registration — not the `agent_id` a payload happens to carry —
+    /// is the authority for everything the connection says afterwards (#960).
+    /// Agent control connections are long-lived and carry the agent's whole
+    /// state: heartbeats, session updates, advertised addresses. Reading the id
+    /// out of each payload would mean a connection registered as `A` could move
+    /// `B`'s state, by bug or by intent, for as long as the id in the payload
+    /// said so. A payload that *does* name an agent is checked against the bound
+    /// identity, because the two disagreeing means one of them is wrong. A
+    /// message that omits the id is not refused: it claims nothing, and the
+    /// connection supplies the answer. A connection that never registered has no
+    /// authority at all — there is no bound identity to fall back on.
     ///
-    /// The refusal is message-level, not connection-level: a wrong id is a
-    /// fault in one message, and tearing down a working control connection over
-    /// it would hand any peer a way to disconnect an agent by sending it
-    /// garbage.
-    fn bound_agent_id(&self, payload: &Value, wire: &str) -> Option<String> {
+    /// **Generation.** Identity alone is not enough, because a connection that
+    /// registered as `A` is not always still `A`'s. A reconnect registers again
+    /// on a brand-new WebSocket and takes the agent over; the old socket, half
+    /// closed or not yet reaped, can still deliver what it read — and those
+    /// late frames are reports about an agent instance that no longer exists.
+    /// Writing them would resurrect the sessions the new registration just
+    /// cleared. So the connection must additionally still be the agent's
+    /// **current generation**, which the broker records where it records
+    /// ownership (`CommandBroker::is_current_generation`): one lifecycle, read
+    /// for routing and for state writes both, instead of the two notions of
+    /// authority this used to have.
+    ///
+    /// The refusal is message-level, not connection-level: a wrong id, or a
+    /// superseded generation, is a fault in one message, and tearing down a
+    /// working control connection over it would hand any peer a way to
+    /// disconnect an agent by sending it garbage.
+    ///
+    /// Not for `server.agent.command-response`, which is deliberately
+    /// identity-only: it answers a request the Server itself sent, and a
+    /// response from a connection that has since been superseded is still the
+    /// answer to that request (see `handle_agent_command_response`, #743).
+    async fn authorized_agent_id(&self, payload: &Value, wire: &str) -> Option<String> {
         let Some(bound) = self.registered_agent_id.as_deref() else {
             warn!("{wire} from a connection that has not registered an agent");
             return None;
@@ -225,6 +243,18 @@ impl ConnectionHandler {
                 );
                 return None;
             }
+        }
+        if !self
+            .command_broker
+            .is_current_generation(bound, self.connection_generation)
+            .await
+        {
+            warn!(
+                "{wire} from {} for agent '{bound}', which a newer connection has taken \
+                 over; refusing",
+                self.connection_generation
+            );
+            return None;
         }
         Some(bound.to_string())
     }
@@ -394,6 +424,39 @@ impl ConnectionHandler {
             ))));
         }
 
+        // Registration is a **state transition, not a rebind**: a connection
+        // either has not registered yet or is already somebody. Re-registering
+        // is refused rather than applied, because everything downstream keeps
+        // one identity per connection — the broker holds the claimed agent, the
+        // disconnect path releases exactly this id, and the frames in between
+        // are authorized against it. A connection that registered `A` and then
+        // `B` would leave the broker claiming `A` from a socket the handler
+        // remembers as `B`, and `A` would keep a control channel nobody releases
+        // (#960). An agent that wants to come back as somebody else opens a new
+        // connection, which is what its own reconnect path does anyway.
+        if let Some(bound) = &self.registered_agent_id {
+            info!(
+                "Agent {} rejected: {} is already registered as '{bound}'",
+                payload.agent_id, self.connection_generation
+            );
+            return Ok(HandlerAction::Reply(Some(Message::Text(
+                json!({
+                    "msg_type": "server.agent.register",
+                    "id": msg.id,
+                    "timestamp": current_timestamp(),
+                    "payload": {
+                        "status": "rejected",
+                        "message": format!(
+                            "This connection is already registered as agent '{bound}'. \
+                             Registration is one-shot per connection; reconnect to \
+                             register as a different agent."
+                        )
+                    }
+                })
+                .to_string(),
+            ))));
+        }
+
         // A manifest is required, not optional (`#678`).
         //
         // This is a **breaking upgrade**, chosen deliberately over supporting
@@ -480,7 +543,7 @@ impl ConnectionHandler {
         self.agent_registry.register(agent_info).await;
         // Binding *this connection* to the agent: from here on it is the
         // authority for every agent-originated message it carries, whatever
-        // those payloads name (`bound_agent_id`). The other half of
+        // those payloads name (`authorized_agent_id`). The other half of
         // registration is the broker claim the websocket loop makes for it —
         // see `server/websocket.rs` on why ownership is keyed on the connection.
         self.registered_agent_id = Some(payload.agent_id.clone());
@@ -531,13 +594,16 @@ impl ConnectionHandler {
     /// recognised as a message of its own.
     ///
     /// The agent it belongs to comes from the connection, not from the payload
-    /// — see `bound_agent_id`.
+    /// — see `authorized_agent_id`.
     async fn handle_control_heartbeat(
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
     ) -> anyhow::Result<HandlerAction> {
         let payload: serde_json::Value = msg.payload;
-        let Some(agent_id) = self.bound_agent_id(&payload, "control.heartbeat") else {
+        let Some(agent_id) = self
+            .authorized_agent_id(&payload, "control.heartbeat")
+            .await
+        else {
             return Ok(HandlerAction::Reply(None));
         };
 
@@ -607,7 +673,7 @@ impl ConnectionHandler {
     /// one of its tmux sessions.
     ///
     /// The agent it belongs to comes from the connection, not from the payload
-    /// — see `bound_agent_id`. Session ids are `agent_id:session_name`, so the
+    /// — see `authorized_agent_id`. Session ids are `agent_id:session_name`, so the
     /// payload's id decides which *namespace* the update writes into; a
     /// connection registered as `A` reporting for `B` would otherwise rewrite
     /// another agent's session list.
@@ -616,7 +682,10 @@ impl ConnectionHandler {
         msg: ProtocolMessage<serde_json::Value>,
     ) -> anyhow::Result<HandlerAction> {
         let payload: serde_json::Value = msg.payload;
-        let Some(agent_id) = self.bound_agent_id(&payload, "server.agent.session-update") else {
+        let Some(agent_id) = self
+            .authorized_agent_id(&payload, "server.agent.session-update")
+            .await
+        else {
             return Ok(HandlerAction::Reply(None));
         };
         let session_name = payload
@@ -1046,10 +1115,12 @@ impl ConnectionHandler {
         // Remove from in-memory registries. The broker entry goes with them,
         // but not through the disconnect path: this is a verdict about the
         // *agent* (it is offline), and it is not the release of a claim — see
-        // `CommandBroker::evict_agent`.
+        // `CommandBroker::forget_agent`, which is the one removal that may drop
+        // the generation high-water mark, because the agent it belonged to is
+        // gone rather than quiet.
         self.agent_registry.unregister(agent_id).await;
         self.session_registry.remove_by_agent(agent_id).await;
-        self.command_broker.evict_agent(agent_id).await;
+        self.command_broker.forget_agent(agent_id).await;
 
         // Broadcast updated lists to all connected web clients.
         self.web_client_registry
@@ -1975,17 +2046,50 @@ impl ConnectionHandler {
 
     /// Handle `agent.terminal.resize` — broadcast terminal resize to all
     /// web clients attached to the session via relay.
+    ///
+    /// Authorized the same way as the other agent-originated state: the sending
+    /// connection must be the agent's current generation, and the session it
+    /// names must be one of *its own*. This handler used to check nothing at
+    /// all — it read `session_id` and broadcast — which made it the one
+    /// agent-originated wire where a connection registered as `A` could move
+    /// state belonging to `B`, and where a superseded connection could still
+    /// drive a session it no longer served (#960).
+    ///
+    /// The session check reads the id's own structure rather than a registry
+    /// lookup: session ids are `agent_id:session_name` (see
+    /// `crate::registry::session`), so the prefix is whose screen this is. A
+    /// resize for a session the registry has never heard of is not refused —
+    /// the resize is a level, and a client attached to a session the registry
+    /// has not caught up with is still a client that needs the size.
     async fn handle_agent_terminal_resize(
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
     ) -> anyhow::Result<HandlerAction> {
-        let payload: AgentTerminalResizePayload = match serde_json::from_value(msg.payload) {
+        let value = msg.payload;
+        let Some(agent_id) = self
+            .authorized_agent_id(&value, "server.agent.terminal-resize")
+            .await
+        else {
+            return Ok(HandlerAction::Reply(None));
+        };
+        let payload: AgentTerminalResizePayload = match serde_json::from_value(value) {
             Ok(p) => p,
             Err(e) => {
                 warn!("agent.terminal.resize with invalid payload: {}", e);
                 return Ok(HandlerAction::Reply(None));
             }
         };
+
+        // `agent_id:` rather than a split, so that whatever a session name
+        // contains cannot change which agent the id is attributed to.
+        if !payload.session_id.starts_with(&format!("{agent_id}:")) {
+            warn!(
+                "agent.terminal.resize from agent '{agent_id}' for session '{}', which is \
+                 not one of its own; refusing",
+                payload.session_id
+            );
+            return Ok(HandlerAction::Reply(None));
+        }
 
         info!(
             "Terminal resize for session {}: {}x{}",
@@ -2023,7 +2127,7 @@ impl ConnectionHandler {
     /// addresses after a network change on the agent host.
     ///
     /// The agent it belongs to comes from the connection, not from the payload
-    /// — see `bound_agent_id`.
+    /// — see `authorized_agent_id`.
     async fn handle_agent_address_update(
         &self,
         msg: ProtocolMessage<serde_json::Value>,
@@ -2032,7 +2136,10 @@ impl ConnectionHandler {
         // the typed parse below — the connection's registration is what decides
         // whose addresses these are, not the id in the body.
         let value = msg.payload;
-        let Some(agent_id) = self.bound_agent_id(&value, "server.agent.address-update") else {
+        let Some(agent_id) = self
+            .authorized_agent_id(&value, "server.agent.address-update")
+            .await
+        else {
             return Ok(HandlerAction::Reply(None));
         };
         let payload: AgentAddressUpdatePayload = serde_json::from_value(value)?;
@@ -6533,6 +6640,13 @@ mod tests {
 
         let mut h = test_handler("").await;
 
+        // Registering is what makes a connection able to resize `a1:dev` at all,
+        // and the claim is what `server/websocket.rs` makes for it right after —
+        // a resize from a connection that never registered is refused, so this
+        // setup is part of the case rather than incidental to it.
+        register_agent_connection(&mut h, "a1").await;
+        let (_sender, _rx) = claim_control_channel(&h).await;
+
         // Register two clients in the ClientRegistry for the target session
         let client_registry = Arc::clone(&h.client_registry);
         let (sender1, mut rx1) = WsMessageSender::new();
@@ -6577,6 +6691,11 @@ mod tests {
     async fn agent_terminal_resize_no_attached_clients() {
         let mut h = test_handler("").await;
 
+        // Registered and claimed, so what the frame meets is the absence of
+        // clients rather than the absence of authority.
+        register_agent_connection(&mut h, "a1").await;
+        let (_sender, _rx) = claim_control_channel(&h).await;
+
         // No clients attached — should still succeed silently
         let action = h
             .handle_message(proto_msg(
@@ -6595,6 +6714,11 @@ mod tests {
     #[tokio::test]
     async fn agent_terminal_resize_invalid_payload() {
         let mut h = test_handler("").await;
+
+        // As above: the payload is what this test is about, so the connection
+        // arrives already authorized for the session it names.
+        register_agent_connection(&mut h, "a1").await;
+        let (_sender, _rx) = claim_control_channel(&h).await;
 
         // Missing required fields — should log warning but not crash
         let action = h
@@ -6679,11 +6803,12 @@ mod tests {
 
     // ---- agent identity is bound to the connection that registered it (#960) ----
 
-    /// Register `agent_id` **through the wire**, the way its own connection
-    /// does. This is the binding: from here on the handler answers as that
-    /// agent, and what its payloads name is checked against it.
-    async fn register_agent_connection(h: &mut ConnectionHandler, agent_id: &str) {
-        let reply = parse_reply(
+    /// Send `agent_id`'s `server.agent.register` frame and return the reply, as
+    /// the body the Server answers with. Judging the reply is the caller's, so
+    /// that the tests about the *answer* (a refusal) and the tests about the
+    /// binding can share one frame.
+    async fn register(h: &mut ConnectionHandler, agent_id: &str) -> serde_json::Value {
+        parse_reply(
             h.handle_message(proto_msg(
                 "server.agent.register",
                 json!({
@@ -6700,7 +6825,14 @@ mod tests {
             ))
             .await
             .unwrap(),
-        );
+        )
+    }
+
+    /// Register `agent_id` **through the wire**, the way its own connection
+    /// does. This is the binding: from here on the handler answers as that
+    /// agent, and what its payloads name is checked against it.
+    async fn register_agent_connection(h: &mut ConnectionHandler, agent_id: &str) {
+        let reply = register(h, agent_id).await;
         assert_eq!(reply["payload"]["status"], "accepted");
     }
 
@@ -6837,6 +6969,473 @@ mod tests {
         assert!(
             a2.addresses.is_empty(),
             "a1's connection must not move a2's advertised addresses"
+        );
+    }
+
+    // ---- ownership is a generation, not an identity (#960) ----
+
+    /// Two connections on **one** server: one broker, one pair of registries,
+    /// one client registry.
+    ///
+    /// `test_handler` gives every handler its own services, which is the right
+    /// default for a test about one connection. Ownership across connections is
+    /// exactly the case where both have to be looking at the same records: the
+    /// second connection's registration clears state the first one wrote, and
+    /// the first one's late frames are judged against the second one's claim.
+    async fn connections_on_one_server() -> (ConnectionHandler, ConnectionHandler) {
+        let db = Arc::new(Database::new(":memory:").await.unwrap());
+        let agent_registry = Arc::new(AgentRegistry::new(60, Arc::clone(&db)));
+        let session_registry = Arc::new(SessionRegistry::new(Arc::clone(&db)));
+        let command_broker = Arc::new(CommandBroker::new());
+        let client_registry = Arc::new(ClientRegistry::new());
+        let web_client_registry = Arc::new(WebClientRegistry::new());
+        let connection = || {
+            ConnectionHandler::new(
+                ConnectionHandlerDeps {
+                    agent_registry: Arc::clone(&agent_registry),
+                    session_registry: Arc::clone(&session_registry),
+                    command_broker: Arc::clone(&command_broker),
+                    client_registry: Arc::clone(&client_registry),
+                    web_client_registry: Arc::clone(&web_client_registry),
+                    env_service: EnvService::new(Arc::clone(&db)),
+                    db: Arc::clone(&db),
+                },
+                ConnectionHandlerConfig {
+                    server_auth_token: String::new(),
+                    heartbeat_interval_secs: 30,
+                },
+            )
+        };
+        (connection(), connection())
+    }
+
+    /// The claim `server/websocket.rs` makes after every frame from a registered
+    /// agent connection: the connection that just spoke is the agent's control
+    /// channel.
+    ///
+    /// Returns the sender and its receiver, for the tests that claim more than
+    /// once or watch where a command lands; **keep both alive** — a dropped
+    /// receiver is a control channel that cannot be sent to.
+    async fn claim_control_channel(
+        h: &ConnectionHandler,
+    ) -> (
+        crate::server::outbound::WsMessageSender,
+        tokio::sync::mpsc::Receiver<crate::server::outbound::QueuedFrame>,
+    ) {
+        let (sender, rx) = crate::server::outbound::WsMessageSender::new();
+        if let Some(agent_id) = h.registered_agent_id() {
+            h.command_broker
+                .claim_agent(agent_id, h.connection_generation(), sender.clone())
+                .await;
+        }
+        (sender, rx)
+    }
+
+    /// Hand one agent-originated frame to this connection's handler.
+    ///
+    /// No reply is expected from any of them — a refusal and an applied update
+    /// are both silent — so the assertions live in the caller, on the state the
+    /// frame was or was not allowed to move. The frame is built at the call
+    /// site on purpose: a wire name passed through here would be invisible to
+    /// `scripts/protocol-gate.mjs`, which is what catches a name that no
+    /// runtime answers.
+    async fn report(h: &mut ConnectionHandler, frame: Message) {
+        let action = h.handle_message(frame).await.unwrap();
+        assert!(matches!(action, HandlerAction::Reply(None)));
+    }
+
+    async fn has_session(h: &ConnectionHandler, session_id: &str) -> bool {
+        h.session_registry
+            .list()
+            .await
+            .iter()
+            .any(|session| session.session_id == session_id)
+    }
+
+    /// #960, the state-write half: a connection a reconnect has superseded must
+    /// not write the current agent's state.
+    ///
+    /// The window is the reconnect's own. The new connection's registration
+    /// clears the sessions the *previous* agent instance left behind, and the
+    /// old connection — half closed, not yet reaped, still delivering — reports
+    /// the session it remembers. Judged by identity alone that report was
+    /// believed, and the cleared session came back as if the registration had
+    /// never happened.
+    #[tokio::test]
+    async fn a_superseded_connection_cannot_restore_a_cleared_session() {
+        let (mut c1, mut c2) = connections_on_one_server().await;
+
+        register_agent_connection(&mut c1, "a1").await;
+        let (_sender, _rx) = claim_control_channel(&c1).await;
+        report(
+            &mut c1,
+            proto_msg(
+                "server.agent.session-update",
+                json!({ "agent_id": "a1", "session_name": "dev", "status": "active", "window_count": 1 }),
+            ),
+        )
+        .await;
+        assert!(has_session(&c1, "a1:dev").await, "c1's report is placed");
+
+        // The agent reconnects. Registering clears the previous instance's
+        // sessions; the loop claims the agent for the new connection right after
+        // — in that order, and both here in the test rather than raced between
+        // two tasks.
+        register_agent_connection(&mut c2, "a1").await;
+        let (_sender2, _rx2) = claim_control_channel(&c2).await;
+        assert!(
+            !has_session(&c1, "a1:dev").await,
+            "re-registration clears the sessions of the agent instance before it"
+        );
+
+        // c1's late frame, arriving after all of that.
+        report(
+            &mut c1,
+            proto_msg(
+                "server.agent.session-update",
+                json!({ "agent_id": "a1", "session_name": "dev", "status": "active", "window_count": 1 }),
+            ),
+        )
+        .await;
+        assert!(
+            !has_session(&c1, "a1:dev").await,
+            "a superseded connection's late report must not restore the cleared session"
+        );
+
+        // The refusal is about which connection this is, not about the message:
+        // the generation that took the agent over still writes its state.
+        report(
+            &mut c2,
+            proto_msg(
+                "server.agent.session-update",
+                json!({ "agent_id": "a1", "session_name": "dev", "status": "active", "window_count": 1 }),
+            ),
+        )
+        .await;
+        assert!(
+            has_session(&c1, "a1:dev").await,
+            "the current generation's report must still be placed"
+        );
+    }
+
+    /// The same rule for the other three wires an agent writes state with.
+    ///
+    /// A heartbeat is what keeps an agent online and carries its counts, so a
+    /// superseded connection's heartbeat is not a stale number — it is the
+    /// previous agent instance speaking for the current one.
+    ///
+    /// One test per wire rather than one test over all of them: each wire's
+    /// check is its own call site, and a test that asserted three refusals in a
+    /// row would stop at the first one and say nothing about the other two.
+    #[tokio::test]
+    async fn a_superseded_connection_cannot_heartbeat() {
+        let (mut c1, mut c2) = connections_on_one_server().await;
+        register_agent_connection(&mut c1, "a1").await;
+        let (_sender, _rx) = claim_control_channel(&c1).await;
+        register_agent_connection(&mut c2, "a1").await;
+        let (_sender2, _rx2) = claim_control_channel(&c2).await;
+
+        report(
+            &mut c1,
+            proto_msg(
+                "control.heartbeat",
+                json!({ "agent_id": "a1", "session_count": 9, "active_sessions": 9 }),
+            ),
+        )
+        .await;
+
+        let a1 = c1.agent_registry.get("a1").await.expect("a1 is registered");
+        assert_eq!(
+            a1.session_count, 0,
+            "a superseded connection's heartbeat must not be believed"
+        );
+
+        report(
+            &mut c2,
+            proto_msg(
+                "control.heartbeat",
+                json!({ "agent_id": "a1", "session_count": 4, "active_sessions": 1 }),
+            ),
+        )
+        .await;
+        let a1 = c1.agent_registry.get("a1").await.expect("a1 is registered");
+        assert_eq!(
+            a1.session_count, 4,
+            "the current generation's heartbeat must be believed"
+        );
+    }
+
+    /// The address update decides where P2P clients dial an agent, so it is the
+    /// one report a stale generation could aim at a *different* host entirely.
+    #[tokio::test]
+    async fn a_superseded_connection_cannot_move_the_agents_addresses() {
+        let (mut c1, mut c2) = connections_on_one_server().await;
+        register_agent_connection(&mut c1, "a1").await;
+        let (_sender, _rx) = claim_control_channel(&c1).await;
+        register_agent_connection(&mut c2, "a1").await;
+        let (_sender2, _rx2) = claim_control_channel(&c2).await;
+
+        report(
+            &mut c1,
+            proto_msg(
+                "server.agent.address-update",
+                json!({ "agent_id": "a1", "addresses": [{ "url": "ws://elsewhere.example:19091/ws", "network_type": "lan" }] }),
+            ),
+        )
+        .await;
+
+        let a1 = c1.agent_registry.get("a1").await.expect("a1 is registered");
+        assert!(
+            !a1.addresses
+                .iter()
+                .any(|probed| probed.address.url.contains("elsewhere.example")),
+            "a superseded connection must not move the agent's addresses"
+        );
+
+        report(
+            &mut c2,
+            proto_msg(
+                "server.agent.address-update",
+                json!({ "agent_id": "a1", "addresses": [{ "url": "ws://here.example:19091/ws", "network_type": "lan" }] }),
+            ),
+        )
+        .await;
+        let a1 = c1.agent_registry.get("a1").await.expect("a1 is registered");
+        assert!(
+            a1.addresses
+                .iter()
+                .any(|probed| probed.address.url.contains("here.example")),
+            "the current generation's address update must be applied"
+        );
+    }
+
+    /// A resize is a *level* pushed to whoever is watching a session, and the
+    /// session belongs to an agent. A superseded connection's resize would move
+    /// the screen a client is looking at on behalf of an instance that is gone.
+    #[tokio::test]
+    async fn a_superseded_connection_cannot_resize_a_session() {
+        use crate::server::outbound::WsMessageSender;
+
+        let (mut c1, mut c2) = connections_on_one_server().await;
+        register_agent_connection(&mut c1, "a1").await;
+        let (_sender, _rx) = claim_control_channel(&c1).await;
+        register_agent_connection(&mut c2, "a1").await;
+        let (_sender2, _rx2) = claim_control_channel(&c2).await;
+
+        // A client watching a session of a1's. The client registry is shared, so
+        // either connection's broadcast reaches it.
+        let (client, mut client_rx) = WsMessageSender::new();
+        c1.client_registry
+            .register("a1:dev", "client-1", client)
+            .await;
+
+        report(
+            &mut c1,
+            proto_msg(
+                "server.agent.terminal-resize",
+                json!({ "session_id": "a1:dev", "cols": 120, "rows": 40 }),
+            ),
+        )
+        .await;
+        assert!(
+            client_rx.try_recv().is_err(),
+            "a superseded connection must not resize a session it no longer serves"
+        );
+
+        report(
+            &mut c2,
+            proto_msg(
+                "server.agent.terminal-resize",
+                json!({ "session_id": "a1:dev", "cols": 100, "rows": 30 }),
+            ),
+        )
+        .await;
+        assert!(
+            client_rx.try_recv().is_ok(),
+            "the current generation's resize must reach the session's client"
+        );
+    }
+
+    /// The one wire deliberately left out of the generation rule.
+    ///
+    /// `server.agent.command-response` answers a request the *Server* sent. A
+    /// connection that has since been superseded is still the connection the
+    /// request went to, so its answer is still the answer to that request —
+    /// refusing it would report "Agent disconnected" for work the agent may
+    /// already have completed, which is exactly what #743 fixed. The rule the
+    /// generation check enforces is about whose *state* a connection may write,
+    /// and a response writes no state: it resolves one waiter.
+    #[tokio::test]
+    async fn a_superseded_connection_may_still_answer_an_in_flight_command() {
+        let (mut c1, mut c2) = connections_on_one_server().await;
+        register_agent_connection(&mut c1, "a1").await;
+        let (_sender, _rx) = claim_control_channel(&c1).await;
+
+        // A command the Server sent while c1 was the agent's connection.
+        let waiter = c1
+            .command_broker
+            .send_command("a1", "server.session.create", "req-1", json!({}))
+            .await;
+
+        // The agent reconnects; a newer connection takes the agent over.
+        register_agent_connection(&mut c2, "a1").await;
+        let (_sender2, _rx2) = claim_control_channel(&c2).await;
+
+        report(
+            &mut c1,
+            proto_msg(
+                "server.agent.command-response",
+                json!({ "request_id": "req-1", "success": true, "session_name": "dev" }),
+            ),
+        )
+        .await;
+
+        let response = tokio::time::timeout(std::time::Duration::from_millis(500), waiter)
+            .await
+            .expect("a superseded connection's answer must still resolve the request")
+            .expect("the waiter must be resolved with the answer");
+        assert_eq!(response["success"], json!(true));
+    }
+
+    /// A liveness verdict is a statement about the *agent*, not about which
+    /// connection is newest.
+    ///
+    /// The heartbeat sweep evicts an agent that has gone quiet without dropping
+    /// its WebSocket. The connection it evicted is still the agent's current
+    /// generation — nothing newer has claimed it — so its next report is still
+    /// believed, and the claim the loop makes for it puts its channel back. That
+    /// recovery is the reason the mark is a high-water mark rather than "the
+    /// owner, or nothing".
+    #[tokio::test]
+    async fn the_current_generation_recovers_after_a_liveness_eviction() {
+        let mut h = test_handler("").await;
+        register_agent_connection(&mut h, "a1").await;
+        let (_sender, _rx) = claim_control_channel(&h).await;
+
+        h.command_broker.evict_agent("a1").await;
+
+        report(
+            &mut h,
+            proto_msg(
+                "control.heartbeat",
+                json!({ "agent_id": "a1", "session_count": 4, "active_sessions": 1 }),
+            ),
+        )
+        .await;
+        let a1 = h.agent_registry.get("a1").await.expect("a1 is registered");
+        assert_eq!(
+            a1.session_count, 4,
+            "the evicted generation is still the agent's current one, so its report lands"
+        );
+
+        // The loop re-claims on the next inbound frame, which is the only way
+        // back for an agent that went quiet without reconnecting.
+        let (_sender, mut rx) = claim_control_channel(&h).await;
+        let _waiter = h
+            .command_broker
+            .send_command("a1", "server.session.create", "req-1", json!({}))
+            .await;
+        assert!(
+            rx.try_recv().is_ok(),
+            "the current generation must recover its control channel after a false eviction"
+        );
+    }
+
+    /// Registration is a transition — `Unregistered -> Agent(A)` — and never a
+    /// rebind.
+    ///
+    /// What the rebind left behind was a ghost: the broker still claiming `A`
+    /// from a socket whose handler now remembered only `B`. Nothing released
+    /// `A` — not the disconnect path, which releases the one id the handler
+    /// remembers, and not `B`, which no claim ever named.
+    #[tokio::test]
+    async fn registering_twice_on_one_connection_is_refused() {
+        let mut h = test_handler("").await;
+        register_agent_connection(&mut h, "a1").await;
+        let (sender, mut rx) = claim_control_channel(&h).await;
+
+        let reply = register(&mut h, "a2").await;
+        assert_eq!(
+            reply["payload"]["status"], "rejected",
+            "a connection that already answers for one agent may not become another"
+        );
+        assert!(
+            h.agent_registry.get("a2").await.is_none(),
+            "the refused registration must not create the second agent"
+        );
+        assert_eq!(
+            h.registered_agent_id(),
+            Some(&"a1".to_string()),
+            "the connection keeps the identity it established"
+        );
+
+        // The claim the loop makes after that frame still names a1, which is the
+        // point: `a1` is what the disconnect path will release, and what this
+        // connection is judged by.
+        let agent_id = h.registered_agent_id().unwrap().clone();
+        h.command_broker
+            .claim_agent(&agent_id, h.connection_generation(), sender)
+            .await;
+        let _waiter = h
+            .command_broker
+            .send_command("a1", "server.session.create", "req-1", json!({}))
+            .await;
+        assert!(
+            rx.try_recv().is_ok(),
+            "a1 must still be served from this connection — no ghost, and no ghost's replacement"
+        );
+    }
+
+    /// A resize names its session and nothing else — there is no `agent_id` in
+    /// the frame to check — so the session id's own prefix is the identity this
+    /// wire is judged by.
+    ///
+    /// This one used to be checked by nothing at all: it parsed, then broadcast
+    /// to whatever session the payload named. A connection registered as `a1`
+    /// could therefore move `a2`'s screen.
+    #[tokio::test]
+    async fn terminal_resize_for_another_agents_session_is_refused() {
+        use crate::server::outbound::WsMessageSender;
+
+        let mut h = test_handler("").await;
+        register_agent_connection(&mut h, "a1").await;
+        let (_sender, _rx) = claim_control_channel(&h).await;
+
+        let (client, mut client_rx) = WsMessageSender::new();
+        h.client_registry
+            .register("a2:dev", "client-1", client)
+            .await;
+
+        report(
+            &mut h,
+            proto_msg(
+                "server.agent.terminal-resize",
+                json!({ "session_id": "a2:dev", "cols": 120, "rows": 40 }),
+            ),
+        )
+        .await;
+        assert!(
+            client_rx.try_recv().is_err(),
+            "a connection registered as a1 must not resize a2's session"
+        );
+
+        // Whose session it is, not whether resizes work: the same frame for one
+        // of its own still reaches the attached client.
+        let (client, mut client_rx) = WsMessageSender::new();
+        h.client_registry
+            .register("a1:dev", "client-2", client)
+            .await;
+        report(
+            &mut h,
+            proto_msg(
+                "server.agent.terminal-resize",
+                json!({ "session_id": "a1:dev", "cols": 120, "rows": 40 }),
+            ),
+        )
+        .await;
+        assert!(
+            client_rx.try_recv().is_ok(),
+            "a resize for one of its own sessions must still be broadcast"
         );
     }
 
