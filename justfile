@@ -1,6 +1,6 @@
-# Use sccache for faster Rust compilation if installed (brew install sccache).
-# Empty string → cargo ignores the wrapper, no-op if sccache is missing.
-export RUSTC_WRAPPER := `which sccache 2>/dev/null || echo ""`
+# Local Cargo cache policy lives in .cargo/config.toml + scripts/rustc-wrapper.sh.
+# Do not export RUSTC_WRAPPER here: direct cargo and just must behave identically,
+# while GitHub Actions explicitly resets the wrapper to keep its rust-cache path.
 
 # ── Rust ────────────────────────────────────────────────────────────────────
 
@@ -32,9 +32,29 @@ coverage:
 # Fast pre-commit checks (fmt + clippy)
 quick: fmt lint
 
+# Prove the repository rustc wrapper selects sccache only for local builds and
+# always falls back safely when sccache is unavailable or CI disables it.
+check-rustc-wrapper:
+    bash ./scripts/rustc-wrapper-selftest.sh
+
+# Prove worktree warm seeding never aliases/overwrites a target and removes
+# workspace-member outputs before publishing the private destination.
+check-worktree-target-seed:
+    bash ./scripts/seed-worktree-target-selftest.sh
+
+# Best-effort warm-start for a newly-created worktree. On APFS/reflink-capable
+# filesystems this clone-shares dependency artifacts while keeping a private
+# target directory and then removes all workspace-member artifacts.
+seed-worktree-target:
+    bash ./scripts/seed-worktree-target.sh
+
+# Show the active local compiler-cache/worktree seed state.
+build-cache-status:
+    bash ./scripts/build-cache-status.sh
+
 # Full CI checks (fmt + lint + tmux-socket gate + protocol gate + codegen drift +
 # coverage — coverage runs all tests)
-check: fmt lint check-tmux-socket check-protocol check-codegen coverage
+check: fmt lint check-rustc-wrapper check-worktree-target-seed check-tmux-socket check-protocol check-codegen coverage
 
 # ── Protocol codegen (#678 Phase 5) ─────────────────────────────────────────
 

@@ -48,8 +48,14 @@
 //! the Protocol Units Nession itself owns, such as `session.attach` or
 //! `agent.register` — one module per family, one file per contract version.
 //! See `docs/architecture/protocol.md` for the layout rules and for how to add
-//! a Protocol Unit, publish a new contract version, provide a legacy adapter,
+//! a Protocol Unit, publish a new contract version, resolve one as a consumer,
 //! generate consumer types and retire a contract.
+//!
+//! It used to name "provide a legacy adapter" among those. No such section
+//! exists, and the design reaches the opposite conclusion: a peer with no
+//! manifest is refused rather than guessed at, and the adapter was designed and
+//! deliberately not built. A list of what the document contains should not
+//! contain the thing the document exists to rule out.
 
 pub mod contracts;
 pub mod kernel;

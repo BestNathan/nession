@@ -927,7 +927,7 @@ fn session_by_id(payload_value: &serde_json::Value) -> ResourceKey {
 // connection's reader hands this unit to a lane. The key helpers above are what
 // the `Key` policies are written in terms of.
 p2p_routes! { ctx, msg_type, payload_value;
-            "agent.session.list" => "agent.session.list" => Query => { match ctx.tmux.list_sessions().await {
+            "agent.session.list" => "agent.session.list" => 1 => Query => { match ctx.tmux.list_sessions().await {
                 Ok(sessions_list) => {
                     let payload = SessionListResponse {
                         sessions: sessions_list,
@@ -940,7 +940,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                 }
                 Err(e) => ctx.err("list_failed", &e.to_string()),
             } }
-            "agent.session.create" => "agent.session.create" => Key(session_by(payload_value)) => {
+            "agent.session.create" => "agent.session.create" => 1 => Key(session_by(payload_value)) => {
                 let payload: SessionCreatePayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -986,7 +986,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     Err(e) => ctx.err("create_failed", &e.to_string()),
                 }
             }
-            "agent.session.kill" => "agent.session.kill" => Key(session_by(payload_value)) => {
+            "agent.session.kill" => "agent.session.kill" => 1 => Key(session_by(payload_value)) => {
                 let payload: SessionKillPayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -1000,7 +1000,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     Err(e) => ctx.err("kill_failed", &e.to_string()),
                 }
             }
-            "agent.session.capture-preview" => "agent.session.capture-preview" => Query => {
+            "agent.session.capture-preview" => "agent.session.capture-preview" => 1 => Query => {
                 info!(
                     "agent: received session.capture_preview request id={}",
                     ctx.id
@@ -1061,7 +1061,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     }
                 }
             }
-            "agent.attach" => "agent.attach" => Key(session_named(payload_value)) => {
+            "agent.attach" => "agent.attach" => 1 => Key(session_named(payload_value)) => {
                 let payload: ClientAttachPayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -1362,7 +1362,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     }
                 }
             }
-            "agent.detach" => "agent.detach" => Key(session_named(payload_value)) => {
+            "agent.detach" => "agent.detach" => 1 => Key(session_named(payload_value)) => {
                 let payload: ClientDetachPayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -1409,7 +1409,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                 serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
                     .unwrap_or_default()
             }
-            "agent.terminal.input" => "agent.terminal.input" => Key(session_named(payload_value)) => {
+            "agent.terminal.input" => "agent.terminal.input" => 1 => Key(session_named(payload_value)) => {
                 let payload: TerminalInputPayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -1437,7 +1437,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     ),
                 }
             }
-            "agent.terminal.resize" => "agent.terminal.resize" => Key(session_named(payload_value)) => {
+            "agent.terminal.resize" => "agent.terminal.resize" => 1 => Key(session_named(payload_value)) => {
                 let payload: TerminalResizePayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -1469,7 +1469,7 @@ p2p_routes! { ctx, msg_type, payload_value;
             }
 
             // --- Web UI compatibility handlers ---
-            "client.auth" => "client.auth" => Ordered => {
+            "client.auth" => "client.auth" => 1 => Ordered => {
                 let payload: ClientAuthPayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => {
@@ -1507,7 +1507,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                 };
                 serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp)).unwrap_or_default()
             }
-            "client.sessions.list" => "client.sessions.list" => Query => { match ctx.tmux.list_sessions().await {
+            "client.sessions.list" => "client.sessions.list" => 1 => Query => { match ctx.tmux.list_sessions().await {
                 Ok(sessions_list) => {
                     let sessions: Vec<WebSessionInfo> = sessions_list
                         .into_iter()
@@ -1543,7 +1543,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                 }
                 Err(e) => ctx.err("list_failed", &e.to_string()),
             } }
-            "client.session.attach" => "client.session.attach" => Inline => {
+            "client.session.attach" => "client.session.attach" => 1 => Inline => {
                 let payload: WebSessionAttachPayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -1558,7 +1558,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                 serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
                     .unwrap_or_default()
             }
-            "client.session.create" => "client.session.create" => Key(session_by(payload_value)) => {
+            "client.session.create" => "client.session.create" => 1 => Key(session_by(payload_value)) => {
                 let payload: WebSessionCreatePayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => {
@@ -1603,7 +1603,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     }
                 }
             }
-            "client.session.kill" => "client.session.kill" => Key(session_by_id(payload_value)) => {
+            "client.session.kill" => "client.session.kill" => 1 => Key(session_by_id(payload_value)) => {
                 let payload: WebSessionKillPayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => {
@@ -1637,7 +1637,7 @@ p2p_routes! { ctx, msg_type, payload_value;
             }
 
             // --- File operations ---
-            "agent.file.list" => "agent.file.list" => Query => {
+            "agent.file.list" => "agent.file.list" => 1 => Query => {
                 let payload: FileListPayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -1651,7 +1651,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     Err(e) => ctx.err("list_failed", &format_error_chain(&e)),
                 }
             }
-            "agent.file.read" => "agent.file.read" => Query => {
+            "agent.file.read" => "agent.file.read" => 1 => Query => {
                 let payload: FileReadPayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -1677,7 +1677,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     }
                 }
             }
-            "agent.file.write" => "agent.file.write" => Key(ResourceKey::Filesystem) => {
+            "agent.file.write" => "agent.file.write" => 1 => Key(ResourceKey::Filesystem) => {
                 let payload: FileWritePayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -1692,7 +1692,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     Err(e) => ctx.err("write_error", &e.to_string()),
                 }
             }
-            "agent.file.delete" => "agent.file.delete" => Key(ResourceKey::Filesystem) => {
+            "agent.file.delete" => "agent.file.delete" => 1 => Key(ResourceKey::Filesystem) => {
                 let payload: FileDeletePayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -1710,7 +1710,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     Err(e) => ctx.err("delete_failed", &format_error_chain(&e)),
                 }
             }
-            "agent.file.create-dir" => "agent.file.create-dir" => Key(ResourceKey::Filesystem) => {
+            "agent.file.create-dir" => "agent.file.create-dir" => 1 => Key(ResourceKey::Filesystem) => {
                 let payload: FileCreateDirPayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -1728,7 +1728,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     Err(e) => ctx.err("create_dir_failed", &format_error_chain(&e)),
                 }
             }
-            "agent.file.rename" => "agent.file.rename" => Key(ResourceKey::Filesystem) => {
+            "agent.file.rename" => "agent.file.rename" => 1 => Key(ResourceKey::Filesystem) => {
                 let payload: FileRenamePayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -1748,7 +1748,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     Err(e) => ctx.err("rename_failed", &e.to_string()),
                 }
             }
-            "agent.file.cwd" => "agent.file.cwd" => Query => {
+            "agent.file.cwd" => "agent.file.cwd" => 1 => Query => {
                 let payload: FileCwdPayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
