@@ -381,62 +381,33 @@ impl SessionManager {
         }
 
         // Stage 3: set-environment for future windows/panes (both paths).
-        let _ = self
-            .cmd
-            .tokio()
-            .args(["set-environment", "-t", name, "TERM", "xterm-256color"])
-            .stderr(std::process::Stdio::null())
-            .status()
-            .await;
-        let _ = self
-            .cmd
-            .tokio()
-            .args(["set-environment", "-t", name, "LANG", "C.UTF-8"])
-            .stderr(std::process::Stdio::null())
-            .status()
-            .await;
+        //
+        // All of these are **best-effort**, and the policy is unchanged by the
+        // extraction below — `let _ =` was already here. What `#991` changes is
+        // that the grammar is no longer spelled out six times; whether each of
+        // these *should* be best-effort is scope 4's question and is left as it
+        // is rather than decided as a side effect of a refactor.
+        let _ = super::env::set_environment_var(&self.cmd, name, "TERM", "xterm-256color").await;
+        let _ = super::env::set_environment_var(&self.cmd, name, "LANG", "C.UTF-8").await;
         for (key, value) in &process_env {
             if skip_env(key, &caller_keys) {
                 continue;
             }
-            let _ = self
-                .cmd
-                .tokio()
-                .args(["set-environment", "-t", name, key, value])
-                .stderr(std::process::Stdio::null())
-                .status()
-                .await;
+            let _ = super::env::set_environment_var(&self.cmd, name, key, value).await;
         }
         for (key, value) in env {
-            let _ = self
-                .cmd
-                .tokio()
-                .args(["set-environment", "-t", name, key, value])
-                .stderr(std::process::Stdio::null())
-                .status()
-                .await;
+            let _ = super::env::set_environment_var(&self.cmd, name, key, value).await;
         }
         if !has_ps1 {
-            let _ = self
-                .cmd
-                .tokio()
-                .args(["set-environment", "-t", name, "NESSON_PS1", DEFAULT_PS1])
-                .stderr(std::process::Stdio::null())
-                .status()
-                .await;
-            let _ = self
-                .cmd
-                .tokio()
-                .args([
-                    "set-environment",
-                    "-t",
-                    name,
-                    "PROMPT_COMMAND",
-                    "[ -n \"$NESSON_PS1\" ] && { PS1=\"$NESSON_PS1\"; unset NESSON_PS1; }",
-                ])
-                .stderr(std::process::Stdio::null())
-                .status()
-                .await;
+            let _ =
+                super::env::set_environment_var(&self.cmd, name, "NESSON_PS1", DEFAULT_PS1).await;
+            let _ = super::env::set_environment_var(
+                &self.cmd,
+                name,
+                "PROMPT_COMMAND",
+                "[ -n \"$NESSON_PS1\" ] && { PS1=\"$NESSON_PS1\"; unset NESSON_PS1; }",
+            )
+            .await;
         }
 
         // Enable tmux mouse mode so mouse events reach tmux as SGR sequences

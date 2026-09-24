@@ -57,6 +57,57 @@ pub struct EnvManager {
     script_dir: PathBuf,
 }
 
+/// Set one tmux session variable — the **only** place that knows how.
+///
+/// `#991`. This grammar used to be hand-written in six places: once here, and
+/// five times in `SessionManager::create_session` (`TERM`, `LANG`, the caller's
+/// `env`, the forwarded process environment, and `NESSON_PS1`). They did not all
+/// agree — the copy in this module used `-e KEY=VALUE`, which is
+/// `new-session`'s idiom and not this subcommand's, so every variable a caller
+/// asked for went unset while its callers reported success (`#980`).
+///
+/// `#980` fixed that by correcting the copy. That leaves two implementations
+/// that agree *today*, which is the arrangement that produced the drift in the
+/// first place — so the fix that matters is not the corrected spelling, it is
+/// that there is one spelling.
+///
+/// Two things are load-bearing about the shape, and neither is style:
+///
+/// - **`name` and `value` are two separate argv values.** `set-environment`
+///   takes `name [value]`; handing it one `KEY=VALUE` fails with `variable name
+///   contains =`. It is what keeps a value containing spaces, quotes or `=`
+///   intact, because nothing re-parses it and nothing reconstructs it.
+/// - **stderr is captured, not discarded.** tmux's own message ("no such
+///   session: …") is the only thing that says *why* a required mutation failed,
+///   and throwing it away is why the #980 failure was invisible even in logs.
+///
+/// Takes the command rather than reaching for `cmd::global()` so a caller can
+/// pass the one it holds — `SessionManager` has had its own for a while, and
+/// `#991` scope 3 is the rest of the subsystem catching up.
+pub(crate) async fn set_environment_var(
+    tmux: &cmd::TmuxCmd,
+    session_name: &str,
+    key: &str,
+    value: &str,
+) -> Result<()> {
+    let output = tmux
+        .tokio()
+        .args(["set-environment", "-t", session_name, key, value])
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .await
+        .map_err(|e| anyhow::anyhow!("set-environment {key} for session {session_name}: {e}"))?;
+
+    if output.status.success() {
+        return Ok(());
+    }
+    Err(anyhow::anyhow!(
+        "set-environment {key} for session {session_name}: {} ({})",
+        output.status,
+        String::from_utf8_lossy(&output.stderr).trim()
+    ))
+}
+
 impl EnvManager {
     /// Create a new `EnvManager` with the given temporary directory.
     pub fn new(script_dir: PathBuf) -> Self {
@@ -96,26 +147,10 @@ impl EnvManager {
     ) -> Result<()> {
         let mut failures: Vec<String> = Vec::new();
         for (key, value) in vars {
-            let output = cmd::global()
-                .tokio()
-                .args(["set-environment", "-t", session_name, key, value])
-                .stderr(std::process::Stdio::piped())
-                .output()
-                .await;
-            match output {
-                // Deliberately not `stderr(Stdio::null())`: tmux's own message
-                // ("variable name contains =", "no such session: …") is the
-                // only thing that says *why* a required mutation failed, and
-                // discarding it is why the failure was invisible even in logs.
-                Ok(out) if out.status.success() => {}
-                Ok(out) => failures.push(format!(
-                    "set-environment {key} for session {session_name}: {} ({})",
-                    out.status,
-                    String::from_utf8_lossy(&out.stderr).trim()
-                )),
-                Err(e) => failures.push(format!(
-                    "set-environment {key} for session {session_name}: {e}"
-                )),
+            // Every variable is attempted even after one fails, so a single bad
+            // name cannot hide the rest.
+            if let Err(e) = set_environment_var(cmd::global(), session_name, key, value).await {
+                failures.push(e.to_string());
             }
         }
         if failures.is_empty() {
@@ -390,5 +425,94 @@ mod tests {
 
         mgr.cleanup_client_scripts("cid").await;
         assert!(!in_custom.exists());
+    }
+
+    /// Write a fake `tmux` that records its argv and exits with `code`.
+    ///
+    /// The one seam that makes the grammar testable: `TmuxCmd::with_bin` accepts
+    /// any path, so the whole operation path can be exercised without tmux —
+    /// which is what `#991` scope 3 is about, and what made the `#980` drift
+    /// invisible for so long (there was no way to assert what was executed).
+    #[cfg(unix)]
+    fn fake_tmux(dir: &std::path::Path, code: u8) -> std::path::PathBuf {
+        use std::os::unix::fs::PermissionsExt as _;
+        let log = dir.join("argv");
+        let bin = dir.join("tmux");
+        std::fs::write(
+            &bin,
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$@\" > {log}\n[ {code} -eq 0 ] || {{ echo 'variable name contains =' >&2; exit {code}; }}\nexit {code}\n",
+                log = log.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        bin
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn set_environment_var_passes_name_and_value_as_separate_arguments() {
+        // The `#980` grammar, pinned where it now lives. `set-environment` takes
+        // `name [value]`; a single `KEY=VALUE` argument fails with "variable name
+        // contains =", and `-e KEY=VALUE` is `new-session`'s idiom, answered with
+        // "unknown flag -e". Both are one edit away from coming back, and this is
+        // the test that would catch it.
+        let dir = tempfile::tempdir().unwrap();
+        let sock = dir.path().join("sock");
+        let tmux = cmd::TmuxCmd::new(
+            fake_tmux(dir.path(), 0).to_string_lossy().to_string(),
+            sock.clone(),
+        );
+
+        // A value with spaces, `=` and quotes: nothing may re-parse it.
+        set_environment_var(&tmux, "sess", "KEY", "a value = with \"both\"")
+            .await
+            .expect("the fake exits 0");
+
+        let argv = std::fs::read_to_string(dir.path().join("argv")).unwrap();
+        // The `-S <socket>` is asserted rather than filtered out: it is the
+        // invariant `#574` established and this issue says to preserve, and a
+        // refactor that reached for the default socket would be caught here.
+        assert_eq!(
+            argv.lines().collect::<Vec<_>>(),
+            vec![
+                "-S",
+                &sock.to_string_lossy(),
+                "set-environment",
+                "-t",
+                "sess",
+                "KEY",
+                "a value = with \"both\""
+            ],
+            "name and value are two argv values, the value is not reconstructed, \
+             and the command addresses nession's own socket"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn set_environment_var_reports_tmuxs_own_message_on_failure() {
+        // Required mutations must not degrade into success — the `#980` shape,
+        // where the caller reported success while nothing was set. tmux's stderr
+        // is the only thing that says *why*, so it travels with the error.
+        let dir = tempfile::tempdir().unwrap();
+        let tmux = cmd::TmuxCmd::new(
+            fake_tmux(dir.path(), 1).to_string_lossy().to_string(),
+            dir.path().join("sock"),
+        );
+
+        let err = set_environment_var(&tmux, "sess", "KEY", "value")
+            .await
+            .expect_err("a non-zero exit is a failure");
+        let text = err.to_string();
+        assert!(
+            text.contains("variable name contains ="),
+            "tmux's own message must survive into the error: {text}"
+        );
+        assert!(
+            text.contains("KEY"),
+            "and the variable it was setting: {text}"
+        );
     }
 }
