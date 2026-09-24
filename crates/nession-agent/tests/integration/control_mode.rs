@@ -5,6 +5,7 @@
 
 use anyhow::{anyhow, Result};
 use nession_agent::tmux::control::ControlModeSession;
+use nession_agent::tmux::ops::TmuxDep;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::sleep;
@@ -87,7 +88,7 @@ async fn test_attach_and_receive_output() -> Result<()> {
     sleep(Duration::from_millis(300)).await;
 
     let (mut session, mut rx, _resize_rx) =
-        ControlModeSession::attach(guard.name(), 80, 24).await?;
+        ControlModeSession::attach(&TmuxDep::global(), guard.name(), 80, 24).await?;
 
     // Drain any startup output (initial screen redraw from refresh-client).
     let _ = drain_bytes(&mut rx, 500).await;
@@ -118,7 +119,8 @@ async fn test_resize_updates_viewport() -> Result<()> {
     create_session(guard.name()).await?;
     sleep(Duration::from_millis(300)).await;
 
-    let (mut session, _rx, _resize_rx) = ControlModeSession::attach(guard.name(), 80, 24).await?;
+    let (mut session, _rx, _resize_rx) =
+        ControlModeSession::attach(&TmuxDep::global(), guard.name(), 80, 24).await?;
 
     assert_eq!(session.viewport(), (80, 24));
 
@@ -155,8 +157,10 @@ async fn two_clients_share_one_window() -> Result<()> {
     create_session(guard.name()).await?;
     sleep(Duration::from_millis(300)).await;
 
-    let (mut client1, _rx1, _rz1) = ControlModeSession::attach(guard.name(), 80, 24).await?;
-    let (mut client2, _rx2, _rz2) = ControlModeSession::attach(guard.name(), 120, 40).await?;
+    let (mut client1, _rx1, _rz1) =
+        ControlModeSession::attach(&TmuxDep::global(), guard.name(), 80, 24).await?;
+    let (mut client2, _rx2, _rz2) =
+        ControlModeSession::attach(&TmuxDep::global(), guard.name(), 120, 40).await?;
     sleep(Duration::from_millis(300)).await;
 
     // client2 attached second, and `attach` resizes the window on the way in,
@@ -193,7 +197,8 @@ async fn test_close_is_idempotent() -> Result<()> {
     create_session(guard.name()).await?;
     sleep(Duration::from_millis(300)).await;
 
-    let (mut session, _rx, _resize_rx) = ControlModeSession::attach(guard.name(), 80, 24).await?;
+    let (mut session, _rx, _resize_rx) =
+        ControlModeSession::attach(&TmuxDep::global(), guard.name(), 80, 24).await?;
 
     session.close().await?;
     session.close().await?;

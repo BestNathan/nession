@@ -58,7 +58,12 @@ mod tests {
     /// the trait object dispatches correctly on the Ok path.
     #[tokio::test]
     async fn pty_session_usable_as_trait_object() {
-        let Ok((session, _rx)) = PtySession::attach("__nession_trait_test__", 80, 24) else {
+        let Ok((session, _rx)) = PtySession::attach(
+            &crate::tmux::ops::TmuxDep::global(),
+            "__nession_trait_test__",
+            80,
+            24,
+        ) else {
             return; // tmux not available — nothing to assert
         };
         let mut boxed: Box<dyn TmuxSession> = Box::new(session);

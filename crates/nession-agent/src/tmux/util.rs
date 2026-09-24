@@ -14,7 +14,7 @@
 use anyhow::{Context, Result};
 
 use super::cmd;
-use super::ops::TmuxOps;
+use super::ops::{TmuxDep, TmuxOps};
 
 /// Default window size for a session whose size could not be read.
 ///
@@ -39,8 +39,14 @@ const FALLBACK_WINDOW_SIZE: (u16, u16) = (80, 24);
 /// *supplies the argument vector here*, so anything reusable added on top of it
 /// would be the `run(args: &[&str])` shape #991 rules out. A reusable operation
 /// belongs in [`TmuxOps`].
-pub async fn run_tmux_command(session: &str, args: &[&str]) -> Result<()> {
-    let mut cmd = cmd::global().tokio();
+///
+/// `tmux` is the caller's addressing rather than the process-wide one (#991
+/// step 6): this runs inside an attach, so it must land on the same server the
+/// attach backend was handed — and a test substituting a fake binary has to
+/// reach the `resize-window` that opens a control-mode attach, or the fake
+/// covers everything except its first tmux call.
+pub async fn run_tmux_command(tmux: &TmuxDep, session: &str, args: &[&str]) -> Result<()> {
+    let mut cmd = tmux.cmd().tokio();
     cmd.args(args)
         .arg("-t")
         .arg(session)

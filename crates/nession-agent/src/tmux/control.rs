@@ -26,7 +26,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout};
 use tokio::sync::mpsc;
 
-use super::cmd;
+use super::ops::TmuxDep;
 use super::parser::{parse_control_line, unescape_tmux_data, ControlMessage};
 use super::util::run_tmux_command;
 
@@ -49,6 +49,10 @@ pub struct ControlModeSession {
     child: Child,
     stdin: ChildStdin,
     viewport: (u16, u16),
+    /// The tmux this client is attached to — held rather than resolved per
+    /// call because [`Drop`] cannot reach the process, and a client attached
+    /// to one addressing must be detached from the same one (#991 step 6).
+    tmux: TmuxDep,
 }
 
 impl ControlModeSession {
@@ -66,7 +70,11 @@ impl ControlModeSession {
     /// clients (e.g. as a `terminal.resize` message). When the tmux
     /// subprocess exits (or the reader task drops the senders), both
     /// receivers close.
+    ///
+    /// `tmux` is the caller's addressing — the same one the session was
+    /// created on, and the one a test substitutes a fake binary into.
     pub async fn attach(
+        tmux: &TmuxDep,
         session_name: &str,
         width: u16,
         height: u16,
@@ -75,6 +83,7 @@ impl ControlModeSession {
         // This ensures tmux renders at the correct dimensions from the first
         // frame, avoiding a flash of wrong-sized content.
         run_tmux_command(
+            tmux,
             session_name,
             &[
                 "resize-window",
@@ -86,7 +95,8 @@ impl ControlModeSession {
         )
         .await?;
 
-        let mut child = cmd::global()
+        let mut child = tmux
+            .cmd()
             .tokio()
             .args(["-C", "attach", "-t", session_name])
             .stdin(Stdio::piped())
@@ -107,6 +117,7 @@ impl ControlModeSession {
             child,
             stdin,
             viewport: (width, height),
+            tmux: tmux.clone(),
         };
 
         Ok((session, output_rx, resize_rx))
@@ -196,7 +207,9 @@ impl Drop for ControlModeSession {
         // SIGKILL (start_kill / kill -9) on a control-mode client crashes
         // the tmux server on macOS (Homebrew tmux 3.6b: "server exited
         // unexpectedly").  We must always detach cleanly.
-        let _ = cmd::global()
+        let _ = self
+            .tmux
+            .cmd()
             .std()
             .args(["detach-client", "-t", &self.session_name])
             .stdin(std::process::Stdio::null())
@@ -275,3 +288,75 @@ async fn read_output_loop(
 // the control-mode client exists, so there is no stdin to write to yet.
 // `resize` writes `resize-window` to the control-mode stdin instead. Two
 // routes, one shared window. Covered by tests/integration/control_mode.rs.
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_injected_tmux_receives_the_control_mode_attach_and_the_detach() {
+        // The control-mode backend reaches tmux three ways — `resize-window`
+        // through `util::run_tmux_command` before it attaches, `-C attach` as
+        // its own child, and `detach-client` on the way out — and all three ran
+        // on the process-wide tmux before #991 step 6.
+        //
+        // **This one runs on macOS too**, which the control-mode integration
+        // tests (skipped by `cfg!(target_os = "macos")` because a real tmux
+        // server can be crashed by parallel control-mode clients) cannot. There
+        // is no server here: every tmux invocation is the fake, which records
+        // its argv and exits. So the shape that has no local coverage on this
+        // machine — the backend's own wiring — has a test that does, and the
+        // macOS skip keeps applying exactly where it was needed: to real tmux.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let fake = crate::test_support::FakeTmux::new(dir.path(), "exit 0");
+
+        let (session, _rx, _resize_rx) =
+            ControlModeSession::attach(&fake.dep(), "nession-fake-sess", 80, 24)
+                .await
+                .expect("the injected binary accepts the resize and the attach");
+        assert_eq!(session.viewport(), (80, 24));
+
+        // `resize-window` is awaited, `-C attach` is a spawned child that the
+        // reader loop may not have seen finish yet.
+        let calls = fake
+            .wait_for_calls(3, std::time::Duration::from_secs(10))
+            .await;
+        assert_eq!(
+            calls.first(),
+            Some(&vec![
+                "resize-window".to_string(),
+                "-x".to_string(),
+                "80".to_string(),
+                "-y".to_string(),
+                "24".to_string(),
+                "-t".to_string(),
+                "nession-fake-sess".to_string(),
+            ]),
+            "the window is resized before the attach, through the injected tmux: {calls:?}"
+        );
+        assert!(
+            calls.iter().any(|args| args
+                == &vec![
+                    "-C".to_string(),
+                    "attach".to_string(),
+                    "-t".to_string(),
+                    "nession-fake-sess".to_string(),
+                ]),
+            "the control-mode client is the injected binary: {calls:?}"
+        );
+
+        drop(session);
+        let calls = fake.calls();
+        assert!(
+            calls.iter().any(|args| args
+                == &vec![
+                    "detach-client".to_string(),
+                    "-t".to_string(),
+                    "nession-fake-sess".to_string(),
+                ]),
+            "a control-mode client must always detach cleanly, on the tmux it \
+             attached to: {calls:?}"
+        );
+    }
+}

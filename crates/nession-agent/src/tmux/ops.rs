@@ -366,6 +366,64 @@ impl TmuxOps {
     }
 }
 
+/// The tmux **dependency** a domain type runs on: one [`TmuxCmd`], from which
+/// the semantic owner is derived.
+///
+/// This is the seam #991's step 6 exists for. Before it, every type that was
+/// not [`SessionManager`](super::manager::SessionManager) reached
+/// [`cmd::global`] itself — `EnvManager` for `set-environment` and
+/// `clear-history`, `PtySession`/`ControlModeSession` for `attach` and
+/// `detach-client` — so substituting a fake tmux binary covered
+/// `SessionManager` alone, and the operations those types performed could only
+/// be exercised against the real tmux on a real socket.
+///
+/// Both halves are substitutions of one thing: a domain type holds a `TmuxDep`,
+/// a test hands in one built with [`TmuxDep::injected`], and every operation the
+/// type performs — process addressing *and* the grammar [`TmuxOps`] derives from
+/// it — follows. Nothing in a holder of this resolves the process-wide
+/// addressing behind its own back.
+///
+/// It is not the whole crate's seam yet, and the remainder is deliberate:
+/// [`util`](super::util)'s capture and availability helpers
+/// (`capture_scrollback`, `check_tmux_available`, `tmux_version`) take no
+/// dependency and still resolve [`cmd::global`], because they are stateless
+/// functions on the capture/preview and startup paths rather than operations of
+/// a domain type. `run_tmux_command`, which an attach *does* call, takes one.
+///
+/// A `TmuxDep` built with [`TmuxDep::global`] resolves [`cmd::global`] on
+/// **every** use rather than once, which is the property [`TmuxOps::global`]
+/// documents: a value frozen before [`cmd::configure`](super::cmd::configure)
+/// would pin the process to the fallback socket for its whole life, and
+/// `configure`'s already-set check compares against `cmd::global()`, so it
+/// could not see that it had been bypassed. The injected arm is the one that is
+/// fixed by construction — that is what injecting means.
+#[derive(Debug, Clone)]
+pub struct TmuxDep(Option<TmuxCmd>);
+
+impl TmuxDep {
+    /// The process-wide addressing, resolved per use.
+    pub fn global() -> Self {
+        Self(None)
+    }
+
+    /// Exactly this addressing — what a test hands in so that one fake tmux
+    /// binary covers every operation in the path.
+    pub fn injected(cmd: TmuxCmd) -> Self {
+        Self(Some(cmd))
+    }
+
+    /// The process addressing to build a command on — what a caller needs for
+    /// the subcommands that are not (yet) operations here.
+    pub fn cmd(&self) -> TmuxCmd {
+        self.0.clone().unwrap_or_else(|| cmd::global().clone())
+    }
+
+    /// The semantic owner bound to that addressing.
+    pub fn ops(&self) -> TmuxOps {
+        TmuxOps::new(self.cmd())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -472,6 +530,119 @@ mod tests {
         let ops = TmuxOps::new(TmuxCmd::new("/nonexistent/fake-tmux", socket.clone()));
         assert_eq!(ops.cmd.socket_path(), socket.as_path());
         assert_eq!(ops.cmd.bin(), "/nonexistent/fake-tmux");
+    }
+
+    // ── the dependency, and the failure arms it makes reachable ──────────────
+
+    #[test]
+    fn a_dep_resolves_the_process_socket_until_it_is_injected() {
+        // Two properties, and both are what a substituted binary depends on:
+        // the default resolves the process-wide addressing (so a `TmuxDep`
+        // passed by value through a domain type is not a second socket), and an
+        // injected one keeps *both* halves of what was handed in. A seam that
+        // reset the socket would make fake-tmux tests pass while proving
+        // nothing about `-S`.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let socket = dir.path().join("probe.sock");
+        let injected = TmuxDep::injected(TmuxCmd::new("/nonexistent/fake-tmux", socket.clone()));
+        assert_eq!(injected.cmd().bin(), "/nonexistent/fake-tmux");
+        assert_eq!(injected.cmd().socket_path(), socket.as_path());
+
+        assert_eq!(
+            TmuxDep::global().cmd().socket_path(),
+            cmd::global().socket_path(),
+            "the default must address the process socket"
+        );
+        assert_eq!(
+            TmuxDep::injected(TmuxCmd::new("tmux", socket.clone()))
+                .ops()
+                .cmd
+                .socket_path(),
+            socket.as_path(),
+            "the owner an operation runs on must be built from the same addressing"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_missing_binary_is_a_spawn_failure_not_a_silent_answer() {
+        // The arm with no exit status to report: the binary does not exist, so
+        // no process is ever spawned. It is a different failure from tmux
+        // answering non-zero, and the message has to say which — a caller that
+        // sees only "set-environment failed" cannot tell a refused flag from a
+        // missing tmux.
+        //
+        // Covered through the owner's own addressing rather than through
+        // `cmd::global()`: a test that reached the real binary here would not
+        // reach this arm at all.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let ops = TmuxOps::new(TmuxCmd::new(
+            "/nonexistent/fake-tmux",
+            dir.path().join("tmux.sock"),
+        ));
+
+        let set = format!(
+            "{:#}",
+            ops.set_environment("sess", "NESSON_SPAWN", "v")
+                .await
+                .expect_err("there is no binary to spawn")
+        );
+        assert!(
+            set.contains("failed to spawn tmux set-environment"),
+            "the failure must say the process never started: {set}"
+        );
+        assert!(
+            set.contains("NESSON_SPAWN") && set.contains("sess"),
+            "and it must name the variable and the session it was for: {set}"
+        );
+
+        let show = format!(
+            "{:#}",
+            ops.show_environment("sess", "NESSON_SPAWN")
+                .await
+                .expect_err("there is no binary to spawn")
+        );
+        assert!(
+            show.contains("failed to spawn tmux show-environment"),
+            "the query must fail the same way rather than answer `None`: {show}"
+        );
+        assert!(
+            show.contains("NESSON_SPAWN") && show.contains("sess"),
+            "and it must name the variable and the session it was asked about: {show}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn show_environment_refuses_an_answer_that_is_not_a_value() {
+        // tmux exited 0 and printed something that is not the one `NAME=VALUE`
+        // line it documents. `Ok(None)` here would say "the session does not
+        // hold it", which is the answer a *successful* query gives — and the
+        // caller cannot tell the two apart afterwards. The fake is what makes
+        // the arm reachable: real tmux does not answer this way.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let fake = crate::test_support::FakeTmux::new(dir.path(), "printf 'not a value\\n'");
+
+        let err = format!(
+            "{:#}",
+            fake.dep()
+                .ops()
+                .show_environment("sess", "NESSON_MALFORMED")
+                .await
+                .expect_err("a line with no `=` is not a value")
+        );
+        assert!(
+            err.contains("printed no NAME=VALUE line"),
+            "the failure must say what tmux answered instead: {err}"
+        );
+        assert!(
+            err.contains("NESSON_MALFORMED") && err.contains("sess"),
+            "and it must name the variable and the session it asked about: {err}"
+        );
+        assert_eq!(
+            fake.calls(),
+            vec![vec!["show-environment", "-t", "sess", "NESSON_MALFORMED"]],
+            "the query must be the owner's grammar, run against the injected binary"
+        );
     }
 
     // ── the window-size query ────────────────────────────────────────────────

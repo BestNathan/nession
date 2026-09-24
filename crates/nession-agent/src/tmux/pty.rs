@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 use tracing::error;
 
-use super::cmd;
+use super::ops::TmuxDep;
 
 /// Buffer size for reading from the PTY master — 4 KiB per read.
 const READ_BUF_SIZE: usize = 4096;
@@ -30,6 +30,11 @@ pub struct PtySession {
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     master: Box<dyn MasterPty + Send>,
     viewport: (u16, u16),
+    /// The tmux this backend attaches and detaches through — held rather than
+    /// resolved per call because [`Drop`] cannot reach the process: a client
+    /// that was attached with one addressing must be detached from the same
+    /// one (#991 step 6).
+    tmux: TmuxDep,
 }
 
 impl PtySession {
@@ -39,7 +44,11 @@ impl PtySession {
     /// The returned `mpsc::Receiver<Vec<u8>>` yields chunks of ANSI
     /// data read from the PTY master.  The caller should forward these
     /// to all connected web clients as `terminal.output` messages.
+    ///
+    /// `tmux` is the caller's addressing — the same one the session was
+    /// created on, and the one a test substitutes a fake binary into.
     pub fn attach(
+        tmux: &TmuxDep,
         session_name: &str,
         cols: u16,
         rows: u16,
@@ -57,7 +66,8 @@ impl PtySession {
         // Hide the tmux status bar for this session only — the web UI has
         // its own chrome.  Using `-t` instead of `-g` avoids a global
         // side-effect that would affect every session on the machine.
-        let _ = cmd::global()
+        let _ = tmux
+            .cmd()
             .std()
             .args(["set-option", "-t", session_name, "status", "off"])
             .status();
@@ -66,7 +76,7 @@ impl PtySession {
         // and spawn it on the slave side of the PTY.  portable-pty has its own
         // command type, so this goes through TmuxCmd::pty() rather than the
         // std/tokio builders — the socket flag has to be applied per API.
-        let mut attach = cmd::global().pty();
+        let mut attach = tmux.cmd().pty();
         attach.args(["attach", "-t", session_name]);
         let child = pty
             .slave
@@ -116,6 +126,7 @@ impl PtySession {
                 writer,
                 master: pty.master,
                 viewport: (cols, rows),
+                tmux: tmux.clone(),
             },
             rx,
         ))
@@ -166,7 +177,9 @@ impl Drop for PtySession {
         // Detach the tmux client gracefully using a blocking command (Drop is
         // sync so we cannot wait on the async child).  SIGKILL on a tmux
         // attach client is less risky than control-mode, but be safe.
-        let _ = cmd::global()
+        let _ = self
+            .tmux
+            .cmd()
             .std()
             .args(["detach-client", "-t", &self.session_name])
             .stdin(std::process::Stdio::null())
@@ -201,7 +214,9 @@ impl super::session::TmuxSession for PtySession {
 
     async fn close(&mut self) -> Result<()> {
         // Detach the tmux client gracefully before killing the subprocess.
-        let _ = cmd::global()
+        let _ = self
+            .tmux
+            .cmd()
             .std()
             .args(["detach-client", "-t", &self.session_name])
             .stdin(std::process::Stdio::null())
@@ -218,6 +233,7 @@ impl super::session::TmuxSession for PtySession {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tmux::cmd;
     use std::time::{Duration, Instant};
 
     /// Harness socket env var — set by `scripts/tmux-run-socket.sh` (via
@@ -279,7 +295,7 @@ mod tests {
             "failed to create tmux session {name} on the harness socket"
         );
 
-        let (session, mut rx) = match PtySession::attach(&name, 80, 24) {
+        let (session, mut rx) = match PtySession::attach(&TmuxDep::global(), &name, 80, 24) {
             Ok(pair) => pair,
             Err(e) => {
                 let _ = cmd::global()
@@ -343,11 +359,78 @@ mod tests {
         // outcome is valid for this test — we verify only that the
         // returned struct is well-constructed on the Ok path and that
         // there is no panic or hang on either path.
-        let result = PtySession::attach("__nession_test_session__", 80, 24);
+        let result = PtySession::attach(&TmuxDep::global(), "__nession_test_session__", 80, 24);
         if let Ok((session, _rx)) = result {
             assert_eq!(session.session_name(), "__nession_test_session__");
             assert_eq!(session.viewport(), (80, 24));
             drop(session);
         }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_injected_tmux_receives_the_attach_and_the_detach() {
+        // The attach backend is a tmux client *and* a tmux caller: it sets an
+        // option before it attaches, and it detaches on the way out. All three
+        // of those ran on the process-wide tmux before #991 step 6 and run on
+        // whatever the caller passes now.
+        //
+        // This is the wiring that a test cannot check through results: against
+        // the real binary the calls succeed whether or not the injection took.
+        // What is checked instead is the fake's own record — which is also why
+        // the session name is one no real tmux has ever heard of: if the real
+        // binary were reached, `set-option` on a session that does not exist
+        // would be the only thing that happened, and the recorded calls would
+        // not be there at all.
+        //
+        // No tmux and no harness socket: unlike the integration tests that skip
+        // on macOS, this one never runs control-mode/PTY against a real server,
+        // so it has no reason to skip anywhere.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let fake = crate::test_support::FakeTmux::new(dir.path(), "exit 0");
+
+        let (session, _rx) = PtySession::attach(&fake.dep(), "nession-fake-sess", 80, 24)
+            .expect("the injected binary exists, so the PTY spawn succeeds");
+        assert_eq!(session.viewport(), (80, 24));
+
+        // The attach is a spawned child rather than an awaited call, so its
+        // record can be a moment behind the spawn; `set-option` is `.status()`
+        // and is already there.
+        let calls = fake
+            .wait_for_calls(2, std::time::Duration::from_secs(10))
+            .await;
+        assert_eq!(
+            calls.first(),
+            Some(&vec![
+                "set-option".to_string(),
+                "-t".to_string(),
+                "nession-fake-sess".to_string(),
+                "status".to_string(),
+                "off".to_string(),
+            ]),
+            "the status bar is hidden on the injected tmux, targeted at the session: {calls:?}"
+        );
+        assert!(
+            calls.iter().any(|args| args
+                == &vec![
+                    "attach".to_string(),
+                    "-t".to_string(),
+                    "nession-fake-sess".to_string(),
+                ]),
+            "the PTY child must be the injected binary attaching to the session: {calls:?}"
+        );
+
+        drop(session);
+        let calls = fake.calls();
+        assert!(
+            calls.iter().any(|args| args
+                == &vec![
+                    "detach-client".to_string(),
+                    "-t".to_string(),
+                    "nession-fake-sess".to_string(),
+                ]),
+            "dropping the session detaches its client from the same tmux it \
+             attached to: {calls:?}"
+        );
     }
 }

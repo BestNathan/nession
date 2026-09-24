@@ -392,3 +392,91 @@ async fn test_create_duplicate_session() {
     // Clean up
     manager.kill_session(&session_name).await.unwrap();
 }
+
+// ── the injected tmux, from outside the crate (#991 step 6) ─────────────────
+//
+// `#### Testability` asks for one thing: "a fake tmux binary can exercise the
+// complete env mutation path, not only `SessionManager`". These two tests are
+// that, driven through the same public API any other consumer of this crate
+// would use — deliberately not through a `#[cfg(test)]` seam, which is what the
+// old injection point was and why the criterion stayed unmet for two steps.
+
+/// The path, end to end, on a binary that records what it was asked to do.
+///
+/// Both halves of the proof are here and they are different halves: the call
+/// succeeded, *and* the fake's own record says which process ran it and with
+/// which argv. The first alone would pass against real tmux (a session that
+/// exists accepts `set-environment`), which is the way a substitution test
+/// usually proves nothing.
+///
+/// No tmux and no harness socket: the injected dependency addresses a socket
+/// inside this test's temp dir that nothing has bound, so an injection that
+/// silently did not take is a failure rather than a pass.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_fake_tmux_exercises_the_env_mutation_path_from_outside_the_crate() {
+    use nession_agent::tmux::env::EnvManager;
+
+    let dir = tempfile::tempdir().unwrap();
+    let fake = super::FakeTmux::new(dir.path(), "exit 0").expect("install the fake tmux");
+    let mut env = EnvManager::new(dir.path().to_path_buf());
+    env.with_tmux(fake.dep());
+
+    env.set_environment(
+        "nession-fake-sess",
+        &[("NESSON_OUTSIDE".to_string(), "v".to_string())],
+    )
+    .await
+    .expect("the injected binary exits 0 for every call");
+
+    assert_eq!(
+        fake.calls(),
+        vec![vec![
+            "set-environment",
+            "-t",
+            "nession-fake-sess",
+            "NESSON_OUTSIDE",
+            "v"
+        ]],
+        "the operation must have run on the injected binary, in the owner's grammar"
+    );
+}
+
+/// The class, from outside the crate: a required mutation that tmux refuses is
+/// an error, and the error carries tmux's own words.
+///
+/// This is #980's failure mode as a public-API contract. The fake is what makes
+/// it checkable without needing real tmux to fail for the right reason — the
+/// only way to make real tmux refuse a `set-environment` is a session that does
+/// not exist, which is also what a *working* implementation reports.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_refused_required_mutation_is_reported_from_outside_the_crate() {
+    use nession_agent::tmux::env::EnvManager;
+
+    let dir = tempfile::tempdir().unwrap();
+    let fake = super::FakeTmux::new(
+        dir.path(),
+        "case \"$1\" in set-environment) echo 'unknown flag -e' >&2; exit 1;; *) exit 0;; esac",
+    )
+    .expect("install the fake tmux");
+    let mut env = EnvManager::new(dir.path().to_path_buf());
+    env.with_tmux(fake.dep());
+
+    let err = env
+        .set_environment(
+            "nession-fake-sess",
+            &[("NESSON_OUTSIDE".to_string(), "v".to_string())],
+        )
+        .await
+        .expect_err("a required mutation must not be downgraded to a warning");
+    let message = err.to_string();
+    assert!(
+        message.contains("NESSON_OUTSIDE"),
+        "the failure must name the variable: {message}"
+    );
+    assert!(
+        message.contains("unknown flag -e"),
+        "and it must carry tmux's own diagnostic: {message}"
+    );
+}
