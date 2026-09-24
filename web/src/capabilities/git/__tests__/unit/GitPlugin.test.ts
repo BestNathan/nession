@@ -1,9 +1,38 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { GitPlugin } from '@/capabilities/git/GitPlugin';
 import { createMockPluginSurface, type MockPluginSurface } from '@/test/mockPluginSurface';
+import type { ProtocolManifest } from '@/platform/protocol';
 
 const statusReq = { agent_id: 'a1', session: 'a1:work' } as const;
 const diffReq = { agent_id: 'a1', session: 'a1:work', path: 'src/a.ts' } as const;
+
+/**
+ * What `a1` advertises.
+ *
+ * Every test in this file addresses `a1`, so every test needs the directory to
+ * know about it. That is not new — it is what a connection that has received an
+ * agent list always has — but it used to be optional, because a manifest-less
+ * target was relayed unversioned and the call still worked. Since `#963` that
+ * path throws, so "there is an agent here" has to be stated rather than assumed.
+ */
+const AGENT_MANIFEST: ProtocolManifest = {
+  provider: 'test',
+  protocols: {
+    'git.status': { versions: [1] },
+    'git.diff': { versions: [1] },
+    'git.root': { versions: [1] },
+    'git.log': { versions: [1] },
+    'git.branches': { versions: [1] },
+    'git.worktrees': { versions: [1] },
+  },
+};
+
+/** A surface whose agent `a1` is reachable — the premise of every test here. */
+function surfaceWithAgent(): MockPluginSurface {
+  const surface = createMockPluginSurface();
+  surface.protocols.publish(new Map([['a1', AGENT_MANIFEST]]));
+  return surface;
+}
 
 const statusResponse = {
   state: 'ok',
@@ -26,7 +55,7 @@ describe('GitPlugin', () => {
 
   beforeEach(() => {
     plugin = new GitPlugin();
-    surface = createMockPluginSurface();
+    surface = surfaceWithAgent();
   });
 
   it('exposes the "git" transport name', () => {
@@ -35,8 +64,8 @@ describe('GitPlugin', () => {
 
   describe('binding lifecycle', () => {
     it('double-mount replaces the binding; stale teardown keeps the newer binding active', async () => {
-      const surfaceA = createMockPluginSurface();
-      const surfaceB = createMockPluginSurface();
+      const surfaceA = surfaceWithAgent();
+      const surfaceB = surfaceWithAgent();
 
       const teardownA = plugin.install(surfaceA);
       const teardownB = plugin.install(surfaceB); // replace semantics — no throw
@@ -140,14 +169,24 @@ describe('GitPlugin', () => {
       await expect(pending).resolves.toEqual(statusResponse);
     });
 
-    it('sends no version to a target that advertised no manifest', async () => {
-      // The pre-#678 request, unchanged. A Legacy Peer is relayed to exactly as
-      // it was, and naming a version it never heard of would not be.
-      const pending = plugin.gitStatus(statusReq);
-      expect(surface.requests[0].payload).toEqual(statusReq);
+    it('refuses rather than sending unversioned when the target is not in the directory', async () => {
+      // This was `sends no version to a target that advertised no manifest`,
+      // and it asserted the request went out byte-identical to the pre-`#678`
+      // one. That assertion *was* the bypass `#963` removed: a target nobody
+      // had heard from yet was addressed as though it were a peer predating
+      // manifests, so a slow agent list produced a call that had negotiated
+      // nothing — and the server relays a caller that names no version, so
+      // nothing downstream could catch it either.
+      //
+      // Rewritten rather than repaired. The behaviour it pinned is gone, and a
+      // test that still described it would be describing a path that no longer
+      // exists.
+      surface.protocols.publish(new Map());
 
-      surface.resolveNext('git.status', statusResponse);
-      await expect(pending).resolves.toEqual(statusResponse);
+      await expect(plugin.gitStatus(statusReq)).rejects.toThrow(
+        /`a1` is not in the protocol directory yet/,
+      );
+      expect(surface.requests, 'nothing may reach the wire').toHaveLength(0);
     });
 
     it('refuses locally when the target serves only versions we cannot read', async () => {

@@ -1,4 +1,4 @@
-import type { ProtocolManifest } from './types';
+import type { TargetProtocols } from './directory';
 
 /**
  * Consumer Requirements ∩ Provider Manifest → the contract version to use.
@@ -18,21 +18,23 @@ import type { ProtocolManifest } from './types';
  * 3. **No intersection disables one unit, not the connection.** The result is a
  *    value the caller renders, not a failure that unwinds anything — an Agent
  *    that cannot do `git.diff` is still an Agent.
- * 4. **A peer with no manifest is not a peer that refused.** It is a Legacy
- *    Peer: it relays exactly as it did before any of this existed, which means
- *    *not naming a version*. Absence is not a claim about versions.
+ * 4. **There is no Legacy Peer.** A peer whose manifest is not known yet is one
+ *    this client cannot address, not one it may address unversioned. `#963`
+ *    removed that path: it let a manifest still in flight be read as a
+ *    negotiation that had succeeded.
  */
 
 /**
  * What resolving one unit against one target produced.
  *
- * A union rather than a nullable version so the three outcomes stay distinct
- * sentences to a reader. `legacy` in particular is not a failure and must never
- * be reported as one — it is the pre-`#678` path, working as before.
+ * A union rather than a nullable version so the outcomes stay distinct
+ * sentences to a reader. Every outcome except `resolved` is a refusal the
+ * caller must report — including `not-ready`, which used to be the success
+ * path `legacy`.
  */
 export type Resolution =
   | { readonly kind: 'resolved'; readonly version: number }
-  | { readonly kind: 'legacy' }
+  | { readonly kind: 'not-ready' }
   | { readonly kind: 'not-advertised' }
   | { readonly kind: 'no-common-version'; readonly offered: readonly number[] };
 
@@ -57,20 +59,24 @@ export function selectVersion(
 /**
  * Resolve one protocol unit for one target.
  *
- * `manifest` is `null` for a target that advertised none — a Legacy Peer, or an
- * agent this client has not heard about yet. Both answer `legacy`, and that is
- * the safe direction for the second case too: not having fetched yet must not
- * read as "this target refused".
+ * `unknown` and `none` are kept apart because they are different sentences to
+ * a reader, not because they behave differently — neither resolves, and
+ * neither falls back to an unversioned call. "We have not heard from this
+ * target yet" asks the caller to wait and retry; "this target advertises
+ * nothing" asks nobody to move, because nothing can.
  */
 export function resolveContract(
   unit: string,
   requirements: readonly number[],
-  manifest: ProtocolManifest | null | undefined,
+  target: TargetProtocols,
 ): Resolution {
-  if (!manifest) {
-    return { kind: 'legacy' };
+  if (target.kind === 'unknown') {
+    return { kind: 'not-ready' };
   }
-  const support = manifest.protocols[unit];
+  if (target.kind === 'none') {
+    return { kind: 'not-advertised' };
+  }
+  const support = target.manifest.protocols[unit];
   if (!support) {
     return { kind: 'not-advertised' };
   }
@@ -82,7 +88,8 @@ export function resolveContract(
 }
 
 /**
- * The sentence a refusal gets, or `null` when there is nothing to refuse.
+ * The sentence a refusal gets. Total over the outcomes that *are* refusals, so
+ * a caller cannot reach a `throw` with nothing to say about why.
  *
  * Both sides are named, for the reason the server's own refusal names both:
  * "version not supported" is not actionable, "`agent-a` offers `git.status` at
@@ -90,15 +97,14 @@ export function resolveContract(
  * the server's `contract_not_supported` refusal so a reader cannot tell — and
  * does not need to care — which side answered.
  */
-export function refusalMessage(
+function refusalFor(
   unit: string,
   target: string,
-  resolution: Resolution,
-): string | null {
+  resolution: Exclude<Resolution, { kind: 'resolved' }>,
+): string {
   switch (resolution.kind) {
-    case 'resolved':
-    case 'legacy':
-      return null;
+    case 'not-ready':
+      return `\`${target}\` is not in the protocol directory yet, so \`${unit}\` cannot be resolved to a contract version — wait for the agent list and retry`;
     case 'not-advertised':
       return `\`${target}\` does not advertise \`${unit}\``;
     case 'no-common-version':
@@ -113,20 +119,34 @@ export function refusalMessage(
 }
 
 /**
+ * The sentence a resolution gets, or `null` when there is nothing to refuse.
+ *
+ * The `null` arm exists for callers that want to render rather than throw; the
+ * one that must act on it is {@link addressedPayload}, which throws.
+ */
+export function refusalMessage(
+  unit: string,
+  target: string,
+  resolution: Resolution,
+): string | null {
+  return resolution.kind === 'resolved' ? null : refusalFor(unit, target, resolution);
+}
+
+/**
  * The payload to send `unit` to `target` with, or a throw explaining why this
  * call is one this client must not make.
  *
  * This is the whole of what a capability has to do to become a resolving
  * consumer: name the unit, name the target, hand over its own requirements.
  *
- * ## Why the refusal happens here rather than at the server
+ * ## Why there is no third outcome
  *
- * The server checks the version a caller names (`#856`) and would refuse this
- * call too — but only if the caller named one. Sending *nothing* is not a
- * refusal: it is the Legacy Peer path, and a v1-shaped payload would go to a
- * target that serves only v2. So a consumer that knows it cannot speak the
- * target's contract has to say so itself; the server's check is a second
- * boundary against a stale manifest, not the first one.
+ * Every path here either resolves a version or throws. That is the point: the
+ * function used to have an else-branch that sent the payload *without*
+ * `contract_version` when the manifest was missing, and because the server
+ * relays a caller that names nothing, that branch was a version negotiation
+ * bypassed by a slow list. There is no longer an unversioned payload to send —
+ * a caller with nothing to resolve has nothing to send.
  *
  * Throws a plain `Error`. The server's refusal is a structured payload
  * (`error`, `protocol`, `named_version`, `offered_versions`); nothing on this
@@ -138,16 +158,13 @@ export function addressedPayload(args: {
   unit: string;
   target: string;
   requirements: readonly number[];
-  manifest: ProtocolManifest | null;
+  protocols: TargetProtocols;
   payload: Record<string, unknown>;
 }): Record<string, unknown> {
-  const { unit, target, requirements, manifest, payload } = args;
-  const resolution = resolveContract(unit, requirements, manifest);
-  const refusal = refusalMessage(unit, target, resolution);
-  if (refusal) {
-    throw new Error(refusal);
+  const { unit, target, requirements, protocols, payload } = args;
+  const resolution = resolveContract(unit, requirements, protocols);
+  if (resolution.kind === 'resolved') {
+    return { ...payload, contract_version: resolution.version };
   }
-  return resolution.kind === 'resolved'
-    ? { ...payload, contract_version: resolution.version }
-    : { ...payload };
+  throw new Error(refusalFor(unit, target, resolution));
 }

@@ -5,12 +5,18 @@ import {
   resolveContract,
   selectVersion,
   type ProtocolManifest,
+  type TargetProtocols,
 } from '@/platform/protocol';
 
 function manifest(protocols: ProtocolManifest['protocols'], software?: string): ProtocolManifest {
   return software === undefined
     ? { provider: 'agent-a', protocols }
     : { provider: 'agent-a', protocols, software_version: software };
+}
+
+/** A target this connection has heard from and that advertises these units. */
+function present(protocols: ProtocolManifest['protocols']): TargetProtocols {
+  return { kind: 'present', manifest: manifest(protocols) };
 }
 
 describe('selectVersion', () => {
@@ -41,30 +47,41 @@ describe('selectVersion', () => {
 
 describe('resolveContract', () => {
   it('resolves a unit the target advertises at a version we speak', () => {
-    const m = manifest({ 'git.status': { versions: [1, 2] } });
-    expect(resolveContract('git.status', [1], m)).toEqual({ kind: 'resolved', version: 1 });
+    const target = present({ 'git.status': { versions: [1, 2] } });
+    expect(resolveContract('git.status', [1], target)).toEqual({ kind: 'resolved', version: 1 });
   });
 
   it('keeps "never claimed it" apart from "claims it at versions we cannot read"', () => {
     // Two different sentences to a reader: one names a target that has no git
     // at all, the other names a target that has git and needs a newer client.
     // Collapsing them reports "unsupported" for both and hides who must move.
-    const withoutGit = manifest({ 'git.diff': { versions: [1] } });
+    const withoutGit = present({ 'git.diff': { versions: [1] } });
     expect(resolveContract('git.status', [1], withoutGit)).toEqual({ kind: 'not-advertised' });
 
-    const v2Only = manifest({ 'git.status': { versions: [2] } });
+    const v2Only = present({ 'git.status': { versions: [2] } });
     expect(resolveContract('git.status', [1], v2Only)).toEqual({
       kind: 'no-common-version',
       offered: [2],
     });
   });
 
-  it('treats an absent manifest as a Legacy Peer rather than a refusal', () => {
-    // The design's rule, and the reason `legacy` is its own outcome: a peer
-    // that has not spoken must not be read as one that said no. It relays
-    // exactly as it did before manifests existed, which means naming no version.
-    expect(resolveContract('git.status', [1], null)).toEqual({ kind: 'legacy' });
-    expect(resolveContract('git.status', [1], undefined)).toEqual({ kind: 'legacy' });
+  it('refuses a target it has not heard from rather than relaying unversioned', () => {
+    // This is the bypass `#963` removed. It used to answer `legacy`, and
+    // `addressedPayload` turned that into a payload with no `contract_version`
+    // — which the server relays, because a caller that names no version is not
+    // making a claim it can check. A manifest still in flight therefore read as
+    // a negotiation that had succeeded.
+    expect(resolveContract('git.status', [1], { kind: 'unknown' })).toEqual({ kind: 'not-ready' });
+  });
+
+  it('tells "not heard from" apart from "heard from, advertises nothing"', () => {
+    // Different sentences, and different asks: one is our gap and is worth
+    // retrying, the other is a fact about the target and is worth nobody's
+    // time. Both refuse — neither is a reason to relay unversioned.
+    expect(resolveContract('git.status', [1], { kind: 'unknown' })).toEqual({ kind: 'not-ready' });
+    expect(resolveContract('git.status', [1], { kind: 'none' })).toEqual({
+      kind: 'not-advertised',
+    });
   });
 
   it('is unchanged by the software version', () => {
@@ -73,17 +90,32 @@ describe('resolveContract', () => {
     // otherwise be tempted to: the server's answer and this one have to agree,
     // or the client resolves a version the server then refuses.
     const protocols = { 'git.status': { versions: [1] } };
-    const ancient = resolveContract('git.status', [1], manifest(protocols, '0.0.1'));
-    const future = resolveContract('git.status', [1], manifest(protocols, '99.0.0'));
+    const ancient = resolveContract('git.status', [1], {
+      kind: 'present',
+      manifest: manifest(protocols, '0.0.1'),
+    });
+    const future = resolveContract('git.status', [1], {
+      kind: 'present',
+      manifest: manifest(protocols, '99.0.0'),
+    });
     expect(ancient).toEqual(future);
     expect(ancient).toEqual({ kind: 'resolved', version: 1 });
   });
 });
 
 describe('refusalMessage', () => {
-  it('is null when there is nothing to refuse', () => {
+  it('is null only when there is nothing to refuse', () => {
     expect(refusalMessage('git.status', 'agent-a', { kind: 'resolved', version: 1 })).toBeNull();
-    expect(refusalMessage('git.status', 'agent-a', { kind: 'legacy' })).toBeNull();
+  });
+
+  it('asks the caller to wait when the target is not in the directory yet', () => {
+    // `not-ready` is the one outcome with an action attached: the call is not
+    // wrong, it is early. The sentence has to say so, or a caller reads a race
+    // as a refusal and stops trying.
+    const message = refusalMessage('git.status', 'agent-a', { kind: 'not-ready' });
+    expect(message).toContain('`agent-a`');
+    expect(message).toContain('`git.status`');
+    expect(message).toContain('retry');
   });
 
   it('names the target that has no such contract', () => {
@@ -104,7 +136,7 @@ describe('refusalMessage', () => {
 });
 
 describe('addressedPayload', () => {
-  const m = manifest({ 'git.status': { versions: [1, 2] } });
+  const target = present({ 'git.status': { versions: [1, 2] } });
 
   it('adds the resolved version to the payload it was given', () => {
     expect(
@@ -112,25 +144,39 @@ describe('addressedPayload', () => {
         unit: 'git.status',
         target: 'agent-a',
         requirements: [1],
-        manifest: m,
+        protocols: target,
         payload: { agent_id: 'agent-a', session: 'a:work' },
       }),
     ).toEqual({ agent_id: 'agent-a', session: 'a:work', contract_version: 1 });
   });
 
-  it('sends no contract_version to a Legacy Peer', () => {
-    // Not `contract_version: 1`. Absence is not a claim about versions, and a
-    // peer that predates manifests is not being downgraded — it is being
-    // addressed exactly as it was before any of this existed.
-    const payload = addressedPayload({
-      unit: 'git.status',
-      target: 'agent-a',
-      requirements: [1],
-      manifest: null,
-      payload: { agent_id: 'agent-a', session: 'a:work' },
-    });
-    expect(payload).not.toHaveProperty('contract_version');
-    expect(payload).toEqual({ agent_id: 'agent-a', session: 'a:work' });
+  it('refuses rather than sending an unversioned payload to a target it has not heard from', () => {
+    // The regression this exists for, and the one that used to *succeed*: a
+    // missing manifest produced `{ ...payload }` with no `contract_version`,
+    // which is a legal frame the server relays. So a slow `client.agents.list`
+    // was indistinguishable from a peer that predates manifests, and the call
+    // went out having negotiated nothing.
+    expect(() =>
+      addressedPayload({
+        unit: 'git.status',
+        target: 'agent-a',
+        requirements: [1],
+        protocols: { kind: 'unknown' },
+        payload: { agent_id: 'agent-a', session: 'a:work' },
+      }),
+    ).toThrow(/not in the protocol directory yet/);
+  });
+
+  it('refuses a target that advertises nothing', () => {
+    expect(() =>
+      addressedPayload({
+        unit: 'git.status',
+        target: 'agent-a',
+        requirements: [1],
+        protocols: { kind: 'none' },
+        payload: { agent_id: 'agent-a', session: 'a:work' },
+      }),
+    ).toThrow('`agent-a` does not advertise `git.status`');
   });
 
   it('refuses locally rather than sending an unversioned v1 payload to a v2 target', () => {
@@ -143,7 +189,7 @@ describe('addressedPayload', () => {
         unit: 'git.status',
         target: 'agent-a',
         requirements: [1],
-        manifest: manifest({ 'git.status': { versions: [2] } }),
+        protocols: present({ 'git.status': { versions: [2] } }),
         payload: { agent_id: 'agent-a', session: 'a:work' },
       }),
     ).toThrow('`agent-a` offers `git.status` at [v2], which this client cannot read');
@@ -155,7 +201,7 @@ describe('addressedPayload', () => {
         unit: 'git.status',
         target: 'agent-a',
         requirements: [1],
-        manifest: manifest({ 'git.diff': { versions: [1] } }),
+        protocols: present({ 'git.diff': { versions: [1] } }),
         payload: { agent_id: 'agent-a' },
       }),
     ).toThrow('`agent-a` does not advertise `git.status`');
