@@ -273,10 +273,10 @@ async fn integration_heartbeat_message_format() {
     // Skip registration message.
     let _ = msg_rx.recv().await;
 
-    // Send heartbeat.
+    // Send heartbeat. Not `async` any more: it publishes into a coalescing
+    // lane, which never waits for room (#961).
     handle
         .send_heartbeat(AgentStatus::Online, 10, 3, 7200, [0.5, 1.0, 1.5])
-        .await
         .expect("heartbeat failed");
 
     // Wait for heartbeat message.
@@ -345,10 +345,9 @@ async fn integration_session_update_message_format() {
     // Skip registration message.
     let _ = msg_rx.recv().await;
 
-    // Send session update.
+    // Send session update. Not `async` any more, and for the heartbeat's reason.
     handle
         .send_session_update("my-session", "active", 5, 2, Some("claude"))
-        .await
         .expect("session update failed");
 
     // Wait for session update message.

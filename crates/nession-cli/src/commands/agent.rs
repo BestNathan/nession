@@ -447,7 +447,7 @@ async fn run_agent_foreground(config: AgentConfig) -> Result<()> {
         tokio::spawn(async move {
             while let Some((session_id, cols, rows)) = resize_updates.next().await {
                 if handle.is_connected() {
-                    let _ = handle.send_terminal_resize(&session_id, cols, rows).await;
+                    let _ = handle.send_terminal_resize(&session_id, cols, rows);
                 }
             }
         });
