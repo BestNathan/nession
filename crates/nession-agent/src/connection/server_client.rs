@@ -828,41 +828,56 @@ impl ServerClient {
         msg: ProtocolMessage<serde_json::Value>,
         responses: &mpsc::Sender<WsMessage>,
     ) -> Result<()> {
-        // Try extension dispatch first
-        if msg.msg_type.starts_with("extension.") {
-            if let Some(ref ext_registry) = self.extension_registry {
-                if let Some(result) = ext_registry
-                    .dispatch(&msg.msg_type, msg.payload.clone())
-                    .await
-                {
-                    let payload_value = match result {
-                        Ok(value) => value,
-                        Err(e) => {
-                            warn!("Extension handler error: {:#}", e);
-                            serde_json::json!({
-                                "error": e.to_string(),
-                                "available": false,
-                            })
-                        }
-                    };
+        // Extension dispatch first, decided by the registry rather than by the
+        // message type's spelling.
+        //
+        // This used to read `msg.msg_type.starts_with("extension.")`, which was
+        // correct while wires carried an `extension.*` namespace. `#912` deleted
+        // that namespace — the wire *is* the protocol id now — and left this
+        // gate behind, so every relayed extension call (`git.status`,
+        // `claude-code.read`) failed the prefix test, failed `CORE_WIRES`, and
+        // was swallowed by the control match below: nothing logged, nothing
+        // answered, and the server's `agent_command` timing out ten seconds
+        // later.
+        //
+        // The registry's own `Option` is the gate. `routes` is built from the
+        // extension half only (`extension.rs` collision-checks the core half
+        // without inserting it), so a core or control wire returns `None` here
+        // and falls through exactly as before. Re-testing the spelling as well
+        // would be a second copy of a rule the routes already own, and two
+        // copies are what let them disagree.
+        if let Some(ref ext_registry) = self.extension_registry {
+            if let Some(result) = ext_registry
+                .dispatch(&msg.msg_type, msg.payload.clone())
+                .await
+            {
+                let payload_value = match result {
+                    Ok(value) => value,
+                    Err(e) => {
+                        warn!("Extension handler error: {:#}", e);
+                        serde_json::json!({
+                            "error": e.to_string(),
+                            "available": false,
+                        })
+                    }
+                };
 
-                    let response = serde_json::json!({
-                        "msg_type": "server.agent.command-response",
-                        "id": uuid::Uuid::new_v4().to_string(),
-                        "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
-                        "payload": {
-                            "request_id": msg.payload.get("request_id")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or(""),
-                            "command": msg.msg_type,
-                            "result": payload_value,
-                        }
-                    });
-                    responses
-                        .send(WsMessage::Text(response.to_string()))
-                        .await?;
-                    return Ok(());
-                }
+                let response = serde_json::json!({
+                    "msg_type": "server.agent.command-response",
+                    "id": uuid::Uuid::new_v4().to_string(),
+                    "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                    "payload": {
+                        "request_id": msg.payload.get("request_id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or(""),
+                        "command": msg.msg_type,
+                        "result": payload_value,
+                    }
+                });
+                responses
+                    .send(WsMessage::Text(response.to_string()))
+                    .await?;
+                return Ok(());
             }
         }
         // One list, not two: `CORE_WIRES` and `dispatch_core` are generated
@@ -1687,6 +1702,200 @@ mod tests {
         // frame, and an unhandled wire would be ignored by the same loop, so
         // what this pins is that the arm exists and does not break the loop.
         tokio::time::sleep(Duration::from_millis(200)).await;
+
+        handle.shutdown().await.ok();
+        server_handle.abort();
+    }
+
+    /// An extension that declares exactly one wire and answers recognisably.
+    struct DeclaredExtension {
+        name: &'static str,
+        id: &'static str,
+        wire: &'static str,
+    }
+
+    #[async_trait::async_trait]
+    impl nession_common::extension::AgentExtension for DeclaredExtension {
+        fn name(&self) -> &'static str {
+            self.name
+        }
+
+        fn descriptors(
+            &self,
+        ) -> Result<Vec<nession_protocol::ProtocolDescriptor>, nession_protocol::IdentityError>
+        {
+            Ok(vec![nession_protocol::ProtocolDescriptor::new(
+                self.id,
+                "test",
+                vec![nession_protocol::ContractDescriptor::new(
+                    nession_protocol::ContractVersion::V1,
+                    &[self.wire],
+                )],
+            )?])
+        }
+
+        async fn handle_command(
+            &self,
+            command: &str,
+            _payload: serde_json::Value,
+        ) -> anyhow::Result<serde_json::Value> {
+            Ok(serde_json::json!({ "answered": command }))
+        }
+    }
+
+    /// Accept one connection, register it, then push `wire` as a command.
+    async fn start_mock_server_pushing_a_wire(
+        wire: &'static str,
+    ) -> (
+        std::net::SocketAddr,
+        tokio::task::JoinHandle<()>,
+        mpsc::Receiver<String>,
+    ) {
+        let (msg_tx, msg_rx) = mpsc::channel(100);
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("failed to bind mock server");
+        let addr = listener.local_addr().expect("mock server local_addr");
+
+        let handle = tokio::spawn(async move {
+            if let Ok((stream, _)) = listener.accept().await {
+                let ws = accept_async(stream).await.expect("failed to accept ws");
+                let (mut sink, mut stream) = ws.split();
+
+                let response = serde_json::json!({
+                    "msg_type": "server.agent.register",
+                    "id": "test-id",
+                    "timestamp": 1234567890,
+                    "payload": { "status": "accepted", "message": "ok" }
+                });
+                let _ = sink.send(WsMessage::Text(response.to_string())).await;
+
+                // Skip the registration message from the client.
+                let _ = stream.next().await;
+
+                // The relay's shape, verbatim: `command_broker` puts the
+                // caller's `msg_type` on the frame with no wrapper wire.
+                let command = serde_json::json!({
+                    "msg_type": wire,
+                    "id": "cmd-1",
+                    "timestamp": 1234567891,
+                    "payload": { "request_id": "req-1", "session": "a:work" }
+                });
+                let _ = sink.send(WsMessage::Text(command.to_string())).await;
+
+                // Forward what the agent sends back, which is how the test
+                // observes the answer. Without this the response channel has no
+                // writer and every assertion sees an empty list — a test that
+                // fails for its own reasons and cannot tell a drop from a bug.
+                while let Some(Ok(msg)) = stream.next().await {
+                    if let WsMessage::Text(text) = msg {
+                        let _ = msg_tx.send(text.clone()).await;
+                    }
+                }
+            }
+        });
+
+        (addr, handle, msg_rx)
+    }
+
+    /// A `ServerClient` whose registry composes `extensions`, connected to `addr`.
+    async fn client_with_extensions(
+        addr: std::net::SocketAddr,
+        agent_id: &str,
+        extensions: Vec<Box<dyn nession_common::extension::AgentExtension>>,
+    ) -> crate::connection::server_client::ServerClientHandle {
+        let registry = Arc::new(
+            ExtensionRegistry::new(agent_id.to_string(), extensions, Vec::new())
+                .expect("the test's extensions compose"),
+        );
+        let client = ServerClient::new(
+            format!("ws://{addr}"),
+            "test-token",
+            agent_id,
+            "test-host",
+            "127.0.0.1",
+            8080,
+            None,
+            vec![],
+            None,
+            metadata_for_tests(),
+            Arc::new(SessionManager::new()),
+            "/tmp".to_string(),
+            Some(registry),
+        );
+        client.connect_and_run().await.expect("connect failed").0
+    }
+
+    /// The regression this pins (`#912`).
+    ///
+    /// `d5e75793` deleted the `extension.` namespace from every wire — the wire
+    /// *is* the protocol id now — and `handle_server_message` kept gating
+    /// extension dispatch on `starts_with("extension.")`. So a relayed
+    /// `git.status` failed the prefix test, failed `CORE_WIRES`, and was
+    /// swallowed by the control match's `_ => {}`: no log, no reply, and the
+    /// server's `agent_command` timing out ten seconds later.
+    ///
+    /// Nothing caught it because `ExtensionRegistry::dispatch` has exactly one
+    /// production caller — inside that gate — while `extension.rs`'s own tests
+    /// call `dispatch` *directly* and so never pass through the gate at all.
+    #[tokio::test]
+    async fn a_relayed_extension_wire_reaches_its_handler() {
+        let (addr, server_handle, mut msg_rx) =
+            start_mock_server_pushing_a_wire("git.status").await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        let handle = client_with_extensions(
+            addr,
+            "test-agent-extension-wire",
+            vec![Box::new(DeclaredExtension {
+                name: "git",
+                id: "git.status",
+                wire: "git.status",
+            })],
+        )
+        .await;
+
+        let responses = responses_within(&mut msg_rx, Duration::from_secs(2)).await;
+        assert_eq!(
+            responses.len(),
+            1,
+            "a relayed `git.status` must be answered by the extension that \
+             declared it; got {responses:#?}"
+        );
+        assert_eq!(responses[0]["payload"]["command"], "git.status");
+        assert_eq!(responses[0]["payload"]["result"]["answered"], "git.status");
+        assert_eq!(responses[0]["payload"]["request_id"], "req-1");
+
+        handle.shutdown().await.ok();
+        server_handle.abort();
+    }
+
+    /// The other half, and the reason the fix is a registry lookup rather than
+    /// a wider string test: a wire no extension declared must still fall
+    /// through. A gate that answered everything would be the same defect
+    /// pointing the other way.
+    #[tokio::test]
+    async fn a_wire_no_extension_declared_is_not_dispatched() {
+        let (addr, server_handle, mut msg_rx) =
+            start_mock_server_pushing_a_wire("not.a.unit").await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        let handle = client_with_extensions(
+            addr,
+            "test-agent-unknown-wire",
+            vec![Box::new(DeclaredExtension {
+                name: "git",
+                id: "git.status",
+                wire: "git.status",
+            })],
+        )
+        .await;
+
+        let responses = responses_within(&mut msg_rx, Duration::from_secs(1)).await;
+        assert!(
+            responses.is_empty(),
+            "an undeclared wire must not be answered by an extension; got {responses:#?}"
+        );
 
         handle.shutdown().await.ok();
         server_handle.abort();
