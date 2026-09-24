@@ -18,33 +18,16 @@ use super::ops::{TmuxDep, TmuxOps};
 /// reports nothing, which is a binding that never appears rather than an error
 /// anyone sees.
 ///
-/// Empty when the agent cannot name its own state directory. A session still
-/// works; its Claude conversation is simply not bound, and the capability
-/// answers with the candidate list, which is the honest answer rather than a
-/// guess.
-///
-/// **Reads no filesystem and creates nothing.** The hook writes with `cat >`,
-/// so the directory has to exist — but creating it here would give session
-/// creation a side effect nobody asked for, and would put the developer's real
-/// state directory in the path of every test that creates a session. The agent
-/// creates it at startup, beside the plugin whose hook needs it, which is also
-/// the only time it can matter: the hook cannot run before it is installed.
+/// The derivation itself lives in [`crate::claude_binding`], which the reader
+/// uses too; see that module for why it is shared rather than written out here.
+/// See it also for why nothing is created here: the hook writes with `cat >`,
+/// but giving session creation a filesystem side effect would put the
+/// developer's real state directory in the path of every test that creates a
+/// session. The agent creates it at startup, beside the plugin whose hook needs
+/// it — the only time it can matter, because the hook cannot run before it is
+/// installed. This function reads no filesystem.
 fn claude_binding_env(session_name: &str) -> Vec<(String, String)> {
-    let Ok(dir) = nession_common::paths::agent_claude_bindings_dir() else {
-        return Vec::new();
-    };
-
-    let file = dir.join(nession_claude_code::binding::binding_filename(session_name));
-    vec![
-        (
-            nession_claude_code::binding::SESSION_ID_ENV.to_string(),
-            session_name.to_string(),
-        ),
-        (
-            nession_claude_code::binding::BINDING_FILE_ENV.to_string(),
-            file.to_string_lossy().into_owned(),
-        ),
-    ]
+    crate::claude_binding::env_for(session_name)
 }
 
 /// Width a session is created at, **before any client has attached**.

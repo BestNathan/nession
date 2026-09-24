@@ -420,6 +420,29 @@ mod tests {
     }
 
     #[test]
+    fn the_hook_reads_the_variables_this_crate_declares() {
+        // The two halves of this contract are written in different languages and
+        // were asserted apart: the test above pins the *script's* literals, and
+        // the constants are pinned where the agent injects them — but nothing
+        // compared the two. Renaming `SESSION_ID_ENV` would leave the agent
+        // exporting a variable the hook does not read, and the failure has no
+        // symptom at all: no error, no missing file, just a binding that never
+        // arrives, forever.
+        let files = render("1.0.0");
+        let script = file(&files, "hooks/record-binding.sh");
+        for name in [
+            crate::binding::SESSION_ID_ENV,
+            crate::binding::BINDING_FILE_ENV,
+        ] {
+            assert!(
+                script.contains(&format!("${name}")),
+                "the hook does not read ${name}, which is what this crate injects; \
+                 the script reads: {script}"
+            );
+        }
+    }
+
+    #[test]
     fn the_hook_parses_nothing() {
         // A parser here would be a second copy of Claude's payload format, in a
         // language with no JSON library guaranteed to be installed.

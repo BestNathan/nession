@@ -183,20 +183,45 @@ impl ClaudeCodeAgentExtension {
         Some(PathBuf::from(cwd).join(".claude"))
     }
 
+    /// The conversation `session_id` is bound to, among those `found`.
+    ///
+    /// Matching is on the **transcript path**, which is the binding's strongest
+    /// statement: it names the exact file Claude said this session's
+    /// conversation lives in. The Claude session id would match just as well
+    /// today — discovery derives it from that same file's name — but it is the
+    /// weaker claim of the two, and the binding carries the path precisely so
+    /// this does not have to reconstruct it.
+    ///
+    /// Restricting the search to `found` is what keeps a stale binding harmless.
+    /// `found` is the conversations at the session's **current** cwd, so a
+    /// binding written before the user changed directory simply is not in it,
+    /// and the caller gets the candidate list rather than a conversation from a
+    /// directory this session has left.
+    async fn bound_conversation<'a>(
+        &self,
+        session_id: &str,
+        found: &'a [conversation::Discovered],
+    ) -> Option<&'a conversation::Discovered> {
+        let binding = self.context.session_claude_binding(session_id).await?;
+        found
+            .iter()
+            .find(|candidate| candidate.path() == binding.transcript_path)
+    }
+
     /// Answer `claude-code.conversation`.
     ///
     /// ## What decides the state, and what never does
     ///
     /// The cwd comes from the host and the candidates from that cwd, matched
-    /// strictly (`#1005` decision 7). A conversation is **resolved only when the
-    /// caller named it**: either it came in with the request, or — with no
-    /// choice made — there is nothing to open and the caller gets the list.
+    /// strictly (`#1005` decision 7). A conversation is resolved when the caller
+    /// named it, or when the session is **bound** to one; with neither, there is
+    /// nothing to open and the caller gets the list.
     ///
     /// A single candidate is deliberately *not* opened. "There is only one, so
     /// it must be the current one" is the same reasoning as "it is the newest,
-    /// so it must be current", which decision 3 forbids; until an exact binding
-    /// exists (stage C) the honest answer is that the current conversation has
-    /// not been determined. `Ambiguous` says that, whatever the list length.
+    /// so it must be current", which decision 3 forbids — a list of one is still
+    /// a list the caller has not chosen from. `Ambiguous` says that, whatever
+    /// the list length.
     async fn handle_conversation(&self, payload: Value) -> anyhow::Result<Value> {
         let request: ConversationRequestV1 = match serde_json::from_value(payload) {
             Ok(request) => request,
@@ -234,10 +259,15 @@ impl ClaudeCodeAgentExtension {
             })
             .collect();
 
-        let chosen = request
-            .claude_session_id
-            .as_deref()
-            .and_then(|id| found.iter().find(|c| c.claude_session_id == id));
+        // A conversation the caller named, or — when they named none — the one
+        // this session is bound to. The two are not interchangeable and the
+        // order is not an optimisation: a caller who named an id that is not
+        // here must be told so, and handing them the binding's conversation
+        // instead would answer a different question than the one asked.
+        let chosen = match request.claude_session_id.as_deref() {
+            Some(id) => found.iter().find(|c| c.claude_session_id == id),
+            None => self.bound_conversation(session_id, &found).await,
+        };
 
         let Some(chosen) = chosen else {
             // Either nothing was asked for, or what was asked for is not at this
@@ -370,6 +400,7 @@ impl AgentExtension for ClaudeCodeAgentExtension {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::binding::Binding;
     use crate::security::MAX_CHUNK_SIZE;
     use crate::session_context::NoSessionContext;
 
@@ -461,6 +492,38 @@ mod tests {
     struct FixedContext {
         cwd: Option<String>,
         active: Option<bool>,
+        binding: Option<Binding>,
+    }
+
+    impl FixedContext {
+        /// A host that knows the cwd and nothing else — the common case here,
+        /// and the one every pre-binding test wanted.
+        fn at(cwd: Option<&str>) -> Self {
+            Self {
+                cwd: cwd.map(str::to_string),
+                active: None,
+                binding: None,
+            }
+        }
+
+        /// The same host, with Claude having reported a binding to `transcript`.
+        ///
+        /// The cwd comes from the context rather than a constant so the two
+        /// cannot disagree: a fixture whose binding claimed a different
+        /// directory than the host was asked about would make a later test that
+        /// checks the binding's cwd fail for the wrong reason.
+        fn bound(mut self, transcript: &str) -> Self {
+            let payload = serde_json::json!({
+                "session_id": "claude-abc",
+                "transcript_path": transcript,
+                "cwd": self.cwd.clone().unwrap_or_default(),
+                "hook_event_name": "SessionStart",
+            })
+            .to_string();
+            self.binding =
+                Some(crate::binding::parse(&payload).expect("the fixture payload binds"));
+            self
+        }
     }
 
     #[async_trait]
@@ -471,6 +534,9 @@ mod tests {
         async fn session_claude_active(&self, _session_id: &str) -> Option<bool> {
             self.active
         }
+        async fn session_claude_binding(&self, _session_id: &str) -> Option<Binding> {
+            self.binding.clone()
+        }
     }
 
     #[tokio::test]
@@ -480,10 +546,8 @@ mod tests {
         // true** — the agent asks tmux for `#{pane_current_path}` — so the
         // assertion was pinning a limitation of this provider's reach, not a
         // decision. #1005 called it out and asks for the resolver to be reused.
-        let extension = ClaudeCodeAgentExtension::new(Arc::new(FixedContext {
-            cwd: Some("/work/project".to_string()),
-            active: None,
-        }));
+        let extension =
+            ClaudeCodeAgentExtension::new(Arc::new(FixedContext::at(Some("/work/project"))));
         assert_eq!(
             extension.resolve_project_claude_dir(Some("agent:s")).await,
             Some(PathBuf::from("/work/project/.claude"))
@@ -513,6 +577,7 @@ mod tests {
         ClaudeCodeAgentExtension::new(Arc::new(FixedContext {
             cwd: cwd.map(str::to_string),
             active,
+            binding: None,
         }))
     }
 
@@ -563,6 +628,164 @@ mod tests {
                 .is_none_or(std::vec::Vec::is_empty),
             "nothing to choose from: {value}"
         );
+    }
+
+    // ---- the binding resolves the conversation ---------------------------
+
+    /// The cwd every binding test's transcripts record.
+    const BOUND_CWD: &str = "/work/bound";
+
+    /// A temporary `~/.claude/projects` holding one project folder with the
+    /// given transcripts, each `(session id, cwd, timestamp)`.
+    ///
+    /// Returns the tempdir so it outlives the test, and the guard that points
+    /// discovery at it — dropping the guard restores the real root.
+    fn projects(
+        files: &[(&str, &str, &str)],
+    ) -> (tempfile::TempDir, conversation::ProjectsRootForTest) {
+        let root = tempfile::tempdir().expect("tempdir");
+        let project = root.path().join("-work-bound");
+        std::fs::create_dir_all(&project).expect("project directory");
+        for (id, cwd, timestamp) in files {
+            let record = serde_json::json!({
+                "type": "user",
+                "uuid": "u",
+                "timestamp": timestamp,
+                "cwd": cwd,
+                "sessionId": id,
+                "message": {"role": "user", "content": "hello"},
+            });
+            std::fs::write(project.join(format!("{id}.jsonl")), record.to_string())
+                .expect("write the transcript");
+        }
+        let guard = conversation::ProjectsRootForTest::set(root.path().to_path_buf());
+        (root, guard)
+    }
+
+    /// Where a transcript named `id` lives inside a tree from [`projects`].
+    fn transcript_path(root: &std::path::Path, id: &str) -> String {
+        root.join("-work-bound")
+            .join(format!("{id}.jsonl"))
+            .to_string_lossy()
+            .into_owned()
+    }
+
+    #[tokio::test]
+    async fn a_bound_session_opens_its_conversation_rather_than_asking_which() {
+        // The whole point of stage C. Without a binding this is exactly the
+        // `ambiguous` case — two candidates, no way to tell them apart — so
+        // this test fails if the binding is not consulted, and it is the
+        // failure #1005 success criterion 1 is about.
+        let (root, _guard) = projects(&[
+            ("aaa", BOUND_CWD, "2026-09-25T00:00:01Z"),
+            ("bbb", BOUND_CWD, "2026-09-25T00:00:09Z"),
+        ]);
+        let extension = ClaudeCodeAgentExtension::new(Arc::new(
+            FixedContext::at(Some(BOUND_CWD)).bound(&transcript_path(root.path(), "aaa")),
+        ));
+
+        let value = extension
+            .handle_conversation(serde_json::json!({"session_id": "agent:s"}))
+            .await
+            .unwrap();
+
+        // `bbb` is newer, so this also pins that the binding — not recency —
+        // chose: #1005 decision 3 forbids the newest-wins heuristic, and a
+        // "helpful" fallback to it would be invisible if the fixture agreed.
+        assert_eq!(
+            value["conversation"]["claude_session_id"], "aaa",
+            "the bound conversation must be the one opened: {value}"
+        );
+        assert_ne!(
+            value["state"], "ambiguous",
+            "a bound session has nothing to be ambiguous about: {value}"
+        );
+        assert!(
+            value["candidates"].as_array().is_some_and(|c| c.len() == 2),
+            "the other conversation is still offered: {value}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_binding_whose_transcript_is_not_here_leaves_the_question_open() {
+        // A binding outlives the directory it was made in: the user starts
+        // Claude, then `cd`s. The recorded conversation is no longer among this
+        // cwd's candidates, so opening it would show a conversation from a
+        // directory this session has left. Falling back to the list is the
+        // honest answer, and `ambiguous` is what says so.
+        let (root, _guard) = projects(&[("aaa", BOUND_CWD, "2026-09-25T00:00:01Z")]);
+        let elsewhere = root.path().join("-gone").join("zzz.jsonl");
+        let extension = ClaudeCodeAgentExtension::new(Arc::new(
+            FixedContext::at(Some(BOUND_CWD)).bound(&elsewhere.to_string_lossy()),
+        ));
+
+        let value = extension
+            .handle_conversation(serde_json::json!({"session_id": "agent:s"}))
+            .await
+            .unwrap();
+
+        assert_eq!(value["state"], "ambiguous", "{value}");
+        assert!(
+            value["conversation"].is_null(),
+            "nothing was opened: {value}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_caller_who_named_a_conversation_is_not_handed_the_binding_instead() {
+        // Selection is a request, not a suggestion. A caller who names an id
+        // that is not here must be told it is not here — quietly substituting
+        // the binding would answer a different question than the one asked, and
+        // the caller has no way to notice.
+        let (root, _guard) = projects(&[
+            ("aaa", BOUND_CWD, "2026-09-25T00:00:01Z"),
+            ("bbb", BOUND_CWD, "2026-09-25T00:00:09Z"),
+        ]);
+        let extension = ClaudeCodeAgentExtension::new(Arc::new(
+            FixedContext::at(Some(BOUND_CWD)).bound(&transcript_path(root.path(), "aaa")),
+        ));
+
+        let value = extension
+            .handle_conversation(
+                serde_json::json!({"session_id": "agent:s", "claude_session_id": "aaa"}),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            value["conversation"]["claude_session_id"], "aaa",
+            "the named conversation is the one opened: {value}"
+        );
+
+        let value = extension
+            .handle_conversation(
+                serde_json::json!({"session_id": "agent:s", "claude_session_id": "nope"}),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            value["state"], "ambiguous",
+            "an unknown id must fall back to the list, not to the binding: {value}"
+        );
+        assert!(value["conversation"].is_null(), "{value}");
+    }
+
+    #[tokio::test]
+    async fn a_session_with_no_binding_at_all_still_answers_with_its_candidates() {
+        // The ordinary state before Claude starts, and the one the capability
+        // spends most of its life in. A host that answers `None` must not turn
+        // into "no conversations".
+        // Both bindings are held for the whole test: the guard points discovery
+        // at the tempdir, and the tempdir has to still exist when it looks.
+        let (_root, _guard) = projects(&[("aaa", BOUND_CWD, "2026-09-25T00:00:01Z")]);
+        let extension = ClaudeCodeAgentExtension::new(Arc::new(FixedContext::at(Some(BOUND_CWD))));
+
+        let value = extension
+            .handle_conversation(serde_json::json!({"session_id": "agent:s"}))
+            .await
+            .unwrap();
+
+        assert_eq!(value["state"], "ambiguous", "{value}");
+        assert!(value["candidates"].as_array().is_some_and(|c| c.len() == 1));
     }
 
     #[tokio::test]
