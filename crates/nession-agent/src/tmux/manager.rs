@@ -781,9 +781,13 @@ mod window_size_lock_tests {
 mod legacy_stage_two_tests {
     use super::*;
 
-    /// Prefix of the one-file-per-call records the shim writes.
+    /// Prefix of the one-directory-per-call records the shim writes.
     #[cfg(unix)]
     const CALL_FILE_PREFIX: &str = "call.";
+
+    /// Name of the file inside `call.N` that holds the call's argv.
+    #[cfg(unix)]
+    const CALL_RECORD_NAME: &str = "argv";
 
     /// Terminator the shim writes after the argv of each recorded call.
     #[cfg(unix)]
@@ -811,15 +815,18 @@ mod legacy_stage_two_tests {
             format!(
                 "#!/bin/sh\n\
                  if [ \"$1\" = \"-S\" ]; then shift 2; fi\n\
-                 set -C\n\
                  n=0\n\
-                 while ! : 2>/dev/null > \"{dir}/{prefix}$n\"; do\n\
+                 while true; do\n\
+                 while [ -e \"{dir}/{prefix}$n\" ]; do n=$((n + 1)); done\n\
+                 if mkdir \"{dir}/{prefix}$n\" 2>/dev/null; then break; fi\n\
+                 if [ ! -d \"{dir}/{prefix}$n\" ]; then\n\
+                 echo \"fake tmux: cannot claim {dir}/{prefix}$n\" >&2\n\
+                 exit 1\n\
+                 fi\n\
                  n=$((n + 1))\n\
-                 if [ \"$n\" -gt 9999 ]; then break; fi\n\
                  done\n\
-                 set +C\n\
-                 printf '%s\\n' \"$@\" >> \"{dir}/{prefix}$n\"\n\
-                 echo \"{sep}\" >> \"{dir}/{prefix}$n\"\n\
+                 printf '%s\\n' \"$@\" > \"{dir}/{prefix}$n/{record}\"\n\
+                 echo \"{sep}\" >> \"{dir}/{prefix}$n/{record}\"\n\
                  case \"$1\" in\n\
                    new-session)\n\
                      if [ -f \"{stage1}\" ]; then exit 0; else : > \"{stage1}\"; exit 1; fi;;\n\
@@ -827,6 +834,7 @@ mod legacy_stage_two_tests {
                  esac\n",
                 dir = dir.display(),
                 prefix = CALL_FILE_PREFIX,
+                record = CALL_RECORD_NAME,
                 sep = CALL_SEPARATOR,
                 stage1 = stage1.display(),
             ),
@@ -845,12 +853,16 @@ mod legacy_stage_two_tests {
     fn recorded_calls(dir: &std::path::Path) -> Vec<Vec<String>> {
         let mut calls = Vec::new();
         for n in 0.. {
-            let path = dir.join(format!("{CALL_FILE_PREFIX}{n}"));
-            let text = match std::fs::read_to_string(&path) {
+            let claimed = dir.join(format!("{CALL_FILE_PREFIX}{n}"));
+            // Indices are claimed in order by creating the directory, so the
+            // first unclaimed one means there is nothing after it either.
+            if !claimed.is_dir() {
+                break;
+            }
+            let text = match std::fs::read_to_string(claimed.join(CALL_RECORD_NAME)) {
                 Ok(text) => text,
-                // Indices are claimed in order, so the first free one means
-                // there is nothing after it either.
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => break,
+                // Claimed, but the argv is not on disk yet — and later indices
+                // may already be complete, so this is not where the scan ends.
                 Err(_) => continue,
             };
             let Some(body) = text.trim_end_matches('\n').strip_suffix(CALL_SEPARATOR) else {

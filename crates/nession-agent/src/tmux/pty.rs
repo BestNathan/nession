@@ -288,6 +288,32 @@ mod tests {
     use crate::tmux::cmd;
     use std::time::{Duration, Instant};
 
+    /// Wait until the spawned fixture has written `path`, or fail trying.
+    ///
+    /// The detach tests' fake records its own pid in its `attach` branch and
+    /// answers `list-clients` with it, so a parent that resolves its client
+    /// before that file exists reads no pid, finds no client, and never
+    /// attempts the detach — the *fixture* not being ready, reported as the
+    /// behaviour under test missing. Waiting for it is what makes those tests
+    /// measure the detach rather than the scheduler: measured, the same test
+    /// without this wait failed 12 of 30 runs once the recorder took one extra
+    /// process to claim its record index, and 23 of 30 with two.
+    async fn wait_for_fixture(path: &std::path::Path, deadline: Duration) {
+        let until = Instant::now() + deadline;
+        loop {
+            if path.metadata().is_ok_and(|meta| meta.len() > 0) {
+                return;
+            }
+            assert!(
+                Instant::now() < until,
+                "the fixture never wrote {} — the fake's attach branch records \
+                 its pid there, and everything after it is waiting for that",
+                path.display()
+            );
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    }
+
     /// Harness socket env var — set by `scripts/tmux-run-socket.sh` (via
     /// `just test` / `filtered-test.sh`). The regression test below only runs
     /// under it: without it, `cmd::global()` would fall back to the default
@@ -477,14 +503,16 @@ mod tests {
         // Reddens on: making `close` propagate the detach failure.
         //
         // The evidence is a sentinel file rather than a line of the fake's argv
-        // log: this backend *spawns* a tmux client, so the attach child and the
-        // detach command are two processes appending to one log at once, and
-        // `FakeTmux` writes a call's argv one entry at a time. A per-call
-        // assertion there is racy — measured, 3 runs in 10 spliced the two
-        // calls' entries together — while `: > <file>` in the refusing branch is
-        // atomic and says exactly what this test needs: the branch that refuses
-        // was reached. (The harness race is real and not mine to fix here; the
-        // other fake-based tests assert on awaited calls, which cannot overlap.)
+        // log: `: > <file>` in the refusing branch says exactly what this test
+        // needs — the branch that refuses was reached — without depending on
+        // what the recorder did with a call made by a *spawned* child. (That
+        // recorder is safe for concurrent writers now — each call gets its own
+        // record, see `FakeTmux` — so a log assertion would work too; the
+        // sentinel is simply the narrower claim.)
+        //
+        // What this test does need from the fixture is the pid the child writes,
+        // and waiting for it is not optional: without it the test passes or
+        // fails on how the two processes were scheduled.
         let dir = tempfile::tempdir().expect("tempdir");
         let sentinel = dir.path().join("detach-ran");
         let child_pid = dir.path().join("child.pid");
@@ -505,6 +533,7 @@ mod tests {
 
         let (mut session, _rx) = PtySession::attach(&fake.dep(), "nession-fake-sess", 80, 24)
             .expect("the injected binary accepts the attach");
+        wait_for_fixture(&child_pid, Duration::from_secs(10)).await;
         crate::tmux::session::TmuxSession::close(&mut session)
             .await
             .expect("a refused detach is Cleanup, not a close failure");

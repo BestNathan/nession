@@ -66,18 +66,22 @@ impl FakeTmux {
             format!(
                 "#!/bin/sh\n\
                  if [ \"$1\" = \"-S\" ]; then shift 2; fi\n\
-                 set -C\n\
                  n=0\n\
-                 while ! : 2>/dev/null > \"{dir}/{prefix}$n\"; do\n\
+                 while true; do\n\
+                 while [ -e \"{dir}/{prefix}$n\" ]; do n=$((n + 1)); done\n\
+                 if mkdir \"{dir}/{prefix}$n\" 2>/dev/null; then break; fi\n\
+                 if [ ! -d \"{dir}/{prefix}$n\" ]; then\n\
+                 echo \"fake tmux: cannot claim {dir}/{prefix}$n\" >&2\n\
+                 exit 1\n\
+                 fi\n\
                  n=$((n + 1))\n\
-                 if [ \"$n\" -gt 9999 ]; then break; fi\n\
                  done\n\
-                 set +C\n\
-                 printf '%s\\n' \"$@\" >> \"{dir}/{prefix}$n\"\n\
-                 echo \"{sep}\" >> \"{dir}/{prefix}$n\"\n\
+                 printf '%s\\n' \"$@\" > \"{dir}/{prefix}$n/{record}\"\n\
+                 echo \"{sep}\" >> \"{dir}/{prefix}$n/{record}\"\n\
                  {script}\n",
                 dir = dir.display(),
                 prefix = CALL_FILE_PREFIX,
+                record = CALL_RECORD_NAME,
                 sep = CALL_SEPARATOR,
             ),
         )?;
@@ -105,17 +109,20 @@ impl FakeTmux {
     pub(crate) fn calls(&self) -> Vec<Vec<String>> {
         let mut calls = Vec::new();
         for n in 0.. {
-            let path = self.dir.join(format!("{CALL_FILE_PREFIX}{n}"));
-            let text = match std::fs::read_to_string(&path) {
+            let claimed = self.dir.join(format!("{CALL_FILE_PREFIX}{n}"));
+            // Indices are claimed in order by creating the directory, so the
+            // first unclaimed one means there is nothing after it either.
+            if !claimed.is_dir() {
+                break;
+            }
+            let text = match std::fs::read_to_string(claimed.join(CALL_RECORD_NAME)) {
                 Ok(text) => text,
-                // Indices are claimed in order, so the first free one means
-                // there is nothing after it either.
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => break,
-                // Present but not readable — mid-write. Not a call yet.
+                // Claimed, but the argv is not on disk yet — and later indices
+                // may already be complete, so this is not where the scan ends.
                 Err(_) => continue,
             };
-            // The file exists from the moment its index is claimed, so a call
-            // still being written has no terminator.
+            // The argv is written after the claim, so a call still being
+            // recorded has no terminator.
             let Some(body) = text.trim_end_matches('\n').strip_suffix(CALL_SEPARATOR) else {
                 continue;
             };
@@ -132,10 +139,14 @@ impl FakeTmux {
     }
 }
 
-/// Prefix of the one-file-per-call records [`FakeTmux`] writes into its
+/// Prefix of the one-directory-per-call records [`FakeTmux`] writes into its
 /// directory.
 #[cfg(unix)]
 pub(crate) const CALL_FILE_PREFIX: &str = "call.";
+
+/// Name of the file inside `call.N` that holds the call's argv.
+#[cfg(unix)]
+pub(crate) const CALL_RECORD_NAME: &str = "argv";
 
 /// Terminator [`FakeTmux`] writes after the argv of each recorded call.
 #[cfg(unix)]

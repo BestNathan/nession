@@ -59,14 +59,21 @@ impl Drop for TestSession {
     }
 }
 
-/// Prefix of the one-file-per-call records the fake writes into its directory.
+/// Prefix of the one-directory-per-call records the fake writes.
+///
+/// Each call's index is claimed by creating `call.N`, and its argv is written
+/// inside as `call.N/argv`.
 #[cfg(unix)]
 pub(crate) const CALL_FILE_PREFIX: &str = "call.";
 
+/// Name of the file inside `call.N` that holds the call's argv.
+#[cfg(unix)]
+pub(crate) const CALL_RECORD_NAME: &str = "argv";
+
 /// Terminator written after the argv of each recorded call.
 ///
-/// It is what tells a reader the call was recorded *whole*: the file exists
-/// from the moment its index is claimed, so a call still being written has no
+/// It is what tells a reader the call was recorded *whole*: `call.N/argv` is
+/// written after the index is claimed, so a call still being written has no
 /// terminator yet and is not reported.
 #[cfg(unix)]
 pub(crate) const CALL_SEPARATOR: &str = "==call==";
@@ -87,20 +94,52 @@ pub(crate) const CALL_SEPARATOR: &str = "==call==";
 ///
 /// The binary (`tmux`, mode 0755), the socket the injected [`TmuxDep`]
 /// addresses (`tmux.sock`, never created — a fake binds nothing), and one
-/// record file per call (`call.0`, `call.1`, …) live in `dir`, which the caller
-/// owns (a `tempfile::TempDir`).
+/// record directory per call (`call.0/argv`, `call.1/argv`, …) live in `dir`,
+/// which the caller owns (a `tempfile::TempDir`).
 ///
 /// ## The recorder is safe for concurrent writers
 ///
 /// More than one process records at once: the PTY backend *spawns* a tmux
 /// client (the attach) while the parent keeps making awaited calls. **Each call
-/// gets its own file**, so there is nothing to interleave — the writer claims
-/// an index by creating `call.N`, and writes that file alone. The claim is
-/// `: > call.N` under `set -C`: an `O_EXCL` create (atomic on every filesystem
-/// this runs on) performed by the shell itself, so it spawns no process.
+/// gets its own directory**, so there is nothing to interleave — the writer
+/// claims an index with `mkdir call.N`, then writes only inside it. `mkdir` is
+/// a regular utility: it creates the directory atomically, and it fails with an
+/// ordinary non-zero status when the name is taken. Nothing about the claim
+/// depends on how the shell treats a failing command, which is the property the
+/// first attempt lacked.
+///
+/// That attempt claimed the index with `: > call.N` under `set -C` — an
+/// `O_EXCL` create performed by the shell itself, so it spawned no process. It
+/// worked here and failed on CI: `:` is a POSIX **special built-in**, and a
+/// redirection error on one makes a *non-interactive* shell exit (POSIX XCU
+/// 2.8.1). bash 3.2, `/bin/sh` on macOS, tolerates it and carries on; dash,
+/// `/bin/sh` on the Linux runner, exits. Measured with dash 0.5.13.5 on the
+/// generated script: the first claim succeeds, the second invocation exits 2
+/// before recording anything — so on CI every call after the first went
+/// unrecorded and eleven FakeTmux tests failed. **No gate in this repo runs
+/// dash**: `/bin/sh` on macOS is bash, and that dash came from Homebrew on one
+/// machine, so a re-run of that check is not something anyone can rely on. That
+/// is the point of choosing a claim with no such dependence — the interpreter
+/// difference is not something a local gate could have caught, and it is not
+/// something the mechanism relies on being absent. The claim is `mkdir` now
+/// because its failure is the utility's own status, on every shell; the price
+/// is one process per call (~2.4 ms, measured over the 105 calls
+/// `legacy_stage_two_tests` makes: 0.72 s → 0.95 s for that test, against its
+/// 10 s create budget). The index scan in front of it uses `[ -e ]`, a builtin,
+/// so it spawns nothing.
+///
+/// The accepted loop was measured too, not only argued: the generated script run
+/// under dash 0.5.13.5 records three consecutive calls as three complete
+/// `call.N/argv` files with every exit 0, byte-identical to the same script
+/// under `/bin/sh` — the shell that killed the rejected one.
+///
+/// A claim that fails for a reason other than the name being taken (an
+/// unwritable directory, no space) is *not* "the index is taken": the writer
+/// checks whether the directory now exists, and exits 1 with a diagnostic if it
+/// does not, so it fails loudly rather than scanning forever.
+///
 /// Indices are claimed in order and densely, so `calls()` reads `call.0` upward
-/// and stops at the first index nobody holds. The claim loop is bounded, so a
-/// directory that cannot be written fails the call loudly instead of spinning.
+/// and stops at the first index nobody holds.
 ///
 /// A single shared log was measured and rejected, twice. `O_APPEND` orders each
 /// `write(2)`, but a call is not one `write` — the shell's write boundary is
@@ -117,9 +156,12 @@ pub(crate) const CALL_SEPARATOR: &str = "==call==";
 /// 0x1f bytes — one of them was read as an entry boundary the first time that
 /// format ran under `cargo llvm-cov`. A lock removes all of it too, at the cost
 /// of two process spawns per call — and that latency turned `pty.rs`'s
-/// `a_refused_detach_changes_neither_close_nor_drop`, which races the pid its
-/// spawned child writes, from 30 passes in 30 runs into 23 failures in 30.
-/// Per-call files cost neither a separator nor a spawn.
+/// `a_refused_detach_changes_neither_close_nor_drop`, which raced the pid its
+/// spawned child writes, from 30 passes in 30 runs into 23 failures in 30. (One
+/// spawn per call, as the claim above costs, failed it 12 of 30 until the test
+/// was fixed to wait for that pid — `wait_for_fixture` in `pty.rs` — which is
+/// the right shape for a test that races its own fixture either way.)
+/// Per-call records cost neither an in-band separator nor a lock.
 #[cfg(unix)]
 pub(crate) struct FakeTmux {
     bin: String,
@@ -140,18 +182,22 @@ impl FakeTmux {
             format!(
                 "#!/bin/sh\n\
                  if [ \"$1\" = \"-S\" ]; then shift 2; fi\n\
-                 set -C\n\
                  n=0\n\
-                 while ! : 2>/dev/null > \"{dir}/{prefix}$n\"; do\n\
+                 while true; do\n\
+                 while [ -e \"{dir}/{prefix}$n\" ]; do n=$((n + 1)); done\n\
+                 if mkdir \"{dir}/{prefix}$n\" 2>/dev/null; then break; fi\n\
+                 if [ ! -d \"{dir}/{prefix}$n\" ]; then\n\
+                 echo \"fake tmux: cannot claim {dir}/{prefix}$n\" >&2\n\
+                 exit 1\n\
+                 fi\n\
                  n=$((n + 1))\n\
-                 if [ \"$n\" -gt 9999 ]; then break; fi\n\
                  done\n\
-                 set +C\n\
-                 printf '%s\\n' \"$@\" >> \"{dir}/{prefix}$n\"\n\
-                 echo \"{sep}\" >> \"{dir}/{prefix}$n\"\n\
+                 printf '%s\\n' \"$@\" > \"{dir}/{prefix}$n/{record}\"\n\
+                 echo \"{sep}\" >> \"{dir}/{prefix}$n/{record}\"\n\
                  {script}\n",
                 dir = dir.display(),
                 prefix = CALL_FILE_PREFIX,
+                record = CALL_RECORD_NAME,
                 sep = CALL_SEPARATOR,
             ),
         )
@@ -185,19 +231,21 @@ impl FakeTmux {
     pub(crate) fn calls(&self) -> Vec<Vec<String>> {
         let mut calls = Vec::new();
         for n in 0.. {
-            let path = self.dir.join(format!("{CALL_FILE_PREFIX}{n}"));
-            let text = match std::fs::read_to_string(&path) {
+            let claimed = self.dir.join(format!("{CALL_FILE_PREFIX}{n}"));
+            // Indices are claimed in order by creating the directory, so the
+            // first unclaimed one means there is nothing after it either.
+            if !claimed.is_dir() {
+                break;
+            }
+            let text = match std::fs::read_to_string(claimed.join(CALL_RECORD_NAME)) {
                 Ok(text) => text,
-                // Indices are claimed in order, so the first free one means
-                // there is nothing after it either.
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => break,
-                // Present but not readable — mid-write, or a read that landed
-                // between two bytes of a multi-byte character. Not a call yet.
+                // Claimed, but the argv is not on disk yet (or is being written
+                // right now). Not a call yet — and later indices may already be
+                // complete, so this is not where the scan ends.
                 Err(_) => continue,
             };
-            // The file exists from the moment its index is claimed, so a call
-            // still being written has no terminator: report it only once the
-            // whole argv is on disk.
+            // The argv is written after the claim, so a call still being
+            // recorded has no terminator: report it only once it is whole.
             let Some(body) = text.trim_end_matches('\n').strip_suffix(CALL_SEPARATOR) else {
                 continue;
             };
@@ -303,30 +351,35 @@ fn concurrent_writers_do_not_splice_the_recorded_calls() {
 /// was claimed.
 ///
 /// Both halves are what the recorder's isolation buys a reader: the index is
-/// claimed before the argv is written, so a file without its terminator is a
-/// call still in flight — reporting it would hand the caller half an argv, and
-/// `wait_for_calls` would count it — and the indices are dense, so reading
-/// upward cannot skip a call.
+/// claimed before the argv is written, so a claimed index whose argv is absent
+/// or unterminated is a call still in flight — reporting it would hand the
+/// caller half an argv, and `wait_for_calls` would count it — and the indices
+/// are claimed densely and in order, so reading upward cannot skip a call.
 #[cfg(unix)]
 #[test]
 fn a_call_is_reported_only_after_its_terminator() {
     let dir = tempfile::tempdir().unwrap();
     let fake = FakeTmux::new(dir.path(), "exit 0");
-    let path = dir.path().join(format!("{CALL_FILE_PREFIX}0"));
+    let claim = |n: usize| dir.path().join(format!("{CALL_FILE_PREFIX}{n}"));
+    let record = |n: usize| claim(n).join(CALL_RECORD_NAME);
 
-    std::fs::write(&path, "set-option\n-t\nsess\n").unwrap();
+    std::fs::create_dir(claim(0)).unwrap();
+    assert_eq!(
+        fake.calls(),
+        Vec::<Vec<String>>::new(),
+        "a claimed index with no argv on disk yet is not a call"
+    );
+
+    std::fs::write(record(0), "set-option\n-t\nsess\n").unwrap();
     assert_eq!(
         fake.calls(),
         Vec::<Vec<String>>::new(),
         "a call whose argv is still being written is not a call yet"
     );
 
-    std::fs::write(&path, "set-option\n-t\nsess\n==call==\n").unwrap();
-    std::fs::write(
-        dir.path().join(format!("{CALL_FILE_PREFIX}1")),
-        "attach\n-t\nsess\n==call==\n",
-    )
-    .unwrap();
+    std::fs::write(record(0), "set-option\n-t\nsess\n==call==\n").unwrap();
+    std::fs::create_dir(claim(1)).unwrap();
+    std::fs::write(record(1), "attach\n-t\nsess\n==call==\n").unwrap();
 
     let expected: Vec<Vec<String>> = [["set-option", "-t", "sess"], ["attach", "-t", "sess"]]
         .map(|call| call.iter().map(ToString::to_string).collect())
