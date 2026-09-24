@@ -17,7 +17,6 @@ use tokio::fs;
 
 use super::cmd;
 use super::ops::TmuxOps;
-use super::util::send_keys;
 
 /// Path for the source script of a given (client, session, env-name) triple.
 fn source_script_path(base_dir: PathBuf, client_id: &str, session: &str, name: &str) -> PathBuf {
@@ -133,8 +132,11 @@ impl EnvManager {
 
         // Use tmux send-keys to source the script, then clear the scrollback
         // history so the command doesn't appear when re-attaching.
+        // **Required**: a script that was never sourced is the whole operation
+        // failing, and it is invisible from the outside — the variables simply
+        // are not there. The grammar is the owner's; the class is this line's.
         let cmd = format!(" . {}", path.display());
-        send_keys(session_name, &cmd).await?;
+        TmuxOps::global().send_keys(session_name, &cmd).await?;
 
         // Clear tmux scrollback history to hide the source command
         clear_history(session_name).await;
@@ -161,7 +163,7 @@ impl EnvManager {
             .with_context(|| format!("failed to write unsource script: {}", path.display()))?;
 
         let cmd = format!(" . {}", path.display());
-        send_keys(session_name, &cmd).await?;
+        TmuxOps::global().send_keys(session_name, &cmd).await?;
 
         // Clear tmux scrollback history to hide the unsource command
         clear_history(session_name).await;

@@ -280,7 +280,7 @@ async fn main() -> Result<()> {
     // Forward tmux resize events from the P2P server to the central server so
     // relay clients (browser → server → agent) receive size updates. Events
     // arriving while disconnected are dropped — the next attach re-syncs the
-    // pane size via the initial `query_window_size` flow.
+    // pane size via the initial window-size query the attach path makes.
     //
     // What a consumer that is behind costs now is a superseded intermediate
     // size and not a queue: the lane holds one value per session, so a
