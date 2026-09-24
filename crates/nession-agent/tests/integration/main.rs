@@ -41,7 +41,7 @@ pub(crate) fn unique_session_name(prefix: &str) -> String {
 #[cfg(unix)]
 pub(crate) struct FakeTmux {
     bin: String,
-    log: std::path::PathBuf,
+    dir: std::path::PathBuf,
     socket: std::path::PathBuf,
 }
 
@@ -55,16 +55,29 @@ impl FakeTmux {
     pub(crate) fn new(dir: &std::path::Path, script: &str) -> std::io::Result<Self> {
         use std::os::unix::fs::PermissionsExt;
         let bin = dir.join("tmux");
-        let log = dir.join("argv.log");
         std::fs::write(
             &bin,
+            // One file per call, claimed with an O_EXCL create, so two
+            // processes recording at once (a spawned tmux client and the parent
+            // making awaited calls) cannot interleave. The mechanism, the
+            // rejected alternatives and the measurements are documented on the
+            // unit-test copy in `crates/nession-agent/src/test_support.rs`;
+            // this body must stay in step with it.
             format!(
                 "#!/bin/sh\n\
                  if [ \"$1\" = \"-S\" ]; then shift 2; fi\n\
-                 printf '%s\\n' \"$@\" >> \"{log}\"\n\
-                 echo \"{sep}\" >> \"{log}\"\n\
+                 set -C\n\
+                 n=0\n\
+                 while ! : 2>/dev/null > \"{dir}/{prefix}$n\"; do\n\
+                 n=$((n + 1))\n\
+                 if [ \"$n\" -gt 9999 ]; then break; fi\n\
+                 done\n\
+                 set +C\n\
+                 printf '%s\\n' \"$@\" >> \"{dir}/{prefix}$n\"\n\
+                 echo \"{sep}\" >> \"{dir}/{prefix}$n\"\n\
                  {script}\n",
-                log = log.display(),
+                dir = dir.display(),
+                prefix = CALL_FILE_PREFIX,
                 sep = CALL_SEPARATOR,
             ),
         )?;
@@ -73,7 +86,7 @@ impl FakeTmux {
         std::fs::set_permissions(&bin, perms)?;
         Ok(Self {
             bin: bin.to_string_lossy().into_owned(),
-            log,
+            dir: dir.to_path_buf(),
             socket: dir.join("tmux.sock"),
         })
     }
@@ -90,21 +103,41 @@ impl FakeTmux {
 
     /// Every call recorded so far, each as the argv entries tmux received.
     pub(crate) fn calls(&self) -> Vec<Vec<String>> {
-        let log = std::fs::read_to_string(&self.log).unwrap_or_default();
-        log.split(CALL_SEPARATOR)
-            .map(|block| {
-                block
-                    .trim_matches('\n')
-                    .lines()
-                    .map(str::to_string)
-                    .collect::<Vec<String>>()
-            })
-            .filter(|args| !args.is_empty())
-            .collect()
+        let mut calls = Vec::new();
+        for n in 0.. {
+            let path = self.dir.join(format!("{CALL_FILE_PREFIX}{n}"));
+            let text = match std::fs::read_to_string(&path) {
+                Ok(text) => text,
+                // Indices are claimed in order, so the first free one means
+                // there is nothing after it either.
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => break,
+                // Present but not readable — mid-write. Not a call yet.
+                Err(_) => continue,
+            };
+            // The file exists from the moment its index is claimed, so a call
+            // still being written has no terminator.
+            let Some(body) = text.trim_end_matches('\n').strip_suffix(CALL_SEPARATOR) else {
+                continue;
+            };
+            let entries: Vec<String> = body
+                .trim_matches('\n')
+                .lines()
+                .map(str::to_string)
+                .collect();
+            if !entries.is_empty() {
+                calls.push(entries);
+            }
+        }
+        calls
     }
 }
 
-/// Separator [`FakeTmux`] writes after each recorded call.
+/// Prefix of the one-file-per-call records [`FakeTmux`] writes into its
+/// directory.
+#[cfg(unix)]
+pub(crate) const CALL_FILE_PREFIX: &str = "call.";
+
+/// Terminator [`FakeTmux`] writes after the argv of each recorded call.
 #[cfg(unix)]
 pub(crate) const CALL_SEPARATOR: &str = "==call==";
 
