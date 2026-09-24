@@ -183,6 +183,43 @@ fn send_keys_args<'a>(session: &'a str, keys: &'a str) -> [&'a str; 5] {
     ["send-keys", "-t", session, keys, "Enter"]
 }
 
+/// The query that resolves a client's name from the process that owns it.
+///
+/// `detach-client -t` takes a **client** target, and a session name is not one
+/// — measured on tmux 3.6b: `detach-client -t <session>` answers `can't find
+/// client: <session>` with exit 1 and detaches nothing, which is why every
+/// teardown that named a session had been a no-op since it was written
+/// (#1011). tmux does record the pid of the process that attached, and
+/// `#{client_pid}` is the `tmux attach` process this backend spawned, so the
+/// client we own is the one carrying our child's pid. `-s <session>` would be
+/// the wrong repair: it detaches *every* client of the session, including one
+/// a user attached by hand.
+fn list_clients_args() -> [&'static str; 3] {
+    ["list-clients", "-F", "#{client_pid} #{client_name}"]
+}
+
+/// Detach one client, by name — see [`list_clients_args`] for why the name and
+/// not the session. Fixed arity, so a caller cannot drop the target and detach
+/// the current client by accident.
+fn detach_client_args(client: &str) -> [&str; 3] {
+    ["detach-client", "-t", client]
+}
+
+/// The client name on the line whose pid is `pid`, from a
+/// [`list_clients_args`] listing. `None` means no client carries that pid.
+///
+/// Parsing lives here rather than at the call sites so the `-F` format and the
+/// reading of it cannot drift apart — a listing read with the wrong shape finds
+/// nothing and looks exactly like "the client is already gone".
+fn client_name_for_pid_in(listing: &[u8], pid: u32) -> Option<String> {
+    String::from_utf8_lossy(listing).lines().find_map(|line| {
+        let mut fields = line.split_whitespace();
+        let line_pid = fields.next()?.parse::<u32>().ok()?;
+        let name = fields.next()?;
+        (line_pid == pid).then(|| name.to_string())
+    })
+}
+
 /// The tmux semantic owner: typed operations over one [`TmuxCmd`].
 #[derive(Debug, Clone)]
 pub struct TmuxOps {
@@ -363,6 +400,114 @@ impl TmuxOps {
             output.status,
             String::from_utf8_lossy(&output.stderr).trim()
         )
+    }
+
+    /// Detach the tmux client owned by `pid` — the one this backend spawned.
+    ///
+    /// `Ok(true)` means a client carried that pid and was detached.
+    /// **`Ok(false)` means no client does, and is not a failure**: the client
+    /// is already gone, so there is nothing left to detach. `Err` means the
+    /// question could not be asked at all — tmux missing, server unreachable —
+    /// and carries tmux's own words.
+    ///
+    /// The call sites classify all of this `Cleanup`, so the distinction is not
+    /// about propagation: `Ok(false)` is the ordinary "already finished" answer
+    /// and an `Err` is the one worth a line in a log. Collapsing them into a
+    /// bare `let _ =` is what let the previous, session-targeted form stay
+    /// invisible for as long as it did (#1011).
+    pub async fn detach_client_by_pid(&self, pid: u32) -> Result<bool> {
+        let Some(client) = self.client_name_for_pid(pid).await? else {
+            return Ok(false);
+        };
+        let output = self
+            .cmd
+            .tokio()
+            .args(detach_client_args(&client))
+            .stderr(std::process::Stdio::piped())
+            .output()
+            .await
+            .with_context(|| format!("failed to spawn tmux detach-client for {client}"))?;
+        if output.status.success() {
+            return Ok(true);
+        }
+        anyhow::bail!(
+            "tmux detach-client -t {client} failed: {} ({})",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        )
+    }
+
+    /// [`detach_client_by_pid`](Self::detach_client_by_pid) for a caller that
+    /// cannot await. `Drop` is why this exists.
+    ///
+    /// The same operation on the blocking [`TmuxCmd::std`] builder, not a
+    /// second grammar: both reach [`detach_client_args`] and
+    /// [`client_name_for_pid_in`]. Only the spawn differs, which is the
+    /// `std`/`tokio` duality [`TmuxCmd`] already carries.
+    pub fn detach_client_by_pid_blocking(&self, pid: u32) -> Result<bool> {
+        let Some(client) = self.client_name_for_pid_blocking(pid)? else {
+            return Ok(false);
+        };
+        let output = self
+            .cmd
+            .std()
+            .args(detach_client_args(&client))
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .output()
+            .with_context(|| format!("failed to spawn tmux detach-client for {client}"))?;
+        if output.status.success() {
+            return Ok(true);
+        }
+        anyhow::bail!(
+            "tmux detach-client -t {client} failed: {} ({})",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        )
+    }
+
+    /// The name of the client whose process is `pid`; `None` when no client
+    /// carries it.
+    async fn client_name_for_pid(&self, pid: u32) -> Result<Option<String>> {
+        let output = self
+            .cmd
+            .tokio()
+            .args(list_clients_args())
+            .stderr(std::process::Stdio::piped())
+            .output()
+            .await
+            .with_context(|| format!("failed to spawn tmux list-clients to resolve pid {pid}"))?;
+        if !output.status.success() {
+            anyhow::bail!(
+                "tmux list-clients failed: {} ({})",
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+        }
+        Ok(client_name_for_pid_in(&output.stdout, pid))
+    }
+
+    /// [`client_name_for_pid`](Self::client_name_for_pid) on the blocking
+    /// builder.
+    fn client_name_for_pid_blocking(&self, pid: u32) -> Result<Option<String>> {
+        let output = self
+            .cmd
+            .std()
+            .args(list_clients_args())
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .output()
+            .with_context(|| format!("failed to spawn tmux list-clients to resolve pid {pid}"))?;
+        if !output.status.success() {
+            anyhow::bail!(
+                "tmux list-clients failed: {} ({})",
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+        }
+        Ok(client_name_for_pid_in(&output.stdout, pid))
     }
 }
 
@@ -887,6 +1032,45 @@ mod tests {
         assert!(
             seen.contains("step5-send-keys-ran"),
             "the line was typed but never ran — or never arrived: {seen:?}"
+        );
+    }
+
+    /// The listing is one line per client and the pid is what identifies ours.
+    /// Both halves matter: reading the wrong field finds nothing, and "found
+    /// nothing" is indistinguishable from "the client is already gone" — the
+    /// two outcomes the operation exists to tell apart.
+    #[test]
+    fn the_client_with_our_pid_is_the_one_that_is_found() {
+        let listing = b"111 client-111\n222 client-222\n333 client-333\n";
+        assert_eq!(
+            client_name_for_pid_in(listing, 222).as_deref(),
+            Some("client-222"),
+            "the pid selects the line, not the position in the listing"
+        );
+    }
+
+    #[test]
+    fn a_listing_without_our_pid_finds_nothing() {
+        let listing = b"111 client-111\n222 client-222\n";
+        assert_eq!(client_name_for_pid_in(listing, 999), None);
+    }
+
+    #[test]
+    fn an_empty_listing_finds_nothing() {
+        // What a server with no clients prints, and what the fake prints when
+        // the attach never recorded a pid.
+        assert_eq!(client_name_for_pid_in(b"", 1), None);
+    }
+
+    #[test]
+    fn a_line_that_is_not_a_pid_is_skipped_rather_than_matched() {
+        // tmux's own diagnostics can land on stdout; a line whose first field
+        // is not a number must not be mistaken for a client.
+        let listing = b"not-a-pid client-x\n42 client-42\n";
+        assert_eq!(
+            client_name_for_pid_in(listing, 42).as_deref(),
+            Some("client-42"),
+            "the unparsable line is skipped, and the real one after it is found"
         );
     }
 }

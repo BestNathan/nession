@@ -228,21 +228,21 @@ impl Drop for ControlModeSession {
         // 3.6b: "server exited unexpectedly"), so an unclean detach is the
         // lesser risk here but still not a state a caller has to hear about.
         //
-        // **Measured on tmux 3.6b (2026-09-24): `-t` is a *client* target and a
-        // session name is not one**, so this call answers `can't find client:
-        // <session>` (exit 1) and detaches nothing. The class does not change —
-        // the client still goes away — but the target form is a
-        // client-lifecycle decision (`-s <session>` detaches *every* client of
-        // the session) and belongs with #991's step 8/9, not here.
-        let _ = self
-            .tmux
-            .cmd()
-            .std()
-            .args(["detach-client", "-t", &self.session_name])
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status();
+        // The target is the client **this backend spawned**, resolved from the
+        // child's pid (#1011). It used to name the session, which
+        // `detach-client -t` does not accept: measured on tmux 3.6b that
+        // answers `can't find client: <session>` (exit 1) and detaches nothing,
+        // so the detach was a no-op from the day it was written. `-s <session>`
+        // is not the repair — it detaches *every* client of the session,
+        // including one a user attached by hand.
+        //
+        // [`close`](ControlModeSession::close) reaches the same end through the
+        // control-mode stdin instead, which is the transport this backend
+        // already owns; this path keeps a subprocess because `Drop` cannot
+        // await. The class and the silence are unchanged.
+        if let Some(pid) = self.child.id() {
+            let _ = self.tmux.ops().detach_client_by_pid_blocking(pid);
+        }
         // Let the child process exit on its own — drop order will close
         // stdin (EOF → child exits), then child (reaped by tokio/lanchd).
     }
@@ -341,7 +341,22 @@ mod tests {
         // machine — the backend's own wiring — has a test that does, and the
         // macOS skip keeps applying exactly where it was needed: to real tmux.
         let dir = tempfile::tempdir().expect("tempdir");
-        let fake = crate::test_support::FakeTmux::new(dir.path(), "exit 0");
+        let child_pid = dir.path().join("child.pid");
+        // `-C attach` records its own pid — the process this backend spawned,
+        // which is what it later resolves its client by — and `list-clients`
+        // hands it back the way tmux does (measured: `#{client_pid}` is the
+        // attaching process, so the client we own is the one carrying it).
+        let fake = crate::test_support::FakeTmux::new(
+            dir.path(),
+            &format!(
+                "case \"$1\" in \
+                 attach|-C) echo $$ > \"{pid}\"; exit 0;; \
+                 list-clients) p=$(cat \"{pid}\" 2>/dev/null || echo 0); \
+                   echo \"$p client-$p\"; exit 0;; \
+                 *) exit 0;; esac",
+                pid = child_pid.display(),
+            ),
+        );
 
         let (session, _rx, _resize_rx) =
             ControlModeSession::attach(&fake.dep(), "nession-fake-sess", 80, 24)
@@ -380,15 +395,33 @@ mod tests {
 
         drop(session);
         let calls = fake.calls();
+        let pid = std::fs::read_to_string(&child_pid)
+            .expect("the attach branch records its pid")
+            .trim()
+            .to_string();
+
+        // `-s <session>` would detach *every* client of the session, including
+        // one a user attached by hand, and `-t <session>` detaches nothing at
+        // all (#1011). The only correct target is the client this backend owns,
+        // named from the pid it spawned.
         assert!(
             calls.iter().any(|args| args
                 == &vec![
                     "detach-client".to_string(),
                     "-t".to_string(),
+                    format!("client-{pid}"),
+                ]),
+            "a control-mode client must detach the client it spawned ({pid}), on \
+             the tmux it attached to: {calls:?}"
+        );
+        assert!(
+            !calls.iter().any(|args| args
+                == &vec![
+                    "detach-client".to_string(),
+                    "-t".to_string(),
                     "nession-fake-sess".to_string(),
                 ]),
-            "a control-mode client must always detach cleanly, on the tmux it \
-             attached to: {calls:?}"
+            "and never the session, which is the #1011 no-op: {calls:?}"
         );
     }
 }
