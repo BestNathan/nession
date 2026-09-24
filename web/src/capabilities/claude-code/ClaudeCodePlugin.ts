@@ -95,7 +95,7 @@ export class ClaudeCodePlugin implements TransportPlugin {
       unit,
       target: agentId,
       requirements: CONSUMER_REQUIREMENTS[unit],
-      manifest: connection.protocols.manifestFor(agentId),
+      protocols: connection.protocols.targetProtocols(agentId),
       payload: { ...req },
     });
   }

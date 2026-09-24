@@ -18,5 +18,6 @@ export {
   resolveContract,
   selectVersion,
 } from './resolve';
+export type { TargetProtocols } from './directory';
 export type { Resolution } from './resolve';
 export type { ContractSupport, ProtocolManifest } from './types';

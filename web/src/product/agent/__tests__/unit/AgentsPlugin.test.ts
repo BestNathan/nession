@@ -50,7 +50,7 @@ describe('AgentsPlugin', () => {
       });
       await pending;
 
-      expect(surface.protocols.manifestFor('a1')).toEqual(manifest);
+      expect(surface.protocols.targetProtocols('a1')).toEqual({ kind: 'present', manifest });
     });
 
     it('publishes before the caller can address anything to the agent', async () => {
@@ -64,20 +64,20 @@ describe('AgentsPlugin', () => {
       });
       await pending;
 
-      expect(surface.protocols.manifestFor('a1')).toEqual(manifest);
+      expect(surface.protocols.targetProtocols('a1')).toEqual({ kind: 'present', manifest });
     });
 
     it('publishes from the push as well, because both paths go through notify', async () => {
       // `server.agents.changed` is the path a client that never re-lists depends on,
       // and the server now sends `protocols` on it too. If publishing lived at
       // the call sites instead of in `notify`, this is the one that would be
-      // forgotten — and forgetting it looks like nothing, because an empty
-      // directory resolves as "Legacy Peer" and the calls keep working.
+      // forgotten — and forgetting it no longer looks like nothing: an empty
+      // directory now refuses the call instead of relaying it unversioned.
       surface.pushMessage('server.agents.changed', {
         agents: [{ ...makeAgent('a1'), protocols: manifest }],
       });
 
-      expect(surface.protocols.manifestFor('a1')).toEqual(manifest);
+      expect(surface.protocols.targetProtocols('a1')).toEqual({ kind: 'present', manifest });
     });
 
     it('replaces the snapshot, so an agent the server dropped stops resolving', () => {
@@ -86,8 +86,8 @@ describe('AgentsPlugin', () => {
       });
       surface.pushMessage('server.agents.changed', { agents: [makeAgent('a2')] });
 
-      expect(surface.protocols.manifestFor('a1')).toBeNull();
-      expect(surface.protocols.manifestFor('a2')).toBeNull();
+      expect(surface.protocols.targetProtocols('a1')).toEqual({ kind: 'unknown' });
+      expect(surface.protocols.targetProtocols('a2')).toEqual({ kind: 'none' });
     });
 
     it('writes to the surface it is currently bound to', () => {
@@ -102,8 +102,8 @@ describe('AgentsPlugin', () => {
         agents: [{ ...makeAgent('a1'), protocols: manifest }],
       });
 
-      expect(other.protocols.manifestFor('a1')).toEqual(manifest);
-      expect(surface.protocols.manifestFor('a1')).toBeNull();
+      expect(other.protocols.targetProtocols('a1')).toEqual({ kind: 'present', manifest });
+      expect(surface.protocols.targetProtocols('a1')).toEqual({ kind: 'unknown' });
     });
   });
 

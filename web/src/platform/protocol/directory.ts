@@ -17,13 +17,16 @@ import type { ProtocolManifest } from './types';
  * directory hangs off the surface rather than out of one plugin and into
  * another.
  *
- * ## Unknown and absent are the same answer
+ * ## Unknown and absent are different answers, and used to be the same one
  *
- * `manifestFor` returns `null` both for an agent that advertised nothing and
- * for one this connection has not heard about yet. Both are Legacy Peers from
- * here: the call goes out naming no version and relays as it did before any of
- * this existed. Collapsing them is the safe direction — *not having fetched
- * yet* must never read as *this target refused*.
+ * `manifestFor` returned `null` both for an agent that advertised nothing and
+ * for one this connection had not heard about yet, and the note defending that
+ * said collapsing them was "the safe direction". It was not. It made *not
+ * having fetched yet* resolve to *this target is a Legacy Peer, relay it
+ * naming no version* — which is a manifest still in flight being read as a
+ * version-negotiation that succeeded. That is the bypass `#963` removes, and
+ * separating the two answers is what removes it: neither is a success, so
+ * neither can be mistaken for one.
  *
  * ## Replaced wholesale, never merged
  *
@@ -32,6 +35,21 @@ import type { ProtocolManifest } from './types';
  * it resolves to a version the target no longer serves, which is exactly the
  * "target manifest stale" case the server's gate exists to catch.
  */
+
+/**
+ * What this connection knows about one target's protocols.
+ *
+ * Three answers, because two of them look alike and are not: a target nobody
+ * has told us about yet, and a target that was seen and advertised nothing.
+ * The first is a gap in *our* knowledge; the second is a fact about the
+ * target. Only the second is something a caller may relay against, and there
+ * is no outcome here that means "go ahead unversioned".
+ */
+export type TargetProtocols =
+  | { readonly kind: 'unknown' }
+  | { readonly kind: 'none' }
+  | { readonly kind: 'present'; readonly manifest: ProtocolManifest };
+
 /**
  * The directory input for a list of agents, keyed by agent id.
  *
@@ -39,9 +57,10 @@ import type { ProtocolManifest } from './types';
  * own vocabulary — the only thing it needs from an agent is that it has an id
  * and may carry a manifest.
  *
- * `undefined` folds to `null` here: "the server did not say" and "the agent
- * advertised none" resolve identically, and a caller should not have to
- * remember which of the two its source produces.
+ * `undefined` folds to `null` here, and that is still right: "the server did
+ * not say" and "the agent advertised none" both come from a *snapshot that
+ * named this agent*, so neither is `unknown`. `unknown` is the id being absent
+ * from the snapshot altogether, which only {@link ProtocolDirectory} can tell.
  */
 export function manifestsOf(
   agents: readonly { agent_id: string; protocols?: ProtocolManifest | null }[],
@@ -56,9 +75,8 @@ export class ProtocolDirectory {
    * Replace every entry with this snapshot.
    *
    * `null` values are meaningful and are kept: an agent that was seen and
-   * advertised nothing is a Legacy Peer, which is a different fact from an
-   * agent we have not seen. Both resolve the same today, but only one of them
-   * is worth being able to tell apart when that changes.
+   * advertised nothing is a different fact from an agent we have not seen, and
+   * {@link targetProtocols} is where the difference is readable.
    */
   publish(manifests: ReadonlyMap<string, ProtocolManifest | null>): void {
     this.manifests.clear();
@@ -67,8 +85,18 @@ export class ProtocolDirectory {
     }
   }
 
-  /** What `agentId` advertises, or `null` — see the class note on that value. */
-  manifestFor(agentId: string): ProtocolManifest | null {
-    return this.manifests.get(agentId) ?? null;
+  /**
+   * What this connection knows about `agentId`.
+   *
+   * The map's `has` and `get` are both needed: `get` alone cannot tell an entry
+   * holding `null` from no entry at all, and that is exactly the distinction
+   * this method exists to expose.
+   */
+  targetProtocols(agentId: string): TargetProtocols {
+    if (!this.manifests.has(agentId)) {
+      return { kind: 'unknown' };
+    }
+    const manifest = this.manifests.get(agentId) ?? null;
+    return manifest === null ? { kind: 'none' } : { kind: 'present', manifest };
   }
 }
