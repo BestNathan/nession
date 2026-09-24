@@ -1,3 +1,11 @@
 # Cargo configuration for Nession project.
-# sccache is configured via justfile (RUSTC_WRAPPER env var) — local only.
-# CI uses actions-rust-lang's cache-workspaces instead.
+#
+# Local Cargo invocations use the repository wrapper so `cargo check/test/clippy`
+# and `just ...` follow the same cache path. The wrapper is deliberately
+# optional: if sccache is missing it execs rustc directly.
+#
+# GitHub Actions sets RUSTC_WRAPPER="" at workflow scope. Cargo documents an
+# empty RUSTC_WRAPPER as an explicit reset, so CI keeps using its existing
+# rust-cache / target-cache path and never starts the local sccache wrapper.
+[build]
+rustc-wrapper = "scripts/rustc-wrapper.sh"

@@ -18,6 +18,7 @@ NC='\033[0m'
 HAS_RUST=0
 HAS_WEB=0
 HAS_DESIGN=0
+HAS_PROTOCOL=0
 
 while read -r local_ref local_sha _remote_ref remote_sha; do
   if [ "$remote_sha" = "0000000000000000000000000000000000000000" ]; then
@@ -40,6 +41,7 @@ while read -r local_ref local_sha _remote_ref remote_sha; do
       HAS_RUST=1
       HAS_WEB=1
       HAS_DESIGN=1
+      HAS_PROTOCOL=1
       continue
     fi
   fi
@@ -61,15 +63,34 @@ while read -r local_ref local_sha _remote_ref remote_sha; do
   if echo "$changed" | grep -qE '^(design/|docs/design/|web/eslint-plugin-nession/|scripts/check-design-tokens|\.claude/skills/nession-web-design/|justfile$)'; then
     HAS_DESIGN=1
   fi
+
+  # Protocol owners and enforcement infrastructure (`#963`). Same rule as the
+  # design gate: this decides *when* to run the canonical checks, never what
+  # they are — the rules live in `scripts/protocol-gate.mjs` and
+  # `scripts/check-codegen-drift.sh`, and this must not restate either.
+  #
+  # It is a bucket of its own rather than folded into Rust because two of these
+  # paths are invisible to the other three:
+  #
+  #   * `scripts/protocol-gate*` is not `.rs`, not web, not design — so a
+  #     change to the gate itself used to run *nothing* before a push, which
+  #     is the worst place for that gap: the gate's own selftest is what
+  #     proves it still catches what it claims.
+  #   * `web/src/generated/protocol/**` is `.ts`, so it ran the web checks and
+  #     never the drift check — and generated bindings that drifted from the
+  #     contracts are exactly what the web checks cannot see.
+  if echo "$changed" | grep -qE '^(crates/nession-protocol/|crates/[^/]+/src/protocol/|crates/nession-protocol-codegen/|web/src/generated/protocol/|scripts/protocol-gate)'; then
+    HAS_PROTOCOL=1
+  fi
 done
 
 # ── Skip if nothing relevant changed ────────────────────────────────────────
-if [ $HAS_RUST -eq 0 ] && [ $HAS_WEB -eq 0 ] && [ $HAS_DESIGN -eq 0 ]; then
-  echo -e "${GREEN}→ pre-push: no Rust/Web/design changes, skipping tests${NC}"
+if [ $HAS_RUST -eq 0 ] && [ $HAS_WEB -eq 0 ] && [ $HAS_DESIGN -eq 0 ] && [ $HAS_PROTOCOL -eq 0 ]; then
+  echo -e "${GREEN}→ pre-push: no Rust/Web/design/protocol changes, skipping tests${NC}"
   exit 0
 fi
 
-echo -e "${YELLOW}→ pre-push: running checks (Rust=$HAS_RUST Web=$HAS_WEB Design=$HAS_DESIGN)${NC}"
+echo -e "${YELLOW}→ pre-push: running checks (Rust=$HAS_RUST Web=$HAS_WEB Design=$HAS_DESIGN Protocol=$HAS_PROTOCOL)${NC}"
 echo ""
 
 HAS_ERROR=0
@@ -95,6 +116,35 @@ if [ $HAS_RUST -eq 1 ]; then
     echo -e "${RED}✗ just coverage${NC}"
     HAS_ERROR=1
     FAILED_CHECKS+=("coverage (≥ 80% line coverage)")
+  fi
+fi
+
+# ── Protocol / generated bindings (`#963`) ──────────────────────────────────
+#
+# The canonical commands, unchanged — `just check-protocol` and
+# `just check-codegen` are the same two CI runs in `just check`, so a protocol
+# drift fails here rather than three minutes into a CI run. Before this, the
+# only pre-commit-side protocol check was `check-protocol` on staged `.rs` or
+# `web/src/` files, and `check-codegen` was not run by any hook at all.
+if [ $HAS_PROTOCOL -eq 1 ]; then
+  echo -e "${YELLOW}→ just check-protocol${NC}"
+  if just check-protocol; then
+    echo -e "${GREEN}✓ just check-protocol${NC}"
+  else
+    echo -e "${RED}✗ just check-protocol${NC}"
+    HAS_ERROR=1
+    FAILED_CHECKS+=("check-protocol (a wire nobody answers, or a unit nobody calls)")
+  fi
+
+  echo ""
+
+  echo -e "${YELLOW}→ just check-codegen${NC}"
+  if just check-codegen; then
+    echo -e "${GREEN}✓ just check-codegen${NC}"
+  else
+    echo -e "${RED}✗ just check-codegen${NC}"
+    HAS_ERROR=1
+    FAILED_CHECKS+=("check-codegen (generated bindings drifted from the contracts)")
   fi
 fi
 

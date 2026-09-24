@@ -7779,22 +7779,22 @@ fn env_file_key(payload: &Value) -> ResourceKey {
 }
 
 server_routes!(handler, msg, payload;
-    "server.agent.register" => "server.agent.register" => Ordered => handler.handle_agent_register(msg).await,
+    "server.agent.register" => "server.agent.register" => 1 => Ordered => handler.handle_agent_register(msg).await,
     // `control.heartbeat` is deliberately **not** an arm here. It is a control
     // message, not an operation: nothing answers it (the agent used to read an
     // acknowledgement on a wire of its own, and that is gone because control
     // has no acknowledgement), and an arm would put it in the manifest as a
     // unit the server offers. It is handled in `handle_protocol_message`, ahead
     // of the relay path — see the match there for why the position matters.
-    "server.agent.session-update" => "server.agent.session-update" => Inline => handler.handle_agent_session_update(msg).await,
-    "server.agent.command-response" => "server.agent.command-response" => Inline => handler.handle_agent_command_response(msg).await,
-    "server.agent.terminal-resize" => "server.agent.terminal-resize" => Inline => handler.handle_agent_terminal_resize(msg).await,
-    "server.agent.address-update" => "server.agent.address-update" => Inline => handler.handle_agent_address_update(msg).await,
-    "server.auth" => "server.auth" => Ordered => handler.handle_client_auth(msg).await,
-    "server.agent.list" => "server.agent.list" => Query => handler.handle_client_agents_list(msg).await,
-    "server.session.list" => "server.session.list" => Query => handler.handle_client_sessions_list(msg).await,
-    "server.session.attach" => "server.session.attach" => Ordered => handler.handle_client_session_attach(msg).await,
-    "server.session.relay.begin" => "server.session.relay.begin" => Ordered => handler.handle_client_session_relay_begin(msg).await,
+    "server.agent.session-update" => "server.agent.session-update" => 1 => Inline => handler.handle_agent_session_update(msg).await,
+    "server.agent.command-response" => "server.agent.command-response" => 1 => Inline => handler.handle_agent_command_response(msg).await,
+    "server.agent.terminal-resize" => "server.agent.terminal-resize" => 1 => Inline => handler.handle_agent_terminal_resize(msg).await,
+    "server.agent.address-update" => "server.agent.address-update" => 1 => Inline => handler.handle_agent_address_update(msg).await,
+    "server.auth" => "server.auth" => 1 => Ordered => handler.handle_client_auth(msg).await,
+    "server.agent.list" => "server.agent.list" => 1 => Query => handler.handle_client_agents_list(msg).await,
+    "server.session.list" => "server.session.list" => 1 => Query => handler.handle_client_sessions_list(msg).await,
+    "server.session.attach" => "server.session.attach" => 1 => Ordered => handler.handle_client_session_attach(msg).await,
+    "server.session.relay.begin" => "server.session.relay.begin" => 1 => Ordered => handler.handle_client_session_relay_begin(msg).await,
     // `server.session.relay.end` is intercepted by the relay function
     // (`relay_bidirectional_via_channel`) and never reaches the dispatcher
     // during active relay. It is declared here anyway, because the Server does
@@ -7802,27 +7802,27 @@ server_routes!(handler, msg, payload;
     // would understate what this peer answers. `Ordered`, because it is the
     // other half of the mode transition: leaving relay mode must be as
     // deterministic as entering it.
-    "server.session.relay.end" => "server.session.relay.end" => Ordered => Ok(HandlerAction::Reply(None)),
+    "server.session.relay.end" => "server.session.relay.end" => 1 => Ordered => Ok(HandlerAction::Reply(None)),
     // The keyed mutations (`#961-E`). Each carries the resource it mutates,
     // read from its own payload: the session ones by the session they name, the
     // env ones by the file. Create and kill name one session two ways and must
     // land on one key — see `session_by_parts` / `session_by_id`.
-    "server.session.create" => "server.session.create" => Key(session_by_parts(payload)) => handler.handle_client_session_create(msg).await,
-    "server.session.kill" => "server.session.kill" => Key(session_by_id(payload)) => handler.handle_client_session_kill(msg).await,
-    "server.session.capture-preview" => "server.session.capture-preview" => Query => handler.handle_client_session_capture_preview(msg).await,
-    "server.env.list" => "server.env.list" => Query => handler.handle_client_env_list(msg).await,
-    "server.env.get" => "server.env.get" => Query => handler.handle_client_env_get(msg).await,
-    "server.env.write" => "server.env.write" => Key(env_file_key(payload)) => handler.handle_client_env_write(msg).await,
-    "server.env.delete" => "server.env.delete" => Key(env_file_key(payload)) => handler.handle_client_env_delete(msg).await,
-    "server.session.env.apply" => "server.session.env.apply" => Key(session_by_id(payload)) => handler.handle_client_session_env_apply(msg).await,
-    "server.session.env.unset" => "server.session.env.unset" => Key(session_by_id(payload)) => handler.handle_client_session_env_unset(msg).await,
-    "server.session.env.active" => "server.session.env.active" => Query => handler.handle_client_session_env_active(msg).await,
-    "server.session.env.query" => "server.session.env.query" => Query => handler.handle_client_session_env_query(msg).await,
-    "server.info" => "server.info" => Query => handler.handle_client_server_info(msg).await,
-    "server.agent.rename" => "server.agent.rename" => Inline => handler.handle_client_agent_rename(msg).await,
-    "server.agent.delete" => "server.agent.delete" => Inline => handler.handle_client_agent_delete(msg).await,
-    "server.commands.list" => "server.commands.list" => Query => handler.handle_client_commands_list(msg).await,
-    "server.commands.add" => "server.commands.add" => Inline => handler.handle_client_commands_add(msg).await,
-    "server.commands.remove" => "server.commands.remove" => Inline => handler.handle_client_commands_remove(msg).await,
-    "server.commands.update" => "server.commands.update" => Inline => handler.handle_client_commands_update(msg).await,
+    "server.session.create" => "server.session.create" => 1 => Key(session_by_parts(payload)) => handler.handle_client_session_create(msg).await,
+    "server.session.kill" => "server.session.kill" => 1 => Key(session_by_id(payload)) => handler.handle_client_session_kill(msg).await,
+    "server.session.capture-preview" => "server.session.capture-preview" => 1 => Query => handler.handle_client_session_capture_preview(msg).await,
+    "server.env.list" => "server.env.list" => 1 => Query => handler.handle_client_env_list(msg).await,
+    "server.env.get" => "server.env.get" => 1 => Query => handler.handle_client_env_get(msg).await,
+    "server.env.write" => "server.env.write" => 1 => Key(env_file_key(payload)) => handler.handle_client_env_write(msg).await,
+    "server.env.delete" => "server.env.delete" => 1 => Key(env_file_key(payload)) => handler.handle_client_env_delete(msg).await,
+    "server.session.env.apply" => "server.session.env.apply" => 1 => Key(session_by_id(payload)) => handler.handle_client_session_env_apply(msg).await,
+    "server.session.env.unset" => "server.session.env.unset" => 1 => Key(session_by_id(payload)) => handler.handle_client_session_env_unset(msg).await,
+    "server.session.env.active" => "server.session.env.active" => 1 => Query => handler.handle_client_session_env_active(msg).await,
+    "server.session.env.query" => "server.session.env.query" => 1 => Query => handler.handle_client_session_env_query(msg).await,
+    "server.info" => "server.info" => 1 => Query => handler.handle_client_server_info(msg).await,
+    "server.agent.rename" => "server.agent.rename" => 1 => Inline => handler.handle_client_agent_rename(msg).await,
+    "server.agent.delete" => "server.agent.delete" => 1 => Inline => handler.handle_client_agent_delete(msg).await,
+    "server.commands.list" => "server.commands.list" => 1 => Query => handler.handle_client_commands_list(msg).await,
+    "server.commands.add" => "server.commands.add" => 1 => Inline => handler.handle_client_commands_add(msg).await,
+    "server.commands.remove" => "server.commands.remove" => 1 => Inline => handler.handle_client_commands_remove(msg).await,
+    "server.commands.update" => "server.commands.update" => 1 => Inline => handler.handle_client_commands_update(msg).await,
 );

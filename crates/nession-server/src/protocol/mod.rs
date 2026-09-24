@@ -32,13 +32,45 @@ use nession_protocol::{
 /// Who owns these contracts. Also the answer to "who do I ask when they change?"
 pub const OWNER: &str = "nession-server";
 
-/// One version, one wire message type — the shape every server unit has today.
-pub(crate) fn v1_descriptor(id: &str, wire: &str) -> Result<ProtocolDescriptor, IdentityError> {
+/// One Contract Version of one wire message type (`#963`).
+///
+/// Takes the version rather than assuming `V1`: the wire locates the Protocol
+/// Unit and the version selects the generation, so a unit serving two
+/// generations states both and this is how a table says which is which.
+pub(crate) fn descriptor(
+    id: &str,
+    wire: &str,
+    version: u32,
+) -> Result<ProtocolDescriptor, IdentityError> {
     ProtocolDescriptor::new(
         id,
         OWNER,
-        vec![ContractDescriptor::new(ContractVersion::V1, &[wire])],
+        vec![ContractDescriptor::new(
+            ContractVersion::new(version)?,
+            &[wire],
+        )],
     )
+}
+
+/// The `contract_version` a payload names, or `1` when it names none.
+///
+/// **Absent means v1**, which is the rule the routing tables are built on: a
+/// caller naming no version is addressing the unit as it was before versions
+/// existed, and that is v1 by definition. It is also what lets a table match on
+/// a plain `(wire, version)` tuple — two generations are two distinct patterns,
+/// where two arms on one wire alone would make the second unreachable and
+/// `-D warnings` would fail the build.
+///
+/// A `contract_version` that is present but not a number also resolves to `1`.
+/// Looser than `ExtensionRegistry`'s check, and deliberately so for now: this is
+/// the macro's routing contract, and making *this* layer refuse is `#963`
+/// Stage 3's decision about how wide the refusal should be.
+pub(crate) fn named_contract_version(payload: &serde_json::Value) -> u32 {
+    payload
+        .get("contract_version")
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|n| u32::try_from(n).ok())
+        .unwrap_or(1)
 }
 
 /// Declare the units this server serves, once.
@@ -69,18 +101,24 @@ pub(crate) fn v1_descriptor(id: &str, wire: &str) -> Result<ProtocolDescriptor, 
 /// `dispatch_server` below: the policy is read before the arm runs, and the arm
 /// consumes the payload, so this half may only look at it.
 macro_rules! server_routes {
-    ($handler:ident, $msg:ident, $payload:ident $(,)? ; $( $id:literal => $wire:literal => $policy:expr => $body:expr ),* $(,)?) => {
+    ($handler:ident, $msg:ident, $payload:ident $(,)? ; $( $id:literal => $wire:literal => $version:literal => $policy:expr => $body:expr ),* $(,)?) => {
         /// Every Protocol Unit this server serves on its client and agent
         /// connections.
         ///
         /// Derived from the same invocation that dispatches them, so this list
         /// is what the server *does* rather than what someone remembered to
         /// write down.
+        ///
+        /// **One descriptor per arm, so a unit at two versions emits two.** They
+        /// share an id and differ by version, and `from_descriptors` unions them
+        /// into one entry advertising `[1, 2]` — the shape `#963` exists to make
+        /// expressible. One descriptor per *wire* would have to pick a version,
+        /// and picking is the manifest's job.
         pub fn server_descriptors() -> Result<
             Vec<nession_protocol::ProtocolDescriptor>,
             nession_protocol::IdentityError,
         > {
-            Ok(vec![$( $crate::protocol::v1_descriptor($id, $wire)?, )*])
+            Ok(vec![$( $crate::protocol::descriptor($id, $wire, $version)?, )*])
         }
 
         /// The wire types the same invocation covers.
@@ -88,6 +126,9 @@ macro_rules! server_routes {
         /// The message loop asks this before dispatching, so a message the
         /// server does not serve falls through to the tail match rather than
         /// into `dispatch_server`'s empty arm.
+        ///
+        /// A unit serving two versions appears once per version. Membership is
+        /// the only question asked of it, so the repeat is harmless.
         pub(crate) const SERVER_WIRES: &[&str] = &[$( $wire, )*];
 
         /// How the connection's reader dispatches one wire (`#961-C`, `#961-E`).
@@ -96,12 +137,16 @@ macro_rules! server_routes {
         /// it only forwards to an agent, or something nobody serves. The
         /// connection reads that as its declared default rather than guessing
         /// from the name; see `server::execution`.
+        ///
+        /// Keyed on `(wire, version)`. The version comes from the payload
+        /// because that is where the contract puts it; `wire` is passed in
+        /// separately because this half is read before the message is decoded.
         pub(crate) fn unit_policy(
             wire: &str,
             $payload: &serde_json::Value,
         ) -> Option<$crate::server::execution::ExecutionPolicy> {
-            match wire {
-                $( $wire => Some($policy), )*
+            match (wire, $crate::protocol::named_contract_version($payload)) {
+                $( ($wire, $version) => Some($policy), )*
                 _ => None,
             }
         }
@@ -125,11 +170,17 @@ macro_rules! server_routes {
             // per message, and the alternative is rewriting every handler's
             // signature to no purpose.
             let msg_type = $msg.msg_type.clone();
-            match msg_type.as_str() {
-                $( $wire => $body, )*
-                // Unreachable through the caller's membership test. Kept
-                // rather than `unreachable!()` so a message that slips past it
-                // is answered the way the tail match answers anything unknown.
+            // The version is read from the payload before the match moves it,
+            // for the same reason `msg_type` is cloned: the arms take the
+            // message by value.
+            let version = $crate::protocol::named_contract_version(&$msg.payload);
+            match (msg_type.as_str(), version) {
+                $( ($wire, $version) => $body, )*
+                // Unreachable through the caller's membership test for a unit
+                // this table serves, and reachable for a message naming a
+                // version no arm declares — answered the way the tail match
+                // answers anything unknown. `#963` Stage 3 owns making it a
+                // refusal.
                 _ => Ok(HandlerAction::Reply(None)),
             }
         }
@@ -183,7 +234,7 @@ mod tests {
 
     #[test]
     fn a_descriptor_names_its_unit_its_owner_and_its_wire_type() {
-        let d = v1_descriptor("session.attach", "server.session.attach").unwrap();
+        let d = descriptor("session.attach", "server.session.attach", 1).unwrap();
         assert_eq!(d.id.as_str(), "session.attach");
         assert_eq!(d.owner, OWNER);
         assert_eq!(
@@ -228,9 +279,17 @@ mod tests {
         //
         // The two calls differ only in the id's spelling, so the first failing
         // and the second succeeding is the whole rule.
-        assert!(
-            v1_descriptor("session.capture_preview", "server.session.capture-preview").is_err()
-        );
-        assert!(v1_descriptor("session.capture-preview", "server.session.capture-preview").is_ok());
+        assert!(descriptor(
+            "session.capture_preview",
+            "server.session.capture-preview",
+            1
+        )
+        .is_err());
+        assert!(descriptor(
+            "session.capture-preview",
+            "server.session.capture-preview",
+            1
+        )
+        .is_ok());
     }
 }
