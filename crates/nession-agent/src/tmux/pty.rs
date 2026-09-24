@@ -133,6 +133,12 @@ impl PtySession {
     }
 
     /// Resize the PTY.  tmux receives SIGWINCH and reflows automatically.
+    ///
+    /// The PTY is this attach client's own size, but the pane it produces is
+    /// not private: with tmux's default `window-size latest` the window follows
+    /// the client, so this moves the **shared** window for every other client
+    /// on the session — the same resource `ControlModeSession::resize` moves,
+    /// by a different route. See `manager.rs`'s `SESSION_WIDTH`.
     pub fn resize(&mut self, cols: u16, rows: u16) -> Result<()> {
         self.viewport = (cols, rows);
         self.master.resize(PtySize {
