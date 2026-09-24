@@ -25,6 +25,36 @@ pub(crate) fn unique_session_name(prefix: &str) -> String {
     format!("{TEST_SESSION_PREFIX}{prefix}-{suffix}")
 }
 
+/// `tmux show-environment -t <session> <name>`, as tmux holds it — the value
+/// half of the one `NAME=VALUE` line it prints, or `None` when tmux does not
+/// answer successfully (an unknown variable exits 1).
+///
+/// This is how a test asks tmux what it actually holds, rather than asking
+/// nession whether it thinks it succeeded — the distinction #980 turned on.
+///
+/// Built from `tmux::cmd::global()` like every other tmux call in this
+/// workspace, so it addresses the socket this run was given rather than tmux's
+/// default one, which is also what makes it read the same server the code
+/// under test wrote to (`scripts/check-tmux-socket.sh` enforces the form).
+///
+/// The split is `split_once('=')` rather than a split on every `=`: a value is
+/// allowed to contain them, and a value is not something to parse.
+pub(crate) async fn tmux_show_environment(session: &str, name: &str) -> Option<String> {
+    let out = nession_agent::tmux::cmd::global()
+        .tokio()
+        .args(["show-environment", "-t", session, name])
+        .output()
+        .await
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&out.stdout);
+    text.trim()
+        .split_once('=')
+        .map(|(_, value)| value.to_string())
+}
+
 /// Owns a generated session name and kills the tmux session on drop.
 ///
 /// The tests' own `kill_session` calls only run on the happy path, so a panic
