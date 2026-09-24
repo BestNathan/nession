@@ -1,9 +1,14 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ReactElement } from 'react';
 import { ClaudeCodeWorkspace } from '../../ClaudeCodeWorkspace';
 import { claudeCodeApi } from '../../../ClaudeCodePlugin';
-import type { ClaudeCodeListResponse, ClaudeCodeReadResponse } from '../../../types';
+import type {
+  ClaudeCodeConversationResponse,
+  ClaudeCodeListResponse,
+  ClaudeCodeReadResponse,
+} from '../../../types';
 import type { WorkspaceContext } from '@/app/workspace/workspaceContext';
 import type { Agent, Session } from '@/types';
 import type { DomainState } from '@/product/session/model/domainState';
@@ -12,8 +17,26 @@ vi.mock('../../../ClaudeCodePlugin', () => ({
   claudeCodeApi: {
     claudeCodeList: vi.fn(),
     claudeCodeRead: vi.fn(),
+    claudeCodeConversation: vi.fn(),
   },
 }));
+
+/**
+ * What the conversation view is told on mount.
+ *
+ * Every test in this file is about the config browser, which is no longer the
+ * default view — `#1005` decision 3 makes the Session's current work the entry
+ * point — so they open the browser first (see `renderConfig`). This answer keeps
+ * the view they are not looking at from being an error.
+ */
+const noConversations: ClaudeCodeConversationResponse = {
+  state: 'not_found',
+  candidates: [],
+  items: [],
+  has_more: false,
+  partial_tail: false,
+  skipped: 0,
+};
 
 const agent: Agent = {
   agent_id: 'agent-1',
@@ -115,11 +138,59 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
+/**
+ * Render the Workspace on the **config browser**.
+ *
+ * The conversation is the default view now (`#1005` decision 3), so a test about
+ * the browser has to open it — leaving that implicit would be asserting browser
+ * behaviour through a view that is not showing it. A context with no agent or
+ * session renders no tabs at all, so the click is conditional.
+ */
+function renderConfig(ui: ReactElement) {
+  const view = render(ui);
+  const global = screen.queryByRole('tab', { name: 'Global' });
+  if (global) {
+    fireEvent.click(global);
+  }
+  return view;
+}
+
 describe('ClaudeCodeWorkspace', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(claudeCodeApi.claudeCodeList).mockReset();
     vi.mocked(claudeCodeApi.claudeCodeRead).mockReset();
+    vi.mocked(claudeCodeApi.claudeCodeConversation).mockReset();
+    vi.mocked(claudeCodeApi.claudeCodeConversation).mockResolvedValue(noConversations);
+  });
+
+  it('opens on the conversation, and keeps the config browser one tab away', async () => {
+    // #1005 decision 3: the Session's current work is the entry point, not the
+    // config browser. A default, not a removal — all three tabs are here.
+    mockLists();
+    render(<ClaudeCodeWorkspace ctx={makeContext()} />);
+
+    expect(await screen.findByTestId('conversation-not-found')).toBeInTheDocument();
+    expect(screen.queryByTestId('claude-code-scope-global')).not.toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Conversation' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Global' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Project' })).toBeInTheDocument();
+  });
+
+  it('asks the provider which conversation this Session is in, without naming one', async () => {
+    // The client has no say in the choice: it names a Session and nothing else,
+    // so there is no path here that could fall back to a timestamp.
+    mockLists();
+    render(<ClaudeCodeWorkspace ctx={makeContext()} />);
+
+    await waitFor(() => expect(claudeCodeApi.claudeCodeConversation).toHaveBeenCalled());
+    expect(vi.mocked(claudeCodeApi.claudeCodeConversation).mock.calls[0][0]).toMatchObject({
+      agent_id: 'agent-1',
+      session_id: 'agent-1:work',
+    });
+    expect(vi.mocked(claudeCodeApi.claudeCodeConversation).mock.calls[0][0]).not.toHaveProperty(
+      'claude_session_id',
+    );
   });
 
   it('requests both scopes and renders the global file browser', async () => {
@@ -130,7 +201,7 @@ describe('ClaudeCodeWorkspace', () => {
       .mockReturnValueOnce(globalList.promise)
       .mockReturnValueOnce(projectList.promise);
     vi.mocked(claudeCodeApi.claudeCodeRead).mockResolvedValue(readResponse);
-    render(<ClaudeCodeWorkspace ctx={makeContext()} />);
+    renderConfig(<ClaudeCodeWorkspace ctx={makeContext()} />);
 
     expect(screen.getByTestId('claude-code-workspace')).toBeInTheDocument();
     expect(screen.getAllByText('Loading Claude Code files...')).toHaveLength(2);
@@ -176,7 +247,7 @@ describe('ClaudeCodeWorkspace', () => {
       total_size: 12,
       has_more: false,
     });
-    render(<ClaudeCodeWorkspace ctx={makeContext()} />);
+    renderConfig(<ClaudeCodeWorkspace ctx={makeContext()} />);
 
     await user.click(screen.getByRole('tab', { name: 'Project' }));
     const projectScope = screen.getByTestId('claude-code-scope-project');
@@ -202,7 +273,7 @@ describe('ClaudeCodeWorkspace', () => {
     vi.mocked(claudeCodeApi.claudeCodeRead)
       .mockReturnValueOnce(globalRead.promise)
       .mockReturnValueOnce(projectRead.promise);
-    render(<ClaudeCodeWorkspace ctx={makeContext()} />);
+    renderConfig(<ClaudeCodeWorkspace ctx={makeContext()} />);
 
     await user.click(await screen.findByRole('button', { name: 'settings.json' }));
     await user.click(screen.getByRole('tab', { name: 'Project' }));
@@ -227,7 +298,7 @@ describe('ClaudeCodeWorkspace', () => {
         offset: readResponse.content.length,
         has_more: false,
       });
-    render(<ClaudeCodeWorkspace ctx={makeContext()} />);
+    renderConfig(<ClaudeCodeWorkspace ctx={makeContext()} />);
 
     await user.click(await screen.findByRole('button', { name: 'settings.json' }));
     await user.click(await screen.findByRole('button', { name: 'Load more' }));
@@ -259,7 +330,7 @@ describe('ClaudeCodeWorkspace', () => {
         total_size: 12,
         has_more: false,
       });
-    render(<ClaudeCodeWorkspace ctx={makeContext()} />);
+    renderConfig(<ClaudeCodeWorkspace ctx={makeContext()} />);
 
     await user.click(await screen.findByRole('button', { name: 'settings.json' }));
     await user.click(await screen.findByRole('button', { name: 'Load more' }));
@@ -279,7 +350,7 @@ describe('ClaudeCodeWorkspace', () => {
     vi.mocked(claudeCodeApi.claudeCodeRead)
       .mockResolvedValueOnce(readResponse)
       .mockRejectedValueOnce(new Error('pagination failed'));
-    render(<ClaudeCodeWorkspace ctx={makeContext()} />);
+    renderConfig(<ClaudeCodeWorkspace ctx={makeContext()} />);
 
     await user.click(await screen.findByRole('button', { name: 'settings.json' }));
     await screen.findByText('{"enabled":true}');
@@ -300,7 +371,7 @@ describe('ClaudeCodeWorkspace', () => {
     vi.mocked(claudeCodeApi.claudeCodeRead)
       .mockReturnValueOnce(readA)
       .mockReturnValueOnce(readB);
-    render(<ClaudeCodeWorkspace ctx={makeContext()} />);
+    renderConfig(<ClaudeCodeWorkspace ctx={makeContext()} />);
 
     await user.click(await screen.findByRole('button', { name: 'a.json' }));
     await user.click(screen.getByRole('button', { name: 'b.json' }));
@@ -318,7 +389,7 @@ describe('ClaudeCodeWorkspace', () => {
     const user = userEvent.setup();
     mockLists();
     vi.mocked(claudeCodeApi.claudeCodeRead).mockRejectedValue(new Error('read failed'));
-    render(<ClaudeCodeWorkspace ctx={makeContext()} />);
+    renderConfig(<ClaudeCodeWorkspace ctx={makeContext()} />);
 
     await user.click(await screen.findByRole('button', { name: 'settings.json' }));
 
@@ -333,7 +404,7 @@ describe('ClaudeCodeWorkspace', () => {
       .mockRejectedValueOnce(new Error('global failed'))
       .mockResolvedValueOnce(projectResponse)
       .mockResolvedValueOnce(globalResponse);
-    render(<ClaudeCodeWorkspace ctx={makeContext()} />);
+    renderConfig(<ClaudeCodeWorkspace ctx={makeContext()} />);
 
     expect(await screen.findByText('global failed')).toBeInTheDocument();
     expect(screen.getByTestId('claude-code-retry-global')).toBeInTheDocument();
@@ -349,20 +420,20 @@ describe('ClaudeCodeWorkspace', () => {
 
   it('shows the not-installed state for an unavailable scope', async () => {
     mockLists({ available: false, categories: [] }, projectResponse);
-    render(<ClaudeCodeWorkspace ctx={makeContext()} />);
+    renderConfig(<ClaudeCodeWorkspace ctx={makeContext()} />);
 
     expect(await within(screen.getByTestId('claude-code-scope-global')).findByText('Claude Code not installed')).toBeInTheDocument();
   });
 
   it('does not request without an agent or session and explains the missing context', () => {
-    render(<ClaudeCodeWorkspace ctx={makeContext({ agent: undefined })} />);
+    renderConfig(<ClaudeCodeWorkspace ctx={makeContext({ agent: undefined })} />);
 
     expect(screen.getByText('Select an agent and session to browse Claude Code files.')).toBeInTheDocument();
     expect(claudeCodeApi.claudeCodeList).not.toHaveBeenCalled();
   });
 
   it('does not request without a session when the agent is present', () => {
-    render(<ClaudeCodeWorkspace ctx={makeContext({ session: null })} />);
+    renderConfig(<ClaudeCodeWorkspace ctx={makeContext({ session: null })} />);
 
     expect(screen.getByText('Select an agent and session to browse Claude Code files.')).toBeInTheDocument();
     expect(claudeCodeApi.claudeCodeList).not.toHaveBeenCalled();
@@ -372,7 +443,7 @@ describe('ClaudeCodeWorkspace', () => {
     const user = userEvent.setup();
     mockLists();
     vi.mocked(claudeCodeApi.claudeCodeRead).mockResolvedValue({ ...readResponse, has_more: false });
-    const { rerender } = render(<ClaudeCodeWorkspace ctx={makeContext()} />);
+    const { rerender } = renderConfig(<ClaudeCodeWorkspace ctx={makeContext()} />);
 
     await user.click(await screen.findByRole('button', { name: 'settings.json' }));
     expect(await screen.findByText('{"enabled":true}')).toBeInTheDocument();
@@ -402,7 +473,7 @@ describe('ClaudeCodeWorkspace', () => {
     vi.mocked(claudeCodeApi.claudeCodeList)
       .mockReturnValueOnce(oldGlobal)
       .mockResolvedValueOnce(projectResponse);
-    const { rerender } = render(<ClaudeCodeWorkspace ctx={makeContext()} />);
+    const { rerender } = renderConfig(<ClaudeCodeWorkspace ctx={makeContext()} />);
 
     const nextAgent: Agent = { ...agent, agent_id: 'agent-2' };
     vi.mocked(claudeCodeApi.claudeCodeList)
@@ -440,7 +511,7 @@ describe('ClaudeCodeWorkspace', () => {
     vi.mocked(claudeCodeApi.claudeCodeList)
       .mockReturnValueOnce(oldGlobal.promise)
       .mockReturnValueOnce(oldProject.promise);
-    const { rerender } = render(<ClaudeCodeWorkspace ctx={makeContext()} />);
+    const { rerender } = renderConfig(<ClaudeCodeWorkspace ctx={makeContext()} />);
 
     const nextSession: Session = { ...session, session_id: 'agent-1:review', session_name: 'review' };
     vi.mocked(claudeCodeApi.claudeCodeList)
@@ -491,7 +562,7 @@ describe('ClaudeCodeWorkspace', () => {
     vi.mocked(claudeCodeApi.claudeCodeList)
       .mockReturnValueOnce(oldGlobal.promise)
       .mockReturnValueOnce(oldProject.promise);
-    const { rerender } = render(<ClaudeCodeWorkspace ctx={makeContext()} />);
+    const { rerender } = renderConfig(<ClaudeCodeWorkspace ctx={makeContext()} />);
 
     vi.mocked(claudeCodeApi.claudeCodeList)
       .mockResolvedValueOnce(bGlobalResponse)
@@ -513,13 +584,13 @@ describe('ClaudeCodeWorkspace', () => {
 
   it('keeps the browser heading on web and defers the app heading to AppToolHeader', () => {
     mockLists();
-    const { unmount } = render(<ClaudeCodeWorkspace ctx={makeContext({ experience: 'web' })} />);
+    const { unmount } = renderConfig(<ClaudeCodeWorkspace ctx={makeContext({ experience: 'web' })} />);
     expect(screen.getByRole('heading', { name: 'Claude Code' })).toBeInTheDocument();
     unmount();
 
     vi.mocked(claudeCodeApi.claudeCodeList).mockReset();
     mockLists();
-    render(<ClaudeCodeWorkspace ctx={makeContext({ experience: 'app' })} />);
+    renderConfig(<ClaudeCodeWorkspace ctx={makeContext({ experience: 'app' })} />);
     expect(screen.queryByRole('heading', { name: 'Claude Code' })).not.toBeInTheDocument();
   });
 });
