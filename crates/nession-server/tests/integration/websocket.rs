@@ -2023,6 +2023,197 @@ async fn an_ordered_frame_is_applied_after_the_mutations_read_before_it() -> any
     Ok(())
 }
 
+/// Two clients mutating one session are ordered against each other.
+///
+/// The other half of `mutations_of_one_session_are_ordered`, and the one
+/// `#961`'s review found missing: the key lane is the *runtime's*, not the
+/// connection's, so "the same session" means the same session however many
+/// sockets name it. The instrument is the one the section above explains — the
+/// agent is the test, so a command reaching it is a fact this test owns rather
+/// than a race to observe.
+///
+/// The first client's `kill` is brokered and never answered, which parks the
+/// session's key for as long as the test stays silent. The second client's
+/// `env.apply` for that same session is written on another socket and must not
+/// reach the agent until the kill is answered. With a lane per connection — what
+/// this was — the second client's frame goes straight through: its connection has
+/// its own map, its own worker, and no idea that anyone else is mutating `a1:s1`.
+#[tokio::test]
+async fn mutations_of_one_session_are_ordered_across_connections() -> anyhow::Result<()> {
+    let (_db_dir, addr, _handle) = start_ownership_server("test_ws_key_lane_across.db").await?;
+
+    let mut agent = connect_agent(addr, "a1").await?;
+    let mut first = connect_client(addr).await?;
+    let mut second = connect_client(addr).await?;
+
+    // The session exists, reported the way an agent reports one. Without it a
+    // `kill` is refused before it reaches a lane and the negative assertion
+    // below would be measuring the registry — see the single-connection test.
+    send_json(&mut agent, session_update("a1", "s1")).await?;
+    wait_for_session(&mut first, "a1:s1").await?;
+
+    // The first client's mutation, with no answer.
+    send_json(&mut first, session_kill_request("kill-1", "a1:s1")).await?;
+    let (kill_request, _) = next_command(&mut agent, "agent.session.kill").await?;
+
+    // The second client's mutation of that same session, on its own connection —
+    // and a query written behind it on that same connection, so the Server is
+    // known to have *read* it. That is what makes the wait below a statement
+    // about the lane rather than about the other client's socket.
+    send_json(&mut second, session_env_apply_request("apply-2", "a1:s1")).await?;
+    reader_caught_up(&mut second, "sync-3").await?;
+
+    no_command_within(
+        &mut agent,
+        "agent.session.env.apply",
+        std::time::Duration::from_millis(300),
+    )
+    .await?;
+
+    // Answering the kill frees the session's queue, and the other client's
+    // mutation is admitted.
+    send_json(
+        &mut agent,
+        command_response(
+            &kill_request,
+            serde_json::json!({ "request_id": kill_request, "success": true }),
+        ),
+    )
+    .await?;
+    let (apply_request, _) = next_command(&mut agent, "agent.session.env.apply").await?;
+    send_json(
+        &mut agent,
+        command_response(
+            &apply_request,
+            serde_json::json!({ "request_id": apply_request, "success": true }),
+        ),
+    )
+    .await?;
+
+    // Both clients are answered, each on its own connection.
+    let first_replies = replies_in_arrival_order(&mut first, &["kill-1"]).await?;
+    assert_eq!(
+        payload_of(&first_replies[0], "server.session.kill")?["success"],
+        serde_json::json!(true)
+    );
+    let second_replies = replies_in_arrival_order(&mut second, &["apply-2"]).await?;
+    assert_eq!(
+        payload_of(&second_replies[0], "server.session.env.apply")?["success"],
+        serde_json::json!(true)
+    );
+    Ok(())
+}
+
+/// The commands of `wire` the agent is handed before they stop coming.
+///
+/// The flood below reaches a bound that is never released, so the commands stop
+/// arriving and the end of the flood is "nothing more for `quiet`". A total
+/// ceiling keeps a connection that answers everything forever from parking this
+/// test instead of failing it.
+async fn commands_until_quiet(
+    agent: &mut TestWs,
+    wire: &str,
+    quiet: std::time::Duration,
+) -> anyhow::Result<Vec<serde_json::Value>> {
+    let ceiling = tokio::time::Instant::now() + std::time::Duration::from_secs(20);
+    let mut seen = Vec::new();
+    loop {
+        anyhow::ensure!(
+            tokio::time::Instant::now() < ceiling,
+            "the agent was still being handed {wire} commands after 20s: {seen:?}"
+        );
+        match tokio::time::timeout(quiet, agent.next()).await {
+            Ok(Some(Ok(tokio_tungstenite::tungstenite::Message::Text(text)))) => {
+                let parsed: serde_json::Value = serde_json::from_str(&text)?;
+                if parsed.get("msg_type").and_then(serde_json::Value::as_str) == Some(wire) {
+                    seen.push(parsed.get("payload").cloned().unwrap_or_default());
+                }
+            }
+            Ok(Some(Ok(_))) => {}
+            Ok(Some(Err(e))) => return Err(e.into()),
+            Ok(None) => anyhow::bail!("the agent's connection closed while counting {wire}"),
+            Err(_) => return Ok(seen),
+        }
+    }
+}
+
+/// A client that names many distinct resources gets a worker for a bounded
+/// number of them.
+///
+/// `#961`'s review, finding 3: "Server and Agent P2P still have unbounded
+/// unique-key worker growth ... 100000 unique keys x one worker ... bounded per
+/// key, but not globally bounded per connection". The bound tests in this file
+/// repeat work for *one* key, which is the shape that missed it; this is the
+/// flood — forty session creates, forty distinct names, forty keys — and the
+/// instrument is the agent's connection, where every brokered command is visible
+/// and no answer is ever given.
+///
+/// The silence is the arrangement: an unanswered command holds its session's key
+/// for as long as the test stays quiet, so the number of commands that reach the
+/// agent is the number of mutations the connection got a worker for, and that
+/// must stop at the connection's own bound rather than at the number of keys.
+///
+/// The last command is another client's, and it is why the bound is on the
+/// connection rather than on the lane: a peer that has spent its own has spent
+/// nobody else's, so a second client's create reaches the agent while the first
+/// client is stopped at its bound.
+#[tokio::test]
+async fn a_client_naming_many_resources_gets_workers_for_a_bounded_number_of_them(
+) -> anyhow::Result<()> {
+    const FLOOD: usize = 40;
+    let bound = nession_server::server::execution::DEFAULT_MUTATIONS_IN_FLIGHT;
+
+    let (_db_dir, addr, _handle) = start_ownership_server("test_ws_mutation_bound.db").await?;
+
+    let mut agent = connect_agent(addr, "a1").await?;
+    let mut flooder = connect_client(addr).await?;
+    let mut other = connect_client(addr).await?;
+
+    for n in 0..FLOOD {
+        send_json(
+            &mut flooder,
+            session_create_request(&format!("create-{n}"), "a1", &format!("s{n}")),
+        )
+        .await?;
+    }
+
+    let commands = commands_until_quiet(
+        &mut agent,
+        "agent.session.create",
+        std::time::Duration::from_millis(400),
+    )
+    .await?;
+    let names: std::collections::HashSet<String> = commands
+        .iter()
+        .filter_map(|payload| payload.get("name").and_then(serde_json::Value::as_str))
+        .map(str::to_string)
+        .collect();
+
+    assert!(
+        names.len() < FLOOD,
+        "a connection naming {FLOOD} distinct resources had a worker for every one of \
+         them: the tasks in flight track the number of keys, which is the unbounded \
+         unique-key growth this bound exists for"
+    );
+    assert_eq!(
+        names.len(),
+        bound,
+        "the flood stopped at {} workers rather than at this connection's bound of {bound}",
+        names.len()
+    );
+
+    // And a second client is not behind any of it.
+    send_json(&mut other, session_create_request("other-1", "a1", "other")).await?;
+    let (_, payload) = next_command(&mut agent, "agent.session.create").await?;
+    assert_eq!(
+        payload["name"],
+        serde_json::json!("other"),
+        "a second client's mutation did not reach the agent while the first client's \
+         flood was stopped at its own bound"
+    );
+    Ok(())
+}
+
 /// A client that stops reading **parks dispatch, and loses nothing**.
 ///
 /// Stage A's `a_client_that_stops_reading_neither_stalls_nor_loses_replies`,

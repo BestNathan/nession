@@ -12,13 +12,15 @@ use crate::registry::{AgentRegistry, AgentStatus, SessionRegistry};
 use crate::server::client_registry::ClientRegistry;
 use crate::server::command_broker::CommandBroker;
 use crate::server::execution::{
-    answer, policy_for_wire, ExecutionPolicy, Lanes, DEFAULT_KEY_QUEUE_DEPTH,
+    answer, mutation_scheduler, policy_for_wire, ExecutionPolicy, Lanes, ResourceKey,
+    DEFAULT_MUTATIONS_IN_FLIGHT,
 };
 use crate::server::outbound::WsMessageSender;
 use crate::server::web_client_registry::WebClientRegistry;
 use nession_common::config::ServerConfig;
 use nession_protocol::contracts::env::v1::EnvSnapshot;
 use nession_protocol::ProtocolMessage;
+use nession_runtime::lane::KeyedLane;
 
 pub struct WebSocketServer {
     config: ServerConfig,
@@ -29,6 +31,10 @@ pub struct WebSocketServer {
     web_client_registry: Arc<WebClientRegistry>,
     env_service: Arc<EnvService>,
     db: Arc<Database>,
+    /// The one mutation lane every connection of this Server dispatches into.
+    /// Built here because the resources its keys name — the registries and the
+    /// env store — are built here. See `server::execution::mutation_scheduler`.
+    mutations: Arc<KeyedLane<ResourceKey>>,
     listener: Option<TcpListener>,
 }
 
@@ -76,6 +82,7 @@ impl WebSocketServer {
             web_client_registry,
             env_service,
             db,
+            mutations: mutation_scheduler(),
             listener: Some(listener),
         })
     }
@@ -225,6 +232,7 @@ impl WebSocketServer {
                 web_client_registry: Arc::clone(&self.web_client_registry),
                 env_service: Arc::clone(&self.env_service),
                 db: Arc::clone(&self.db),
+                mutations: Arc::clone(&self.mutations),
                 auth_token: self.config.auth_token.clone(),
                 heartbeat_interval_secs,
                 terminal_stall_grace: std::time::Duration::from_secs(
@@ -285,6 +293,11 @@ struct ServerContext {
     web_client_registry: Arc<WebClientRegistry>,
     env_service: Arc<EnvService>,
     db: Arc<Database>,
+    /// The runtime's mutation lane (`#961` review, finding 1), shared by every
+    /// connection this Server serves, because the resources it orders are the
+    /// Server's rather than any one connection's. See
+    /// `server::execution::mutation_scheduler`.
+    mutations: Arc<KeyedLane<ResourceKey>>,
     auth_token: String,
     heartbeat_interval_secs: u64,
     terminal_stall_grace: std::time::Duration,
@@ -322,6 +335,7 @@ where
         web_client_registry,
         env_service,
         db,
+        mutations,
         auth_token,
         heartbeat_interval_secs,
         terminal_stall_grace,
@@ -401,13 +415,17 @@ where
     });
 
     // The work this connection has in flight (#961-C, #961-E). Read-only units
-    // run on the query lane and mutations on their resource's own queue, rather
-    // than in this loop, so one unit waiting on an agent does not hold the
-    // connection's other frames behind it; `server::execution` owns the bounds
+    // run on the query lane — this connection's own, since it is admission — and
+    // mutations on the *runtime's* key lane, queued behind their resource's own
+    // queue rather than in this loop. So one unit waiting on an agent does not
+    // hold the connection's other frames behind it, and a mutation of a session
+    // is ordered against the other connections' mutations of that session rather
+    // than only against this connection's. `server::execution` owns the bounds
     // and the policies that decide which units those are.
-    let mut lanes = Lanes::new(
+    let mut lanes = Lanes::shared(
         query_concurrency,
-        DEFAULT_KEY_QUEUE_DEPTH,
+        mutations,
+        DEFAULT_MUTATIONS_IN_FLIGHT,
         super::execution::LANE_LABEL,
     );
 
@@ -578,8 +596,11 @@ where
     {
         let (queries, keys) = lanes.snapshot().await;
         debug!(
-            "connection closed — lanes: {}",
-            nession_runtime::lane::summary(&queries, &keys)
+            "connection closed — lanes: {} (the mutation half is the shared scheduler's, \
+             which this connection dispatched into); its own mutation admissions waited \
+             {} time(s)",
+            nession_runtime::lane::summary(&queries, &keys),
+            lanes.admission_waits().await
         );
     }
     debug!("connection closed — outbound: {:?}", sender.snapshot());
