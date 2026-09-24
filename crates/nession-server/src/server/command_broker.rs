@@ -30,13 +30,37 @@ impl std::fmt::Display for ConnectionGeneration {
     }
 }
 
+/// The connection currently serving an agent's control channel.
+struct ActiveControl {
+    generation: ConnectionGeneration,
+    sender: WsMessageSender,
+}
+
 /// Per-agent control state: the owning connection, the message sender, and
 /// pending command receivers.
-pub struct AgentControl {
-    /// The connection this agent's control channel currently belongs to. Only a
-    /// newer connection may take it over; see [`CommandBroker::claim_agent`].
-    generation: ConnectionGeneration,
-    pub sender: WsMessageSender,
+///
+/// One record per *agent*, not per connection — which is why the two halves
+/// below are separate fields rather than one `Option`. A logical agent outlives
+/// its transports: when the connection serving it goes away, the agent is not
+/// gone, and the record that says which connection *was* newest is exactly what
+/// stops that dead connection's successor-of-predecessor from taking it back.
+///
+/// * [`Self::high_water_generation`] is that memory, and nothing but
+///   [`CommandBroker::forget_agent`] discards it.
+/// * [`Self::active`] is who is serving the agent *right now*, and it is
+///   legitimately absent — while a liveness verdict is in force
+///   ([`CommandBroker::evict_agent`]), and after the owning connection
+///   disconnected ([`CommandBroker::release_agent`]).
+///
+/// Reading only `active` answers "can a command be delivered"; reading only
+/// `high_water_generation` answers "is this connection still the agent's current
+/// generation" — the question every state-writing message asks, and the one
+/// there was no way to ask before `#960`.
+struct AgentControl {
+    /// The newest generation that has ever claimed this agent.
+    high_water_generation: ConnectionGeneration,
+    /// The connection currently serving this agent's control channel, if any.
+    active: Option<ActiveControl>,
     pub pending_commands: HashMap<String, oneshot::Sender<serde_json::Value>>,
 }
 
@@ -91,7 +115,10 @@ impl CommandBroker {
     /// * A reconnect claims the agent outright — it is a brand-new connection,
     ///   hence the highest generation, and the agent is now served from it.
     /// * A superseded connection's late heartbeat or session update changes
-    ///   nothing, however many of them arrive.
+    ///   nothing, however many of them arrive — including after the agent's
+    ///   entry was *evicted*, because eviction keeps the high-water mark
+    ///   (`#960`'s second half; the mark used to go with the entry, and a stale
+    ///   generation then reclaimed the agent it had already lost).
     /// * The current owner re-asserts its own claim harmlessly.
     ///
     /// That last case is not decoration. A connection re-asserting ownership is
@@ -111,38 +138,68 @@ impl CommandBroker {
         sender: WsMessageSender,
     ) {
         let mut agents = self.agents.write().await;
-        match agents.get_mut(agent_id) {
-            Some(existing) if existing.generation > generation => {
-                // This agent already belongs to a newer connection, and nothing
-                // an older one says may move it.
-                debug!(
-                    "CommandBroker: ignoring claim on agent {} by {} — owned by {}",
-                    agent_id, generation, existing.generation
-                );
-            }
-            Some(existing) => {
-                existing.generation = generation;
-                existing.sender = sender;
-                debug!(
-                    "CommandBroker: agent {} claimed by {}",
-                    agent_id, generation
-                );
-            }
-            None => {
-                agents.insert(
-                    agent_id.to_string(),
-                    AgentControl {
-                        generation,
-                        sender,
-                        pending_commands: HashMap::new(),
-                    },
-                );
-                debug!(
-                    "CommandBroker: agent {} claimed by {}",
-                    agent_id, generation
-                );
-            }
+        let control = agents
+            .entry(agent_id.to_string())
+            .or_insert_with(|| AgentControl {
+                high_water_generation: generation,
+                active: None,
+                pending_commands: HashMap::new(),
+            });
+
+        if control.high_water_generation > generation {
+            // This agent already belongs to a newer connection, and nothing an
+            // older one says may move it — not its sender, and (via
+            // [`Self::is_current_generation`]) not its state either.
+            debug!(
+                "CommandBroker: ignoring claim on agent {} by {} — owned by {}",
+                agent_id, generation, control.high_water_generation
+            );
+            return;
         }
+
+        control.high_water_generation = generation;
+        control.active = Some(ActiveControl { generation, sender });
+        debug!(
+            "CommandBroker: agent {} claimed by {}",
+            agent_id, generation
+        );
+    }
+
+    /// Whether `generation` may still speak for `agent_id` — as its **current**
+    /// generation, for the messages that write the agent's state.
+    ///
+    /// This is the other half of the ownership rule. [`Self::claim_agent`]
+    /// decides where a command goes; this decides whose report about an agent's
+    /// heartbeats, sessions and addresses is still believed. They are one
+    /// lifecycle read two ways, and before this they disagreed: routing followed
+    /// generations while state writes followed nothing but "this connection once
+    /// registered the id", so a superseded connection's late session update
+    /// re-created the session its replacement's registration had just cleared
+    /// (#960).
+    ///
+    /// True while no **newer** connection has claimed the agent. The comparison
+    /// is against the high-water mark rather than against the active owner on
+    /// purpose:
+    ///
+    /// * after a liveness eviction there is no active owner, and the generation
+    ///   that was evicted is still the agent's current one — it recovers by
+    ///   re-claiming, and until it does, its reports are still its own;
+    /// * an agent's entry being absent means no connection has ever claimed it in
+    ///   this process, so there is no newer generation to have been superseded
+    ///   by, and the connection's own registration is the only authority there
+    ///   is. (Registration is where that authority is created — see
+    ///   `handler::ConnectionHandler::authorized_agent_id` for the identity half,
+    ///   which is checked first and is what makes this arm unreachable for a
+    ///   connection that never registered.)
+    pub async fn is_current_generation(
+        &self,
+        agent_id: &str,
+        generation: ConnectionGeneration,
+    ) -> bool {
+        let agents = self.agents.read().await;
+        agents
+            .get(agent_id)
+            .is_none_or(|control| control.high_water_generation <= generation)
     }
 
     /// Release an agent's control channel **if this connection still owns it**.
@@ -151,16 +208,27 @@ impl CommandBroker {
     /// compare-and-remove: a connection that a reconnect has already superseded
     /// releases only its own claim and finds it has none — closing the old
     /// WebSocket cannot unregister the agent its replacement is serving (#960).
-    /// Dropping the map for a release that *does* match still resolves every
-    /// pending command of that agent with `RecvError`, which is the intended
-    /// meaning: the agent is gone, and work still in flight cannot complete.
+    ///
+    /// What a matching release removes is the *owner*, not the record: the
+    /// high-water mark stays, because the connection on the other end of a
+    /// disconnected-but-not-yet-reaped socket is exactly the one whose late
+    /// frames this mark exists to refuse. `pending_commands` go with the owner —
+    /// the agent has no control channel left, so work still in flight cannot
+    /// complete, and resolving its waiters now is more honest than making each
+    /// of them wait out its timeout. The record itself is dropped by
+    /// [`Self::forget_agent`], when the agent is deleted rather than merely
+    /// unreachable.
     ///
     /// Returns whether the caller was still the owner.
     pub async fn release_agent(&self, agent_id: &str, generation: ConnectionGeneration) -> bool {
         let mut agents = self.agents.write().await;
-        match agents.get(agent_id).map(|control| control.generation) {
+        let Some(control) = agents.get_mut(agent_id) else {
+            return false;
+        };
+        match control.active.as_ref().map(|active| active.generation) {
             Some(current) if current == generation => {
-                agents.remove(agent_id);
+                control.active = None;
+                control.pending_commands.clear();
                 info!(
                     "CommandBroker: agent {} released by {}",
                     agent_id, generation
@@ -185,23 +253,59 @@ impl CommandBroker {
     /// rather than about any connection: the heartbeat sweep marking a silent
     /// agent offline, and a client deleting an agent the registry reports as
     /// offline. Whoever holds the channel is by definition not answering, so
-    /// there is no owner to compare against and no generation to preserve.
+    /// there is no owner to compare against.
     ///
-    /// It is the one removal that ignores generations. The state it leaves — an
-    /// agent with no owner — is one any connection may claim again, which is
-    /// how a live connection recovers from a sweep that fired on it; the window
-    /// it leaves, between the sweep's verdict and this call, is bounded by the
-    /// heartbeat timeout and belongs to the sweep rather than to the broker.
+    /// It clears the owner and the pending commands — the verdict is that
+    /// nothing will answer them — and it **keeps the high-water mark**. That is
+    /// the difference between this and `#960`'s first half: removing the whole
+    /// record threw away the one number that says which connection is newest, so
+    /// the stale generation the mark had been refusing fell through to the
+    /// insert arm and took the agent back. A verdict about liveness is not a
+    /// statement about *generations*, and it does not get to erase one.
+    ///
+    /// The state it leaves — an agent with no owner but a known newest
+    /// generation — is one that generation may claim again, which is how a live
+    /// connection recovers from a sweep that fired on it. A generation *older*
+    /// than the mark cannot.
     pub async fn evict_agent(&self, agent_id: &str) {
         let mut agents = self.agents.write().await;
-        if agents.remove(agent_id).is_some() {
+        let Some(control) = agents.get_mut(agent_id) else {
+            return;
+        };
+        let was_held = control.active.take().is_some();
+        control.pending_commands.clear();
+        if was_held {
             info!("CommandBroker: evicted agent {}", agent_id);
+        }
+    }
+
+    /// Drop an agent's record entirely — the agent **does not exist** any more.
+    ///
+    /// The one removal that discards the high-water mark, and the only one that
+    /// may: the mark exists to refuse a stale connection of *this* agent, and an
+    /// agent that has been deleted has no connections left to refuse. Called
+    /// where the registry entry goes, so the broker's map stays the size of the
+    /// agents this server knows about rather than the size of every agent id it
+    /// has ever seen.
+    ///
+    /// What a stale connection can still do afterwards is bounded by that: the
+    /// registry no longer knows the agent, so its heartbeats, session updates
+    /// and address updates are refused there (`handler::ConnectionHandler`).
+    pub async fn forget_agent(&self, agent_id: &str) {
+        let mut agents = self.agents.write().await;
+        if agents.remove(agent_id).is_some() {
+            info!("CommandBroker: forgot agent {}", agent_id);
         }
     }
 
     /// Send a command to an agent and return a oneshot receiver for the response.
     ///
     /// If the agent is not found, returns a receiver that immediately errors.
+    /// So does an agent that is *found but unserved*: a record whose owner was
+    /// released or evicted and not yet re-claimed. There is no connection to
+    /// carry the command, which is the same fact as "not found" from the
+    /// caller's side, and inserting a pending entry for it would be a promise
+    /// nothing could keep (#960).
     pub async fn send_command(
         &self,
         agent_id: &str,
@@ -216,17 +320,25 @@ impl CommandBroker {
         let (tx, rx) = oneshot::channel();
 
         let mut agents = self.agents.write().await;
-        let agent = match agents.get_mut(agent_id) {
-            Some(a) => {
-                info!("CommandBroker: found agent {} in registry", agent_id);
-                a
-            }
-            None => {
-                warn!("CommandBroker: agent {} not found in registry", agent_id);
-                drop(tx);
-                return rx;
-            }
+        let Some(agent) = agents.get_mut(agent_id) else {
+            warn!("CommandBroker: agent {} not found in registry", agent_id);
+            drop(tx);
+            return rx;
         };
+        // Taken here, under the same lock as the check, so the sender that is
+        // used below is the one that passed it. A record with no owner is an
+        // agent with no control connection — released, or evicted and not yet
+        // re-claimed — which is the same answer as "not found" from the
+        // caller's side: there is nothing to carry the command.
+        let Some(sender) = agent.active.as_ref().map(|active| active.sender.clone()) else {
+            warn!(
+                "CommandBroker: agent {} has no control connection to send {} to",
+                agent_id, msg_type
+            );
+            drop(tx);
+            return rx;
+        };
+        info!("CommandBroker: found agent {} in registry", agent_id);
 
         agent.pending_commands.insert(request_id.to_string(), tx);
         info!(
@@ -253,7 +365,6 @@ impl CommandBroker {
             }
         };
 
-        let sender = agent.sender.clone();
         drop(agents);
 
         let req_id = request_id.to_string();
@@ -266,39 +377,49 @@ impl CommandBroker {
         // agent across everyone talking to the Server. `Err` is the answer to
         // "no room" and to "no connection" alike, and both mean the same thing
         // to the caller — this command cannot be delivered now.
-        match sender.try_send_command(WsMessage::Text(json)) {
-            Ok(_) => {
+        let undeliverable = match sender.try_send_command(WsMessage::Text(json)) {
+            Ok(()) => {
                 info!(
                     "CommandBroker: sent {} to agent {} (req: {})",
                     mt, aid, req_id
                 );
+                false
             }
             Err(e) => {
                 warn!(
                     "CommandBroker: failed to send command to agent {}: {}",
                     aid, e
                 );
-                // The command can never be answered — the transport is gone, or
-                // the agent has stopped draining it — and leaving the entry in
-                // `pending_commands` is what made the caller wait out its
-                // 10/30s timeout to find out. Revoking it drops the oneshot
-                // sender, resolving the waiter with `RecvError` now; callers
-                // already read that as "Agent disconnected", which is exactly
-                // what this is (#960).
-                //
-                // Request ids are server-generated UUIDs, so this removal can
-                // only ever take back this call's own entry: nothing else can
-                // be waiting under the same id, and if the response somehow won
-                // the race, the entry is already gone and there is nothing to
-                // remove.
-                let mut agents = self.agents.write().await;
-                if let Some(agent) = agents.get_mut(agent_id) {
-                    agent.pending_commands.remove(request_id);
-                }
+                true
             }
+        };
+
+        if undeliverable {
+            // The command can never be answered — the transport is gone, or
+            // the agent has stopped draining it — and leaving the entry in
+            // `pending_commands` is what made the caller wait out its
+            // 10/30s timeout to find out. Revoking it drops the oneshot
+            // sender, resolving the waiter with `RecvError` now; callers
+            // already read that as "Agent disconnected", which is exactly
+            // what this is (#960).
+            self.revoke_pending(agent_id, request_id).await;
         }
 
         rx
+    }
+
+    /// Take back a command that this call inserted, so its waiter fails now
+    /// rather than at the far end of its timeout.
+    ///
+    /// Request ids are server-generated UUIDs, so this can only ever take back
+    /// the caller's own entry: nothing else can be waiting under the same id,
+    /// and if a response somehow won the race, the entry is already gone and
+    /// there is nothing to remove.
+    async fn revoke_pending(&self, agent_id: &str, request_id: &str) {
+        let mut agents = self.agents.write().await;
+        if let Some(agent) = agents.get_mut(agent_id) {
+            agent.pending_commands.remove(request_id);
+        }
     }
 
     /// Resolve a pending command with a response from the agent.
@@ -496,5 +617,175 @@ mod tests {
                 .is_empty(),
             "the revoked command must not be left in the pending map"
         );
+    }
+
+    /// #960, the eviction half: a liveness verdict must not erase the record of
+    /// which connection is newest.
+    ///
+    /// The sweep evicts an agent that has gone quiet. It takes the channel away
+    /// whoever holds it — that is what a verdict about the agent means — but the
+    /// generation it evicted is still the agent's newest, so:
+    ///
+    /// * the superseded generation a reconnect had already beaten cannot come
+    ///   back through the gap the eviction opened (it used to: the whole record
+    ///   went with the sender, so the next stale claim found an empty map and
+    ///   inserted itself);
+    /// * the generation that was evicted can, because a verdict about liveness
+    ///   says nothing about which connection is newer.
+    #[tokio::test]
+    async fn a_stale_generation_cannot_reclaim_after_a_liveness_eviction() {
+        let broker = CommandBroker::new();
+        let stale = broker.new_connection_generation();
+        let current = broker.new_connection_generation();
+        let (stale_sender, mut stale_rx) = WsMessageSender::new();
+        let (current_sender, _current_rx) = WsMessageSender::new();
+        broker.claim_agent("a1", stale, stale_sender.clone()).await;
+        broker.claim_agent("a1", current, current_sender).await;
+
+        broker.evict_agent("a1").await;
+
+        // The stale connection's next frame re-claims, as the loop does for
+        // every inbound message.
+        broker.claim_agent("a1", stale, stale_sender).await;
+
+        let waiter = broker
+            .send_command("a1", "server.session.create", "req-1", json!({}))
+            .await;
+        assert!(
+            stale_rx.try_recv().is_err(),
+            "the stale generation must not take the agent back through the eviction"
+        );
+        assert_fails_now(
+            waiter,
+            "the eviction left no owner, so nothing can carry the command",
+        )
+        .await;
+
+        // The generation that was evicted is still the newest one to have
+        // claimed the agent, so it — and only it — can take the channel back.
+        let (recovered, mut recovered_rx) = WsMessageSender::new();
+        broker.claim_agent("a1", current, recovered).await;
+
+        let _waiter = broker
+            .send_command("a1", "server.session.create", "req-2", json!({}))
+            .await;
+        assert!(
+            recovered_rx.try_recv().is_ok(),
+            "the evicted generation must be able to recover its channel"
+        );
+        assert!(
+            stale_rx.try_recv().is_err(),
+            "and the stale generation must still receive nothing"
+        );
+    }
+
+    /// The disconnect path keeps the mark too.
+    ///
+    /// Releasing is owner-checked, so this is the owner going away with a
+    /// superseded connection still alive behind it. Removing the record here
+    /// would reopen the same gap eviction used to: the stale connection's next
+    /// frame would find an empty map and claim the agent.
+    #[tokio::test]
+    async fn a_superseded_connection_cannot_reclaim_after_the_owner_disconnected() {
+        let broker = CommandBroker::new();
+        let stale = broker.new_connection_generation();
+        let owner = broker.new_connection_generation();
+        let (stale_sender, mut stale_rx) = WsMessageSender::new();
+        let (owner_sender, _owner_rx) = WsMessageSender::new();
+        broker.claim_agent("a1", stale, stale_sender.clone()).await;
+        broker.claim_agent("a1", owner, owner_sender).await;
+
+        assert!(
+            broker.release_agent("a1", owner).await,
+            "the owner releases"
+        );
+
+        broker.claim_agent("a1", stale, stale_sender).await;
+
+        assert!(
+            !broker.is_current_generation("a1", stale).await,
+            "the released agent's newest generation is still the one that left"
+        );
+        let _waiter = broker
+            .send_command("a1", "server.session.create", "req-1", json!({}))
+            .await;
+        assert!(
+            stale_rx.try_recv().is_err(),
+            "the superseded connection must not take over the agent the owner released"
+        );
+    }
+
+    /// A record with no owner is "no connection to carry it" — the same answer
+    /// as an unknown agent, and not a pending entry that waits for a timeout
+    /// that cannot change anything.
+    #[tokio::test]
+    async fn a_command_for_an_unserved_agent_fails_now() {
+        let broker = CommandBroker::new();
+        let (sender, receiver) = WsMessageSender::new();
+        let generation = broker.new_connection_generation();
+        broker.claim_agent("a1", generation, sender).await;
+        broker.release_agent("a1", generation).await;
+        drop(receiver);
+
+        let waiter = broker
+            .send_command("a1", "server.session.create", "req-1", json!({}))
+            .await;
+        assert_fails_now(waiter, "an agent with no control connection cannot answer").await;
+
+        let agents = broker.agents.read().await;
+        assert!(
+            agents
+                .get("a1")
+                .expect("the released agent keeps its generation record")
+                .pending_commands
+                .is_empty(),
+            "nothing may be left waiting on a channel that does not exist"
+        );
+    }
+
+    /// `forget_agent` is the one removal that drops the record, because the
+    /// agent it belonged to does not exist any more: there is no stale
+    /// connection of *that* agent left to refuse, and the next connection to use
+    /// the id starts a new story.
+    #[tokio::test]
+    async fn forgetting_an_agent_drops_its_generation_record() {
+        let broker = CommandBroker::new();
+        let first = broker.new_connection_generation();
+        let second = broker.new_connection_generation();
+        let (first_sender, _first_rx) = WsMessageSender::new();
+        let (second_sender, mut second_rx) = WsMessageSender::new();
+        broker.claim_agent("a1", first, first_sender).await;
+        broker.claim_agent("a1", second, second_sender).await;
+
+        broker.forget_agent("a1").await;
+        assert!(broker.agents.read().await.get("a1").is_none());
+
+        // The oldest generation is claimable again — not because it won
+        // anything, but because the agent it belonged to was deleted, and a
+        // deleted agent's successor is a new agent as far as generations go.
+        let (restarted, mut restarted_rx) = WsMessageSender::new();
+        broker.claim_agent("a1", first, restarted).await;
+
+        let _waiter = broker
+            .send_command("a1", "server.session.create", "req-1", json!({}))
+            .await;
+        assert!(
+            restarted_rx.try_recv().is_ok(),
+            "a deleted agent's id starts a new record"
+        );
+        assert!(
+            second_rx.try_recv().is_err(),
+            "and the record that was dropped is not still serving anyone"
+        );
+    }
+
+    /// A command that cannot be delivered must fail now, not at the far end of
+    /// its timeout — the caller's answer cannot change in between.
+    async fn assert_fails_now(waiter: oneshot::Receiver<serde_json::Value>, because: &str) {
+        match tokio::time::timeout(std::time::Duration::from_millis(100), waiter).await {
+            Ok(Err(_)) => {}
+            Ok(Ok(response)) => panic!("{because} — but it answered: {response}"),
+            Err(_) => panic!("{because} — but it waited for a timeout instead"),
+        }
     }
 }

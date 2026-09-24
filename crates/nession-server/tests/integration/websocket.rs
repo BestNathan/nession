@@ -783,6 +783,144 @@ async fn old_connection_disconnect_does_not_unregister_the_new_one() -> anyhow::
     Ok(())
 }
 
+/// What a connection says *about* the agent, end to end through the real loop.
+///
+/// The broker tests above prove where a command goes; this proves whose report
+/// the Server believes. Registering again clears the sessions the previous
+/// agent instance left behind (`handler::handle_agent_register`), and a late
+/// `session-update` from the connection it superseded must not put them back —
+/// which takes the whole path to show: the loop's claim after every frame, the
+/// generation check inside the handler, and the registry write.
+#[tokio::test]
+async fn a_superseded_connection_cannot_restore_a_session() -> anyhow::Result<()> {
+    let (_db_dir, addr, _handle) =
+        start_ownership_server("test_ws_agent_generation_session.db").await?;
+
+    let mut old = connect_agent(addr, "a1").await?;
+    let mut client = connect_client(addr).await?;
+
+    // `old` is the only connection, so its report is placed. The barrier is
+    // what makes the next assertion deterministic: one connection's frames are
+    // handled in order, so an answered frame proves the report before it was
+    // processed.
+    send_json(&mut old, agent_session_update("a1", "dev", "active")).await?;
+    answered_barrier(&mut old, "barrier-1").await?;
+    anyhow::ensure!(
+        listed_session_ids(&mut client)
+            .await?
+            .contains(&"a1:dev".to_string()),
+        "the current generation's report must be placed"
+    );
+
+    // The agent reconnects: a new connection registers the same agent, which
+    // clears the previous instance's sessions.
+    let mut new = connect_agent(addr, "a1").await?;
+    anyhow::ensure!(
+        !listed_session_ids(&mut client)
+            .await?
+            .contains(&"a1:dev".to_string()),
+        "re-registration must clear the sessions of the agent instance before it"
+    );
+
+    // `old` is half closed, not gone: it reports the session it remembers, and
+    // then the barrier proves the Server processed that report.
+    send_json(&mut old, agent_session_update("a1", "dev", "active")).await?;
+    answered_barrier(&mut old, "barrier-2").await?;
+    anyhow::ensure!(
+        !listed_session_ids(&mut client)
+            .await?
+            .contains(&"a1:dev".to_string()),
+        "a superseded connection's late report must not restore the cleared session"
+    );
+
+    // Not "refused everything": the connection that took the agent over is
+    // believed for the same report.
+    send_json(&mut new, agent_session_update("a1", "dev", "active")).await?;
+    answered_barrier(&mut new, "barrier-3").await?;
+    anyhow::ensure!(
+        listed_session_ids(&mut client)
+            .await?
+            .contains(&"a1:dev".to_string()),
+        "the current generation's report must still be placed"
+    );
+    Ok(())
+}
+
+/// One `server.agent.session-update`, as the agent's watcher sends it.
+fn agent_session_update(agent_id: &str, session_name: &str, status: &str) -> serde_json::Value {
+    serde_json::json!({
+        "msg_type": "server.agent.session-update",
+        "id": "session-update",
+        "timestamp": current_timestamp(),
+        "payload": {
+            "agent_id": agent_id,
+            "session_name": session_name,
+            "status": status,
+            "window_count": 1,
+            "attached_clients": 1,
+        },
+    })
+}
+
+/// Send a frame the Server answers *on this connection*, and wait for the
+/// answer — a barrier that proves every frame sent before it was processed.
+///
+/// The answer is the point, not the frame: a registration that is refused
+/// (an already-registered connection re-registering, `#960`) is answered just
+/// as an accepted one is, and a refused registration changes nothing, so this
+/// is safe to send on any agent connection.
+async fn answered_barrier(ws: &mut TestWs, id: &str) -> anyhow::Result<()> {
+    let agent_id = "a1";
+    send_json(
+        ws,
+        serde_json::json!({
+            "msg_type": "server.agent.register",
+            "id": id,
+            "timestamp": current_timestamp(),
+            "payload": register_payload(agent_id),
+        }),
+    )
+    .await?;
+    let reply = next_reply(ws, &[id], std::time::Duration::from_secs(5)).await?;
+    // The type is the assertion: this is the answer to *that* frame, not a push
+    // that happened to arrive at the same time.
+    payload_of(&reply, "server.agent.register")?;
+    Ok(())
+}
+
+/// The session ids a client can see — a request the Server answers itself, so
+/// it is the registry's state rather than a relay.
+async fn listed_session_ids(client: &mut TestWs) -> anyhow::Result<Vec<String>> {
+    send_json(
+        client,
+        serde_json::json!({
+            "msg_type": "server.session.list",
+            "id": "sessions-1",
+            "timestamp": current_timestamp(),
+            "payload": {},
+        }),
+    )
+    .await?;
+    // By id, not by "the next frame": this connection is also sent
+    // `server.sessions.changed` pushes, and one of those arriving first would
+    // otherwise be read as this reply.
+    let reply = next_reply(client, &["sessions-1"], std::time::Duration::from_secs(5)).await?;
+    let payload = payload_of(&reply, "server.session.list")?;
+    Ok(payload
+        .get("sessions")
+        .and_then(serde_json::Value::as_array)
+        .map(|rows| {
+            rows.iter()
+                .filter_map(|row| {
+                    row.get("session_id")
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::to_string)
+                })
+                .collect()
+        })
+        .unwrap_or_default())
+}
+
 // ── The per-connection execution model (#961 stage A) ────────────────────────
 //
 // **Characterization, not aspiration.** Every test below pins what this tree
