@@ -41,7 +41,7 @@ pub(crate) fn unique_session_name(prefix: &str) -> String {
 #[cfg(unix)]
 pub(crate) struct FakeTmux {
     bin: String,
-    log: std::path::PathBuf,
+    dir: std::path::PathBuf,
     socket: std::path::PathBuf,
 }
 
@@ -55,16 +55,33 @@ impl FakeTmux {
     pub(crate) fn new(dir: &std::path::Path, script: &str) -> std::io::Result<Self> {
         use std::os::unix::fs::PermissionsExt;
         let bin = dir.join("tmux");
-        let log = dir.join("argv.log");
         std::fs::write(
             &bin,
+            // One file per call, claimed with an O_EXCL create, so two
+            // processes recording at once (a spawned tmux client and the parent
+            // making awaited calls) cannot interleave. The mechanism, the
+            // rejected alternatives and the measurements are documented on the
+            // unit-test copy in `crates/nession-agent/src/test_support.rs`;
+            // this body must stay in step with it.
             format!(
                 "#!/bin/sh\n\
                  if [ \"$1\" = \"-S\" ]; then shift 2; fi\n\
-                 printf '%s\\n' \"$@\" >> \"{log}\"\n\
-                 echo \"{sep}\" >> \"{log}\"\n\
+                 n=0\n\
+                 while true; do\n\
+                 while [ -e \"{dir}/{prefix}$n\" ]; do n=$((n + 1)); done\n\
+                 if mkdir \"{dir}/{prefix}$n\" 2>/dev/null; then break; fi\n\
+                 if [ ! -d \"{dir}/{prefix}$n\" ]; then\n\
+                 echo \"fake tmux: cannot claim {dir}/{prefix}$n\" >&2\n\
+                 exit 1\n\
+                 fi\n\
+                 n=$((n + 1))\n\
+                 done\n\
+                 printf '%s\\n' \"$@\" > \"{dir}/{prefix}$n/{record}\"\n\
+                 echo \"{sep}\" >> \"{dir}/{prefix}$n/{record}\"\n\
                  {script}\n",
-                log = log.display(),
+                dir = dir.display(),
+                prefix = CALL_FILE_PREFIX,
+                record = CALL_RECORD_NAME,
                 sep = CALL_SEPARATOR,
             ),
         )?;
@@ -73,7 +90,7 @@ impl FakeTmux {
         std::fs::set_permissions(&bin, perms)?;
         Ok(Self {
             bin: bin.to_string_lossy().into_owned(),
-            log,
+            dir: dir.to_path_buf(),
             socket: dir.join("tmux.sock"),
         })
     }
@@ -90,21 +107,48 @@ impl FakeTmux {
 
     /// Every call recorded so far, each as the argv entries tmux received.
     pub(crate) fn calls(&self) -> Vec<Vec<String>> {
-        let log = std::fs::read_to_string(&self.log).unwrap_or_default();
-        log.split(CALL_SEPARATOR)
-            .map(|block| {
-                block
-                    .trim_matches('\n')
-                    .lines()
-                    .map(str::to_string)
-                    .collect::<Vec<String>>()
-            })
-            .filter(|args| !args.is_empty())
-            .collect()
+        let mut calls = Vec::new();
+        for n in 0.. {
+            let claimed = self.dir.join(format!("{CALL_FILE_PREFIX}{n}"));
+            // Indices are claimed in order by creating the directory, so the
+            // first unclaimed one means there is nothing after it either.
+            if !claimed.is_dir() {
+                break;
+            }
+            let text = match std::fs::read_to_string(claimed.join(CALL_RECORD_NAME)) {
+                Ok(text) => text,
+                // Claimed, but the argv is not on disk yet — and later indices
+                // may already be complete, so this is not where the scan ends.
+                Err(_) => continue,
+            };
+            // The argv is written after the claim, so a call still being
+            // recorded has no terminator.
+            let Some(body) = text.trim_end_matches('\n').strip_suffix(CALL_SEPARATOR) else {
+                continue;
+            };
+            let entries: Vec<String> = body
+                .trim_matches('\n')
+                .lines()
+                .map(str::to_string)
+                .collect();
+            if !entries.is_empty() {
+                calls.push(entries);
+            }
+        }
+        calls
     }
 }
 
-/// Separator [`FakeTmux`] writes after each recorded call.
+/// Prefix of the one-directory-per-call records [`FakeTmux`] writes into its
+/// directory.
+#[cfg(unix)]
+pub(crate) const CALL_FILE_PREFIX: &str = "call.";
+
+/// Name of the file inside `call.N` that holds the call's argv.
+#[cfg(unix)]
+pub(crate) const CALL_RECORD_NAME: &str = "argv";
+
+/// Terminator [`FakeTmux`] writes after the argv of each recorded call.
 #[cfg(unix)]
 pub(crate) const CALL_SEPARATOR: &str = "==call==";
 
