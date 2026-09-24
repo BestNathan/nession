@@ -1,14 +1,22 @@
 //! Environment variable management for tmux sessions.
 //!
 //! Sets, sources, and unsources environment variables on running tmux sessions
-//! via `set-environment`, temp shell scripts, and `send-keys`. Scripts are
-//! written to a configurable temporary directory (default `std::env::temp_dir`).
+//! via the [`TmuxOps`] semantic operations, temp shell scripts, and
+//! `send-keys`. Scripts are written to a configurable temporary directory
+//! (default `std::env::temp_dir`).
+//!
+//! This module owns what is *domain* about a session's environment: which
+//! variables a batch contains, how a batch's failures are reported, and the
+//! script/send-keys mechanism `source_env`/`unsource_env` use. The grammar of
+//! the tmux subcommands it needs is [`TmuxOps`]'s — see [`super::ops`] for why
+//! that split is load-bearing rather than stylistic (#980, #991).
 
 use anyhow::{Context, Result};
 use std::path::PathBuf;
 use tokio::fs;
 
 use super::cmd;
+use super::ops::TmuxOps;
 use super::util::send_keys;
 
 /// Path for the source script of a given (client, session, env-name) triple.
@@ -66,21 +74,12 @@ impl EnvManager {
     /// Set tmux-level environment variables on a running session, making them
     /// available to new windows/panes in that session.
     ///
-    /// One `tmux set-environment -t <session> <name> <value>` per variable,
-    /// with `name` and `value` as **two separate argv values**. Both halves of
-    /// that shape matter:
-    ///
-    /// - `set-environment` takes `name [value]`. Handing it one `KEY=VALUE`
-    ///   argument fails with `variable name contains =` (exit 1), so a
-    ///   `name`/`value` split is not a style preference — the joined form is
-    ///   simply wrong.
-    /// - `-e KEY=VALUE` is **`new-session`'s** idiom, not this subcommand's;
-    ///   `set-environment` answers `unknown flag -e` (exit 1). It was copied
-    ///   here from `SessionManager::create_session`, which uses it correctly.
-    ///
-    /// Separate argv values are also what keeps a value containing spaces,
-    /// quotes or `=` intact: nothing re-parses it, and the value is never
-    /// reconstructed into `KEY=VALUE`.
+    /// One [`TmuxOps::set_environment`] per variable — that operation owns the
+    /// `set-environment` argument vector, and this function owns only what is
+    /// domain about it: how a batch of variables is attempted and how their
+    /// failures are reported. Before #991 this function built the argument
+    /// vector itself, and the copy it built was wrong (`-e KEY=VALUE`, both
+    /// halves refused by tmux — #980).
     ///
     /// **Required.** These are variables a caller asked for, and "set" and
     /// "not set" look identical from the outside — which is how every variable
@@ -94,28 +93,16 @@ impl EnvManager {
         session_name: &str,
         vars: &[(String, String)],
     ) -> Result<()> {
+        let ops = TmuxOps::global();
         let mut failures: Vec<String> = Vec::new();
         for (key, value) in vars {
-            let output = cmd::global()
-                .tokio()
-                .args(["set-environment", "-t", session_name, key, value])
-                .stderr(std::process::Stdio::piped())
-                .output()
-                .await;
-            match output {
-                // Deliberately not `stderr(Stdio::null())`: tmux's own message
-                // ("variable name contains =", "no such session: …") is the
-                // only thing that says *why* a required mutation failed, and
-                // discarding it is why the failure was invisible even in logs.
-                Ok(out) if out.status.success() => {}
-                Ok(out) => failures.push(format!(
-                    "set-environment {key} for session {session_name}: {} ({})",
-                    out.status,
-                    String::from_utf8_lossy(&out.stderr).trim()
-                )),
-                Err(e) => failures.push(format!(
-                    "set-environment {key} for session {session_name}: {e}"
-                )),
+            // One spawn per variable, deliberately: the failure of one variable
+            // must not hide the others, and the error each reports names the
+            // variable it was setting. It is also what the ordering tests
+            // measure — `server.rs` parks a session key for the length of this
+            // loop, and that length is this many tmux spawns.
+            if let Err(e) = ops.set_environment(session_name, key, value).await {
+                failures.push(format!("{e:#}"));
             }
         }
         if failures.is_empty() {

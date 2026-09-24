@@ -7,6 +7,7 @@ use tokio::process::Command;
 
 use super::cmd::{self, TmuxCmd};
 use super::env::EnvManager;
+use super::ops::TmuxOps;
 
 /// Fixed width for tmux sessions. Individual clients get independent
 /// viewports via `refresh-client -C`, so the session's own size only needs
@@ -381,62 +382,28 @@ impl SessionManager {
         }
 
         // Stage 3: set-environment for future windows/panes (both paths).
-        let _ = self
-            .cmd
-            .tokio()
-            .args(["set-environment", "-t", name, "TERM", "xterm-256color"])
-            .stderr(std::process::Stdio::null())
-            .status()
+        self.propagate_env_best_effort(name, "TERM", "xterm-256color")
             .await;
-        let _ = self
-            .cmd
-            .tokio()
-            .args(["set-environment", "-t", name, "LANG", "C.UTF-8"])
-            .stderr(std::process::Stdio::null())
-            .status()
+        self.propagate_env_best_effort(name, "LANG", "C.UTF-8")
             .await;
         for (key, value) in &process_env {
             if skip_env(key, &caller_keys) {
                 continue;
             }
-            let _ = self
-                .cmd
-                .tokio()
-                .args(["set-environment", "-t", name, key, value])
-                .stderr(std::process::Stdio::null())
-                .status()
-                .await;
+            self.propagate_env_best_effort(name, key, value).await;
         }
         for (key, value) in env {
-            let _ = self
-                .cmd
-                .tokio()
-                .args(["set-environment", "-t", name, key, value])
-                .stderr(std::process::Stdio::null())
-                .status()
-                .await;
+            self.propagate_env_best_effort(name, key, value).await;
         }
         if !has_ps1 {
-            let _ = self
-                .cmd
-                .tokio()
-                .args(["set-environment", "-t", name, "NESSON_PS1", DEFAULT_PS1])
-                .stderr(std::process::Stdio::null())
-                .status()
+            self.propagate_env_best_effort(name, "NESSON_PS1", DEFAULT_PS1)
                 .await;
-            let _ = self
-                .cmd
-                .tokio()
-                .args([
-                    "set-environment",
-                    "-t",
-                    name,
-                    "PROMPT_COMMAND",
-                    "[ -n \"$NESSON_PS1\" ] && { PS1=\"$NESSON_PS1\"; unset NESSON_PS1; }",
-                ])
-                .stderr(std::process::Stdio::null())
-                .status()
-                .await;
+            self.propagate_env_best_effort(
+                name,
+                "PROMPT_COMMAND",
+                "[ -n \"$NESSON_PS1\" ] && { PS1=\"$NESSON_PS1\"; unset NESSON_PS1; }",
+            )
+            .await;
         }
 
         // Enable tmux mouse mode so mouse events reach tmux as SGR sequences
@@ -452,6 +419,52 @@ impl SessionManager {
             .await;
 
         Ok(())
+    }
+
+    /// Propagate one environment variable to a session's **future** windows and
+    /// panes — `tmux set-environment -t <session> <name> <value>`.
+    ///
+    /// **BestEffort, by decision rather than by omission.** Every call site is
+    /// stage 3 of `create_session_impl`, which the code there labels
+    /// "set-environment for future windows/panes (both paths)". The environment
+    /// the *session's own shell* runs with was established by an earlier stage
+    /// whose failure is the create's failure — stage 1's `new-session -e …`, or
+    /// stage 2's `send-keys export …`. Stage 3 therefore carries an environment
+    /// the initial shell already has to windows that do not exist yet, so its
+    /// failure degrades a *later* operation rather than this one: #991's
+    /// definition of `Required` is "failure changes the operation result", and
+    /// this one does not.
+    ///
+    /// Three separate classes meet here — the forced pair (`TERM`/`LANG`), the
+    /// agent-process passthrough, and the caller's own variables — and they are
+    /// the same class for that same reason: in all three, stage 1 or stage 2
+    /// already delivered the value to the shell that exists.
+    ///
+    /// It is **not** `Required`, and making it so would be actively harmful for
+    /// the passthrough group: `std::env::vars()` is ambient, and tmux refuses a
+    /// variable name beginning with `-` (`unknown flag`, measured on 3.6b), so
+    /// one odd name in the agent's environment would fail every session
+    /// creation. (A *user-requested* mutation is the opposite case and is
+    /// `Required` — that is `EnvManager::set_environment`, whose callers must
+    /// report the failure; #980 is what fixed it and this must not undo it.)
+    ///
+    /// The failure is WARNed rather than dropped, which is the whole difference
+    /// from the `let _ = … .stderr(Stdio::null())` calls this replaced: those
+    /// discarded both the status and tmux's reason, so a failure here was
+    /// unobservable even in logs (#980's invisibility half).
+    ///
+    /// Bound to `self.cmd` rather than to the process-wide
+    /// [`TmuxOps::global`](super::ops::TmuxOps::global): a manager that had been
+    /// given a different socket must not propagate its environment onto the
+    /// other one. This is *not* #991 step 6 — `SessionManager` already holds
+    /// this `TmuxCmd`, and nothing new became injectable.
+    async fn propagate_env_best_effort(&self, session: &str, name: &str, value: &str) {
+        let ops = TmuxOps::new(self.cmd.clone());
+        if let Err(e) = ops.set_environment(session, name, value).await {
+            tracing::warn!(
+                "best-effort env propagation to future panes of session {session} failed ({name}): {e:#}"
+            );
+        }
     }
 
     pub async fn kill_session(&self, name: &str) -> Result<()> {
