@@ -25,7 +25,8 @@
 use std::sync::OnceLock;
 
 use nession_protocol::{
-    ContractDescriptor, ContractVersion, IdentityError, ProtocolDescriptor, ProtocolManifest,
+    CompositionError, ContractDescriptor, ContractVersion, IdentityError, ProtocolDescriptor,
+    ProtocolManifest,
 };
 
 /// Who owns these contracts. Also the answer to "who do I ask when they change?"
@@ -151,13 +152,21 @@ pub(crate) use server_routes;
 /// request path. Every id and wire type is a literal in one file, so the error
 /// is unreachable in practice — which is exactly why it should not be a panic
 /// waiting in a rarely-taken branch.
-pub fn server_manifest() -> Result<&'static ProtocolManifest, IdentityError> {
+///
+/// The wire check is the second half of that: a table with two Units on one
+/// wire would mis-route silently, because `unit_for_wire` answers with the
+/// first match and the generated `match` takes the first arm. Compile-time
+/// literals make it unreachable today; this is what keeps it unreachable when
+/// someone adds a route.
+pub fn server_manifest() -> Result<&'static ProtocolManifest, CompositionError> {
     static MANIFEST: OnceLock<ProtocolManifest> = OnceLock::new();
     if let Some(manifest) = MANIFEST.get() {
         return Ok(manifest);
     }
     let descriptors = crate::server::server_descriptors()?;
-    Ok(MANIFEST.get_or_init(|| ProtocolManifest::from_descriptors(OWNER, &descriptors)))
+    let manifest = MANIFEST.get_or_init(|| ProtocolManifest::from_descriptors(OWNER, &descriptors));
+    manifest.validate_wires()?;
+    Ok(manifest)
 }
 
 #[cfg(test)]
