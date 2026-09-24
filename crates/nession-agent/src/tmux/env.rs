@@ -44,7 +44,15 @@ fn unsource_script_path(base_dir: PathBuf, client_id: &str, session: &str, name:
 /// step 5 inventoried it as two call sites in one shape and left it, and
 /// rewiring the *dependency* is what step 6 is — the grammar migrates when
 /// there is a second shape to unify, not to make this file shorter.
-async fn clear_history(tmux: &TmuxDep, session_name: &str) {
+///
+/// `pub(crate)` since #991 step 7, for the same reason: the crate's other
+/// `clear-history` site is `SessionManager`'s stage-2 path, which hides the
+/// same kind of typed line from the same kind of pane. It is the same
+/// operation and the same class, so it is one implementation — the argument
+/// vector and the policy cannot drift apart, which is what #980 did to the two
+/// `set-environment` encodings. Both callers state the class at their own
+/// call site; this function is where it is enacted.
+pub(crate) async fn clear_history(tmux: &TmuxDep, session_name: &str) {
     match tmux
         .cmd()
         .tokio()
@@ -630,6 +638,58 @@ mod tests {
             fake.calls().len(),
             2,
             "one spawn per variable, so the second is not skipped after the first fails"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_failed_primary_keeps_its_error_when_the_cleanup_also_fails() {
+        // #991's cleanup edge case — "cleanup fails while the primary operation
+        // already failed: primary error is preserved; cleanup error may be
+        // attached/logged" — for the one place in this file where the two run
+        // back to back. `source-env`'s `send-keys` is the primary (a script
+        // that was never sourced is the whole operation failing); `clear-history`
+        // is the cosmetic cleanup behind it. Here *both* fail, with different
+        // words, so the assertion can tell which error the caller got.
+        //
+        // What holds it: `send_keys` propagates with `?` before the cleanup is
+        // reached, and the cleanup's own failure is a `tracing::warn!` that
+        // cannot travel. The mutation that reddens this is the plausible future
+        // edit the class exists to forbid: giving the cleanup a `Result` and
+        // `?`-ing it *before* the primary — the caller then reads
+        // "clear-history-marker" instead.
+        let dir = tempfile::tempdir().unwrap();
+        let fake = crate::test_support::FakeTmux::new(
+            dir.path(),
+            "case \"$1\" in \
+             send-keys) echo 'injected tmux refuses send-keys' >&2; exit 1;; \
+             clear-history) echo 'clear-history-marker' >&2; exit 1;; \
+             *) exit 0;; esac",
+        );
+        let mgr = manager_on(fake.dep(), dir.path());
+
+        let err = mgr
+            .source_env("cid", "nession-fake-sess", "vars.env", &[])
+            .await
+            .expect_err("the script was never sourced, so the operation failed");
+        let message = format!("{err:#}");
+        assert!(
+            message.starts_with("tmux send-keys"),
+            "the failure the caller reads must be the primary's, not the \
+             cleanup's: {message}"
+        );
+        assert!(
+            message.contains("injected tmux refuses send-keys"),
+            "with the primary's own context: {message}"
+        );
+        assert_eq!(
+            fake.calls()
+                .iter()
+                .filter(|args| args.first().map(String::as_str) == Some("send-keys"))
+                .count(),
+            1,
+            "the primary really was attempted: {:#?}",
+            fake.calls()
         );
     }
 

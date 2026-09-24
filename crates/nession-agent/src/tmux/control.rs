@@ -186,13 +186,29 @@ impl ControlModeSession {
     /// Sends `detach-client` to the control-mode stdin so tmux cleanly
     /// disconnects the client.  SIGKILL is NEVER used because it can crash
     /// the tmux server on macOS (observed with Homebrew tmux 3.6b).
+    ///
+    /// **Cleanup**, and the three steps are the teardown of a client that is
+    /// already on its way out: what ends it is this client's stdin closing
+    /// (control mode exits on EOF), which is why the failures below are
+    /// dropped rather than propagated, and why `Ok` here is not a claim that
+    /// tmux confirmed anything. The one thing the class forbids — masking a
+    /// primary error — cannot happen: nothing else in this function can fail.
     pub async fn close(&mut self) -> Result<()> {
         // Send graceful detach — the tmux subprocess will exit cleanly.
+        //
+        // Not a tmux *spawn*: this is a line written to a control-mode client's
+        // stdin, so there is no exit status and no stderr to classify — tmux's
+        // answer to a bad line arrives asynchronously on the same pipe the
+        // output comes back on, and a failure here means the pipe is already
+        // gone (EPIPE), i.e. the client has already detached. `ops.rs`'s module
+        // docs carry the same point for why `send-keys -H` over this transport
+        // is not `TmuxOps::send_keys`.
         let _ = self.stdin.write_all(b"detach-client\n").await;
         let _ = self.stdin.flush().await;
         // Wait briefly for the subprocess to process the detach and exit.
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-        // Best-effort wait — child has likely already exited after detach.
+        // Reap the control-mode child. Not a tmux call — it is the process this
+        // backend spawned, so no tmux operation class applies.
         // Use wait() instead of start_kill() to avoid SIGKILL.
         let _ = self.child.wait().await;
         Ok(())
@@ -201,12 +217,23 @@ impl ControlModeSession {
 
 impl Drop for ControlModeSession {
     fn drop(&mut self) {
-        // Detach the control-mode client gracefully using a blocking tmux
-        // command (Drop is sync so we cannot use async here).
+        // **Cleanup** (#991): teardown, so the failure is allowed and the shape
+        // is `let _ =` rather than `?` — a `Drop` cannot report anything, and
+        // must not panic.
         //
-        // SIGKILL (start_kill / kill -9) on a control-mode client crashes
-        // the tmux server on macOS (Homebrew tmux 3.6b: "server exited
-        // unexpectedly").  We must always detach cleanly.
+        // It also does not have to succeed: what ends this client is its stdin
+        // closing below (control mode exits on EOF), and the SIGKILL route this
+        // deliberately avoids is the one with a documented hazard — SIGKILL on
+        // a control-mode client crashes the tmux server on macOS (Homebrew tmux
+        // 3.6b: "server exited unexpectedly"), so an unclean detach is the
+        // lesser risk here but still not a state a caller has to hear about.
+        //
+        // **Measured on tmux 3.6b (2026-09-24): `-t` is a *client* target and a
+        // session name is not one**, so this call answers `can't find client:
+        // <session>` (exit 1) and detaches nothing. The class does not change —
+        // the client still goes away — but the target form is a
+        // client-lifecycle decision (`-s <session>` detaches *every* client of
+        // the session) and belongs with #991's step 8/9, not here.
         let _ = self
             .tmux
             .cmd()
@@ -270,9 +297,14 @@ async fn read_output_loop(
                         }
                     }
                     ControlMessage::WindowResize { cols, rows, .. } => {
-                        // Best-effort: if the receiver is gone the client
-                        // has detached but we keep reading output until
-                        // the output channel also closes.
+                        // Best-effort, and **not a tmux result at all**: this is
+                        // an internal `mpsc` send to the caller's resize
+                        // receiver, whose only failure is "the receiver is
+                        // gone". No tmux operation class applies — the tmux
+                        // call that produced this event already returned, and
+                        // its result was the line above. Keeping the reader
+                        // alive after a dropped receiver is the decision: output
+                        // continues until the output channel closes too.
                         let _ = resize_tx.send((cols, rows)).await;
                     }
                     ControlMessage::Exit => break,

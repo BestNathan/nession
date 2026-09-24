@@ -26,8 +26,21 @@ const FALLBACK_WINDOW_SIZE: (u16, u16) = (80, 24);
 /// Run a tmux subcommand against a named session.
 ///
 /// Spawns `tmux <args> -t <session>` and waits for completion. Returns
-/// `Ok(())` on success, or an error with the command description and exit
-/// status on failure.
+/// `Ok(())` on success, or an error with the command description, its exit
+/// status **and tmux's own stderr** on failure.
+///
+/// **`Required` at its call site, and the context is why that matters.** Its
+/// one caller propagates with `?` — `ControlModeSession::attach`'s
+/// pre-attach `resize-window`, whose failure aborts the attach. Before #991
+/// step 7 this read `.status()` with `stderr(Stdio::null())` and bailed on the
+/// exit status alone, so "the session is gone", "tmux refused the size" and
+/// "the binary is broken" all reached the caller as `exited with status: 1`.
+/// A required operation's failure is what the user is told happened, so it
+/// carries what tmux said (#991's third error criterion).
+///
+/// (Whether an attach-time resize *should* be `Required` is #991's step 8, and
+/// is not changed here: the class is what it was, only the diagnostic is now
+/// retained.)
 ///
 /// Prefer this for session-scoped subcommands — it gives consistent error
 /// reporting (including the exit status in the message). It is not the
@@ -47,17 +60,18 @@ const FALLBACK_WINDOW_SIZE: (u16, u16) = (80, 24);
 /// covers everything except its first tmux call.
 pub async fn run_tmux_command(tmux: &TmuxDep, session: &str, args: &[&str]) -> Result<()> {
     let mut cmd = tmux.cmd().tokio();
-    cmd.args(args)
-        .arg("-t")
-        .arg(session)
-        .stderr(std::process::Stdio::null());
+    cmd.args(args).arg("-t").arg(session);
     let desc = format!("tmux {} -t {session}", args.join(" "));
-    let status = cmd
-        .status()
+    let output = cmd
+        .output()
         .await
         .with_context(|| format!("failed to spawn {desc}"))?;
-    if !status.success() {
-        anyhow::bail!("{desc} exited with status: {status}");
+    if !output.status.success() {
+        anyhow::bail!(
+            "{desc} exited with status: {} ({})",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
     }
     Ok(())
 }
@@ -246,6 +260,64 @@ mod tests {
             FALLBACK_WINDOW_SIZE,
             (80, 24),
             "the fallback is the value callers have seen since before #991"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn run_tmux_command_carries_what_tmux_said() {
+        // This helper's one caller propagates with `?` — a control-mode attach
+        // is abandoned when its pre-attach `resize-window` fails — so its
+        // failure is `Required`, and #991's third criterion is that a required
+        // failure keeps tmux's own context. Before step 7 the call was
+        // `.status()` with `stderr(Stdio::null())`: tmux's reason was discarded
+        // a pipe earlier and every cause reached the caller as
+        // `exited with status: 1`.
+        //
+        // The fake's wording is tmux 3.6b's for a target that is not there,
+        // measured this step. Reddens on: restoring the status-only shape (the
+        // marker assertion finds nothing to match — there is no pipe), and on
+        // dropping the status from the message.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let fake = crate::test_support::FakeTmux::new(
+            dir.path(),
+            "case \"$1\" in resize-window) echo 'no such session: nession-fake-sess' >&2; exit 1;; \
+             *) exit 0;; esac",
+        );
+
+        let err = run_tmux_command(
+            &fake.dep(),
+            "nession-fake-sess",
+            &["resize-window", "-x", "80", "-y", "24"],
+        )
+        .await
+        .expect_err("the injected binary refuses every resize-window");
+        let message = format!("{err:#}");
+        assert!(
+            message.contains("no such session: nession-fake-sess"),
+            "the failure must carry tmux's own stderr: {message}"
+        );
+        assert!(
+            message.contains("exit status"),
+            "and its exit status: {message}"
+        );
+        assert!(
+            message.contains("resize-window"),
+            "and the command it was running: {message}"
+        );
+        assert_eq!(
+            fake.calls(),
+            vec![vec![
+                "resize-window",
+                "-x",
+                "80",
+                "-y",
+                "24",
+                "-t",
+                "nession-fake-sess"
+            ]],
+            "on the injected addressing, with the caller's argv and the session \
+             appended after it"
         );
     }
 }
