@@ -1,4 +1,5 @@
 use nession_agent::tmux::manager::SessionManager;
+use nession_agent::tmux::ops::TmuxOps;
 use nession_agent::tmux::util::{check_tmux_available, send_keys};
 
 use super::{tmux_show_environment, unique_session_name, TestSession};
@@ -45,6 +46,13 @@ async fn set_environment_round_trips_through_tmux() {
         ),
         ("NESSON_EQUALS".to_string(), "k=v=w".to_string()),
         ("NESSON_EMPTY".to_string(), String::new()),
+        // Leading and trailing whitespace. tmux keeps it — measured on 3.6b,
+        // `set-environment -t p K 'v '` reads back as `K=v \n` — so a read-back
+        // that trimmed tmux's line rather than only its newline would answer
+        // with a value nobody wrote, and the roundtrip would have to be believed
+        // over tmux. These two cases are what make "unchanged" mean unchanged.
+        ("NESSON_TRAILING".to_string(), "v ".to_string()),
+        ("NESSON_LEADING".to_string(), " v".to_string()),
     ];
 
     manager
@@ -116,6 +124,142 @@ async fn set_environment_reports_a_refused_variable_rather_than_succeeding() {
         Some("1")
     );
     assert_eq!(tmux_show_environment(&name, "NESSON_BAD=NAME").await, None);
+}
+
+/// `show_environment` separates "this session does not hold it" from "the
+/// question could not be asked".
+///
+/// Both answers from tmux are a non-zero exit carrying a message on stderr —
+/// measured on tmux 3.6b: `unknown variable: X` when the session exists and
+/// holds nothing under that name, `no such session: X` when it does not exist.
+/// Collapsing the two into one `None` would let a mistyped or already-killed
+/// session name read back as "nothing is set", which is #980's shape one layer
+/// up: a state that is not, reported as one that is. So both are asserted here,
+/// against the same tmux, in one test — a classifier that answered `None` for
+/// everything would fail the second, and one that answered `Err` for everything
+/// would fail the first.
+#[tokio::test]
+async fn show_environment_tells_an_unset_variable_apart_from_an_unanswerable_question() {
+    let manager = SessionManager::new();
+    let session = TestSession::new("showenv-none");
+    let name = session.name().to_string();
+    manager
+        .create_session(&name, 80, 24, "/tmp", &[])
+        .await
+        .unwrap();
+
+    let ops = TmuxOps::global();
+
+    assert_eq!(
+        ops.show_environment(&name, "NESSON_NEVER_SET")
+            .await
+            .expect("an existing session that holds nothing under that name is an answer"),
+        None,
+        "a session that exists and holds nothing must answer None, not an error"
+    );
+
+    // The session does not exist. A server is running (the create above made
+    // one on this run's socket), so tmux answers in its own words rather than
+    // failing to connect.
+    let err = ops
+        .show_environment("nession_nonexistent_xyz_123", "NESSON_NEVER_SET")
+        .await
+        .expect_err("a session that does not exist is not an answer of 'unset'");
+    assert!(
+        err.to_string().contains("no such session"),
+        "the failure must carry tmux's own diagnostic rather than only our summary: {err}"
+    );
+}
+
+/// `show_environment` reads the session it was given, not one of its own
+/// choosing.
+///
+/// `-t` is not decoration on this subcommand: measured on tmux 3.6b with two
+/// sessions on one socket, a target-less `show-environment <name>` answered out
+/// of a session the caller never named — and reported `unknown variable` for a
+/// variable the other session held. So the second assertion is the one that
+/// makes the target load-bearing: the variable *is* set, on the other session.
+///
+/// `first` is created before `second` on purpose. That is the session tmux's own
+/// target resolution picks (measured, same tmux), so the ordering is what lets
+/// the second assertion catch a query that dropped `-t`: it would answer with
+/// `first`'s value instead of nothing.
+#[tokio::test]
+async fn show_environment_reads_the_session_it_was_given() {
+    let manager = SessionManager::new();
+    let first = TestSession::new("showenv-first");
+    let second = TestSession::new("showenv-second");
+    for session in [&first, &second] {
+        manager
+            .create_session(session.name(), 80, 24, "/tmp", &[])
+            .await
+            .unwrap();
+    }
+
+    let ops = TmuxOps::global();
+    ops.set_environment(first.name(), "NESSON_TARGETED", "only-in-first")
+        .await
+        .expect("set_environment on the first session");
+
+    assert_eq!(
+        ops.show_environment(first.name(), "NESSON_TARGETED")
+            .await
+            .expect("an existing session that holds the variable"),
+        Some("only-in-first".to_string()),
+    );
+    assert_eq!(
+        ops.show_environment(second.name(), "NESSON_TARGETED")
+            .await
+            .expect("an existing session is an answer even when it holds nothing"),
+        None,
+        "the second session holds nothing under that name; an answer carrying it \
+         would mean the query was not bound to the session asked about"
+    );
+}
+
+/// The variables a caller passes to `create_session` are in the session's
+/// environment — and are **not** owed to the `BestEffort` stage-3 propagation.
+///
+/// This is the evidence for the class `SessionManager` assigns those variables
+/// (#991's `Required` vs `BestEffort`). Stage 1 hands them to `new-session -e`,
+/// which *is* a stage whose failure is the create's failure — measured on tmux
+/// 3.6b, `new-session -e K=V` populates the session environment that
+/// `show-environment` reads — and stage 3 repeats them for windows and panes
+/// that do not exist yet. The experiment that settles the class is a negative
+/// one: with stage 3's propagation loop for these variables turned off, this
+/// test still passes, so a stage-3 failure cannot take a caller-visible
+/// variable away. That is what makes `BestEffort` honest there rather than a
+/// silent downgrade.
+///
+/// It also covers a production path nothing asserted on: `server_client.rs`
+/// passes a flattened env snapshot to `create_session`, and until now no test
+/// asked tmux whether those variables arrived — every other call site passes
+/// `&[]`. Read back out of tmux, not out of the return value, for #980's reason.
+#[tokio::test]
+async fn create_session_env_parameter_lands_in_the_session_environment() {
+    let manager = SessionManager::new();
+    let session = TestSession::new("create-env");
+    let name = session.name().to_string();
+    let vars = vec![
+        (
+            "NESSON_CREATE_PLAIN".to_string(),
+            "from-the-create".to_string(),
+        ),
+        ("NESSON_CREATE_SPACED".to_string(), "a b  c".to_string()),
+    ];
+
+    manager
+        .create_session(&name, 80, 24, "/tmp", &vars)
+        .await
+        .expect("create with a caller env");
+
+    for (key, expected) in &vars {
+        assert_eq!(
+            tmux_show_environment(&name, key).await.as_deref(),
+            Some(expected.as_str()),
+            "{key} was passed to create_session and is not in the session's environment"
+        );
+    }
 }
 
 #[tokio::test]
