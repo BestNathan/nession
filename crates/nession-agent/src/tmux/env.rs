@@ -23,6 +23,34 @@ fn unsource_script_path(base_dir: PathBuf, client_id: &str, session: &str, name:
     base_dir.join(format!("nession-unsource-{client_id}-{session}-{safe}"))
 }
 
+/// Clear a session's scrollback, hiding the `. <script>` line the caller just
+/// printed.
+///
+/// **BestEffort**, and the class is stated here rather than left implicit: a
+/// failure does not change `source_env`/`unsource_env`'s result — a session
+/// whose scrollback could not be cleared is still a session the script was
+/// sourced into — but it is logged, because `let _ =` on a command whose
+/// stderr is `Stdio::null()` is unobservable, and unobservable is a policy
+/// nobody chose (#991's edge cases: a cosmetic failure after a successful
+/// primary is observable and does not rewrite the primary).
+async fn clear_history(session_name: &str) {
+    match cmd::global()
+        .tokio()
+        .args(["clear-history", "-t", session_name])
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .await
+    {
+        Ok(out) if out.status.success() => {}
+        Ok(out) => tracing::warn!(
+            "clear-history for session {session_name} failed ({}): {}",
+            out.status,
+            String::from_utf8_lossy(&out.stderr).trim()
+        ),
+        Err(e) => tracing::warn!("clear-history for session {session_name} failed: {e}"),
+    }
+}
+
 /// Manages environment variables for tmux sessions.
 pub struct EnvManager {
     /// Base directory for temporary scripts. Defaults to `std::env::temp_dir()`.
@@ -35,45 +63,65 @@ impl EnvManager {
         Self { script_dir }
     }
 
-    /// Set tmux-level environment variables on a running session.
+    /// Set tmux-level environment variables on a running session, making them
+    /// available to new windows/panes in that session.
     ///
-    /// Uses `tmux set-environment -t <session> -e KEY=VALUE` which makes
-    /// variables available to new windows/panes in that session.
-    /// Non-fatal: errors are returned as warnings rather than failing the
-    /// whole operation so that a single bad env var doesn't block attach.
+    /// One `tmux set-environment -t <session> <name> <value>` per variable,
+    /// with `name` and `value` as **two separate argv values**. Both halves of
+    /// that shape matter:
+    ///
+    /// - `set-environment` takes `name [value]`. Handing it one `KEY=VALUE`
+    ///   argument fails with `variable name contains =` (exit 1), so a
+    ///   `name`/`value` split is not a style preference — the joined form is
+    ///   simply wrong.
+    /// - `-e KEY=VALUE` is **`new-session`'s** idiom, not this subcommand's;
+    ///   `set-environment` answers `unknown flag -e` (exit 1). It was copied
+    ///   here from `SessionManager::create_session`, which uses it correctly.
+    ///
+    /// Separate argv values are also what keeps a value containing spaces,
+    /// quotes or `=` intact: nothing re-parses it, and the value is never
+    /// reconstructed into `KEY=VALUE`.
+    ///
+    /// **Required.** These are variables a caller asked for, and "set" and
+    /// "not set" look identical from the outside — which is how every variable
+    /// this function was asked for went unset while its callers reported
+    /// success (#980). Every variable is still attempted (one bad name must not
+    /// hide the rest), and any tmux failure — non-zero exit or a spawn error —
+    /// is returned as an error carrying tmux's own stderr, never downgraded to
+    /// a warning. See #991 for the operation classes.
     pub async fn set_environment(
         &self,
         session_name: &str,
         vars: &[(String, String)],
-    ) -> Result<(), Vec<String>> {
-        let mut warnings = Vec::new();
+    ) -> Result<()> {
+        let mut failures: Vec<String> = Vec::new();
         for (key, value) in vars {
-            let status = cmd::global()
+            let output = cmd::global()
                 .tokio()
-                .args([
-                    "set-environment",
-                    "-t",
-                    session_name,
-                    "-e",
-                    &format!("{key}={value}"),
-                ])
-                .stderr(std::process::Stdio::null())
-                .status()
+                .args(["set-environment", "-t", session_name, key, value])
+                .stderr(std::process::Stdio::piped())
+                .output()
                 .await;
-            match status {
-                Ok(s) if !s.success() => {
-                    warnings.push(format!("set-environment {key}={value} failed"));
-                }
-                Err(e) => {
-                    warnings.push(format!("set-environment {key}={value}: {e}"));
-                }
-                _ => {}
+            match output {
+                // Deliberately not `stderr(Stdio::null())`: tmux's own message
+                // ("variable name contains =", "no such session: …") is the
+                // only thing that says *why* a required mutation failed, and
+                // discarding it is why the failure was invisible even in logs.
+                Ok(out) if out.status.success() => {}
+                Ok(out) => failures.push(format!(
+                    "set-environment {key} for session {session_name}: {} ({})",
+                    out.status,
+                    String::from_utf8_lossy(&out.stderr).trim()
+                )),
+                Err(e) => failures.push(format!(
+                    "set-environment {key} for session {session_name}: {e}"
+                )),
             }
         }
-        if warnings.is_empty() {
+        if failures.is_empty() {
             Ok(())
         } else {
-            Err(warnings)
+            Err(anyhow::anyhow!("{}", failures.join("; ")))
         }
     }
 
@@ -102,12 +150,7 @@ impl EnvManager {
         send_keys(session_name, &cmd).await?;
 
         // Clear tmux scrollback history to hide the source command
-        let _ = cmd::global()
-            .tokio()
-            .args(["clear-history", "-t", session_name])
-            .stderr(std::process::Stdio::null())
-            .output()
-            .await;
+        clear_history(session_name).await;
 
         Ok(())
     }
@@ -134,12 +177,7 @@ impl EnvManager {
         send_keys(session_name, &cmd).await?;
 
         // Clear tmux scrollback history to hide the unsource command
-        let _ = cmd::global()
-            .tokio()
-            .args(["clear-history", "-t", session_name])
-            .stderr(std::process::Stdio::null())
-            .output()
-            .await;
+        clear_history(session_name).await;
 
         Ok(())
     }
@@ -304,7 +342,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn set_environment_on_nonexistent_session_returns_warnings() {
+    async fn set_environment_on_nonexistent_session_fails_with_tmux_diagnostic() {
+        // A real non-zero exit from real tmux, and the property that makes a
+        // failure actionable rather than merely visible: the message carries
+        // tmux's own words. `stderr(Stdio::null())` used to discard them, so
+        // every failure — this one included — was indistinguishable from any
+        // other (#991: required failures retain useful tmux stderr context).
+        //
+        // The name is one no other test creates, so the only way tmux answers
+        // successfully is a session that exists.
         let mgr = EnvManager::new(tmp());
         let result = mgr
             .set_environment(
@@ -312,10 +358,16 @@ mod tests {
                 &[("TEST_KEY".to_string(), "TEST_VALUE".to_string())],
             )
             .await;
-        // Should return warnings (session doesn't exist) but not panic.
-        assert!(result.is_err());
-        let warnings = result.unwrap_err();
-        assert!(!warnings.is_empty());
+        let err = result.expect_err("setting a variable on a session that does not exist");
+        let message = err.to_string();
+        assert!(
+            message.contains("TEST_KEY"),
+            "the failure must name the variable it was setting: {message}"
+        );
+        assert!(
+            message.contains("no such session") || message.contains("no server running"),
+            "the failure must carry tmux's own diagnostic rather than only our summary: {message}"
+        );
     }
 
     #[tokio::test]

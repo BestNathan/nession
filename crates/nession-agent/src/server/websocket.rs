@@ -567,14 +567,21 @@ pub struct AgentServer {
 }
 
 /// Apply env snapshots to a tmux session via `set-environment`.
-/// Returns warnings for keys that failed (non-fatal).
+///
+/// **Required** (#991): these are variables a user asked for, so "the session
+/// has them" and "it does not" are different outcomes and only the caller can
+/// tell the user which happened. This used to return a `Vec<String>` of
+/// warnings that every caller logged before answering `ok` — a required
+/// mutation silently downgraded to a log line, which is the second half of
+/// #980 and the reason nothing noticed the first half. The failure travels as
+/// a `Result` now, and no caller is allowed to turn it back into success.
 async fn apply_env_snapshots(
     tmux: &SessionManager,
     session_name: &str,
     snapshots: &[EnvSnapshot],
-) -> Vec<String> {
+) -> anyhow::Result<()> {
     if snapshots.is_empty() {
-        return Vec::new();
+        return Ok(());
     }
     // Collect all vars from all snapshots, deduplicating by key (last wins).
     let mut seen = std::collections::HashMap::new();
@@ -584,10 +591,7 @@ async fn apply_env_snapshots(
         }
     }
     let deduped: Vec<(String, String)> = seen.into_iter().collect();
-    match tmux.env().set_environment(session_name, &deduped).await {
-        Ok(()) => Vec::new(),
-        Err(warnings) => warnings,
-    }
+    tmux.env().set_environment(session_name, &deduped).await
 }
 
 /// Handle to a running [`AgentServer`]. Clone and keep around to request
@@ -959,11 +963,21 @@ p2p_routes! { ctx, msg_type, payload_value;
                         // projection had none — and accepting a parameter and
                         // then dropping it is the failure mode the rest of this
                         // change exists to remove.
-                        let env_warnings =
+                        if let Err(e) =
                             apply_env_snapshots(ctx.tmux, &payload.name, &payload.env_snapshots)
-                                .await;
-                        for w in &env_warnings {
-                            warn!("env set-environment warning for session {}: {w}", payload.name);
+                                .await
+                        {
+                            // A create whose environment did not land is not the
+                            // create that was asked for, so this cannot answer
+                            // `ok`. The session itself is left in place: this
+                            // reports the failure, it does not add a rollback
+                            // policy (no caller had one before, and choosing one
+                            // is #991's, not #980's).
+                            warn!(
+                                "env set-environment failed for session {}: {e:#}",
+                                payload.name
+                            );
+                            return ctx.err("env_apply_failed", &format!("{e:#}"));
                         }
                         let resp = SessionCreateResponse { name: payload.name };
                         serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
@@ -1057,16 +1071,15 @@ p2p_routes! { ctx, msg_type, payload_value;
                     // ---- Plain PTY path (session-shared) ----
                     let session_name = payload.session_name.clone();
 
-                    // Apply env snapshots before PTY creation (non-fatal).
-                    let env_warnings =
-                        apply_env_snapshots(ctx.tmux, &session_name, &payload.env_snapshots).await;
-                    if !env_warnings.is_empty() {
-                        for w in &env_warnings {
-                            warn!(
-                                "env set-environment warning for session {}: {w}",
-                                session_name
-                            );
-                        }
+                    // Apply env snapshots before PTY creation. Required: the
+                    // client asked for these variables, and an attach that
+                    // proceeds without them answers `ok` for a session that
+                    // does not have the environment it was told to have.
+                    if let Err(e) =
+                        apply_env_snapshots(ctx.tmux, &session_name, &payload.env_snapshots).await
+                    {
+                        warn!("env set-environment failed for session {session_name}: {e:#}");
+                        return ctx.err("env_apply_failed", &format!("{e:#}"));
                     }
 
                     // Whether this connection is the session's first subscriber
@@ -1173,17 +1186,20 @@ p2p_routes! { ctx, msg_type, payload_value;
                 } else {
                     // ---- Control mode path ----
 
-                    // Apply env snapshots before control-mode attach (non-fatal).
-                    let env_warnings =
-                        apply_env_snapshots(ctx.tmux, &payload.session_name, &payload.env_snapshots)
-                            .await;
-                    if !env_warnings.is_empty() {
-                        for w in &env_warnings {
-                            warn!(
-                                "env set-environment warning for session {}: {w}",
-                                payload.session_name
-                            );
-                        }
+                    // Apply env snapshots before control-mode attach. Required,
+                    // for the same reason as the PTY path above.
+                    if let Err(e) = apply_env_snapshots(
+                        ctx.tmux,
+                        &payload.session_name,
+                        &payload.env_snapshots,
+                    )
+                    .await
+                    {
+                        warn!(
+                            "env set-environment failed for session {}: {e:#}",
+                            payload.session_name
+                        );
+                        return ctx.err("env_apply_failed", &format!("{e:#}"));
                     }
 
                     match crate::tmux::control::ControlModeSession::attach(
