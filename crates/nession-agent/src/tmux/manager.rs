@@ -9,9 +9,19 @@ use super::cmd::{self, TmuxCmd};
 use super::env::EnvManager;
 use super::ops::TmuxOps;
 
-/// Fixed width for tmux sessions. Individual clients get independent
-/// viewports via `refresh-client -C`, so the session's own size only needs
-/// to be large enough to accommodate all realistic client viewports.
+/// Width a session is created at, **before any client has attached**.
+///
+/// A starting size, not a lock. tmux's `window-size` defaults to `latest` and
+/// `create_session` deliberately leaves it unset (see `window_size_lock_tests`
+/// at the bottom of this file), so the first client to attach resizes the
+/// window to its own viewport and every later resize moves it again. There is
+/// one window and one pane, shared by every attached client — a client that
+/// does not fit scrolls, it does not get a viewport of its own.
+///
+/// That is the model decided in
+/// `2026-08-15-viewport-fit-terminal-migration-design.md` §2
+/// ("accept last-writer-wins … No arbitration"), which superseded the
+/// fixed-size design this constant was originally sized for.
 pub const SESSION_WIDTH: u16 = 200;
 
 /// Default shell prompt injected into every tmux session so the K8s pod
@@ -19,7 +29,8 @@ pub const SESSION_WIDTH: u16 = 200;
 /// clutter the terminal.  `\u` = user, `\w` = working dir, `\$` = # or $.
 pub const DEFAULT_PS1: &str = r"\[\e[32m\]\u\[\e[0m\]:\[\e[34m\]\w\[\e[0m\]\$ ";
 
-/// Fixed height for tmux sessions. See [`SESSION_WIDTH`] for rationale.
+/// Height a session is created at, before any client has attached.
+/// See [`SESSION_WIDTH`] — a starting size, not a lock.
 pub const SESSION_HEIGHT: u16 = 60;
 
 /// Timeout for quick tmux queries (`list-sessions`, `display-message`).
@@ -216,13 +227,22 @@ impl SessionManager {
         Ok(stdout.trim().to_string())
     }
 
-    /// Create a new detached tmux session at a fixed [`SESSION_WIDTH`] × [`SESSION_HEIGHT`].
+    /// Create a new detached tmux session at [`SESSION_WIDTH`] × [`SESSION_HEIGHT`].
     ///
-    /// The `_width` and `_height` parameters are ignored — sessions always use the
-    /// fixed size so that multiple clients with different viewports can attach to
-    /// the same session without one resizing the pane out from under another.
-    /// Each client sets its own viewport independently via `refresh-client -C`
-    /// (see `ControlModeSession::resize`).
+    /// The `_width` and `_height` parameters are ignored — every session starts
+    /// at the same size, and the first client to attach resizes it from there.
+    ///
+    /// There is deliberately **no per-client viewport**: the session has one
+    /// window and one pane, and a resize by any attached client moves it for
+    /// all of them. A second client attaching to a session already at 120×40
+    /// does not get its own 80×24 — it watches that client's resizes and
+    /// resizes it in turn. Last write wins; there is no arbitration
+    /// (`2026-08-15-viewport-fit-terminal-migration-design.md` §2).
+    ///
+    /// `window-size` is left at tmux's default (`latest`) so that clients can
+    /// resize the window at all; locking it would freeze the pane at the
+    /// create-time size. `window_size_lock_tests` below asserts that it stays
+    /// unset.
     pub async fn create_session(
         &self,
         name: &str,

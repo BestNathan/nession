@@ -24,6 +24,35 @@ async fn create_session(name: &str) -> Result<()> {
     Ok(())
 }
 
+/// Read a session's window size **from tmux**, for tests that must assert what
+/// tmux actually did rather than what a backend was asked to do.
+///
+/// Errors on unparsable output instead of defaulting: `display-message` exits 0
+/// and prints nothing for a target that does not exist, so a silent fallback
+/// would turn "no such session" into a passing assertion.
+async fn window_size(name: &str) -> Result<(u16, u16)> {
+    let out = nession_agent::tmux::cmd::global()
+        .tokio()
+        .args([
+            "display-message",
+            "-p",
+            "-t",
+            name,
+            "#{window_width} #{window_height}",
+        ])
+        .output()
+        .await?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    let mut parts = text.split_whitespace();
+    match (parts.next(), parts.next()) {
+        (Some(c), Some(r)) => match (c.parse::<u16>(), r.parse::<u16>()) {
+            (Ok(c), Ok(r)) => Ok((c, r)),
+            _ => Err(anyhow!("unparsable window size in {text:?}")),
+        },
+        _ => Err(anyhow!("unparsable window size in {text:?}")),
+    }
+}
+
 /// Drain the output receiver, accumulating bytes until either the deadline
 /// elapses or the receiver closes. Uses a short recv timeout per iteration.
 async fn drain_bytes(rx: &mut mpsc::Receiver<Vec<u8>>, total_ms: u64) -> Vec<u8> {
@@ -103,26 +132,52 @@ async fn test_resize_updates_viewport() -> Result<()> {
     Ok(())
 }
 
+/// Two clients on one session share **one tmux window**: a resize by either
+/// moves the pane for both, and the most recent caller wins.
+///
+/// This is the sizing model `2026-08-15-viewport-fit-terminal-migration-design.md`
+/// §2 decided — "accept last-writer-wins (a client resize resizes the shared
+/// pane for everyone). No arbitration." — superseding the fixed-200×60 model.
+///
+/// The assertions read tmux's own `#{window_width}`/`#{window_height}` rather
+/// than `ControlModeSession::viewport`. That field is written by `attach` and
+/// `resize` from their own arguments, so asserting on it only restates what the
+/// caller just passed and holds whatever tmux did — which is why the test this
+/// replaces (`test_multiple_clients_independent_viewport`) could not fail,
+/// while its name and comment claimed the independent-sized model that had
+/// been explicitly rejected.
 #[tokio::test]
-async fn test_multiple_clients_independent_viewport() -> Result<()> {
+async fn two_clients_share_one_window() -> Result<()> {
     if cfg!(target_os = "macos") {
         return Ok(());
     }
-    let guard = TestSession::new("ctrl-multi");
+    let guard = TestSession::new("ctrl-shared");
     create_session(guard.name()).await?;
     sleep(Duration::from_millis(300)).await;
 
     let (mut client1, _rx1, _rz1) = ControlModeSession::attach(guard.name(), 80, 24).await?;
     let (mut client2, _rx2, _rz2) = ControlModeSession::attach(guard.name(), 120, 40).await?;
+    sleep(Duration::from_millis(300)).await;
 
-    assert_eq!(client1.viewport(), (80, 24));
-    assert_eq!(client2.viewport(), (120, 40));
+    // client2 attached second, and `attach` resizes the window on the way in,
+    // so the one shared window is its size. client1's 80×24 did not survive,
+    // and client1 does not get a viewport of its own to keep it in.
+    assert_eq!(
+        window_size(guard.name()).await?,
+        (120, 40),
+        "the second attach resizes the one shared window"
+    );
 
-    // Resizing one client should NOT touch the other client's state (locally
-    // tracked; tmux internally maintains independent client sizes).
+    // Now client1 resizes. It is the only client asking for anything, and the
+    // window moves anyway — that is the shared resource, and it is what
+    // client2 is looking at too.
     client1.resize(100, 30).await?;
-    assert_eq!(client1.viewport(), (100, 30));
-    assert_eq!(client2.viewport(), (120, 40));
+    sleep(Duration::from_millis(300)).await;
+    assert_eq!(
+        window_size(guard.name()).await?,
+        (100, 30),
+        "client1's resize moves the shared window that client2 also sees"
+    );
 
     let _ = client1.close().await;
     let _ = client2.close().await;
