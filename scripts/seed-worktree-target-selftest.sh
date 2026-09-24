@@ -35,7 +35,7 @@ EOF
 
 cat >"$bin/uname" <<'EOF'
 #!/usr/bin/env bash
-echo Darwin
+echo Linux
 EOF
 
 cat >"$bin/cp" <<'EOF'
