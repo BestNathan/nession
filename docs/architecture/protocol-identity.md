@@ -208,5 +208,21 @@ Section 3 is kept as the reasoning that produced the second row of that rule
 (the capability, not the host, owns a provider unit's prefix). It is no longer
 an open question; the namespace it asks about was deleted rather than renamed.
 
+### Versions do not get their own names
+
+One consequence of the wire being the id, recorded here because this is the
+document that fixes the naming rule: **a Unit's contract versions share the
+Unit's one name.** `git.status` at v1 and at v2 is `git.status` both times.
+
+The alternative — `git.status.v1`, `git.status.v2` — would give one identity two
+names and would put the version into the part of the design that is defined by
+being version-free. Which generation answers is `contract_version`'s job, and
+the wire's job is only to locate the Unit; keeping them separate is what lets a
+transport rename be told apart from a semantic change.
+
+So the table above does not gain a row per version. A Unit serving three
+generations still has one row, one wire, and one entry in the manifest saying
+`versions: [1, 2, 3]`.
+
 Reached from `docs/architecture/protocol.md`, which owns the Protocol Unit model
 this refines.
