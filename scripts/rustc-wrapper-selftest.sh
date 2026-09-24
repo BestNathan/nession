@@ -35,7 +35,7 @@ assert_line() {
 }
 
 : >"$log"
-PATH="$tmp:/usr/bin:/bin" NSESSION_WRAPPER_TEST_LOG="$log" "$wrapper" "$tmp/fake-rustc" --crate-name demo
+PATH="$tmp:/usr/bin:/bin" CI=false GITHUB_ACTIONS=false NSESSION_WRAPPER_TEST_LOG="$log" "$wrapper" "$tmp/fake-rustc" --crate-name demo
 assert_line "sccache:$tmp/fake-rustc --crate-name demo
 rustc:--crate-name demo"
 
@@ -44,11 +44,11 @@ PATH="$tmp:/usr/bin:/bin" CI=true NSESSION_WRAPPER_TEST_LOG="$log" "$wrapper" "$
 assert_line "rustc:--crate-name demo"
 
 : >"$log"
-PATH="/usr/bin:/bin" NSESSION_WRAPPER_TEST_LOG="$log" "$wrapper" "$tmp/fake-rustc" --crate-name demo
+PATH="/usr/bin:/bin" CI=false GITHUB_ACTIONS=false NSESSION_WRAPPER_TEST_LOG="$log" "$wrapper" "$tmp/fake-rustc" --crate-name demo
 assert_line "rustc:--crate-name demo"
 
 : >"$log"
-PATH="$tmp:/usr/bin:/bin" NSESSION_DISABLE_SCCACHE=1 NSESSION_WRAPPER_TEST_LOG="$log" "$wrapper" "$tmp/fake-rustc" --crate-name demo
+PATH="$tmp:/usr/bin:/bin" CI=false GITHUB_ACTIONS=false NSESSION_DISABLE_SCCACHE=1 NSESSION_WRAPPER_TEST_LOG="$log" "$wrapper" "$tmp/fake-rustc" --crate-name demo
 assert_line "rustc:--crate-name demo"
 
 echo "rustc wrapper selftest OK ✓ local sccache + CI/no-sccache fallbacks"
