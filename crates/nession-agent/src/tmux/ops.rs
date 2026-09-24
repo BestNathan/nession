@@ -377,11 +377,15 @@ impl TmuxOps {
 /// `SessionManager` alone, and the operations those types performed could only
 /// be exercised against the real tmux on a real socket.
 ///
-/// Both halves are substitutions of one thing: a domain type holds a `TmuxDep`,
-/// a test hands in one built with [`TmuxDep::injected`], and every operation the
-/// type performs — process addressing *and* the grammar [`TmuxOps`] derives from
-/// it — follows. Nothing in a holder of this resolves the process-wide
-/// addressing behind its own back.
+/// Both halves are substitutions of one thing: a domain type either holds a
+/// `TmuxDep` (`EnvManager`) or takes one as a parameter for the work it does
+/// (`PtySession::attach`, `ControlModeSession::attach` — neither makes a tmux
+/// call *after* attach returns, since #1011 removed the `detach-client` that
+/// was the only reason to keep one), a test hands in one built with
+/// [`TmuxDep::injected`], and every operation the type performs — process
+/// addressing *and* the grammar [`TmuxOps`] derives from it — follows. Nothing
+/// that holds or is handed one of these resolves the process-wide addressing
+/// behind its own back.
 ///
 /// It is not the whole crate's seam yet, and the remainder is deliberate:
 /// [`util`](super::util)'s capture and availability helpers

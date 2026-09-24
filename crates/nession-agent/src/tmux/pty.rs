@@ -24,17 +24,20 @@ const READ_BUF_SIZE: usize = 4096;
 /// multiple tasks can write input concurrently.  Resize calls go
 /// directly through the stored `MasterPty` (the method takes `&self`,
 /// so no locking is needed).
+///
+/// The `TmuxDep` this attaches through is a parameter of [`PtySession::attach`]
+/// and is not held: it used to be a field so that [`Drop`] could detach through
+/// the same addressing it attached with (#991 step 6), and #1011 removed the
+/// spawned `detach-client` that was the field's only reader. Nothing here makes
+/// a tmux call after `attach` returns — `set-option` and the attach child are
+/// both built from the parameter at attach time, and teardown is the child
+/// process — so the seam a test substitutes a fake binary into is the parameter.
 pub struct PtySession {
     session_name: String,
     child: Box<dyn Child + Send + Sync>,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     master: Box<dyn MasterPty + Send>,
     viewport: (u16, u16),
-    /// The tmux this backend attaches and detaches through — held rather than
-    /// resolved per call because [`Drop`] cannot reach the process: a client
-    /// that was attached with one addressing must be detached from the same
-    /// one (#991 step 6).
-    tmux: TmuxDep,
 }
 
 impl PtySession {
@@ -150,7 +153,6 @@ impl PtySession {
                 writer,
                 master: pty.master,
                 viewport: (cols, rows),
-                tmux: tmux.clone(),
             },
             rx,
         ))
@@ -202,34 +204,27 @@ impl Drop for PtySession {
         // but it must not become anyone's error and must not panic, which is
         // why the shape is `let _ =` and not `?`.
         //
-        // What actually ends this client is `child.kill()`/`child.wait()`
-        // below: `Drop` cannot await, and SIGKILL on a plain attach client is
-        // the documented fallback ("less risky than control-mode, but be
-        // safe"). Detaching first is the courteous route to the same end.
+        // What ends this client is `child.kill()`/`child.wait()` below: `Drop`
+        // cannot await, and SIGKILL on a plain attach client is the documented
+        // fallback ("less risky than control-mode, but be safe"). That is the
+        // *whole* of this teardown — the child is the client.
         //
-        // **Measured on tmux 3.6b (2026-09-24): `-t` is a *client* target and a
-        // session name is not one** — this call answers `can't find client:
-        // <session>` (exit 1) and detaches nothing, so the detach has been a
-        // no-op since it was written. The class is `Cleanup` either way and the
-        // silence is deliberate: the child kill is what reaps the client, and
-        // warning on every teardown would be an alarm nobody can act on here.
-        // The target form is a client-lifecycle question (`-s <session>`
-        // detaches *every* client of the session, including a user's own manual
-        // attach), so it is not decided by this step — see #991 step 8/9.
-        let _ = self
-            .tmux
-            .cmd()
-            .std()
-            .args(["detach-client", "-t", &self.session_name])
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status();
-        // Reap the PTY child. Not a tmux call: this is `portable_pty::Child`,
-        // the `tmux attach` process this backend spawned, so no tmux
-        // operation class applies — there is no tmux exit status here to
-        // classify, only a process to reap, and a reap that fails when the
-        // child already exited must not surface as anything.
+        // A spawned `detach-client -t <session>` used to sit here as the
+        // courteous route to the same end. **Removed in #1011**: measured on
+        // tmux 3.6b (2026-09-24), `-t` is a *client* target and a session name
+        // is not one, so the call answered `can't find client: <session>`
+        // (exit 1) and detached nothing — it had been a no-op since it was
+        // written, and it was `let _ =`, so nothing ever said so. The correct
+        // target form needs a client name resolved and matched to *this*
+        // client, which a `Drop` that cannot await is the wrong place to do;
+        // `-s <session>` is not the fix either (it detaches *every* client of
+        // the session, including a user's own manual attach).
+        //
+        // The child is `portable_pty::Child`, the `tmux attach` process this
+        // backend spawned — not a tmux call, so no tmux operation class
+        // applies: there is no tmux exit status here to classify, only a
+        // process to reap, and a reap that fails when the child already exited
+        // must not surface as anything.
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
@@ -262,18 +257,13 @@ impl super::session::TmuxSession for PtySession {
         // the *session* teardown (`SessionManager::kill_session`, which is
         // `Required` and reports tmux's own words), not whether a client had to
         // be killed instead of detaching. `?` here would report an error for a
-        // client that is gone either way. Same measured target-form note as
-        // [`Drop`]: `-t <session>` is not a client target, so this detach does
-        // not happen, and the kill below is what ends the client.
-        let _ = self
-            .tmux
-            .cmd()
-            .std()
-            .args(["detach-client", "-t", &self.session_name])
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status();
+        // client that is gone either way.
+        //
+        // The spawned `detach-client -t <session>` that used to run first is
+        // gone (#1011), for the reason [`Drop`] records: `-t` takes a *client*
+        // and a session name is not one, so it could never detach anything.
+        // The kill below is what ends the client, and it is all of this path.
+        //
         // Not a tmux call — the PTY child process, as in `Drop`.
         let _ = self.child.kill();
         let _ = self.child.wait();
@@ -457,66 +447,91 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
-    async fn a_refused_detach_changes_neither_close_nor_drop() {
-        // The `Cleanup` class, at both teardown paths: `close` returns `Ok`
-        // even when the detach is refused, and `Drop` does not panic. What ends
-        // the client in both is the child kill/reap below the detach, which is
-        // why the class tolerates the failure — and why propagating it would be
-        // wrong: a caller would be told the close failed for a client that is
-        // gone either way.
+    async fn closing_a_pty_session_reaps_the_attach_child() {
+        // What ends a PTY client is the child reaped by `close`, not a tmux
+        // command. That was already the mechanism before #1011 — the only other
+        // candidate was a spawned `detach-client -t <session>` that could not
+        // work — but #1011 removed the dead call, so this is now the *whole*
+        // teardown and the thing a test has to watch.
         //
-        // The fake answers with the measurement this step took on tmux 3.6b:
-        // `-t` takes a *client* target, so a session name is not one and the
-        // call has always failed (`can't find client: <session>`, exit 1). Its
-        // silence in the old `let _ =` is the point of the class statement
-        // beside it — the teardown that actually happens is the process one.
+        // The fake's `attach` branch ignores HUP/TERM/INT and execs `sleep`, so
+        // nothing but the reaping ends the child: closing the PTY master on
+        // teardown would otherwise hang it up and the test would pass for free.
+        // `exec` (rather than a forked `sleep`) keeps the tracked PID the one
+        // that receives the signal, leaving no orphan behind. Only SIGKILL —
+        // what `portable_pty::Child::kill` sends — ends it.
         //
-        // Reddens on: making `close` propagate the detach failure.
+        // The observation is the PTY channel closing, and a `std::thread`
+        // watches it for a reason: `portable_pty::Child::wait` is *blocking*, so
+        // a `tokio` timeout wrapped around `close` in this task can never fire
+        // (measured: with `kill` dropped, the same test passed after 32s, the
+        // child's own `sleep 30` having ended the wait), and a timeout around a
+        // *spawned* `close` would instead measure the session's [`Drop`] — which
+        // reaps too, and which runs the moment that task ends. The session
+        // therefore stays alive here until the assertion has been made.
         //
-        // The evidence is a sentinel file rather than a line of the fake's argv
-        // log: this backend *spawns* a tmux client, so the attach child and the
-        // detach command are two processes appending to one log at once, and
-        // `FakeTmux` writes a call's argv one entry at a time. A per-call
-        // assertion there is racy — measured, 3 runs in 10 spliced the two
-        // calls' entries together — while `: > <file>` in the refusing branch is
-        // atomic and says exactly what this test needs: the branch that refuses
-        // was reached. (The harness race is real and not mine to fix here; the
-        // other fake-based tests assert on awaited calls, which cannot overlap.)
+        // Both mutations of the reaping path are caught, measured: `kill` alone
+        // dropped leaves `wait` to be served by the child's own 30s timer, and
+        // the whole kill/reap pair dropped leaves the child holding the slave —
+        // either way the reader thread keeps its sender and the channel is still
+        // open when the deadline passes.
+        let deadline = std::time::Duration::from_secs(5);
+
         let dir = tempfile::tempdir().expect("tempdir");
-        let sentinel = dir.path().join("detach-ran");
         let fake = crate::test_support::FakeTmux::new(
             dir.path(),
-            &format!(
-                "case \"$1\" in detach-client) : > \"{sent}\"; \
-                 echo 'cant find client: nession-fake-sess' >&2; exit 1;; \
-                 *) exit 0;; esac",
-                sent = sentinel.display(),
-            ),
+            "case \"$1\" in attach) trap '' HUP TERM INT; exec sleep 30;; *) exit 0;; esac",
         );
 
-        let (mut session, _rx) = PtySession::attach(&fake.dep(), "nession-fake-sess", 80, 24)
+        let (mut session, mut rx) = PtySession::attach(&fake.dep(), "nession-fake-sess", 80, 24)
             .expect("the injected binary accepts the attach");
+        assert!(
+            matches!(
+                rx.try_recv(),
+                Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+            ),
+            "the attach child must be alive and holding the PTY before teardown, \
+             or the rest of this test would pass for free"
+        );
+
+        let reaped = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let observed = std::sync::Arc::clone(&reaped);
+        let watcher = std::thread::spawn(move || {
+            let start = std::time::Instant::now();
+            loop {
+                if matches!(
+                    rx.try_recv(),
+                    Err(tokio::sync::mpsc::error::TryRecvError::Disconnected)
+                ) {
+                    observed.store(true, std::sync::atomic::Ordering::SeqCst);
+                    return;
+                }
+                if start.elapsed() >= deadline {
+                    return; // leaves `false`: the client outlived the deadline
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        });
+
         crate::tmux::session::TmuxSession::close(&mut session)
             .await
-            .expect("a refused detach is Cleanup, not a close failure");
-        assert!(
-            sentinel.exists(),
-            "the detach really was attempted, and refused by the injected binary: {:#?}",
-            fake.calls()
-        );
+            .expect("closing is Cleanup: it has no failure to report, and no detach to fail");
+        watcher.join().expect("the watcher thread");
 
-        // And the Drop path, with the same refusing fake: reaching the end of
-        // this test without a panic is the assertion.
-        drop(session);
+        assert!(
+            reaped.load(std::sync::atomic::Ordering::SeqCst),
+            "close must reap the client itself, not wait for the child's own timer: \
+             the PTY channel was still open {deadline:?} after close returned, so \
+             the child holding it was not killed"
+        );
     }
 
     #[cfg(unix)]
     #[tokio::test]
-    async fn the_injected_tmux_receives_the_attach_and_the_detach() {
+    async fn the_injected_tmux_receives_the_attach_and_no_detach() {
         // The attach backend is a tmux client *and* a tmux caller: it sets an
-        // option before it attaches, and it detaches on the way out. All three
-        // of those ran on the process-wide tmux before #991 step 6 and run on
-        // whatever the caller passes now.
+        // option before it attaches. Both of those ran on the process-wide tmux
+        // before #991 step 6 and run on whatever the caller passes now.
         //
         // This is the wiring that a test cannot check through results: against
         // the real binary the calls succeed whether or not the injection took.
@@ -525,6 +540,15 @@ mod tests {
         // binary were reached, `set-option` on a session that does not exist
         // would be the only thing that happened, and the recorded calls would
         // not be there at all.
+        //
+        // **The absence half is the #1011 regression guard.** Teardown used to
+        // spawn a third call here — `detach-client -t <session_name>` — and on
+        // tmux 3.6b (measured 2026-09-24) that is not a valid target: `-t`
+        // takes a *client*, a session name is not one, and the answer was
+        // `can't find client: <session>` (exit 1). It detached nothing for as
+        // long as it existed. Re-adding it would re-add a no-op; the fake
+        // records every argv it was given, so a detach that came back lands in
+        // this assertion.
         //
         // No tmux and no harness socket: unlike the integration tests that skip
         // on macOS, this one never runs control-mode/PTY against a real server,
@@ -564,16 +588,19 @@ mod tests {
         );
 
         drop(session);
+        // The removed call was `status()`-shaped — awaited inside `Drop` — so
+        // it would be recorded before `drop` returned. The settle covers a
+        // re-added *spawned* one, which the fake (a separate process appending
+        // to one file) could record a moment after teardown.
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
         let calls = fake.calls();
         assert!(
-            calls.iter().any(|args| args
-                == &vec![
-                    "detach-client".to_string(),
-                    "-t".to_string(),
-                    "nession-fake-sess".to_string(),
-                ]),
-            "dropping the session detaches its client from the same tmux it \
-             attached to: {calls:?}"
+            !calls
+                .iter()
+                .any(|args| args.first().map(String::as_str) == Some("detach-client")),
+            "teardown must not spawn `detach-client`: `-t` takes a client and a \
+             session name is not one, so the call was a no-op (#1011), and the \
+             child kill/reap is what ends the client: {calls:?}"
         );
     }
 }

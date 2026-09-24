@@ -44,15 +44,19 @@ const RESIZE_CHANNEL_CAPACITY: usize = 16;
 /// Spawns a `tmux -C attach` subprocess and pipes structured messages
 /// (parsed to raw ANSI bytes) through an mpsc channel. The caller drives
 /// input via `write_input` and resizes the shared tmux window via `resize`.
+///
+/// The `TmuxDep` this attaches through is a parameter of [`ControlModeSession::attach`]
+/// and is not held: it used to be a field so that [`Drop`] could detach through
+/// the same addressing it attached with (#991 step 6), and #1011 removed the
+/// spawned `detach-client` that was the field's only reader. Every tmux call
+/// this type makes — `resize-window` and the `-C attach` child — is built from
+/// the parameter at attach time, and teardown is a line on the attached child's
+/// stdin, so the seam a test substitutes a fake binary into is the parameter.
 pub struct ControlModeSession {
     session_name: String,
     child: Child,
     stdin: ChildStdin,
     viewport: (u16, u16),
-    /// The tmux this client is attached to — held rather than resolved per
-    /// call because [`Drop`] cannot reach the process, and a client attached
-    /// to one addressing must be detached from the same one (#991 step 6).
-    tmux: TmuxDep,
 }
 
 impl ControlModeSession {
@@ -117,7 +121,6 @@ impl ControlModeSession {
             child,
             stdin,
             viewport: (width, height),
-            tmux: tmux.clone(),
         };
 
         Ok((session, output_rx, resize_rx))
@@ -228,21 +231,15 @@ impl Drop for ControlModeSession {
         // 3.6b: "server exited unexpectedly"), so an unclean detach is the
         // lesser risk here but still not a state a caller has to hear about.
         //
-        // **Measured on tmux 3.6b (2026-09-24): `-t` is a *client* target and a
-        // session name is not one**, so this call answers `can't find client:
-        // <session>` (exit 1) and detaches nothing. The class does not change —
-        // the client still goes away — but the target form is a
-        // client-lifecycle decision (`-s <session>` detaches *every* client of
-        // the session) and belongs with #991's step 8/9, not here.
-        let _ = self
-            .tmux
-            .cmd()
-            .std()
-            .args(["detach-client", "-t", &self.session_name])
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status();
+        // A spawned `detach-client -t <session>` used to sit here as a second,
+        // "graceful" route beside the stdin one in
+        // [`ControlModeSession::close`]. **Removed in #1011**: measured on tmux
+        // 3.6b (2026-09-24), `-t` is a *client* target and a session name is
+        // not one, so it answered `can't find client: <session>` (exit 1) and
+        // detached nothing. The graceful detach this type has is the stdin one
+        // (a bare `detach-client` there targets the client that wrote it, so it
+        // works); here the teardown is the EOF below.
+        //
         // Let the child process exit on its own — drop order will close
         // stdin (EOF → child exits), then child (reaped by tokio/lanchd).
     }
@@ -327,11 +324,24 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
-    async fn the_injected_tmux_receives_the_control_mode_attach_and_the_detach() {
-        // The control-mode backend reaches tmux three ways — `resize-window`
-        // through `util::run_tmux_command` before it attaches, `-C attach` as
-        // its own child, and `detach-client` on the way out — and all three ran
-        // on the process-wide tmux before #991 step 6.
+    async fn the_injected_tmux_receives_the_control_mode_attach_and_no_detach() {
+        // The control-mode backend reaches tmux two ways — `resize-window`
+        // through `util::run_tmux_command` before it attaches, and `-C attach`
+        // as its own child — and both ran on the process-wide tmux before #991
+        // step 6.
+        //
+        // **The absence half is the #1011 regression guard.** Teardown used to
+        // spawn a third call, `detach-client -t <session_name>`, "on the way
+        // out". On tmux 3.6b (measured 2026-09-24) that is not a valid target:
+        // `-t` takes a *client*, a session name is not one, and the answer was
+        // `can't find client: <session>` (exit 1). It detached nothing for as
+        // long as it existed, and the fake below records every argv it was
+        // given, so a detach that came back lands in this assertion.
+        //
+        // The graceful detach this backend does have is a bare `detach-client`
+        // on the control client's *stdin*, which is not a spawn and so cannot
+        // appear here: `closing_a_control_mode_session_detaches_on_stdin`
+        // checks it, from the child's side of that pipe.
         //
         // **This one runs on macOS too**, which the control-mode integration
         // tests (skipped by `cfg!(target_os = "macos")` because a real tmux
@@ -352,7 +362,7 @@ mod tests {
         // `resize-window` is awaited, `-C attach` is a spawned child that the
         // reader loop may not have seen finish yet.
         let calls = fake
-            .wait_for_calls(3, std::time::Duration::from_secs(10))
+            .wait_for_calls(2, std::time::Duration::from_secs(10))
             .await;
         assert_eq!(
             calls.first(),
@@ -379,16 +389,78 @@ mod tests {
         );
 
         drop(session);
+        // The removed call was `status()`-shaped — awaited inside `Drop` — so
+        // it would be recorded before `drop` returned. The settle covers a
+        // re-added *spawned* one, which the fake (a separate process appending
+        // to one file) could record a moment after teardown.
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
         let calls = fake.calls();
         assert!(
-            calls.iter().any(|args| args
-                == &vec![
-                    "detach-client".to_string(),
-                    "-t".to_string(),
-                    "nession-fake-sess".to_string(),
-                ]),
-            "a control-mode client must always detach cleanly, on the tmux it \
-             attached to: {calls:?}"
+            !calls
+                .iter()
+                .any(|args| args.first().map(String::as_str) == Some("detach-client")),
+            "teardown must not spawn `detach-client`: `-t` takes a client and a \
+             session name is not one, so the call was a no-op (#1011), and the \
+             stdin EOF is what ends the client: {calls:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn closing_a_control_mode_session_detaches_on_stdin() {
+        // The graceful detach this backend has is a `detach-client` *line on
+        // the control client's stdin*. No `-t`, so tmux applies it to the
+        // client that wrote it, and no exit status to read. #1011 removed the
+        // second, spawned `detach-client -t <session>` that this class also
+        // ran — a no-op, for the reason the guard above records — which leaves
+        // this stdin line as the only detach a control-mode session makes.
+        //
+        // The fake is the other end of that pipe: it takes one line from its
+        // own stdin and records it. `close` writes the line, sleeps 200ms and
+        // then waits for the child, so a child that never hears from it blocks
+        // close forever — hence the timeout, which turns that into a failure
+        // instead of a hang.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let received = dir.path().join("stdin-line");
+        let fake = crate::test_support::FakeTmux::new(
+            dir.path(),
+            &format!(
+                "case \"$1\" in -C) IFS= read -r line; \
+                 printf '%s\\n' \"$line\" > \"{out}\"; exit 0;; \
+                 *) exit 0;; esac",
+                out = received.display(),
+            ),
+        );
+
+        let (mut session, _rx, _resize_rx) =
+            ControlModeSession::attach(&fake.dep(), "nession-fake-sess", 80, 24)
+                .await
+                .expect("the injected binary accepts the resize and the attach");
+
+        tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            crate::tmux::session::TmuxSession::close(&mut session),
+        )
+        .await
+        .expect("close must not block: its child is waiting for the detach line")
+        .expect("closing is Cleanup: it has no failure to report");
+
+        assert_eq!(
+            std::fs::read_to_string(&received)
+                .expect("the control client received a line on its stdin")
+                .trim_end(),
+            "detach-client",
+            "the graceful detach is a bare `detach-client` on the control \
+             client's stdin — no `-t`, so it targets the client that wrote it"
+        );
+        assert!(
+            !fake
+                .calls()
+                .iter()
+                .any(|args| args.first().map(String::as_str) == Some("detach-client")),
+            "and it is not a spawned `detach-client -t <session>`, the #1011 \
+             no-op — the fake records spawns, and there must be none: {:#?}",
+            fake.calls()
         );
     }
 }
