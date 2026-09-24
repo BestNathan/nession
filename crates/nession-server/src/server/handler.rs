@@ -2367,6 +2367,50 @@ impl ConnectionHandler {
                     .to_string(),
                 ))));
             }
+        } else {
+            // No version named. Refused **only when the target serves more than
+            // one generation of this unit**, because that is the one case where
+            // the silence is genuinely ambiguous: the caller could have meant
+            // either, and nothing on the wire says which.
+            //
+            // Refusing everywhere was the alternative, and it is not a smaller
+            // change — it is a different one. Every `agent.file.*`,
+            // `agent.env.*` and `agent.session.*` call is unversioned today and
+            // every one of those units is in the target's manifest, so a blanket
+            // refusal refuses essentially all traffic. A unit with exactly one
+            // version has only one thing an unversioned call can mean; refusing
+            // that would break every caller while catching nothing.
+            //
+            // So the rule is the ambiguity, not the absence. `#963` Scope 2's
+            // literal wording asks for the second; this is the first, chosen
+            // because it targets the failure that scope names — a manifest-backed
+            // operation whose version nobody checked — without the repository-wide
+            // caller migration the literal reading implies.
+            let offered = manifest
+                .support(unit)
+                .map(|support| support.versions.clone())
+                .unwrap_or_default();
+            if offered.len() > 1 {
+                return Ok(HandlerAction::Reply(Some(Message::Text(
+                    json!({
+                        "msg_type": reply_wire,
+                        "id": msg.id,
+                        "timestamp": current_timestamp(),
+                        "payload": {
+                            "error": "contract_not_supported",
+                            "available": false,
+                            "message": format!(
+                                "`{agent_id}` serves `{unit}` at {offered:?}, so this call has \
+                                 to name one — an unversioned request to a unit with more than \
+                                 one generation does not say which"
+                            ),
+                            "protocol": unit.as_str(),
+                            "offered_versions": offered.iter().map(|v| v.get()).collect::<Vec<_>>(),
+                        },
+                    })
+                    .to_string(),
+                ))));
+            }
         }
 
         match self
@@ -4474,15 +4518,49 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_caller_that_named_no_version_is_relayed_as_before() {
-        // Absence is not a claim about versions, any more than it is about wire
-        // types. A caller that has not resolved keeps working exactly as it did
-        // before version checking existed.
+    async fn an_unversioned_call_to_a_two_version_unit_is_refused() {
+        // `#963` Scope 2. A unit the target serves at more than one generation
+        // is the one case where naming no version is genuinely ambiguous — the
+        // caller could have meant either, and nothing on the wire says which.
+        //
+        // This test used to assert the opposite, under the reasoning that
+        // "absence is not a claim about versions, any more than it is about wire
+        // types". The premise was right and the conclusion did not follow: a
+        // claim is exactly what the caller *cannot* make here, so relaying hands
+        // the target a request whose version nobody checked — which is the
+        // failure the scope names.
         let mut h = test_handler("").await;
         register_agent(&h, Some(manifest_with_two_versions())).await;
 
         let payload = relay(&mut h, "git.status").await;
-        assert_ne!(payload["error"], "contract_not_supported");
+        assert_eq!(payload["error"], "contract_not_supported");
+        assert_eq!(payload["protocol"], "git.status");
+        assert_eq!(payload["offered_versions"], json!([1, 2]));
+        assert!(
+            payload["message"]
+                .as_str()
+                .unwrap_or("")
+                .contains("name one"),
+            "the refusal should say what the caller has to do: {payload}"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_unversioned_call_to_a_single_version_unit_is_relayed() {
+        // The discriminating half, and the reason the rule is the *ambiguity*
+        // rather than the absence. Every `agent.file.*`, `agent.env.*` and
+        // `agent.session.*` call is unversioned today and every one of those
+        // units has a single version — where the call has exactly one possible
+        // meaning. Refusing those would break every caller while catching
+        // nothing, which is why `#963` Scope 2's literal wording was not taken.
+        let mut h = test_handler("").await;
+        register_agent(&h, Some(manifest_carrying("git.status"))).await;
+
+        let payload = relay(&mut h, "git.status").await;
+        assert_ne!(
+            payload["error"], "contract_not_supported",
+            "a single-version unit has one thing an unversioned call can mean"
+        );
         assert_eq!(payload["error"], "agent_disconnected");
     }
 
