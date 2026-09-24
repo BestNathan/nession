@@ -28,7 +28,9 @@ use crate::config::AttachMode;
 use crate::fs::ops::FileOps;
 use crate::protocol::p2p_routes;
 use crate::server::execution::ExecutionPolicy::{Inline, Key, Ordered, Query};
-use crate::server::execution::{ExecutionLanes, ResourceKey, SHUTDOWN_GRACE};
+use crate::server::execution::{
+    mutation_scheduler, ExecutionLanes, ResourceKey, DEFAULT_MUTATIONS_IN_FLIGHT, SHUTDOWN_GRACE,
+};
 // The lanes' boxed work is the shared type, and the constructors take this
 // socket's own bounds — see `nession_runtime::lane`.
 use crate::server::outbound::{self, OutboundError, P2pOutbound};
@@ -38,7 +40,7 @@ use crate::tmux::session::TmuxSession;
 use anyhow::{Context, Result};
 use futures_util::StreamExt;
 use nession_protocol::contracts::env::v1::EnvSnapshot;
-use nession_runtime::lane::Work;
+use nession_runtime::lane::{KeyedLane, Work};
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::pin::Pin;
@@ -542,6 +544,11 @@ fn make_ok(request_id: &str, message: &str) -> Message<OkPayload> {
 pub struct AgentServer {
     tmux_manager: SessionManager,
     file_ops: Arc<FileOps>,
+    /// The one mutation lane every peer-to-peer connection of this agent
+    /// dispatches into. Built here because the resources its keys name — one
+    /// tmux server, one file sandbox — are here. See
+    /// `server::execution::mutation_scheduler`.
+    mutations: Arc<KeyedLane<ResourceKey>>,
     shutdown_tx: mpsc::Sender<()>,
     shutdown_rx: Option<mpsc::Receiver<()>>,
     tls_acceptor: Option<tokio_rustls::TlsAcceptor>,
@@ -900,33 +907,12 @@ fn session_by_id(payload_value: &serde_json::Value) -> ResourceKey {
     )
 }
 
-/// The path a file frame acts on.
-fn file_by_path(payload_value: &serde_json::Value) -> ResourceKey {
-    ResourceKey::File(
-        payload_value
-            .get("path")
-            .and_then(|v| v.as_str())
-            .unwrap_or_default()
-            .to_string(),
-    )
-}
-
-/// The path a rename reads from.
-///
-/// `from` rather than `to`, and the choice is worth stating: a rename is a
-/// mutation of both paths, and a key has to be one of them. The source is the
-/// one whose *others* are ordered against it — two renames competing for the
-/// same source are the case that must not interleave — while the destination is
-/// written by one rename and read by nobody else's key.
-fn file_by_from(payload_value: &serde_json::Value) -> ResourceKey {
-    ResourceKey::File(
-        payload_value
-            .get("from")
-            .and_then(|v| v.as_str())
-            .unwrap_or_default()
-            .to_string(),
-    )
-}
+// The file wires have no key helper, and that is the statement rather than an
+// omission: every one of them carries [`ResourceKey::Filesystem`], the sandbox
+// as one resource, so there is no field to read. See that variant for why the
+// key space is that coarse — a rename touches two paths, a recursive delete
+// touches every path under one, and a path is therefore not the whole of what a
+// file mutation touches.
 
 // The peer-to-peer surface, declared once (`#678`). Invoked at module scope
 // rather than inside `handle_request` so the context type above and the units
@@ -1675,7 +1661,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     }
                 }
             }
-            "agent.file.write" => "agent.file.write" => Key(file_by_path(payload_value)) => {
+            "agent.file.write" => "agent.file.write" => Key(ResourceKey::Filesystem) => {
                 let payload: FileWritePayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -1690,7 +1676,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     Err(e) => ctx.err("write_error", &e.to_string()),
                 }
             }
-            "agent.file.delete" => "agent.file.delete" => Key(file_by_path(payload_value)) => {
+            "agent.file.delete" => "agent.file.delete" => Key(ResourceKey::Filesystem) => {
                 let payload: FileDeletePayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -1708,7 +1694,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     Err(e) => ctx.err("delete_failed", &format_error_chain(&e)),
                 }
             }
-            "agent.file.create-dir" => "agent.file.create-dir" => Key(file_by_path(payload_value)) => {
+            "agent.file.create-dir" => "agent.file.create-dir" => Key(ResourceKey::Filesystem) => {
                 let payload: FileCreateDirPayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -1726,7 +1712,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     Err(e) => ctx.err("create_dir_failed", &format_error_chain(&e)),
                 }
             }
-            "agent.file.rename" => "agent.file.rename" => Key(file_by_from(payload_value)) => {
+            "agent.file.rename" => "agent.file.rename" => Key(ResourceKey::Filesystem) => {
                 let payload: FileRenamePayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -1809,6 +1795,7 @@ impl AgentServer {
         Ok(Self {
             tmux_manager: SessionManager::new(),
             file_ops,
+            mutations: mutation_scheduler(),
             shutdown_tx,
             shutdown_rx: Some(shutdown_rx),
             tls_acceptor,
@@ -1844,6 +1831,7 @@ impl AgentServer {
 
         let tmux_manager = Arc::new(self.tmux_manager);
         let file_ops = Arc::clone(&self.file_ops);
+        let mutations = Arc::clone(&self.mutations);
         let tls_acceptor = self.tls_acceptor;
         let default_working_dir = self.default_working_dir.clone();
         let listen_address = self.listen_address.clone();
@@ -1866,6 +1854,7 @@ impl AgentServer {
                             Ok((stream, addr)) => {
                                 let tmux = Arc::clone(&tmux_manager);
                                 let fops = Arc::clone(&file_ops);
+                                let lanes = Arc::clone(&mutations);
                                 let tls = tls_acceptor.clone();
                                 let wd = default_working_dir.clone();
                                 let la = listen_address.clone();
@@ -1874,7 +1863,11 @@ impl AgentServer {
                                 let rtx = resize.clone();
                                 tokio::spawn(async move {
                                     if let Err(e) =
-                                        Self::handle_connection(stream, addr, tmux, tls, wd, fops, &la, &aid, am, rtx).await
+                                        Self::handle_connection(
+                                            stream, addr, tmux, tls, wd, fops, lanes, &la, &aid,
+                                            am, rtx,
+                                        )
+                                        .await
                                     {
                                         // Downgraded from warn: random non-WebSocket clients
                                         // (health checks, scanners) hitting the P2P port are
@@ -1910,6 +1903,7 @@ impl AgentServer {
         tls_acceptor: Option<tokio_rustls::TlsAcceptor>,
         default_working_dir: String,
         file_ops: Arc<FileOps>,
+        mutations: Arc<KeyedLane<ResourceKey>>,
         listen_address: &str,
         agent_id: &str,
         attach_mode: AttachMode,
@@ -1966,7 +1960,7 @@ impl AgentServer {
             addr,
         });
 
-        let result = Self::run_message_loop(ws_stream, connection).await;
+        let result = Self::run_message_loop(ws_stream, connection, mutations).await;
 
         // The connection is over, so the writer goes with it — dropping the sink
         // and closing the peer's socket. The writer also stops by itself when it
@@ -2000,13 +1994,22 @@ impl AgentServer {
     async fn run_message_loop(
         mut ws_stream: futures_util::stream::SplitStream<WebSocketStream<TcpOrTls>>,
         connection: Arc<Connection>,
+        mutations: Arc<KeyedLane<ResourceKey>>,
     ) -> Result<()> {
         let addr = connection.addr;
         // The lanes this connection reads into, and the only thing that admits
-        // to them. Dropped with the loop, which is what ends their tasks.
-        let mut lanes = ExecutionLanes::new(
+        // to them. The query lane is this connection's own — it is admission,
+        // and what it protects is this connection's progress — while the key
+        // lane is the agent's, shared with every other connection that mutates
+        // the same tmux sessions and the same file sandbox. What stays private
+        // to this connection is its *bound* on mutations in flight, which is
+        // what makes the number of resources one peer can be ahead of a number
+        // (see `server::execution`). Both are dropped with the loop, which is
+        // what ends this connection's share of them.
+        let mut lanes = ExecutionLanes::shared(
             crate::server::execution::DEFAULT_QUERY_CONCURRENCY,
-            crate::server::execution::DEFAULT_KEY_QUEUE_DEPTH,
+            mutations,
+            DEFAULT_MUTATIONS_IN_FLIGHT,
             crate::server::execution::LANE_LABEL,
         );
 
@@ -2102,8 +2105,11 @@ impl AgentServer {
         {
             let (queries, keys) = lanes.snapshot().await;
             debug!(
-                "peer-to-peer connection closed — lanes: {}",
-                nession_runtime::lane::summary(&queries, &keys)
+                "peer-to-peer connection closed — lanes: {} (the mutation half is the \
+                 agent's shared scheduler, which this connection dispatched into); its \
+                 own mutation admissions waited {} time(s)",
+                nession_runtime::lane::summary(&queries, &keys),
+                lanes.admission_waits().await
             );
         }
         debug!(
