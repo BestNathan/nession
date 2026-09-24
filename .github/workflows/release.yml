@@ -1,5 +1,13 @@
 name: Release
 
+# Repository Cargo config enables a local-only rustc wrapper. CI deliberately
+# bypasses it and keeps using setup-rust-toolchain / rust-cache. This preserves
+# the measured #126 decision: sccache on GHA had a 0–3% hit rate and competed
+# for the Actions cache quota.
+env:
+  RUSTC_WRAPPER: ""
+
+
 on:
   push:
     branches: [main]

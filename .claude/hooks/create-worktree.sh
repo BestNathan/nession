@@ -89,5 +89,21 @@ fi
 # Activate hooks inside the new worktree too.
 git -C "$worktree_dir" config core.hooksPath .githooks 2>/dev/null || true
 
+# Best-effort Cargo warm start. Keep target/ private to this worktree, but when
+# the main worktree already has a compatible warm target let the filesystem
+# clone its blocks into the new directory. The seed script never falls back to
+# a full copy, and removes all workspace-member artifacts before publishing it.
+seed_script="$worktree_dir/scripts/seed-worktree-target.sh"
+if [ -f "$seed_script" ]; then
+  main_worktree=$(git -C "$worktree_dir" worktree list --porcelain | sed -n '1s/^worktree //p')
+  if [ -n "$main_worktree" ] && [ "$main_worktree" != "$worktree_dir" ]; then
+    log "WorktreeCreate hook: attempting Cargo target warm seed"
+    if ! bash "$seed_script" "$main_worktree" "$worktree_dir" >&2; then
+      log "WorktreeCreate hook: target seed failed; continuing with an empty private target"
+      log "  Fix/retry: cd \"$worktree_dir\" && just seed-worktree-target"
+    fi
+  fi
+fi
+
 log "WorktreeCreate hook: created worktree at $worktree_dir"
 printf '%s\n' "$worktree_dir"

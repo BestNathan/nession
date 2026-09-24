@@ -51,17 +51,46 @@ use nession_protocol::{ContractDescriptor, ContractVersion, IdentityError, Proto
 /// Who owns these contracts. Also the answer to "who do I ask when they change?"
 pub const OWNER: &str = "nession-agent";
 
-/// One version, one wire message type — the shape every core unit has today.
+/// One Contract Version of one wire message type (`#963`).
 ///
-/// The same helper the other providers use, for the same reason: a unit that
-/// needs something else states it itself, and this one exists so six do not
-/// each restate it.
-pub(crate) fn v1_descriptor(id: &str, wire: &str) -> Result<ProtocolDescriptor, IdentityError> {
+/// Takes the version rather than assuming `V1`: the wire locates the Protocol
+/// Unit and the version selects the generation, so a unit serving two
+/// generations states both and this is how a table says which is which.
+pub(crate) fn descriptor(
+    id: &str,
+    wire: &str,
+    version: u32,
+) -> Result<ProtocolDescriptor, IdentityError> {
     ProtocolDescriptor::new(
         id,
         OWNER,
-        vec![ContractDescriptor::new(ContractVersion::V1, &[wire])],
+        vec![ContractDescriptor::new(
+            ContractVersion::new(version)?,
+            &[wire],
+        )],
     )
+}
+
+/// The `contract_version` a payload names, or `1` when it names none.
+///
+/// **Absent means v1**, and that is the rule the routing tables are built on:
+/// a caller that names no version is addressing the unit as it was before
+/// versions existed, which is v1 by definition. It is also why the tables can
+/// match on a plain `(wire, version)` tuple — two generations are two distinct
+/// patterns, where two arms on one wire alone would make the second
+/// unreachable and `-D warnings` would fail the build.
+///
+/// A `contract_version` that is present but not a number also resolves to `1`.
+/// That is looser than `ExtensionRegistry`'s check, which refuses it, and the
+/// difference is deliberate for now: this is the macro's routing contract, and
+/// making *this* layer refuse is `#963` Stage 3's decision — the one about how
+/// wide the refusal should be. Recorded here rather than left to be discovered.
+pub(crate) fn named_contract_version(payload: &serde_json::Value) -> u32 {
+    payload
+        .get("contract_version")
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|n| u32::try_from(n).ok())
+        .unwrap_or(1)
 }
 
 /// Declare the units this agent serves, once.
@@ -95,17 +124,24 @@ pub(crate) fn v1_descriptor(id: &str, wire: &str) -> Result<ProtocolDescriptor, 
 /// payload is a **reference** here for the same reason as there — the policy is
 /// read before the arm runs, and the arm consumes the payload.
 macro_rules! core_routes {
-    ($client:ident, $msg:ident, $responses:ident $(,)? ; $( $id:literal => $wire:literal => $policy:expr => $body:block )* $(,)?) => {
+    ($client:ident, $msg:ident, $responses:ident $(,)? ; $( $id:literal => $wire:literal => $version:literal => $policy:expr => $body:block )* $(,)?) => {
         /// Every Protocol Unit this agent serves on its server connection.
         ///
         /// Derived from the same invocation that dispatches them, so this list
         /// is what the agent *does* rather than what someone remembered to
         /// write down.
+        ///
+        /// **One descriptor per arm, so a unit at two versions emits two.**
+        /// They carry the same id and different versions, and
+        /// `ProtocolManifest::from_descriptors` unions them into one entry
+        /// advertising `[1, 2]` — which is the shape `#963` exists to make
+        /// expressible. Emitting one descriptor per *wire* instead would have
+        /// to pick a version, and picking is the manifest's job.
         pub fn core_descriptors() -> Result<
             Vec<nession_protocol::ProtocolDescriptor>,
             nession_protocol::IdentityError,
         > {
-            Ok(vec![$( crate::protocol::v1_descriptor($id, $wire)?, )*])
+            Ok(vec![$( crate::protocol::descriptor($id, $wire, $version)?, )*])
         }
 
         /// The wire types the same invocation covers.
@@ -113,6 +149,10 @@ macro_rules! core_routes {
         /// The message loop asks this before dispatching, so a message the
         /// agent does not serve falls through to the notification match rather
         /// than into `dispatch_core`'s empty arm.
+        ///
+        /// A unit serving two versions appears once per version here. Membership
+        /// is the only question asked of it, so the repeat is harmless — and
+        /// deduping it would need a `const` map that cannot be built.
         pub(crate) const CORE_WIRES: &[&str] = &[$( $wire, )*];
 
         /// How the connection's reader dispatches one wire (`#961-E`).
@@ -121,11 +161,19 @@ macro_rules! core_routes {
         /// control wire, an extension's own command unit, or a name nobody
         /// answers. The reader reads that as its declared default rather than
         /// guessing from the name; see `crate::connection::execution`.
+        ///
+        /// Keyed on `(wire, version)`, so the first arm that names a version
+        /// wins and an arm for version 2 cannot shadow version 1. Two
+        /// generations of one unit may declare different policies, and then each
+        /// gets the one it declared.
         pub(crate) fn core_policy(
             $msg: &ProtocolMessage<serde_json::Value>,
         ) -> Option<crate::connection::execution::ExecutionPolicy> {
-            match $msg.msg_type.as_str() {
-                $( $wire => Some($policy), )*
+            match (
+                $msg.msg_type.as_str(),
+                crate::protocol::named_contract_version(&$msg.payload),
+            ) {
+                $( ($wire, $version) => Some($policy), )*
                 _ => None,
             }
         }
@@ -142,11 +190,16 @@ macro_rules! core_routes {
             $msg: &ProtocolMessage<serde_json::Value>,
             $responses: &mpsc::Sender<WsMessage>,
         ) -> Result<()> {
-            match $msg.msg_type.as_str() {
-                $( $wire => $body, )*
-                // Unreachable through the caller's membership test. Kept
-                // rather than `unreachable!()` so a message that slips past it
-                // is ignored, which is what this loop did before.
+            match (
+                $msg.msg_type.as_str(),
+                crate::protocol::named_contract_version(&$msg.payload),
+            ) {
+                $( ($wire, $version) => $body, )*
+                // Unreachable through the caller's membership test for a unit
+                // this table serves, and reachable for a message that names a
+                // version no arm declares — which is ignored rather than
+                // refused, matching what this loop did before. `#963` Stage 3
+                // owns making it a refusal.
                 _ => {}
             }
             Ok(())
@@ -214,7 +267,7 @@ pub(crate) use core_routes;
 /// dispatcher below: the policy is read before the arm runs, and the arm
 /// consumes the payload, so this half may only look at it.
 macro_rules! p2p_routes {
-    ($ctx:ident, $msg_type:ident, $payload:ident $(,)? ; $( $id:literal => $wire:literal => $policy:expr => $body:block )* $(,)?) => {
+    ($ctx:ident, $msg_type:ident, $payload:ident $(,)? ; $( $id:literal => $wire:literal => $version:literal => $policy:expr => $body:block )* $(,)?) => {
         /// Every Protocol Unit this agent serves on its peer-to-peer socket.
         ///
         /// Unioned with [`crate::connection::core_descriptors`] into the one
@@ -224,7 +277,7 @@ macro_rules! p2p_routes {
             Vec<nession_protocol::ProtocolDescriptor>,
             nession_protocol::IdentityError,
         > {
-            Ok(vec![$( crate::protocol::v1_descriptor($id, $wire)?, )*])
+            Ok(vec![$( crate::protocol::descriptor($id, $wire, $version)?, )*])
         }
 
         /// The wire types the same invocation covers.
@@ -252,8 +305,8 @@ macro_rules! p2p_routes {
             $msg_type: &str,
             $payload: &serde_json::Value,
         ) -> Option<crate::server::execution::ExecutionPolicy> {
-            match $msg_type {
-                $( $wire => Some($policy), )*
+            match ($msg_type, crate::protocol::named_contract_version($payload)) {
+                $( ($wire, $version) => Some($policy), )*
                 _ => None,
             }
         }
@@ -273,9 +326,9 @@ macro_rules! p2p_routes {
             $msg_type: &str,
             $payload: serde_json::Value,
         ) -> String {
-            match $msg_type {
-                $( $wire => $body, )*
-                unknown => $ctx.err(
+            match ($msg_type, crate::protocol::named_contract_version(&$payload)) {
+                $( ($wire, $version) => $body, )*
+                (unknown, _) => $ctx.err(
                     "unknown_message_type",
                     &format!("unknown message type: {unknown}"),
                 ),
@@ -320,7 +373,7 @@ mod tests {
 
     #[test]
     fn a_descriptor_names_its_unit_its_owner_and_its_wire_type() {
-        let d = v1_descriptor("session.create", "agent.session.create").unwrap();
+        let d = descriptor("session.create", "agent.session.create", 1).unwrap();
         assert_eq!(d.id.as_str(), "session.create");
         assert_eq!(d.owner, OWNER);
         assert_eq!(
@@ -341,16 +394,18 @@ mod tests {
         // are the same string by construction, and what the test pins is that
         // the *id* form is the one that has to be canonical.
         assert!(
-            v1_descriptor(
+            descriptor(
                 "agent.session.capture_preview",
-                "agent.session.capture-preview"
+                "agent.session.capture-preview",
+                1
             )
             .is_err(),
             "an id with an underscore is not canonical and must be refused"
         );
-        assert!(v1_descriptor(
+        assert!(descriptor(
             "agent.session.capture-preview",
-            "agent.session.capture-preview"
+            "agent.session.capture-preview",
+            1
         )
         .is_ok());
     }

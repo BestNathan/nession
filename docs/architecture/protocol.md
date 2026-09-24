@@ -80,6 +80,43 @@ Two consequences worth knowing:
   slot names a *shape under this unit's wire*, so it is the wrong place to
   describe a message that is not an answer at all.
 
+### One wire, several generations
+
+**The wire locates the Protocol Unit; `contract_version` selects which
+generation of its contract answers.** Since the wire *is* the id, a unit serving
+v1 and v2 travels as **one** wire — `git.status`, not `git.status.v1` and
+`git.status.v2`. Those would be two names for one identity, and they would encode
+the version into the very thing that is supposed to carry no version.
+
+```text
+git.status                       wire / Protocol Unit
+    ├── contract_version 1  ──▶  the v1 contract's handler
+    └── contract_version 2  ──▶  the v2 contract's handler
+```
+
+The manifest still says one thing about the unit — `versions: [1, 2]` — and
+picks nothing. Selection is the resolver's, per target, by highest common
+version.
+
+Three consequences that are easy to get wrong:
+
+- **"One wire per operation" is about the Unit, not about a generation.** Two
+  arms on one wire are not two routes on one wire. A dispatch table matching
+  `wire` alone cannot express this — the second arm would be an unreachable
+  pattern, which an `-D warnings` build turns into a failure rather than a
+  surprise. The tables match `(wire, version)`.
+- **A message naming no version resolves to v1**, because that is the only thing
+  it could have meant before versions existed. That rule is what makes the
+  tuple matchable at all, and it is stated where it is implemented rather than
+  left to the reader.
+- **The version rides in the payload.** It is where the contract puts it, and
+  both paths that dispatch — the relay and the direct/P2P socket — read it the
+  same way. Whether it should move to the envelope is an open question, taken
+  only if dispatch proves the payload position insufficient.
+
+Refusing an *unversioned* call is where this meets callers, and it is confined
+to the ambiguous case: see *Resolve as a consumer* below.
+
 ### The three wire categories
 
 Every wire is one of three kinds, and its **name says which**. This is the whole
@@ -469,11 +506,22 @@ Four rules, each of which is a way this goes wrong quietly:
 - **Highest common version**, not the target's newest. A consumer speaking v1
   talking to a target offering v1 and v3 lands on v1.
 - **Versions are not contiguous.** `[1, 3]` is a legitimate answer set.
-- **Naming no version is not a refusal.** A caller that names no version is
-  relayed, because absence is not a claim about versions. A consumer that
-  *knows* it shares no version with the target must refuse locally: sending
-  nothing puts a v1-shaped payload in front of a v2-only target. The server's
-  check is a second boundary against a stale manifest, not the first one.
+- **Naming no version is refused only where it is ambiguous.** This used to read
+  "naming no version is not a refusal": a caller that named nothing was relayed,
+  because absence is not a claim about versions. The premise still holds and the
+  conclusion was wrong — a claim is exactly what a caller *cannot* make when the
+  target serves more than one generation of the unit, and relaying it hands the
+  target a request whose version nobody checked. So the relay refuses an
+  unversioned call **when the target serves more than one version of that unit**,
+  and relays it when it serves exactly one, where the call has one possible
+  meaning. Refusing on absence alone would refuse essentially all traffic:
+  every `agent.file.*`, `agent.env.*` and `agent.session.*` call is unversioned,
+  and every one of those units is in the target's manifest.
+
+  A consumer that *knows* it shares no version with the target still refuses
+  locally: sending nothing puts a v1-shaped payload in front of a v2-only
+  target. The server's check is a second boundary against a stale manifest, not
+  the first one.
 
 A refusal names both sides, on the client exactly as on the server:
 `` `agent-a` offers `git.status` at [v2], which this client cannot read ``.
@@ -618,6 +666,13 @@ is broken by it.
 | What is routed is what is advertised | the routes are *derived* from the descriptors — there is no second list |
 | The same holds for the agent's core units | `core_routes!` (`crates/nession-agent/src/protocol/mod.rs`) — one invocation emits `core_descriptors()` **and** `dispatch_core()` |
 | One wire type, one claimant, across both halves | `ExtensionRegistry::new` — `DuplicateCoreWireType` names both, whichever side lost |
+| One *version* of a unit per declaration | `ProtocolDescriptor::validate` — a second contract at one version is ambiguous, so it is refused rather than resolved by iteration order |
+| Two versions of one unit share its one wire | the same `validate`, which no longer refuses it — the wire locates the unit and the version selects the generation, so a second wire would be a second identity |
+| One wire cannot locate two units | `ProtocolManifest::validate_wires` — refused at composition, because `unit_for_wire` scans and a dispatch table takes the first arm, so a shared wire is a wrong answer presented as a right one |
+| A router selects by version, not only by wire | the route tables match `(wire, version)`; `serve`-side `named_contract_version` resolves an absent version to v1 |
+| A named version the target does not serve is refused | `ExtensionRegistry::check_named_version` on the agent, the relay on the server — the same words on both, because two boundaries disagreeing about "unsupported" is how a negotiation is bypassed |
+| A contract version cannot be overwritten in the schema document | `schema::entry_key` — `protocols` is keyed `<id>@v<N>`, because a JSON object cannot raise on a duplicate key and `Map::insert` would have replaced silently |
+| Completeness is compared per version, not per id | `nession-protocol-codegen`'s `declared()` is keyed `(id, version)` — an id-keyed map would agree with itself while the catalog and the providers disagreed |
 | A core unit the agent does not serve is not advertised | the same invocation — `CORE_WIRES` and `core_descriptors()` are the same list |
 | The same holds for the Server's units | `server_routes!` (`crates/nession-server/src/protocol/mod.rs`) — one invocation, and `every_unit_the_server_dispatches_is_in_its_manifest` says so |
 | A client can ask the Server what it serves | `server.info` → `ServerInfoResponse.protocol_manifest` |
@@ -626,7 +681,9 @@ is broken by it.
 | A peer with no manifest does not connect | `handle_agent_register` — `protocol_manifest` is required, and its absence is a rejection |
 | A straggler is refused per call, not disconnected | the same gate as any other unsupported unit — `contract_not_supported` |
 | A consumer resolves per target, not per connection | `ProtocolDirectory` is keyed by agent id and replaced wholesale by each agent-list snapshot |
-| A consumer never sends a version it cannot read | `addressedPayload` refuses locally — the server's gate cannot catch this case, because a caller that names nothing is relayed |
+| A consumer never sends a version it cannot read | `addressedPayload` refuses locally — it has no unversioned branch at all, so a consumer with nothing to resolve has nothing to send |
+| A target the directory has not heard from is not relayed to | `ProtocolDirectory.targetProtocols` — `unknown` is its own answer, and `addressedPayload` refuses it rather than treating "not fetched yet" as "advertises nothing" |
+| An unversioned call is refused where it is ambiguous | the relay, when the target serves more than one version of that unit — one version has one possible meaning, so it still relays |
 | Every path that learns an agent list publishes it | `AgentsPlugin.listAgents` and the `server.agents.changed` push, both calling one `publishProtocols` |
 | The agent list carries the same fields on every path | `server/agent_view.rs` — one builder, because the two hand-built ones had already drifted |
 | Generated bindings are what the contracts say | `just check-codegen` (`scripts/check-codegen-drift.sh`) — regenerate into a scratch directory, diff |
