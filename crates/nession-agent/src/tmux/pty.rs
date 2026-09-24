@@ -66,11 +66,35 @@ impl PtySession {
         // Hide the tmux status bar for this session only — the web UI has
         // its own chrome.  Using `-t` instead of `-g` avoids a global
         // side-effect that would affect every session on the machine.
-        let _ = tmux
-            .cmd()
-            .std()
-            .args(["set-option", "-t", session_name, "status", "off"])
-            .status();
+        //
+        // **BestEffort** (#991 open question 4, decided here). What breaks if
+        // this fails: the attached client sees tmux's own status line in the
+        // last row of the grid — visual noise in a client whose chrome is the
+        // web UI's. What does not break: the attach, the pane, and every byte
+        // of its content. It is a *presentation* option applied to the client
+        // being opened, not a prerequisite for opening it, so `?` here would
+        // make a cosmetic preference able to fail an attach. Measured on tmux
+        // 3.6b: when the option is refused, the refusal is `no such session:
+        // <name>` (exit 1) — a session the attach itself cannot survive either,
+        // which is exactly why it must not be *this* call that reports it.
+        //
+        // Observable rather than dropped (#991: "no silent accidental
+        // policy"): the failure names the option and carries tmux's stderr.
+        // `.std()` + `.output()` rather than `.status()`, because a status-only
+        // call has no pipes to carry tmux's reason.
+        let mut status_bar = tmux.cmd().std();
+        status_bar.args(["set-option", "-t", session_name, "status", "off"]);
+        match status_bar.output() {
+            Ok(out) if out.status.success() => {}
+            Ok(out) => tracing::warn!(
+                "best-effort `set-option status off` for session {session_name} failed ({}): {}",
+                out.status,
+                String::from_utf8_lossy(&out.stderr).trim()
+            ),
+            Err(e) => tracing::warn!(
+                "best-effort `set-option status off` for session {session_name} failed to spawn: {e}"
+            ),
+        }
 
         // Build the command using portable-pty's CommandBuilder
         // and spawn it on the slave side of the PTY.  portable-pty has its own
@@ -174,9 +198,24 @@ impl PtySession {
 
 impl Drop for PtySession {
     fn drop(&mut self) {
-        // Detach the tmux client gracefully using a blocking command (Drop is
-        // sync so we cannot wait on the async child).  SIGKILL on a tmux
-        // attach client is less risky than control-mode, but be safe.
+        // **Cleanup** (#991): a teardown path, and its failure is allowed —
+        // but it must not become anyone's error and must not panic, which is
+        // why the shape is `let _ =` and not `?`.
+        //
+        // What actually ends this client is `child.kill()`/`child.wait()`
+        // below: `Drop` cannot await, and SIGKILL on a plain attach client is
+        // the documented fallback ("less risky than control-mode, but be
+        // safe"). Detaching first is the courteous route to the same end.
+        //
+        // **Measured on tmux 3.6b (2026-09-24): `-t` is a *client* target and a
+        // session name is not one** — this call answers `can't find client:
+        // <session>` (exit 1) and detaches nothing, so the detach has been a
+        // no-op since it was written. The class is `Cleanup` either way and the
+        // silence is deliberate: the child kill is what reaps the client, and
+        // warning on every teardown would be an alarm nobody can act on here.
+        // The target form is a client-lifecycle question (`-s <session>`
+        // detaches *every* client of the session, including a user's own manual
+        // attach), so it is not decided by this step — see #991 step 8/9.
         let _ = self
             .tmux
             .cmd()
@@ -186,7 +225,11 @@ impl Drop for PtySession {
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .status();
-        // Best-effort reap — the child has likely exited after detach.
+        // Reap the PTY child. Not a tmux call: this is `portable_pty::Child`,
+        // the `tmux attach` process this backend spawned, so no tmux
+        // operation class applies — there is no tmux exit status here to
+        // classify, only a process to reap, and a reap that fails when the
+        // child already exited must not surface as anything.
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
@@ -213,7 +256,15 @@ impl super::session::TmuxSession for PtySession {
     }
 
     async fn close(&mut self) -> Result<()> {
-        // Detach the tmux client gracefully before killing the subprocess.
+        // **Cleanup**, not `Required`, and the class is why this returns `Ok`
+        // to its caller: closing is the teardown itself, so its failure has no
+        // primary operation left to invalidate — what a caller can act on is
+        // the *session* teardown (`SessionManager::kill_session`, which is
+        // `Required` and reports tmux's own words), not whether a client had to
+        // be killed instead of detaching. `?` here would report an error for a
+        // client that is gone either way. Same measured target-form note as
+        // [`Drop`]: `-t <session>` is not a client target, so this detach does
+        // not happen, and the kill below is what ends the client.
         let _ = self
             .tmux
             .cmd()
@@ -223,7 +274,7 @@ impl super::session::TmuxSession for PtySession {
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .status();
-        // Best-effort reap — child should have exited after detach.
+        // Not a tmux call — the PTY child process, as in `Drop`.
         let _ = self.child.kill();
         let _ = self.child.wait();
         Ok(())
@@ -365,6 +416,98 @@ mod tests {
             assert_eq!(session.viewport(), (80, 24));
             drop(session);
         }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_refused_status_option_does_not_stop_the_attach() {
+        // #991 open question 4, decided at the call site: `set-option status
+        // off` is `BestEffort` — hiding tmux's status bar is what the web UI's
+        // own chrome replaces, so a tmux that refuses it yields a client with
+        // one noisy row, not a client that cannot be opened. The fake refuses
+        // it (with tmux's real wording for a target that is not there, measured
+        // on 3.6b) and the attach still stands.
+        //
+        // Reddens on: propagating the failure (`?` — the `expect` below fails),
+        // and on dropping the call (the recorded-call assertion fails).
+        let dir = tempfile::tempdir().expect("tempdir");
+        let fake = crate::test_support::FakeTmux::new(
+            dir.path(),
+            "case \"$1\" in set-option) echo 'no such session: nession-fake-sess' >&2; exit 1;; \
+             *) exit 0;; esac",
+        );
+
+        let (session, _rx) = PtySession::attach(&fake.dep(), "nession-fake-sess", 80, 24)
+            .expect("a refused status option must not fail the attach");
+        assert_eq!(session.viewport(), (80, 24));
+
+        assert_eq!(
+            fake.calls().first(),
+            Some(&vec![
+                "set-option".to_string(),
+                "-t".to_string(),
+                "nession-fake-sess".to_string(),
+                "status".to_string(),
+                "off".to_string(),
+            ]),
+            "the attempt is still made, targeted at this session and not globally: {:#?}",
+            fake.calls()
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_refused_detach_changes_neither_close_nor_drop() {
+        // The `Cleanup` class, at both teardown paths: `close` returns `Ok`
+        // even when the detach is refused, and `Drop` does not panic. What ends
+        // the client in both is the child kill/reap below the detach, which is
+        // why the class tolerates the failure — and why propagating it would be
+        // wrong: a caller would be told the close failed for a client that is
+        // gone either way.
+        //
+        // The fake answers with the measurement this step took on tmux 3.6b:
+        // `-t` takes a *client* target, so a session name is not one and the
+        // call has always failed (`can't find client: <session>`, exit 1). Its
+        // silence in the old `let _ =` is the point of the class statement
+        // beside it — the teardown that actually happens is the process one.
+        //
+        // Reddens on: making `close` propagate the detach failure.
+        //
+        // The evidence is a sentinel file rather than a line of the fake's argv
+        // log: this backend *spawns* a tmux client, so the attach child and the
+        // detach command are two processes appending to one log at once, and
+        // `FakeTmux` writes a call's argv one entry at a time. A per-call
+        // assertion there is racy — measured, 3 runs in 10 spliced the two
+        // calls' entries together — while `: > <file>` in the refusing branch is
+        // atomic and says exactly what this test needs: the branch that refuses
+        // was reached. (The harness race is real and not mine to fix here; the
+        // other fake-based tests assert on awaited calls, which cannot overlap.)
+        let dir = tempfile::tempdir().expect("tempdir");
+        let sentinel = dir.path().join("detach-ran");
+        let fake = crate::test_support::FakeTmux::new(
+            dir.path(),
+            &format!(
+                "case \"$1\" in detach-client) : > \"{sent}\"; \
+                 echo 'cant find client: nession-fake-sess' >&2; exit 1;; \
+                 *) exit 0;; esac",
+                sent = sentinel.display(),
+            ),
+        );
+
+        let (mut session, _rx) = PtySession::attach(&fake.dep(), "nession-fake-sess", 80, 24)
+            .expect("the injected binary accepts the attach");
+        crate::tmux::session::TmuxSession::close(&mut session)
+            .await
+            .expect("a refused detach is Cleanup, not a close failure");
+        assert!(
+            sentinel.exists(),
+            "the detach really was attempted, and refused by the injected binary: {:#?}",
+            fake.calls()
+        );
+
+        // And the Drop path, with the same refusing fake: reaching the end of
+        // this test without a panic is the assertion.
+        drop(session);
     }
 
     #[cfg(unix)]
