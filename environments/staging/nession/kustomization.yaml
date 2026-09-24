@@ -27,13 +27,13 @@ resources:
 images:
 - name: ghcr.io/bestnathan/nession-agent
   newName: ghcr.io/bestnathan/nession
-  newTag: agent-fc95d80
+  newTag: agent-f220cac
 - name: ghcr.io/bestnathan/nession-server
   newName: ghcr.io/bestnathan/nession
-  newTag: server-fc95d80
+  newTag: server-f220cac
 - name: ghcr.io/bestnathan/nession-ui
   newName: ghcr.io/bestnathan/nession
-  newTag: ui-fc95d80
+  newTag: ui-f220cac
 
 patchesStrategicMerge:
 - patch-imagepullsecrets.yaml
