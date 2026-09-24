@@ -384,12 +384,16 @@ impl SessionManager {
                 );
             }
             if !init_cmd.is_empty() {
-                let _ = self
-                    .cmd
-                    .tokio()
-                    .args(["send-keys", "-t", name, &init_cmd, "Enter"])
-                    .stderr(std::process::Stdio::null())
-                    .status()
+                // Typed into the live shell through the same operation every
+                // other send-keys call site uses. **The class is unchanged and
+                // unchanged deliberately**: `let _ =` was this site's policy
+                // before #991 step 5 and it still is, because whether a failed
+                // stage-2 line is tolerable is #991's step 7 (it is a policy
+                // question about this call, not about the grammar). What
+                // changed is that the argument vector — including the trailing
+                // `Enter` — is now built once, by the owner, instead of here.
+                let _ = TmuxOps::new(self.cmd.clone())
+                    .send_keys(name, &init_cmd)
                     .await;
                 let _ = self
                     .cmd
@@ -689,6 +693,127 @@ mod window_size_lock_tests {
             "error connecting to /tmp/x/tmux.sock (File name too long)"
         ));
         assert!(!is_no_sessions_stderr("lost server"));
+    }
+}
+
+/// The fake-tmux tests for `create_session`'s legacy stage 2.
+///
+/// `#[cfg(test)]` with per-item `#[cfg(unix)]` rather than `cfg(all(test,
+/// unix))` on the module: clippy's `allow-expect-in-tests` (clippy.toml)
+/// recognizes a `cfg(test)` module, and spelling the predicate as `all(...)`
+/// hides that from it — the module's `.expect(…)` calls then read as
+/// production code and the lint gate fails. The items are Unix-only because
+/// they write and chmod a `#!/bin/sh` script.
+#[cfg(test)]
+mod legacy_stage_two_tests {
+    use super::*;
+
+    /// Separator the fake tmux writes between recorded calls.
+    #[cfg(unix)]
+    const CALL_SEPARATOR: &str = "==call==";
+
+    /// A fake tmux that records its arguments — one per line, so a call's
+    /// *boundaries* are visible — and fails the first `new-session` so
+    /// `create_session` takes its legacy stage-2 path (the one for a tmux
+    /// without `-e`, i.e. before 3.0).
+    ///
+    /// The `-S <socket>` prefix is stripped first, exactly as real tmux
+    /// receives it: a script matching on `$1` without that shift would see `-S`
+    /// and fall through to its catch-all, "working" while testing nothing.
+    #[cfg(unix)]
+    fn recording_shim(dir: &std::path::Path) -> (String, PathBuf) {
+        use std::os::unix::fs::PermissionsExt;
+        let log = dir.join("argv.log");
+        let stage1 = dir.join("stage1-ran");
+        let path = dir.join("tmux");
+        std::fs::write(
+            &path,
+            format!(
+                "#!/bin/sh\n\
+                 if [ \"$1\" = \"-S\" ]; then shift 2; fi\n\
+                 printf '%s\\n' \"$@\" >> \"{log}\"\n\
+                 echo \"{sep}\" >> \"{log}\"\n\
+                 case \"$1\" in\n\
+                   new-session)\n\
+                     if [ -f \"{stage1}\" ]; then exit 0; else : > \"{stage1}\"; exit 1; fi;;\n\
+                   *) exit 0;;\n\
+                 esac\n",
+                log = log.display(),
+                sep = CALL_SEPARATOR,
+                stage1 = stage1.display(),
+            ),
+        )
+        .expect("write shim");
+        let mut perms = std::fs::metadata(&path)
+            .expect("shim metadata")
+            .permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&path, perms).expect("chmod shim");
+        (path.to_string_lossy().into_owned(), log)
+    }
+
+    /// The recorded calls, each as the list of argv entries tmux received.
+    #[cfg(unix)]
+    fn recorded_calls(log: &str) -> Vec<Vec<&str>> {
+        log.split(CALL_SEPARATOR)
+            // The separator is written *after* each call, so every block but
+            // the first opens with the newline that ended the previous one.
+            .map(|block| block.trim_matches('\n').lines().collect::<Vec<&str>>())
+            .filter(|args| !args.is_empty())
+            .collect()
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn stage_two_types_the_env_line_as_the_owners_argv() {
+        // Stage 2 is the path for a tmux older than 3.0, so it cannot be reached
+        // on this machine's tmux at all — the fake is what makes the migrated
+        // call site observable. It is `let _ =` in production, so nothing else
+        // would notice if the line were suddenly sent as five separate
+        // keystrokes, or without its `Enter`.
+        //
+        // Reddens on: dropping `Enter` from `send_keys_args` (the call becomes
+        // three entries long plus… → `len() == 5` and the last-entry assertion
+        // fail), splitting the line into key names (length), or swapping the
+        // `-t` order (the prefix assertion).
+        let dir = tempfile::tempdir().expect("tempdir");
+        let (shim, log_path) = recording_shim(dir.path());
+        let mut mgr = SessionManager::new();
+        mgr.with_tmux_bin(shim);
+        let session = crate::test_support::TestSession::new("stage2-argv");
+
+        mgr.create_session(session.name(), SESSION_WIDTH, SESSION_HEIGHT, "/tmp", &[])
+            .await
+            .expect("against the shim, create takes its legacy stage-2 path");
+
+        let log = std::fs::read_to_string(&log_path).expect("shim recorded its calls");
+        let calls = recorded_calls(&log);
+        let typed = calls
+            .iter()
+            .find(|args| args.first() == Some(&"send-keys"))
+            .unwrap_or_else(|| panic!("stage 2 must type the environment line: {calls:?}"));
+
+        assert_eq!(
+            typed.len(),
+            5,
+            "send-keys takes the whole line as ONE argument and the trailing \
+             Enter is part of the operation: {typed:?}"
+        );
+        assert_eq!(
+            &typed[..3],
+            ["send-keys", "-t", session.name()],
+            "the session is the target, in the owner's order: {typed:?}"
+        );
+        assert_eq!(
+            typed.last(),
+            Some(&"Enter"),
+            "a line that is typed but never submitted sets nothing: {typed:?}"
+        );
+        assert!(
+            typed[3].starts_with("export TERM=xterm-256color;")
+                && typed[3].contains("export LANG=C.UTF-8;"),
+            "the line is the export chain stage 2 builds, unchanged: {typed:?}"
+        );
     }
 }
 

@@ -39,6 +39,22 @@
 //! caller choosing `BestEffort` has to say so, and it says it in its own code
 //! where a reader can see it.
 //!
+//! ## What is deliberately not here: control-mode command lines
+//!
+//! `control.rs` writes `send-keys … -H <hex>` and `resize-window …` to an
+//! attached control-mode client's **stdin** rather than spawning anything. That
+//! is tmux grammar too, and it is a *different operation* from the argv
+//! [`TmuxOps::send_keys`] below — different flag, different payload encoding
+//! (raw bytes rather than key names), different transport. It cannot become an
+//! operation here as things stand either, because an operation's one guarantee
+//! is that it returns the failure it caused, and that transport has no failure
+//! to return: nothing is spawned, so there is no exit status, no stderr, and
+//! tmux's answer to a bad line arrives asynchronously on the same pipe the
+//! output comes back on. One `send_keys` covering both would be one name for
+//! two incompatible result semantics. It is also the same shape as
+//! `resize-window`, which #991 assigns to its step 8 — so that transport's seam
+//! gets designed once both shapes are known, not from the first of them.
+//!
 //! [`TmuxCmd`]: super::cmd::TmuxCmd
 //! [`EnvManager::set_environment`]: super::env::EnvManager::set_environment
 
@@ -108,6 +124,63 @@ fn show_environment_args<'a>(session: &'a str, name: &'a str) -> [&'a str; 4] {
 /// something that is not the line it documents.
 fn value_from_line(line: &str) -> Option<String> {
     line.split_once('=').map(|(_, value)| value.to_string())
+}
+
+/// The format the window-size query asks tmux for.
+///
+/// Both dimensions in one format, because they are one round trip either way
+/// and two queries could answer out of two different moments — a window
+/// resized in between would report a width and a height that never coexisted.
+/// It is a const so a caller cannot ask for half a size.
+const WINDOW_SIZE_FORMAT: &str = "#{window_width} #{window_height}";
+
+/// The argument vector for one window-size query.
+///
+/// `display-message [-p] [-t target-pane] [format]`. `-p` is what makes tmux
+/// print the expansion to stdout instead of writing it into a status line, and
+/// `-t` is what binds the answer to the session that was asked about — without
+/// it tmux resolves a target of its own choosing (measured on 3.6b: with two
+/// sessions on one socket, a target-less query answered out of one the caller
+/// never named).
+///
+/// The arity is part of the type, like [`set_environment_args`]'s: a second
+/// format entry cannot be appended without changing this signature.
+fn window_size_args(session: &str) -> [&str; 5] {
+    ["display-message", "-p", "-t", session, WINDOW_SIZE_FORMAT]
+}
+
+/// Parse the `"<cols> <rows>"` line [`TmuxOps::window_size`] asks for.
+///
+/// Whitespace-separated rather than a fixed split, because that is what tmux's
+/// word is: it prints the two numbers and a newline. Extra trailing fields are
+/// ignored, and a missing or unparseable dimension is an error rather than a
+/// default — a call site that wants a default has to supply one, which is how
+/// `capture_scrollback`'s 80×24 stays visible in `util.rs` beside the call it
+/// belongs to.
+fn size_from_line(line: &str) -> Result<(u16, u16)> {
+    let mut parts = line.split_whitespace();
+    let cols = parts
+        .next()
+        .with_context(|| format!("no width in {line:?}"))?
+        .parse::<u16>()
+        .with_context(|| format!("width in {line:?} is not a number"))?;
+    let rows = parts
+        .next()
+        .with_context(|| format!("no height in {line:?}"))?
+        .parse::<u16>()
+        .with_context(|| format!("height in {line:?} is not a number"))?;
+    Ok((cols, rows))
+}
+
+/// The argument vector for one line typed into a session:
+/// `send-keys -t <session> <keys> Enter`.
+///
+/// `keys` is ONE entry, so a line containing spaces arrives as the single
+/// argument the caller passed and nothing here splits it into key names. `Enter`
+/// is the last of the fixed five, so pressing it cannot be forgotten at a call
+/// site and cannot drift out of the grammar.
+fn send_keys_args<'a>(session: &'a str, keys: &'a str) -> [&'a str; 5] {
+    ["send-keys", "-t", session, keys, "Enter"]
 }
 
 /// The tmux semantic owner: typed operations over one [`TmuxCmd`].
@@ -214,11 +287,104 @@ impl TmuxOps {
             )
         })
     }
+
+    /// The current size of `session`'s active window, as tmux reports it:
+    /// `tmux display-message -p -t <session> '#{window_width} #{window_height}'`.
+    ///
+    /// This was written twice before #991 — `util.rs` asked
+    /// `-t <session> -p <format>` and fell back to 80×24 per dimension on any
+    /// failure, `server/websocket.rs` asked `-p -t <session> <format>` and
+    /// errored. Same query, two encodings, two policies. The query and its
+    /// parse are here now; each caller keeps the policy it had, at its own call
+    /// site (see the module docs).
+    ///
+    /// **A target that does not exist is not a non-zero exit.** Measured on
+    /// tmux 3.6b against a live server: `display-message -p -t nope '<fmt>'`
+    /// exits **0** and prints an empty line, because the format expands to
+    /// nothing. So the parse is what fails, and this returns `Err` for it —
+    /// which is what lets the `BestEffort` caller fall back to its default and
+    /// keeps the `Required` caller from reading an empty answer as a size.
+    pub async fn window_size(&self, session: &str) -> Result<(u16, u16)> {
+        let output = self
+            .cmd
+            .tokio()
+            .args(window_size_args(session))
+            .stderr(std::process::Stdio::piped())
+            .output()
+            .await
+            .with_context(|| format!("failed to spawn tmux display-message for {session}"))?;
+        if !output.status.success() {
+            anyhow::bail!(
+                "tmux display-message -p -t {session} failed: {} ({})",
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+        }
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let line = stdout.trim_end_matches(['\r', '\n']);
+        size_from_line(line).with_context(|| {
+            format!("tmux display-message -p -t {session} answered no window size")
+        })
+    }
+
+    /// Type one line into `session`'s active pane and press Enter:
+    /// `tmux send-keys -t <session> <keys> Enter`.
+    ///
+    /// The `Enter` is part of the operation, not of the caller's argument,
+    /// because every call site wants it: the line is a shell command and a line
+    /// that is never submitted is not the operation anyone asked for.
+    ///
+    /// This is the **argv** form — a subprocess, whose exit status and stderr
+    /// are the failure this returns. A control-mode client's `send-keys -H` is a
+    /// different operation over a different transport and is deliberately not
+    /// this; see the module docs for why it is not unified with it.
+    ///
+    /// Both halves of what changed when this moved: the argument vector is now
+    /// built once, in [`send_keys_args`], instead of at the two call sites that
+    /// each wrote it; and a failure now carries tmux's own stderr, where the
+    /// `util::send_keys` it replaces discarded it (`Stdio::null()`) and
+    /// reported only the session name (#991: a required failure retains useful
+    /// tmux context). No caller's *class* changed — `EnvManager` still
+    /// propagates, `SessionManager`'s legacy stage 2 still ignores.
+    pub async fn send_keys(&self, session: &str, keys: &str) -> Result<()> {
+        let output = self
+            .cmd
+            .tokio()
+            .args(send_keys_args(session, keys))
+            .stderr(std::process::Stdio::piped())
+            .output()
+            .await
+            .with_context(|| format!("failed to spawn tmux send-keys for session {session}"))?;
+        if output.status.success() {
+            return Ok(());
+        }
+        anyhow::bail!(
+            "tmux send-keys -t {session} failed: {} ({})",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        )
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A real tmux session on this run's harness socket, killed on drop.
+    ///
+    /// Created through `SessionManager` rather than by spelling `new-session`
+    /// here: the point of these tests is that the owner's queries agree with
+    /// the session the rest of the crate creates, and a test that built its own
+    /// session could agree with itself and nothing else.
+    async fn probe_session(prefix: &str) -> crate::test_support::TestSession {
+        use super::super::manager::{SessionManager, SESSION_HEIGHT, SESSION_WIDTH};
+        let guard = crate::test_support::TestSession::new(prefix);
+        SessionManager::new()
+            .create_session(guard.name(), SESSION_WIDTH, SESSION_HEIGHT, "/tmp", &[])
+            .await
+            .expect("create probe session");
+        guard
+    }
 
     #[test]
     fn set_environment_argv_splits_name_from_value() {
@@ -306,5 +472,250 @@ mod tests {
         let ops = TmuxOps::new(TmuxCmd::new("/nonexistent/fake-tmux", socket.clone()));
         assert_eq!(ops.cmd.socket_path(), socket.as_path());
         assert_eq!(ops.cmd.bin(), "/nonexistent/fake-tmux");
+    }
+
+    // ── the window-size query ────────────────────────────────────────────────
+
+    #[test]
+    fn window_size_argv_prints_the_target_and_both_dimensions() {
+        // Each assertion is the one that goes red under a specific edit:
+        //   - drop `-p`            → the first (the full vector) fails
+        //   - drop `-t`            → the first, and `names the target` below
+        //   - swap `-p`/`-t`       → the first (the order is asserted)
+        //   - ask only one dimension → `asks for both dimensions` fails
+        let argv = window_size_args("sess");
+        assert_eq!(
+            argv,
+            [
+                "display-message",
+                "-p",
+                "-t",
+                "sess",
+                "#{window_width} #{window_height}"
+            ]
+        );
+        assert!(
+            argv.contains(&"-p"),
+            "without -p tmux writes into a status line instead of stdout: {argv:?}"
+        );
+        assert!(
+            argv.contains(&"-t"),
+            "without -t tmux resolves a target of its own choosing, so the answer \
+             can come from a session nobody asked about: {argv:?}"
+        );
+        let format = argv[4];
+        assert!(
+            format.contains("#{window_width}") && format.contains("#{window_height}"),
+            "one query answers both dimensions, or a resize between two queries \
+             reports a size that never existed: {format:?}"
+        );
+        assert_eq!(argv.len(), 5, "arity is part of the grammar: {argv:?}");
+    }
+
+    #[test]
+    fn size_from_line_reads_the_two_numbers_tmux_prints() {
+        // Whitespace-separated, because that is tmux's word: it prints the two
+        // numbers and a newline. A `split(' ')` instead would go red on the
+        // leading/trailing-space case below.
+        assert_eq!(size_from_line("200 60").ok(), Some((200, 60)));
+        assert_eq!(
+            size_from_line(" 200   60 \n").ok(),
+            Some((200, 60)),
+            "tmux's output is whitespace-separated and newline-terminated"
+        );
+        assert_eq!(
+            size_from_line("200 60 extra").ok(),
+            Some((200, 60)),
+            "the size is the first two fields; a third cannot appear in the format"
+        );
+    }
+
+    #[test]
+    fn size_from_line_refuses_to_invent_a_dimension() {
+        // The mutation this pins: defaulting a missing or unparseable dimension.
+        // `capture_scrollback`'s 80×24 belongs to `capture_scrollback`; an owner
+        // that supplied defaults would give the `Required` caller a size it
+        // could not tell from a real one.
+        for (line, missing) in [
+            ("200", "no height"),
+            ("", "no width"),
+            ("200 x", "height"),
+            ("x 60", "width"),
+        ] {
+            let err = size_from_line(line)
+                .expect_err(&format!("{line:?} is not a size"))
+                .to_string();
+            assert!(
+                err.contains(missing),
+                "the failure must say what was missing ({missing:?}): {err}"
+            );
+            assert!(
+                err.contains(&format!("{line:?}")),
+                "the failure must quote what tmux actually answered: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn send_keys_argv_presses_enter_and_keeps_the_line_whole() {
+        // Two edits redden this, and both are the mistakes the inline copies
+        // could make: dropping `Enter` (the line is typed but never submitted)
+        // and splitting `keys` into key names (a line with spaces becomes
+        // several keystrokes).
+        let argv = send_keys_args("sess", "export A='b c'");
+        assert_eq!(argv, ["send-keys", "-t", "sess", "export A='b c'", "Enter"]);
+        assert_eq!(
+            argv.last(),
+            Some(&"Enter"),
+            "the operation is \"type this line AND submit it\": {argv:?}"
+        );
+        assert_eq!(
+            argv[3], "export A='b c'",
+            "the line is one argument, not a sequence of key names: {argv:?}"
+        );
+        assert_eq!(argv.len(), 5, "arity is part of the grammar: {argv:?}");
+    }
+
+    #[tokio::test]
+    async fn window_size_reads_back_the_size_tmux_created_the_session_with() {
+        // The real-tmux proof that the unified grammar asks the question the
+        // two hand-written copies used to ask. `create_session` builds a
+        // session at the crate's fixed size, so the answer is not a guess.
+        use super::super::manager::{SESSION_HEIGHT, SESSION_WIDTH};
+        if !super::super::util::check_tmux_available()
+            .await
+            .unwrap_or(false)
+        {
+            return;
+        }
+        let guard = probe_session("ops-window-size").await;
+        let size = TmuxOps::global()
+            .window_size(guard.name())
+            .await
+            .expect("a session that exists has a size");
+        assert_eq!(
+            size,
+            (SESSION_WIDTH, SESSION_HEIGHT),
+            "the query must answer with the session's real size"
+        );
+    }
+
+    #[tokio::test]
+    async fn window_size_of_a_missing_session_is_an_error_not_a_default() {
+        // Measured on tmux 3.6b: against a live server whose target does not
+        // exist, `display-message -p -t nope '<fmt>'` exits **0** and prints an
+        // empty line. So this `Err` comes from the parse, and the mutation that
+        // proves the target is bound is dropping `-t` from the argv: tmux then
+        // answers out of a session it picked itself and this call succeeds.
+        if !super::super::util::check_tmux_available()
+            .await
+            .unwrap_or(false)
+        {
+            return;
+        }
+        // A live server, so the failure cannot be "no server running": that is
+        // the other arm, and it is asserted separately.
+        let _server = probe_session("ops-window-size-missing").await;
+        let err = TmuxOps::global()
+            .window_size("nession_nonexistent_session_xyz")
+            .await
+            .expect_err("a session that does not exist must not answer a size");
+        let message = format!("{err:#}");
+        assert!(
+            message.contains("nession_nonexistent_session_xyz"),
+            "the failure must name the session it asked about: {message}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_socket_with_no_server_fails_with_tmux_own_words() {
+        // The non-zero-exit arm, for both operations, without a fake tmux: a
+        // real tmux binary and a socket no server has ever bound. tmux answers
+        // "error connecting to <path>" on stderr and exits 1.
+        //
+        // The mutation this pins is the one #980 was: swallowing the status.
+        // Returning `Ok` where the status is non-zero reddens the `expect_err`
+        // below (run: the send-keys half of the pair fails), and dropping
+        // tmux's stderr from the message reddens the first assertion — a
+        // `Required` caller that cannot see either is the failure mode #991
+        // exists for.
+        if !super::super::util::check_tmux_available()
+            .await
+            .unwrap_or(false)
+        {
+            return;
+        }
+        let dir = tempfile::tempdir().expect("tempdir");
+        let socket = dir.path().join("tmux.sock");
+        assert!(dir.path().join("tmux.sock").to_string_lossy().len() < 103);
+        let ops = TmuxOps::new(TmuxCmd::new(
+            cmd::global().bin().to_string(),
+            socket.clone(),
+        ));
+        let socket_text = socket.to_string_lossy().into_owned();
+
+        let errors = [
+            ops.window_size("sess").await.expect_err("no server to ask"),
+            ops.send_keys("sess", "echo hi")
+                .await
+                .expect_err("no server to type into"),
+        ];
+        for err in errors {
+            let message = format!("{err:#}");
+            assert!(
+                message.contains("error connecting to"),
+                "the failure must carry tmux's own stderr: {message}"
+            );
+            assert!(
+                message.contains(&socket_text),
+                "and it must name the socket tmux could not reach: {message}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn send_keys_types_the_line_into_the_session_shell() {
+        // The end-to-end proof for the argv form: the bytes reach a real shell
+        // *and the shell runs the line*.
+        //
+        // The marker is deliberately not the text that is typed. A shell echoes
+        // what it is handed, so a pane containing the typed line proves only
+        // that the characters arrived — `send-keys` without `Enter` leaves
+        // exactly that, unexecuted. `printf` makes the printed word a value the
+        // input never contains: the echoed line reads `printf 'step5%s\n' …`,
+        // and only execution produces `step5-send-keys-ran`. Dropping `Enter`
+        // from `send_keys_args` reddens this.
+        if !super::super::util::check_tmux_available()
+            .await
+            .unwrap_or(false)
+        {
+            return;
+        }
+        let guard = probe_session("ops-send-keys").await;
+        // The shell needs a moment to be readable; the existing capture tests
+        // wait the same way.
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        TmuxOps::global()
+            .send_keys(guard.name(), "printf 'step5%s\\n' -send-keys-ran")
+            .await
+            .expect("send keys to a session that exists");
+
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+        let mut seen = String::new();
+        while tokio::time::Instant::now() < deadline {
+            if let Ok(Some((bytes, _, _))) =
+                super::super::util::capture_scrollback(guard.name(), 100).await
+            {
+                seen = String::from_utf8_lossy(&bytes).into_owned();
+                if seen.contains("step5-send-keys-ran") {
+                    break;
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        assert!(
+            seen.contains("step5-send-keys-ran"),
+            "the line was typed but never ran — or never arrived: {seen:?}"
+        );
     }
 }
