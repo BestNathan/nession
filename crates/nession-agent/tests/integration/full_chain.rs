@@ -79,6 +79,50 @@ async fn start_test_server(
 }
 
 /// Start a real agent WebSocket server on an OS-assigned port.
+/// Read half of a connected client, named so a helper can take one.
+type WsStreamHalf = futures_util::stream::SplitStream<
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+>;
+
+/// The next text frame, or a panic naming what it was waiting for.
+///
+/// A **deadline rather than a single timeout**, because every wait this
+/// replaces is for an *external process* to answer: `tmux new-session` spawns a
+/// server and a pane, and `list-sessions` and `kill-session` round-trip through
+/// it. A bare two-second timeout on that is not an assertion about the
+/// lifecycle — it is a bet on how loaded the machine is, and it loses under an
+/// instrumented `just coverage` run. Measured 2026-09-24: three failures in one
+/// session, each passing on an immediate re-run of the identical tree, twice
+/// blocking a push.
+///
+/// Five seconds is not a new tolerance. It is the one the rest of this file
+/// already uses for exactly this kind of wait — the attach response and the
+/// terminal-output poll both run a five-second deadline — so this applies the
+/// file's own rule to three waits that had been given a tighter one for no
+/// stated reason. The assertions are on the reply's *contents*; the deadline
+/// was never the subject.
+///
+/// It also refuses to skip the assertion. The call sites this replaces wrapped
+/// their check in `if let WsMessage::Text(text)`, so a non-text frame arriving
+/// first made the assertion silently not run and the test pass — which is a
+/// worse failure than the timeout it was hiding.
+async fn next_text_frame(stream: &mut WsStreamHalf, what: &str) -> String {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        match tokio::time::timeout(Duration::from_millis(500), stream.next()).await {
+            Ok(Some(Ok(WsMessage::Text(text)))) => return text,
+            // Ping, Pong and Binary are not the reply; keep waiting for it.
+            Ok(Some(Ok(_))) => {}
+            Ok(Some(Err(e))) => panic!("error while waiting for {what}: {e}"),
+            Ok(None) => panic!("stream ended while waiting for {what}"),
+            Err(_) if tokio::time::Instant::now() >= deadline => {
+                panic!("timed out waiting for {what}")
+            }
+            Err(_) => {}
+        }
+    }
+}
+
 async fn start_test_agent_server(
 ) -> anyhow::Result<(std::net::SocketAddr, nession_agent::server::ServerHandle)> {
     let tmp = Box::leak(Box::new(tempfile::tempdir()?));
@@ -360,34 +404,20 @@ async fn test_session_lifecycle() {
     sink.send(WsMessage::Text(json)).await.unwrap();
 
     // Wait for response.
-    let response = tokio::time::timeout(Duration::from_secs(2), stream.next())
-        .await
-        .expect("timeout")
-        .expect("stream ended")
-        .expect("error");
-
-    if let WsMessage::Text(text) = response {
-        let parsed: serde_json::Value = serde_json::from_str(&text).unwrap();
-        assert_eq!(parsed["msg_type"], agent_msg_types::OK);
-    }
+    let text = next_text_frame(&mut stream, "the create-session reply").await;
+    let parsed: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(parsed["msg_type"], agent_msg_types::OK);
 
     // List sessions.
     let req = new_message(agent_msg_types::SESSION_LIST, serde_json::json!({}));
     let json = serde_json::to_string(&req).unwrap();
     sink.send(WsMessage::Text(json)).await.unwrap();
 
-    let response = tokio::time::timeout(Duration::from_secs(2), stream.next())
-        .await
-        .expect("timeout")
-        .expect("stream ended")
-        .expect("error");
-
-    if let WsMessage::Text(text) = response {
-        let parsed: serde_json::Value = serde_json::from_str(&text).unwrap();
-        assert_eq!(parsed["msg_type"], agent_msg_types::OK);
-        let sessions = parsed["payload"]["sessions"].as_array().unwrap();
-        assert!(sessions.iter().any(|s| s["name"] == session_name.as_str()));
-    }
+    let text = next_text_frame(&mut stream, "the session-list reply").await;
+    let parsed: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(parsed["msg_type"], agent_msg_types::OK);
+    let sessions = parsed["payload"]["sessions"].as_array().unwrap();
+    assert!(sessions.iter().any(|s| s["name"] == session_name.as_str()));
 
     // Kill the session.
     let kill = SessionKillPayload {
@@ -397,16 +427,9 @@ async fn test_session_lifecycle() {
     let json = serde_json::to_string(&req).unwrap();
     sink.send(WsMessage::Text(json)).await.unwrap();
 
-    let response = tokio::time::timeout(Duration::from_secs(2), stream.next())
-        .await
-        .expect("timeout")
-        .expect("stream ended")
-        .expect("error");
-
-    if let WsMessage::Text(text) = response {
-        let parsed: serde_json::Value = serde_json::from_str(&text).unwrap();
-        assert_eq!(parsed["msg_type"], agent_msg_types::OK);
-    }
+    let text = next_text_frame(&mut stream, "the kill-session reply").await;
+    let parsed: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(parsed["msg_type"], agent_msg_types::OK);
 
     agent_handle.shutdown().await.ok();
 }
