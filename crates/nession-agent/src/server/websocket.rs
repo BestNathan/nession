@@ -1083,7 +1083,11 @@ p2p_routes! { ctx, msg_type, payload_value;
                     }
 
                     // Session doesn't exist yet: create PtySession + first subscriber.
+                    // The backend is handed this manager's tmux addressing rather
+                    // than resolving the process-wide one, so a substituted
+                    // binary reaches the attach too (#991 step 6).
                     match crate::tmux::pty::PtySession::attach(
+                        &ctx.tmux.tmux_dep(),
                         &session_name,
                         payload.width,
                         payload.height,
@@ -1163,6 +1167,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     }
 
                     match crate::tmux::control::ControlModeSession::attach(
+                        &ctx.tmux.tmux_dep(),
                         &payload.session_name,
                         payload.width,
                         payload.height,
@@ -1275,6 +1280,13 @@ p2p_routes! { ctx, msg_type, payload_value;
                             let session_name_resize = session_name.clone();
                             let resize_reporter = ctx.resize.clone();
                             let agent_id_resize = ctx.agent_id.to_string();
+                            // The same addressing the attach above was given,
+                            // rather than the process-wide one (#991 step 6):
+                            // a migrated operation reached from a handler
+                            // inherited from `ctx.tmux` like everything else on
+                            // this path, so an injected tmux is not bypassed by
+                            // the first query that follows the attach.
+                            let tmux_resize = ctx.tmux.tmux_dep();
                             tokio::spawn(async move {
                                 // Initial resize: query tmux for the pane's
                                 // current size and forward it as one message.
@@ -1291,10 +1303,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                                 // decided (see #991 on the two policies this
                                 // query used to carry in two hand-written
                                 // copies).
-                                match crate::tmux::ops::TmuxOps::global()
-                                    .window_size(&session_name_resize)
-                                    .await
-                                {
+                                match tmux_resize.ops().window_size(&session_name_resize).await {
                                     Ok((cols, rows)) => {
                                         send_terminal_resize_msg(
                                             &outbound_resize,
@@ -2405,9 +2414,14 @@ mod tests {
                 "s1".to_string(),
                 AttachedSession {
                     backend: Arc::new(Mutex::new(Box::new(
-                        crate::tmux::pty::PtySession::attach("s1", 80, 24)
-                            .expect("a PTY for the session under test")
-                            .0,
+                        crate::tmux::pty::PtySession::attach(
+                            &crate::tmux::ops::TmuxDep::global(),
+                            "s1",
+                            80,
+                            24,
+                        )
+                        .expect("a PTY for the session under test")
+                        .0,
                     ))),
                     subscribers: Vec::new(),
                 },

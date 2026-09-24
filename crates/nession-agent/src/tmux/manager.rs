@@ -7,7 +7,7 @@ use tokio::process::Command;
 
 use super::cmd::{self, TmuxCmd};
 use super::env::EnvManager;
-use super::ops::TmuxOps;
+use super::ops::{TmuxDep, TmuxOps};
 
 /// Fixed width for tmux sessions. Individual clients get independent
 /// viewports via `refresh-client -C`, so the session's own size only needs
@@ -129,11 +129,31 @@ impl SessionManager {
         self.cmd.socket_path()
     }
 
+    /// The tmux dependency this manager runs on, for the callers that are
+    /// handed tmux addressing rather than reaching for the process-wide one —
+    /// the attach backends ([`PtySession`](super::pty::PtySession),
+    /// [`ControlModeSession`](super::control::ControlModeSession)).
+    ///
+    /// One manager's addressing, so a substituted binary reaches them too:
+    /// without this the WebSocket layer would open an attach on the
+    /// process-wide tmux while creating the session on the injected one.
+    pub fn tmux_dep(&self) -> TmuxDep {
+        TmuxDep::injected(self.cmd.clone())
+    }
+
     /// Test seam: override the tmux binary (inject a fake `tmux`), keeping the
     /// socket unchanged.
+    ///
+    /// The substitution is *total* as of #991 step 6: it rebinds the manager's
+    /// own addressing **and** the [`EnvManager`] it holds, whose operations used
+    /// to reach the process-wide tmux behind this manager's back. A test that
+    /// injects a fake and then drives `env().set_environment(…)` is driving the
+    /// fake; before that, it was driving the real binary on the real socket and
+    /// could not tell.
     #[cfg(test)]
     pub(crate) fn with_tmux_bin(&mut self, tmux_bin: impl Into<String>) -> &mut Self {
         self.cmd = self.cmd.with_bin(tmux_bin);
+        self.env.with_tmux(TmuxDep::injected(self.cmd.clone()));
         self
     }
 
@@ -457,11 +477,14 @@ impl SessionManager {
     /// discarded both the status and tmux's reason, so a failure here was
     /// unobservable even in logs (#980's invisibility half).
     ///
-    /// Bound to `self.cmd` rather than to the process-wide
+    /// Bound to the manager's own addressing rather than to the process-wide
     /// [`TmuxOps::global`](super::ops::TmuxOps::global): a manager that had been
     /// given a different socket must not propagate its environment onto the
-    /// other one. This is *not* #991 step 6 — `SessionManager` already holds
-    /// this `TmuxCmd`, and nothing new became injectable.
+    /// other one. (Steps 3–4 noted here that this is *not* step 6's work — at
+    /// the time only this manager held a `TmuxCmd` and nothing else had become
+    /// injectable. Step 6 is what changed that: the addressing is a
+    /// [`TmuxDep`] the `EnvManager` below is bound to as well, so the fake the
+    /// `legacy_stage_two_tests` module injects is what both halves run.)
     async fn propagate_env_best_effort(&self, session: &str, name: &str, value: &str) {
         let ops = TmuxOps::new(self.cmd.clone());
         if let Err(e) = ops.set_environment(session, name, value).await {
@@ -793,6 +816,131 @@ mod legacy_stage_two_tests {
             typed[3].starts_with("export TERM=xterm-256color;")
                 && typed[3].contains("export LANG=C.UTF-8;"),
             "the line is the export chain stage 2 builds, unchanged: {typed:?}"
+        );
+    }
+}
+
+/// What `with_tmux_bin` substitutes, now that it substitutes more than the
+/// manager's own addressing (#991 step 6).
+///
+/// `#[cfg(test)]` with per-item `#[cfg(unix)]` for the same reason as
+/// `legacy_stage_two_tests` above: the fake is a `#!/bin/sh` script, and a
+/// `all(test, unix)` predicate on the module would hide the `cfg(test)` from
+/// clippy's `allow-expect-in-tests`.
+#[cfg(test)]
+mod injected_tmux_tests {
+    use super::*;
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn with_tmux_bin_reaches_the_env_manager_beside_the_manager() {
+        // The whole point of step 6, asserted at the seam every existing test
+        // already uses. `mgr.env()` reaches an `EnvManager` that resolved
+        // `TmuxOps::global()` at each call before this step, so a fake injected
+        // here covered `create_session` and stopped: the env operations ran
+        // against the real binary on the process socket, and the test could not
+        // see it.
+        //
+        // The assertion is on the fake's own record, not on the error the
+        // caller got: an error alone would be produced just as well by real
+        // tmux refusing a session that does not exist.
+        //
+        // The fake's stderr is a marker real tmux never prints, for the same
+        // reason: TMUX's own wording for a missing session would satisfy the
+        // message assertion whether or not the injection took, so a message
+        // that cannot be real tmux's is what makes that assertion mean "the
+        // injected binary's words travelled".
+        let dir = tempfile::tempdir().expect("tempdir");
+        let fake = crate::test_support::FakeTmux::new(
+            dir.path(),
+            "case \"$1\" in set-environment) echo 'injected tmux refuses nession-fake' >&2; \
+             exit 1;; *) exit 0;; esac",
+        );
+        let mut mgr = SessionManager::new();
+        mgr.with_tmux_bin(fake.bin());
+
+        let err = mgr
+            .env()
+            .set_environment(
+                "nession-fake",
+                &[("NESSON_WIRED".to_string(), "1".to_string())],
+            )
+            .await
+            .expect_err("the injected binary refuses every set-environment");
+        assert!(
+            err.to_string()
+                .contains("injected tmux refuses nession-fake"),
+            "the failure must be the injected binary's: {err}"
+        );
+        assert_eq!(
+            fake.calls(),
+            vec![vec![
+                "set-environment",
+                "-t",
+                "nession-fake",
+                "NESSON_WIRED",
+                "1"
+            ]],
+            "the env operation must have run on the injected binary"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn best_effort_propagation_reports_a_failure_and_still_creates_the_session() {
+        // Stage 3's arm: `propagate_env_best_effort`'s
+        // `if let Err(e) = … { tracing::warn!(…) }`. Steps 3–4 classified this
+        // `BestEffort` *by experiment* (stage 1 already delivered the value to
+        // the shell that exists, so turning this off left the callers' tests
+        // green). The fake is what makes the failure observable instead of
+        // argued: every `set-environment` it is handed fails, so the only arm
+        // the call can take is the warn — and the session is created anyway.
+        //
+        // Reddens on: making the propagation `Required` (the `expect` below
+        // then fails), and on dropping the calls entirely (`propagated` is 0 —
+        // which is the mutation that says this test is about the propagation
+        // and not about the create).
+        let dir = tempfile::tempdir().expect("tempdir");
+        let fake = crate::test_support::FakeTmux::new(
+            dir.path(),
+            "case \"$1\" in set-environment) echo 'unknown flag -e' >&2; exit 1;; \
+             *) exit 0;; esac",
+        );
+        let mut mgr = SessionManager::new();
+        mgr.with_tmux_bin(fake.bin());
+        let session = crate::test_support::TestSession::new("step6-best-effort");
+
+        mgr.create_session(session.name(), SESSION_WIDTH, SESSION_HEIGHT, "/tmp", &[])
+            .await
+            .expect("a best-effort env failure must not take the session create down");
+
+        let calls = fake.calls();
+        let propagated = calls
+            .iter()
+            .filter(|args| args.first().map(String::as_str) == Some("set-environment"))
+            .count();
+        assert!(
+            propagated >= 2,
+            "TERM and LANG alone are propagated to future panes, and every one \
+             of them failed here: {calls:?}"
+        );
+
+        // The control the test needs to mean anything: the *same* binary
+        // refuses a required mutation through the *same* manager, so "the
+        // create succeeded" above is the BestEffort class and not a tmux that
+        // quietly accepted everything. Without this, a fake that never failed
+        // would satisfy the assertions above.
+        let required = mgr
+            .env()
+            .set_environment(
+                session.name(),
+                &[("NESSON_REQUIRED".to_string(), "1".to_string())],
+            )
+            .await;
+        assert!(
+            required.is_err(),
+            "this fake refuses every set-environment, so the manager's required \
+             path must fail on it too: {required:?}"
         );
     }
 }
