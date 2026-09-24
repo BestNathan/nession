@@ -1022,6 +1022,91 @@ fn classify_client_frame(msg: &Message) -> ClientFrame {
     }
 }
 
+/// Merge a burst of terminal-input frames into one that carries every byte.
+///
+/// `#966`. The window used to keep only the **newest** frame of a burst, which
+/// is right for a mouse report — a position, where only the last one matters —
+/// and wrong for everything else that shares `agent.terminal.input`: a paste, an
+/// IME composition and key repeat all arrive here, and their earlier frames are
+/// *content*, not stale positions.
+///
+/// Telling the two apart means reading escape sequences out of the payload, and
+/// the payload is base64 — so the classifier that decides "coalescable" cannot
+/// also decide "safe to drop". Merging removes the question instead of answering
+/// it: every byte survives, and the window still does its job, because the agent
+/// receives one frame instead of N.
+///
+/// `None` when any frame's payload cannot be read, which is the honest answer —
+/// there is nothing to merge, and the caller forwards them in order rather than
+/// guessing which ones mattered.
+fn merge_terminal_input(frames: &[Message]) -> Option<Message> {
+    use base64::Engine as _;
+    let engine = base64::engine::general_purpose::STANDARD;
+
+    let mut bytes = Vec::new();
+    for frame in frames {
+        let envelope: serde_json::Value = serde_json::from_str(frame.to_text().ok()?).ok()?;
+        let data = envelope.get("payload")?.get("data")?.as_str()?;
+        bytes.extend(engine.decode(data).ok()?);
+    }
+
+    // The newest frame supplies the envelope — the id and the session — and only
+    // its `data` is replaced. All frames in a burst are for this one relay's
+    // session, so the envelope is the same shape throughout.
+    let mut envelope: serde_json::Value =
+        serde_json::from_str(frames.last()?.to_text().ok()?).ok()?;
+    let payload = envelope.get_mut("payload")?.as_object_mut()?;
+    payload.insert(
+        "data".to_string(),
+        serde_json::Value::String(engine.encode(&bytes)),
+    );
+    Some(Message::Text(envelope.to_string()))
+}
+
+/// Forward a burst that the throttle window held, in order and losing nothing.
+///
+/// Returns `false` when a send failed, which is how the caller learns to stop.
+async fn flush_burst<AS>(agent_write: &mut AS, burst: &mut Vec<Message>) -> bool
+where
+    AS: futures_util::Sink<Message> + Unpin,
+    AS::Error: std::fmt::Display,
+{
+    use futures_util::SinkExt as _;
+
+    let frames = std::mem::take(burst);
+
+    // One frame needs no merge, and the common case is a burst of one.
+    let merged = match frames.len() {
+        0 => return true,
+        1 => frames.into_iter().next(),
+        _ => match merge_terminal_input(&frames) {
+            Some(merged) => Some(merged),
+            // Unmergeable: forward them individually rather than drop the ones
+            // that could not be folded in.
+            None => {
+                for frame in frames {
+                    if let Err(e) = agent_write.send(frame).await {
+                        error!("Failed to forward client message to agent: {}", e);
+                        return false;
+                    }
+                }
+                return true;
+            }
+        },
+    };
+
+    match merged {
+        Some(frame) => match agent_write.send(frame).await {
+            Ok(()) => true,
+            Err(e) => {
+                error!("Failed to forward client message to agent: {}", e);
+                false
+            }
+        },
+        None => true,
+    }
+}
+
 /// Why the client → agent half of the relay stopped.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ClientToAgent {
@@ -1109,7 +1194,10 @@ where
         // arrives in the meantime has to be handled *here* — this loop is the
         // only reader for as long as it runs.
         let drain_deadline = last_terminal_input + input_throttle;
-        let mut pending = Some(msg);
+        // Every terminal-input frame the window holds, oldest first. A `Vec`
+        // rather than a single `Option` because the window merges a burst
+        // instead of keeping its newest — see `merge_terminal_input` (`#966`).
+        let mut burst: Vec<Message> = vec![msg];
         let mut end_requested = false;
 
         loop {
@@ -1119,8 +1207,11 @@ where
             }
             match tokio::time::timeout(remaining, client_read.next()).await {
                 Ok(Some(Ok(m))) => match classify_client_frame(&m) {
-                    // Coalescable: keep only the newest of the burst.
-                    ClientFrame::TerminalInput => pending = Some(m),
+                    // Coalescable: held, and merged with the rest of the burst
+                    // rather than replacing it. Replacing dropped the earlier
+                    // frames, which is right for a mouse report and wrong for a
+                    // paste — and nothing here can tell them apart.
+                    ClientFrame::TerminalInput => burst.push(m),
                     // Control, read inside the window. It ends the relay
                     // exactly as the main loop ends it, and is not forwarded.
                     // Without this arm the frame fell through to the
@@ -1137,11 +1228,8 @@ where
                     // the order the client sent them, then hand this one on and
                     // go back to reading outside the window.
                     ClientFrame::Other => {
-                        if let Some(held) = pending.take() {
-                            if let Err(e) = agent_write.send(held).await {
-                                error!("Failed to forward client message to agent: {}", e);
-                                break 'forward;
-                            }
+                        if !flush_burst(agent_write, &mut burst).await {
+                            break 'forward;
                         }
                         if let Err(e) = agent_write.send(m).await {
                             error!("Failed to forward client message to agent: {}", e);
@@ -1160,14 +1248,11 @@ where
             }
         }
 
-        // The trailing edge: whatever the window kept. What the client sent
+        // The trailing edge: whatever the window held. What the client sent
         // before a relay.end still goes out, in order — that control frame
         // holds nothing back. The control frame itself never does.
-        if let Some(latest) = pending.take() {
-            if let Err(e) = agent_write.send(latest).await {
-                error!("Failed to forward client message to agent: {}", e);
-                break;
-            }
+        if !flush_burst(agent_write, &mut burst).await {
+            break;
         }
         if end_requested {
             info!("Client requested relay end for session '{}'", session_name);
@@ -1252,8 +1337,35 @@ mod tests {
         frame_with_payload(msg_type, id, json!({ "session_name": "sess" }))
     }
 
+    /// A terminal-input frame whose bytes are its own `id`, base64-encoded.
+    ///
+    /// The bytes matter since `#966`: a burst is *merged* rather than reduced to
+    /// its newest frame, so a test that wants to show the window was open has to
+    /// say what the agent received — and `frame_data` reads it back. Deriving the
+    /// bytes from the id is what makes the order visible.
     fn terminal_input(id: &str) -> Message {
-        frame(TERMINAL_INPUT_WIRE, id)
+        use base64::Engine as _;
+        frame_with_payload(
+            TERMINAL_INPUT_WIRE,
+            id,
+            json!({
+                "session_name": "sess",
+                "data": base64::engine::general_purpose::STANDARD.encode(id.as_bytes()),
+            }),
+        )
+    }
+
+    /// The bytes a terminal-input frame carries, decoded.
+    fn frame_data(msg: &Message) -> String {
+        use base64::Engine as _;
+        let envelope: serde_json::Value = serde_json::from_str(msg.to_text().unwrap()).unwrap();
+        let data = envelope["payload"]["data"].as_str().unwrap();
+        String::from_utf8(
+            base64::engine::general_purpose::STANDARD
+                .decode(data)
+                .unwrap(),
+        )
+        .unwrap()
     }
 
     fn relay_end(id: &str) -> Message {
@@ -1277,34 +1389,63 @@ mod tests {
     /// #962: a relay end that arrives inside the throttle window ends the relay
     /// rather than being forwarded to the agent.
     ///
+    /// A burst the window cannot merge goes out frame by frame — never dropped.
+    ///
+    /// A terminal-input frame with no readable `data` is not something the merge
+    /// can fold in, and the honest answer is to forward the whole burst in order
+    /// rather than pick a frame to keep. This is the path that used to lose the
+    /// earlier frames silently (`#966`); it now gives up only the frame-count
+    /// saving, which is the trade the fix is willing to make and the old
+    /// behaviour was not.
+    #[tokio::test]
+    async fn a_burst_that_cannot_be_merged_is_forwarded_whole() {
+        let (sent, _) = drive(vec![
+            frame(TERMINAL_INPUT_WIRE, "in-1"),
+            frame(TERMINAL_INPUT_WIRE, "in-2"),
+            frame(TERMINAL_INPUT_WIRE, "in-3"),
+        ])
+        .await;
+
+        assert_eq!(
+            sent.len(),
+            3,
+            "three unmergeable frames arrive as three, not as one kept and two lost: {sent:?}"
+        );
+    }
+
     /// The three inputs are what put the control frame inside the window: the
     /// first is a leading-edge forward, the second opens the window, the third
-    /// replaces it. `in-2` never reaching the agent is what proves the window
-    /// was open when `relay.end` was read — assert on the *set* alone and this
-    /// test would also pass on a machine that never entered the drain loop.
+    /// joins it. That the held pair arrives as **one** frame is what proves the
+    /// window was open when `relay.end` was read — assert on the *set* alone and
+    /// this test would also pass on a machine that never entered the drain loop.
+    ///
+    /// `#966` changed what being inside the window looks like: the burst used to
+    /// collapse to its newest frame, and it now carries every byte. The witness
+    /// moved from "`in-2` never reached the agent" to "`in-2` and `in-3` arrived
+    /// folded together", which is the same fact about the drain loop.
     #[tokio::test]
     async fn relay_end_inside_the_drain_window_ends_the_relay() {
         let first = terminal_input("in-1");
-        let coalesced_away = terminal_input("in-2");
-        let held = terminal_input("in-3");
+        let held = terminal_input("in-2");
+        let also_held = terminal_input("in-3");
         let end = relay_end("end-1");
 
-        let (sent, outcome) = drive(vec![
-            first.clone(),
-            coalesced_away,
-            held.clone(),
-            end.clone(),
-        ])
-        .await;
+        let (sent, outcome) = drive(vec![first.clone(), held, also_held, end.clone()]).await;
 
         assert!(
             !sent.contains(&end),
             "relay.end must not reach the agent, but was forwarded: {sent:?}"
         );
         assert_eq!(
-            sent,
-            vec![first, held],
-            "the burst collapsed to its newest frame, then flushed in arrival order"
+            sent.len(),
+            2,
+            "the burst is one merged frame, not one per input and not one kept: {sent:?}"
+        );
+        assert_eq!(sent[0], first);
+        assert_eq!(
+            frame_data(&sent[1]),
+            "in-2in-3",
+            "every byte of the burst, in the order the client sent it"
         );
         assert_eq!(outcome, ClientToAgent::ClientRequested);
     }
@@ -1316,29 +1457,29 @@ mod tests {
     /// reach the agent after it. A PTY resized before it receives the bytes
     /// that were written for the old size is a different session, and the old
     /// drain loop forwarded the interrupting frame first and the held input
-    /// second. `in-2` is again the witness that the window was open.
+    /// second.
+    ///
+    /// The held pair arriving merged (`#966`) is the witness that the window was
+    /// open — the previous one was that `in-2` was dropped.
     #[tokio::test]
     async fn a_frame_read_inside_the_window_keeps_its_place_in_the_order() {
         let first = terminal_input("in-1");
-        let coalesced_away = terminal_input("in-2");
-        let held = terminal_input("in-3");
+        let held = terminal_input("in-2");
+        let also_held = terminal_input("in-3");
         // The browser relays this one too: `agent.terminal.resize`, sent by the
         // Server and answered by the Agent.
         let resize = frame("agent.terminal.resize", "resize-1");
 
-        let (sent, outcome) = drive(vec![
-            first.clone(),
-            coalesced_away,
-            held.clone(),
-            resize.clone(),
-        ])
-        .await;
+        let (sent, outcome) = drive(vec![first.clone(), held, also_held, resize.clone()]).await;
 
+        assert_eq!(sent.len(), 3, "{sent:?}");
+        assert_eq!(sent[0], first);
         assert_eq!(
-            sent,
-            vec![first, held, resize],
-            "the held input goes first, and the frame that interrupted it follows"
+            frame_data(&sent[1]),
+            "in-2in-3",
+            "the held input goes first, merged"
         );
+        assert_eq!(sent[2], resize, "and the frame that interrupted it follows");
         assert_eq!(outcome, ClientToAgent::Ended);
     }
 
