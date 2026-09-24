@@ -133,6 +133,142 @@ async fn integration_session_create_and_kill() {
     handle.shutdown().await.ok();
 }
 
+/// The user-visible half of #980: a snapshot sent over the wire reaches tmux.
+///
+/// The unit-level roundtrip in `tmux.rs` proves `env.rs` encodes
+/// `set-environment` correctly; this proves the whole chain the user actually
+/// exercises — `agent.session.create` → `apply_env_snapshots` → `EnvManager` →
+/// tmux — and it is asserted against tmux rather than against the reply,
+/// because the reply was the thing that lied. Before the fix this create
+/// answered `ok` and tmux held nothing.
+#[tokio::test]
+async fn integration_session_create_env_snapshot_lands_in_tmux() {
+    use std::time::Duration;
+
+    let (addr, handle) = start_server(0).await.unwrap();
+    let (mut sink, mut stream) = connect(addr).await.unwrap();
+
+    let session = TestSession::new("env-lands");
+    let name = session.name().to_string();
+    let create = new_message(
+        msg_types::SESSION_CREATE,
+        serde_json::json!({
+            "name": name,
+            "width": 80,
+            "height": 24,
+            "env_snapshots": [{
+                "name": "snap",
+                "source": "agent",
+                "vars": [
+                    ["NESSON_LANDS", "through-the-wire"],
+                    ["NESSON_LANDS_SPACED", "a b  c"],
+                ],
+                "warnings": [],
+            }],
+        }),
+    );
+    sink.send(WsMessage::Text(
+        serde_json::to_value(&create).unwrap().to_string(),
+    ))
+    .await
+    .expect("send the create");
+
+    let answered = answer_for(&mut stream, &create.id, Duration::from_secs(30))
+        .await
+        .expect("the create was never answered");
+    assert_eq!(
+        answered["msg_type"],
+        serde_json::json!(msg_types::OK),
+        "a create carrying a well-formed snapshot was not answered ok: {answered}"
+    );
+
+    assert_eq!(
+        super::tmux_show_environment(&name, "NESSON_LANDS")
+            .await
+            .as_deref(),
+        Some("through-the-wire"),
+        "the create answered ok while tmux held nothing — the reply was believed \
+         instead of the session"
+    );
+    assert_eq!(
+        super::tmux_show_environment(&name, "NESSON_LANDS_SPACED")
+            .await
+            .as_deref(),
+        Some("a b  c"),
+        "the value was not passed to tmux as one argv value"
+    );
+
+    handle.shutdown().await.ok();
+}
+
+/// A required env mutation tmux refuses is an error reply, not a warning.
+///
+/// #980's second half, and the reason the first half survived: failures here
+/// were a `Vec<String>` of warnings that every caller logged before answering
+/// `ok`. A repair that only fixed the grammar would leave #980's real lesson
+/// in place — the agent could still report a mutation it did not perform.
+///
+/// The variable is deliberately one tmux refuses *for its own sake*
+/// (`variable name contains =`, exit 1 — measured on tmux 3.6b), so what is
+/// under test is the propagation and not the grammar: this payload fails
+/// whether `env.rs` encodes `set-environment` correctly or not, and the only
+/// way it can answer `ok` is if a required failure was downgraded to a log
+/// line. That is what it did before the fix.
+#[tokio::test]
+async fn a_refused_env_mutation_is_an_error_reply_not_a_warning() {
+    use std::time::Duration;
+
+    let (addr, handle) = start_server(0).await.unwrap();
+    let (mut sink, mut stream) = connect(addr).await.unwrap();
+
+    let session = TestSession::new("env-refused");
+    let create = new_message(
+        msg_types::SESSION_CREATE,
+        serde_json::json!({
+            "name": session.name(),
+            "width": 80,
+            "height": 24,
+            "env_snapshots": [{
+                "name": "bad",
+                "source": "agent",
+                "vars": [["NESSON_BAD=NAME", "value"]],
+                "warnings": [],
+            }],
+        }),
+    );
+    sink.send(WsMessage::Text(
+        serde_json::to_value(&create).unwrap().to_string(),
+    ))
+    .await
+    .expect("send the create");
+
+    let answered = answer_for(&mut stream, &create.id, Duration::from_secs(30))
+        .await
+        .expect("the create was never answered");
+
+    assert_eq!(
+        answered["msg_type"],
+        serde_json::json!(msg_types::ERROR),
+        "a required env mutation the tmux layer refused was converted into protocol \
+         success: {answered}"
+    );
+    assert_eq!(
+        answered["payload"]["code"],
+        serde_json::json!("env_apply_failed"),
+        "the failure was reported as something other than the env mutation: {answered}"
+    );
+    // tmux's own words, which `stderr(Stdio::null())` used to discard — without
+    // them the caller learns that something failed and nothing about what.
+    assert!(
+        answered["payload"]["message"]
+            .as_str()
+            .is_some_and(|m| m.contains("contains =")),
+        "the error does not retain tmux's diagnostic: {answered}"
+    );
+
+    handle.shutdown().await.ok();
+}
+
 #[tokio::test]
 async fn integration_client_attach_creates_pty() {
     let (addr, handle) = start_server(19084).await.unwrap();
@@ -612,9 +748,11 @@ async fn a_blocked_file_read_no_longer_holds_the_peer_connection() {
 ///
 /// One `tmux` spawn per variable, measured at ~2.5 ms per spawn on the machine
 /// this was written on, so 1 500 of them park the key for several seconds — more
-/// than an order of magnitude past the window below. The loop fails every call
-/// (see the note on [`set_environment`](nession_agent::tmux::env) below), which
-/// does not matter here: what the park needs is the spawns, not their effect.
+/// than an order of magnitude past the window below. What the park needs is the
+/// spawns; whether each one also lands is not what it measures, and the count is
+/// unchanged either way. (When this was written every one of them failed — the
+/// `-e` flag bug of #980, fixed since — which is why the original note here read
+/// "the loop fails every call". The session exists, so they succeed now.)
 ///
 /// The park is never waited out: the test that uses it ends the connection that
 /// dispatched the work, which is what the queue behind it is released by.
@@ -646,21 +784,23 @@ fn attach_with_long_park(session_name: &str) -> serde_json::Value {
     })
 }
 
-// Why the attach's park is not observed through tmux, and what sequences the two
-// peers instead.
+// What sequences the two peers, and why it is the reader rather than tmux.
 //
-// `EnvManager::set_environment` spawns `tmux set-environment -t <session> -e
-// KEY=VALUE`, and `-e` is not a flag that subcommand takes (`tmux 3.6b` answers
-// `command set-environment: unknown flag -e`, exit 1), so no variable it sets
-// ever lands. That is a pre-existing bug in a path this change does not own —
-// recorded in the report rather than fixed here — and it means the park cannot
-// be handed a handshake from the tmux side.
+// The reader itself: it reads frames in order and *awaits* each admission, so a
+// query written behind the attach on the first peer's own connection cannot be
+// answered until the attach has reached the lane. That reply is the handshake,
+// and it is causal — no clock is consulted, and neither socket is racing the
+// other.
 //
-// What sequences the peers instead is the reader itself: it reads frames in
-// order and *awaits* each admission, so a query written behind the attach on the
-// first peer's own connection cannot be answered until the attach has reached the
-// lane. That reply is the handshake, and it is causal — no clock is consulted,
-// and neither socket is racing the other.
+// A handshake read back out of tmux (`show-environment`) was impossible when
+// this was written, and that is why it is the reader: `EnvManager::
+// set_environment` spawned `set-environment -t <session> -e KEY=VALUE`, and
+// `-e` is not a flag that subcommand takes, so no variable it set ever landed.
+// That bug is #980 and it is fixed — `set_environment` now passes `name` and
+// `value` as separate argv values, and `tests/integration/tmux.rs` reads a
+// written variable back out of tmux to prove it. The reader-based handshake is
+// kept as it is: it is causal, it does not depend on which of the two mechanisms
+// happens to work, and re-sequencing a passing ordering test is not #980's.
 
 /// Fail if the frame with `id` is answered within `window`.
 async fn no_answer_within(
