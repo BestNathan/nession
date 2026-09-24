@@ -22,6 +22,7 @@
 //! descriptors makes them one list, so neither state is constructible — which is
 //! a stronger guarantee than detecting either after the fact.
 
+use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap};
 
 use nession_common::extension::AgentExtension;
@@ -36,10 +37,20 @@ use tracing::debug;
 #[derive(Debug, Clone)]
 struct Route {
     extension: usize,
-    /// The Protocol Unit and contract version this route serves, so a dispatch
-    /// can say what it answered rather than only that it answered.
+    /// The Protocol Unit this wire locates, so a dispatch can say what it
+    /// answered rather than only that it answered.
     id: ProtocolId,
-    version: ContractVersion,
+    /// Every Contract Version of that Unit this wire carries.
+    ///
+    /// A list because the wire locates the Unit and the version selects the
+    /// generation (`#963`): one Unit legitimately answers several versions over
+    /// its one wire. A single version could neither describe what the runtime
+    /// serves nor refuse a version it does not, and those are the same fact
+    /// seen from the two sides of a call.
+    ///
+    /// Kept sorted and deduped so a refusal that names the offered set names it
+    /// the same way twice.
+    versions: Vec<ContractVersion>,
 }
 
 /// Dispatches server-relayed commands to registered extensions, and describes
@@ -166,25 +177,43 @@ impl ExtensionRegistry {
 
                 for contract in &descriptor.contracts {
                     for wire in &contract.wire {
-                        if let Some(existing) = routes.get(wire) {
-                            let first = extensions
-                                .get(existing.extension)
-                                .map_or("unknown", |e| e.name());
-                            return Err(RegistryError::DuplicateWireType {
-                                wire: wire.clone(),
-                                first,
-                                second: owner,
-                            });
+                        match routes.entry(wire.clone()) {
+                            Entry::Occupied(mut occupied) => {
+                                let route = occupied.get_mut();
+                                // The same Unit at another version is the shape
+                                // `#963` exists for — the wire locates the Unit,
+                                // the version selects the generation — so a
+                                // second claim from the *same* Unit adds a
+                                // version rather than colliding.
+                                //
+                                // Anything else is still a collision. A
+                                // different Unit on this wire would make
+                                // `unit_for_wire` ambiguous; a different
+                                // extension cannot even get here, because
+                                // `owner_of` above already refused one Unit
+                                // claimed twice.
+                                if route.extension != extension || route.id != descriptor.id {
+                                    let first = extensions
+                                        .get(route.extension)
+                                        .map_or("unknown", |e| e.name());
+                                    return Err(RegistryError::DuplicateWireType {
+                                        wire: wire.clone(),
+                                        first,
+                                        second: owner,
+                                    });
+                                }
+                                route.versions.push(contract.version);
+                                route.versions.sort();
+                                route.versions.dedup();
+                            }
+                            Entry::Vacant(vacant) => {
+                                vacant.insert(Route {
+                                    extension,
+                                    id: descriptor.id.clone(),
+                                    versions: vec![contract.version],
+                                });
+                            }
                         }
-
-                        routes.insert(
-                            wire.clone(),
-                            Route {
-                                extension,
-                                id: descriptor.id.clone(),
-                                version: contract.version,
-                            },
-                        );
                     }
                 }
 
@@ -270,16 +299,67 @@ impl ExtensionRegistry {
     pub async fn dispatch(&self, msg_type: &str, payload: Value) -> Option<anyhow::Result<Value>> {
         let route = self.routes.get(msg_type)?;
         let ext = self.extensions.get(route.extension)?;
+
+        if let Err(refusal) = self.check_named_version(route, &payload) {
+            debug!("Extension dispatch refused: {}", refusal);
+            return Some(Err(refusal));
+        }
+
         debug!(
-            "Extension dispatch: {} → {} (protocol: {}@{})",
+            "Extension dispatch: {} → {} (protocol: {})",
             ext.name(),
             msg_type,
-            route.id,
-            route.version
+            route.id
         );
         // `msg_type` and not a stripped copy of it: the wire *is* the protocol
         // id now, so the extension is handed exactly the name it declared.
+        //
+        // The resolved version travels in the payload rather than as an
+        // argument, because that is where the contract puts it. Which shape the
+        // provider API should take for a Unit that serves several generations
+        // is `#963` Open Question 2, and answering it here would answer it for
+        // every provider before the question has been asked.
         Some(ext.handle_command(msg_type, payload).await)
+    }
+
+    /// Refuse a message whose named `contract_version` this Unit does not serve.
+    ///
+    /// The wire locates the Unit and the version selects the generation, so a
+    /// named version nobody serves must not reach the handler: the handler
+    /// would read the payload as whichever generation it knows, which is the
+    /// silent misread the version field exists to prevent.
+    ///
+    /// A message naming *no* version still passes, deliberately. That is the
+    /// current behaviour rather than the target one — `#963` Stage 3 owns
+    /// changing it, and owning it separately keeps this check from quietly
+    /// becoming the place that decided it.
+    ///
+    /// The Server makes the same check at its relay boundary, in the same
+    /// words. This is the boundary a browser talking to the agent directly
+    /// (P2P) reaches, and two boundaries disagreeing about what "unsupported"
+    /// means is how a version negotiation gets bypassed.
+    fn check_named_version(&self, route: &Route, payload: &Value) -> Result<(), anyhow::Error> {
+        let Some(named) = payload.get("contract_version") else {
+            return Ok(());
+        };
+
+        // A version that is not a number is not a version. Reading it as
+        // "absent" would relay a message whose version nobody checked, which is
+        // the one thing the field exists to make impossible.
+        let number = named
+            .as_u64()
+            .ok_or_else(|| anyhow::anyhow!("`contract_version` must be a number, got {named}"))?;
+
+        let offered = &route.versions;
+        if offered.iter().any(|v| u64::from(v.get()) == number) {
+            return Ok(());
+        }
+
+        Err(anyhow::anyhow!(
+            "`{}` offers `{}` at {offered:?}, not v{number}",
+            self.manifest.provider,
+            route.id
+        ))
     }
 }
 
@@ -412,6 +492,166 @@ mod tests {
             text.contains("shared.thing"),
             "must name the wire type: {text}"
         );
+    }
+
+    fn v(n: u32) -> ContractVersion {
+        ContractVersion::new(n).unwrap()
+    }
+
+    /// One extension declaring one Unit at several contract versions, all on
+    /// that Unit's one wire.
+    struct Versioned {
+        name: &'static str,
+        id: &'static str,
+        wire: &'static str,
+        versions: Vec<ContractVersion>,
+    }
+
+    #[async_trait]
+    impl AgentExtension for Versioned {
+        fn name(&self) -> &'static str {
+            self.name
+        }
+
+        fn descriptors(&self) -> Result<Vec<ProtocolDescriptor>, IdentityError> {
+            Ok(vec![ProtocolDescriptor::new(
+                self.id,
+                "test",
+                self.versions
+                    .iter()
+                    .map(|version| ContractDescriptor::new(*version, &[self.wire]))
+                    .collect(),
+            )?])
+        }
+
+        async fn handle_command(&self, command: &str, payload: Value) -> anyhow::Result<Value> {
+            // Echoes what it was handed, so a test can prove the resolved
+            // version actually reached the handler rather than being dropped on
+            // the way through.
+            Ok(serde_json::json!({ "handled": command, "payload": payload }))
+        }
+    }
+
+    #[test]
+    fn one_unit_may_declare_two_versions_over_its_one_wire() {
+        // The shape `#963` exists for: `git.status = [v1, v2]`. This was
+        // impossible twice over — the descriptor refused two versions sharing a
+        // wire, and the registry refused the second claim of it here.
+        let registry = compose(vec![Box::new(Versioned {
+            name: "git",
+            id: "git.status",
+            wire: "git.status",
+            versions: vec![v(1), v(2)],
+        })])
+        .expect("one Unit at two versions over one wire composes");
+
+        let support = registry
+            .manifest()
+            .support(&ProtocolId::new("git.status").unwrap())
+            .expect("the unit is advertised");
+        assert_eq!(support.versions, vec![v(1), v(2)]);
+        assert_eq!(support.wire, vec!["git.status".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn dispatch_accepts_a_version_the_unit_serves() {
+        let registry = compose(vec![Box::new(Versioned {
+            name: "git",
+            id: "git.status",
+            wire: "git.status",
+            versions: vec![v(1), v(2)],
+        })])
+        .unwrap();
+
+        let value = registry
+            .dispatch("git.status", serde_json::json!({ "contract_version": 2 }))
+            .await
+            .expect("the wire is routed")
+            .expect("v2 is served");
+
+        assert_eq!(value["handled"], "git.status");
+        assert_eq!(
+            value["payload"]["contract_version"], 2,
+            "the resolved version has to reach the handler, or it cannot pick \
+             a generation to answer in"
+        );
+    }
+
+    #[tokio::test]
+    async fn dispatch_refuses_a_version_the_unit_does_not_serve() {
+        // The second half of "a declared version with no handler". Handing v2
+        // to a v1-only handler would let it read the payload as the generation
+        // it knows — the silent misread the version field exists to prevent.
+        let registry = compose(vec![Box::new(Versioned {
+            name: "git",
+            id: "git.status",
+            wire: "git.status",
+            versions: vec![v(1)],
+        })])
+        .unwrap();
+
+        let err = registry
+            .dispatch("git.status", serde_json::json!({ "contract_version": 2 }))
+            .await
+            .expect("the wire is routed")
+            .expect_err("v2 is not served");
+
+        let text = err.to_string();
+        assert!(text.contains("git.status"), "must name the unit: {text}");
+        assert!(
+            text.contains("v2"),
+            "must name the version asked for: {text}"
+        );
+        assert!(text.contains("[v1]"), "must name what is offered: {text}");
+    }
+
+    #[tokio::test]
+    async fn dispatch_refuses_a_named_version_that_is_not_a_number() {
+        // `"2"` is a peer's spelling, not a Contract Version. Reading it as
+        // absent would relay a message whose version nobody checked.
+        let registry = compose(vec![Box::new(Versioned {
+            name: "git",
+            id: "git.status",
+            wire: "git.status",
+            versions: vec![v(1)],
+        })])
+        .unwrap();
+
+        let err = registry
+            .dispatch("git.status", serde_json::json!({ "contract_version": "2" }))
+            .await
+            .expect("the wire is routed")
+            .expect_err("a non-numeric version is not a version");
+
+        assert!(
+            err.to_string().contains("contract_version"),
+            "must say which field it could not read: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn dispatch_still_answers_a_message_that_names_no_version() {
+        // Pinned on purpose. This is the *current* behaviour, not the target
+        // one: `#963` Stage 3 owns making an unversioned call a refusal, and
+        // that is blocked on a decision about how wide the refusal should be.
+        // The test exists so the change is visible when it lands instead of
+        // arriving as a surprise — and so nobody reads this silence as a
+        // version check that passed.
+        let registry = compose(vec![Box::new(Versioned {
+            name: "git",
+            id: "git.status",
+            wire: "git.status",
+            versions: vec![v(1), v(2)],
+        })])
+        .unwrap();
+
+        let value = registry
+            .dispatch("git.status", serde_json::json!({ "session": "a:work" }))
+            .await
+            .expect("the wire is routed")
+            .expect("an unversioned call is still answered today");
+
+        assert_eq!(value["handled"], "git.status");
     }
 
     #[test]
