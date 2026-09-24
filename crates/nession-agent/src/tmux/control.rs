@@ -28,7 +28,6 @@ use tokio::sync::mpsc;
 
 use super::ops::TmuxDep;
 use super::parser::{parse_control_line, unescape_tmux_data, ControlMessage};
-use super::util::run_tmux_command;
 
 /// Buffer capacity for the output channel — bytes-per-batch parsed from tmux.
 const OUTPUT_CHANNEL_CAPACITY: usize = 256;
@@ -82,18 +81,16 @@ impl ControlModeSession {
         // Resize tmux window to client's requested size BEFORE attaching.
         // This ensures tmux renders at the correct dimensions from the first
         // frame, avoiding a flash of wrong-sized content.
-        run_tmux_command(
-            tmux,
-            session_name,
-            &[
-                "resize-window",
-                "-x",
-                &width.to_string(),
-                "-y",
-                &height.to_string(),
-            ],
-        )
-        .await?;
+        //
+        // Through the owner rather than a locally built argument vector: this
+        // used to call `util::run_tmux_command(tmux, session, &[...])`, a
+        // caller-supplies-the-argv runner whose one caller this was — exactly
+        // the `run(args)` shape #991 rules out, since a caller holding the
+        // vector can encode a wrong flag or drop the target with nothing to
+        // catch it.
+        tmux.ops()
+            .resize_window(session_name, width, height)
+            .await?;
 
         let mut child = tmux
             .cmd()
@@ -329,9 +326,9 @@ mod tests {
     #[tokio::test]
     async fn the_injected_tmux_receives_the_control_mode_attach_and_the_detach() {
         // The control-mode backend reaches tmux three ways — `resize-window`
-        // through `util::run_tmux_command` before it attaches, `-C attach` as
-        // its own child, and `detach-client` on the way out — and all three ran
-        // on the process-wide tmux before #991 step 6.
+        // through `TmuxOps` before it attaches, `-C attach` as its own child,
+        // and `detach-client` on the way out — and all three ran on the
+        // process-wide tmux before #991 step 6.
         //
         // **This one runs on macOS too**, which the control-mode integration
         // tests (skipped by `cfg!(target_os = "macos")` because a real tmux
@@ -373,12 +370,12 @@ mod tests {
             calls.first(),
             Some(&vec![
                 "resize-window".to_string(),
+                "-t".to_string(),
+                "nession-fake-sess".to_string(),
                 "-x".to_string(),
                 "80".to_string(),
                 "-y".to_string(),
                 "24".to_string(),
-                "-t".to_string(),
-                "nession-fake-sess".to_string(),
             ]),
             "the window is resized before the attach, through the injected tmux: {calls:?}"
         );

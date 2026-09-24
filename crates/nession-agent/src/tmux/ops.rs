@@ -172,6 +172,25 @@ fn size_from_line(line: &str) -> Result<(u16, u16)> {
     Ok((cols, rows))
 }
 
+/// The argument vector for resizing a session's window:
+/// `resize-window -t <session> -x <cols> -y <rows>`.
+///
+/// The **spawned** form of this operation, and the reason it is an operation
+/// rather than a caller-supplied vector: `util.rs` used to expose
+/// `run_tmux_command(session, args: &[&str])` for this one call, which is the
+/// `run(args)` shape #991 rules out — a caller that supplies the vector can
+/// encode a subcommand with the wrong flags, or drop the target, and nothing
+/// catches it. Here `-t` is in the vector and both dimensions are in it
+/// together, so neither can be forgotten.
+///
+/// `ControlModeSession::resize` writes the same subcommand to control-mode
+/// stdin instead. That is a different transport — no process, no exit status,
+/// no stderr to carry — not a second grammar to keep in step; the same split
+/// `send_keys` documents.
+fn resize_window_args<'a>(session: &'a str, cols: &'a str, rows: &'a str) -> [&'a str; 7] {
+    ["resize-window", "-t", session, "-x", cols, "-y", rows]
+}
+
 /// The argument vector for one line typed into a session:
 /// `send-keys -t <session> <keys> Enter`.
 ///
@@ -364,6 +383,36 @@ impl TmuxOps {
         })
     }
 
+    /// Resize `session`'s window to `cols` × `rows` — the write counterpart of
+    /// [`window_size`](Self::window_size).
+    ///
+    /// Called by `ControlModeSession::attach`, which has to set the size
+    /// **before** the control-mode client exists: at that moment there is no
+    /// stdin to write to, so the resize cannot travel the transport
+    /// [`ControlModeSession::resize`](super::control::ControlModeSession::resize)
+    /// uses. Same subcommand, same target, two routes — the split is the
+    /// transport, not the grammar.
+    pub async fn resize_window(&self, session: &str, cols: u16, rows: u16) -> Result<()> {
+        let cols = cols.to_string();
+        let rows = rows.to_string();
+        let output = self
+            .cmd
+            .tokio()
+            .args(resize_window_args(session, &cols, &rows))
+            .stderr(std::process::Stdio::piped())
+            .output()
+            .await
+            .with_context(|| format!("failed to spawn tmux resize-window for session {session}"))?;
+        if output.status.success() {
+            return Ok(());
+        }
+        anyhow::bail!(
+            "tmux resize-window -t {session} -x {cols} -y {rows} failed: {} ({})",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        )
+    }
+
     /// Type one line into `session`'s active pane and press Enter:
     /// `tmux send-keys -t <session> <keys> Enter`.
     ///
@@ -533,7 +582,9 @@ impl TmuxOps {
 /// (`capture_scrollback`, `check_tmux_available`, `tmux_version`) take no
 /// dependency and still resolve [`cmd::global`], because they are stateless
 /// functions on the capture/preview and startup paths rather than operations of
-/// a domain type. `run_tmux_command`, which an attach *does* call, takes one.
+/// a domain type. Everything that *does* carry one — both attach backends,
+/// `EnvManager`, `SessionManager` — is a type whose operation would otherwise
+/// have to reach for the process-wide addressing behind its own back.
 ///
 /// A `TmuxDep` built with [`TmuxDep::global`] resolves [`cmd::global`] on
 /// **every** use rather than once, which is the property [`TmuxOps::global`]
@@ -1071,6 +1122,67 @@ mod tests {
             client_name_for_pid_in(listing, 42).as_deref(),
             Some("client-42"),
             "the unparsable line is skipped, and the real one after it is found"
+        );
+    }
+
+    /// A required `resize-window` failure keeps tmux's own words.
+    ///
+    /// Moved here from `util.rs` when the attach-time resize stopped going
+    /// through a caller-supplied argument vector (#991's non-goal): the claim
+    /// is about the *operation*, so it belongs with the operation rather than
+    /// with a helper that no longer exists.
+    ///
+    /// Its one caller propagates with `?` — a control-mode attach is abandoned
+    /// when its pre-attach resize fails — so the class is `Required`, and
+    /// #991's third error criterion is that a required failure carries tmux's
+    /// context. Before step 7 the call was `.status()` with
+    /// `stderr(Stdio::null())`, so "the session is gone", "tmux refused the
+    /// size" and "the binary is broken" all reached the caller as
+    /// `exited with status: 1`.
+    ///
+    /// Reddens on: dropping the stderr pipe (the marker assertion matches
+    /// nothing), dropping the status from the message, or dropping the command.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_required_resize_failure_carries_what_tmux_said() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let fake = crate::test_support::FakeTmux::new(
+            dir.path(),
+            "case \"$1\" in resize-window) echo 'no such session: nession-fake-sess' >&2; exit 1;; \
+             *) exit 0;; esac",
+        );
+        let dep = fake.dep();
+
+        let err = dep
+            .ops()
+            .resize_window("nession-fake-sess", 80, 24)
+            .await
+            .expect_err("the injected binary refuses every resize-window");
+        let message = format!("{err:#}");
+        assert!(
+            message.contains("no such session: nession-fake-sess"),
+            "the failure must carry tmux's own stderr: {message}"
+        );
+        assert!(
+            message.contains("exit status"),
+            "and its exit status: {message}"
+        );
+        assert!(
+            message.contains("resize-window"),
+            "and the command it was running: {message}"
+        );
+        assert_eq!(
+            fake.calls(),
+            vec![vec![
+                "resize-window",
+                "-t",
+                "nession-fake-sess",
+                "-x",
+                "80",
+                "-y",
+                "24"
+            ]],
+            "the target and both dimensions come from the owner's one vector"
         );
     }
 }
