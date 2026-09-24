@@ -113,10 +113,7 @@ impl SessionWatcher {
             for name in self.prev_sessions.keys() {
                 if !current_sessions.iter().any(|s| s.name == *name) {
                     debug!("Reporting stale session as gone: {}", name);
-                    let _ = self
-                        .handle
-                        .send_session_update(name, "gone", 0, 0, None)
-                        .await;
+                    let _ = self.handle.send_session_update(name, "gone", 0, 0, None);
                 }
             }
 
@@ -168,9 +165,7 @@ impl SessionWatcher {
             if !current_map.contains_key(name) {
                 debug!("Session removed: {}", name);
                 // Send a "removed" update with status "gone".
-                self.handle
-                    .send_session_update(name, "gone", 0, 0, None)
-                    .await?;
+                self.handle.send_session_update(name, "gone", 0, 0, None)?;
             }
         }
 
@@ -189,15 +184,13 @@ impl SessionWatcher {
             "detached"
         };
 
-        self.handle
-            .send_session_update(
-                &session.name,
-                status,
-                session.window_count,
-                session.attached_clients,
-                session.foreground_command.as_deref(),
-            )
-            .await?;
+        self.handle.send_session_update(
+            &session.name,
+            status,
+            session.window_count,
+            session.attached_clients,
+            session.foreground_command.as_deref(),
+        )?;
 
         Ok(())
     }

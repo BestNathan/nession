@@ -118,15 +118,13 @@ impl HeartbeatLoop {
             session_count, active_sessions, uptime_seconds
         );
 
-        self.handle
-            .send_heartbeat(
-                AgentStatus::Online,
-                session_count,
-                active_sessions,
-                uptime_seconds,
-                load_average,
-            )
-            .await?;
+        self.handle.send_heartbeat(
+            AgentStatus::Online,
+            session_count,
+            active_sessions,
+            uptime_seconds,
+            load_average,
+        )?;
 
         Ok(())
     }
