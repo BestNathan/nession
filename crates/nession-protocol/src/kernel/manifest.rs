@@ -184,6 +184,67 @@ impl ProtocolManifest {
     pub fn carries(&self, wire_type: &str) -> bool {
         self.unit_for_wire(wire_type).is_some()
     }
+
+    /// Every wire this manifest carries locates exactly one Unit.
+    ///
+    /// The wire *is* the Unit's identity since `#912`, so two Units claiming
+    /// one wire is not a naming collision to be resolved — it is a set that
+    /// cannot say which answer a caller gets. [`Self::unit_for_wire`] would
+    /// return whichever the iteration reached first, and a generated `match`
+    /// would take the first arm and leave the other unreachable. Both are a
+    /// wrong answer presented as a right one.
+    ///
+    /// This cannot live on the descriptor, and the reason is structural: a
+    /// descriptor only ever describes *one* Unit. It is also invisible until
+    /// the merge — descriptors for one Unit arrive once per transport and are
+    /// unioned by [`Self::from_descriptors`] — so the built manifest is the
+    /// first place the case exists to be judged.
+    ///
+    /// A *single* Unit serving several versions over one wire is not a
+    /// conflict. That is the shape `#963` exists to allow, and the version
+    /// selects the generation while the wire locates the Unit.
+    pub fn validate_wires(&self) -> Result<(), CompositionError> {
+        let mut seen: BTreeMap<&str, &ProtocolId> = BTreeMap::new();
+        for (id, support) in &self.protocols {
+            for wire in &support.wire {
+                if let Some(first) = seen.insert(wire.as_str(), id) {
+                    if first != id {
+                        return Err(CompositionError::WireClaimedTwice {
+                            wire: wire.clone(),
+                            first: first.to_string(),
+                            second: id.to_string(),
+                        });
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Why a set of composed providers is not a valid Protocol Set.
+///
+/// Separate from [`super::descriptor::DescriptorError`] because the two are
+/// checked at different scopes: a descriptor can only see itself, and this one
+/// needs every Unit that was composed.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum CompositionError {
+    /// A composed provider named something that is not a canonical identity.
+    ///
+    /// Carried here so a composition boundary has one error type to return
+    /// rather than two: building a manifest is "name the units, then check
+    /// them", and both halves are the same question to a caller.
+    #[error(transparent)]
+    Identity(#[from] super::identity::IdentityError),
+    #[error(
+        "`{wire}` is claimed by both `{first}` and `{second}` — a wire locates one \
+         Protocol Unit, so two Units cannot travel as the same one"
+    )]
+    WireClaimedTwice {
+        wire: String,
+        first: String,
+        second: String,
+    },
 }
 
 #[cfg(test)]
@@ -361,6 +422,70 @@ mod tests {
         let support = &manifest.protocols[&ProtocolId::new("git.status").unwrap()];
         assert_eq!(support.versions, vec![V1, ContractVersion::new(2).unwrap()]);
         assert_eq!(support.wire.len(), 2);
+    }
+
+    #[test]
+    fn refuses_two_units_claiming_one_wire() {
+        // The wire locates the Unit, so two Units on one wire is a set that
+        // cannot answer: `unit_for_wire` returns whichever the scan reached
+        // first, and a generated `match` takes the first arm and leaves the
+        // other unreachable. Both are a wrong answer presented as a right one.
+        //
+        // Ordered by id, so the first claimant is `git.diff`.
+        let manifest = ProtocolManifest::from_descriptors(
+            "agent-a",
+            &[
+                ProtocolDescriptor::new(
+                    "git.diff",
+                    "nession-git",
+                    vec![ContractDescriptor::new(V1, &["git.status"])],
+                )
+                .unwrap(),
+                ProtocolDescriptor::new(
+                    "git.status",
+                    "nession-git",
+                    vec![ContractDescriptor::new(V1, &["git.status"])],
+                )
+                .unwrap(),
+            ],
+        );
+
+        assert_eq!(
+            manifest.validate_wires(),
+            Err(CompositionError::WireClaimedTwice {
+                wire: "git.status".to_string(),
+                first: "git.diff".to_string(),
+                second: "git.status".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn one_unit_at_two_versions_on_one_wire_is_the_shape_the_model_allows() {
+        // `#963`'s whole point, and the reason the descriptor's old refusal had
+        // to go: one Unit, two generations, one wire. The version selects the
+        // contract; the wire only locates the Unit.
+        let v2 = ContractVersion::new(2).unwrap();
+        let manifest = ProtocolManifest::from_descriptors(
+            "agent-a",
+            &[ProtocolDescriptor::new(
+                "git.status",
+                "nession-git",
+                vec![
+                    ContractDescriptor::new(V1, &["git.status"]),
+                    ContractDescriptor::new(v2, &["git.status"]),
+                ],
+            )
+            .unwrap()],
+        );
+
+        let support = &manifest.protocols[&ProtocolId::new("git.status").unwrap()];
+        assert_eq!(support.versions, vec![V1, v2]);
+        assert_eq!(support.wire, vec!["git.status".to_string()]);
+        assert!(
+            manifest.validate_wires().is_ok(),
+            "two versions of one Unit are one Unit, not two Units claiming a wire"
+        );
     }
 
     #[test]

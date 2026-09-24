@@ -57,9 +57,9 @@ pub mod kernel;
 // Flat re-exports for the handful of names almost every caller needs, so a
 // contract module does not open with five `use crate::kernel::…` lines.
 pub use kernel::{
-    resolve, select_version, ContractDescriptor, ContractSupport, ContractVersion, DescriptorError,
-    IdentityError, Lifecycle, Message, ProtocolDescriptor, ProtocolError, ProtocolId,
-    ProtocolManifest, ProtocolMessage, MAX_ID_LEN,
+    resolve, select_version, CompositionError, ContractDescriptor, ContractSupport,
+    ContractVersion, DescriptorError, IdentityError, Lifecycle, Message, ProtocolDescriptor,
+    ProtocolError, ProtocolId, ProtocolManifest, ProtocolMessage, MAX_ID_LEN,
 };
 
 /// The version of the Kernel's *own* mechanism — not of any protocol.
