@@ -208,6 +208,120 @@ fn make_executable(_path: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+/// What the agent learned from trying to install the integration.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Installed {
+    /// Registered and installed. Also the answer when both were already done:
+    /// every command below is idempotent, so "already there" and "just done" are
+    /// the same state and a caller has no reason to tell them apart.
+    Ready,
+    /// Claude Code cannot be used for this, with the reason.
+    ///
+    /// **Not an error the agent should fail on.** `#1005` decision 5 requires
+    /// the agent to start normally and report the Claude capability as
+    /// unavailable — a host without `claude`, or with a version that predates
+    /// the plugin commands, is still a working Nession agent.
+    Unavailable(String),
+}
+
+/// How long to wait for one `claude plugin` command.
+///
+/// The agent is starting up while this runs, so a CLI that hangs must not hang
+/// it. Measured: a real `install` finishes well inside this.
+const CLI_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Register the marketplace and install the plugin, as idempotently as the CLI
+/// allows.
+///
+/// ## Measured, not assumed
+///
+/// Every branch here was observed against `claude` 2.1.281 with an isolated
+/// `CLAUDE_CONFIG_DIR` before it was written:
+///
+/// | command | case | exit | `outcome` |
+/// |---|---|---|---|
+/// | `marketplace add` | first time | 0 | `Successfully added` |
+/// | `marketplace add` | already registered | 0 | `already on disk` |
+/// | `install --json` | first time | 0 | `ok` |
+/// | `install --json` | already installed | 0 | `ok` |
+/// | `install --json` | unknown marketplace | 1 | `failed`, `not_found` |
+///
+/// Two consequences shape this. **`marketplace add` has no `--json`** — the flag
+/// is on `install`, not on the marketplace subcommand — so this reads its exit
+/// status and nothing else. And **`install` answers `ok` when the plugin is
+/// already present**, so "already installed" is not a case to detect: a plugin
+/// from a directory marketplace loads in place, and its files are re-read at the
+/// next session start, which is why writing the tree again is the update.
+pub async fn reconcile(root: &Path) -> Installed {
+    let root = root.to_string_lossy().into_owned();
+
+    match run(&["plugin", "marketplace", "add", &root]).await {
+        Ok(()) => {}
+        Err(reason) => return Installed::Unavailable(reason),
+    }
+
+    let installed = format!("{PLUGIN_NAME}@{MARKETPLACE_NAME}");
+    match run(&["plugin", "install", &installed, "--json"]).await {
+        Ok(()) => Installed::Ready,
+        Err(reason) => Installed::Unavailable(reason),
+    }
+}
+
+/// Run one `claude plugin …` command, treating a non-zero exit or a JSON
+/// `outcome` other than `ok` as failure, and carrying whichever words explain it.
+///
+/// The `outcome` field is read as well as the exit status because the two are
+/// not the same thing to rely on: a failing install exits 1 *and* reports
+/// `{"outcome":"failed","failureCode":"not_found"}`, and the failure code is the
+/// part worth putting in front of someone.
+async fn run(args: &[&str]) -> Result<(), String> {
+    let output = tokio::time::timeout(
+        CLI_TIMEOUT,
+        tokio::process::Command::new("claude").args(args).output(),
+    )
+    .await
+    .map_err(|_| "claude did not answer in time".to_string())?
+    .map_err(|e| format!("claude could not be run: {e}"))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    if !output.status.success() {
+        // The CLI puts its machine-readable failure on stdout, so read it before
+        // falling back to the exit status.
+        if let Some(detail) = failure_detail(&stdout) {
+            return Err(detail);
+        }
+        return Err(format!("claude exited with {}", output.status));
+    }
+
+    // A success exit with `outcome: failed` would be the CLI disagreeing with
+    // itself; treating the field as authoritative is the safer reading.
+    if let Some(detail) = failure_detail(&stdout) {
+        return Err(detail);
+    }
+    Ok(())
+}
+
+/// The failure a `--json` line reports, if it reports one.
+fn failure_detail(stdout: &str) -> Option<String> {
+    let line = stdout
+        .lines()
+        .rev()
+        .find(|l| l.trim_start().starts_with('{'))?;
+    let value: serde_json::Value = serde_json::from_str(line.trim()).ok()?;
+    if value.get("outcome").and_then(serde_json::Value::as_str) != Some("failed") {
+        return None;
+    }
+    let code = value
+        .get("failureCode")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("failed");
+    let message = value
+        .get("message")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    Some(format!("{code}: {message}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -375,5 +489,55 @@ mod tests {
             r#"{"hooks":{"SessionStart":["mine"]}}"#,
             "the agent wrote into a file it does not own"
         );
+    }
+
+    // ---- reading the CLI's answers ---------------------------------------
+    //
+    // The strings below are the measured stdout of `claude` 2.1.281, not
+    // invented shapes. That is the point: an install that fails reports it in
+    // JSON on *stdout* while exiting 1, and a parser written from an assumed
+    // shape would read a failure as success.
+
+    #[test]
+    fn a_refused_install_carries_the_clis_own_words() {
+        let stdout = r#"{"command":"install","outcome":"failed","plugin":"nope@nonexistent-market","scope":"user","message":"Plugin \"nope\" not found in marketplace \"nonexistent-market\". Your local copy may be out of date — try `claude plugin marketplace update nonexistent-market`.","failureCode":"not_found"}"#;
+        let detail = failure_detail(stdout).expect("outcome failed is a failure");
+        assert!(
+            detail.contains("not_found"),
+            "the code is carried: {detail}"
+        );
+        assert!(
+            detail.contains("not found"),
+            "and the CLI's explanation, which is the part a person can act on: {detail}"
+        );
+    }
+
+    #[test]
+    fn an_install_that_was_already_done_is_not_a_failure() {
+        // Measured: installing a plugin that is present answers `ok`, not an
+        // error. Treating it as one would make every agent start after the
+        // first report the capability as broken.
+        let stdout = r#"{"command":"install","outcome":"ok","plugin":"nession-agent@nession-integration","scope":"user","message":"Plugin \"nession-agent@nession-integration\" is already installed (scope: user)","installedVersion":"0.35.0","availableVersion":"0.35.0"}"#;
+        assert!(failure_detail(stdout).is_none());
+    }
+
+    #[test]
+    fn a_command_that_prints_no_json_is_judged_by_its_exit_status_alone() {
+        // `marketplace add` has no `--json` and answers in prose — measured, the
+        // flag is rejected outright. Whatever it prints must not be mistaken
+        // for a failure report.
+        for stdout in [
+            "Adding marketplace…✔ Successfully added marketplace: nession-integration (declared in user settings)",
+            "Adding marketplace…✔ Marketplace 'nession-integration' already on disk",
+            "",
+        ] {
+            assert!(failure_detail(stdout).is_none(), "read {stdout:?} as a failure");
+        }
+    }
+
+    #[test]
+    fn a_failure_report_is_found_even_when_it_is_not_the_first_line() {
+        let stdout = "some progress line\n{\"outcome\":\"failed\",\"failureCode\":\"x\",\"message\":\"why\"}\n";
+        assert!(failure_detail(stdout).is_some());
     }
 }
