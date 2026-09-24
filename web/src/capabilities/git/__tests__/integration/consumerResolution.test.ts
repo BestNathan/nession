@@ -78,16 +78,22 @@ describe('consumer contract resolution end to end', () => {
     await expect(pending).resolves.toEqual(statusResponse);
   });
 
-  it('serves an agent that advertises nothing exactly as it did before #678', async () => {
-    // A Legacy Peer. The request is byte-identical to the one this client sent
-    // before any of this existed, which is the design's condition for putting
-    // the manifest in `agent.register` rather than requiring it.
+  it('refuses an agent that advertises nothing, rather than relaying unversioned', async () => {
+    // This was `serves an agent that advertises nothing exactly as it did
+    // before #678`, and it asserted the request was byte-identical to the
+    // pre-`#678` one. That *was* the Legacy Peer bypass: a target that
+    // advertised nothing got a payload naming no contract version, and the
+    // server relays a caller that names no version — so nothing downstream
+    // could tell this apart from a negotiation that had succeeded.
+    //
+    // `#963` removed that path. An agent that advertises nothing cannot be
+    // addressed, because there is no version to address it with.
     await listAgents([agent('a1', null)]);
 
-    const pending = git.gitStatus({ agent_id: 'a1', session: 'a1:work' });
-    expect(surface.requests[0].payload).toEqual({ agent_id: 'a1', session: 'a1:work' });
-    surface.resolveNext('git.status', statusResponse);
-    await expect(pending).resolves.toEqual(statusResponse);
+    await expect(git.gitStatus({ agent_id: 'a1', session: 'a1:work' })).rejects.toThrow(
+      '`a1` does not advertise `git.status`',
+    );
+    expect(surface.requests, 'the refused call never left').toHaveLength(0);
   });
 
   it('resolves each agent against its own manifest', async () => {
@@ -106,14 +112,19 @@ describe('consumer contract resolution end to end', () => {
 
   it('stops resolving once the agent list stops listing the agent', async () => {
     // The list is a snapshot, not a growing map. An agent removed from it may
-    // be gone; resolving against the manifest it used to advertise would send
-    // a versioned call to a target that no longer answers for it.
+    // be gone, and resolving against the manifest it used to advertise would
+    // send a versioned call to a target that no longer answers for it.
+    //
+    // The old assertion here was that the call went out *unversioned and still
+    // worked*, which is the same bypass seen from the other side: dropping the
+    // agent from the list silently downgraded the call instead of stopping it.
+    // Now the agent is `unknown`, and `unknown` refuses.
     await listAgents([agent('a1', [1])]);
     await listAgents([]);
 
-    const pending = git.gitStatus({ agent_id: 'a1', session: 'a1:work' });
-    expect(surface.requests[0].payload).not.toHaveProperty('contract_version');
-    surface.resolveNext('git.status', statusResponse);
-    await expect(pending).resolves.toEqual(statusResponse);
+    await expect(git.gitStatus({ agent_id: 'a1', session: 'a1:work' })).rejects.toThrow(
+      /`a1` is not in the protocol directory yet/,
+    );
+    expect(surface.requests, 'the refused call never left').toHaveLength(0);
   });
 });

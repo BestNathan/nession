@@ -97,12 +97,20 @@ impl ProtocolDescriptor {
     /// ambiguous — the resolver would pick one by iteration order, which is the
     /// kind of answer that changes when a `Vec` becomes a `HashMap`.
     ///
-    /// One wire message type claimed by two contract versions is the other
-    /// half: the transport could no longer tell which contract an incoming
-    /// message was for, so the version on the wire would be decided by luck.
+    /// **That is the only thing left to check.** Two *versions* sharing one
+    /// wire used to be refused here as well, on the reasoning that the
+    /// transport could not tell which contract an incoming message was for.
+    /// A `contract_version` on the message is what tells it (`#963`), so the
+    /// ambiguity is gone — and keeping the refusal would instead make the
+    /// model's own `git.status = [v1, v2]` unrepresentable, which is the one
+    /// shape the version model exists to express.
+    ///
+    /// A wire claimed by two *Units* is still a conflict, and it is not
+    /// visible from here: a descriptor only ever describes one Unit. That
+    /// check needs more than one Unit in hand, so it lives on
+    /// [`super::manifest::ProtocolManifest::validate_wires`].
     pub fn validate(&self) -> Result<(), DescriptorError> {
         let mut seen_versions: Vec<ContractVersion> = Vec::new();
-        let mut seen_wire: Vec<&str> = Vec::new();
 
         for contract in &self.contracts {
             if seen_versions.contains(&contract.version) {
@@ -112,16 +120,6 @@ impl ProtocolDescriptor {
                 });
             }
             seen_versions.push(contract.version);
-
-            for wire in &contract.wire {
-                if seen_wire.contains(&wire.as_str()) {
-                    return Err(DescriptorError::DuplicateWireType {
-                        id: self.id.to_string(),
-                        wire: wire.clone(),
-                    });
-                }
-                seen_wire.push(wire.as_str());
-            }
         }
 
         Ok(())
@@ -134,12 +132,17 @@ impl ProtocolDescriptor {
 }
 
 /// Why a descriptor is not self-consistent.
+///
+/// One variant, and the second one was removed rather than renamed: a
+/// descriptor cannot see a cross-Unit wire conflict, so the `DuplicateWireType`
+/// that used to live here was only ever firing on the cross-*version* case
+/// `#963` made legal. The conflict it named is real — it just belongs to
+/// [`super::manifest::ProtocolManifest::validate_wires`], where more than one
+/// Unit is in hand.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum DescriptorError {
     #[error("`{id}` declares contract version v{version} more than once")]
     DuplicateVersion { id: String, version: u32 },
-    #[error("`{id}` maps wire message type `{wire}` to more than one contract version")]
-    DuplicateWireType { id: String, wire: String },
 }
 
 #[cfg(test)]
@@ -154,14 +157,22 @@ mod tests {
 
     #[test]
     fn accepts_one_contract_per_version() {
+        // Two versions of one Unit, sharing the Unit's one canonical wire.
+        //
+        // The wire *is* the id since `#912`, so a v2 that spelled itself
+        // `git.status.v2` would be a second Unit wearing the first one's name
+        // — and a second identity where the model says there is one. The
+        // version selects the generation; the wire locates the Unit.
         let d = descriptor(vec![
-            ContractDescriptor::new(V1, &["extension.git.status"]),
-            ContractDescriptor::new(
-                ContractVersion::new(2).unwrap(),
-                &["extension.git.status.v2"],
-            ),
+            ContractDescriptor::new(V1, &["git.status"]),
+            ContractDescriptor::new(ContractVersion::new(2).unwrap(), &["git.status"]),
         ]);
-        assert!(d.validate().is_ok());
+        assert_eq!(
+            d.validate(),
+            Ok(()),
+            "one Unit serving two versions over its one wire is the shape \
+             `contract_version` exists to route"
+        );
         assert_eq!(d.versions().len(), 2);
     }
 
@@ -181,17 +192,22 @@ mod tests {
     }
 
     #[test]
-    fn refuses_one_wire_type_serving_two_versions() {
-        // Otherwise the transport cannot tell which contract arrived, and the
-        // version is decided by whichever the resolver happened to look at.
+    fn one_wire_across_two_versions_is_not_a_conflict() {
+        // This was refused until `#963`, on the reasoning that "the transport
+        // could not tell which contract an incoming message was for, so the
+        // version on the wire would be decided by luck". A `contract_version`
+        // on the message is what tells it. The ambiguity the check guarded is
+        // gone, and keeping the check would make `git.status = [v1, v2]`
+        // unrepresentable — which is the whole point of the version model.
+        //
+        // The conflict that *remains* is a cross-Unit wire grab, and it cannot
+        // be seen from inside one descriptor: a descriptor only ever describes
+        // one Unit. `ProtocolManifest::validate_wires` owns that case.
         let d = descriptor(vec![
-            ContractDescriptor::new(V1, &["extension.git.status"]),
-            ContractDescriptor::new(ContractVersion::new(2).unwrap(), &["extension.git.status"]),
+            ContractDescriptor::new(V1, &["git.status"]),
+            ContractDescriptor::new(ContractVersion::new(2).unwrap(), &["git.status"]),
         ]);
-        assert!(matches!(
-            d.validate().unwrap_err(),
-            DescriptorError::DuplicateWireType { .. }
-        ));
+        assert!(d.validate().is_ok());
     }
 
     #[test]
