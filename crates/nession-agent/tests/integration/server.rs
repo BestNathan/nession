@@ -4,7 +4,7 @@
 //! bind, connect, send requests, and receive responses. They require a
 //! working tmux installation (same as the tmux manager / pty tests).
 
-use super::TestSession;
+use super::{unique_session_name, TestSession};
 use futures_util::{SinkExt, StreamExt};
 use nession_agent::config::AttachMode;
 use nession_agent::server::websocket::{
@@ -584,6 +584,607 @@ async fn a_blocked_file_read_no_longer_holds_the_peer_connection() {
         .expect("an answer to the file read");
     assert_eq!(answered_read["id"], serde_json::json!(read.id));
     assert_eq!(answered_read["msg_type"], serde_json::json!(msg_types::OK));
+
+    handle.shutdown().await.ok();
+}
+
+// ---------------------------------------------------------------------------
+// Mutation ordering across connections, and the coarse filesystem key
+// (#961 review, findings 1 and 2)
+// ---------------------------------------------------------------------------
+//
+// Three tests, and the arrangement they share is what makes them deterministic
+// rather than lucky:
+//
+// * the park is always *inside the mutation's own key*, so what the second
+//   mutation waits for is the ordering and not the backend;
+// * the park is opened by a **handshake the test polls for** — an env variable
+//   that has landed, a tree that has started to shrink — so "the first mutation
+//   is running" is a fact before the second frame is written, and never two
+//   sockets racing to be read first;
+// * the second mutation's *own reply* is the witness. It cannot arrive while the
+//   first holds the key, and the window it is given is several times shorter
+//   than the park, so a correct implementation cannot answer it early and a
+//   broken one cannot answer it late.
+
+/// One `tmux set-environment` per variable, and the attach that carries them
+/// parks inside its own session key for the length of that loop.
+///
+/// One `tmux` spawn per variable, measured at ~2.5 ms per spawn on the machine
+/// this was written on, so 1 500 of them park the key for several seconds — more
+/// than an order of magnitude past the window below. The loop fails every call
+/// (see the note on [`set_environment`](nession_agent::tmux::env) below), which
+/// does not matter here: what the park needs is the spawns, not their effect.
+///
+/// The park is never waited out: the test that uses it ends the connection that
+/// dispatched the work, which is what the queue behind it is released by.
+const LONG_PARK_VARS: usize = 1_500;
+
+/// How long a test watches for a reply that must not come.
+///
+/// Two orders of magnitude longer than the work of a mutation that was *not*
+/// queued behind anything — the witness it serves is the absence of an answer
+/// that a broken lane produces in well under a millisecond — and an order of
+/// magnitude shorter than any park these tests arrange.
+const WINDOW: std::time::Duration = std::time::Duration::from_millis(100);
+
+/// An `agent.attach` whose env snapshots park its own key.
+fn attach_with_long_park(session_name: &str) -> serde_json::Value {
+    let vars: Vec<serde_json::Value> = (0..LONG_PARK_VARS)
+        .map(|i| serde_json::json!([format!("NESSION_PARK_{i}"), "1"]))
+        .collect();
+    serde_json::json!({
+        "session_name": session_name,
+        "width": 80,
+        "height": 24,
+        "env_snapshots": [{
+            "name": "park",
+            "source": "agent",
+            "vars": vars,
+            "warnings": [],
+        }],
+    })
+}
+
+// Why the attach's park is not observed through tmux, and what sequences the two
+// peers instead.
+//
+// `EnvManager::set_environment` spawns `tmux set-environment -t <session> -e
+// KEY=VALUE`, and `-e` is not a flag that subcommand takes (`tmux 3.6b` answers
+// `command set-environment: unknown flag -e`, exit 1), so no variable it sets
+// ever lands. That is a pre-existing bug in a path this change does not own —
+// recorded in the report rather than fixed here — and it means the park cannot
+// be handed a handshake from the tmux side.
+//
+// What sequences the peers instead is the reader itself: it reads frames in
+// order and *awaits* each admission, so a query written behind the attach on the
+// first peer's own connection cannot be answered until the attach has reached the
+// lane. That reply is the handshake, and it is causal — no clock is consulted,
+// and neither socket is racing the other.
+
+/// Fail if the frame with `id` is answered within `window`.
+async fn no_answer_within(
+    stream: &mut WsStream,
+    id: &str,
+    window: std::time::Duration,
+) -> anyhow::Result<()> {
+    let deadline = tokio::time::Instant::now() + window;
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return Ok(());
+        }
+        match tokio::time::timeout(remaining, stream.next()).await {
+            Ok(Some(Ok(WsMessage::Text(text)))) => {
+                let parsed: serde_json::Value = serde_json::from_str(&text)?;
+                anyhow::ensure!(
+                    parsed.get("id").and_then(serde_json::Value::as_str) != Some(id),
+                    "a mutation was answered while an earlier mutation of the same \
+                     resource was still running: {parsed}"
+                );
+            }
+            Ok(Some(Ok(_))) => {}
+            Ok(Some(Err(e))) => return Err(e.into()),
+            Ok(None) => anyhow::bail!("connection closed while checking that {id} went unanswered"),
+            Err(_) => return Ok(()),
+        }
+    }
+}
+
+/// The first answer to any of `ids`, whichever arrives — for a connection where
+/// the *order* of two replies is the thing under test, and where asserting it
+/// needs no clock: a lane that ordered the two would produce them in this order
+/// and no lane that did not could.
+async fn first_answer(
+    stream: &mut WsStream,
+    ids: &[&str],
+    window: std::time::Duration,
+) -> anyhow::Result<serde_json::Value> {
+    let deadline = tokio::time::Instant::now() + window;
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        anyhow::ensure!(
+            !remaining.is_zero(),
+            "none of {ids:?} was answered within {window:?}"
+        );
+        match tokio::time::timeout(remaining, stream.next()).await {
+            Ok(Some(Ok(WsMessage::Text(text)))) => {
+                let parsed: serde_json::Value = serde_json::from_str(&text)?;
+                let id = parsed.get("id").and_then(serde_json::Value::as_str);
+                if id.is_some_and(|id| ids.contains(&id)) {
+                    return Ok(parsed);
+                }
+            }
+            Ok(Some(Ok(_))) => {}
+            Ok(Some(Err(e))) => return Err(e.into()),
+            Ok(None) => anyhow::bail!("connection closed while waiting for one of {ids:?}"),
+            Err(_) => anyhow::bail!("none of {ids:?} was answered within {window:?}"),
+        }
+    }
+}
+
+/// The answer to `id`, or a failure naming what arrived instead.
+async fn answer_for(
+    stream: &mut WsStream,
+    id: &str,
+    window: std::time::Duration,
+) -> anyhow::Result<serde_json::Value> {
+    let deadline = tokio::time::Instant::now() + window;
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        anyhow::ensure!(!remaining.is_zero(), "no answer to {id} within {window:?}");
+        match tokio::time::timeout(remaining, stream.next()).await {
+            Ok(Some(Ok(WsMessage::Text(text)))) => {
+                let parsed: serde_json::Value = serde_json::from_str(&text)?;
+                if parsed.get("id").and_then(serde_json::Value::as_str) == Some(id) {
+                    return Ok(parsed);
+                }
+            }
+            Ok(Some(Ok(_))) => {}
+            Ok(Some(Err(e))) => return Err(e.into()),
+            Ok(None) => anyhow::bail!("connection closed while waiting for {id}"),
+            Err(_) => anyhow::bail!("no answer to {id} within {window:?}"),
+        }
+    }
+}
+
+/// How many entries the delete park's tree holds.
+///
+/// The park is the delete's own duration, so its size is the test's clock.
+/// Measured when this was written: removing 20 000 small files takes ~1.1 s on
+/// the machine it was written on, so 30 000 is comfortably over a second — an
+/// order of magnitude past the window above, and a slower machine moves the
+/// margin the safe way.
+///
+const PARK_ENTRIES: usize = 30_000;
+
+/// The same, for the test whose witness needs no window.
+///
+/// [`a_file_mutation_is_ordered_against_every_other_file_mutation`] asserts the
+/// *order* of two replies on one stream rather than the absence of one within a
+/// window, so its park only has to outlast a rename's own work — microseconds.
+/// A smaller tree keeps that test cheap.
+const SHORT_PARK_ENTRIES: usize = 4_000;
+
+/// Build the tree a recursive delete parks on, and return its path.
+///
+/// Empty files, one `write` each. Hard links to one file were tried first and
+/// measured *slower* to create (172 µs each against 70 µs on APFS), which is the
+/// wrong way for a tree that exists to be built and then removed.
+fn make_big_tree(
+    root: &std::path::Path,
+    name: &str,
+    entries: usize,
+) -> anyhow::Result<std::path::PathBuf> {
+    let dir = root.join(name);
+    std::fs::create_dir_all(&dir)?;
+    for i in 0..entries {
+        std::fs::write(dir.join(format!("entry-{i}")), b"x")?;
+    }
+    Ok(dir)
+}
+
+/// Wait until the recursive delete has begun: entries have started to disappear.
+///
+/// The same handshake as the env park, for the same reason — the fact is about
+/// the agent, and polling for it is what keeps the window below from being a race
+/// between two connections.
+async fn wait_for_delete_to_start(dir: &std::path::Path, entries: usize) -> anyhow::Result<()> {
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(15);
+    loop {
+        anyhow::ensure!(
+            tokio::time::Instant::now() < deadline,
+            "the recursive delete never started: {} still has every entry",
+            dir.display()
+        );
+        let remaining = std::fs::read_dir(dir).map(Iterator::count);
+        match remaining {
+            Ok(n) if n < entries => return Ok(()),
+            // Gone entirely is the delete having *finished*, which is past the
+            // point this can be observed from.
+            Ok(_) => {}
+            Err(e) => anyhow::bail!("the tree being deleted became unreadable: {e}"),
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+}
+
+/// Two peers mutating one session are ordered against each other.
+///
+/// `#961`'s review, finding 1, on the socket it names second: two peer-to-peer
+/// connections mutate one tmux session through two `ExecutionLanes` that used to
+/// be two independent maps of queues and workers. What that ordered was `same
+/// session + same connection`; what a browser attached to a session another
+/// browser is also attached to needs is `same session`.
+///
+/// The first peer's `attach` is parked inside the session's own key by its env
+/// snapshots ([`LONG_PARK_VARS`]), and the second peer's `terminal.input` — for
+/// the same session name, on its own connection — must not be answered until
+/// that attach is. The handshake is the first environment variable landing, so
+/// the ordering is established before the second frame is even written.
+#[tokio::test]
+async fn two_peers_mutating_one_session_are_ordered() {
+    use std::time::Duration;
+
+    let (addr, handle) = start_server(0).await.unwrap();
+    let tmux = SessionManager::new();
+    let session = TestSession::new("peers");
+    let name = session.name().to_string();
+    tmux.create_session(&name, 80, 24, "/tmp", &[])
+        .await
+        .unwrap();
+
+    let (mut sink_a, mut stream_a) = connect(addr).await.unwrap();
+    let (mut sink_b, mut stream_b) = connect(addr).await.unwrap();
+
+    let attach = new_message(msg_types::CLIENT_ATTACH, attach_with_long_park(&name));
+    let probe = new_message(msg_types::SESSION_LIST, serde_json::json!({}));
+    let input = new_message(msg_types::TERMINAL_INPUT, one_byte_input(&name));
+
+    // The first peer's attach, and a query behind it on the same connection. The
+    // reader dispatches in order and awaits the admission, so the query's reply
+    // is proof that the attach is in the lane — see the note above for why the
+    // handshake cannot come from tmux.
+    for request in [
+        serde_json::to_value(&attach).unwrap(),
+        serde_json::to_value(&probe).unwrap(),
+    ] {
+        sink_a
+            .send(WsMessage::Text(request.to_string()))
+            .await
+            .expect("send to the first peer");
+    }
+    let answered_probe = answer_for(&mut stream_a, &probe.id, Duration::from_secs(30))
+        .await
+        .expect("the first peer's query was never answered");
+    assert_eq!(answered_probe["msg_type"], serde_json::json!(msg_types::OK));
+
+    // The second peer, for the same session's key, on its own connection.
+    sink_b
+        .send(WsMessage::Text(
+            serde_json::to_value(&input).unwrap().to_string(),
+        ))
+        .await
+        .expect("send the terminal input");
+
+    // It cannot be answered while the first peer's attach holds the key, and the
+    // attach's park is seconds long against this window. A lane per connection
+    // answers it in well under a millisecond — the arm is a map lookup — which
+    // is what this asserts the absence of.
+    no_answer_within(&mut stream_b, &input.id, WINDOW)
+        .await
+        .unwrap();
+
+    // Then the first peer's connection ends, which ends the work it dispatched,
+    // and the queue behind it moves: the second peer's input is admitted and
+    // answered. The attach's own reply is deliberately never read — it is the
+    // end of a park of several seconds, and this test does not wait for it.
+    drop(sink_a);
+    drop(stream_a);
+    let answered_input = answer_for(&mut stream_b, &input.id, Duration::from_secs(30))
+        .await
+        .expect("the input was never answered once the attach it queued behind ended");
+    assert_eq!(
+        answered_input["payload"]["code"],
+        serde_json::json!("not_attached"),
+        "the input was answered with something other than the second peer's own \
+         attachment state: {:?}",
+        answered_input["payload"]
+    );
+
+    handle.shutdown().await.ok();
+}
+
+/// A rename cannot be overtaken by a file mutation read before it.
+///
+/// `#961`'s review, finding 2: `agent.file.rename` was keyed by `from` and
+/// everything else by `path`, so `rename A -> B` and a mutation of `B` were two
+/// keys — and even on one connection, where the reader dispatches in order, they
+/// ran concurrently. What the key names now is the *filesystem*, one resource for
+/// this agent, which is what makes a rename ordered against a write of its
+/// destination and a recursive delete ordered against a write of a descendant.
+///
+/// The park is the delete of a large tree: a file mutation has no gate to hold
+/// (the query tests' FIFO trick does not work here — `write_file` writes a temp
+/// file and renames it, so a FIFO is replaced rather than blocked on), and a
+/// recursive delete's duration is the test's to choose.
+///
+/// The order asserted is `delete` then `rename` then `write b.txt`, and the last
+/// step is what makes the rename's own effect checkable: the write is dispatched
+/// last, so a rename that had overtaken it would leave `b.txt` holding the
+/// renamed content.
+///
+/// The witness for the first step needs no clock, and that is why this test is
+/// the one that states the ordering rather than the window: both replies arrive
+/// on *one* stream, and a rename that was ordered behind the delete it was read
+/// behind cannot be answered first. A lane that keyed them by path answers the
+/// rename in microseconds and hands this test the rename's answer, whatever the
+/// delete takes.
+#[tokio::test]
+async fn a_file_mutation_is_ordered_against_every_other_file_mutation() {
+    use std::time::Duration;
+
+    let (addr, handle, root) = start_server_with_file_root().await.unwrap();
+    let (mut sink, mut stream) = connect(addr).await.unwrap();
+
+    make_big_tree(root.path(), "big", SHORT_PARK_ENTRIES).unwrap();
+    std::fs::write(root.path().join("a.txt"), b"renamed").unwrap();
+
+    let delete = new_message(
+        msg_types::FILE_DELETE,
+        serde_json::json!({ "path": "big", "recursive": true }),
+    );
+    let rename = new_message(
+        msg_types::FILE_RENAME,
+        serde_json::json!({ "from": "a.txt", "to": "b.txt" }),
+    );
+    for request in [
+        serde_json::to_value(&delete).unwrap(),
+        serde_json::to_value(&rename).unwrap(),
+    ] {
+        sink.send(WsMessage::Text(request.to_string()))
+            .await
+            .expect("send to the agent");
+    }
+
+    let first = first_answer(
+        &mut stream,
+        &[&delete.id, &rename.id],
+        Duration::from_secs(60),
+    )
+    .await
+    .expect("neither file mutation was answered");
+    assert_eq!(
+        first["id"],
+        serde_json::json!(delete.id),
+        "the rename was answered while the delete it was read behind was still running: \
+         the two are one resource, so this is a key that is not the filesystem's"
+    );
+    let answered_delete = first;
+    assert_eq!(
+        answered_delete["msg_type"],
+        serde_json::json!(msg_types::OK),
+        "the delete failed: {:?}",
+        answered_delete["payload"]
+    );
+    let answered_rename = answer_for(&mut stream, &rename.id, Duration::from_secs(30))
+        .await
+        .expect("the rename was never answered");
+    assert_eq!(
+        answered_rename["msg_type"],
+        serde_json::json!(msg_types::OK),
+        "the rename failed: {:?}",
+        answered_rename["payload"]
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.path().join("b.txt")).unwrap(),
+        "renamed"
+    );
+    assert!(
+        !root.path().join("a.txt").exists(),
+        "the rename left its source behind"
+    );
+
+    // And the other direction: the write was dispatched last, so its content is
+    // what `b.txt` ends up holding.
+    let write = new_message(
+        msg_types::FILE_WRITE,
+        serde_json::json!({ "path": "b.txt", "content": write_content("written") }),
+    );
+    sink.send(WsMessage::Text(
+        serde_json::to_value(&write).unwrap().to_string(),
+    ))
+    .await
+    .expect("send the write");
+    let answered_write = answer_for(&mut stream, &write.id, Duration::from_secs(30))
+        .await
+        .expect("the write was never answered");
+    assert_eq!(answered_write["msg_type"], serde_json::json!(msg_types::OK));
+    assert_eq!(
+        std::fs::read_to_string(root.path().join("b.txt")).unwrap(),
+        "written",
+        "a write dispatched after the rename was applied before it"
+    );
+
+    handle.shutdown().await.ok();
+}
+
+/// Base64 content for a `file.write`.
+fn write_content(text: &str) -> String {
+    use base64::Engine;
+    base64::engine::general_purpose::STANDARD.encode(text.as_bytes())
+}
+
+/// Two peers mutating one file are ordered against each other.
+///
+/// Finding 1 again, for the filesystem: two connections, one resource, and a
+/// *descendant* of the path the first peer is removing — the case finding 2
+/// names, where an exact-path key cannot express that the second mutation is
+/// inside the first one's scope.
+///
+/// The handshake is the tree starting to shrink, and it is what makes this a
+/// statement about the shared key rather than about which connection's reader
+/// happened to run first.
+#[tokio::test]
+async fn two_peers_mutating_one_file_are_ordered() {
+    use std::time::Duration;
+
+    let (addr, handle, root) = start_server_with_file_root().await.unwrap();
+    let (mut sink_a, mut stream_a) = connect(addr).await.unwrap();
+    let (mut sink_b, mut stream_b) = connect(addr).await.unwrap();
+
+    let big = make_big_tree(root.path(), "big", PARK_ENTRIES).unwrap();
+
+    let delete = new_message(
+        msg_types::FILE_DELETE,
+        serde_json::json!({ "path": "big", "recursive": true }),
+    );
+    let write = new_message(
+        msg_types::FILE_WRITE,
+        serde_json::json!({ "path": "big/inside.txt", "content": write_content("written") }),
+    );
+
+    let sent = std::time::Instant::now();
+    sink_a
+        .send(WsMessage::Text(
+            serde_json::to_value(&delete).unwrap().to_string(),
+        ))
+        .await
+        .expect("send the delete");
+    wait_for_delete_to_start(&big, PARK_ENTRIES)
+        .await
+        .expect("the delete never started");
+
+    sink_b
+        .send(WsMessage::Text(
+            serde_json::to_value(&write).unwrap().to_string(),
+        ))
+        .await
+        .expect("send the write");
+
+    // A write into a tree that is being removed: with one key for the sandbox it
+    // is queued behind the delete, and with a key per path it is a different
+    // resource and runs straight into the removal.
+    no_answer_within(&mut stream_b, &write.id, WINDOW)
+        .await
+        .unwrap();
+
+    let answered_delete = answer_for(&mut stream_a, &delete.id, Duration::from_secs(60))
+        .await
+        .expect("the delete was never answered");
+    // The window above is only an assertion if the park outlasts it, so the park
+    // is measured rather than assumed: the second peer's frame was written once
+    // the handshake showed the delete had begun, and this is the park that frame
+    // was queued behind.
+    let parked = sent.elapsed();
+    assert!(
+        parked > WINDOW,
+        "the delete held its key for {parked:?}, which is not longer than the {WINDOW:?} \
+         window the ordering above was asserted over"
+    );
+    assert_eq!(
+        answered_delete["msg_type"],
+        serde_json::json!(msg_types::OK)
+    );
+    let answered_write = answer_for(&mut stream_b, &write.id, Duration::from_secs(60))
+        .await
+        .expect("the write was never answered");
+    assert_eq!(
+        answered_write["msg_type"],
+        serde_json::json!(msg_types::OK),
+        "the write failed: {:?}",
+        answered_write["payload"]
+    );
+
+    // Applied in that order: the write recreated the directory the delete had
+    // removed, so the file is there and it is the second mutation's content.
+    assert_eq!(
+        std::fs::read_to_string(root.path().join("big/inside.txt")).unwrap(),
+        "written"
+    );
+
+    handle.shutdown().await.ok();
+}
+
+/// A peer naming many distinct sessions gets a worker for a bounded number of
+/// them.
+///
+/// `#961`'s review, finding 3, on the socket it names first: `ExecutionLanes`
+/// was built with the no-budget constructor, so a peer naming a thousand sessions
+/// had a thousand keys, a thousand queues and a thousand workers — each one
+/// inside its own depth. The bound tests repeat work for one key; this is the
+/// flood.
+///
+/// Each create parks inside its own key on [`LONG_PARK_VARS`] environment
+/// variables *after* creating its session, so a session that exists in tmux is a
+/// mutation that was admitted — which is what the count below reads. The flood
+/// is larger than the bound, so a runtime without one shows every session.
+#[tokio::test]
+async fn a_peer_naming_many_sessions_gets_workers_for_a_bounded_number_of_them() {
+    use std::time::Duration;
+
+    const FLOOD: usize = 48;
+    const PARK_VARS: usize = 400;
+
+    let (addr, handle) = start_server(0).await.unwrap();
+    let (mut sink, _stream) = connect(addr).await.unwrap();
+    let tmux = SessionManager::new();
+    let prefix = unique_session_name("flood");
+
+    let vars: Vec<serde_json::Value> = (0..PARK_VARS)
+        .map(|i| serde_json::json!([format!("NESSION_FLOOD_{i}"), "1"]))
+        .collect();
+    for n in 0..FLOOD {
+        let create = new_message(
+            msg_types::SESSION_CREATE,
+            serde_json::json!({
+                "name": format!("{prefix}-{n}"),
+                "width": 80,
+                "height": 24,
+                "env_snapshots": [{
+                    "name": "park",
+                    "source": "agent",
+                    "vars": vars,
+                    "warnings": [],
+                }],
+            }),
+        );
+        sink.send(WsMessage::Text(
+            serde_json::to_value(&create).unwrap().to_string(),
+        ))
+        .await
+        .expect("send the create");
+    }
+
+    // Long enough for every admitted mutation to have created its session (the
+    // create comes first, the park second) and far shorter than the park, so the
+    // count below is the bound rather than the rate.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let bound = nession_agent::server::execution::DEFAULT_MUTATIONS_IN_FLIGHT;
+    let created = tmux
+        .list_sessions()
+        .await
+        .expect("list the flood's sessions")
+        .into_iter()
+        .filter(|session| session.name.starts_with(&prefix))
+        .count();
+
+    assert!(
+        created < FLOOD,
+        "a peer naming {FLOOD} distinct sessions had a worker for every one of them: the \
+         tasks in flight track the number of keys, which is the unbounded unique-key \
+         growth this bound exists for"
+    );
+    assert!(
+        created <= bound,
+        "the flood was admitted for {created} sessions, past this connection's bound of \
+         {bound}"
+    );
+    assert!(
+        created > 0,
+        "not one of the flood's sessions was created: nothing was measured"
+    );
 
     handle.shutdown().await.ok();
 }

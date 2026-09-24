@@ -1,6 +1,30 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { ClaudeCodePlugin } from '@/capabilities/claude-code/ClaudeCodePlugin';
 import { createMockPluginSurface, type MockPluginSurface } from '@/test/mockPluginSurface';
+import type { ProtocolManifest } from '@/platform/protocol';
+
+/**
+ * What `a1` advertises.
+ *
+ * Every test here addresses `a1`, so the directory has to know about it — the
+ * premise "there is an agent here", which a connection that has received an
+ * agent list always satisfies. It used to be optional because a manifest-less
+ * target was relayed unversioned; since `#963` that path throws.
+ */
+const AGENT_MANIFEST: ProtocolManifest = {
+  provider: 'test',
+  protocols: {
+    'claude-code.list': { versions: [1] },
+    'claude-code.read': { versions: [1] },
+  },
+};
+
+/** A surface whose agent `a1` is reachable — the premise of every test here. */
+function surfaceWithAgent(): MockPluginSurface {
+  const surface = createMockPluginSurface();
+  surface.protocols.publish(new Map([['a1', AGENT_MANIFEST]]));
+  return surface;
+}
 
 const listReq = {
   agent_id: 'a1',
@@ -33,7 +57,7 @@ describe('ClaudeCodePlugin', () => {
 
   beforeEach(() => {
     plugin = new ClaudeCodePlugin();
-    surface = createMockPluginSurface();
+    surface = surfaceWithAgent();
   });
 
   it('exposes the "claude-code" capability name', () => {
@@ -42,8 +66,8 @@ describe('ClaudeCodePlugin', () => {
 
   describe('binding lifecycle', () => {
     it('double-mount replaces the binding; stale teardown keeps the newer binding active', async () => {
-      const surfaceA = createMockPluginSurface();
-      const surfaceB = createMockPluginSurface();
+      const surfaceA = surfaceWithAgent();
+      const surfaceB = surfaceWithAgent();
 
       const teardownA = plugin.install(surfaceA);
       const teardownB = plugin.install(surfaceB); // replace semantics — no throw

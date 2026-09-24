@@ -28,13 +28,29 @@
 //!   the map lock only long enough to *find* the session
 //!   (`server::websocket`'s `AttachedSession::backend`).
 //!
-//! ## The lanes themselves are shared
+//! ## The lanes themselves are shared, and so is one of them
 //!
 //! Both lanes are the same mechanism the Server's connections and this agent's
 //! *central* connection run on, so there is one implementation rather than
 //! three: [`nession_runtime::lane`]. What stays here is everything that is this
 //! socket's answer rather than the mechanism's — its policy vocabulary, its
 //! resource key, its derived keys, and its bounds.
+//!
+//! They are not shared at the same scope, and that is the second half of
+//! `#961`'s review:
+//!
+//! | lane | scope | why |
+//! |---|---|---|
+//! | [`QueryLane`](nession_runtime::lane::QueryLane) | one per connection | it is admission, and what it protects is that connection's progress |
+//! | key lane | **[`mutation_scheduler`] — one per agent**, shared by every peer-to-peer connection | it is *ordering*, and the resources it orders — the tmux server, the file sandbox — are the agent's |
+//!
+//! A key lane per connection — what this was — ordered `same resource + same
+//! connection`, and the case this socket exists for is two browsers attaching to
+//! one session: two frames on two sockets against one tmux session. The lane
+//! that orders them has to be the lane the session manager hangs off, so it is
+//! built where the session manager and the file sandbox are built
+//! ([`crate::server::websocket::AgentServer::new`]) and handed to every
+//! connection.
 //!
 //! ## The policies
 //!
@@ -55,6 +71,18 @@
 //! a bound protects is the *connection's* ability to make progress, and one busy
 //! browser must not consume the fleet's budget.
 //!
+//! A mutation now waits at *two* bounds, and both wait in the same place — this
+//! connection's reader, before the frame is read:
+//!
+//! * this connection's own admission slots ([`DEFAULT_MUTATIONS_IN_FLIGHT`]),
+//!   taken before the frame reaches the shared lane. This is the bound that makes
+//!   the number of resources one peer can be mutating at once a number, whatever
+//!   keys it names.
+//! * the shared lane's per-key depth ([`DEFAULT_KEY_QUEUE_DEPTH`]), reached once
+//!   the frame is queued. This is the bound on how far ahead of one resource a
+//!   peer may get — and because the lane is the agent's, the resource's queue is
+//!   shared with every other connection, which is the point of it.
+//!
 //! Neither lane drops, because neither carries anything droppable: every frame
 //! on them is a request with an `id` and a caller waiting for its answer, and
 //! "the answer is never sent" is not a policy — it is a hang the peer cannot
@@ -69,7 +97,10 @@
 //! enough ([`DEFAULT_KEY_QUEUE_DEPTH`]) that reaching it means the client is
 //! genuinely ahead of the backend rather than merely bursty.
 
+use std::sync::Arc;
 use std::time::Duration;
+
+use nession_runtime::lane::KeyedLane;
 
 /// The default number of queries one peer-to-peer connection may have running.
 ///
@@ -91,6 +122,41 @@ pub const DEFAULT_QUERY_CONCURRENCY: usize = 8;
 /// for.
 pub const DEFAULT_KEY_QUEUE_DEPTH: usize = 16;
 
+/// How many mutations one peer-to-peer connection may have in flight.
+///
+/// The bound that makes "tasks do not grow with unique keys" true here. Without
+/// it a peer naming a thousand sessions has a thousand keys and therefore a
+/// thousand tasks, each inside its own per-key depth; what this states is that a
+/// *connection* cannot have more than this many mutations outstanding whichever
+/// resources it names, so the number of workers its frames can create is a
+/// number ([`ExecutionLanes`]' shared lane takes the slots before the work
+/// reaches the lane).
+///
+/// Sixteen, and per *connection* rather than per agent, for the reason
+/// [`DEFAULT_KEY_QUEUE_DEPTH`] gives about fairness: the thing that waits is one
+/// connection's reader, and a bound every peer shares is a budget one peer can
+/// spend on behalf of the others. Sixteen is also this socket's per-key depth, so
+/// a client that is merely far ahead of *one* session sees the same number on
+/// both bounds; they are still two statements — how far ahead of one resource,
+/// and how many resources at once.
+pub const DEFAULT_MUTATIONS_IN_FLIGHT: usize = 16;
+
+/// The mutation lane every peer-to-peer connection of this agent dispatches
+/// into.
+///
+/// Built once, where the resources its keys name are built — one tmux server and
+/// one file sandbox, both process-wide — and handed to every connection that
+/// accepts on this socket ([`crate::server::websocket::AgentServer`]). See
+/// [`ResourceKey`] for what "the same resource" means here, and
+/// `nession_runtime::lane::Lanes::shared` for what a shared lane buys.
+///
+/// No worker budget: what bounds how many resources are mutated at once is the
+/// *connection's* admission bound ([`DEFAULT_MUTATIONS_IN_FLIGHT`]), which is
+/// where the waiter is. See `nession_runtime::lane`.
+pub fn mutation_scheduler() -> Arc<KeyedLane<ResourceKey>> {
+    Arc::new(KeyedLane::new(DEFAULT_KEY_QUEUE_DEPTH, LANE_LABEL))
+}
+
 /// How long a connection's lanes are given to stop when it ends.
 ///
 /// The lanes are *aborted* rather than drained (see `Lanes::shutdown`), so this
@@ -109,7 +175,9 @@ pub const LANE_LABEL: &str = "peer-to-peer ";
 ///
 /// [`ExecutionLanes`] is shared; this is the alias that fixes its key type to
 /// *this* socket's resource key, so a call site names one type and the compiler
-/// checks the key space it hands over.
+/// checks the key space it hands over. A connection builds one with
+/// [`ExecutionLanes::shared`](nession_runtime::lane::Lanes::shared), handing it
+/// the agent's [`mutation_scheduler`].
 pub type ExecutionLanes = nession_runtime::lane::Lanes<ResourceKey>;
 
 /// The resource a mutation is ordered against.
@@ -130,15 +198,49 @@ pub type ExecutionLanes = nession_runtime::lane::Lanes<ResourceKey>;
 pub enum ResourceKey {
     /// A tmux session, by the name this agent knows it by.
     Session(String),
-    /// A path under the connection's file sandbox root.
-    File(String),
+    /// **The file sandbox as one resource**, rather than a path within it.
+    ///
+    /// A deliberately coarse key, and the reason is that a path is not the whole
+    /// of what a file mutation touches:
+    ///
+    /// * `agent.file.rename` mutates two paths — `from` and `to` — and a key can
+    ///   name only one of them, so keyed by `from` a `write` of the destination
+    ///   runs concurrently with the rename that is about to overwrite it;
+    /// * recursive `agent.file.delete` mutates a directory *and everything under
+    ///   it*, so keyed by the directory itself a `write` of `dir/x` is a
+    ///   different key and the write lands in a tree that is being removed;
+    /// * `agent.file.create-dir` and `agent.file.write` both create parents, so
+    ///   either may be making a path a queued mutation of a *descendant* is
+    ///   about to use.
+    ///
+    /// The alternative is multi-key acquisition — take the keys of every path a
+    /// unit touches, in a fixed order — and it is more machinery than the
+    /// ordering is worth: it needs a lock order to keep it deadlock-free, a
+    /// parent-chain walk per frame, and an answer to what a key *is* on a
+    /// hierarchical namespace (a prefix? a glob?). File mutations are also not a
+    /// throughput-critical path — a UI's edits and an occasional bulk delete —
+    /// while a session-key mistake is a stuck terminal. So the coarse answer,
+    /// which is the direction `#961`'s review prefers: one key for the sandbox,
+    /// and every file mutation of this agent is ordered against every other.
+    ///
+    /// What it costs is parallelism between *unrelated* file mutations: two
+    /// browsers editing two different files now take turns where they did not.
+    /// What it buys is that no two file mutations can interleave at all, which
+    /// is what makes "a rename cannot race a write of its destination" and "a
+    /// recursive delete cannot race a write of a descendant" properties of the
+    /// design rather than of a path comparison that has to be right about
+    /// symlinks, `..`, and trailing separators.
+    ///
+    /// Reads are untouched: `agent.file.list` and `agent.file.read` are queries
+    /// on the connection's own lane and were never ordered against mutations.
+    Filesystem,
 }
 
 impl std::fmt::Display for ResourceKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Session(name) => write!(f, "session:{name}"),
-            Self::File(path) => write!(f, "file:{path}"),
+            Self::Filesystem => write!(f, "filesystem"),
         }
     }
 }
@@ -178,6 +280,17 @@ pub enum ExecutionPolicy {
     Query,
     /// A mutation: queued behind every other mutation of the same
     /// [`ResourceKey`], and independent of every other key's.
+    ///
+    /// "Every other mutation of the same key" is not "every other mutation of
+    /// the same key *on this connection*": the lane is the agent's
+    /// ([`mutation_scheduler`]), so two browsers attaching to one session are
+    /// queued against each other, and both are queued against a Server command
+    /// that renames it. Only the connection's admission bound
+    /// ([`DEFAULT_MUTATIONS_IN_FLIGHT`]) is per connection, because only that is
+    /// about what one peer may have in flight.
+    ///
+    /// Every file mutation carries [`ResourceKey::Filesystem`] rather than a
+    /// path — see that variant for why the key space is that coarse.
     Key(ResourceKey),
 }
 
@@ -187,20 +300,20 @@ mod tests {
 
     /// The two key spaces are told apart by the key, not by its text.
     ///
-    /// A session named after a path and a file at that path are not the same
-    /// resource, and the lane would merge them if the key were the bare string —
-    /// the kind of merge that shows up later as an unexplained stall on a
-    /// session somebody happened to name after a file.
+    /// A session named after a path is not the file at that path, and the lane
+    /// would merge them if the key were the bare string — the kind of merge that
+    /// shows up later as an unexplained stall on a session somebody happened to
+    /// name after a file.
     #[test]
     fn the_two_key_spaces_have_distinct_spellings() {
         assert_ne!(
             ResourceKey::Session("a/b.txt".to_string()),
-            ResourceKey::File("a/b.txt".to_string())
+            ResourceKey::Filesystem
         );
         assert_eq!(
             ResourceKey::Session("s1".to_string()).to_string(),
             "session:s1"
         );
-        assert_eq!(ResourceKey::File("a/b".to_string()).to_string(), "file:a/b");
+        assert_eq!(ResourceKey::Filesystem.to_string(), "filesystem");
     }
 }

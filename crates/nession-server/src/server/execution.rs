@@ -21,7 +21,7 @@
 //! | [`ExecutionPolicy::Query`] | the read-only units | admits it to a bounded lane and reads the next frame |
 //! | [`ExecutionPolicy::Key`] | the units that mutate a resource | queues it behind that resource's own queue and reads the next frame |
 //!
-//! ## The lanes themselves are shared
+//! ## The lanes themselves are shared, and so is one of them
 //!
 //! The reader's two lanes — bounded parallel reads, and one FIFO worker per
 //! resource key — are the same mechanism the agent runs on both of its
@@ -29,6 +29,21 @@
 //! [`nession_runtime::lane`]. What stays here is everything that is the
 //! *Server's* answer rather than the mechanism's: its policy vocabulary, its
 //! resource key, its derived keys, and its bounds.
+//!
+//! The two are not shared at the same scope, and that is the point of the
+//! second half of `#961`'s review:
+//!
+//! | lane | scope | why |
+//! |---|---|---|
+//! | [`QueryLane`](nession_runtime::lane::QueryLane) | one per connection | it is admission, and what it protects is that connection's progress |
+//! | key lane | **[`mutation_scheduler`] — one per runtime**, shared by every connection | it is *ordering*, and the resources it orders are the runtime's |
+//!
+//! A key lane per connection — what this was — ordered `same resource + same
+//! connection`, which says nothing about the case the guarantee exists for: two
+//! clients mutating one session are two frames on two sockets against one row of
+//! one registry. The lane that orders them has to be the lane the registry
+//! hangs off, so it is built where the registries and the env store are built
+//! and passed to every connection.
 //!
 //! ## Why the ordered lane waits, and for how long
 //!
@@ -53,16 +68,27 @@
 //! process-wide, because what it protects is the *connection's* ability to make
 //! progress, and one busy browser must not consume the fleet's budget.
 //!
+//! A mutation now waits at *two* bounds, and they are per connection in the same
+//! way: this connection's own admission slots
+//! ([`DEFAULT_MUTATIONS_IN_FLIGHT`]) before its frame reaches the shared lane,
+//! and that lane's per-key depth ([`DEFAULT_KEY_QUEUE_DEPTH`]) once it has. The
+//! first is what makes the number of resources one peer can be mutating at once
+//! a number; the second is what stops one peer from getting arbitrarily far
+//! ahead of the agent acting on one resource.
+//!
 //! Waiting on a lane does not hold the connection's *writes*: the outbound path
 //! is its own task with its own bound ([`crate::server::outbound`]), so a reader
 //! parked on a full lane still has its ping written and its terminal frames
 //! relayed.
+
+use std::sync::Arc;
 
 use tracing::{debug, error};
 
 use crate::server::handler::{unit_policy, ConnectionHandler, HandlerAction};
 use crate::server::outbound::WsMessageSender;
 use nession_protocol::ProtocolMessage;
+use nession_runtime::lane::KeyedLane;
 
 /// The default number of queries one connection may have in flight.
 ///
@@ -71,6 +97,46 @@ use nession_protocol::ProtocolMessage;
 /// number. See `nession_runtime::lane::QueryLane` for what reaching it does.
 pub const DEFAULT_QUERY_CONCURRENCY: usize =
     nession_common::config::DEFAULT_QUERY_CONCURRENCY_PER_CONNECTION;
+
+/// How many mutations one connection of this Server may have in flight.
+///
+/// The bound that makes "tasks do not grow with unique keys" true here. Four
+/// hundred resources each queued behind their own worker is four hundred tasks;
+/// what this states is that a *connection* cannot have more than this many
+/// mutations outstanding whichever resources it names, so the number of workers
+/// its frames can create is a number ([`Lanes::shared`] takes the slots before
+/// the work reaches the lane).
+///
+/// Sixteen rather than the query lane's `query_concurrency_per_connection`
+/// because a mutation is not a query: a brokered `session.create` is a round
+/// trip to an agent and back, so a client opening a workspace spends several
+/// slots at once and a smaller bound would park it mid-workspace. It is also not
+/// derived from the per-key depth ([`DEFAULT_KEY_QUEUE_DEPTH`], 8): the depth
+/// says how far ahead of one resource a client may get, and this says how many
+/// resources it may be ahead of at once. Two statements, two numbers.
+///
+/// The agent's peer-to-peer socket keeps its own number for the same reasons
+/// `DEFAULT_KEY_QUEUE_DEPTH` states: a concurrency policy belongs to the runtime
+/// that implements it (#961 constraints), and the two runtimes serve different
+/// workloads.
+pub const DEFAULT_MUTATIONS_IN_FLIGHT: usize = 16;
+
+/// The mutation lane every connection of this Server dispatches into.
+///
+/// Built once, by whoever owns the resources its keys name — this Server's
+/// registries and env store — and handed to each connection
+/// ([`crate::server::websocket::ServerContext`]). It is *the runtime's* lane
+/// rather than a connection's because the resources are the runtime's: two
+/// clients mutating one session are mutating one row of one registry, and a lane
+/// per connection would order neither against the other. See
+/// [`ResourceKey`] and `nession_runtime::lane::Lanes::shared`.
+///
+/// No worker budget: what bounds how many resources are mutated at once is the
+/// *connection's* admission bound ([`DEFAULT_MUTATIONS_IN_FLIGHT`]), which is
+/// where the waiter is. See `nession_runtime::lane`.
+pub fn mutation_scheduler() -> Arc<KeyedLane<ResourceKey>> {
+    Arc::new(KeyedLane::new(DEFAULT_KEY_QUEUE_DEPTH, LANE_LABEL))
+}
 
 /// How many mutations one resource may have queued before the reader waits.
 ///
@@ -99,7 +165,9 @@ pub const LANE_LABEL: &str = "";
 ///
 /// [`Lanes`] itself is shared; this is the alias that fixes its key type to
 /// *this* Server's resource key, so a call site names one type and the compiler
-/// checks the key space it hands over.
+/// checks the key space it hands over. A connection builds one with
+/// [`Lanes::shared`](nession_runtime::lane::Lanes::shared), handing it the
+/// runtime's [`mutation_scheduler`].
 pub type Lanes = nession_runtime::lane::Lanes<ResourceKey>;
 
 /// The resource a mutation is ordered against.
@@ -193,6 +261,13 @@ pub enum ExecutionPolicy {
     Query,
     /// A mutation: queued behind every other mutation of the same
     /// [`ResourceKey`], and independent of every other key's.
+    ///
+    /// "Every other mutation of the same key" is not "every other mutation of
+    /// the same key *on this connection*": the lane is the runtime's
+    /// ([`mutation_scheduler`]), so two clients mutating one session are queued
+    /// against each other. Only the connection's admission bound
+    /// ([`DEFAULT_MUTATIONS_IN_FLIGHT`]) is per connection, because only that is
+    /// about what one peer may have in flight.
     ///
     /// Carries its key because the key is half of what the policy *is*: "how is
     /// this dispatched" cannot be answered for a mutation without saying what it
