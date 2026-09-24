@@ -74,8 +74,8 @@
 //! that.
 //!
 //! The resize class is not marked for resync, deliberately: a pane size is
-//! re-established by the attach path (`query_window_size`), not by the session
-//! registry.
+//! re-established by the attach path (its initial `TmuxOps::window_size`
+//! query), not by the session registry.
 //!
 //! ## Who publishes, who writes
 //!

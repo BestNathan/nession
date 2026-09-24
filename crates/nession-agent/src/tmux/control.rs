@@ -8,6 +8,17 @@
 //! the new size via `%window-resize` events, which the agent broadcasts to
 //! all attached clients. Last writer wins — the most recent resize sets
 //! the size for everyone.
+//!
+//! **That is a decision, not an accident.**
+//! `2026-08-15-viewport-fit-terminal-migration-design.md` §2 chose it
+//! explicitly ("accept last-writer-wins … No arbitration"), superseding the
+//! earlier fixed-200×60 model. The resource being resized is the tmux
+//! **window**: one per session, one pane, shared by every attached client.
+//!
+//! tmux also has a per-client mechanism (`refresh-client -C`), and this
+//! backend deliberately does not use it — every attached client is fed the
+//! same `%output` byte stream, so per-client viewports could not be rendered
+//! coherently. See [`ControlModeSession::resize`].
 
 use anyhow::{Context, Result};
 use std::process::Stdio;
@@ -15,7 +26,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout};
 use tokio::sync::mpsc;
 
-use super::cmd;
+use super::ops::TmuxDep;
 use super::parser::{parse_control_line, unescape_tmux_data, ControlMessage};
 use super::util::run_tmux_command;
 
@@ -25,16 +36,23 @@ const OUTPUT_CHANNEL_CAPACITY: usize = 256;
 /// Buffer capacity for the resize channel — one (cols, rows) tuple per event.
 const RESIZE_CHANNEL_CAPACITY: usize = 16;
 
-/// tmux control mode session — one per attached web client.
+/// tmux control mode session — **one per nession session**, shared by every
+/// attached web client. The agent's session map is keyed by session name, so a
+/// second client attaching joins the existing backend as a subscriber instead
+/// of spawning a second `tmux -C attach` (`server/websocket.rs`).
 ///
 /// Spawns a `tmux -C attach` subprocess and pipes structured messages
 /// (parsed to raw ANSI bytes) through an mpsc channel. The caller drives
-/// input via `write_input` and resizes the tmux window via `resize`.
+/// input via `write_input` and resizes the shared tmux window via `resize`.
 pub struct ControlModeSession {
     session_name: String,
     child: Child,
     stdin: ChildStdin,
     viewport: (u16, u16),
+    /// The tmux this client is attached to — held rather than resolved per
+    /// call because [`Drop`] cannot reach the process, and a client attached
+    /// to one addressing must be detached from the same one (#991 step 6).
+    tmux: TmuxDep,
 }
 
 impl ControlModeSession {
@@ -52,7 +70,11 @@ impl ControlModeSession {
     /// clients (e.g. as a `terminal.resize` message). When the tmux
     /// subprocess exits (or the reader task drops the senders), both
     /// receivers close.
+    ///
+    /// `tmux` is the caller's addressing — the same one the session was
+    /// created on, and the one a test substitutes a fake binary into.
     pub async fn attach(
+        tmux: &TmuxDep,
         session_name: &str,
         width: u16,
         height: u16,
@@ -61,6 +83,7 @@ impl ControlModeSession {
         // This ensures tmux renders at the correct dimensions from the first
         // frame, avoiding a flash of wrong-sized content.
         run_tmux_command(
+            tmux,
             session_name,
             &[
                 "resize-window",
@@ -72,7 +95,8 @@ impl ControlModeSession {
         )
         .await?;
 
-        let mut child = cmd::global()
+        let mut child = tmux
+            .cmd()
             .tokio()
             .args(["-C", "attach", "-t", session_name])
             .stdin(Stdio::piped())
@@ -93,6 +117,7 @@ impl ControlModeSession {
             child,
             stdin,
             viewport: (width, height),
+            tmux: tmux.clone(),
         };
 
         Ok((session, output_rx, resize_rx))
@@ -124,12 +149,17 @@ impl ControlModeSession {
         Ok(())
     }
 
-    /// Resize the tmux window and trigger a full redraw.
+    /// Resize the tmux **window** and trigger a full redraw.
     ///
     /// Sends two commands via control-mode stdin:
-    /// 1. `resize-window` — changes the window size (affects all clients)
+    /// 1. `resize-window` — changes the window size (**affects all clients**)
     /// 2. `refresh-client` — triggers a full pane redraw so the reflowed
     ///    content is sent as `%output` messages immediately
+    ///
+    /// This is not a per-client viewport: one window, one pane, shared by
+    /// every client on the session, so this moves the pane for all of them and
+    /// the most recent caller wins. The module docs carry the decision and why
+    /// `refresh-client -C` is deliberately not used.
     pub async fn resize(&mut self, width: u16, height: u16) -> Result<()> {
         self.viewport = (width, height);
         let cmd = format!(
@@ -156,13 +186,29 @@ impl ControlModeSession {
     /// Sends `detach-client` to the control-mode stdin so tmux cleanly
     /// disconnects the client.  SIGKILL is NEVER used because it can crash
     /// the tmux server on macOS (observed with Homebrew tmux 3.6b).
+    ///
+    /// **Cleanup**, and the three steps are the teardown of a client that is
+    /// already on its way out: what ends it is this client's stdin closing
+    /// (control mode exits on EOF), which is why the failures below are
+    /// dropped rather than propagated, and why `Ok` here is not a claim that
+    /// tmux confirmed anything. The one thing the class forbids — masking a
+    /// primary error — cannot happen: nothing else in this function can fail.
     pub async fn close(&mut self) -> Result<()> {
         // Send graceful detach — the tmux subprocess will exit cleanly.
+        //
+        // Not a tmux *spawn*: this is a line written to a control-mode client's
+        // stdin, so there is no exit status and no stderr to classify — tmux's
+        // answer to a bad line arrives asynchronously on the same pipe the
+        // output comes back on, and a failure here means the pipe is already
+        // gone (EPIPE), i.e. the client has already detached. `ops.rs`'s module
+        // docs carry the same point for why `send-keys -H` over this transport
+        // is not `TmuxOps::send_keys`.
         let _ = self.stdin.write_all(b"detach-client\n").await;
         let _ = self.stdin.flush().await;
         // Wait briefly for the subprocess to process the detach and exit.
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-        // Best-effort wait — child has likely already exited after detach.
+        // Reap the control-mode child. Not a tmux call — it is the process this
+        // backend spawned, so no tmux operation class applies.
         // Use wait() instead of start_kill() to avoid SIGKILL.
         let _ = self.child.wait().await;
         Ok(())
@@ -171,19 +217,32 @@ impl ControlModeSession {
 
 impl Drop for ControlModeSession {
     fn drop(&mut self) {
-        // Detach the control-mode client gracefully using a blocking tmux
-        // command (Drop is sync so we cannot use async here).
+        // **Cleanup** (#991): teardown, so the failure is allowed and the shape
+        // is `let _ =` rather than `?` — a `Drop` cannot report anything, and
+        // must not panic.
         //
-        // SIGKILL (start_kill / kill -9) on a control-mode client crashes
-        // the tmux server on macOS (Homebrew tmux 3.6b: "server exited
-        // unexpectedly").  We must always detach cleanly.
-        let _ = cmd::global()
-            .std()
-            .args(["detach-client", "-t", &self.session_name])
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status();
+        // It also does not have to succeed: what ends this client is its stdin
+        // closing below (control mode exits on EOF), and the SIGKILL route this
+        // deliberately avoids is the one with a documented hazard — SIGKILL on
+        // a control-mode client crashes the tmux server on macOS (Homebrew tmux
+        // 3.6b: "server exited unexpectedly"), so an unclean detach is the
+        // lesser risk here but still not a state a caller has to hear about.
+        //
+        // The target is the client **this backend spawned**, resolved from the
+        // child's pid (#1011). It used to name the session, which
+        // `detach-client -t` does not accept: measured on tmux 3.6b that
+        // answers `can't find client: <session>` (exit 1) and detaches nothing,
+        // so the detach was a no-op from the day it was written. `-s <session>`
+        // is not the repair — it detaches *every* client of the session,
+        // including one a user attached by hand.
+        //
+        // [`close`](ControlModeSession::close) reaches the same end through the
+        // control-mode stdin instead, which is the transport this backend
+        // already owns; this path keeps a subprocess because `Drop` cannot
+        // await. The class and the silence are unchanged.
+        if let Some(pid) = self.child.id() {
+            let _ = self.tmux.ops().detach_client_by_pid_blocking(pid);
+        }
         // Let the child process exit on its own — drop order will close
         // stdin (EOF → child exits), then child (reaped by tokio/lanchd).
     }
@@ -238,9 +297,14 @@ async fn read_output_loop(
                         }
                     }
                     ControlMessage::WindowResize { cols, rows, .. } => {
-                        // Best-effort: if the receiver is gone the client
-                        // has detached but we keep reading output until
-                        // the output channel also closes.
+                        // Best-effort, and **not a tmux result at all**: this is
+                        // an internal `mpsc` send to the caller's resize
+                        // receiver, whose only failure is "the receiver is
+                        // gone". No tmux operation class applies — the tmux
+                        // call that produced this event already returned, and
+                        // its result was the line above. Keeping the reader
+                        // alive after a dropped receiver is the decision: output
+                        // continues until the output channel closes too.
                         let _ = resize_tx.send((cols, rows)).await;
                     }
                     ControlMessage::Exit => break,
@@ -252,5 +316,112 @@ async fn read_output_loop(
     }
 }
 
-// resize() spawns a separate `tmux resize-window` process; covered by
-// integration tests (test_resize_updates_viewport, etc.).
+// `attach` spawns a separate `tmux resize-window` process — it runs *before*
+// the control-mode client exists, so there is no stdin to write to yet.
+// `resize` writes `resize-window` to the control-mode stdin instead. Two
+// routes, one shared window. Covered by tests/integration/control_mode.rs.
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_injected_tmux_receives_the_control_mode_attach_and_the_detach() {
+        // The control-mode backend reaches tmux three ways — `resize-window`
+        // through `util::run_tmux_command` before it attaches, `-C attach` as
+        // its own child, and `detach-client` on the way out — and all three ran
+        // on the process-wide tmux before #991 step 6.
+        //
+        // **This one runs on macOS too**, which the control-mode integration
+        // tests (skipped by `cfg!(target_os = "macos")` because a real tmux
+        // server can be crashed by parallel control-mode clients) cannot. There
+        // is no server here: every tmux invocation is the fake, which records
+        // its argv and exits. So the shape that has no local coverage on this
+        // machine — the backend's own wiring — has a test that does, and the
+        // macOS skip keeps applying exactly where it was needed: to real tmux.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let child_pid = dir.path().join("child.pid");
+        // `-C attach` records its own pid — the process this backend spawned,
+        // which is what it later resolves its client by — and `list-clients`
+        // hands it back the way tmux does (measured: `#{client_pid}` is the
+        // attaching process, so the client we own is the one carrying it).
+        let fake = crate::test_support::FakeTmux::new(
+            dir.path(),
+            &format!(
+                "case \"$1\" in \
+                 attach|-C) echo $$ > \"{pid}\"; exit 0;; \
+                 list-clients) p=$(cat \"{pid}\" 2>/dev/null || echo 0); \
+                   echo \"$p client-$p\"; exit 0;; \
+                 *) exit 0;; esac",
+                pid = child_pid.display(),
+            ),
+        );
+
+        let (session, _rx, _resize_rx) =
+            ControlModeSession::attach(&fake.dep(), "nession-fake-sess", 80, 24)
+                .await
+                .expect("the injected binary accepts the resize and the attach");
+        assert_eq!(session.viewport(), (80, 24));
+
+        // `resize-window` is awaited, `-C attach` is a spawned child that the
+        // reader loop may not have seen finish yet.
+        let calls = fake
+            .wait_for_calls(3, std::time::Duration::from_secs(10))
+            .await;
+        assert_eq!(
+            calls.first(),
+            Some(&vec![
+                "resize-window".to_string(),
+                "-x".to_string(),
+                "80".to_string(),
+                "-y".to_string(),
+                "24".to_string(),
+                "-t".to_string(),
+                "nession-fake-sess".to_string(),
+            ]),
+            "the window is resized before the attach, through the injected tmux: {calls:?}"
+        );
+        assert!(
+            calls.iter().any(|args| args
+                == &vec![
+                    "-C".to_string(),
+                    "attach".to_string(),
+                    "-t".to_string(),
+                    "nession-fake-sess".to_string(),
+                ]),
+            "the control-mode client is the injected binary: {calls:?}"
+        );
+
+        drop(session);
+        let calls = fake.calls();
+        let pid = std::fs::read_to_string(&child_pid)
+            .expect("the attach branch records its pid")
+            .trim()
+            .to_string();
+
+        // `-s <session>` would detach *every* client of the session, including
+        // one a user attached by hand, and `-t <session>` detaches nothing at
+        // all (#1011). The only correct target is the client this backend owns,
+        // named from the pid it spawned.
+        assert!(
+            calls.iter().any(|args| args
+                == &vec![
+                    "detach-client".to_string(),
+                    "-t".to_string(),
+                    format!("client-{pid}"),
+                ]),
+            "a control-mode client must detach the client it spawned ({pid}), on \
+             the tmux it attached to: {calls:?}"
+        );
+        assert!(
+            !calls.iter().any(|args| args
+                == &vec![
+                    "detach-client".to_string(),
+                    "-t".to_string(),
+                    "nession-fake-sess".to_string(),
+                ]),
+            "and never the session, which is the #1011 no-op: {calls:?}"
+        );
+    }
+}

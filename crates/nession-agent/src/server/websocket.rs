@@ -411,46 +411,6 @@ pub(crate) fn extract_session_name(session_id: &str) -> String {
         .unwrap_or_else(|| session_id.to_string())
 }
 
-/// Query tmux for the current window size of `session_name` using
-/// `tmux display-message -p -t <session> '#{window_width} #{window_height}'`.
-///
-/// Returns `(cols, rows)`. Errors if the command fails, the output cannot
-/// be parsed, or the two dimensions cannot both be read as `u16`.
-async fn query_window_size(session_name: &str) -> Result<(u16, u16)> {
-    let output = crate::tmux::cmd::global()
-        .tokio()
-        .args([
-            "display-message",
-            "-p",
-            "-t",
-            session_name,
-            "#{window_width} #{window_height}",
-        ])
-        .output()
-        .await
-        .with_context(|| format!("failed to spawn tmux display-message for {session_name}"))?;
-    if !output.status.success() {
-        anyhow::bail!(
-            "tmux display-message exited with status {}: {}",
-            output.status,
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-    let text = String::from_utf8_lossy(&output.stdout);
-    let mut parts = text.split_whitespace();
-    let cols: u16 = parts
-        .next()
-        .context("no width in display-message output")?
-        .parse()
-        .context("failed to parse window width")?;
-    let rows: u16 = parts
-        .next()
-        .context("no height in display-message output")?
-        .parse()
-        .context("failed to parse window height")?;
-    Ok((cols, rows))
-}
-
 /// Send a single `terminal.resize` message on this connection's outbound path.
 /// Returns `true` while the connection is usable, `false` once it is over.
 ///
@@ -1123,7 +1083,11 @@ p2p_routes! { ctx, msg_type, payload_value;
                     }
 
                     // Session doesn't exist yet: create PtySession + first subscriber.
+                    // The backend is handed this manager's tmux addressing rather
+                    // than resolving the process-wide one, so a substituted
+                    // binary reaches the attach too (#991 step 6).
                     match crate::tmux::pty::PtySession::attach(
+                        &ctx.tmux.tmux_dep(),
                         &session_name,
                         payload.width,
                         payload.height,
@@ -1203,6 +1167,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     }
 
                     match crate::tmux::control::ControlModeSession::attach(
+                        &ctx.tmux.tmux_dep(),
                         &payload.session_name,
                         payload.width,
                         payload.height,
@@ -1315,12 +1280,30 @@ p2p_routes! { ctx, msg_type, payload_value;
                             let session_name_resize = session_name.clone();
                             let resize_reporter = ctx.resize.clone();
                             let agent_id_resize = ctx.agent_id.to_string();
+                            // The same addressing the attach above was given,
+                            // rather than the process-wide one (#991 step 6):
+                            // a migrated operation reached from a handler
+                            // inherited from `ctx.tmux` like everything else on
+                            // this path, so an injected tmux is not bypassed by
+                            // the first query that follows the attach.
+                            let tmux_resize = ctx.tmux.tmux_dep();
                             tokio::spawn(async move {
                                 // Initial resize: query tmux for the pane's
                                 // current size and forward it as one message.
                                 // Runs inside the spawned task so the attach
                                 // OK response reaches the client first.
-                                match query_window_size(&session_name_resize).await {
+                                //
+                                // **Required** at this call site: the size is
+                                // what xterm.js is told to expect, so a session
+                                // whose size could not be read is not one to
+                                // announce a guessed one for — an 80×24 that was
+                                // never asked for would show as a real resize
+                                // and reflow nothing. The grammar is
+                                // `TmuxOps`'s; this arm is where the class is
+                                // decided (see #991 on the two policies this
+                                // query used to carry in two hand-written
+                                // copies).
+                                match tmux_resize.ops().window_size(&session_name_resize).await {
                                     Ok((cols, rows)) => {
                                         send_terminal_resize_msg(
                                             &outbound_resize,
@@ -2431,9 +2414,14 @@ mod tests {
                 "s1".to_string(),
                 AttachedSession {
                     backend: Arc::new(Mutex::new(Box::new(
-                        crate::tmux::pty::PtySession::attach("s1", 80, 24)
-                            .expect("a PTY for the session under test")
-                            .0,
+                        crate::tmux::pty::PtySession::attach(
+                            &crate::tmux::ops::TmuxDep::global(),
+                            "s1",
+                            80,
+                            24,
+                        )
+                        .expect("a PTY for the session under test")
+                        .0,
                     ))),
                     subscribers: Vec::new(),
                 },
@@ -2797,7 +2785,8 @@ mod tests {
         tmux.create_session(&session_name, 80, 24, "/tmp", &[])
             .await
             .unwrap();
-        crate::tmux::util::send_keys(&session_name, "echo hello-from-preview")
+        crate::tmux::ops::TmuxOps::global()
+            .send_keys(&session_name, "echo hello-from-preview")
             .await
             .unwrap();
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;

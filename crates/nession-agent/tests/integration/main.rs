@@ -25,6 +25,89 @@ pub(crate) fn unique_session_name(prefix: &str) -> String {
     format!("{TEST_SESSION_PREFIX}{prefix}-{suffix}")
 }
 
+/// A fake `tmux` binary, for substitution through
+/// [`TmuxDep::injected`](nession_agent::tmux::ops::TmuxDep::injected).
+///
+/// The unit-test copy of this is `crate::test_support::FakeTmux`, which
+/// integration tests cannot see (see the note on [`TestSession`]). Keep the two
+/// in step: both record the argv of every call with the `-S <socket>` prefix
+/// stripped, both run `script` with `/bin/sh`, and both leave the recorded log
+/// in the caller's temp dir.
+///
+/// It is here rather than in one test file because #991 step 6 is about a seam
+/// that has to be reachable *from outside the crate*: a test that reached it
+/// only through `#[cfg(test)]` items would pass while the seam stayed
+/// unavailable to every other consumer.
+#[cfg(unix)]
+pub(crate) struct FakeTmux {
+    bin: String,
+    log: std::path::PathBuf,
+    socket: std::path::PathBuf,
+}
+
+#[cfg(unix)]
+impl FakeTmux {
+    /// Write the fake into `dir`.
+    ///
+    /// `io::Result` rather than panicking here: this file's helpers are not
+    /// themselves test code, so `allow-expect-in-tests` does not cover them —
+    /// the caller (a `#[test]`) is where a failure is allowed to be fatal.
+    pub(crate) fn new(dir: &std::path::Path, script: &str) -> std::io::Result<Self> {
+        use std::os::unix::fs::PermissionsExt;
+        let bin = dir.join("tmux");
+        let log = dir.join("argv.log");
+        std::fs::write(
+            &bin,
+            format!(
+                "#!/bin/sh\n\
+                 if [ \"$1\" = \"-S\" ]; then shift 2; fi\n\
+                 printf '%s\\n' \"$@\" >> \"{log}\"\n\
+                 echo \"{sep}\" >> \"{log}\"\n\
+                 {script}\n",
+                log = log.display(),
+                sep = CALL_SEPARATOR,
+            ),
+        )?;
+        let mut perms = std::fs::metadata(&bin)?.permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&bin, perms)?;
+        Ok(Self {
+            bin: bin.to_string_lossy().into_owned(),
+            log,
+            socket: dir.join("tmux.sock"),
+        })
+    }
+
+    /// The tmux dependency to inject: this binary, on a socket no server has
+    /// bound — so a call that failed to reach the fake cannot quietly succeed
+    /// against a real one.
+    pub(crate) fn dep(&self) -> nession_agent::tmux::ops::TmuxDep {
+        nession_agent::tmux::ops::TmuxDep::injected(nession_agent::tmux::cmd::TmuxCmd::new(
+            self.bin.clone(),
+            self.socket.clone(),
+        ))
+    }
+
+    /// Every call recorded so far, each as the argv entries tmux received.
+    pub(crate) fn calls(&self) -> Vec<Vec<String>> {
+        let log = std::fs::read_to_string(&self.log).unwrap_or_default();
+        log.split(CALL_SEPARATOR)
+            .map(|block| {
+                block
+                    .trim_matches('\n')
+                    .lines()
+                    .map(str::to_string)
+                    .collect::<Vec<String>>()
+            })
+            .filter(|args| !args.is_empty())
+            .collect()
+    }
+}
+
+/// Separator [`FakeTmux`] writes after each recorded call.
+#[cfg(unix)]
+pub(crate) const CALL_SEPARATOR: &str = "==call==";
+
 /// What tmux holds for `name` in `session` — the value half of the one
 /// `NAME=VALUE` line it prints, or `None` when tmux does not hold it.
 ///

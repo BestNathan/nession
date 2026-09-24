@@ -15,9 +15,7 @@ use anyhow::{Context, Result};
 use std::path::PathBuf;
 use tokio::fs;
 
-use super::cmd;
-use super::ops::TmuxOps;
-use super::util::send_keys;
+use super::ops::TmuxDep;
 
 /// Path for the source script of a given (client, session, env-name) triple.
 fn source_script_path(base_dir: PathBuf, client_id: &str, session: &str, name: &str) -> PathBuf {
@@ -41,8 +39,22 @@ fn unsource_script_path(base_dir: PathBuf, client_id: &str, session: &str, name:
 /// stderr is `Stdio::null()` is unobservable, and unobservable is a policy
 /// nobody chose (#991's edge cases: a cosmetic failure after a successful
 /// primary is observable and does not rewrite the primary).
-async fn clear_history(session_name: &str) {
-    match cmd::global()
+///
+/// `clear-history` is still written here rather than in [`super::ops`]: #991
+/// step 5 inventoried it as two call sites in one shape and left it, and
+/// rewiring the *dependency* is what step 6 is — the grammar migrates when
+/// there is a second shape to unify, not to make this file shorter.
+///
+/// `pub(crate)` since #991 step 7, for the same reason: the crate's other
+/// `clear-history` site is `SessionManager`'s stage-2 path, which hides the
+/// same kind of typed line from the same kind of pane. It is the same
+/// operation and the same class, so it is one implementation — the argument
+/// vector and the policy cannot drift apart, which is what #980 did to the two
+/// `set-environment` encodings. Both callers state the class at their own
+/// call site; this function is where it is enacted.
+pub(crate) async fn clear_history(tmux: &TmuxDep, session_name: &str) {
+    match tmux
+        .cmd()
         .tokio()
         .args(["clear-history", "-t", session_name])
         .stderr(std::process::Stdio::piped())
@@ -63,12 +75,46 @@ async fn clear_history(session_name: &str) {
 pub struct EnvManager {
     /// Base directory for temporary scripts. Defaults to `std::env::temp_dir()`.
     script_dir: PathBuf,
+    /// The tmux everything this manager runs is addressed to.
+    ///
+    /// Before #991 step 6 the manager had no such field and reached
+    /// `cmd::global()` / `TmuxOps::global()` at each call, so a fake tmux
+    /// binary injected into a `SessionManager` covered session creation and
+    /// stopped there: the env operations went to the real binary on the process
+    /// socket, and the one path #980 was about could not be exercised without
+    /// real tmux to fail.
+    tmux: TmuxDep,
 }
 
 impl EnvManager {
-    /// Create a new `EnvManager` with the given temporary directory.
+    /// Create a new `EnvManager` with the given temporary directory, addressed
+    /// to the process-wide tmux.
     pub fn new(script_dir: PathBuf) -> Self {
-        Self { script_dir }
+        Self {
+            script_dir,
+            tmux: TmuxDep::global(),
+        }
+    }
+
+    /// Bind this manager to a specific tmux dependency, replacing the
+    /// process-wide one — **the substitution seam**.
+    ///
+    /// A test hands in a [`TmuxDep::injected`] fake tmux and thereby exercises
+    /// the whole mutation path — the grammar, the spawn, the exit status, the
+    /// stderr — without a tmux server, and observes what it ran. Nothing else
+    /// in this type resolves tmux addressing, so a substitution here is total.
+    ///
+    /// `SessionManager::with_tmux_bin` calls this too, so one injected binary
+    /// covers the manager *and* the env operations a caller reaches through
+    /// [`SessionManager::env`](super::manager::SessionManager::env).
+    pub fn with_tmux(&mut self, tmux: TmuxDep) -> &mut Self {
+        self.tmux = tmux;
+        self
+    }
+
+    /// The tmux dependency this manager runs on.
+    pub fn tmux(&self) -> &TmuxDep {
+        &self.tmux
     }
 
     /// Set tmux-level environment variables on a running session, making them
@@ -93,7 +139,7 @@ impl EnvManager {
         session_name: &str,
         vars: &[(String, String)],
     ) -> Result<()> {
-        let ops = TmuxOps::global();
+        let ops = self.tmux.ops();
         let mut failures: Vec<String> = Vec::new();
         for (key, value) in vars {
             // One spawn per variable, deliberately: the failure of one variable
@@ -133,11 +179,14 @@ impl EnvManager {
 
         // Use tmux send-keys to source the script, then clear the scrollback
         // history so the command doesn't appear when re-attaching.
+        // **Required**: a script that was never sourced is the whole operation
+        // failing, and it is invisible from the outside — the variables simply
+        // are not there. The grammar is the owner's; the class is this line's.
         let cmd = format!(" . {}", path.display());
-        send_keys(session_name, &cmd).await?;
+        self.tmux.ops().send_keys(session_name, &cmd).await?;
 
         // Clear tmux scrollback history to hide the source command
-        clear_history(session_name).await;
+        clear_history(&self.tmux, session_name).await;
 
         Ok(())
     }
@@ -161,10 +210,10 @@ impl EnvManager {
             .with_context(|| format!("failed to write unsource script: {}", path.display()))?;
 
         let cmd = format!(" . {}", path.display());
-        send_keys(session_name, &cmd).await?;
+        self.tmux.ops().send_keys(session_name, &cmd).await?;
 
         // Clear tmux scrollback history to hide the unsource command
-        clear_history(session_name).await;
+        clear_history(&self.tmux, session_name).await;
 
         Ok(())
     }
@@ -377,5 +426,287 @@ mod tests {
 
         mgr.cleanup_client_scripts("cid").await;
         assert!(!in_custom.exists());
+    }
+
+    // ── the injected tmux (#991 step 6) ──────────────────────────────────────
+    //
+    // Everything below runs against a fake binary and needs no tmux, no server
+    // and no harness socket: the substitution is total, which is what the seam
+    // was added for. Two independent things are asserted in each test — what
+    // the fake *recorded* (so "the operation ran, with this grammar" is
+    // observed rather than assumed) and what the caller got back. The first is
+    // the load-bearing one: a test that only checked the caller's result would
+    // pass against real tmux and prove nothing about which binary ran — which
+    // is exactly how the pre-step-6 seam (`SessionManager::with_tmux_bin`)
+    // could look injectable and send every env operation to the real binary.
+    //
+    // The injected [`TmuxDep`] addresses a socket inside the test's own
+    // temporary directory that no server has ever bound, so "the injection did
+    // not take" is not a silent pass either: a call that reached the real
+    // binary would fail to connect, and the `expect` below would redden.
+
+    /// An `EnvManager` whose tmux is a fake that records its argv.
+    #[cfg(unix)]
+    fn manager_on(dep: TmuxDep, dir: &std::path::Path) -> EnvManager {
+        let mut mgr = EnvManager::new(dir.to_path_buf());
+        mgr.with_tmux(dep);
+        mgr
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_fake_tmux_runs_the_whole_env_mutation_path() {
+        // The criterion #991's `#### Testability` was missing: "a fake tmux
+        // binary can exercise the complete env mutation path, not only
+        // `SessionManager`". Before step 6 this test could not exist — the
+        // argument vector was the owner's, but the *process* was resolved by
+        // `TmuxOps::global()` inside `set_environment`, so a fake could be
+        // injected into the manager and this call would still reach real tmux.
+        //
+        // What makes it a proof rather than a formality is the recorded argv:
+        // it is the owner's grammar (`set-environment -t <session> <name>
+        // <value>`, one spawn per variable) seen from outside the process, and
+        // if the injection had not taken there would be nothing in the log at
+        // all — the real binary writes to no log.
+        let dir = tempfile::tempdir().unwrap();
+        let fake = crate::test_support::FakeTmux::new(dir.path(), "exit 0");
+        let mgr = manager_on(fake.dep(), dir.path());
+
+        mgr.set_environment(
+            "nession-fake-sess",
+            &[
+                ("NESSON_FAKE_A".to_string(), "1".to_string()),
+                ("NESSON_FAKE_B".to_string(), "two words".to_string()),
+            ],
+        )
+        .await
+        .expect("the injected tmux exits 0 for every call");
+
+        assert_eq!(
+            fake.calls(),
+            vec![
+                vec![
+                    "set-environment",
+                    "-t",
+                    "nession-fake-sess",
+                    "NESSON_FAKE_A",
+                    "1"
+                ],
+                vec![
+                    "set-environment",
+                    "-t",
+                    "nession-fake-sess",
+                    "NESSON_FAKE_B",
+                    "two words"
+                ],
+            ],
+            "one spawn per variable, in the owner's grammar, run by the injected binary"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_fake_tmux_runs_the_source_and_unsource_paths() {
+        // The rest of the mutation path: the script goes to disk, the session
+        // is told to source it, and the scrollback is cleared — the same three
+        // steps in the other direction for `unsource_env`. All of it through
+        // the injected binary, which is what "the complete path" means.
+        //
+        // `clear-history`'s `BestEffort` class is asserted here too, from the
+        // caller's side: the fake fails it, and `source_env` still returns
+        // `Ok` — a scrollback that could not be cleared is still a script that
+        // was sourced. Its failure is observable (a `tracing::warn!`), which is
+        // the difference from the `let _ =` it replaced.
+        let dir = tempfile::tempdir().unwrap();
+        let fake = crate::test_support::FakeTmux::new(
+            dir.path(),
+            "case \"$1\" in clear-history) echo 'no server' >&2; exit 1;; *) exit 0;; esac",
+        );
+        let mgr = manager_on(fake.dep(), dir.path());
+
+        mgr.source_env(
+            "cid",
+            "nession-fake-sess",
+            "vars.env",
+            &[("NESSON_SOURCED".to_string(), "v".to_string())],
+        )
+        .await
+        .expect("a failed clear-history is BestEffort");
+        mgr.unsource_env(
+            "cid",
+            "nession-fake-sess",
+            "vars.env",
+            &["NESSON_SOURCED".to_string()],
+        )
+        .await
+        .expect("a failed clear-history is BestEffort");
+
+        let calls = fake.calls();
+        assert_eq!(
+            calls.len(),
+            4,
+            "source and unsource are each send-keys + clear-history: {calls:?}"
+        );
+        for (call, script) in [
+            (&calls[0], "nession-source-cid-nession-fake-sess-vars.env"),
+            (&calls[2], "nession-unsource-cid-nession-fake-sess-vars.env"),
+        ] {
+            assert_eq!(
+                &call[..3],
+                ["send-keys", "-t", "nession-fake-sess"],
+                "the script is typed into the session with the owner's grammar: {call:?}"
+            );
+            assert_eq!(
+                call.last().map(String::as_str),
+                Some("Enter"),
+                "a line that is typed but never submitted sources nothing: {call:?}"
+            );
+            assert!(
+                call[3].contains(script),
+                "the line sources the script this manager wrote ({script}): {call:?}"
+            );
+            assert!(
+                dir.path().join(script).exists(),
+                "the script must exist on disk: {script}"
+            );
+        }
+        assert_eq!(
+            calls[1],
+            vec!["clear-history", "-t", "nession-fake-sess"],
+            "the source line is cleared from view afterwards: {calls:?}"
+        );
+        assert_eq!(
+            calls[3],
+            vec!["clear-history", "-t", "nession-fake-sess"],
+            "and so is the unsource line: {calls:?}"
+        );
+        assert!(
+            std::fs::read_to_string(
+                dir.path()
+                    .join("nession-source-cid-nession-fake-sess-vars.env")
+            )
+            .unwrap()
+            .contains("export NESSON_SOURCED='v'"),
+            "the script holds the variables the caller asked for"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_required_mutation_that_the_injected_tmux_refuses_is_never_success() {
+        // The Error-semantics arm, made reachable without needing real tmux to
+        // fail for the right reason. The fake answers the way the drifted
+        // grammar made real tmux answer — non-zero, with tmux's own words on
+        // stderr — and the two things #980 was missing are both asserted: the
+        // failure is an `Err` (not a warning that every caller logged before
+        // answering `ok`), and the message carries tmux's diagnostic rather
+        // than only our summary.
+        //
+        // Every variable is still attempted: one bad name must not hide the
+        // rest, and the count of recorded calls is what proves the loop kept
+        // going past the first failure.
+        let dir = tempfile::tempdir().unwrap();
+        let fake = crate::test_support::FakeTmux::new(
+            dir.path(),
+            "case \"$1\" in set-environment) echo 'unknown flag -e' >&2; exit 1;; *) exit 0;; esac",
+        );
+        let mgr = manager_on(fake.dep(), dir.path());
+
+        let err = mgr
+            .set_environment(
+                "nession-fake-sess",
+                &[
+                    ("NESSON_ALPHA".to_string(), "1".to_string()),
+                    ("NESSON_BETA".to_string(), "2".to_string()),
+                ],
+            )
+            .await
+            .expect_err("the injected tmux refused every variable");
+        let message = err.to_string();
+
+        assert!(
+            message.contains("unknown flag -e"),
+            "the failure must carry tmux's own stderr: {message}"
+        );
+        for name in ["NESSON_ALPHA", "NESSON_BETA"] {
+            assert!(
+                message.contains(name),
+                "every variable is attempted and named, not just the first ({name}): {message}"
+            );
+        }
+        assert_eq!(
+            fake.calls().len(),
+            2,
+            "one spawn per variable, so the second is not skipped after the first fails"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_failed_primary_keeps_its_error_when_the_cleanup_also_fails() {
+        // #991's cleanup edge case — "cleanup fails while the primary operation
+        // already failed: primary error is preserved; cleanup error may be
+        // attached/logged" — for the one place in this file where the two run
+        // back to back. `source-env`'s `send-keys` is the primary (a script
+        // that was never sourced is the whole operation failing); `clear-history`
+        // is the cosmetic cleanup behind it. Here *both* fail, with different
+        // words, so the assertion can tell which error the caller got.
+        //
+        // What holds it: `send_keys` propagates with `?` before the cleanup is
+        // reached, and the cleanup's own failure is a `tracing::warn!` that
+        // cannot travel. The mutation that reddens this is the plausible future
+        // edit the class exists to forbid: giving the cleanup a `Result` and
+        // `?`-ing it *before* the primary — the caller then reads
+        // "clear-history-marker" instead.
+        let dir = tempfile::tempdir().unwrap();
+        let fake = crate::test_support::FakeTmux::new(
+            dir.path(),
+            "case \"$1\" in \
+             send-keys) echo 'injected tmux refuses send-keys' >&2; exit 1;; \
+             clear-history) echo 'clear-history-marker' >&2; exit 1;; \
+             *) exit 0;; esac",
+        );
+        let mgr = manager_on(fake.dep(), dir.path());
+
+        let err = mgr
+            .source_env("cid", "nession-fake-sess", "vars.env", &[])
+            .await
+            .expect_err("the script was never sourced, so the operation failed");
+        let message = format!("{err:#}");
+        assert!(
+            message.starts_with("tmux send-keys"),
+            "the failure the caller reads must be the primary's, not the \
+             cleanup's: {message}"
+        );
+        assert!(
+            message.contains("injected tmux refuses send-keys"),
+            "with the primary's own context: {message}"
+        );
+        assert_eq!(
+            fake.calls()
+                .iter()
+                .filter(|args| args.first().map(String::as_str) == Some("send-keys"))
+                .count(),
+            1,
+            "the primary really was attempted: {:#?}",
+            fake.calls()
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_managers_own_tmux_is_the_process_one_until_it_is_replaced() {
+        // The default is the process-wide addressing, and it must be resolved
+        // per use rather than frozen when the manager is built — a `TmuxDep`
+        // captured before `cmd::configure` would pin the process to the
+        // fallback socket for its whole life (the reason `TmuxOps::global`
+        // gives). This asserts the property without a configure() call: what
+        // the default resolves to is what `cmd::global()` currently is.
+        let mgr = EnvManager::new(std::env::temp_dir());
+        assert_eq!(
+            mgr.tmux().cmd().socket_path(),
+            crate::tmux::cmd::global().socket_path(),
+            "an unreplaced manager must address the process socket"
+        );
     }
 }

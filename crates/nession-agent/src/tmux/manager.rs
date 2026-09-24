@@ -1,17 +1,27 @@
 //! tmux session lifecycle management: create, list, and kill sessions.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio::process::Command;
 
 use super::cmd::{self, TmuxCmd};
 use super::env::EnvManager;
-use super::ops::TmuxOps;
+use super::ops::{TmuxDep, TmuxOps};
 
-/// Fixed width for tmux sessions. Individual clients get independent
-/// viewports via `refresh-client -C`, so the session's own size only needs
-/// to be large enough to accommodate all realistic client viewports.
+/// Width a session is created at, **before any client has attached**.
+///
+/// A starting size, not a lock. tmux's `window-size` defaults to `latest` and
+/// `create_session` deliberately leaves it unset (see `window_size_lock_tests`
+/// at the bottom of this file), so the first client to attach resizes the
+/// window to its own viewport and every later resize moves it again. There is
+/// one window and one pane, shared by every attached client — a client that
+/// does not fit scrolls, it does not get a viewport of its own.
+///
+/// That is the model decided in
+/// `2026-08-15-viewport-fit-terminal-migration-design.md` §2
+/// ("accept last-writer-wins … No arbitration"), which superseded the
+/// fixed-size design this constant was originally sized for.
 pub const SESSION_WIDTH: u16 = 200;
 
 /// Default shell prompt injected into every tmux session so the K8s pod
@@ -19,7 +29,8 @@ pub const SESSION_WIDTH: u16 = 200;
 /// clutter the terminal.  `\u` = user, `\w` = working dir, `\$` = # or $.
 pub const DEFAULT_PS1: &str = r"\[\e[32m\]\u\[\e[0m\]:\[\e[34m\]\w\[\e[0m\]\$ ";
 
-/// Fixed height for tmux sessions. See [`SESSION_WIDTH`] for rationale.
+/// Height a session is created at, before any client has attached.
+/// See [`SESSION_WIDTH`] — a starting size, not a lock.
 pub const SESSION_HEIGHT: u16 = 60;
 
 /// Timeout for quick tmux queries (`list-sessions`, `display-message`).
@@ -129,11 +140,31 @@ impl SessionManager {
         self.cmd.socket_path()
     }
 
+    /// The tmux dependency this manager runs on, for the callers that are
+    /// handed tmux addressing rather than reaching for the process-wide one —
+    /// the attach backends ([`PtySession`](super::pty::PtySession),
+    /// [`ControlModeSession`](super::control::ControlModeSession)).
+    ///
+    /// One manager's addressing, so a substituted binary reaches them too:
+    /// without this the WebSocket layer would open an attach on the
+    /// process-wide tmux while creating the session on the injected one.
+    pub fn tmux_dep(&self) -> TmuxDep {
+        TmuxDep::injected(self.cmd.clone())
+    }
+
     /// Test seam: override the tmux binary (inject a fake `tmux`), keeping the
     /// socket unchanged.
+    ///
+    /// The substitution is *total* as of #991 step 6: it rebinds the manager's
+    /// own addressing **and** the [`EnvManager`] it holds, whose operations used
+    /// to reach the process-wide tmux behind this manager's back. A test that
+    /// injects a fake and then drives `env().set_environment(…)` is driving the
+    /// fake; before that, it was driving the real binary on the real socket and
+    /// could not tell.
     #[cfg(test)]
     pub(crate) fn with_tmux_bin(&mut self, tmux_bin: impl Into<String>) -> &mut Self {
         self.cmd = self.cmd.with_bin(tmux_bin);
+        self.env.with_tmux(TmuxDep::injected(self.cmd.clone()));
         self
     }
 
@@ -216,13 +247,22 @@ impl SessionManager {
         Ok(stdout.trim().to_string())
     }
 
-    /// Create a new detached tmux session at a fixed [`SESSION_WIDTH`] × [`SESSION_HEIGHT`].
+    /// Create a new detached tmux session at [`SESSION_WIDTH`] × [`SESSION_HEIGHT`].
     ///
-    /// The `_width` and `_height` parameters are ignored — sessions always use the
-    /// fixed size so that multiple clients with different viewports can attach to
-    /// the same session without one resizing the pane out from under another.
-    /// Each client sets its own viewport independently via `refresh-client -C`
-    /// (see `ControlModeSession::resize`).
+    /// The `_width` and `_height` parameters are ignored — every session starts
+    /// at the same size, and the first client to attach resizes it from there.
+    ///
+    /// There is deliberately **no per-client viewport**: the session has one
+    /// window and one pane, and a resize by any attached client moves it for
+    /// all of them. A second client attaching to a session already at 120×40
+    /// does not get its own 80×24 — it watches that client's resizes and
+    /// resizes it in turn. Last write wins; there is no arbitration
+    /// (`2026-08-15-viewport-fit-terminal-migration-design.md` §2).
+    ///
+    /// `window-size` is left at tmux's default (`latest`) so that clients can
+    /// resize the window at all; locking it would freeze the pane at the
+    /// create-time size. `window_size_lock_tests` below asserts that it stays
+    /// unset.
     pub async fn create_session(
         &self,
         name: &str,
@@ -364,20 +404,37 @@ impl SessionManager {
                 );
             }
             if !init_cmd.is_empty() {
-                let _ = self
-                    .cmd
-                    .tokio()
-                    .args(["send-keys", "-t", name, &init_cmd, "Enter"])
-                    .stderr(std::process::Stdio::null())
-                    .status()
-                    .await;
-                let _ = self
-                    .cmd
-                    .tokio()
-                    .args(["clear-history", "-t", name])
-                    .stderr(std::process::Stdio::null())
-                    .status()
-                    .await;
+                // **Required.** Stage 2 is the path for a tmux without
+                // `new-session -e` (before 3.0), and on that path this line is
+                // the *only* thing that puts the caller's environment into the
+                // shell that exists — stage 3 below reaches windows that do not
+                // exist yet, so it cannot stand in for it. A line that was typed
+                // but never ran therefore leaves a session whose `TERM`, locale
+                // and caller variables are not the requested ones, and the
+                // create would answer success for it: `let _ =` here is the
+                // exact shape #980 was, one stage further along.
+                //
+                // The class is what step 5 left open and step 7 decided
+                // ("whether a failed stage-2 line is tolerable is #991's step
+                // 7"). It is not tolerable: the variable this operation exists
+                // to deliver has nowhere else to come from. The session itself
+                // is left in place — this reports the failure, it does not add
+                // a rollback policy no caller had.
+                TmuxOps::new(self.cmd.clone())
+                    .send_keys(name, &init_cmd)
+                    .await
+                    .with_context(|| {
+                        format!("failed to inject the environment line into session {name}")
+                    })?;
+
+                // **BestEffort.** Cosmetic: it hides the `export …` line the
+                // statement above typed from the pane's scrollback. The
+                // environment was delivered by that statement, so a scrollback
+                // that could not be cleared is still a session that has it —
+                // #991's "cosmetic cleanup fails after the primary succeeded is
+                // observable but does not rewrite the primary". Observability is
+                // the shared helper's `tracing::warn!`.
+                crate::tmux::env::clear_history(&self.tmux_dep(), name).await;
             }
         }
 
@@ -410,13 +467,35 @@ impl SessionManager {
         // (copy-mode scroll, pane selection, and forwarding to TUI apps).
         // The web client lets xterm.js use its default behaviour — mouse
         // clicks pass through to the PTY; hold Shift for local selection.
-        let _ = self
-            .cmd
-            .tokio()
-            .args(["set-option", "-t", name, "mouse", "on"])
-            .stderr(std::process::Stdio::null())
-            .status()
-            .await;
+        //
+        // **BestEffort** (#991 open question 4, decided here). What breaks if
+        // this fails: the session's *interaction* degrades — there is no
+        // mouse-driven copy-mode, no pane selection, and TUI apps stop
+        // receiving mouse reports. What does not break: the session itself. The
+        // option is not consulted on the input path (keyboard bytes reach the
+        // pane through `send-keys`/the attach client regardless of it), it
+        // holds no session state, and the web client carries its own scrollback
+        // (`DeviceProfile`'s 10k/50k lines), so scrolling history does not
+        // depend on tmux following the mouse either. Making it `Required` would
+        // let a presentation preference fail a create whose session exists and
+        // works.
+        //
+        // Observable rather than dropped: `let _ = … .stderr(Stdio::null())`
+        // discarded the status *and* tmux's reason, which is the invisibility
+        // #980 fixed elsewhere (#991's "no silent accidental policy").
+        let mut mouse = self.cmd.tokio();
+        mouse.args(["set-option", "-t", name, "mouse", "on"]);
+        match mouse.output().await {
+            Ok(out) if out.status.success() => {}
+            Ok(out) => tracing::warn!(
+                "best-effort `set-option mouse on` for session {name} failed ({}): {}",
+                out.status,
+                String::from_utf8_lossy(&out.stderr).trim()
+            ),
+            Err(e) => tracing::warn!(
+                "best-effort `set-option mouse on` for session {name} failed to spawn: {e}"
+            ),
+        }
 
         Ok(())
     }
@@ -453,11 +532,14 @@ impl SessionManager {
     /// discarded both the status and tmux's reason, so a failure here was
     /// unobservable even in logs (#980's invisibility half).
     ///
-    /// Bound to `self.cmd` rather than to the process-wide
+    /// Bound to the manager's own addressing rather than to the process-wide
     /// [`TmuxOps::global`](super::ops::TmuxOps::global): a manager that had been
     /// given a different socket must not propagate its environment onto the
-    /// other one. This is *not* #991 step 6 — `SessionManager` already holds
-    /// this `TmuxCmd`, and nothing new became injectable.
+    /// other one. (Steps 3–4 noted here that this is *not* step 6's work — at
+    /// the time only this manager held a `TmuxCmd` and nothing else had become
+    /// injectable. Step 6 is what changed that: the addressing is a
+    /// [`TmuxDep`] the `EnvManager` below is bound to as well, so the fake the
+    /// `legacy_stage_two_tests` module injects is what both halves run.)
     async fn propagate_env_best_effort(&self, session: &str, name: &str, value: &str) {
         let ops = TmuxOps::new(self.cmd.clone());
         if let Err(e) = ops.set_environment(session, name, value).await {
@@ -467,14 +549,29 @@ impl SessionManager {
         }
     }
 
+    /// Kill a session.
+    ///
+    /// **Required** (#991): `SessionManager::kill_session`'s result is what the
+    /// caller reports — `agent.session.kill` answers `success: false` with this
+    /// error's text, and the server-side `session.kill` path turns it into the
+    /// message a user reads. So the failure carries tmux's own words and exit
+    /// status, not just the session name: before #991 step 7 this read
+    /// `.stderr(Stdio::null())` and bailed with "Failed to kill session: <name>",
+    /// which is the same sentence for "no such session", "the server is gone"
+    /// and "you are not allowed to" — the diagnostic was discarded before the
+    /// message that reaches the user could hold it.
     pub async fn kill_session(&self, name: &str) -> Result<()> {
         let mut cmd = self.cmd.tokio();
         cmd.args(["kill-session", "-t", name])
-            .stderr(std::process::Stdio::null());
-        let status = tmux_status(&mut cmd, self.kill_timeout).await?;
+            .stderr(std::process::Stdio::piped());
+        let output = tmux_output(&mut cmd, self.kill_timeout).await?;
 
-        if !status.success() {
-            anyhow::bail!("Failed to kill session: {name}");
+        if !output.status.success() {
+            anyhow::bail!(
+                "Failed to kill session {name}: {} ({})",
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
         }
 
         // Clean up env source/unsource scripts for this session so they
@@ -512,16 +609,20 @@ fn is_no_sessions_stderr(stderr: &str) -> bool {
 }
 
 /// Run a tmux command, failing with a timeout error if it exceeds `timeout`.
+///
+/// `output()` rather than `status()` since #991 step 7, for the reason #980
+/// measured: a `status()` call has no pipes, so everything tmux says about a
+/// failure is gone by the time the caller can report it. The two are not
+/// interchangeable at a `Required` call site, and this helper no longer has any
+/// other kind. (`.stderr(Stdio::piped())` beside it is declarative rather than
+/// load-bearing: `output()` sets both pipes itself — measured, `tokio`'s
+/// implementation calls `stdout(Stdio::piped())/stderr(Stdio::piped())` on the
+/// inner `std::process::Command` immediately before spawning, which *overrides*
+/// anything set earlier. `std::process::Command::output()` does not: there an
+/// explicit `Stdio::null()` survives and arrives empty. The distinction decides
+/// which sites can keep their `null()` and which cannot.)
 async fn tmux_output(cmd: &mut Command, timeout: Duration) -> Result<std::process::Output> {
     match tokio::time::timeout(timeout, cmd.output()).await {
-        Err(_) => Err(anyhow::anyhow!("tmux command timed out after {timeout:?}")),
-        Ok(res) => Ok(res?),
-    }
-}
-
-/// Run a tmux command that only needs its exit status, with a timeout.
-async fn tmux_status(cmd: &mut Command, timeout: Duration) -> Result<std::process::ExitStatus> {
-    match tokio::time::timeout(timeout, cmd.status()).await {
         Err(_) => Err(anyhow::anyhow!("tmux command timed out after {timeout:?}")),
         Ok(res) => Ok(res?),
     }
@@ -598,20 +699,16 @@ mod window_size_lock_tests {
 
     #[tokio::test]
     async fn tmux_output_times_out() {
+        // One timeout test, not two: `tmux_status_times_out` covered a helper
+        // that no longer exists. #991 step 7 removed it because its only caller
+        // was `kill_session`, and a status-only call there is precisely the
+        // shape that discarded tmux's reason for refusing to kill a session.
         let mut cmd = Command::new("sleep");
         cmd.arg("30");
         let start = std::time::Instant::now();
         let res = tmux_output(&mut cmd, Duration::from_millis(100)).await;
         assert!(res.is_err(), "expected timeout error, got {res:?}");
         assert!(start.elapsed() < Duration::from_secs(2));
-    }
-
-    #[tokio::test]
-    async fn tmux_status_times_out() {
-        let mut cmd = Command::new("sleep");
-        cmd.arg("30");
-        let res = tmux_status(&mut cmd, Duration::from_millis(100)).await;
-        assert!(res.is_err(), "expected timeout error, got {res:?}");
     }
 
     #[test]
@@ -669,6 +766,418 @@ mod window_size_lock_tests {
             "error connecting to /tmp/x/tmux.sock (File name too long)"
         ));
         assert!(!is_no_sessions_stderr("lost server"));
+    }
+}
+
+/// The fake-tmux tests for `create_session`'s legacy stage 2.
+///
+/// `#[cfg(test)]` with per-item `#[cfg(unix)]` rather than `cfg(all(test,
+/// unix))` on the module: clippy's `allow-expect-in-tests` (clippy.toml)
+/// recognizes a `cfg(test)` module, and spelling the predicate as `all(...)`
+/// hides that from it — the module's `.expect(…)` calls then read as
+/// production code and the lint gate fails. The items are Unix-only because
+/// they write and chmod a `#!/bin/sh` script.
+#[cfg(test)]
+mod legacy_stage_two_tests {
+    use super::*;
+
+    /// Separator the fake tmux writes between recorded calls.
+    #[cfg(unix)]
+    const CALL_SEPARATOR: &str = "==call==";
+
+    /// A fake tmux that records its arguments — one per line, so a call's
+    /// *boundaries* are visible — and fails the first `new-session` so
+    /// `create_session` takes its legacy stage-2 path (the one for a tmux
+    /// without `-e`, i.e. before 3.0).
+    ///
+    /// The `-S <socket>` prefix is stripped first, exactly as real tmux
+    /// receives it: a script matching on `$1` without that shift would see `-S`
+    /// and fall through to its catch-all, "working" while testing nothing.
+    #[cfg(unix)]
+    fn recording_shim(dir: &std::path::Path) -> (String, PathBuf) {
+        use std::os::unix::fs::PermissionsExt;
+        let log = dir.join("argv.log");
+        let stage1 = dir.join("stage1-ran");
+        let path = dir.join("tmux");
+        std::fs::write(
+            &path,
+            format!(
+                "#!/bin/sh\n\
+                 if [ \"$1\" = \"-S\" ]; then shift 2; fi\n\
+                 printf '%s\\n' \"$@\" >> \"{log}\"\n\
+                 echo \"{sep}\" >> \"{log}\"\n\
+                 case \"$1\" in\n\
+                   new-session)\n\
+                     if [ -f \"{stage1}\" ]; then exit 0; else : > \"{stage1}\"; exit 1; fi;;\n\
+                   *) exit 0;;\n\
+                 esac\n",
+                log = log.display(),
+                sep = CALL_SEPARATOR,
+                stage1 = stage1.display(),
+            ),
+        )
+        .expect("write shim");
+        let mut perms = std::fs::metadata(&path)
+            .expect("shim metadata")
+            .permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&path, perms).expect("chmod shim");
+        (path.to_string_lossy().into_owned(), log)
+    }
+
+    /// The recorded calls, each as the list of argv entries tmux received.
+    #[cfg(unix)]
+    fn recorded_calls(log: &str) -> Vec<Vec<&str>> {
+        log.split(CALL_SEPARATOR)
+            // The separator is written *after* each call, so every block but
+            // the first opens with the newline that ended the previous one.
+            .map(|block| block.trim_matches('\n').lines().collect::<Vec<&str>>())
+            .filter(|args| !args.is_empty())
+            .collect()
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn stage_two_types_the_env_line_as_the_owners_argv() {
+        // Stage 2 is the path for a tmux older than 3.0, so it cannot be reached
+        // on this machine's tmux at all — the fake is what makes the migrated
+        // call site observable. It is `let _ =` in production, so nothing else
+        // would notice if the line were suddenly sent as five separate
+        // keystrokes, or without its `Enter`.
+        //
+        // Reddens on: dropping `Enter` from `send_keys_args` (the call becomes
+        // three entries long plus… → `len() == 5` and the last-entry assertion
+        // fail), splitting the line into key names (length), or swapping the
+        // `-t` order (the prefix assertion).
+        let dir = tempfile::tempdir().expect("tempdir");
+        let (shim, log_path) = recording_shim(dir.path());
+        let mut mgr = SessionManager::new();
+        mgr.with_tmux_bin(shim);
+        let session = crate::test_support::TestSession::new("stage2-argv");
+
+        mgr.create_session(session.name(), SESSION_WIDTH, SESSION_HEIGHT, "/tmp", &[])
+            .await
+            .expect("against the shim, create takes its legacy stage-2 path");
+
+        let log = std::fs::read_to_string(&log_path).expect("shim recorded its calls");
+        let calls = recorded_calls(&log);
+        let typed = calls
+            .iter()
+            .find(|args| args.first() == Some(&"send-keys"))
+            .unwrap_or_else(|| panic!("stage 2 must type the environment line: {calls:?}"));
+
+        assert_eq!(
+            typed.len(),
+            5,
+            "send-keys takes the whole line as ONE argument and the trailing \
+             Enter is part of the operation: {typed:?}"
+        );
+        assert_eq!(
+            &typed[..3],
+            ["send-keys", "-t", session.name()],
+            "the session is the target, in the owner's order: {typed:?}"
+        );
+        assert_eq!(
+            typed.last(),
+            Some(&"Enter"),
+            "a line that is typed but never submitted sets nothing: {typed:?}"
+        );
+        assert!(
+            typed[3].starts_with("export TERM=xterm-256color;")
+                && typed[3].contains("export LANG=C.UTF-8;"),
+            "the line is the export chain stage 2 builds, unchanged: {typed:?}"
+        );
+    }
+
+    /// The stage-2 fake for the two `Required`/`BestEffort` tests below: it
+    /// fails the *first* `new-session` so `create_session` takes its legacy
+    /// stage-2 path, then fails whichever subcommands `failures` names, and
+    /// succeeds at everything else.
+    ///
+    /// The first-`new-session` failure is what makes the path observable at all:
+    /// on this machine's tmux (3.6b) stage 1 always succeeds, so every
+    /// assertion about stage 2 would otherwise be about a path that never ran.
+    #[cfg(unix)]
+    fn stage_two_fake(dir: &std::path::Path, failures: &str) -> crate::test_support::FakeTmux {
+        let stage1 = dir.join("stage1-ran");
+        crate::test_support::FakeTmux::new(
+            dir,
+            &format!(
+                "case \"$1\" in\n\
+                 new-session)\n\
+                   if [ -f \"{s1}\" ]; then exit 0; else : > \"{s1}\"; exit 1; fi;;\n\
+                 {failures}\
+                 *) exit 0;;\n\
+                 esac",
+                s1 = stage1.display(),
+            ),
+        )
+    }
+
+    /// The calls the fake recorded for one subcommand, as argv vectors.
+    #[cfg(unix)]
+    fn calls_of(fake: &crate::test_support::FakeTmux, subcommand: &str) -> Vec<Vec<String>> {
+        fake.calls()
+            .into_iter()
+            .filter(|args| args.first().map(String::as_str) == Some(subcommand))
+            .collect()
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_refused_stage_two_line_fails_the_create() {
+        // #991 step 7's one *classification change* on this file's create path:
+        // stage 2's `send-keys` was `let _ =` (step 5 left the class open and
+        // said so), and it is `Required` now. On the stage-2 path that line is
+        // the only thing that gives the live shell the requested environment —
+        // stage 3 only reaches windows that do not exist yet — so a create that
+        // answered `Ok` after it failed is #980 one stage along.
+        //
+        // Reddens on: restoring `let _ =` (the `expect_err` below then fails —
+        // this is the mutation that pins the class), dropping the
+        // `with_context` (the session-naming assertion), and `TmuxOps::send_keys`
+        // discarding tmux's stderr (the marker assertion).
+        let dir = tempfile::tempdir().expect("tempdir");
+        let fake = stage_two_fake(
+            dir.path(),
+            "send-keys) echo 'injected tmux refuses send-keys' >&2; exit 1;;\n",
+        );
+        let mut mgr = SessionManager::new();
+        mgr.with_tmux_bin(fake.bin());
+        let session = crate::test_support::TestSession::new("step7-required-stage2");
+
+        let err = mgr
+            .create_session(session.name(), SESSION_WIDTH, SESSION_HEIGHT, "/tmp", &[])
+            .await
+            .expect_err("a stage-2 line that never ran must fail the create");
+
+        let message = format!("{err:#}");
+        assert!(
+            message.contains("injected tmux refuses send-keys"),
+            "a Required failure carries what tmux said, end to end: {message}"
+        );
+        assert!(
+            message.contains("failed to inject the environment line into session")
+                && message.contains(session.name()),
+            "and it says which create it was: {message}"
+        );
+        assert_eq!(
+            calls_of(&fake, "new-session").len(),
+            2,
+            "the create really took the stage-2 path: {:#?}",
+            fake.calls()
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_refused_cosmetic_stage_two_call_still_creates_the_session() {
+        // The other half of the same path, and the contrast the criterion needs:
+        // `clear-history` (cosmetic — it hides the `export …` line the
+        // statement above typed) and `set-option mouse on` (presentation — see
+        // the class comment at that call site) are `BestEffort`, and the fake
+        // refuses both.
+        //
+        // Reddens on: making either one `Required` (the `expect` below then
+        // fails), and on removing either call (the recorded-call assertions
+        // fail) — which is what says this test is about those two calls and not
+        // about the create.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let fake = stage_two_fake(
+            dir.path(),
+            "clear-history) echo 'injected tmux refuses clear-history' >&2; exit 1;;\n\
+             set-option) echo 'injected tmux refuses set-option' >&2; exit 1;;\n",
+        );
+        let mut mgr = SessionManager::new();
+        mgr.with_tmux_bin(fake.bin());
+        let session = crate::test_support::TestSession::new("step7-best-effort-stage2");
+
+        mgr.create_session(session.name(), SESSION_WIDTH, SESSION_HEIGHT, "/tmp", &[])
+            .await
+            .expect("a cosmetic failure after a successful primary must not take the create down");
+
+        assert_eq!(
+            calls_of(&fake, "clear-history"),
+            vec![vec!["clear-history", "-t", session.name()]],
+            "the scrollback is still cleared — through the one implementation of \
+             that operation, on this manager's own tmux: {:#?}",
+            fake.calls()
+        );
+        assert_eq!(
+            calls_of(&fake, "set-option"),
+            vec![vec!["set-option", "-t", session.name(), "mouse", "on"]],
+            "mouse mode is still requested, targeted at the session: {:#?}",
+            fake.calls()
+        );
+    }
+}
+
+/// What `with_tmux_bin` substitutes, now that it substitutes more than the
+/// manager's own addressing (#991 step 6).
+///
+/// `#[cfg(test)]` with per-item `#[cfg(unix)]` for the same reason as
+/// `legacy_stage_two_tests` above: the fake is a `#!/bin/sh` script, and a
+/// `all(test, unix)` predicate on the module would hide the `cfg(test)` from
+/// clippy's `allow-expect-in-tests`.
+#[cfg(test)]
+mod injected_tmux_tests {
+    use super::*;
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn with_tmux_bin_reaches_the_env_manager_beside_the_manager() {
+        // The whole point of step 6, asserted at the seam every existing test
+        // already uses. `mgr.env()` reaches an `EnvManager` that resolved
+        // `TmuxOps::global()` at each call before this step, so a fake injected
+        // here covered `create_session` and stopped: the env operations ran
+        // against the real binary on the process socket, and the test could not
+        // see it.
+        //
+        // The assertion is on the fake's own record, not on the error the
+        // caller got: an error alone would be produced just as well by real
+        // tmux refusing a session that does not exist.
+        //
+        // The fake's stderr is a marker real tmux never prints, for the same
+        // reason: TMUX's own wording for a missing session would satisfy the
+        // message assertion whether or not the injection took, so a message
+        // that cannot be real tmux's is what makes that assertion mean "the
+        // injected binary's words travelled".
+        let dir = tempfile::tempdir().expect("tempdir");
+        let fake = crate::test_support::FakeTmux::new(
+            dir.path(),
+            "case \"$1\" in set-environment) echo 'injected tmux refuses nession-fake' >&2; \
+             exit 1;; *) exit 0;; esac",
+        );
+        let mut mgr = SessionManager::new();
+        mgr.with_tmux_bin(fake.bin());
+
+        let err = mgr
+            .env()
+            .set_environment(
+                "nession-fake",
+                &[("NESSON_WIRED".to_string(), "1".to_string())],
+            )
+            .await
+            .expect_err("the injected binary refuses every set-environment");
+        assert!(
+            err.to_string()
+                .contains("injected tmux refuses nession-fake"),
+            "the failure must be the injected binary's: {err}"
+        );
+        assert_eq!(
+            fake.calls(),
+            vec![vec![
+                "set-environment",
+                "-t",
+                "nession-fake",
+                "NESSON_WIRED",
+                "1"
+            ]],
+            "the env operation must have run on the injected binary"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn best_effort_propagation_reports_a_failure_and_still_creates_the_session() {
+        // Stage 3's arm: `propagate_env_best_effort`'s
+        // `if let Err(e) = … { tracing::warn!(…) }`. Steps 3–4 classified this
+        // `BestEffort` *by experiment* (stage 1 already delivered the value to
+        // the shell that exists, so turning this off left the callers' tests
+        // green). The fake is what makes the failure observable instead of
+        // argued: every `set-environment` it is handed fails, so the only arm
+        // the call can take is the warn — and the session is created anyway.
+        //
+        // Reddens on: making the propagation `Required` (the `expect` below
+        // then fails), and on dropping the calls entirely (`propagated` is 0 —
+        // which is the mutation that says this test is about the propagation
+        // and not about the create).
+        let dir = tempfile::tempdir().expect("tempdir");
+        let fake = crate::test_support::FakeTmux::new(
+            dir.path(),
+            "case \"$1\" in set-environment) echo 'unknown flag -e' >&2; exit 1;; \
+             *) exit 0;; esac",
+        );
+        let mut mgr = SessionManager::new();
+        mgr.with_tmux_bin(fake.bin());
+        let session = crate::test_support::TestSession::new("step6-best-effort");
+
+        mgr.create_session(session.name(), SESSION_WIDTH, SESSION_HEIGHT, "/tmp", &[])
+            .await
+            .expect("a best-effort env failure must not take the session create down");
+
+        let calls = fake.calls();
+        let propagated = calls
+            .iter()
+            .filter(|args| args.first().map(String::as_str) == Some("set-environment"))
+            .count();
+        assert!(
+            propagated >= 2,
+            "TERM and LANG alone are propagated to future panes, and every one \
+             of them failed here: {calls:?}"
+        );
+
+        // The control the test needs to mean anything: the *same* binary
+        // refuses a required mutation through the *same* manager, so "the
+        // create succeeded" above is the BestEffort class and not a tmux that
+        // quietly accepted everything. Without this, a fake that never failed
+        // would satisfy the assertions above.
+        let required = mgr
+            .env()
+            .set_environment(
+                session.name(),
+                &[("NESSON_REQUIRED".to_string(), "1".to_string())],
+            )
+            .await;
+        assert!(
+            required.is_err(),
+            "this fake refuses every set-environment, so the manager's required \
+             path must fail on it too: {required:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_refused_kill_carries_tmux_own_words_and_status() {
+        // #991's third error criterion, at the one `Required` operation whose
+        // failure is a *user-visible sentence*: `agent.session.kill` answers
+        // `success: false` with this error's text, and the server's
+        // `session.kill` path hands it on. Before step 7 it read
+        // `.stderr(Stdio::null())` and bailed with "Failed to kill session:
+        // <name>" — the same sentence for a session that does not exist, a
+        // server that is gone, and a permission problem.
+        //
+        // Reddens on: restoring the status-only shape (the marker assertion
+        // fails — there is no pipe for tmux to answer on), and on dropping the
+        // status from the message (the `exit status` assertion).
+        let dir = tempfile::tempdir().expect("tempdir");
+        let fake = crate::test_support::FakeTmux::new(
+            dir.path(),
+            "case \"$1\" in kill-session) echo 'no such session: nession-fake-sess' >&2; exit 1;; \
+             *) exit 0;; esac",
+        );
+        let mut mgr = SessionManager::new();
+        mgr.with_tmux_bin(fake.bin());
+
+        let err = mgr
+            .kill_session("nession-fake-sess")
+            .await
+            .expect_err("the injected binary refuses every kill-session");
+        let message = format!("{err:#}");
+        assert!(
+            message.contains("no such session: nession-fake-sess"),
+            "the failure must carry tmux's own words — they are what the user \
+             ends up reading: {message}"
+        );
+        assert!(
+            message.contains("exit status"),
+            "and the exit status beside them: {message}"
+        );
+        assert_eq!(
+            fake.calls(),
+            vec![vec!["kill-session", "-t", "nession-fake-sess"]],
+            "on the manager's own addressing, one call, tmux's own grammar"
+        );
     }
 }
 
