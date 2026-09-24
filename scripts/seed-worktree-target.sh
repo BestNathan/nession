@@ -63,9 +63,26 @@ rm -rf "$tmp_target"
 
 case "$(uname -s)" in
   Darwin)
+    # macOS cp -c is best-effort and may fall back to a real copy. Refuse to
+    # invoke it unless both paths are on the same APFS device, where clonefile
+    # is the expected data-copy mechanism for regular files.
+    if ! command -v diskutil >/dev/null 2>&1 || ! command -v plutil >/dev/null 2>&1; then
+      log "target seed skipped: cannot verify APFS clone support (diskutil/plutil unavailable)"
+      log "  Nothing to fix: Cargo will build a fresh private target in this worktree"
+      exit 0
+    fi
+    source_fs=$(diskutil info -plist "$source_target" 2>/dev/null | plutil -extract FilesystemType raw -o - - 2>/dev/null || true)
+    dest_fs=$(diskutil info -plist "$dest_root" 2>/dev/null | plutil -extract FilesystemType raw -o - - 2>/dev/null || true)
+    source_dev=$(stat -f '%d' "$source_target" 2>/dev/null || true)
+    dest_dev=$(stat -f '%d' "$dest_root" 2>/dev/null || true)
+    if [ "$source_fs" != "apfs" ] || [ "$dest_fs" != "apfs" ] || [ -z "$source_dev" ] || [ "$source_dev" != "$dest_dev" ]; then
+      log "target seed skipped: source/destination are not on the same APFS volume"
+      log "  Nothing to fix: refusing a potentially full target copy"
+      exit 0
+    fi
     if ! cp -cRp "$source_target" "$tmp_target" 2>/dev/null; then
-      log "target seed skipped: APFS clone copy is unavailable on this filesystem"
-      log "  Fix: build normally, or move the repository to an APFS volume for CoW seeding"
+      log "target seed skipped: APFS clone copy failed"
+      log "  Fix: build normally; the private target remains untouched"
       exit 0
     fi
     strategy="APFS clonefile"
