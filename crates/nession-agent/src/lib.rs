@@ -6,6 +6,8 @@
 //! - Sends periodic heartbeats with session metrics
 //! - Watches for tmux session changes and syncs them to the server
 
+pub mod claude_binding;
+pub mod claude_session_context;
 pub mod config;
 pub mod connection;
 pub mod env;

@@ -387,6 +387,27 @@ mod tests {
         //
         // The name is one no other test creates, so the only way tmux answers
         // successfully is a session that exists.
+        //
+        // A session is created first, so that the *server* exists too and the
+        // only missing thing is the session the name is about. Without it this
+        // test only held in a full run, where an earlier test had already
+        // started a server on the shared socket; on a socket no server has
+        // bound — a filtered run with a fresh `NESSION_TMUX_SOCKET` — tmux
+        // answers `error connecting to <path> (No such file or directory)`,
+        // which is a different situation that the same call would report the
+        // same way for any session name, existing or not. The cold socket has
+        // its own test, by name:
+        // `tmux::ops::tests::a_socket_with_no_server_fails_with_tmux_own_words`.
+        // `show_environment_tells_an_unset_variable_apart_from_an_unanswerable_question`
+        // (tests/integration/tmux.rs) is the same shape for the sibling
+        // operation — a session is created there for this same reason.
+        use super::super::manager::{SessionManager, SESSION_HEIGHT, SESSION_WIDTH};
+        let guard = crate::test_support::TestSession::new("env-missing-session");
+        SessionManager::new()
+            .create_session(guard.name(), SESSION_WIDTH, SESSION_HEIGHT, "/tmp", &[])
+            .await
+            .expect("a running server, so the failure below can only be about the session");
+
         let mgr = EnvManager::new(tmp());
         let result = mgr
             .set_environment(
@@ -401,8 +422,9 @@ mod tests {
             "the failure must name the variable it was setting: {message}"
         );
         assert!(
-            message.contains("no such session") || message.contains("no server running"),
-            "the failure must carry tmux's own diagnostic rather than only our summary: {message}"
+            message.contains("no such session"),
+            "the failure must carry tmux's own diagnostic for *this* session missing \
+             rather than only our summary: {message}"
         );
     }
 

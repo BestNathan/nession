@@ -50,6 +50,17 @@ pub fn agent_pid_path() -> io::Result<PathBuf> {
     agent_dir().map(|d| d.join("agent.pid"))
 }
 
+/// Where Claude Code integrations report their bindings: ~/.nession/agent/claude
+///
+/// One file per Nession session, written by the hook the agent installs and read
+/// by the agent when it is asked which Claude conversation a session is running
+/// (`#1005`). Under the agent's directory because it is the agent's state: it
+/// describes which sessions *this* agent started, and it is meaningless to any
+/// other.
+pub fn agent_claude_bindings_dir() -> io::Result<PathBuf> {
+    agent_dir().map(|d| d.join("claude"))
+}
+
 /// Server env-file directory: ~/.nession/server/envs
 pub fn server_envs_dir() -> io::Result<PathBuf> {
     server_dir().map(|d| d.join("envs"))

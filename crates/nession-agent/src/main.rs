@@ -12,6 +12,7 @@
 //! 9. Gracefully shut down all components
 
 use anyhow::{Context, Result};
+use nession_agent::claude_session_context::TmuxSessionContext;
 use nession_agent::config::AgentConfig;
 use nession_agent::connection::ServerClient;
 use nession_agent::extension::ExtensionRegistry;
@@ -190,6 +191,10 @@ async fn main() -> Result<()> {
 
     let tmux_for_client = Arc::new(SessionManager::new());
 
+    // Before any session can exist, and before the server connection, so a
+    // standalone agent installs it too.
+    install_claude_integration().await;
+
     eprintln!("[DIAGNOSTIC] Checking server_url: '{}'", config.server_url);
     // Skip server connection if server_url is empty (standalone mode).
     // The supervisor reconnects on its own, so we capture the handle and the
@@ -204,7 +209,13 @@ async fn main() -> Result<()> {
             config.server_url
         );
         let extensions: Vec<Box<dyn AgentExtension>> = vec![
-            Box::new(ClaudeCodeAgentExtension::new()),
+            // #1005. The context is what lets this provider resolve a Session's
+            // cwd and whether Claude is running in it — the agent owns session
+            // lifecycle, so it is the only thing that can answer, and the
+            // provider must not depend back on it to ask.
+            Box::new(ClaudeCodeAgentExtension::new(Arc::new(
+                TmuxSessionContext::new(Arc::clone(&tmux_for_client)),
+            ))),
             // #750. The resolver is what keeps git inside the Session's own
             // working directory: the client names a session, never a path.
             Box::new(GitAgentExtension::new(
@@ -374,6 +385,58 @@ async fn main() -> Result<()> {
 
     info!("nession-agent stopped");
     Ok(())
+}
+
+/// Write the Claude Code integration plugin, register it, and prepare the
+/// directory its hook reports into (`#1005`).
+///
+/// **Never fatal, and never returns an error.** `#1005` decision 5: a host
+/// without `claude`, or with a version predating the plugin commands, must still
+/// be a working Nession agent — the Claude capability reports itself unavailable
+/// and nothing else is affected. Every branch below therefore logs and returns.
+///
+/// The plugin is rewritten on every start rather than when it looks out of date.
+/// A directory marketplace loads in place, so rewriting the tree *is* the
+/// update; comparing first would add a way to be wrong about whether it is
+/// current, in exchange for saving a file write.
+async fn install_claude_integration() {
+    // The hook writes with `cat >`, so this must exist before any session runs
+    // one. Created here rather than at session creation, which keeps that path
+    // free of filesystem side effects.
+    let Ok(bindings) = nession_common::paths::agent_claude_bindings_dir() else {
+        return;
+    };
+    if let Err(e) = std::fs::create_dir_all(&bindings) {
+        warn!(
+            dir = %bindings.display(),
+            error = %e,
+            "claude: the binding directory could not be created; conversations will not bind"
+        );
+        return;
+    }
+
+    let Ok(state_dir) = nession_common::paths::agent_dir() else {
+        return;
+    };
+
+    let version = nession_claude_code::plugin::version();
+    let root = match nession_claude_code::plugin::write_into(&state_dir, version) {
+        Ok(root) => root,
+        Err(e) => {
+            warn!(error = %e, "claude: the integration plugin could not be written");
+            return;
+        }
+    };
+
+    match nession_claude_code::plugin::reconcile(&root).await {
+        nession_claude_code::plugin::Installed::Ready => {
+            info!("claude: integration plugin {version} installed");
+        }
+        nession_claude_code::plugin::Installed::Unavailable(reason) => {
+            // `info`, not `warn`: this is an answer about the host, not a fault.
+            info!("claude: integration unavailable ({reason})");
+        }
+    }
 }
 
 /// Load agent configuration from a TOML file, falling back to defaults.
