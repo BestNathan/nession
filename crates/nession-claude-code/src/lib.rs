@@ -1,5 +1,7 @@
 pub mod agent;
+pub mod binding;
 pub mod conversation;
+pub mod plugin;
 pub mod protocol;
 pub mod scanner;
 pub mod security;
