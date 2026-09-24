@@ -346,6 +346,40 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
             )),
         },
         Unit {
+            owner: "claude-code",
+            id: "claude-code.conversation",
+            version: 1,
+            wires: &["claude-code.conversation"],
+            decls: vec![
+                decl_of::<nession_claude_code::protocol::conversation::v1::ConversationRequestV1>(
+                    cfg,
+                ),
+                decl_of::<nession_claude_code::protocol::conversation::v1::ConversationResponseV1>(
+                    cfg,
+                ),
+                decl_of::<nession_claude_code::protocol::conversation::v1::ConversationStateV1>(cfg),
+                decl_of::<nession_claude_code::protocol::conversation::v1::ConversationItemV1>(cfg),
+                decl_of::<nession_claude_code::protocol::conversation::v1::ItemKindV1>(cfg),
+                decl_of::<nession_claude_code::protocol::conversation::v1::ToolV1>(cfg),
+                decl_of::<nession_claude_code::protocol::conversation::v1::ConversationIdentityV1>(
+                    cfg,
+                ),
+                decl_of::<nession_claude_code::protocol::conversation::v1::ConversationCandidateV1>(
+                    cfg,
+                ),
+            ],
+            request: Some((
+                "ConversationRequest",
+                nession_claude_code::protocol::conversation::v1::ConversationRequestV1::inline,
+                schema_of::<nession_claude_code::protocol::conversation::v1::ConversationRequestV1>,
+            )),
+            response: Some((
+                "ConversationResponse",
+                nession_claude_code::protocol::conversation::v1::ConversationResponseV1::inline,
+                schema_of::<nession_claude_code::protocol::conversation::v1::ConversationResponseV1>,
+            )),
+        },
+        Unit {
             owner: "core",
             id: "server.agent.register",
             version: 1,

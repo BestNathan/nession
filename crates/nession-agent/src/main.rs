@@ -12,6 +12,7 @@
 //! 9. Gracefully shut down all components
 
 use anyhow::{Context, Result};
+use nession_agent::claude_session_context::TmuxSessionContext;
 use nession_agent::config::AgentConfig;
 use nession_agent::connection::ServerClient;
 use nession_agent::extension::ExtensionRegistry;
@@ -204,7 +205,13 @@ async fn main() -> Result<()> {
             config.server_url
         );
         let extensions: Vec<Box<dyn AgentExtension>> = vec![
-            Box::new(ClaudeCodeAgentExtension::new()),
+            // #1005. The context is what lets this provider resolve a Session's
+            // cwd and whether Claude is running in it — the agent owns session
+            // lifecycle, so it is the only thing that can answer, and the
+            // provider must not depend back on it to ask.
+            Box::new(ClaudeCodeAgentExtension::new(Arc::new(
+                TmuxSessionContext::new(Arc::clone(&tmux_for_client)),
+            ))),
             // #750. The resolver is what keeps git inside the Session's own
             // working directory: the client names a session, never a path.
             Box::new(GitAgentExtension::new(

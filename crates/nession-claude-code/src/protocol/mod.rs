@@ -2,6 +2,7 @@
 //!
 //! ```text
 //! protocol/
+//!   conversation/v1
 //!   list/v1
 //!   read/v1
 //! ```
@@ -37,6 +38,7 @@
 //! a wire change that needs a new contract version and a client update in the
 //! same change, and it is recorded as such rather than smuggled in here.
 
+pub mod conversation;
 pub mod list;
 pub mod read;
 
@@ -51,7 +53,11 @@ pub const OWNER: &str = "nession-claude-code";
 /// own contracts should fail at composition, not panic in whichever thread
 /// happened to compose it.
 pub fn descriptors() -> Result<Vec<ProtocolDescriptor>, IdentityError> {
-    Ok(vec![list::descriptor()?, read::descriptor()?])
+    Ok(vec![
+        list::descriptor()?,
+        read::descriptor()?,
+        conversation::descriptor()?,
+    ])
 }
 
 pub(crate) fn v1_descriptor(id: &str, wire: &str) -> Result<ProtocolDescriptor, IdentityError> {
@@ -66,7 +72,11 @@ pub(crate) fn v1_descriptor(id: &str, wire: &str) -> Result<ProtocolDescriptor, 
 mod tests {
     use super::*;
 
-    const EXPECTED_IDS: [&str; 2] = ["claude-code.list", "claude-code.read"];
+    const EXPECTED_IDS: [&str; 3] = [
+        "claude-code.list",
+        "claude-code.read",
+        "claude-code.conversation",
+    ];
 
     #[test]
     fn provider_contract_ids_are_canonical() {
@@ -107,7 +117,7 @@ mod tests {
     fn a_descriptor_list_is_what_a_manifest_would_advertise() {
         let manifest =
             nession_protocol::ProtocolManifest::from_descriptors(OWNER, &descriptors().unwrap());
-        assert_eq!(manifest.protocols.len(), 2);
+        assert_eq!(manifest.protocols.len(), EXPECTED_IDS.len());
         for id in EXPECTED_IDS {
             let id = nession_protocol::ProtocolId::new(id).unwrap();
             assert!(manifest.offers(&id), "manifest is missing {id}");

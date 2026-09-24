@@ -16,6 +16,7 @@
 //! types what ships rather than changing it in passing.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use nession_common::extension::AgentExtension;
@@ -24,11 +25,17 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 use tracing::debug;
 
+use crate::conversation;
+use crate::protocol::conversation::v1::{
+    ConversationCandidateV1, ConversationIdentityV1, ConversationRequestV1, ConversationResponseV1,
+    ConversationStateV1,
+};
 use crate::protocol::list::{ListRequestV1, ListResponseV1};
 use crate::protocol::read::{ReadFailureV1, ReadOkV1, ReadRequestV1, ReadResponseV1, Scope};
-use crate::protocol::{list, read};
+use crate::protocol::{conversation as conversation_protocol, list, read};
 use crate::scanner;
 use crate::security;
+use crate::session_context::SessionContext;
 
 /// The one place a `Value` becomes a contract.
 ///
@@ -40,27 +47,30 @@ fn decode<T: DeserializeOwned>(payload: Value) -> Result<T, ReadFailureV1> {
 }
 
 /// The Claude Code extension on the agent side.
-pub struct ClaudeCodeAgentExtension;
-
-impl Default for ClaudeCodeAgentExtension {
-    fn default() -> Self {
-        Self
-    }
+pub struct ClaudeCodeAgentExtension {
+    /// The host's session knowledge, injected at construction.
+    ///
+    /// Required rather than defaulted: a provider built without it cannot
+    /// resolve any session, which is indistinguishable from one whose sessions
+    /// have no conversations — and telling those two apart is the point of this
+    /// capability (`#1005` constraint 1). A host that has to pass something
+    /// cannot pass nothing by accident.
+    context: Arc<dyn SessionContext>,
 }
 
 impl ClaudeCodeAgentExtension {
-    pub fn new() -> Self {
-        Self
+    pub fn new(context: Arc<dyn SessionContext>) -> Self {
+        Self { context }
     }
 
     /// Resolve the `.claude/` directory a scope names.
     ///
     /// `None` is "there is no such directory", which both operations answer as
     /// a state rather than an error.
-    fn claude_root(&self, scope: Scope, session_id: Option<&str>) -> Option<PathBuf> {
+    async fn claude_root(&self, scope: Scope, session_id: Option<&str>) -> Option<PathBuf> {
         match scope {
             Scope::Global => security::claude_home_dir(),
-            Scope::Project => self.resolve_project_claude_dir(session_id),
+            Scope::Project => self.resolve_project_claude_dir(session_id).await,
         }
     }
 
@@ -72,6 +82,7 @@ impl ClaudeCodeAgentExtension {
 
         let Some(root) = self
             .claude_root(request.scope, request.session_id.as_deref())
+            .await
             .filter(|dir| dir.exists())
         else {
             return Ok(serde_json::to_value(ListResponseV1::unavailable())?);
@@ -94,7 +105,7 @@ impl ClaudeCodeAgentExtension {
             Err(failure) => return Ok(serde_json::to_value(failure)?),
         };
 
-        Ok(serde_json::to_value(self.read(request))?)
+        Ok(serde_json::to_value(self.read(request).await)?)
     }
 
     /// The read itself, as a typed response.
@@ -102,12 +113,15 @@ impl ClaudeCodeAgentExtension {
     /// Split out from the handler so the security decisions and the pagination
     /// are readable in one place, and so the `?`-free path is obvious: every
     /// refusal here is a value the contract has a shape for.
-    fn read(&self, request: ReadRequestV1) -> ReadResponseV1 {
+    async fn read(&self, request: ReadRequestV1) -> ReadResponseV1 {
         if !security::is_path_allowed(&request.path) {
             return ReadResponseV1::Failed(ReadFailureV1::new("access_denied"));
         }
 
-        let Some(root) = self.claude_root(request.scope, request.session_id.as_deref()) else {
+        let Some(root) = self
+            .claude_root(request.scope, request.session_id.as_deref())
+            .await
+        else {
             return ReadResponseV1::Failed(ReadFailureV1::new("not_found"));
         };
 
@@ -158,17 +172,153 @@ impl ClaudeCodeAgentExtension {
 
     /// Resolve the project-level `.claude/` directory from a session_id.
     ///
-    /// The current SessionManager tracks tmux sessions by listing them via
-    /// `tmux list-sessions`, which does not expose per-session working
-    /// directories. This is a v1 limitation -- project scope will be fully
-    /// implemented once SessionManager stores working_dir for individual
-    /// sessions. Until then this answers `not_found`, which is truthful: there
-    /// is no directory it can name.
-    fn resolve_project_claude_dir(&self, session_id: Option<&str>) -> Option<PathBuf> {
-        if session_id.is_some() {
-            debug!("project-level claude_code requires session working_dir, not yet available");
-        }
-        None
+    /// This used to answer `None` unconditionally, with a comment saying a
+    /// session's working directory was not available. **That had stopped being
+    /// true**: the agent asks tmux for `#{pane_current_path}` and has for a
+    /// while, which `#1005`'s background notes. The limitation was in this
+    /// provider's reach, not in the host — so project scope answers `not_found`
+    /// now only when the host genuinely cannot name a directory.
+    async fn resolve_project_claude_dir(&self, session_id: Option<&str>) -> Option<PathBuf> {
+        let cwd = self.context.session_cwd(session_id?).await?;
+        Some(PathBuf::from(cwd).join(".claude"))
+    }
+
+    /// Answer `claude-code.conversation`.
+    ///
+    /// ## What decides the state, and what never does
+    ///
+    /// The cwd comes from the host and the candidates from that cwd, matched
+    /// strictly (`#1005` decision 7). A conversation is **resolved only when the
+    /// caller named it**: either it came in with the request, or — with no
+    /// choice made — there is nothing to open and the caller gets the list.
+    ///
+    /// A single candidate is deliberately *not* opened. "There is only one, so
+    /// it must be the current one" is the same reasoning as "it is the newest,
+    /// so it must be current", which decision 3 forbids; until an exact binding
+    /// exists (stage C) the honest answer is that the current conversation has
+    /// not been determined. `Ambiguous` says that, whatever the list length.
+    async fn handle_conversation(&self, payload: Value) -> anyhow::Result<Value> {
+        let request: ConversationRequestV1 = match serde_json::from_value(payload) {
+            Ok(request) => request,
+            // Answered rather than propagated, like every other decode here: a
+            // request that never gets a reply reads as a hang.
+            Err(e) => {
+                return Ok(serde_json::to_value(ConversationResponseV1::error(
+                    format!("bad_request: {e}"),
+                ))?)
+            }
+        };
+
+        let Some(session_id) = request.session_id.as_deref() else {
+            return Ok(serde_json::to_value(ConversationResponseV1::error(
+                "session_id is required: a conversation is a session's",
+            ))?);
+        };
+
+        // No host answer means cannot-say, never a guess. `Unavailable` rather
+        // than `NotFound`: nothing is wrong with the session, this provider just
+        // cannot reach the fact.
+        let Some(cwd) = self.context.session_cwd(session_id).await else {
+            return Ok(serde_json::to_value(ConversationResponseV1::bare(
+                ConversationStateV1::Unavailable,
+            ))?);
+        };
+
+        let found = conversation::conversations_at(&cwd);
+        let candidates: Vec<ConversationCandidateV1> = found
+            .iter()
+            .map(|c| ConversationCandidateV1 {
+                claude_session_id: c.claude_session_id.clone(),
+                cwd: c.cwd.clone(),
+                updated_at: c.updated_at.clone(),
+            })
+            .collect();
+
+        let chosen = request
+            .claude_session_id
+            .as_deref()
+            .and_then(|id| found.iter().find(|c| c.claude_session_id == id));
+
+        let Some(chosen) = chosen else {
+            // Either nothing was asked for, or what was asked for is not at this
+            // cwd — and both end at the same place: the caller must choose. An
+            // unknown id is not an error, because a conversation can be deleted
+            // or the session's cwd can change between listing and selecting.
+            let state = if candidates.is_empty() {
+                ConversationStateV1::NotFound
+            } else {
+                ConversationStateV1::Ambiguous
+            };
+            return Ok(serde_json::to_value(ConversationResponseV1 {
+                candidates,
+                ..ConversationResponseV1::bare(state)
+            })?);
+        };
+
+        let limit = ConversationResponseV1::page_limit(request.limit);
+        let offset = match request.cursor.as_deref() {
+            Some(raw) => match raw.parse::<u64>() {
+                Ok(offset) => Some(offset),
+                Err(_) => {
+                    return Ok(serde_json::to_value(ConversationResponseV1::error(
+                        "cursor is not a position in this conversation",
+                    ))?)
+                }
+            },
+            None => None,
+        };
+
+        // Driving the reader is synchronous file I/O; keep it off the async
+        // worker the same way every other blocking read in this crate is kept
+        // off it.
+        let read = {
+            let conversation = chosen.clone();
+            tokio::task::spawn_blocking(move || {
+                conversation::read_page(&conversation, offset, limit as usize)
+            })
+            .await
+        };
+
+        let page = match read {
+            Ok(Ok(page)) => page,
+            Ok(Err(e)) => {
+                debug!("claude-code conversation read failed: {e}");
+                return Ok(serde_json::to_value(ConversationResponseV1::error(
+                    "the transcript could not be read",
+                ))?);
+            }
+            Err(e) => {
+                debug!("claude-code conversation read task failed: {e}");
+                return Ok(serde_json::to_value(ConversationResponseV1::error(
+                    "the transcript read did not complete",
+                ))?);
+            }
+        };
+
+        // `None` from the host is "cannot say", and cannot be reported as
+        // either live or finished — so the conversation is still opened, with
+        // the freshness left unclaimed.
+        let active = self.context.session_claude_active(session_id).await;
+        let state = if active == Some(true) {
+            ConversationStateV1::Ready
+        } else {
+            ConversationStateV1::Inactive
+        };
+
+        Ok(serde_json::to_value(ConversationResponseV1 {
+            state,
+            conversation: Some(ConversationIdentityV1 {
+                claude_session_id: chosen.claude_session_id.clone(),
+                cwd: chosen.cwd.clone(),
+            }),
+            candidates,
+            items: page.items,
+            next_cursor: page.next_offset.map(|offset| offset.to_string()),
+            has_more: page.has_more,
+            partial_tail: page.partial_tail,
+            skipped: page.skipped,
+            error: None,
+        })?)
     }
 }
 
@@ -211,6 +361,7 @@ impl AgentExtension for ClaudeCodeAgentExtension {
         match command {
             list::COMMAND => self.handle_list(payload).await,
             read::COMMAND => self.handle_read(payload).await,
+            conversation_protocol::COMMAND => self.handle_conversation(payload).await,
             other => anyhow::bail!("unknown claude_code command: {other}"),
         }
     }
@@ -220,6 +371,7 @@ impl AgentExtension for ClaudeCodeAgentExtension {
 mod tests {
     use super::*;
     use crate::security::MAX_CHUNK_SIZE;
+    use crate::session_context::NoSessionContext;
 
     #[test]
     fn the_command_the_wire_and_the_id_are_one_string() {
@@ -232,6 +384,11 @@ mod tests {
         for (wire, command, id) in [
             (list::v1::WIRE, list::COMMAND, list::ID),
             (read::v1::WIRE, read::COMMAND, read::ID),
+            (
+                conversation_protocol::v1::WIRE,
+                conversation_protocol::COMMAND,
+                conversation_protocol::ID,
+            ),
         ] {
             assert_eq!(wire, command, "the dispatch key is the wire");
             assert_eq!(wire, id, "and the wire is the protocol id");
@@ -242,7 +399,7 @@ mod tests {
     fn the_advertised_wire_types_are_the_contracts_own() {
         // "Advertised" and "routed" are one set now — the registry derives its
         // table from these — so this asserts the set is what the contracts name.
-        let advertised: Vec<String> = ClaudeCodeAgentExtension::new()
+        let advertised: Vec<String> = ClaudeCodeAgentExtension::new(Arc::new(NoSessionContext))
             .descriptors()
             .unwrap()
             .into_iter()
@@ -250,7 +407,11 @@ mod tests {
             .collect();
         assert_eq!(
             advertised,
-            vec![list::v1::WIRE.to_string(), read::v1::WIRE.to_string()]
+            vec![
+                list::v1::WIRE.to_string(),
+                read::v1::WIRE.to_string(),
+                conversation_protocol::v1::WIRE.to_string(),
+            ]
         );
     }
 
@@ -296,26 +457,143 @@ mod tests {
         assert_eq!(content_type_for("notes.txt"), "text");
     }
 
-    #[test]
-    fn project_scope_has_no_directory_and_says_so() {
-        // The v1 limitation, pinned rather than left to be rediscovered: with a
-        // session id it still resolves to nothing, so a read answers `not_found`
-        // instead of reading the wrong tree.
-        let extension = ClaudeCodeAgentExtension::new();
-        assert_eq!(extension.resolve_project_claude_dir(Some("agent:s")), None);
-        assert_eq!(extension.resolve_project_claude_dir(None), None);
+    /// A host that answers from a fixed table.
+    struct FixedContext {
+        cwd: Option<String>,
+        active: Option<bool>,
     }
 
-    #[test]
-    fn a_path_outside_the_allowed_set_is_refused_before_anything_is_opened() {
-        let extension = ClaudeCodeAgentExtension::new();
-        let response = extension.read(ReadRequestV1 {
-            scope: Scope::Global,
-            session_id: None,
-            path: "../../../etc/passwd".to_string(),
-            offset: 0,
-            limit: None,
-        });
+    #[async_trait]
+    impl SessionContext for FixedContext {
+        async fn session_cwd(&self, _session_id: &str) -> Option<String> {
+            self.cwd.clone()
+        }
+        async fn session_claude_active(&self, _session_id: &str) -> Option<bool> {
+            self.active
+        }
+    }
+
+    #[tokio::test]
+    async fn project_scope_resolves_the_sessions_own_claude_directory() {
+        // This asserted `None` unconditionally, with a comment explaining that a
+        // session's working directory was unavailable. **That had stopped being
+        // true** — the agent asks tmux for `#{pane_current_path}` — so the
+        // assertion was pinning a limitation of this provider's reach, not a
+        // decision. #1005 called it out and asks for the resolver to be reused.
+        let extension = ClaudeCodeAgentExtension::new(Arc::new(FixedContext {
+            cwd: Some("/work/project".to_string()),
+            active: None,
+        }));
+        assert_eq!(
+            extension.resolve_project_claude_dir(Some("agent:s")).await,
+            Some(PathBuf::from("/work/project/.claude"))
+        );
+    }
+
+    #[tokio::test]
+    async fn project_scope_says_nothing_when_the_host_cannot_name_a_directory() {
+        // The remaining limitation, and it is the host's to answer: no session
+        // id, or a host that does not know this session, resolves to nothing
+        // rather than to some other tree.
+        let extension = ClaudeCodeAgentExtension::new(Arc::new(NoSessionContext));
+        assert_eq!(
+            extension.resolve_project_claude_dir(Some("agent:s")).await,
+            None
+        );
+        assert_eq!(extension.resolve_project_claude_dir(None).await, None);
+    }
+
+    // ---- the conversation handler ----------------------------------------
+
+    /// A cwd no real transcript records, so the answer is about the cwd and not
+    /// about whatever is on the machine running the tests.
+    const CWD_WITH_NO_CONVERSATIONS: &str = "/nonexistent-cwd-for-this-test";
+
+    fn extension_with(cwd: Option<&str>, active: Option<bool>) -> ClaudeCodeAgentExtension {
+        ClaudeCodeAgentExtension::new(Arc::new(FixedContext {
+            cwd: cwd.map(str::to_string),
+            active,
+        }))
+    }
+
+    #[tokio::test]
+    async fn a_conversation_request_without_a_session_is_refused() {
+        // A conversation is a session's, so there is nothing to answer with —
+        // and it is answered rather than dropped, or the caller waits forever
+        // on a correlation id that will never resolve.
+        let extension = extension_with(Some("/work"), None);
+        let value = extension
+            .handle_conversation(serde_json::json!({}))
+            .await
+            .unwrap();
+        assert_eq!(value["state"], "error");
+        assert!(
+            value["error"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("session_id"),
+            "the refusal must name what was missing: {value}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_host_that_cannot_name_the_session_answers_unavailable_not_not_found() {
+        // The distinction matters: `not_found` would say the session has no
+        // conversations, which is a claim about the session. Nothing is known
+        // about it — the provider cannot reach the fact at all.
+        let extension = ClaudeCodeAgentExtension::new(Arc::new(NoSessionContext));
+        let value = extension
+            .handle_conversation(serde_json::json!({"session_id": "agent:s"}))
+            .await
+            .unwrap();
+        assert_eq!(value["state"], "unavailable");
+    }
+
+    #[tokio::test]
+    async fn a_cwd_with_no_conversations_answers_not_found_rather_than_picking_one() {
+        let extension = extension_with(Some(CWD_WITH_NO_CONVERSATIONS), None);
+        let value = extension
+            .handle_conversation(serde_json::json!({"session_id": "agent:s"}))
+            .await
+            .unwrap();
+        assert_eq!(value["state"], "not_found");
+        assert!(
+            value["candidates"]
+                .as_array()
+                .is_none_or(std::vec::Vec::is_empty),
+            "nothing to choose from: {value}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_malformed_request_is_answered_rather_than_dropped() {
+        let extension = extension_with(Some("/work"), None);
+        let value = extension
+            .handle_conversation(serde_json::json!({"session_id": "agent:s", "limit": "lots"}))
+            .await
+            .unwrap();
+        assert_eq!(value["state"], "error");
+        assert!(
+            value["error"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("bad_request"),
+            "the decode failure must say it was the request: {value}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_path_outside_the_allowed_set_is_refused_before_anything_is_opened() {
+        let extension = ClaudeCodeAgentExtension::new(Arc::new(NoSessionContext));
+        let response = extension
+            .read(ReadRequestV1 {
+                scope: Scope::Global,
+                session_id: None,
+                path: "../../../etc/passwd".to_string(),
+                offset: 0,
+                limit: None,
+            })
+            .await;
         let value = serde_json::to_value(response).unwrap();
         // Either the allowlist refuses it or the root cannot be resolved; both
         // are refusals, and neither opens the file.
