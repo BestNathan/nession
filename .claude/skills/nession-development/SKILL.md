@@ -193,6 +193,25 @@ cd web && npx tsc --noEmit     # TypeScript check
 cd web && npm run lint         # ESLint
 ```
 
+### Local Build Cache
+
+Each worktree keeps a **private `target/`**; a new one is warm-seeded from the main
+worktree by filesystem copy-on-write (dependency artifacts only), and all local builds
+route through `scripts/rustc-wrapper.sh` to a machine-wide sccache.
+
+**A worktree does not reuse another worktree's compilation**, and neither does `main`
+reuse a worktree's — sccache keys include absolute paths, and Rust key normalization is
+not complete upstream (#986). Do not expect "a new worktree compiles from zero".
+
+```bash
+just build-cache-status    # what is configured
+just build-cache-verify    # what actually happens, incl. cross-checkout hit/miss
+```
+
+**📋 Full guide:** [`references/local-build-cache.md`](references/local-build-cache.md)
+— the three layers, **when sccache will not hit** (and why), how to read the probe, and
+how to reset the counters safely. Consult it before concluding the cache is broken.
+
 ### shadcn/ui Component Conventions
 
 **Before building any new UI pattern, check if shadcn has a primitive for it.**
