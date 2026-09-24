@@ -1871,7 +1871,7 @@ dependencies = [
 
 [[package]]
 name = "nession-agent"
-version = "0.35.0"
+version = "0.37.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1906,7 +1906,7 @@ dependencies = [
 
 [[package]]
 name = "nession-claude-code"
-version = "0.35.0"
+version = "0.37.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1925,7 +1925,7 @@ dependencies = [
 
 [[package]]
 name = "nession-cli"
-version = "0.35.0"
+version = "0.37.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1961,7 +1961,7 @@ dependencies = [
 
 [[package]]
 name = "nession-common"
-version = "0.35.0"
+version = "0.37.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1983,7 +1983,7 @@ dependencies = [
 
 [[package]]
 name = "nession-git"
-version = "0.35.0"
+version = "0.37.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2000,7 +2000,7 @@ dependencies = [
 
 [[package]]
 name = "nession-protocol"
-version = "0.35.0"
+version = "0.37.0"
 dependencies = [
  "schemars",
  "serde",
@@ -2011,7 +2011,7 @@ dependencies = [
 
 [[package]]
 name = "nession-protocol-codegen"
-version = "0.35.0"
+version = "0.37.0"
 dependencies = [
  "nession-agent",
  "nession-claude-code",
@@ -2025,7 +2025,7 @@ dependencies = [
 
 [[package]]
 name = "nession-runtime"
-version = "0.35.0"
+version = "0.37.0"
 dependencies = [
  "tokio",
  "tokio-tungstenite",
@@ -2034,7 +2034,7 @@ dependencies = [
 
 [[package]]
 name = "nession-server"
-version = "0.35.0"
+version = "0.37.0"
 dependencies = [
  "anyhow",
  "base64 0.21.7",
