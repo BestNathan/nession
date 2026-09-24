@@ -53,7 +53,11 @@ pub const OWNER: &str = "nession-claude-code";
 /// own contracts should fail at composition, not panic in whichever thread
 /// happened to compose it.
 pub fn descriptors() -> Result<Vec<ProtocolDescriptor>, IdentityError> {
-    Ok(vec![list::descriptor()?, read::descriptor()?])
+    Ok(vec![
+        list::descriptor()?,
+        read::descriptor()?,
+        conversation::descriptor()?,
+    ])
 }
 
 pub(crate) fn v1_descriptor(id: &str, wire: &str) -> Result<ProtocolDescriptor, IdentityError> {
@@ -68,7 +72,11 @@ pub(crate) fn v1_descriptor(id: &str, wire: &str) -> Result<ProtocolDescriptor, 
 mod tests {
     use super::*;
 
-    const EXPECTED_IDS: [&str; 2] = ["claude-code.list", "claude-code.read"];
+    const EXPECTED_IDS: [&str; 3] = [
+        "claude-code.list",
+        "claude-code.read",
+        "claude-code.conversation",
+    ];
 
     #[test]
     fn provider_contract_ids_are_canonical() {

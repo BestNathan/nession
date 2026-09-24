@@ -223,15 +223,29 @@ impl SessionManager {
 
     /// Query the current working directory of a tmux session's active pane.
     pub async fn get_session_cwd(&self, session_name: &str) -> Result<String> {
+        self.display_message(session_name, "#{pane_current_path}")
+            .await
+    }
+
+    /// The command running in a tmux session's active pane.
+    ///
+    /// This is what tells the Claude Code capability whether Claude is running
+    /// **now** (#1005 criterion 4). It is the same signal the Web projection
+    /// already uses to decide the capability is `active`, which is deliberate:
+    /// one source means the terminal's presence and the conversation's
+    /// freshness cannot disagree about whether Claude is running.
+    pub async fn get_session_command(&self, session_name: &str) -> Result<String> {
+        self.display_message(session_name, "#{pane_current_command}")
+            .await
+    }
+
+    /// `tmux display-message -p -t <session> -F <format>`.
+    ///
+    /// One place for the call, so the two accessors above cannot drift in how
+    /// they address a session or how they treat a failure.
+    async fn display_message(&self, session_name: &str, format: &str) -> Result<String> {
         let mut cmd = self.cmd.tokio();
-        cmd.args([
-            "display-message",
-            "-p",
-            "-t",
-            session_name,
-            "-F",
-            "#{pane_current_path}",
-        ]);
+        cmd.args(["display-message", "-p", "-t", session_name, "-F", format]);
         let output = tmux_output(&mut cmd, self.list_timeout).await?;
 
         if !output.status.success() {
