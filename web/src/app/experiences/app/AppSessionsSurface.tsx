@@ -51,14 +51,10 @@ export type AppSessionsSurfaceProps = Omit<
 const sessionsListFloorAppClass =
   'min-h-[length:var(--shell-sessions-list-min-height)]';
 
-const STATUS_FILTERS: {
-  key: StatusFilter;
-  label: string;
-  countKey?: 'onlineCount' | 'offlineCount';
-}[] = [
+const STATUS_FILTERS: { key: StatusFilter; label: string }[] = [
   { key: 'all', label: 'All' },
-  { key: 'online', label: 'Online', countKey: 'onlineCount' },
-  { key: 'offline', label: 'Offline', countKey: 'offlineCount' },
+  { key: 'online', label: 'Online' },
+  { key: 'offline', label: 'Offline' },
 ];
 
 function SortButton({
@@ -155,17 +151,26 @@ function AgentsDisclosure({
 /**
  * Status filters and sort behind one trigger, with Refresh opposite it.
  *
- * The chips' counts are Agent counts while the filter applies to Sessions —
- * the inconsistency #1050 Finding 2 recorded. Carried over as-is rather than
- * quietly corrected: reconciling it means deciding what the count *means* on a
- * surface where agents are demoted, and that is stage 3's question, not this
- * composition's.
+ * The chips carry no counts. They used to carry Agent counts while filtering
+ * Sessions — the inconsistency #1050 Finding 2 recorded — and the App cannot
+ * correct it by counting Sessions instead: `filterSessions` keys the filter off
+ * each Session's Agent status (`useDashboard.ts`), and this surface receives
+ * only the *already filtered* list, so it has no set to count. The remaining
+ * candidate, `Agent.session_count`, is a heartbeat snapshot taken on the
+ * Agent — stale for an Offline Agent, and not the list the filter runs on — so
+ * summing it would swap one wrong number for another.
+ *
+ * A number that describes a different set from the one its control filters is
+ * worse than no number, so the chips state the filter and nothing else. Giving
+ * the App true Session counts means handing it the unfiltered Session list,
+ * which is a change to what `WorkspaceRegion` passes rather than to this
+ * composition; recorded for #1050 rather than smuggled in here. Web is
+ * untouched: its chips are `SearchBar`'s own, and this surface renders none of
+ * them (`showStatusFilters={false}`).
  */
 function SessionsFilters({
   statusFilter,
   setStatusFilter,
-  onlineCount,
-  offlineCount,
   sortField,
   sortDirection,
   toggleSort,
@@ -174,8 +179,6 @@ function SessionsFilters({
 }: {
   statusFilter: StatusFilter;
   setStatusFilter: (f: StatusFilter) => void;
-  onlineCount: number;
-  offlineCount: number;
   sortField: SortField;
   sortDirection: SortDirection;
   toggleSort: (field: SortField) => void;
@@ -183,18 +186,6 @@ function SessionsFilters({
   loadingSessions: boolean;
 }) {
   const [filtersOpen, setFiltersOpen] = useState(false);
-
-  const countForFilter = (
-    filter: (typeof STATUS_FILTERS)[number],
-  ): number | undefined => {
-    if (filter.countKey === 'onlineCount') {
-      return onlineCount;
-    }
-    if (filter.countKey === 'offlineCount') {
-      return offlineCount;
-    }
-    return undefined;
-  };
 
   return (
     <div className="flex items-center justify-between gap-2">
@@ -223,7 +214,6 @@ function SessionsFilters({
         >
           <div className="flex flex-wrap items-center gap-1">
             {STATUS_FILTERS.map((filter) => {
-              const count = countForFilter(filter);
               const isActive = statusFilter === filter.key;
               return (
                 <Button
@@ -235,11 +225,6 @@ function SessionsFilters({
                   className={cn(shellRowControlMinClass, 'flex-shrink-0')}
                 >
                   {filter.label}
-                  {count !== undefined && (
-                    <span className="ml-1 rounded-full bg-background/20 px-1.5 py-0.5 text-xs">
-                      {count}
-                    </span>
-                  )}
                 </Button>
               );
             })}
@@ -331,9 +316,20 @@ function SessionsChrome({
           setSearchQuery={setSearchQuery}
           statusFilter={statusFilter}
           setStatusFilter={setStatusFilter}
+          /* Carried because `SearchBar` requires them, not because this surface
+             shows them: it renders its own chips (`showStatusFilters={false}`),
+             and those carry no counts. They are still the real Agent counts, so
+             they are not falsified to satisfy the type. */
           onlineCount={onlineCount}
           offlineCount={offlineCount}
           showStatusFilters={false}
+          /* The App's own copy. `SearchBar`'s default advertises Agents, which
+             this surface demotes to a disclosure and never filters; what it
+             does filter — by name, and by Agent id through `filterSessions` —
+             is the Session list below. The two experiences disagree about what
+             this field promises, so neither is the other's default (#1050
+             stage 3). */
+          placeholder="Search sessions..."
         />
         <Button
           type="button"
@@ -354,8 +350,6 @@ function SessionsChrome({
         <SessionsFilters
           statusFilter={statusFilter}
           setStatusFilter={setStatusFilter}
-          onlineCount={onlineCount}
-          offlineCount={offlineCount}
           sortField={sortField}
           sortDirection={sortDirection}
           toggleSort={toggleSort}
@@ -392,11 +386,14 @@ function SessionsChrome({
  *    cost one muted row until asked for.
  * 4. **Filters sit behind one trigger**, as on Web, instead of a chip row
  *    competing with the list for what is left of a short surface.
- *
- * Search is deliberately unchanged, placeholder included: `SearchBar` says
- * "Search agents and sessions..." while only Sessions are filtered (the
- * `filteredAgents` memo `useDashboard` computes has no consumer). Rewording a
- * shared component's copy is #1050 stage 3's job, not this composition's.
+ * 5. **Its copy describes what it does.** The search field says "Search
+ *    sessions..." rather than inheriting Web's "Search agents and sessions...",
+ *    and the filter chips carry no counts. Both used to name a set they did not
+ *    act on — Agents are neither searched nor filtered here — and neither had a
+ *    true replacement available to this composition (`SessionsFilters` records
+ *    what one would cost). The copy each experience shows is its own, so the
+ *    shared default does not move: Web's field, Web's string and Web's
+ *    baselines are untouched by this stage.
  *
  * `data-testid="create-session"` and the filter testids are reused from
  * `SessionListHeader` rather than renamed: they name the controls, not the
