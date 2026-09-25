@@ -1,15 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { TerminalCapsule } from '@/product/terminal/capsule/TerminalCapsule';
-
-vi.mock('@/capabilities/commands/hooks/useQuickCommands', () => ({
-  useQuickCommands: () => ({
-    userCommands: [],
-    addCommand: vi.fn().mockResolvedValue(undefined),
-    deleteCommand: vi.fn().mockResolvedValue(undefined),
-  }),
-}));
 
 vi.mock('@/product/terminal/hooks/useCommandHistory', () => ({
   useCommandHistory: () => ({
@@ -23,20 +15,39 @@ vi.mock('@/product/terminal/hooks/useCommandHistory', () => ({
   }),
 }));
 
-function renderWebCapsule(onLayoutChange?: never) {
-  void onLayoutChange;
+/** A capability that earned disclosure, so the leading `+` renders. */
+const disclosure = {
+  entries: [{ id: 'claude-code', title: 'Claude Code', state: 'active' as const }],
+  onSelect: vi.fn(),
+};
+
+function renderWebCapsule() {
   return render(<TerminalCapsule experience="web" sendText={vi.fn()} />);
 }
 
 function renderAppCapsule() {
   return render(
-    <TerminalCapsule
-      experience="app"
-      mode="input"
-      onModeChange={vi.fn()}
-      sendText={vi.fn()}
-    />,
+    <TerminalCapsule experience="app" sendText={vi.fn()} capabilityDisclosure={disclosure} />,
   );
+}
+
+/**
+ * #1034's two axes on one control: the box that takes the tap names
+ * `control.md`, and the affordance drawn inside it names `control.visualSize`.
+ *
+ * Both bands are asserted on the *token each class names*, never on px: on App
+ * `control.sm` and `control.md` are both 44px, so a control that regressed to
+ * the smaller band measures identically, and a 44px circle inside a 44px target
+ * is exactly the shape the split was introduced to end.
+ */
+function expectTwoBandControl(testId: string) {
+  const control = screen.getByTestId(testId);
+  expect(control.className).toMatch(/control-md/);
+  expect(control.className).not.toMatch(/control-sm/);
+  expect(within(control).getByTestId('capsule-control-visual').className).toMatch(
+    /control-visual-size/,
+  );
+  return control;
 }
 
 describe('InputComposer', () => {
@@ -50,22 +61,40 @@ describe('InputComposer', () => {
     expect(screen.getByTestId('capsule-input-actions-slot')).toBeInTheDocument();
   });
 
-  it('shows paste/copy on app experience', () => {
+  it('leads with the capability entry, not the trailing actions', () => {
     render(
-      <TerminalCapsule
-        experience="app"
-        mode="input"
-        onModeChange={vi.fn()}
-        sendText={vi.fn()}
-      />,
+      <TerminalCapsule experience="web" sendText={vi.fn()} capabilityDisclosure={disclosure} />,
     );
-    expect(screen.getByTestId('capsule-paste')).toBeInTheDocument();
-    expect(screen.getByTestId('capsule-copy')).toBeInTheDocument();
+    // The resting capsule carries `+` in the leading slot and nothing else there
+    // (terminal-capsule.md §Anatomy: `[+] [ input ... ] [send]`).
+    const leading = within(screen.getByTestId('capsule-input-leading-slot'));
+    expect(leading.getByTestId('capsule-capability-more')).toBeInTheDocument();
+    expect(
+      within(screen.getByTestId('capsule-input-actions-slot')).queryByTestId(
+        'capsule-capability-more',
+      ),
+    ).not.toBeInTheDocument();
   });
 
-  it('wires the history trigger in the composer toolbar', () => {
-    render(<TerminalCapsule experience="web" sendText={vi.fn()} />);
+  it('wires the history trigger on web and omits it on app', () => {
+    const web = render(<TerminalCapsule experience="web" sendText={vi.fn()} />);
     expect(screen.getByTestId('capsule-history-trigger')).toHaveAttribute('aria-haspopup', 'dialog');
+    web.unmount();
+
+    renderAppCapsule();
+    expect(screen.queryByTestId('capsule-history-trigger')).not.toBeInTheDocument();
+  });
+
+  it('asks for intent in the experience’s own words', () => {
+    const web = render(<TerminalCapsule experience="web" sendText={vi.fn()} />);
+    expect(screen.getByTestId('capsule-ghost-input')).toHaveAttribute('placeholder', 'Send input…');
+    web.unmount();
+
+    renderAppCapsule();
+    expect(screen.getByTestId('capsule-ghost-input')).toHaveAttribute(
+      'placeholder',
+      'Ask Nession…',
+    );
   });
 
   it('disables send when empty and sends trimmed input with carriage return', async () => {
@@ -81,22 +110,28 @@ describe('InputComposer', () => {
     renderWebCapsule();
     const row = screen.getByTestId('capsule-input-row');
     expect(row).toHaveAttribute('data-layout', 'flat');
-    expect(row.className).toMatch(/grid-cols-\[minmax/);
+    expect(row.className).toMatch(/grid-cols-\[auto_minmax/);
     expect(screen.queryByTestId('capsule-input-toolbar-row')).not.toBeInTheDocument();
   });
 
-  it('uses full-width field on app even when flat', () => {
-    render(
-      <TerminalCapsule
-        experience="app"
-        mode="input"
-        onModeChange={vi.fn()}
-        sendText={vi.fn()}
-      />,
+  it('keeps the App resting capsule on the single row', () => {
+    // The App capsule is the intent composer at rest, not a two-row sheet:
+    // `+`, field, send, one band — which is why its row measures `control.md`
+    // (44px) rather than a field row stacked on a toolbar row.
+    renderAppCapsule();
+    const row = screen.getByTestId('capsule-input-row');
+    expect(row).toHaveAttribute('data-layout', 'flat');
+    expect(row).not.toHaveAttribute('data-field-first');
+    expect(screen.queryByTestId('capsule-input-toolbar-row')).not.toBeInTheDocument();
+    expect(screen.getByTestId('capsule-input-field')).toHaveAttribute(
+      'data-input-width',
+      'column',
     );
-    expect(screen.getByTestId('capsule-input-row')).toHaveAttribute('data-field-first', 'app');
-    expect(screen.getByTestId('capsule-input-field')).toHaveAttribute('data-input-width', 'full');
-    expect(screen.getByTestId('capsule-input-toolbar-row')).toBeInTheDocument();
+    expect(
+      within(screen.getByTestId('capsule-input-leading-slot')).getByTestId(
+        'capsule-capability-more',
+      ),
+    ).toBeInTheDocument();
   });
 
   it('stays flat when empty even if scrollHeight looks multi-line', async () => {
@@ -131,21 +166,54 @@ describe('InputComposer', () => {
   });
 
   it('renders every capsule control at the control token, never a smaller band', () => {
-    // Regression: App's secondary controls rendered at `control-sm` while
+    // Regression: the capsule's controls once rendered at `control-sm` while
     // `pattern.terminal-capsule` names `control.md` as the band for both
     // experiences. No px assertion could see it — on App both tokens are 44px —
     // so the invariant is asserted on the token the class names.
-    renderAppCapsule();
-    for (const testId of [
-      'capsule-history-trigger',
-      'capsule-paste',
-      'capsule-copy',
-      'capsule-send',
-    ]) {
-      const control = screen.getByTestId(testId);
-      expect(control.className).toMatch(/control-md/);
-      expect(control.className).not.toMatch(/control-sm/);
+    //
+    // Two bands since #1034, and both are asserted because either alone passes
+    // for the wrong reason. The OUTER control is the hit target (`control.md`,
+    // 44px on App) and the inner `capsule-control-visual` is the affordance
+    // drawn inside it (`control.visualSize`, 36px on App). An outer that named
+    // `control-sm` is the old regression; an inner that named `control-md` is
+    // the silent revert of #1034 — every secondary action back to a 44px
+    // filled square, at a size no measurement can distinguish from the target
+    // around it.
+    const app = renderAppCapsule();
+    for (const testId of ['capsule-capability-more', 'capsule-send']) {
+      expectTwoBandControl(testId);
     }
+    app.unmount();
+
+    // The history trigger is Web's (App declares no permanent history control);
+    // it is the third caller of the split, so it gets the same assertion.
+    renderWebCapsule();
+    expectTwoBandControl('capsule-history-trigger');
+  });
+
+  it('keeps the painted affordance off the hit target, so the box never fills', async () => {
+    // Point 4 of the split: the shadcn `Button` *variant* paints the outer
+    // element (`default` → `bg-primary`, `ghost` → `hover:bg-muted`), so moving
+    // the circle inside does not on its own stop the 44px box from filling. On
+    // touch the hover sticks, and every secondary action becomes a filled 44px
+    // square again — the exact regression #1034 exists to end. The paint belongs
+    // to the inner visual; the control is transparent at rest and on hover.
+    renderAppCapsule();
+    for (const testId of ['capsule-capability-more', 'capsule-send']) {
+      const control = screen.getByTestId(testId);
+      expect(control.className).not.toMatch(/bg-foreground/);
+      expect(control.className).toMatch(/hover:bg-transparent/);
+      expect(control.className).not.toMatch(/hover:bg-(?!transparent)/);
+    }
+
+    // …and the fill the send control gave up is on its circle, not nowhere: the
+    // primary action stays a filled affordance, just a 36px one. Typed input so
+    // the fill under test is the enabled one (`bg-foreground`), not the
+    // disabled `bg-muted`.
+    await userEvent.type(screen.getByTestId('capsule-ghost-input'), 'ls');
+    expect(
+      within(screen.getByTestId('capsule-send')).getByTestId('capsule-control-visual').className,
+    ).toMatch(/bg-foreground/);
   });
 
   it('drops tooltips on app, where they would intercept touch', () => {

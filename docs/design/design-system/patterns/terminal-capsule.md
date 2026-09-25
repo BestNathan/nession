@@ -138,6 +138,30 @@ The current implementation may support terminal-oriented modes such as direct in
 
 Those modes are implementation tools beneath the product interaction model. They must not prevent the capsule from evolving into the shared conversational/contextual entry surface described here.
 
+> **Decision update (2026-09-25): App's `input | commands` toggle was retired by `#1034`.**
+>
+> It was one of the implementation tools this section permits and [§Implementation migration](#implementation-migration)
+> explicitly authorises converging, so retiring it changes none of the product model above — the
+> terminal-oriented modes stay reachable and the composer stays the entry surface. What it corrects is
+> **where** they are reached from.
+>
+> A mode *replaced* the composer. The model in this document, in [§Progressive disclosure](#progressive-disclosure),
+> and in [capability-emergence.md](../../capability-emergence.md) is the opposite: the composer persists and
+> secondary tools emerge around it. App's commands mode was a second, competing terminal-key surface that
+> swapped the composer out; Terminal Keys, which `#826` had already made a projection above a surviving
+> composer, is the surface that belongs. The mode is gone and the toggle with it.
+>
+> App also drops its permanent paste and copy controls — [§Anti-patterns](#anti-patterns) already lists
+> duplicating native copy/paste as a violation, and the platform supplies both natively. Web keeps the one
+> composer control that was never part of any of this: its history trigger. What is left on both
+> experiences is the resting anatomy [§Anatomy](#anatomy) draws — `+` leading, one primary action
+> trailing.
+>
+> The mode's own key popover went with it. Neither experience had enabled it for some time (its trigger
+> and the mode that owned it were the same switch), so what the change removed was not a live surface but
+> the last way to reach one — and, in the same pass, the code that would have drawn it. Terminal Keys is
+> the surface for those keys and always was.
+
 Preserve established terminal semantics where the user is explicitly sending terminal input:
 
 - Enter sends/executes according to the active input mode;
@@ -188,6 +212,31 @@ Minimal does not mean bare or unfinished.
 - **Primary:** user's current intent/input.
 - **Secondary:** send/execute and the `+` capability entry.
 - **Tertiary:** temporary Signal/Peek projections and Terminal-local accessories.
+
+### Two axes on one control
+
+An icon control in the capsule has a **hit target** and a **drawn affordance**, and
+they are two objects rather than two values on one element.
+
+| | What it is | Where it is declared |
+|--|-----------|----------------------|
+| Hit target | the box that receives the tap | the Experience control band — `category.control`'s `heightToken`, and the touch floor on App |
+| Drawn affordance | the circle painted inside that box | `control.visualSize`, named per Experience by `pattern.terminal-capsule`'s `visualSizeToken` |
+
+The axes are split because the two platforms disagree about them. On App the control band
+*is* the touch floor, and a hit target may never go below it — correctly — but painting the
+whole band makes every secondary icon action read as a primary button, which is what
+[§Dominance](#dominance) and [§Information hierarchy](#information-hierarchy) are asking it
+not to do. On Web there is no touch floor, so the drawn affordance may fill the control it
+sits in and the split is a no-op.
+
+**Two DOM nodes, not one class.** Every geometric assertion in the contract
+(`expectTokenHeight`, `expectTouchTarget`) measures the element it is handed, so a smaller
+painting inside the same box is only measurable on a second node — a class that named a
+smaller band on the *same* element would have shrunk the tap target instead, which is the
+opposite of the requirement. The gate fails a control whose painting reached its hit target,
+so the split cannot converge back silently. Values live in
+`design/tokens/experience/*.json`; this document names the tokens and never their numbers.
 
 ### Surface treatment
 

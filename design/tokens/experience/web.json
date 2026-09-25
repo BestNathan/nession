@@ -36,6 +36,10 @@
     },
     "lg": {
       "value": "36px"
+    },
+    "visualSize": {
+      "$description": "The affordance actually painted inside a control — the circle a capsule icon action draws — as opposed to the box that receives the tap. Equal to `control.md` (32px) by construction: a pointer has no minimum hit area, so on Web the drawn affordance may fill the control it sits in and the split is a no-op. The leaf exists so a single shared binding resolves on both experiences — an App-only token would be written into [data-experience=app] only and resolve to nothing at `:root` — and so the drawn-affordance check can be stated once against both. See the App side for where the two deliberately differ.",
+      "value": "32px"
     }
   },
   "row": {

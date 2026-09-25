@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  checkDrawnAffordanceBand,
   checkSemanticTokenIdentity,
   formatViolation,
   parseProfile,
@@ -28,6 +29,66 @@ test('semantic identity accepts the contract-named token', () => {
     actualToken: 'control.md',
     resolvedPx: 44,
   }), []);
+});
+
+// #1034. The App capsule's control.sm and control.md are both 44px, so a control
+// whose painted affordance grew back to the band is pixel-identical to one that
+// kept a smaller circle — to every assertion that measures the element it is
+// handed. These fixtures pin the drawn-affordance check, which is the only thing
+// that can see the difference.
+const DRAWN = {
+  pattern: 'pattern.terminal-capsule',
+  expectedToken: 'control.visualSize',
+  actualToken: 'control.visualSize',
+};
+
+test('drawn affordance is accepted only while it stays below the hit target', () => {
+  assert.deepEqual(
+    checkDrawnAffordanceBand({ ...DRAWN, visualPx: 36, bandPx: 44, floorPx: 32 }),
+    [],
+    '36px inside a 44px target is the intended App geometry',
+  );
+
+  const grown = checkDrawnAffordanceBand({ ...DRAWN, visualPx: 44, bandPx: 44, floorPx: 32 });
+  assert.equal(grown.length, 1);
+  assert.equal(grown[0].rule, 'drawn-affordance-band');
+  assert.match(grown[0].expected, /drawn affordance < 44px/);
+
+  const shrunk = checkDrawnAffordanceBand({ ...DRAWN, visualPx: 28, bandPx: 44, floorPx: 32 });
+  assert.deepEqual(shrunk.map((v) => v.rule), ['drawn-affordance-band']);
+});
+
+test('drawn affordance that names the hit-target band fails token identity', () => {
+  // The revert this exists for: the class reaches for a control band instead of
+  // the drawn-affordance token, which merges the two axes back into one. Both
+  // spellings of that mistake are covered — the band it should have used, and
+  // the smaller one the removed `capsuleSecondaryIconButtonClass` used to name.
+  for (const actualToken of ['control.md', 'control.sm']) {
+    const violations = checkDrawnAffordanceBand({
+      ...DRAWN,
+      actualToken,
+      visualPx: 36,
+      bandPx: 44,
+      floorPx: 32,
+    });
+    assert.deepEqual(
+      violations.map((v) => v.rule),
+      ['drawn-affordance-token-identity'],
+      `${actualToken} must not stand in for the drawn affordance`,
+    );
+  }
+});
+
+test('a drawn affordance with no numeric value violates instead of skipping', () => {
+  const violations = checkDrawnAffordanceBand({
+    ...DRAWN,
+    visualPx: null,
+    bandPx: 44,
+    floorPx: 32,
+  });
+  assert.equal(violations.length, 1);
+  assert.equal(violations[0].rule, 'drawn-affordance-band');
+  assert.match(violations[0].actual, /no numeric value found/);
 });
 
 test('shadcn boundary rejects an arbitrary design metric fixture', () => {
