@@ -37,7 +37,9 @@ async fn start_test_server(
     let mut server = WebSocketServer::new(config, Arc::new(db)).await?;
     let addr = server.local_addr()?;
     let handle = tokio::spawn(async move {
-        let _ = server.run().await;
+        let _ = server
+            .run(nession_common::readiness::Readiness::Unwatched)
+            .await;
     });
     sleep(Duration::from_millis(100)).await;
     Ok((addr, handle))

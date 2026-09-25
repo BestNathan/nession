@@ -108,10 +108,61 @@ pub fn get_process_uptime(pid: u32) -> Option<u64> {
     Some(now.saturating_sub(process_start_time))
 }
 
+/// Get the uptime of a process in seconds, without `/proc`.
+///
+/// This used to return `None` unconditionally, which made it useless for the
+/// one thing that needs it: process identity (#1016) reads a start time to tell
+/// a live holder from a reused pid, and an identity that cannot be established
+/// makes `stop` refuse to signal — fail-safe, but a no-op. On the dev platform
+/// that would have turned `nession agent stop` into a command that never stops
+/// anything, and no Linux CI run would have noticed.
+///
+/// `ps` is the portable way to ask, and `LC_ALL=C` pins the output format so the
+/// parse does not depend on the caller's locale. Pairing it with the non-Linux
+/// `get_boot_time` is *not* meaningful — that one is a placeholder — so callers
+/// that need an absolute start time add the elapsed time to something they
+/// trust instead.
 #[cfg(not(target_os = "linux"))]
-pub fn get_process_uptime(_pid: u32) -> Option<u64> {
-    // On non-Linux systems, we can't easily determine process uptime
-    None
+pub fn get_process_uptime(pid: u32) -> Option<u64> {
+    use std::process::Command;
+
+    let output = Command::new("ps")
+        .args(["-o", "etime=", "-p", &pid.to_string()])
+        .env("LC_ALL", "C")
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    parse_elapsed(&String::from_utf8_lossy(&output.stdout))
+}
+
+/// Parse the `[[dd-]hh:]mm:ss` elapsed-time format `ps -o etime=` prints.
+///
+/// Kept pure and separate so the shapes `ps` actually emits are asserted
+/// directly, rather than only through a live process whose uptime the test
+/// cannot predict.
+#[cfg(not(target_os = "linux"))]
+fn parse_elapsed(text: &str) -> Option<u64> {
+    let text = text.trim();
+    if text.is_empty() {
+        return None;
+    }
+    let (days, rest) = match text.split_once('-') {
+        Some((days, rest)) => (days.parse::<u64>().ok()?, rest),
+        None => (0, text),
+    };
+    let parts = rest
+        .split(':')
+        .map(str::parse::<u64>)
+        .collect::<Result<Vec<u64>, _>>()
+        .ok()?;
+    let (hours, minutes, seconds) = match parts.as_slice() {
+        [h, m, s] => (*h, *m, *s),
+        [m, s] => (0, *m, *s),
+        _ => return None,
+    };
+    Some(days * 86_400 + hours * 3_600 + minutes * 60 + seconds)
 }
 
 /// Format a timestamp as a human-readable relative time string.

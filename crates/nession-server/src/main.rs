@@ -13,7 +13,9 @@ use tracing::info;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let config = load_config()?;
-    nession_server::runtime::run(config).await
+    // This binary is always started directly — a daemon parent re-execs the CLI,
+    // not this — so there is nobody to announce readiness to.
+    nession_server::runtime::run(config, nession_common::readiness::Readiness::Unwatched).await
 }
 
 /// Load server configuration.

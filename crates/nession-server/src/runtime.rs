@@ -14,6 +14,7 @@ use std::sync::Arc;
 use tracing::{error, info};
 
 use nession_common::config::ServerConfig;
+use nession_common::readiness::Readiness;
 
 use crate::db::Database;
 use crate::server::WebSocketServer;
@@ -22,7 +23,12 @@ use crate::server::WebSocketServer;
 ///
 /// Returns `Err` if the Server could not be brought up — logs that cannot be
 /// initialised, a database that will not open, a listener that will not bind.
-pub async fn run(config: ServerConfig) -> anyhow::Result<()> {
+///
+/// `ready` is how a daemon parent is told the child got this far. This return
+/// value cannot serve that purpose: `run` does not return until shutdown, so a
+/// parent would learn "started" only when it stopped (#1016). The announcement
+/// happens inside [`WebSocketServer::run`], after the last step that can fail.
+pub async fn run(config: ServerConfig, ready: Readiness) -> anyhow::Result<()> {
     let _log_guard = nession_common::logging::init_logging(
         &config.logging,
         &nession_common::paths::server_logs_dir()?,
@@ -49,7 +55,7 @@ pub async fn run(config: ServerConfig) -> anyhow::Result<()> {
     let mut server = WebSocketServer::new(config, Arc::new(database)).await?;
 
     info!("Starting WebSocket server");
-    if let Err(e) = server.run().await {
+    if let Err(e) = server.run(ready).await {
         error!("Server error: {}", e);
         return Err(e);
     }

@@ -1,6 +1,6 @@
 //! Agent CLI commands implementation.
 
-use crate::utils::{pid_file, process};
+use crate::utils::{pid_file, process, startup};
 use anyhow::{Context, Result};
 use nession_agent::config::AgentConfig;
 use std::fs;
@@ -21,12 +21,15 @@ pub async fn start(
     nession_common::paths::ensure_component_dirs()
         .context("failed to create nession component directories")?;
 
-    // Check if agent is already running
-    if let Ok(pid) = pid_file::read_pid_file(&pid_file) {
-        if pid_file::is_process_running(pid) {
-            anyhow::bail!("Agent is already running with PID {pid}");
-        } else {
-            // Process not running but PID file exists, clean it up
+    // Already running, decided by ownership rather than by pid (#1016). A stale
+    // file whose pid was reused must not read as "already running" — and must
+    // not survive to make the *next* start think so.
+    match pid_file::ownership(&pid_file) {
+        Ok(pid_file::Ownership::Alive(identity)) => {
+            anyhow::bail!("Agent is already running with PID {}", identity.pid);
+        }
+        // Stale, reused, or no record at all: nothing of ours is running.
+        Ok(_) | Err(_) => {
             let _ = fs::remove_file(&pid_file);
         }
     }
@@ -41,9 +44,13 @@ pub async fn start(
         println!("Agent ID: {}", config.agent_id);
         println!("Press Ctrl+C to stop");
 
-        // Write PID file for the current process (foreground mode)
-        let pid = std::process::id();
-        pid_file::write_pid_file(&pid_file, pid)?;
+        // Record this process's identity (foreground mode).
+        //
+        // Written before the runtime starts, which is the half #1016 still has
+        // open: the file existing is not yet evidence the agent is serving, and
+        // a child that dies on its config leaves one behind. The readiness half
+        // moves this to the runtime's ready point.
+        pid_file::write_identity(&pid_file, pid_file::Component::Agent)?;
 
         // Run the agent directly (this will block)
         let result = run_agent_foreground(config).await;
@@ -69,6 +76,13 @@ pub async fn start(
             "--config".to_string(),
             config_path.clone(),
             "--foreground".to_string(),
+            // Forwarded, so the child records its identity where this parent —
+            // and every later `stop`/`status` — looks for it. It was resolved
+            // by the parent and dropped on the way to the child, which then
+            // wrote the *default* path: a background start with a custom
+            // `--pid-file` reported a pid no later command could act on (#1016).
+            "--pid-file".to_string(),
+            pid_file.clone(),
         ];
         // Forward CLI/env overrides to the child process so it uses the same values
         if let Some(ref url) = server_url_override {
@@ -97,26 +111,32 @@ pub async fn start(
             }
         }
 
-        let _child = cmd.spawn().context("failed to spawn agent process")?;
+        // A path only this start knows, so a marker left by an earlier run
+        // cannot be mistaken for this child's announcement.
+        let marker = startup::ReadyMarker::beside_state_file(&pid_file);
+        marker.arm(&mut cmd);
 
-        // Give the child a moment to write its PID file
-        tokio::time::sleep(Duration::from_millis(500)).await;
+        let mut child = cmd.spawn().context("failed to spawn agent process")?;
 
-        // Read the PID from the file written by the child
-        match pid_file::read_pid_file(&pid_file) {
-            Ok(pid) => {
+        // Wait for the child to say it is serving — or to die, or for the
+        // deadline. This replaces a pair of fixed sleeps followed by "Agent is
+        // starting, check logs for status" and an `Ok(())`: that reported a
+        // successful start for a child that had already exited on a bad config
+        // or a failed bind (#1016).
+        match startup::wait_for_ready(&mut child, &marker, startup::STARTUP_TIMEOUT).await {
+            startup::Startup::Serving => {
+                let pid = startup::announced_pid(&pid_file)?;
                 println!("Agent started in background with PID {pid}");
                 println!("PID file: {pid_file}");
             }
-            Err(_) => {
-                println!("Agent started in background (waiting for PID file...)");
-                // Wait a bit more and try again
-                tokio::time::sleep(Duration::from_secs(1)).await;
-                if let Ok(pid) = pid_file::read_pid_file(&pid_file) {
-                    println!("Agent started in background with PID {pid}");
-                } else {
-                    println!("Agent is starting, check logs for status");
-                }
+            startup::Startup::Exited(status) => {
+                anyhow::bail!("Agent exited before it was serving ({status}); check the logs");
+            }
+            startup::Startup::TimedOut => {
+                anyhow::bail!(
+                    "Agent did not report itself serving within {}s; check the logs",
+                    startup::STARTUP_TIMEOUT.as_secs()
+                );
             }
         }
         println!("Config: {config_path}");
@@ -127,22 +147,32 @@ pub async fn start(
 
 /// Stop the agent process.
 pub async fn stop(pid_file: String) -> Result<()> {
-    // Read PID file
-    let pid = match pid_file::read_pid_file(&pid_file) {
-        Ok(pid) => pid,
+    // Ownership, not liveness (#1016). "A process with this number exists" and
+    // "the agent this file was written for is running" are different claims —
+    // pids are reused — and a `stop` acting on the weaker one can signal an
+    // unrelated process. Only `Alive` is signalled; anything else cleans up and
+    // says why.
+    let pid = match pid_file::ownership(&pid_file) {
+        Ok(pid_file::Ownership::Alive(identity)) => identity.pid,
+        Ok(pid_file::Ownership::Reused(identity)) => {
+            println!(
+                "Recorded pid {} is running but is not this agent — not signalling it.",
+                identity.pid
+            );
+            let _ = fs::remove_file(&pid_file);
+            return Ok(());
+        }
+        Ok(pid_file::Ownership::Stale(identity)) => {
+            println!("Agent process {} is not running", identity.pid);
+            // Clean up stale state
+            let _ = fs::remove_file(&pid_file);
+            return Ok(());
+        }
         Err(_) => {
-            println!("Agent is not running (no PID file found)");
+            println!("Agent is not running (no state file found)");
             return Ok(());
         }
     };
-
-    // Check if process is running
-    if !pid_file::is_process_running(pid) {
-        println!("Agent process {pid} is not running");
-        // Clean up stale PID file
-        let _ = fs::remove_file(&pid_file);
-        return Ok(());
-    }
 
     println!("Stopping agent (PID {pid})...");
 
@@ -219,22 +249,31 @@ pub async fn restart(
 
 /// Show agent status.
 pub async fn status(pid_file: String) -> Result<()> {
-    // Read PID file
-    let pid = match pid_file::read_pid_file(&pid_file) {
-        Ok(pid) => pid,
+    // Ownership, like `stop` (#1016). Reporting "running" for a reused pid would
+    // send an operator to look at a process that is not theirs, and reporting
+    // "stopped" while the agent serves — which is what reading a bare pid out of
+    // the identity file would do — is worse. Anything not proven ours is not
+    // reported as ours.
+    let pid = match pid_file::ownership(&pid_file) {
+        Ok(pid_file::Ownership::Alive(identity)) => identity.pid,
+        Ok(pid_file::Ownership::Reused(identity)) => {
+            println!(
+                "Status: stopped (pid {} is running but is not this agent)",
+                identity.pid
+            );
+            let _ = fs::remove_file(&pid_file);
+            return Ok(());
+        }
+        Ok(pid_file::Ownership::Stale(_)) => {
+            println!("Status: stopped (process not running)");
+            let _ = fs::remove_file(&pid_file);
+            return Ok(());
+        }
         Err(_) => {
-            println!("Status: stopped (no PID file)");
+            println!("Status: stopped (no state file)");
             return Ok(());
         }
     };
-
-    // Check if process is running
-    if !pid_file::is_process_running(pid) {
-        println!("Status: stopped (process not running)");
-        // Clean up stale PID file
-        let _ = fs::remove_file(&pid_file);
-        return Ok(());
-    }
 
     // Get process start time for uptime calculation
     let uptime = process::get_process_uptime(pid).map(pid_file::format_duration);
@@ -309,5 +348,9 @@ async fn run_agent_foreground(config: AgentConfig) -> Result<()> {
     // started a different Agent product from the `nession-agent` binary
     // (#1014). Anything added to one path and not the other was invisible
     // until something depended on it.
-    nession_agent::runtime::run(config).await
+    // A background start re-execs this same path with the readiness variable
+    // set, so this one call serves both a foreground start a user typed (no
+    // variable, nobody watching) and the child of a daemon parent waiting to be
+    // told the agent is serving (#1016).
+    nession_agent::runtime::run(config, nession_common::readiness::Readiness::from_env()).await
 }

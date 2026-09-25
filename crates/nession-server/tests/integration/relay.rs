@@ -90,7 +90,9 @@ async fn start_server(
     let addr = server.local_addr()?;
 
     let handle = tokio::spawn(async move {
-        let _ = server.run().await;
+        let _ = server
+            .run(nession_common::readiness::Readiness::Unwatched)
+            .await;
     });
 
     tokio::time::sleep(Duration::from_millis(100)).await;

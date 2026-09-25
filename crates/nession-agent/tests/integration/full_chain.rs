@@ -69,7 +69,9 @@ async fn start_test_server(
     let addr = server.local_addr()?;
 
     let handle = tokio::spawn(async move {
-        let _ = server.run().await;
+        let _ = server
+            .run(nession_common::readiness::Readiness::Unwatched)
+            .await;
     });
 
     // Give the server time to start accepting connections.

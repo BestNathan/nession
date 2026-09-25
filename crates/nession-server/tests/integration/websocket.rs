@@ -27,7 +27,7 @@ async fn start_test_server(
     let addr = server.local_addr()?;
     let handle = tokio::spawn(async move {
         server
-            .run()
+            .run(nession_common::readiness::Readiness::Unwatched)
             .await
             .unwrap_or_else(|e| panic!("test server run failed: {e}"));
     });
