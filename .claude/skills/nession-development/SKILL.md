@@ -620,11 +620,43 @@ After functional verification passes, take screenshots of key states:
 
 Save to `.playwright-mcp/screenshots/` (gitignored). Post them as a **PR comment** rather than in the body, so the body stays a scannable change record. (Under the older squash flow the body became the commit message and image markdown would land in git history; nothing squashes now and no current merge method writes the body to a commit, so this is a readability convention rather than a hard constraint.)
 
+**Upload them with `--attach` — do not paste a local path.** A path like
+`.playwright-mcp/screenshots/x.png` is gitignored, so on GitHub it renders as a
+broken image. `gh` uploads the file to GitHub's attachment storage and **rewrites
+the matching markdown reference in the body in place**, keeping its position:
+
+The body reference and the `--attach` argument must be the **same string**, or
+`gh` cannot tell they are the same file and will append a duplicate at the end.
+Easiest is to run from the screenshots directory:
+
 ```bash
+cd .playwright-mcp/screenshots
 gh pr comment <PR-NUMBER> --body "## 核心功能截图
 
-![feature-name](.playwright-mcp/screenshots/feature-after.png)"
+Before:
+
+![capsule before](./capsule-before.png)
+
+After:
+
+![capsule after](./capsule-after.png)" \
+  --attach ./capsule-before.png \
+  --attach ./capsule-after.png
 ```
+
+- Reference a file the body does **not** mention and it is appended at the end
+  instead — so write the markdown first and the images land where you put them.
+- Alt text comes from the body, or from `--attach './x.png#Some alt text'`
+  (quote it, or the shell eats the `#`).
+- Repeat `--attach` for more files; up to 50 per call. png / jpg / jpeg / gif /
+  webp / svg, and mp4 / mov / webm (video has no alt text).
+- The same flag exists on `gh pr create`, `gh pr edit`, `gh issue create`,
+  `gh issue edit`, `gh issue comment` — so issue reports can carry evidence too.
+- **Requires push/write access to the repo**; GitHub Enterprise Server is limited.
+
+⚠ **The flag needs gh ≥ 2.101.0** (2026-09). On an older binary `--attach` is
+simply absent from `--help` and it looks like the capability does not exist —
+check `gh --version`, and `brew upgrade gh` if it is behind.
 
 ## Batch Development by Label
 
