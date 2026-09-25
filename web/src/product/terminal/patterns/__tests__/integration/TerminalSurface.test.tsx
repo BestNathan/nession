@@ -6,14 +6,6 @@ vi.mock('@/shared/hooks/useMediaQuery', () => ({
   useMediaQuery: () => true,
 }));
 
-vi.mock('@/capabilities/commands/hooks/useQuickCommands', () => ({
-  useQuickCommands: () => ({
-    userCommands: [],
-    addCommand: vi.fn().mockResolvedValue(undefined),
-    deleteCommand: vi.fn().mockResolvedValue(undefined),
-  }),
-}));
-
 vi.mock('@/product/terminal/hooks/useCommandHistory', () => ({
   useCommandHistory: () => ({
     addEntry: vi.fn(),

@@ -44,6 +44,14 @@ export interface ContractBlock {
   scrollOwner?: boolean | string;
   touchTargetToken?: string;
   touchTargetTokenPx?: number;
+  /**
+   * The affordance a control paints, as opposed to `heightToken`'s hit target
+   * (#1034). `expectDrawnAffordance` measures it on a *second* DOM node, because
+   * the height/touch helpers measure the element they are handed — so a 44px
+   * target drawn at 36px is invisible to both of them.
+   */
+  visualSizeToken?: string;
+  visualSizeTokenPx?: number;
   visibility?: { mode: string; breakpoint?: string };
 }
 

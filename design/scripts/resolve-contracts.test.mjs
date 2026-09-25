@@ -29,6 +29,8 @@ test('parseCssPx handles px/rem/plain-number and rejects colors', () => {
 test('token index exposes experience, domain, primitive and semantic aliases', () => {
   const index = buildTokenIndex(TOKENS);
   assert.ok(index.has('experience.web.control.md'));
+  assert.ok(index.has('experience.web.control.visualSize'));
+  assert.ok(index.has('experience.app.control.visualSize'));
   assert.ok(index.has('experience.app.touchTarget.min'));
   assert.ok(index.has('experience.web.row.md'));
   assert.ok(index.has('primitive.typography.size'));
@@ -73,6 +75,23 @@ test('terminal-capsule: chrome + control merge; app sheet overflow wins', () => 
   assert.equal(merged.app.heightTokenPx, 44);
   assert.equal(merged.app.touchTargetTokenPx, 44);
   assert.equal(merged.app.alignY, 'middle');
+});
+
+// #1034: the drawn affordance is the second axis. Its resolved px is what makes
+// "a 44px hit target holding a 36px painted circle" checkable, and on App the
+// height token alone cannot express it — control.sm and control.md are 44px
+// there, so a control that grew its painting back to the band would be
+// pixel-identical to one that kept the smaller circle.
+test('terminal-capsule: the drawn affordance resolves below the App hit target', () => {
+  const merged = mergeContracts(REAL, TOKENS)['pattern.terminal-capsule'];
+  assert.equal(merged.web.visualSizeToken, 'experience.web.control.visualSize');
+  assert.equal(merged.web.visualSizeTokenPx, 32);
+  assert.equal(merged.app.visualSizeToken, 'experience.app.control.visualSize');
+  assert.equal(merged.app.visualSizeTokenPx, 36);
+  assert.ok(
+    merged.app.visualSizeTokenPx < merged.app.heightTokenPx,
+    'the App drawn affordance stays strictly inside the hit target',
+  );
 });
 
 test('session-header inherits chrome band rules and distributes title/actions', () => {

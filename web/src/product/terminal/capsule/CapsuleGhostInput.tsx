@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { cn } from '@/shared/lib/utils';
 import { useCommandHistory } from '@/product/terminal/hooks/useCommandHistory';
 import {
@@ -18,6 +18,23 @@ interface CapsuleGhostInputProps {
   disabled?: boolean;
   placeholder?: string;
   onEnter?: () => void;
+  /**
+   * Fires when the field takes focus.
+   *
+   * The field reports the event and decides nothing: whether focus on the
+   * composer *means* anything — taking the keyboard back from a projection —
+   * is the capsule's question, and it is the capsule that answers it (#1034).
+   */
+  onFocus?: () => void;
+  /**
+   * The field element, for a caller that has to take focus **away** from it.
+   *
+   * Dismissing a soft keyboard is an imperative `blur()`, so the capsule needs
+   * the element. It reaches the field from above rather than the field learning
+   * why it is being blurred — same division as `onFocus`, and the reason this is
+   * a ref rather than a `blur()` prop.
+   */
+  fieldRef?: RefObject<HTMLTextAreaElement>;
   className?: string;
 }
 
@@ -27,6 +44,8 @@ export function CapsuleGhostInput({
   disabled = false,
   placeholder = 'Send input…',
   onEnter,
+  onFocus,
+  fieldRef,
   className,
 }: CapsuleGhostInputProps) {
   const { history } = useCommandHistory();
@@ -34,7 +53,11 @@ export function CapsuleGhostInput({
   const [composing, setComposing] = useState(false);
   const [height, setHeight] = useState<number | undefined>(undefined);
   const [metrics, setMetrics] = useState<ComposerMetrics | null>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const ownRef = useRef<HTMLTextAreaElement>(null);
+  // One element, two interests in it — the field measures its own height and the
+  // capsule may need to blur it. A caller that supplies a ref gets the same node
+  // the measurement reads; a caller that does not is unaffected.
+  const textareaRef = fieldRef ?? ownRef;
 
   const showGhost = hasGhost && !composing;
   const minHeight = metrics?.controlHeight ?? 32;
@@ -67,7 +90,10 @@ export function CapsuleGhostInput({
             maxFieldHeightPx(nextMetrics),
           );
     setHeight((prevHeight) => (prevHeight === nextHeight ? prevHeight : nextHeight));
-  }, [value]);
+    // `textareaRef` is a dependency because the effect reads it, and it is
+    // stable in both of its shapes: the field's own `useRef`, or the one the
+    // capsule passed down for the lifetime of the capsule.
+  }, [textareaRef, value]);
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Tab' && showGhost) {
@@ -127,6 +153,7 @@ export function CapsuleGhostInput({
         )}
         onChange={(event) => onChange(event.target.value)}
         onKeyDown={handleKeyDown}
+        onFocus={onFocus}
         onCompositionStart={() => setComposing(true)}
         onCompositionEnd={() => setComposing(false)}
       />

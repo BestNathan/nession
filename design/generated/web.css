@@ -80,6 +80,7 @@
   --control-sm: 28px;
   --control-md: 32px;
   --control-lg: 36px;
+  --control-visual-size: 32px;
   --row-sm: 28px;
   --row-md: 36px;
   --row-lg: 40px;
@@ -336,6 +337,7 @@
   --spacing-control-sm: var(--control-sm);
   --spacing-control-md: var(--control-md);
   --spacing-control-lg: var(--control-lg);
+  --spacing-control-visual-size: var(--control-visual-size);
   --spacing-row-sm: var(--row-sm);
   --spacing-row-md: var(--row-md);
   --spacing-row-lg: var(--row-lg);
@@ -413,6 +415,7 @@
   --control-sm: 44px;
   --control-md: 44px;
   --control-lg: 52px;
+  --control-visual-size: 36px;
   --row-sm: 40px;
   --row-md: 48px;
   --row-lg: 56px;

@@ -12,6 +12,7 @@
 // target); app rows enforce the app touch target from the app block.
 import { expect, test } from '@playwright/test';
 import {
+  expectDrawnAffordance,
   expectNoUnexpectedOverflow,
   expectMaxWidth,
   expectPaddingX,
@@ -114,6 +115,14 @@ async function assertCapsuleControls(
 ): Promise<void> {
   await expect(page.getByTestId('terminal-capsule')).toBeVisible();
 
+  // The composer's own row is a control band: one line, at the experience's
+  // `control.md`. It is the assertion that makes "one visual row at rest" — the
+  // App capsule's whole anatomy — executable rather than prose. It was a
+  // two-row field-first stack on App (92px against a 44px band) and nothing
+  // said so.
+  await expectTokenHeight(page.getByTestId('capsule-input-row'),
+    optsFor(PATTERN_TERMINAL_CAPSULE, experience, viewportId));
+
   const band = page.getByTestId('capsule-input-actions');
   await expect(band).toBeVisible();
   await expectTokenHeight(band, optsFor(PATTERN_TERMINAL_CAPSULE, experience, viewportId));
@@ -140,6 +149,12 @@ async function assertCapsuleControls(
     const control = controls.nth(i);
     await expect(control).toBeVisible();
     await expectTokenHeight(control, optsFor(PATTERN_TERMINAL_CAPSULE, experience, viewportId));
+    // Both axes of a control (#1034), measured as the contract splits them: the
+    // hit target above, and the affordance painted inside it here. The second
+    // call is not a duplicate of the first — on App both tokens are 44px, so the
+    // height check alone cannot tell a 44px control holding a 36px circle from
+    // one that filled its box, and the matrix is where that would go unnoticed.
+    await expectDrawnAffordance(control, optsFor(PATTERN_TERMINAL_CAPSULE, experience, viewportId));
   }
 }
 
@@ -194,14 +209,28 @@ for (const row of viewports.filter((v) => v.experience === 'app')) {
       await page.goto('/#/fixture/app');
       await assertCapsuleControls(page, 'app', row.id);
 
-      // The App capsule is field-first: the field takes its own full-width row and
-      // the controls sit beneath it. That layout is why `control.sm` may equal
-      // `control.md` on App without costing the field any width — if App ever
-      // moved to the single-row layout, shrinking controls there would start to
-      // trade against the field, and the reasoning behind the token would need
-      // revisiting. Pinned because the token's justification rests on it.
-      await expect(page.getByTestId('capsule-input-row')).toHaveAttribute('data-field-first', 'app');
-      await expect(page.getByTestId('capsule-input-field')).toHaveAttribute('data-input-width', 'full');
+      // The App capsule at rest is one row — `[+] [ intent ] [send]` — and its
+      // controls share that band with the field rather than sitting beneath it.
+      // So there is no second row to trade against, and the field keeps the
+      // width it has by not wrapping an action into it: the anchoring assertion
+      // is the row height `assertCapsuleControls` now measures, and this is the
+      // anatomy that has to stay true for it to hold.
+      const more = page.getByTestId('capsule-capability-more');
+      await expect(more).toBeVisible();
+      await expectTouchTarget(more, optsFor(PATTERN_TERMINAL_CAPSULE, 'app', row.id));
+
+      // Exactly one action beside the field: the primary send. App carries no
+      // permanent history, paste, copy or mode control — the capsule is an
+      // intent composer, not a terminal toolbar.
+      await expect(page.getByTestId('capsule-input-actions').locator('button')).toHaveCount(1);
+      for (const absent of [
+        'capsule-history-trigger',
+        'capsule-paste',
+        'capsule-copy',
+        'capsule-mode-toggle',
+      ]) {
+        await expect(page.getByTestId(absent)).toHaveCount(0);
+      }
 
       // Unlike the workspace bar — which floats over the terminal and settles for
       // touchTarget.compact, 28px (#730) — the capsule is the App's primary input

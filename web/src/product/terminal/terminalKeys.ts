@@ -37,6 +37,17 @@ export function resolveTerminalKeysState(sessionId: string | undefined): Capabil
 
 export const terminalKeysProjection: CapsuleProjectionBinding = {
   id: TERMINAL_KEYS_ID,
+  // The keys are tapped, not typed into, and the soft keyboard is the one thing
+  // that would make them unusable: it covers the row the user is reaching for,
+  // and it takes the vertical space the accessory needs. So this one projection
+  // claims input focus while it is up (#1034 §5) — the capsule blurs the field
+  // when it appears and steps it out when the field is tapped back.
+  //
+  // The flag is deliberately *not* on Git's projection, and that asymmetry is
+  // the design: Signal and Peek are read while you go on typing (`git commit`),
+  // so taking the keyboard from them would be a regression, not a consistency
+  // fix. Nothing here names the capsule; nothing in the capsule names this.
+  ownsInputFocus: true,
   // Nothing to add at Peek and no Workspace view to open: the accessory is the
   // capability in full, which is the lower bound `capability-emergence.md`
   // allows a Terminal-local capability to stop at.
