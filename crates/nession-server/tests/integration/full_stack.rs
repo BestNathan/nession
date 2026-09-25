@@ -55,7 +55,9 @@ impl TestServer {
 
         let handle = tokio::spawn(async move {
             // Errors are expected when tests tear down — ignore them.
-            let _ = server.run().await;
+            let _ = server
+                .run(nession_common::readiness::Readiness::Unwatched)
+                .await;
         });
 
         // Give the accept-loop a moment to start.

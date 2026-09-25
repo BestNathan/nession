@@ -22,6 +22,7 @@
 use anyhow::{Context, Result};
 use nession_claude_code::agent::ClaudeCodeAgentExtension;
 use nession_common::extension::AgentExtension;
+use nession_common::readiness::Readiness;
 use nession_common::system;
 use nession_git::GitAgentExtension;
 use nession_protocol::contracts::agent::v1::AgentMetadata;
@@ -333,60 +334,6 @@ pub async fn run(config: AgentConfig, ready: Readiness) -> Result<()> {
 
     info!("nession-agent stopped");
     Ok(())
-}
-
-/// Environment variable a daemon parent uses to name the readiness marker.
-pub const READY_FILE_ENV: &str = "NESSION_READY_FILE";
-
-/// How a daemon parent is told the runtime reached its ready point.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Readiness {
-    /// Nobody is waiting — the binary was started directly.
-    Unwatched,
-    /// Write a marker at this path once the runtime is serving.
-    Announced(std::path::PathBuf),
-}
-
-impl Readiness {
-    /// The announcement this process was asked for, if any.
-    ///
-    /// A daemon parent re-execs this binary in the background and names a path
-    /// in [`READY_FILE_ENV`]; a foreground start a user typed has none, and the
-    /// variable is absent.
-    pub fn from_env() -> Self {
-        match std::env::var(READY_FILE_ENV) {
-            Ok(path) if !path.trim().is_empty() => Self::Announced(path.into()),
-            _ => Self::Unwatched,
-        }
-    }
-
-    /// Announce, if someone asked to be told.
-    ///
-    /// Called at the point the process is *serving*: the P2P socket is bound,
-    /// the tmux socket is pinned, the providers are composed. The central-server
-    /// connection may still be in flight, deliberately — a standalone agent is a
-    /// working agent, and making readiness wait on a remote server would report
-    /// a healthy agent as a failed start.
-    fn announce(&self) {
-        let Self::Announced(path) = self else {
-            return;
-        };
-        // Staged and renamed, so a parent that sees the file sees a whole one.
-        let staged = path.with_extension("tmp");
-        let body = format!("ready pid={}\n", std::process::id());
-        if let Err(error) =
-            std::fs::write(&staged, body).and_then(|()| std::fs::rename(&staged, path))
-        {
-            // Not fatal to *this* process — it is serving either way — but the
-            // parent is now waiting on something that will not arrive, so say so
-            // where the logs are.
-            warn!(
-                path = %path.display(),
-                %error,
-                "could not announce readiness; a waiting parent will time out"
-            );
-        }
-    }
 }
 
 /// The providers this Agent serves, alongside the units it routes itself.

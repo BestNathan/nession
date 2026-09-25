@@ -1,6 +1,6 @@
 //! Agent CLI commands implementation.
 
-use crate::utils::{pid_file, process};
+use crate::utils::{pid_file, process, startup};
 use anyhow::{Context, Result};
 use nession_agent::config::AgentConfig;
 use std::fs;
@@ -76,6 +76,13 @@ pub async fn start(
             "--config".to_string(),
             config_path.clone(),
             "--foreground".to_string(),
+            // Forwarded, so the child records its identity where this parent —
+            // and every later `stop`/`status` — looks for it. It was resolved
+            // by the parent and dropped on the way to the child, which then
+            // wrote the *default* path: a background start with a custom
+            // `--pid-file` reported a pid no later command could act on (#1016).
+            "--pid-file".to_string(),
+            pid_file.clone(),
         ];
         // Forward CLI/env overrides to the child process so it uses the same values
         if let Some(ref url) = server_url_override {
@@ -106,9 +113,8 @@ pub async fn start(
 
         // A path only this start knows, so a marker left by an earlier run
         // cannot be mistaken for this child's announcement.
-        let ready_file = format!("{pid_file}.ready.{}", std::process::id());
-        let _ = fs::remove_file(&ready_file);
-        cmd.env(nession_agent::runtime::READY_FILE_ENV, &ready_file);
+        let marker = startup::ReadyMarker::beside_state_file(&pid_file);
+        marker.arm(&mut cmd);
 
         let mut child = cmd.spawn().context("failed to spawn agent process")?;
 
@@ -117,22 +123,20 @@ pub async fn start(
         // starting, check logs for status" and an `Ok(())`: that reported a
         // successful start for a child that had already exited on a bad config
         // or a failed bind (#1016).
-        let outcome = wait_for_ready(&mut child, &ready_file, Duration::from_secs(30)).await;
-        let _ = fs::remove_file(&ready_file);
-
-        match outcome {
-            Startup::Serving => {
-                let pid = pid_file::read_identity(&pid_file)
-                    .map(|identity| identity.pid)
-                    .unwrap_or_else(|_| child.id());
+        match startup::wait_for_ready(&mut child, &marker, startup::STARTUP_TIMEOUT).await {
+            startup::Startup::Serving => {
+                let pid = startup::announced_pid(&pid_file)?;
                 println!("Agent started in background with PID {pid}");
                 println!("PID file: {pid_file}");
             }
-            Startup::Exited(status) => {
+            startup::Startup::Exited(status) => {
                 anyhow::bail!("Agent exited before it was serving ({status}); check the logs");
             }
-            Startup::TimedOut => {
-                anyhow::bail!("Agent did not report itself serving within 30s; check the logs");
+            startup::Startup::TimedOut => {
+                anyhow::bail!(
+                    "Agent did not report itself serving within {}s; check the logs",
+                    startup::STARTUP_TIMEOUT.as_secs()
+                );
             }
         }
         println!("Config: {config_path}");
@@ -243,42 +247,6 @@ pub async fn restart(
     .await
 }
 
-/// How a background start ended.
-#[derive(Debug)]
-enum Startup {
-    /// The child announced it is serving.
-    Serving,
-    /// The child exited first — its status is the reason.
-    Exited(std::process::ExitStatus),
-    /// Neither happened before the deadline.
-    TimedOut,
-}
-
-/// Wait for the child to announce readiness, or to exit, or for the deadline.
-///
-/// Watching the child as well as the marker is the point: a start that only
-/// waited for the marker would sit out the whole timeout on a child that died
-/// immediately, and then report the timeout instead of the child's own failure.
-async fn wait_for_ready(
-    child: &mut std::process::Child,
-    ready_file: &str,
-    timeout: Duration,
-) -> Startup {
-    let deadline = std::time::Instant::now() + timeout;
-    loop {
-        if Path::new(ready_file).exists() {
-            return Startup::Serving;
-        }
-        if let Ok(Some(status)) = child.try_wait() {
-            return Startup::Exited(status);
-        }
-        if std::time::Instant::now() >= deadline {
-            return Startup::TimedOut;
-        }
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
-}
-
 /// Show agent status.
 pub async fn status(pid_file: String) -> Result<()> {
     // Ownership, like `stop` (#1016). Reporting "running" for a reused pid would
@@ -380,85 +348,9 @@ async fn run_agent_foreground(config: AgentConfig) -> Result<()> {
     // started a different Agent product from the `nession-agent` binary
     // (#1014). Anything added to one path and not the other was invisible
     // until something depended on it.
-    // A background start re-execs this same path with `NESSION_READY_FILE` set,
-    // so this one call serves both a foreground start a user typed (no variable,
-    // nobody watching) and the child of a daemon parent waiting to be told the
-    // agent is serving (#1016).
-    nession_agent::runtime::run(config, nession_agent::runtime::Readiness::from_env()).await
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// A child that stays alive, so only the marker can end the wait.
-    fn spawn_sleeper() -> std::process::Child {
-        std::process::Command::new("sleep")
-            .arg("30")
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn()
-            .expect("spawn sleep")
-    }
-
-    #[tokio::test]
-    async fn a_child_that_announces_is_serving() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let marker = dir.path().join("ready");
-        std::fs::write(&marker, "ready pid=1\n").expect("write marker");
-        let mut child = spawn_sleeper();
-
-        let outcome =
-            wait_for_ready(&mut child, marker.to_str().unwrap(), Duration::from_secs(5)).await;
-
-        let _ = child.kill();
-        assert!(matches!(outcome, Startup::Serving), "{outcome:?}");
-    }
-
-    /// The defect this replaces: a child that died was reported as a start.
-    ///
-    /// The deadline here is far longer than the child takes to die, so a
-    /// `TimedOut` would mean the wait was watching the clock instead of the
-    /// child — and the caller would print "check logs for status" and return
-    /// success for a process that had already exited.
-    #[tokio::test]
-    async fn a_child_that_exits_without_announcing_reports_its_own_exit() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let marker = dir.path().join("ready");
-        let mut child = std::process::Command::new("false")
-            .spawn()
-            .expect("spawn false");
-
-        let outcome = wait_for_ready(
-            &mut child,
-            marker.to_str().unwrap(),
-            Duration::from_secs(30),
-        )
-        .await;
-
-        match outcome {
-            Startup::Exited(status) => assert!(
-                !status.success(),
-                "the child's own status must travel, not a synthesised success"
-            ),
-            other => panic!("expected the child's exit, not {other:?}"),
-        }
-    }
-
-    #[tokio::test]
-    async fn a_child_that_never_announces_times_out() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let marker = dir.path().join("ready");
-        let mut child = spawn_sleeper();
-
-        let outcome = wait_for_ready(
-            &mut child,
-            marker.to_str().unwrap(),
-            Duration::from_millis(200),
-        )
-        .await;
-
-        let _ = child.kill();
-        assert!(matches!(outcome, Startup::TimedOut), "{outcome:?}");
-    }
+    // A background start re-execs this same path with the readiness variable
+    // set, so this one call serves both a foreground start a user typed (no
+    // variable, nobody watching) and the child of a daemon parent waiting to be
+    // told the agent is serving (#1016).
+    nession_agent::runtime::run(config, nession_common::readiness::Readiness::from_env()).await
 }

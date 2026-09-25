@@ -1,6 +1,6 @@
 //! Server CLI commands implementation.
 
-use crate::utils::{pid_file, process};
+use crate::utils::{pid_file, process, startup};
 use anyhow::{Context, Result};
 use nession_common::config::ServerConfig;
 use std::fs;
@@ -57,10 +57,22 @@ pub async fn start(config_path: String, foreground: bool, pid_file: String) -> R
 
         // Spawn the server process with proper daemonization on Unix
         let mut cmd = Command::new(&exe);
-        cmd.args(["server", "start", "--config", &config_path, "--foreground"])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
+        // `--pid-file` is forwarded, not left to the child's default: the parent
+        // resolved it above, and a child that wrote somewhere else would leave
+        // every later `stop`/`status` — which resolve it the same way the parent
+        // did — looking at a file nothing ever wrote (#1016).
+        cmd.args([
+            "server",
+            "start",
+            "--config",
+            &config_path,
+            "--foreground",
+            "--pid-file",
+            &pid_file,
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
 
         // On Unix, detach the child process from the parent's session
         #[cfg(unix)]
@@ -75,26 +87,30 @@ pub async fn start(config_path: String, foreground: bool, pid_file: String) -> R
             }
         }
 
-        let _child = cmd.spawn().context("failed to spawn server process")?;
+        let marker = startup::ReadyMarker::beside_state_file(&pid_file);
+        marker.arm(&mut cmd);
 
-        // Give the child a moment to write its PID file
-        tokio::time::sleep(Duration::from_millis(500)).await;
+        let mut child = cmd.spawn().context("failed to spawn server process")?;
 
-        // Read the PID from the file written by the child
-        match pid_file::read_pid_file(&pid_file) {
-            Ok(pid) => {
+        // Wait for the child to say it is serving — or to die, or for the
+        // deadline. This replaces a 500 ms sleep, a one-second retry and then
+        // "Server is starting, check logs for status" followed by `Ok(())`:
+        // a child that had already exited — on a bad config, a taken port, an
+        // unreadable certificate — was reported as a successful start (#1016).
+        match startup::wait_for_ready(&mut child, &marker, startup::STARTUP_TIMEOUT).await {
+            startup::Startup::Serving => {
+                let pid = startup::announced_pid(&pid_file)?;
                 println!("Server started in background with PID {pid}");
                 println!("PID file: {pid_file}");
             }
-            Err(_) => {
-                println!("Server started in background (waiting for PID file...)");
-                // Wait a bit more and try again
-                tokio::time::sleep(Duration::from_secs(1)).await;
-                if let Ok(pid) = pid_file::read_pid_file(&pid_file) {
-                    println!("Server started in background with PID {pid}");
-                } else {
-                    println!("Server is starting, check logs for status");
-                }
+            startup::Startup::Exited(status) => {
+                anyhow::bail!("Server exited before it was serving ({status}); check the logs");
+            }
+            startup::Startup::TimedOut => {
+                anyhow::bail!(
+                    "Server did not report itself serving within {}s; check the logs",
+                    startup::STARTUP_TIMEOUT.as_secs()
+                );
             }
         }
         println!("Config: {config_path}");
@@ -259,5 +275,9 @@ async fn run_server_foreground(config: ServerConfig) -> Result<()> {
     // This copy had already drifted the same way the Agent's had — it skipped
     // `ensure_component_dirs`, so a Server started through this path depended on
     // the directories already existing while `nession-server` created them.
-    nession_server::runtime::run(config).await
+    //
+    // A background start re-execs this path with the readiness variable set, so
+    // this one call serves both a foreground start a user typed and the child of
+    // a daemon parent waiting to be told the server is serving (#1016).
+    nession_server::runtime::run(config, nession_common::readiness::Readiness::from_env()).await
 }
