@@ -305,31 +305,76 @@ export async function expectTouchTarget(locator: Locator, opts: AssertOptions): 
  * which experience it is running.
  */
 /**
- * Read an element's box once it has stopped moving.
- *
- * `measure` is a single `getBoundingClientRect()`. The capsule animates over
- * `--motion-terminal-capsule`, so a lone read can land mid-flight and report the
- * drawn affordance a few pixels off its control — which is indistinguishable
- * from a real containment violation, and reads as one.
- *
- * The evidence that this is a timing dependency rather than static geometry:
- * the same commit failed this assertion on one run and passed it on the next,
- * with no change to the tree. Static geometry does not do that.
- *
- * Same technique the App emergence test already uses on the terminal geometry
- * (`fixture-app.spec.ts`): read until two consecutive reads agree.
+ * A box read for comparison — the four numbers containment and sizing need.
+ * `right`/`bottom` are kept because the violation message reports them.
  */
-async function settledMetrics(el: Locator, attempts = 20): Promise<BoxMetrics> {
-  let previous = await measure(el);
+interface PairRect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  right: number;
+  bottom: number;
+}
+
+function sameRect(a: PairRect, b: PairRect): boolean {
+  return (
+    a.left === b.left &&
+    a.top === b.top &&
+    a.width === b.width &&
+    a.height === b.height
+  );
+}
+
+/**
+ * Read the control and its drawn affordance **from one frame**, once that frame
+ * has stopped changing.
+ *
+ * Both rects come out of a single `evaluate`, so they are captured in one
+ * synchronous task and cannot be split by an intervening layout change. That is
+ * the whole point, and it is what the previous attempt got wrong: it settled
+ * each element *independently* via `Promise.all`, and `Promise.all` makes no
+ * guarantee about when the two reads happen relative to each other. Each helper
+ * returned as soon as its own element stopped moving, so the pair could still be
+ * read across a shift — which is exactly what an animation does.
+ *
+ * Evidence it is a timing dependency rather than a layout defect: the same
+ * commit failed and passed with no change to the tree, and one run failed two
+ * *different* viewports on the same assertion. Static geometry does neither, and
+ * a real layout defect would not move between viewports.
+ *
+ * The capsule animates over `--motion-terminal-capsule`; the loop is bounded at
+ * 20 × 50ms, comfortably past that and matching the budget the App emergence
+ * test already uses for terminal geometry.
+ */
+async function settledPair(
+  control: Locator,
+  attempts = 20,
+): Promise<{ c: PairRect; v: PairRect } | null> {
+  const read = () =>
+    control.evaluate((node: Element) => {
+      // The visual is a descendant of the control by contract — the caller has
+      // already required exactly one — so one evaluate can reach both.
+      const visual = node.querySelector('[data-testid="capsule-control-visual"]');
+      if (!(visual instanceof Element)) {
+        return null;
+      }
+      const c = node.getBoundingClientRect();
+      const v = visual.getBoundingClientRect();
+      return {
+        c: { left: c.left, top: c.top, width: c.width, height: c.height, right: c.right, bottom: c.bottom },
+        v: { left: v.left, top: v.top, width: v.width, height: v.height, right: v.right, bottom: v.bottom },
+      };
+    });
+
+  let previous = await read();
   for (let i = 0; i < attempts; i += 1) {
-    await el.page().waitForTimeout(50);
-    const next = await measure(el);
-    if (
-      next.left === previous.left &&
-      next.top === previous.top &&
-      next.width === previous.width &&
-      next.height === previous.height
-    ) {
+    await control.page().waitForTimeout(50);
+    const next = await read();
+    if (next === null) {
+      return null;
+    }
+    if (previous !== null && sameRect(next.c, previous.c) && sameRect(next.v, previous.v)) {
       return next;
     }
     previous = next;
@@ -354,12 +399,20 @@ export async function expectDrawnAffordance(control: Locator, opts: AssertOption
   }
 
   const tolerance = opts.tolerance ?? 1;
-  // Settled, not sampled: a mid-animation read is indistinguishable from a real
-  // containment violation. See `settledMetrics` (#1058).
-  const [c, v] = await Promise.all([
-    settledMetrics(control),
-    settledMetrics(visuals.first()),
-  ]);
+  // Settled as a pair, from one frame (#1058). A real violation survives this —
+  // a stable offset is still a stable offset — so the check filters a mid-flight
+  // read without weakening what it asserts.
+  const settled = await settledPair(control);
+  if (settled === null) {
+    violation(
+      opts,
+      'drawn-affordance',
+      'exactly one drawn affordance inside the control',
+      'not found after settling',
+      'testid: capsule-control-visual',
+    );
+  }
+  const { c, v } = settled;
 
   const sizeDelta = Math.max(
     diffTolerance(v.width, block.visualSizeTokenPx, tolerance),
