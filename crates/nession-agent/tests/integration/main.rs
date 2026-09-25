@@ -45,6 +45,41 @@ pub(crate) struct FakeTmux {
     socket: std::path::PathBuf,
 }
 
+/// Install `body` at `bin`, with the file created by a **child** process.
+///
+/// The path a test execs must never be one this process has open for writing.
+/// `fork` copies the whole descriptor table, so a child forked from another
+/// thread inherits a copy of any write descriptor held here, and `O_CLOEXEC`
+/// drops it only once that child reaches its own `exec`. Until then the inode's
+/// write count is positive, and an `exec` of the same path fails with `ETXTBSY`
+/// (`Text file busy`) — the failure #1026 records.
+///
+/// So the content goes to a path that is **never exec'd**, and a child `cp`
+/// creates the one that is: this process's descriptor table then holds no write
+/// descriptor on `bin`. Measured on Linux in this shape — writer threads plus
+/// threads forking continuously, 6000 attempts each — writing in-process gave
+/// `ETXTBSY` 49 and then 54; this gave 0.
+///
+/// This is a copy of the same helper in `src/test_support.rs`, which
+/// integration tests cannot see; keep the two in step.
+#[cfg(unix)]
+pub(crate) fn install_via_a_child(bin: &std::path::Path, body: &str) -> std::io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let src = bin.with_extension("src");
+    std::fs::write(&src, body)?;
+    let status = std::process::Command::new("cp").arg(&src).arg(bin).status();
+    let _ = std::fs::remove_file(&src);
+    if !status?.success() {
+        return Err(std::io::Error::other(
+            "installing the fake tmux: cp exited with a failure status",
+        ));
+    }
+    // `chmod` does not open the file, so this cannot reintroduce the window.
+    let mut perms = std::fs::metadata(bin)?.permissions();
+    perms.set_mode(0o755);
+    std::fs::set_permissions(bin, perms)
+}
+
 #[cfg(unix)]
 impl FakeTmux {
     /// Write the fake into `dir`.
@@ -53,9 +88,12 @@ impl FakeTmux {
     /// themselves test code, so `allow-expect-in-tests` does not cover them —
     /// the caller (a `#[test]`) is where a failure is allowed to be fatal.
     pub(crate) fn new(dir: &std::path::Path, script: &str) -> std::io::Result<Self> {
-        use std::os::unix::fs::PermissionsExt;
         let bin = dir.join("tmux");
-        std::fs::write(
+        // A child creates it: the path a test execs must not be one this
+        // process wrote, because `fork` copies the descriptor table and an
+        // `exec` of a write-opened file is `ETXTBSY` (#1026). Same reasoning and
+        // measurements as the unit-test copy in `src/test_support.rs`.
+        install_via_a_child(
             &bin,
             // One file per call, claimed with an O_EXCL create, so two
             // processes recording at once (a spawned tmux client and the parent
@@ -63,7 +101,7 @@ impl FakeTmux {
             // rejected alternatives and the measurements are documented on the
             // unit-test copy in `crates/nession-agent/src/test_support.rs`;
             // this body must stay in step with it.
-            format!(
+            &format!(
                 "#!/bin/sh\n\
                  if [ \"$1\" = \"-S\" ]; then shift 2; fi\n\
                  n=0\n\
@@ -85,9 +123,6 @@ impl FakeTmux {
                 sep = CALL_SEPARATOR,
             ),
         )?;
-        let mut perms = std::fs::metadata(&bin)?.permissions();
-        perms.set_mode(0o755);
-        std::fs::set_permissions(&bin, perms)?;
         Ok(Self {
             bin: bin.to_string_lossy().into_owned(),
             dir: dir.to_path_buf(),

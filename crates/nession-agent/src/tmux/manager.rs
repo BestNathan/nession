@@ -845,16 +845,17 @@ mod legacy_stage_two_tests {
     /// and fall through to its catch-all, "working" while testing nothing.
     #[cfg(unix)]
     fn recording_shim(dir: &std::path::Path) -> (String, PathBuf) {
-        use std::os::unix::fs::PermissionsExt;
         let stage1 = dir.join("stage1-ran");
         let path = dir.join("tmux");
-        std::fs::write(
+        // A child creates it; see `install_via_a_child` for why the exec'd path
+        // must not be one this process wrote (#1026).
+        crate::test_support::install_via_a_child(
             &path,
             // One file per call, claimed with an O_EXCL create, so two
             // processes recording at once cannot interleave. The mechanism and
             // the measurements are documented on `FakeTmux` in
             // `crate::test_support`; keep this body in step with it.
-            format!(
+            &format!(
                 "#!/bin/sh\n\
                  if [ \"$1\" = \"-S\" ]; then shift 2; fi\n\
                  n=0\n\
@@ -881,12 +882,7 @@ mod legacy_stage_two_tests {
                 stage1 = stage1.display(),
             ),
         )
-        .expect("write shim");
-        let mut perms = std::fs::metadata(&path)
-            .expect("shim metadata")
-            .permissions();
-        perms.set_mode(0o755);
-        std::fs::set_permissions(&path, perms).expect("chmod shim");
+        .expect("install the shim");
         (path.to_string_lossy().into_owned(), dir.to_path_buf())
     }
 
