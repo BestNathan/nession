@@ -9,24 +9,30 @@ test.skip(!process.env.CI, 'local only — runs in CI workflow only');
 
 test.use({ viewport: { width: 390, height: 844 } });
 
-test('canonical App fixture renders the spatial terminal page', async ({ page }) => {
+test('canonical App fixture renders the Terminal root', async ({ page }) => {
   await page.goto('/#/fixture/app');
 
   await expect(page.getByTestId('shell')).toBeVisible();
-  await expect(page.getByTestId('app-spatial-shell')).toBeVisible();
+  await expect(page.getByTestId('app-layer-root')).toBeVisible();
+  await expect(page.getByTestId('app-layer-root')).toHaveAttribute(
+    'data-layer',
+    'terminal',
+  );
 
   // single-row header: sessions + workspace affordances, NO switcher, NO
-  // duplicated floating buttons. Both pager pages stay mounted, so the
-  // header line renders twice (terminal + workspace pages).
-  await expect(page.getByTestId('session-header-line')).toHaveCount(2);
+  // duplicated floating buttons. Exactly one header line — the pager mounted
+  // every page at once and therefore rendered two permanently (#1049), which
+  // is also why a second one reappearing means a layer is mounted that should
+  // not be.
+  await expect(page.getByTestId('session-header-line')).toHaveCount(1);
   await expect(page.getByTestId('session-header-line').first()).toBeVisible();
   await expect(page.getByTestId('app-header-sessions')).toBeVisible();
   await expect(page.getByTestId('app-header-workspace')).toBeVisible();
   await expect(page.getByTestId('surface-switcher')).toHaveCount(0);
   await expect(page.getByTestId('app-spatial-open-sessions')).toHaveCount(0);
 
-  // terminal page is the centered pager page
-  await expect(page.getByTestId('app-spatial-page-terminal')).toBeInViewport();
+  // the Terminal layer is the root and fills the viewport
+  await expect(page.getByTestId('app-layer-terminal')).toBeInViewport();
 
   await page.screenshot({ path: 'test-results/canonical-app-terminal.png', fullPage: true });
 });
@@ -41,7 +47,7 @@ test('an emerged capability does not reflow the terminal (#826)', async ({ page 
   // `box-border` element xterm is mounted in, so a wrong number is height the
   // terminal loses and re-fits for.
   await page.goto('/#/fixture/app');
-  await expect(page.getByTestId('app-spatial-page-terminal')).toBeInViewport();
+  await expect(page.getByTestId('app-layer-terminal')).toBeInViewport();
 
   const read = () =>
     page.evaluate(() => {
@@ -63,10 +69,10 @@ test('an emerged capability does not reflow the terminal (#826)', async ({ page 
    * Read only once the numbers have stopped moving.
    *
    * The clearance is published by a layout effect and then re-published by a
-   * ResizeObserver, and the spatial pager mounts three pages that settle a
-   * frame or two after the route renders. A single read can therefore catch a
-   * transient value — which is a fault in this test, not in the product: the
-   * claim is about the settled geometry on both sides of the emergence.
+   * ResizeObserver, and the shell's width measurement settles a frame or two
+   * after the route renders. A single read can therefore catch a transient
+   * value — which is a fault in this test, not in the product: the claim is
+   * about the settled geometry on both sides of the emergence.
    */
   const geometry = async () => {
     let previous = await read();

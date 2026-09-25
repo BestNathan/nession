@@ -117,7 +117,7 @@ test.describe('App 390×844', () => {
 
   test('Active Terminal', async ({ page }) => {
     await gotoFixtureApp(page);
-    await expect(page.getByTestId('app-spatial-page-terminal')).toBeInViewport();
+    await expect(page.getByTestId('app-layer-terminal')).toBeInViewport();
     await waitForFixtureTerminal(page);
 
     await expect(page).toHaveScreenshot('app-terminal.png', {
@@ -215,10 +215,10 @@ test.describe('App 390×844', () => {
     });
   });
 
-  test('Sessions spatial page', async ({ page }) => {
+  test('Sessions layer', async ({ page }) => {
     await gotoFixtureApp(page);
     await page.getByTestId('app-header-sessions').first().click();
-    await expect(page.getByTestId('app-spatial-page-sessions')).toBeInViewport();
+    await expect(page.getByTestId('app-layer-sessions')).toBeInViewport();
     await expect(page.getByTestId('session-item-row')).toHaveCount(6);
 
     await expect(page).toHaveScreenshot('app-sessions.png', {
