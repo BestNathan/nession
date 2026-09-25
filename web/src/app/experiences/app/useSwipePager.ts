@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState, type TouchEvent } from 'react';
 import { SWIPE_COMMIT_PX } from './gesture';
+import { isWorkSurface } from './workSurface';
 
 export interface UseSwipePagerArgs {
   pageCount: number;
@@ -43,11 +44,22 @@ export function useSwipePager({
     setIsDragging(false);
   }, []);
 
-  // A drag may start anywhere in the surface. What keeps a vertical scroll
-  // from turning a page is the axis lock in `onTouchMove`, not a start gate.
+  // A drag may start anywhere on the shell chrome, but not inside a work
+  // surface: a touch that lands in the terminal viewport, an editor, a field,
+  // or the capsule belongs to that surface, and starting a page from it would
+  // steal a selection or a scroll before the surface saw the move (#1049
+  // decision 1).
+  //
+  // The axis lock in `onTouchMove` still runs. The two discriminate different
+  // things — the gate says *where navigation may begin*, the lock says whether
+  // a begun drag is a page or a scroll — and neither replaces the other.
   const onTouchStart = useCallback((e: TouchEvent) => {
     const touch = e.touches[0];
     if (!touch) {
+      return;
+    }
+
+    if (isWorkSurface(e.target)) {
       return;
     }
 
