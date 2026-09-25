@@ -16,7 +16,9 @@ async fn main() -> Result<()> {
     // read fails without a log destination to report to — the error goes to the
     // shell, which is where the operator is.
     let config = load_config()?;
-    nession_agent::runtime::run(config).await
+    // This binary is always started directly — a daemon parent re-execs the CLI,
+    // not this — so there is nobody to announce readiness to.
+    nession_agent::runtime::run(config, nession_agent::runtime::Readiness::Unwatched).await
 }
 
 /// Load agent configuration from a TOML file, falling back to defaults.

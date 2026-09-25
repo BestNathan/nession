@@ -21,12 +21,15 @@ pub async fn start(
     nession_common::paths::ensure_component_dirs()
         .context("failed to create nession component directories")?;
 
-    // Check if agent is already running
-    if let Ok(pid) = pid_file::read_pid_file(&pid_file) {
-        if pid_file::is_process_running(pid) {
-            anyhow::bail!("Agent is already running with PID {pid}");
-        } else {
-            // Process not running but PID file exists, clean it up
+    // Already running, decided by ownership rather than by pid (#1016). A stale
+    // file whose pid was reused must not read as "already running" — and must
+    // not survive to make the *next* start think so.
+    match pid_file::ownership(&pid_file) {
+        Ok(pid_file::Ownership::Alive(identity)) => {
+            anyhow::bail!("Agent is already running with PID {}", identity.pid);
+        }
+        // Stale, reused, or no record at all: nothing of ours is running.
+        Ok(_) | Err(_) => {
             let _ = fs::remove_file(&pid_file);
         }
     }
@@ -41,9 +44,13 @@ pub async fn start(
         println!("Agent ID: {}", config.agent_id);
         println!("Press Ctrl+C to stop");
 
-        // Write PID file for the current process (foreground mode)
-        let pid = std::process::id();
-        pid_file::write_pid_file(&pid_file, pid)?;
+        // Record this process's identity (foreground mode).
+        //
+        // Written before the runtime starts, which is the half #1016 still has
+        // open: the file existing is not yet evidence the agent is serving, and
+        // a child that dies on its config leaves one behind. The readiness half
+        // moves this to the runtime's ready point.
+        pid_file::write_identity(&pid_file, pid_file::Component::Agent)?;
 
         // Run the agent directly (this will block)
         let result = run_agent_foreground(config).await;
@@ -97,26 +104,35 @@ pub async fn start(
             }
         }
 
-        let _child = cmd.spawn().context("failed to spawn agent process")?;
+        // A path only this start knows, so a marker left by an earlier run
+        // cannot be mistaken for this child's announcement.
+        let ready_file = format!("{pid_file}.ready.{}", std::process::id());
+        let _ = fs::remove_file(&ready_file);
+        cmd.env(nession_agent::runtime::READY_FILE_ENV, &ready_file);
 
-        // Give the child a moment to write its PID file
-        tokio::time::sleep(Duration::from_millis(500)).await;
+        let mut child = cmd.spawn().context("failed to spawn agent process")?;
 
-        // Read the PID from the file written by the child
-        match pid_file::read_pid_file(&pid_file) {
-            Ok(pid) => {
+        // Wait for the child to say it is serving — or to die, or for the
+        // deadline. This replaces a pair of fixed sleeps followed by "Agent is
+        // starting, check logs for status" and an `Ok(())`: that reported a
+        // successful start for a child that had already exited on a bad config
+        // or a failed bind (#1016).
+        let outcome = wait_for_ready(&mut child, &ready_file, Duration::from_secs(30)).await;
+        let _ = fs::remove_file(&ready_file);
+
+        match outcome {
+            Startup::Serving => {
+                let pid = pid_file::read_identity(&pid_file)
+                    .map(|identity| identity.pid)
+                    .unwrap_or_else(|_| child.id());
                 println!("Agent started in background with PID {pid}");
                 println!("PID file: {pid_file}");
             }
-            Err(_) => {
-                println!("Agent started in background (waiting for PID file...)");
-                // Wait a bit more and try again
-                tokio::time::sleep(Duration::from_secs(1)).await;
-                if let Ok(pid) = pid_file::read_pid_file(&pid_file) {
-                    println!("Agent started in background with PID {pid}");
-                } else {
-                    println!("Agent is starting, check logs for status");
-                }
+            Startup::Exited(status) => {
+                anyhow::bail!("Agent exited before it was serving ({status}); check the logs");
+            }
+            Startup::TimedOut => {
+                anyhow::bail!("Agent did not report itself serving within 30s; check the logs");
             }
         }
         println!("Config: {config_path}");
@@ -127,22 +143,32 @@ pub async fn start(
 
 /// Stop the agent process.
 pub async fn stop(pid_file: String) -> Result<()> {
-    // Read PID file
-    let pid = match pid_file::read_pid_file(&pid_file) {
-        Ok(pid) => pid,
+    // Ownership, not liveness (#1016). "A process with this number exists" and
+    // "the agent this file was written for is running" are different claims —
+    // pids are reused — and a `stop` acting on the weaker one can signal an
+    // unrelated process. Only `Alive` is signalled; anything else cleans up and
+    // says why.
+    let pid = match pid_file::ownership(&pid_file) {
+        Ok(pid_file::Ownership::Alive(identity)) => identity.pid,
+        Ok(pid_file::Ownership::Reused(identity)) => {
+            println!(
+                "Recorded pid {} is running but is not this agent — not signalling it.",
+                identity.pid
+            );
+            let _ = fs::remove_file(&pid_file);
+            return Ok(());
+        }
+        Ok(pid_file::Ownership::Stale(identity)) => {
+            println!("Agent process {} is not running", identity.pid);
+            // Clean up stale state
+            let _ = fs::remove_file(&pid_file);
+            return Ok(());
+        }
         Err(_) => {
-            println!("Agent is not running (no PID file found)");
+            println!("Agent is not running (no state file found)");
             return Ok(());
         }
     };
-
-    // Check if process is running
-    if !pid_file::is_process_running(pid) {
-        println!("Agent process {pid} is not running");
-        // Clean up stale PID file
-        let _ = fs::remove_file(&pid_file);
-        return Ok(());
-    }
 
     println!("Stopping agent (PID {pid})...");
 
@@ -217,24 +243,69 @@ pub async fn restart(
     .await
 }
 
+/// How a background start ended.
+#[derive(Debug)]
+enum Startup {
+    /// The child announced it is serving.
+    Serving,
+    /// The child exited first — its status is the reason.
+    Exited(std::process::ExitStatus),
+    /// Neither happened before the deadline.
+    TimedOut,
+}
+
+/// Wait for the child to announce readiness, or to exit, or for the deadline.
+///
+/// Watching the child as well as the marker is the point: a start that only
+/// waited for the marker would sit out the whole timeout on a child that died
+/// immediately, and then report the timeout instead of the child's own failure.
+async fn wait_for_ready(
+    child: &mut std::process::Child,
+    ready_file: &str,
+    timeout: Duration,
+) -> Startup {
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        if Path::new(ready_file).exists() {
+            return Startup::Serving;
+        }
+        if let Ok(Some(status)) = child.try_wait() {
+            return Startup::Exited(status);
+        }
+        if std::time::Instant::now() >= deadline {
+            return Startup::TimedOut;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
 /// Show agent status.
 pub async fn status(pid_file: String) -> Result<()> {
-    // Read PID file
-    let pid = match pid_file::read_pid_file(&pid_file) {
-        Ok(pid) => pid,
+    // Ownership, like `stop` (#1016). Reporting "running" for a reused pid would
+    // send an operator to look at a process that is not theirs, and reporting
+    // "stopped" while the agent serves — which is what reading a bare pid out of
+    // the identity file would do — is worse. Anything not proven ours is not
+    // reported as ours.
+    let pid = match pid_file::ownership(&pid_file) {
+        Ok(pid_file::Ownership::Alive(identity)) => identity.pid,
+        Ok(pid_file::Ownership::Reused(identity)) => {
+            println!(
+                "Status: stopped (pid {} is running but is not this agent)",
+                identity.pid
+            );
+            let _ = fs::remove_file(&pid_file);
+            return Ok(());
+        }
+        Ok(pid_file::Ownership::Stale(_)) => {
+            println!("Status: stopped (process not running)");
+            let _ = fs::remove_file(&pid_file);
+            return Ok(());
+        }
         Err(_) => {
-            println!("Status: stopped (no PID file)");
+            println!("Status: stopped (no state file)");
             return Ok(());
         }
     };
-
-    // Check if process is running
-    if !pid_file::is_process_running(pid) {
-        println!("Status: stopped (process not running)");
-        // Clean up stale PID file
-        let _ = fs::remove_file(&pid_file);
-        return Ok(());
-    }
 
     // Get process start time for uptime calculation
     let uptime = process::get_process_uptime(pid).map(pid_file::format_duration);
@@ -309,5 +380,85 @@ async fn run_agent_foreground(config: AgentConfig) -> Result<()> {
     // started a different Agent product from the `nession-agent` binary
     // (#1014). Anything added to one path and not the other was invisible
     // until something depended on it.
-    nession_agent::runtime::run(config).await
+    // A background start re-execs this same path with `NESSION_READY_FILE` set,
+    // so this one call serves both a foreground start a user typed (no variable,
+    // nobody watching) and the child of a daemon parent waiting to be told the
+    // agent is serving (#1016).
+    nession_agent::runtime::run(config, nession_agent::runtime::Readiness::from_env()).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A child that stays alive, so only the marker can end the wait.
+    fn spawn_sleeper() -> std::process::Child {
+        std::process::Command::new("sleep")
+            .arg("30")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("spawn sleep")
+    }
+
+    #[tokio::test]
+    async fn a_child_that_announces_is_serving() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let marker = dir.path().join("ready");
+        std::fs::write(&marker, "ready pid=1\n").expect("write marker");
+        let mut child = spawn_sleeper();
+
+        let outcome =
+            wait_for_ready(&mut child, marker.to_str().unwrap(), Duration::from_secs(5)).await;
+
+        let _ = child.kill();
+        assert!(matches!(outcome, Startup::Serving), "{outcome:?}");
+    }
+
+    /// The defect this replaces: a child that died was reported as a start.
+    ///
+    /// The deadline here is far longer than the child takes to die, so a
+    /// `TimedOut` would mean the wait was watching the clock instead of the
+    /// child — and the caller would print "check logs for status" and return
+    /// success for a process that had already exited.
+    #[tokio::test]
+    async fn a_child_that_exits_without_announcing_reports_its_own_exit() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let marker = dir.path().join("ready");
+        let mut child = std::process::Command::new("false")
+            .spawn()
+            .expect("spawn false");
+
+        let outcome = wait_for_ready(
+            &mut child,
+            marker.to_str().unwrap(),
+            Duration::from_secs(30),
+        )
+        .await;
+
+        match outcome {
+            Startup::Exited(status) => assert!(
+                !status.success(),
+                "the child's own status must travel, not a synthesised success"
+            ),
+            other => panic!("expected the child's exit, not {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_child_that_never_announces_times_out() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let marker = dir.path().join("ready");
+        let mut child = spawn_sleeper();
+
+        let outcome = wait_for_ready(
+            &mut child,
+            marker.to_str().unwrap(),
+            Duration::from_millis(200),
+        )
+        .await;
+
+        let _ = child.kill();
+        assert!(matches!(outcome, Startup::TimedOut), "{outcome:?}");
+    }
 }

@@ -51,12 +51,10 @@ use crate::tmux::manager::SessionManager;
 /// cannot be composed. Reaching the end of the composition is what "started"
 /// means.
 ///
-/// **Not yet a readiness signal.** A daemon parent needs to know the child
-/// reached this point (#1016), which will want a notification rather than this
-/// return value, since `run` does not return until shutdown. That seam is
-/// deliberately not added here: it has no consumer yet, and its shape depends on
-/// the acknowledgement design #1016 owns.
-pub async fn run(config: AgentConfig) -> Result<()> {
+/// `ready` is how a daemon parent is told the child got this far. This return
+/// value cannot serve that purpose: `run` does not return until shutdown, so a
+/// parent would learn "started" only when it stopped (#1016).
+pub async fn run(config: AgentConfig, ready: Readiness) -> Result<()> {
     // 1. Initialize logging (stdout + file)
     let _log_guard = nession_common::logging::init_logging(
         &config.logging,
@@ -185,9 +183,18 @@ pub async fn run(config: AgentConfig) -> Result<()> {
     // server-advertised heartbeat interval (falling back to the local config).
     let (client_handle, heartbeat_interval_secs) = if config.server_url.trim().is_empty() {
         info!("No server_url configured — running in standalone mode");
+        // Serving: the P2P socket is bound and the tmux socket is pinned. There
+        // is no provider set to compose on this path, and no remote to reach.
+        ready.announce();
         (None, config.heartbeat_interval_secs)
     } else {
         let ext_registry = compose_providers(&agent_id, Arc::clone(&tmux_for_client))?;
+
+        // Serving: the socket is bound and the provider set composed. Announced
+        // *before* the central-server connection on purpose — that one is
+        // allowed to fail, and a parent that waited for it would report a
+        // healthy agent as a failed start.
+        ready.announce();
 
         let server_client = ServerClient::new(
             &config.server_url,
@@ -326,6 +333,60 @@ pub async fn run(config: AgentConfig) -> Result<()> {
 
     info!("nession-agent stopped");
     Ok(())
+}
+
+/// Environment variable a daemon parent uses to name the readiness marker.
+pub const READY_FILE_ENV: &str = "NESSION_READY_FILE";
+
+/// How a daemon parent is told the runtime reached its ready point.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Readiness {
+    /// Nobody is waiting — the binary was started directly.
+    Unwatched,
+    /// Write a marker at this path once the runtime is serving.
+    Announced(std::path::PathBuf),
+}
+
+impl Readiness {
+    /// The announcement this process was asked for, if any.
+    ///
+    /// A daemon parent re-execs this binary in the background and names a path
+    /// in [`READY_FILE_ENV`]; a foreground start a user typed has none, and the
+    /// variable is absent.
+    pub fn from_env() -> Self {
+        match std::env::var(READY_FILE_ENV) {
+            Ok(path) if !path.trim().is_empty() => Self::Announced(path.into()),
+            _ => Self::Unwatched,
+        }
+    }
+
+    /// Announce, if someone asked to be told.
+    ///
+    /// Called at the point the process is *serving*: the P2P socket is bound,
+    /// the tmux socket is pinned, the providers are composed. The central-server
+    /// connection may still be in flight, deliberately — a standalone agent is a
+    /// working agent, and making readiness wait on a remote server would report
+    /// a healthy agent as a failed start.
+    fn announce(&self) {
+        let Self::Announced(path) = self else {
+            return;
+        };
+        // Staged and renamed, so a parent that sees the file sees a whole one.
+        let staged = path.with_extension("tmp");
+        let body = format!("ready pid={}\n", std::process::id());
+        if let Err(error) =
+            std::fs::write(&staged, body).and_then(|()| std::fs::rename(&staged, path))
+        {
+            // Not fatal to *this* process — it is serving either way — but the
+            // parent is now waiting on something that will not arrive, so say so
+            // where the logs are.
+            warn!(
+                path = %path.display(),
+                %error,
+                "could not announce readiness; a waiting parent will time out"
+            );
+        }
+    }
 }
 
 /// The providers this Agent serves, alongside the units it routes itself.
