@@ -77,8 +77,13 @@ Opening Workspace must preserve the originating Session and capability context. 
 
 ## Gestures and visible alternatives
 
-- Swipe right from the Terminal surface to reveal/open Sessions.
-- Swipe left from the Terminal surface to reveal/open Workspace.
+- Swipe right to reveal/open Sessions; swipe left to reveal/open Workspace.
+- The gesture spans the shell chrome, and is **bounded by work-surface
+  exclusion**: it does not begin inside a surface that owns its own touch
+  behaviour — the terminal viewport (selection, scrollback, TUI mouse
+  reporting), a CodeMirror editor, a text input, or the capsule composer. The
+  surface still needs the shell to define *where* top-level navigation may
+  start, not only which axis a captured drag resolved to.
 - Gestures are accelerators, not the only discoverable or accessible path.
 - Sessions and Workspace must also have visible controls, but those controls should remain visually quiet when they are not the user's current intent.
 
