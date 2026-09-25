@@ -18,6 +18,7 @@ pub mod identity;
 pub mod netdetect;
 pub mod netwatch;
 pub mod protocol;
+pub mod runtime;
 pub mod server;
 pub mod sync;
 pub mod tmux;
