@@ -20,7 +20,11 @@ Conceptually:
 Navigation  ←  Work  →  Context
 ```
 
-This is a navigation relationship, not a claim that Workspace is a static feature page.
+This is a navigation relationship, not a claim that Workspace is a static feature page,
+and it is a statement about the **product** rather than about how the App is built. The
+App is not required to render a pager, a carousel, or three permanently translated pages.
+What the model constrains is where the user can go and what is adjacent to what — not the
+mechanism that gets them there.
 
 ## Terminal-first Session surface
 
@@ -29,6 +33,16 @@ When the user creates or attaches to a Session, the Terminal should occupy the w
 The surrounding UI stays quiet. Session identity, connectivity, and controls are visible only to the degree needed to understand or recover the work.
 
 The App should feel like returning to an active place of work, not entering a management dashboard.
+
+**The Terminal is the root of a selected Session.** Sessions and Workspace are reached
+*from* it and return to it, and while either is open the Terminal stays mounted
+underneath. This constrains the implementation, not only the look: a navigation event must
+not unmount the Terminal, because unmounting rebuilds xterm, the attach state and the
+scrollback, and turns "return to where I was" into a state-restoration problem. Layers,
+drawers and pushed views satisfy this by construction. A translated pager satisfies it
+only by keeping every page mounted at all times — which worked, but also meant the App
+rendered two page headers and two sets of navigation controls at all times, and gave the
+shell no way to say which page was current.
 
 ## Contextual interaction capsule
 
@@ -131,6 +145,9 @@ Exact detection is implementation-specific.
 ## Implementation boundary
 
 The implementation does not need to literally maintain three permanently translated pages. Sessions may be a drawer/layer, Terminal the root content, Workspace a contextual layer, and capability details overlays or pushed views.
+
+The App ships this way (#1049): the Terminal is the root and Sessions and Workspace are
+layers over it, so opening either one does not unmount the work surface.
 
 The product requirements are:
 
