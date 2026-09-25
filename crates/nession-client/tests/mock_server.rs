@@ -18,7 +18,7 @@
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
-use nession_client::{ClientConfig, ClientConnection, ClientError};
+use nession_client::{ClientConfig, ClientConnection, ClientError, P2pConnection};
 use nession_protocol::contracts::agent::v1::AgentListReply;
 use nession_protocol::Message;
 use serde_json::{json, Value};
@@ -421,6 +421,47 @@ async fn the_socket_can_be_handed_over() {
         );
         socket
             .send(WsMessage::Text(serde_json::to_string(&frame).unwrap()))
+            .await
+            .unwrap();
+        linger().await;
+    });
+
+    server.unwrap();
+}
+
+/// The one agent-socket constructor hands back a socket that works.
+///
+/// `P2pConnection::connect` wraps one call today, and this is what says so out
+/// loud: it is the seam #1013 changes to carry a server-issued credential, so
+/// the thing worth pinning is that a caller reaching an agent goes through it
+/// and gets a socket it can write an attach on.
+#[tokio::test]
+async fn the_p2p_constructor_hands_back_a_usable_socket() {
+    let (listener, url) = bind().await.unwrap();
+
+    let server = async {
+        let mut ws = accept(&listener).await?;
+        let frame = next_request(&mut ws).await?;
+        assert_eq!(frame["msg_type"], "agent.attach");
+        assert_eq!(frame["payload"]["session_name"], "work");
+        assert_eq!(frame["payload"]["width"], 120);
+        assert_eq!(frame["payload"]["height"], 40);
+        assert!(
+            !frame["id"].as_str().unwrap_or_default().is_empty(),
+            "the envelope requires an id even when nothing correlates"
+        );
+        linger().await;
+        Ok::<_, Box<dyn std::error::Error + Send + Sync>>(())
+    };
+
+    let (server, ()) = tokio::join!(server, async {
+        let mut socket = P2pConnection::connect(&url)
+            .await
+            .expect("the agent socket opens")
+            .into_stream();
+        let attach = nession_client::attach_frame("work", 120, 40);
+        socket
+            .send(WsMessage::Text(serde_json::to_string(&attach).unwrap()))
             .await
             .unwrap();
         linger().await;

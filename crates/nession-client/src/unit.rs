@@ -47,22 +47,35 @@ pub trait UnitRequest: Serialize {
     const VERSIONS: &'static [ContractVersion] = &[ContractVersion::V1];
 }
 
-/// Build one request envelope, naming its wire.
+/// Build one envelope, naming its wire.
 ///
 /// The wire is a parameter rather than something the payload knows, so that it
 /// is named **at a call site** with a constant from [`crate::wire`] — which is
 /// where `scripts/protocol-gate.mjs` checks it against the set of wires some
-/// runtime actually serves. A request built anywhere else names no wire the
-/// gate can see.
+/// runtime actually serves. A frame built anywhere else names no wire the gate
+/// can see.
 ///
-/// The `id` is left empty on purpose. Uniqueness is a property of the
-/// connection's request sequence, not of the payload, so
-/// [`crate::ClientConnection::request`] assigns it — the only place that can.
-/// Handing the result straight to a socket without going through that method
-/// would send an uncorrelatable request, which is why the two are documented
-/// as a pair.
-pub fn proto_msg<P: UnitRequest>(wire: &'static str, payload: P) -> Message<P> {
-    Message::new(wire, String::new(), now_millis(), payload)
+/// Bound on `Serialize` rather than [`UnitRequest`], because not every unit has
+/// a reply to pair with: `agent.terminal.input` and `agent.terminal.resize` are
+/// **one-way by the contract's own model** (`response: None` in the catalog,
+/// with a comment saying the absence is the statement rather than a gap), and a
+/// keystroke has no answer to type. [`crate::ClientConnection::request`] is the
+/// half that needs a reply, and it asks for `UnitRequest` itself.
+///
+/// The `id` is a UUID, and [`crate::ClientConnection::request`] **overwrites it**
+/// with its own per-connection sequence — uniqueness is a property of that
+/// sequence, so the connection's number is the better one. The UUID is here for
+/// the frames that have no connection behind them: an `agent.attach` sent on a
+/// socket about to become a terminal, a keystroke. Those are sent and not
+/// awaited, and the envelope still requires an `id`, so leaving it empty would
+/// put a value on the wire that only looks like one.
+pub fn proto_msg<P: Serialize>(wire: &'static str, payload: P) -> Message<P> {
+    Message::new(
+        wire,
+        uuid::Uuid::new_v4().to_string(),
+        now_millis(),
+        payload,
+    )
 }
 
 /// Milliseconds since the Unix epoch, the envelope's stated unit.
@@ -81,4 +94,49 @@ pub(crate) fn now_millis() -> u64 {
         .ok()
         .and_then(|elapsed| u64::try_from(elapsed.as_millis()).ok())
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The unit is milliseconds, and a value that is *plausible* either way is
+    /// exactly why this is asserted rather than assumed. Seconds and
+    /// milliseconds differ by three orders of magnitude, so a floor above any
+    /// second-valued timestamp catches the mistake the old consumer made —
+    /// it sent `.as_secs()` into this field and nothing that received one had
+    /// reason to check.
+    #[test]
+    fn the_timestamp_is_milliseconds() {
+        let frame = proto_msg("agent.terminal.input", serde_json::json!({}));
+
+        assert!(
+            frame.timestamp > 1_000_000_000_000,
+            "a second-valued timestamp is ~1.7e9; milliseconds are ~1.7e12 (got {})",
+            frame.timestamp
+        );
+    }
+
+    /// Every frame carries a usable `id`, including the ones nothing correlates.
+    ///
+    /// These are the frames with no connection behind them — a keystroke, an
+    /// attach sent on a socket about to become a terminal. Nothing awaits a
+    /// reply, but the envelope still requires the field, and an empty string is
+    /// a value that only looks like one.
+    #[test]
+    fn a_frame_built_without_a_connection_still_has_an_id() {
+        let frame = proto_msg("agent.terminal.input", serde_json::json!({}));
+
+        assert_eq!(frame.msg_type, "agent.terminal.input");
+        assert!(!frame.id.is_empty(), "the envelope requires an id");
+    }
+
+    /// Two frames built back to back do not share an id.
+    #[test]
+    fn two_frames_do_not_share_an_id() {
+        let first = proto_msg("agent.terminal.input", serde_json::json!({}));
+        let second = proto_msg("agent.terminal.input", serde_json::json!({}));
+
+        assert_ne!(first.id, second.id);
+    }
 }
