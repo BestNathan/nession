@@ -1,8 +1,10 @@
 import type { ReactNode } from 'react';
 import { Loader2 } from 'lucide-react';
-import { useMediaQuery } from '@/shared/hooks/useMediaQuery';
 import { TerminalCapsule } from '@/product/terminal/capsule/TerminalCapsule';
-import type { CapsuleCapabilityProjection } from '@/product/terminal/capsule/types';
+import type {
+  CapsuleCapabilityProjection,
+  CapsuleExperience,
+} from '@/product/terminal/capsule/types';
 import type { CapsuleCapabilityContribution } from '@/app/capsulePresence';
 import type { TerminalController } from '@/platform/terminal-runtime/controller/TerminalController';
 
@@ -17,6 +19,21 @@ export interface TerminalSurfaceProps {
   capsuleCapabilities?: CapsuleCapabilityContribution;
   /** A capability emerging beside the capsule, if Nession decided one should. */
   capsuleProjection?: CapsuleCapabilityProjection;
+  /**
+   * Which experience's capsule to render. **Required, and supplied by the
+   * shell.**
+   *
+   * It used to be derived here — `useMediaQuery('(min-width: 768px)')`, against
+   * the shell's own `(min-width: 1024px)` — so at any width in [768, 1024) the
+   * App shell drew an App layout around a *Web* capsule, complete with the
+   * permanent history control #1034 retired. iPad portrait and every landscape
+   * phone sit in that band.
+   *
+   * This layer cannot see the shell's breakpoint: `product` may not import
+   * `app`, which is precisely why a second breakpoint appeared here. Being told
+   * is the only way the two can be guaranteed to agree.
+   */
+  experience: CapsuleExperience;
 }
 
 /**
@@ -30,9 +47,8 @@ export function TerminalSurface({
   isSwitching = false,
   capsuleCapabilities,
   capsuleProjection,
+  experience,
 }: TerminalSurfaceProps) {
-  const isDesktop = useMediaQuery('(min-width: 768px)');
-  const capsuleExperience = isDesktop ? 'web' : 'app';
 
   const capsuleSendText = (text: string) => {
     if (inputDisabled) {
@@ -61,7 +77,7 @@ export function TerminalSurface({
         {children}
       </div>
       <TerminalCapsule
-        experience={capsuleExperience}
+        experience={experience}
         sendText={capsuleSendText}
         disabled={inputDisabled}
         capabilityDisclosure={capsuleCapabilities?.disclosure}

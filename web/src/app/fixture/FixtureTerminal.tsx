@@ -14,6 +14,7 @@ import {
   terminalViewportInsetClass,
 } from '@/product/terminal/components/TerminalViewport';
 import { TerminalSurface } from '@/product/terminal/patterns/TerminalSurface';
+import type { CapsuleExperience } from '@/product/terminal/capsule/types';
 import type { TerminalChrome } from '@/app/ShellMain';
 
 const FIXTURE_BUFFER = [
@@ -65,7 +66,14 @@ const FIXTURE_BUFFER = [
  * pins the App metrics and a wide one pins Web's instead of one hardcoded size
  * standing in for both.
  */
-export function FixtureTerminal({ chrome }: { chrome?: TerminalChrome }) {
+export function FixtureTerminal({
+  chrome,
+  experience,
+}: {
+  chrome?: TerminalChrome;
+  /** Which experience's capsule to render — the same prop the real shell passes. */
+  experience: CapsuleExperience;
+}) {
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -132,6 +140,7 @@ export function FixtureTerminal({ chrome }: { chrome?: TerminalChrome }) {
 
   return (
     <TerminalSurface
+      experience={experience}
       inputDisabled={false}
       controller={null}
       capsuleCapabilities={chrome?.capsuleCapabilities}

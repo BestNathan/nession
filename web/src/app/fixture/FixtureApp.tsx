@@ -116,7 +116,9 @@ export function FixtureApp() {
         sidebarProps={sidebarProps}
         onLayerSelect={onLayerSelect}
         mainShared={mainShared}
-        terminal={(chrome) => <FixtureTerminal chrome={chrome} />}
+        terminal={(chrome) => (
+          <FixtureTerminal chrome={chrome} experience="app" />
+        )}
       />
     </div>
   );
