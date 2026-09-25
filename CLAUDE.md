@@ -626,6 +626,18 @@ cd web && npm run dev                 # :13000
 
 Use `mcp__playwright__browser_navigate` to open pages, `mcp__playwright__browser_snapshot` to inspect, and `mcp__playwright__browser_take_screenshot` to capture. Post them as a **PR comment**, not in the PR body — the body becomes the commit message.
 
+**Upload them with `gh … --attach`; never paste a local path into the comment.** Screenshots live in the gitignored `.playwright-mcp/`, so a markdown reference to that path renders as a broken image on GitHub. `--attach` uploads to GitHub's attachment storage and rewrites the matching reference **in place**, so write the markdown first and the images appear where you put them:
+
+```bash
+cd .playwright-mcp/screenshots
+gh pr comment <PR> --body "Before: ![before](./before.png)
+
+After: ![after](./after.png)" \
+  --attach ./before.png --attach ./after.png
+```
+
+The body reference and the `--attach` argument must be the **same string** — otherwise `gh` treats them as different files and appends a duplicate. Also available on `gh pr create|edit` and `gh issue create|edit|comment`, so issue reports can carry evidence. Needs push access; requires **gh ≥ 2.101.0** (2026-09) — on an older binary the flag is absent from `--help` and it looks unsupported, so check `gh --version` before concluding otherwise.
+
 **⚠ `browser_take_screenshot` 的 `filename` 必须带 `.playwright-mcp/screenshots/` 前缀** —— 裸文件名会相对于 cwd（仓库根目录）解析，把截图泄漏到工作区。`.playwright-mcp/` 目录只承接 snapshot/console 等自动产物（由 `--output-dir` 控制），不影响显式传入的 `filename`：
 
 - ✅ `filename: ".playwright-mcp/screenshots/terminal-after.png"`
