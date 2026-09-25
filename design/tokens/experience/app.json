@@ -51,6 +51,10 @@
   "shell": {
     "iconButtonSize": {
       "ref": "experience.app.control.md"
+    },
+    "sessionsListMinHeight": {
+      "$description": "How much of the App Sessions surface the Session list keeps for itself, as a share of that surface. The surface is a column of chrome above the list and a status foot below it, and at a short viewport (a phone held in landscape, #1057) the chrome alone can be taller than the surface — the column it replaced measured 328px of chrome at 390px tall, which left the list wrapper at exactly 0px and every Session row unreachable. A share rather than a pixel floor: the surface is 390px on one phone and 932px on another, and a length tuned to either would be wrong on the other. The chrome yields first and scrolls inside what is left, so the list holds this floor without the surface overflowing. It is deliberately not binding at the canonical portrait viewports, where the list already measures ~68% of the surface — it is the crisis floor for a short one.",
+      "value": "30%"
     }
   },
   "terminal": {

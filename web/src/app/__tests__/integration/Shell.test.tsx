@@ -332,6 +332,53 @@ describe('Shell', () => {
     expect(screen.getByTestId('kill-session-dialog')).toBeInTheDocument();
   });
 
+  /**
+   * The row's Kill action — now inside the `…` menu below `lg` (#1050 stage 2)
+   * — has to reach the confirmation, not the kill. `setSessionToKill` is the
+   * seam: typing the Session's name is what unlocks the destructive button, and
+   * a row that killed directly would bypass it.
+   *
+   * The dashboard is mocked here, so the mock writes the field the real
+   * `useDashboardModals` state owns and the Shell is re-rendered on the result
+   * — the `sessionToKill !== null` that `ShellDialogs` turns into the dialog.
+   * What this adds over `opens kill dialog` above is the half that test cannot
+   * see: that the row routes to that state at all.
+   */
+  it('routes the row overflow Kill action to the kill confirmation', async () => {
+    const setSessionToKill = vi.fn((killed: Session | null) => {
+      dashboard.current = { ...dashboard.current, sessionToKill: killed };
+    });
+    dashboard.current = {
+      ...dashboard.current,
+      agents: [agent],
+      sessions: [sess],
+      filteredSessions: [sess],
+      staleAgents: [],
+      sessionToKill: null,
+      setSessionToKill,
+    };
+    const view = renderShell();
+    expect(screen.queryByTestId('kill-session-dialog')).not.toBeInTheDocument();
+
+    await userEvent.click(
+      screen.getByTestId(`session-actions-${sess.session_id}`),
+    );
+    const kill = await screen.findByTestId(
+      `session-actions-kill-${sess.session_id}`,
+    );
+    await waitFor(() => {
+      expect(kill).not.toHaveStyle({ pointerEvents: 'none' });
+    });
+    await userEvent.click(kill);
+
+    expect(setSessionToKill).toHaveBeenCalledWith(sess);
+    expect(dashboard.current.sessionToKill).toEqual(sess);
+
+    view.unmount();
+    renderShell();
+    expect(screen.getByTestId('kill-session-dialog')).toBeInTheDocument();
+  });
+
   it('disables create when no online agents', async () => {
     dashboard.current = {
       ...dashboard.current,

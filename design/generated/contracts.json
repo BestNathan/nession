@@ -42,6 +42,13 @@
       "role": "Large phone",
       "width": 430,
       "height": 932
+    },
+    {
+      "id": "app.landscape-phone",
+      "experience": "app",
+      "role": "Phone in landscape",
+      "width": 844,
+      "height": 390
     }
   ],
   "patterns": {

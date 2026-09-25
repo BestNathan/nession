@@ -1,14 +1,24 @@
 import { AppLayers, type AppLayer } from './AppLayers';
+import { AppSessionsSurface } from './AppSessionsSurface';
 import { ShellMain } from '@/app/ShellMain';
 import type { MainProps } from '@/app/experiences/web/WebLayout';
-import { Sidebar, type SidebarProps } from '@/app/Sidebar';
+import type { SidebarProps } from '@/app/Sidebar';
 import type { DomainState } from '@/product/session/model/domainState';
 import type { Surface } from '@/app/patterns/SessionHeader';
 import type { CapabilityId } from '@/product/capability';
 import type { FileOps } from '@/capabilities/files';
 import type { Agent, Session } from '@/types';
 
-type SidebarFields = Omit<SidebarProps, 'className' | 'onSelect'>;
+/**
+ * `collapsible` is dropped here rather than passed through as `false`: the App
+ * surface has no rail, and `AppSessionsSurface` does not accept the prop at all
+ * (#1050 Finding 1 — the App used to inherit its `true` default and could
+ * collapse itself inside its own overlay).
+ */
+type SidebarFields = Omit<
+  SidebarProps,
+  'className' | 'onSelect' | 'collapsible'
+>;
 
 interface MainShared {
   selectedSession: Session | null;
@@ -65,7 +75,7 @@ export function AppLayout(props: {
         onLayerChange={onLayerChange}
         sessions={
           <div className="flex h-full min-h-0 flex-col">
-            <Sidebar {...sidebarProps} onSelect={onLayerSelect} />
+            <AppSessionsSurface {...sidebarProps} onSelect={onLayerSelect} />
           </div>
         }
         terminal={

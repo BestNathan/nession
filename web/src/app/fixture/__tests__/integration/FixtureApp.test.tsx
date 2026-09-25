@@ -52,7 +52,8 @@ describe('FixtureApp', () => {
 
     await user.click(screen.getByTestId('app-header-sessions'));
     expect(screen.getByTestId('app-layer-sessions')).toBeInTheDocument();
-    expect(screen.getByTestId('sidebar')).toBeInTheDocument();
+    // The App's own Sessions surface, not `Sidebar` (#1050 stage 1).
+    expect(screen.getByTestId('app-sessions-surface')).toBeInTheDocument();
     // Sessions is navigation, not a surface — the Terminal remains the surface
     // and stays visible behind the layer. The old test recorded the same intent
     // as "a pager position, not a surface"; the overlay model is what makes it

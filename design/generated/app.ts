@@ -24,6 +24,7 @@ export const touchTarget = {
 } as const;
 export const shell = {
   iconButtonSize: 44,
+  sessionsListMinHeight: "30%",
 } as const;
 export const terminal = {
   fontSize: 11.5,

@@ -78,7 +78,9 @@ export function FixtureShell() {
           showDetail
           onBackToSessions={() => {}}
           connectionStatus="connected"
-          terminal={(chrome) => <FixtureTerminal chrome={chrome} />}
+          terminal={(chrome) => (
+            <FixtureTerminal chrome={chrome} experience="web" />
+          )}
         />
       </div>
     </div>
