@@ -159,6 +159,7 @@ async fn register_agent(
             Vec::new(),
             nession_agent::protocol::served_descriptors()?,
         )?)),
+        std::sync::Arc::new(nession_agent::p2p_credentials::P2pCredentials::new()),
     );
 
     Ok(client.connect_and_run().await?.0)

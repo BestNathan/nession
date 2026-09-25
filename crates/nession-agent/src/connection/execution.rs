@@ -173,6 +173,16 @@ pub enum ResourceKey {
     Session(String),
     /// A locally stored env file, by name.
     Env(String),
+    /// **This agent's P2P authority**, as one resource (#1013).
+    ///
+    /// The credentials this agent honours are agent-global state, and the only
+    /// ordering that matters for them is against each other. A key of their own
+    /// is what keeps a grant from queueing behind a session mutation — and that
+    /// matters more here than elsewhere, because a client's attach is
+    /// *synchronously waiting* on the grant's acknowledgement: a grant stuck
+    /// behind a slow `session.create` would be a browser attach stuck behind
+    /// it too.
+    Authority,
 }
 
 impl std::fmt::Display for ResourceKey {
@@ -180,6 +190,7 @@ impl std::fmt::Display for ResourceKey {
         match self {
             Self::Session(name) => write!(f, "session:{name}"),
             Self::Env(name) => write!(f, "env:{name}"),
+            Self::Authority => write!(f, "authority"),
         }
     }
 }

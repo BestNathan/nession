@@ -181,6 +181,7 @@ async fn register_agent_with_server(
             Vec::new(),
             nession_agent::protocol::served_descriptors()?,
         )?)),
+        Arc::new(nession_agent::p2p_credentials::P2pCredentials::new()),
     );
 
     Ok(client.connect_and_run().await?.0)

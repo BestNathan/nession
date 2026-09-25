@@ -110,6 +110,7 @@ async fn integration_connection_to_mock_server() {
         Arc::new(SessionManager::new()),
         "/tmp".to_string(),
         None, // extension_registry
+        Arc::new(nession_agent::p2p_credentials::P2pCredentials::new()),
     );
 
     let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
@@ -162,6 +163,7 @@ async fn integration_registration_message_format() {
             )
             .expect("the routes compose"),
         )),
+        Arc::new(nession_agent::p2p_credentials::P2pCredentials::new()),
     );
 
     let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
@@ -266,6 +268,7 @@ async fn integration_heartbeat_message_format() {
         Arc::new(SessionManager::new()),
         "/tmp".to_string(),
         None, // extension_registry
+        Arc::new(nession_agent::p2p_credentials::P2pCredentials::new()),
     );
 
     let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
@@ -338,6 +341,7 @@ async fn integration_session_update_message_format() {
         Arc::new(SessionManager::new()),
         "/tmp".to_string(),
         None, // extension_registry
+        Arc::new(nession_agent::p2p_credentials::P2pCredentials::new()),
     );
 
     let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
@@ -406,6 +410,7 @@ async fn integration_reconnection_logic() {
         Arc::new(SessionManager::new()),
         "/tmp".to_string(),
         None, // extension_registry
+        Arc::new(nession_agent::p2p_credentials::P2pCredentials::new()),
     );
 
     // Spawn the client connection attempt in the background.
