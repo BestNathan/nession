@@ -39,6 +39,21 @@ pub struct ServerConfig {
     /// `nession_server::server::execution`.
     #[serde(default = "default_query_concurrency")]
     pub query_concurrency_per_connection: usize,
+    /// How long a P2P credential stays valid after it is minted (#1013).
+    ///
+    /// A credential authorizes a direct Client → Agent connection, and it is
+    /// validated by the **Agent** — the Server mints and forgets, the Agent
+    /// honours it until this deadline passes. So this is the revocation
+    /// window: it bounds how long a credential that leaked (a token in a URL
+    /// reaches access logs) stays useful, and it is the only expiry the
+    /// boundary has. Shorter is safer and costs the user nothing, because a
+    /// client that needs a new one re-attaches and gets one.
+    ///
+    /// Five minutes, which is long enough for a slow first paint and for the
+    /// reconnect budget a browser uses after a dropped socket, and short enough
+    /// that a leaked token is stale by the time anyone notices it leaked.
+    #[serde(default = "default_p2p_token_expiry")]
+    pub p2p_token_expiry_secs: u64,
     /// Logging configuration (optional). When omitted, defaults to
     /// `level = "info"`, `rotation = "daily"`, `retention_days = 7`.
     #[serde(default)]
@@ -48,6 +63,12 @@ pub struct ServerConfig {
 /// The default for [`ServerConfig::terminal_stall_grace_secs`], published so the
 /// outbound queue's own default cannot drift from the config's.
 pub const DEFAULT_TERMINAL_STALL_GRACE_SECS: u64 = 15;
+
+/// The default for [`ServerConfig::p2p_token_expiry_secs`], published so a
+/// test that needs a credential to be *expired* can derive one rather than
+/// hard-code a number that would silently stop testing expiry if the default
+/// moved.
+pub const DEFAULT_P2P_TOKEN_EXPIRY_SECS: u64 = 300;
 
 /// The default for [`ServerConfig::query_concurrency_per_connection`], published
 /// for the same reason: the query lane's own default is this number.
@@ -74,6 +95,7 @@ impl Default for ServerConfig {
             db_path: default_db_path(),
             terminal_stall_grace_secs: default_terminal_stall_grace(),
             query_concurrency_per_connection: default_query_concurrency(),
+            p2p_token_expiry_secs: default_p2p_token_expiry(),
             logging: LoggingConfig::default(),
         }
     }
@@ -85,6 +107,10 @@ fn default_terminal_stall_grace() -> u64 {
 
 fn default_query_concurrency() -> usize {
     DEFAULT_QUERY_CONCURRENCY_PER_CONNECTION
+}
+
+fn default_p2p_token_expiry() -> u64 {
+    DEFAULT_P2P_TOKEN_EXPIRY_SECS
 }
 
 fn default_heartbeat_interval() -> u64 {
