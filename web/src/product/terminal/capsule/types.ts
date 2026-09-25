@@ -3,7 +3,10 @@ import type { CapabilityDisclosureEntry, CapabilityId } from '@/product/capabili
 
 export type CapsuleExperience = 'web' | 'app';
 
-export type CapsulePopoverId = 'history' | 'commands';
+/** The composer's one anchored popover. `commands` was retired with the App
+ *  `input | commands` mode (#1034): the capability entry and the Terminal Keys
+ *  projection are secondary *surfaces* now, not a second popover. */
+export type CapsulePopoverId = 'history';
 
 /** Content-driven Input composer layout (spec: flat-stacked). */
 export type ComposerLayout = 'flat' | 'stacked';
@@ -80,4 +83,16 @@ export interface CapsuleCapabilityProjection {
   onDismiss: () => void;
   /** Present when the capability has somewhere deeper to go. */
   onOpenWorkspace?: (resourceId?: string) => void;
+  /**
+   * Whether this projection claims the soft keyboard while it is up (#1034).
+   *
+   * Read back from the capability's own binding, not derived here: the capsule
+   * has no capability ids and must not grow any, so a projection that needs the
+   * keys (Terminal Keys) and one that is read while typing (Git's Signal and
+   * Peek) are told apart by the capability declaring which it is.
+   *
+   * Absent means the composer keeps input focus — a capability that has not
+   * asked for the keyboard never has it taken away.
+   */
+  ownsInputFocus?: boolean;
 }

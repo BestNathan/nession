@@ -36,6 +36,27 @@ export interface CapsuleProjectionBinding {
    * not earned a step that opens onto nothing.
    */
   supportsPeek?: boolean;
+  /**
+   * Whether this projection claims the soft keyboard while it is up (#1034).
+   *
+   * The keyboard is the contested resource, and it is contested asymmetrically.
+   * A projection the user *taps* to drive the terminal — Terminal Keys — cannot
+   * share the screen with an IME: the keyboard would cover the accessory it is
+   * competing with, and every key the user wants is behind it. A projection that
+   * is meant to be read *while* typing — Git's Signal and Peek, for a
+   * `git commit` in progress — has the opposite requirement, and taking the
+   * keyboard away from it would be the bug.
+   *
+   * Only the capability knows which of the two it is, so it says so here rather
+   * than the capsule recognising it by id. That is the whole point of the flag:
+   * `TerminalCapsule` reacts to this boolean and never learns a capability name,
+   * which is what lets a second tap-driven accessory arrive later without
+   * touching the capsule.
+   *
+   * Defaults to false: a capability that has not said it needs the keyboard does
+   * not get to take it away from the composer.
+   */
+  ownsInputFocus?: boolean;
   body: (props: {
     agentId: string | undefined;
     sessionId: string | undefined;

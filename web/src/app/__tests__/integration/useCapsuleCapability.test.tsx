@@ -122,6 +122,26 @@ describe('capsule emergence', () => {
     expect(result.current.projection?.onOpenWorkspace).toBeTypeOf('function');
   });
 
+  it('carries the capability’s own answer about the soft keyboard', () => {
+    // #1034 §5. Terminal Keys and an IME want the same vertical space, so that
+    // projection claims input focus while it is up; Git's Signal and Peek are
+    // read *while* typing (`git commit`), so taking the keyboard from them would
+    // be the regression, not the fix.
+    //
+    // This asymmetry is the design, and the capsule has no capability ids — so
+    // this flag is the entire mechanism by which the two are told apart, and it
+    // has to arrive on the resolved projection for any of it to work.
+    const { result, choose } = setup();
+
+    choose('terminal-keys');
+    expect(result.current.projection?.id).toBe('terminal-keys');
+    expect(result.current.projection?.ownsInputFocus).toBe(true);
+
+    choose('git');
+    expect(result.current.projection?.id).toBe('git');
+    expect(result.current.projection?.ownsInputFocus).toBeFalsy();
+  });
+
   it('leaves a capability with no Terminal depth to the Workspace', () => {
     // Files has no Signal to emerge; the entry keeps doing what it always did.
     const { result, choose, onToolChange, onSurfaceChange } = setup();

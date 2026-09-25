@@ -1,4 +1,4 @@
-import { useCallback, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { CAPSULE_EXPERIENCE } from '@/product/terminal/capsule/config/experience';
 import { CapsuleShell } from '@/product/terminal/capsule/components/CapsuleShell';
 import { InputComposer } from '@/product/terminal/capsule/components/InputComposer';
@@ -47,6 +47,49 @@ export function TerminalCapsule({
   const dockRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const inputRowRef = useRef<HTMLDivElement>(null);
+  const fieldRef = useRef<HTMLTextAreaElement>(null);
+
+  /**
+   * A projection that claims the keyboard, and the composer competing for it.
+   *
+   * Both halves of #1034's input-focus rules read one boolean the capability
+   * declared — never a capability id — so the capsule stays generic: a second
+   * tap-driven accessory arrives with the flag and this file does not change.
+   */
+  const projectionOwnsInputFocus = Boolean(capabilityProjection?.ownsInputFocus);
+  const projectionId = capabilityProjection?.id ?? null;
+
+  /**
+   * The accessory takes the keyboard when it appears.
+   *
+   * Blurring the field is *how* a soft keyboard is dismissed — there is no
+   * declarative equivalent — and leaving it focused would put the IME on top of
+   * the keys the accessory exists to expose (#1034 §5, criterion 7).
+   *
+   * Keyed on the projection's identity as well as the flag: a projection that
+   * replaces another one still claims the keyboard on arrival, and two
+   * keyboard-owning surfaces are already mutually exclusive by construction.
+   */
+  useEffect(() => {
+    if (projectionOwnsInputFocus) {
+      fieldRef.current?.blur();
+    }
+  }, [projectionId, projectionOwnsInputFocus]);
+
+  /**
+   * …and the composer takes it back when the user reaches for it.
+   *
+   * Tapping the field dismisses the projection rather than merely focusing the
+   * field. That is what makes the two secondary surfaces exclusive (criterion
+   * 14) and what returns the user to text entry (criterion 8): the dismissal
+   * steps the projection out and nothing else — the Session and the Terminal are
+   * not touched, because neither is part of what was dismissed.
+   */
+  const handleFieldFocus = useCallback(() => {
+    if (projectionOwnsInputFocus) {
+      capabilityProjection?.onDismiss();
+    }
+  }, [capabilityProjection, projectionOwnsInputFocus]);
 
   // The shell, not the dock: the dock also carries a capability projection when
   // one has emerged, and reserving terminal height for a temporary surface
@@ -121,7 +164,12 @@ export function TerminalCapsule({
           ) : null
         }
       >
-        <InputComposer ref={inputRowRef} capabilityDisclosure={capabilityDisclosure} />
+        <InputComposer
+          ref={inputRowRef}
+          capabilityDisclosure={capabilityDisclosure}
+          onFieldFocus={handleFieldFocus}
+          fieldRef={fieldRef}
+        />
       </CapsuleShell>
     </CapsuleProvider>
   );

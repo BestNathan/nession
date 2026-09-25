@@ -92,30 +92,6 @@ export const capsuleIconVisualClass =
 export const capsuleControlRowClass =
   'relative z-[1] flex h-[length:var(--control-md)] shrink-0 items-center gap-[length:var(--terminal-capsule-control-gap)]';
 
-/** Dialog layer above composer popovers (--terminal-capsule-popover-zindex is 100). */
-export const capsuleDialogContentClass = 'z-[110]';
-
-export const capsuleCommandsPanelClass =
-  'flex h-full min-h-0 flex-col overflow-hidden bg-popover text-popover-foreground';
-
-export const capsuleCommandsAppOverlayPanelClass =
-  'pointer-events-auto absolute inset-x-[length:var(--terminal-capsule-shell-inset)] z-[15] flex flex-col overflow-hidden rounded-t-xl border border-border/60 bg-popover text-popover-foreground shadow-lg';
-
-export const capsuleCommandsPanelKeysRegionClass =
-  'flex min-h-0 flex-1 flex-col justify-center border-b border-border/60';
-
-export const capsuleCommandsPanelCommandsRegionClass =
-  'flex min-h-0 flex-1 flex-col overflow-hidden';
-
-export const capsuleCommandsPanelHeaderClass =
-  'flex shrink-0 items-center justify-end gap-[length:var(--terminal-capsule-popover-gap)] px-[length:var(--terminal-capsule-popover-pad)] pt-[length:var(--terminal-capsule-popover-inner-pad)]';
-
-export const capsuleCommandsPanelListClass =
-  'min-h-0 flex-1 overflow-y-auto';
-
-export const capsuleCommandsDismissLayerClass =
-  'absolute inset-x-0 top-0 z-10 cursor-default';
-
 /** Floating control surface — the shared elevation, no border (visual-language.md
  *  "several floating surfaces ... must read as one group", terminal-capsule.md
  *  § Surface treatment). Every Nession-owned floating surface uses this token;
@@ -214,46 +190,7 @@ export const capsuleChainBarClass =
 export const capsuleMiniButtonClass =
   'h-[length:var(--terminal-capsule-mini-control-height)] text-[length:var(--terminal-capsule-caption-font-size)]';
 
-export const capsuleCommandsScrollClass =
-  'flex min-w-0 flex-1 items-center overflow-x-auto scrollbar-none';
-
-export const capsuleCommandsMoreClass =
-  'shrink-0';
-
-export const capsuleDialogStackClass = 'flex flex-col gap-[length:var(--terminal-capsule-dialog-gap)]';
-
 export const capsuleChipRowClass = 'flex flex-wrap gap-[length:var(--terminal-capsule-chip-gap)]';
-
-export const capsuleChipButtonClass =
-  'h-[length:var(--control-md)] px-[length:var(--terminal-capsule-popover-item-pad-x)] text-[length:var(--terminal-capsule-font-size)]';
-
-export const capsuleKeyInputClass =
-  'h-[length:var(--control-md)] w-[length:var(--terminal-capsule-key-input-width)] text-center font-mono text-[length:var(--terminal-capsule-font-size)]';
-
-export const capsuleDialogInputClass =
-  'h-[length:var(--control-md)] text-[length:var(--terminal-capsule-font-size)]';
-
-export const capsuleDialogActionRowClass =
-  'flex justify-end gap-[length:var(--terminal-capsule-popover-gap)]';
-
-export const capsuleDialogMaxWidthClass = 'max-w-[length:var(--terminal-capsule-dialog-max-width)]';
-
-export const capsuleTabRowClass =
-  'mb-[length:var(--terminal-capsule-dialog-gap)] flex gap-[length:var(--terminal-capsule-chip-gap)]';
-
-export const capsuleTabButtonClass =
-  'h-[length:var(--terminal-capsule-tab-height)] px-[length:var(--terminal-capsule-popover-inner-pad)] text-[length:var(--terminal-capsule-font-size)]';
-
-export const capsuleIconCloseButtonClass =
-  'h-[length:var(--terminal-capsule-icon-close-size)] w-[length:var(--terminal-capsule-icon-close-size)] shrink-0 text-muted-foreground hover:text-destructive';
-
-export const capsuleAddCommandFooterClass =
-  'h-[length:var(--control-md)] w-full rounded-none text-[length:var(--terminal-capsule-font-size)]';
-
-export const capsuleAddCommandIconClass =
-  'mr-[length:var(--terminal-capsule-popover-inner-pad)] size-[length:var(--terminal-capsule-phys-key-icon-size)]';
-
-export const capsuleIconCloseSvgClass = 'size-[length:var(--terminal-capsule-phys-key-icon-size)]';
 
 export const capsuleLabelTextClass =
   'shrink-0 text-[length:var(--terminal-capsule-font-size)] text-muted-foreground';

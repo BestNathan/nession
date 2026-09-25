@@ -1,4 +1,4 @@
-import { forwardRef } from 'react';
+import { forwardRef, type RefObject } from 'react';
 import { cn } from '@/shared/lib/utils';
 import type {
   CapsuleCapabilityDisclosure,
@@ -17,6 +17,15 @@ import { useCapsuleContext } from '@/product/terminal/capsule/state/useCapsuleCo
 interface InputComposerProps {
   /** Capabilities that earned no chip, reachable through the leading entry. */
   capabilityDisclosure?: CapsuleCapabilityDisclosure;
+  /**
+   * The field's focus events, passed straight through to it.
+   *
+   * The composer is a layout; what focus *means* is the capsule's, so these two
+   * travel from the capsule to the field without a decision in between (see
+   * `CapsuleGhostInput`).
+   */
+  onFieldFocus?: () => void;
+  fieldRef?: RefObject<HTMLTextAreaElement>;
 }
 
 /**
@@ -28,7 +37,7 @@ interface InputComposerProps {
  * and the tools sit beneath it, `+` still leftmost and send still rightmost.
  */
 export const InputComposer = forwardRef<HTMLDivElement, InputComposerProps>(
-  function InputComposer({ capabilityDisclosure }, ref) {
+  function InputComposer({ capabilityDisclosure, onFieldFocus, fieldRef }, ref) {
     const ctx = useCapsuleContext();
     const {
       inputValue,
@@ -90,6 +99,8 @@ export const InputComposer = forwardRef<HTMLDivElement, InputComposerProps>(
             disabled={disabled}
             placeholder={intentPlaceholder}
             onEnter={send}
+            onFocus={onFieldFocus}
+            fieldRef={fieldRef}
           />
         </div>
 

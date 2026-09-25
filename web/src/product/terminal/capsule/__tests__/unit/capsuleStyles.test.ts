@@ -1,7 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import {
-  capsuleCommandsDismissLayerClass,
-  capsuleCommandsAppOverlayPanelClass,
   capsuleIconButtonClass,
   capsuleIconVisualClass,
   capsulePhysKeyButtonClass,
@@ -38,15 +36,6 @@ describe('capsuleStyles', () => {
     expect(capsulePhysKeyIconClass).toContain(
       'var(--terminal-capsule-phys-key-icon-size)',
     );
-  });
-
-  it('overlay panel is absolutely positioned over the terminal host', () => {
-    expect(capsuleCommandsAppOverlayPanelClass).toContain('absolute');
-    expect(capsuleCommandsAppOverlayPanelClass).toContain('z-[15]');
-  });
-
-  it('dismiss layer sits below capsule dock z-index', () => {
-    expect(capsuleCommandsDismissLayerClass).toContain('z-10');
   });
 
   // #1034: the hit target and the drawn affordance are two axes on two elements.

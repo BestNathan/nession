@@ -19,9 +19,7 @@ export interface CapsuleState {
   applyLineCount: (lineCount: number) => void;
   openPopover: CapsulePopoverId | null;
   setHistoryOpen: (open: boolean) => void;
-  setCommandsOpen: (open: boolean) => void;
   historyOpen: boolean;
-  commandsOpen: boolean;
   disabled: boolean;
   send: () => void;
   pasteIntoInput: () => void;
@@ -49,10 +47,6 @@ export function useCapsuleState({
     setOpenPopover(open ? 'history' : null);
   }, []);
 
-  const setCommandsOpen = useCallback((open: boolean) => {
-    setOpenPopover(open ? 'commands' : null);
-  }, []);
-
   const applyLineCount = useCallback(
     (lineCount: number) => {
       setComposerLayout(layoutFromLineCount(lineCount));
@@ -70,8 +64,7 @@ export function useCapsuleState({
     setInputValue('');
     setComposerLayout('flat');
     setHistoryOpen(false);
-    setCommandsOpen(false);
-  }, [addEntry, inputValue, sendText, setCommandsOpen, setComposerLayout, setHistoryOpen]);
+  }, [addEntry, inputValue, sendText, setComposerLayout, setHistoryOpen]);
 
   const pasteIntoInput = useCallback(() => {
     if (!navigator.clipboard?.readText) {
@@ -104,9 +97,7 @@ export function useCapsuleState({
       applyLineCount,
       openPopover,
       setHistoryOpen,
-      setCommandsOpen,
       historyOpen: openPopover === 'history',
-      commandsOpen: openPopover === 'commands',
       disabled,
       send,
       pasteIntoInput,
@@ -121,7 +112,6 @@ export function useCapsuleState({
       openPopover,
       pasteIntoInput,
       send,
-      setCommandsOpen,
       setComposerLayout,
       setHistoryOpen,
     ],

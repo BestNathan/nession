@@ -3,14 +3,6 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { TerminalCapsule } from '@/product/terminal/capsule/TerminalCapsule';
 
-vi.mock('@/capabilities/commands/hooks/useQuickCommands', () => ({
-  useQuickCommands: () => ({
-    userCommands: [],
-    addCommand: vi.fn().mockResolvedValue(undefined),
-    deleteCommand: vi.fn().mockResolvedValue(undefined),
-  }),
-}));
-
 vi.mock('@/product/terminal/hooks/useCommandHistory', () => ({
   useCommandHistory: () => ({
     addEntry: vi.fn(),

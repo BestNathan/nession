@@ -50,9 +50,8 @@ function CapsuleCapabilityMore({ disclosure }: { disclosure: CapsuleCapabilityDi
           // block-level box rather than an inline `<svg>`: without it the drawn
           // circle would sit in the corner of the 44px hit target instead of
           // being centered in it, and the button's own centering of inline
-          // content would not apply. Sibling triggers that are not `Button`s
-          // already carry the same pairing (CapsuleHistoryPopover,
-          // CapsuleCommandsPopover).
+          // content would not apply. The sibling trigger that is not a `Button`
+          // carries the same pairing (CapsuleHistoryPopover).
           className={cn(
             capsuleIconButtonClass,
             'inline-flex items-center justify-center bg-transparent hover:bg-transparent',
