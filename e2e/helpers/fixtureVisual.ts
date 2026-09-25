@@ -75,7 +75,7 @@ export async function gotoFixtureWorkspace(page: Page): Promise<void> {
 
 export async function gotoFixtureApp(page: Page): Promise<void> {
   await page.goto('/#/fixture/app');
-  await page.getByTestId('app-spatial-shell').waitFor();
+  await page.getByTestId('app-layer-root').waitFor();
 }
 
 /** Wait for xterm to paint fixture buffer (renderer-agnostic). */

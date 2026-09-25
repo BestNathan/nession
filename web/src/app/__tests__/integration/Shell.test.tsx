@@ -419,27 +419,27 @@ describe('Shell', () => {
 
   // The Web back-to-list control is gone with the header (#748). Web never
   // needed one: at wide the sidebar is a column, and below `lg` a selected
-  // Session hands off to the App spatial shell, which carries its own nav.
+  // Session hands off to the App's layer composition, which carries its own nav.
 
-  it('mounts AppSpatialShell on mobile when a session is selected (no XOR back)', async () => {
+  it('mounts the App layer composition on mobile when a session is selected (no XOR back)', async () => {
     mobileNav.isWide = false;
     mobileNav.showList = true;
     mobileNav.showDetail = false;
     renderShell();
-    expect(screen.queryByTestId('app-spatial-shell')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('app-layer-root')).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByTestId('session-item-a1:fix'));
-    expect(screen.getByTestId('app-spatial-shell')).toBeInTheDocument();
+    expect(screen.getByTestId('app-layer-root')).toBeInTheDocument();
     expect(screen.queryByTestId('back-to-list')).not.toBeInTheDocument();
   });
 
-  it('does not mount AppSpatialShell on desktop after selecting a session', async () => {
+  it('does not mount the App layer composition on desktop after selecting a session', async () => {
     mobileNav.isWide = true;
     mobileNav.showList = true;
     mobileNav.showDetail = true;
     deepLink.sessionIdFromUrl = sess.session_id;
     renderShell();
     await userEvent.click(screen.getByTestId('session-item-a1:fix'));
-    expect(screen.queryByTestId('app-spatial-shell')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('app-layer-root')).not.toBeInTheDocument();
   });
 });

@@ -1,8 +1,6 @@
 import { useEffect, useState } from 'react';
-import {
-  AppSpatialShell,
-  type SpatialPageIndex,
-} from '@/app/experiences/app/AppSpatialShell';
+import { AppLayout } from '@/app/experiences/app/AppLayout';
+import { useAppLayer } from '@/app/experiences/app/useAppLayer';
 import { mapDomainState } from '@/product/session/model/domainState';
 import { FixtureTerminal } from '@/app/fixture/FixtureTerminal';
 import {
@@ -11,8 +9,6 @@ import {
   FIXTURE_SELECTED_ID,
   FIXTURE_SESSIONS,
 } from '@/app/fixture/fixtureData';
-import { ShellMain } from '@/app/ShellMain';
-import { Sidebar } from '@/app/Sidebar';
 import type { Surface } from '@/app/patterns/SessionHeader';
 import type { CapabilityId } from '@/product/capability';
 import { gitApi } from '@/capabilities/git';
@@ -24,10 +20,16 @@ import { fixtureGitSurface } from './fixtureGit';
 const fixtureOps = fixtureFileOps();
 
 /**
- * Canonical App Active Terminal screen (#561 Phase 2C): the spatial
- * 3-page pager at 390×844 — single-row App header, static terminal with
- * the app scroll overlay, files plugin app layout, deterministic data.
- * No network. Also the Phase 6 baseline source.
+ * Canonical App Active Terminal screen (#561 Phase 2C): the Terminal-root
+ * layer composition at 390×844 (#1049) — single-row App header, static
+ * terminal with the app scroll overlay, files plugin app layout,
+ * deterministic data. No network. Also the Phase 6 baseline source.
+ *
+ * The fixture renders `AppLayout` directly rather than reimplementing the
+ * composition, so the canonical baseline reflects shipped geometry. It used to
+ * build its own `AppSpatialShell` with a reversed surface/index derivation,
+ * which meant the fixture and the product could disagree about the shell
+ * without any test noticing.
  */
 export function FixtureApp() {
   // A capability projection has to be reachable from a fixture to be captured,
@@ -37,10 +39,7 @@ export function FixtureApp() {
   // screenshots are unaffected unless a case opens one.
   useEffect(() => gitApi.install(fixtureGitSurface('')), []);
 
-  const [spatialIndex, setSpatialIndex] = useState<SpatialPageIndex>(1);
-  // Surface derives from the pager position — page 2 is the workspace,
-  // every other position is the terminal page.
-  const surface: Surface = spatialIndex === 2 ? 'workspace' : 'terminal';
+  const [surface, setSurface] = useState<Surface>('terminal');
   const [tool, setTool] = useState<CapabilityId>('files');
 
   const selectedId = FIXTURE_SELECTED_ID;
@@ -91,11 +90,18 @@ export function FixtureApp() {
     tool,
     fileOps: fixtureOps,
     connectionStatus: 'connected' as const,
-    onSurfaceChange: (s: Surface) =>
-      setSpatialIndex(s === 'workspace' ? 2 : 1),
+    onSurfaceChange: setSurface,
     onToolChange: setTool,
     onOpenAgent: () => {},
   };
+
+  const { layer, onLayerChange, onLayerSelect } = useAppLayer({
+    selectedId,
+    surface,
+    active: true,
+    onSurfaceChange: setSurface,
+    onSelect: () => {},
+  });
 
   return (
     <div
@@ -104,42 +110,13 @@ export function FixtureApp() {
       data-experience="app"
       className="shell flex h-[100dvh] flex-col bg-background"
     >
-      <AppSpatialShell
-        index={spatialIndex}
-        onIndexChange={setSpatialIndex}
-        sessions={
-          <Sidebar
-            {...sidebarProps}
-            onSelect={() => setSpatialIndex(1)}
-          />
-        }
-        terminal={
-          <div className="flex h-full min-h-0 flex-col">
-            <ShellMain
-              {...mainShared}
-              surface={surface}
-              showWorkspace={false}
-              experience="app"
-              onOpenDrawer={() => setSpatialIndex(0)}
-              onOpenWorkspace={() => setSpatialIndex(2)}
-              terminal={(chrome) => (
-                <div className="relative h-full">
-                  <FixtureTerminal chrome={chrome} />
-                </div>
-              )}
-            />
-          </div>
-        }
-        workspace={
-          <div className="flex h-full min-h-0 flex-col">
-            <ShellMain
-              {...mainShared}
-              surface={surface}
-              showTerminal={false}
-              experience="app"
-            />
-          </div>
-        }
+      <AppLayout
+        layer={layer}
+        onLayerChange={onLayerChange}
+        sidebarProps={sidebarProps}
+        onLayerSelect={onLayerSelect}
+        mainShared={mainShared}
+        terminal={(chrome) => <FixtureTerminal chrome={chrome} />}
       />
     </div>
   );
