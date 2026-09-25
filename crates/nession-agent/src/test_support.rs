@@ -169,17 +169,56 @@ pub(crate) struct FakeTmux {
     socket: PathBuf,
 }
 
+/// Install `body` at `bin`, with the file created by a **child** process.
+///
+/// The path a test execs must never be one this process has open for writing.
+/// `fork` copies the whole descriptor table, so while this process holds a write
+/// descriptor on that path, every child it forks inherits a copy — and this
+/// crate's tests fork constantly, because the PTY and control backends *spawn*
+/// tmux clients while other tests keep making awaited calls. `O_CLOEXEC` drops
+/// the inherited copy only once that child reaches its own `exec`; until then
+/// the inode's write count is positive, and an `exec` of the same path fails
+/// with `ETXTBSY` — `Text file busy (os error 26)`, the failure #1026 records.
+///
+/// So the content goes to a path that is **never exec'd**, and a child `cp`
+/// creates the one that is. This process's descriptor table then holds no write
+/// descriptor on `bin`, and a fork has nothing to copy.
+///
+/// `rename` looks like it would do the same and does not: it moves a directory
+/// entry, so the inode — and its write count — is the one that was written.
+/// Measured on Linux, the kernel CI runs, in the shape these tests have (writer
+/// threads plus threads forking continuously, 6000 attempts each): writing in
+/// this process gave `ETXTBSY` 49 and then 54; `rename` gave 174 where writing
+/// gave 125; this gave 0. Only the zero is evidence — the failure is rare enough
+/// that a quiet run on its own would prove nothing.
+#[cfg(unix)]
+pub(crate) fn install_via_a_child(bin: &Path, body: &str) -> std::io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let src = bin.with_extension("src");
+    std::fs::write(&src, body)?;
+    let status = std::process::Command::new("cp").arg(&src).arg(bin).status();
+    let _ = std::fs::remove_file(&src);
+    if !status?.success() {
+        return Err(std::io::Error::other(
+            "installing the fake tmux: cp exited with a failure status",
+        ));
+    }
+    // `chmod` does not open the file, so this cannot reintroduce the window.
+    let mut perms = std::fs::metadata(bin)?.permissions();
+    perms.set_mode(0o755);
+    std::fs::set_permissions(bin, perms)
+}
+
 #[cfg(unix)]
 impl FakeTmux {
     /// Write the fake into `dir`. Panics if it cannot be written or made
     /// executable — a fake that silently failed to install would take a test
     /// down a path that looks like the wiring under test.
     pub(crate) fn new(dir: &Path, script: &str) -> Self {
-        use std::os::unix::fs::PermissionsExt;
         let bin = dir.join("tmux");
-        std::fs::write(
+        install_via_a_child(
             &bin,
-            format!(
+            &format!(
                 "#!/bin/sh\n\
                  if [ \"$1\" = \"-S\" ]; then shift 2; fi\n\
                  n=0\n\
@@ -201,12 +240,7 @@ impl FakeTmux {
                 sep = CALL_SEPARATOR,
             ),
         )
-        .expect("write the fake tmux");
-        let mut perms = std::fs::metadata(&bin)
-            .expect("fake tmux metadata")
-            .permissions();
-        perms.set_mode(0o755);
-        std::fs::set_permissions(&bin, perms).expect("chmod the fake tmux");
+        .expect("install the fake tmux");
         Self {
             bin: bin.to_string_lossy().into_owned(),
             dir: dir.to_path_buf(),
@@ -283,6 +317,40 @@ impl FakeTmux {
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
     }
+}
+
+/// How long a test lets an *injected* binary take, on every command.
+///
+/// The production bounds — 2 s list, 5 s kill, 10 s create — are for real tmux
+/// on a real machine. A test that drives a fake through one of those paths is
+/// racing them, and the race is not benign in either direction. On a loaded
+/// machine the spawn alone can exceed the bound, and the timeout surfaces in
+/// the *same channel* as the error the test is checking for — so a test
+/// asserting on tmux's own words reports "the reason was lost" when the truth
+/// is "the call never got to run", and a weaker assertion (`is_err()`) passes
+/// for the wrong reason instead. Measured: one `Staging` run failed on exactly
+/// that substitution (#1026).
+///
+/// Generous, not infinite: a genuinely stuck call still ends the test, just
+/// later. This bounds how long the *fixture* may take; it claims nothing about
+/// how fast the code under test is.
+#[cfg(unix)]
+pub(crate) const FAKE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// A manager addressed at an injected binary, with [`FAKE_TIMEOUT`] on every
+/// command.
+///
+/// Tests that inject a binary are asking what the caller does with what it
+/// says, not whether the machine is fast; giving them the production bounds
+/// makes them answer a question nobody asked. Prefer this over
+/// `SessionManager::new()` + `with_tmux_bin` so the bound cannot be forgotten
+/// one call site at a time.
+#[cfg(unix)]
+pub(crate) fn manager_with_fake(bin: &str) -> crate::tmux::manager::SessionManager {
+    let mut mgr = crate::tmux::manager::SessionManager::new();
+    mgr.with_tmux_bin(bin);
+    mgr.with_timeouts(FAKE_TIMEOUT, FAKE_TIMEOUT, FAKE_TIMEOUT);
+    mgr
 }
 
 /// The recorder is written by more than one process, so one call has to be
