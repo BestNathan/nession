@@ -169,17 +169,56 @@ pub(crate) struct FakeTmux {
     socket: PathBuf,
 }
 
+/// Install `body` at `bin`, with the file created by a **child** process.
+///
+/// The path a test execs must never be one this process has open for writing.
+/// `fork` copies the whole descriptor table, so while this process holds a write
+/// descriptor on that path, every child it forks inherits a copy — and this
+/// crate's tests fork constantly, because the PTY and control backends *spawn*
+/// tmux clients while other tests keep making awaited calls. `O_CLOEXEC` drops
+/// the inherited copy only once that child reaches its own `exec`; until then
+/// the inode's write count is positive, and an `exec` of the same path fails
+/// with `ETXTBSY` — `Text file busy (os error 26)`, the failure #1026 records.
+///
+/// So the content goes to a path that is **never exec'd**, and a child `cp`
+/// creates the one that is. This process's descriptor table then holds no write
+/// descriptor on `bin`, and a fork has nothing to copy.
+///
+/// `rename` looks like it would do the same and does not: it moves a directory
+/// entry, so the inode — and its write count — is the one that was written.
+/// Measured on Linux, the kernel CI runs, in the shape these tests have (writer
+/// threads plus threads forking continuously, 6000 attempts each): writing in
+/// this process gave `ETXTBSY` 49 and then 54; `rename` gave 174 where writing
+/// gave 125; this gave 0. Only the zero is evidence — the failure is rare enough
+/// that a quiet run on its own would prove nothing.
+#[cfg(unix)]
+pub(crate) fn install_via_a_child(bin: &Path, body: &str) -> std::io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let src = bin.with_extension("src");
+    std::fs::write(&src, body)?;
+    let status = std::process::Command::new("cp").arg(&src).arg(bin).status();
+    let _ = std::fs::remove_file(&src);
+    if !status?.success() {
+        return Err(std::io::Error::other(
+            "installing the fake tmux: cp exited with a failure status",
+        ));
+    }
+    // `chmod` does not open the file, so this cannot reintroduce the window.
+    let mut perms = std::fs::metadata(bin)?.permissions();
+    perms.set_mode(0o755);
+    std::fs::set_permissions(bin, perms)
+}
+
 #[cfg(unix)]
 impl FakeTmux {
     /// Write the fake into `dir`. Panics if it cannot be written or made
     /// executable — a fake that silently failed to install would take a test
     /// down a path that looks like the wiring under test.
     pub(crate) fn new(dir: &Path, script: &str) -> Self {
-        use std::os::unix::fs::PermissionsExt;
         let bin = dir.join("tmux");
-        std::fs::write(
+        install_via_a_child(
             &bin,
-            format!(
+            &format!(
                 "#!/bin/sh\n\
                  if [ \"$1\" = \"-S\" ]; then shift 2; fi\n\
                  n=0\n\
@@ -201,12 +240,7 @@ impl FakeTmux {
                 sep = CALL_SEPARATOR,
             ),
         )
-        .expect("write the fake tmux");
-        let mut perms = std::fs::metadata(&bin)
-            .expect("fake tmux metadata")
-            .permissions();
-        perms.set_mode(0o755);
-        std::fs::set_permissions(&bin, perms).expect("chmod the fake tmux");
+        .expect("install the fake tmux");
         Self {
             bin: bin.to_string_lossy().into_owned(),
             dir: dir.to_path_buf(),
