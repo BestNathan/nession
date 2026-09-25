@@ -285,6 +285,40 @@ impl FakeTmux {
     }
 }
 
+/// How long a test lets an *injected* binary take, on every command.
+///
+/// The production bounds — 2 s list, 5 s kill, 10 s create — are for real tmux
+/// on a real machine. A test that drives a fake through one of those paths is
+/// racing them, and the race is not benign in either direction. On a loaded
+/// machine the spawn alone can exceed the bound, and the timeout surfaces in
+/// the *same channel* as the error the test is checking for — so a test
+/// asserting on tmux's own words reports "the reason was lost" when the truth
+/// is "the call never got to run", and a weaker assertion (`is_err()`) passes
+/// for the wrong reason instead. Measured: one `Staging` run failed on exactly
+/// that substitution (#1026).
+///
+/// Generous, not infinite: a genuinely stuck call still ends the test, just
+/// later. This bounds how long the *fixture* may take; it claims nothing about
+/// how fast the code under test is.
+#[cfg(unix)]
+pub(crate) const FAKE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// A manager addressed at an injected binary, with [`FAKE_TIMEOUT`] on every
+/// command.
+///
+/// Tests that inject a binary are asking what the caller does with what it
+/// says, not whether the machine is fast; giving them the production bounds
+/// makes them answer a question nobody asked. Prefer this over
+/// `SessionManager::new()` + `with_tmux_bin` so the bound cannot be forgotten
+/// one call site at a time.
+#[cfg(unix)]
+pub(crate) fn manager_with_fake(bin: &str) -> crate::tmux::manager::SessionManager {
+    let mut mgr = crate::tmux::manager::SessionManager::new();
+    mgr.with_tmux_bin(bin);
+    mgr.with_timeouts(FAKE_TIMEOUT, FAKE_TIMEOUT, FAKE_TIMEOUT);
+    mgr
+}
+
 /// The recorder is written by more than one process, so one call has to be
 /// recorded in one piece.
 ///
