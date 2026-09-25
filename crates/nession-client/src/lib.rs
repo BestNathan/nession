@@ -42,11 +42,13 @@
 
 pub mod connection;
 pub mod error;
+pub mod p2p;
 pub mod unit;
 pub mod units;
 pub mod wire;
 
 pub use connection::{open_ws, ClientConfig, ClientConnection, WsStream, DEFAULT_REQUEST_TIMEOUT};
 pub use error::ClientError;
+pub use p2p::{attach_frame, P2pConnection};
 pub use unit::{proto_msg, UnitRequest};
 pub use units::AttachMode;
