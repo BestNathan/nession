@@ -82,45 +82,14 @@ fn test_sessions_list_no_server() {
     assert!(stderr.contains("Failed to connect") || stderr.contains("Connection refused"));
 }
 
-#[test]
-fn test_agent_info_deserialization() {
-    use nession_cli::client::connection::AgentInfo;
-
-    let json_data = r#"{
-        "agent_id": "agent_001",
-        "hostname": "dev-server-01",
-        "ip_address": "192.168.1.100",
-        "port": 8080,
-        "status": "online",
-        "session_count": 5,
-        "last_heartbeat": "2024-01-15T10:30:00Z"
-    }"#;
-
-    let agent: AgentInfo = serde_json::from_str(json_data).expect("Failed to deserialize");
-    assert_eq!(agent.agent_id, "agent_001");
-    assert_eq!(agent.hostname, "dev-server-01");
-    assert_eq!(agent.status, "online");
-    assert_eq!(agent.session_count, 5);
-}
-
-#[test]
-fn test_session_info_deserialization() {
-    use nession_cli::client::connection::SessionInfo;
-
-    let json_data = r#"{
-        "session_id": "agent_001:dev-work",
-        "agent_id": "agent_001",
-        "session_name": "dev-work",
-        "status": "active",
-        "window_count": 3,
-        "attached_clients": 1
-    }"#;
-
-    let session: SessionInfo = serde_json::from_str(json_data).expect("Failed to deserialize");
-    assert_eq!(session.session_id, "agent_001:dev-work");
-    assert_eq!(session.agent_id, "agent_001");
-    assert_eq!(session.session_name, "dev-work");
-    assert_eq!(session.status, "active");
-    assert_eq!(session.window_count, 3);
-    assert_eq!(session.attached_clients, 1);
-}
+// The two deserialization tests that lived here fed seven-field and six-field
+// JSON into the CLI's own `AgentInfo` / `SessionInfo`. Both types are gone
+// (#1015): the CLI renders `WebAgentInfo` and `WebSessionInfo` now, and the
+// fixtures above would no longer parse — which is the protection, not a
+// casualty. Those structs named 7 and 6 fields against builders that send 13
+// and 8, so a reply carrying all of them failed to deserialize and a reply
+// carrying fewer than the local copy silently succeeded for the wrong shape.
+//
+// Decoding is asserted where the types live now: `crates/nession-client/tests/`
+// runs it against a real Server's reply rather than against a fixture that
+// agreed with a second copy of the same literals.

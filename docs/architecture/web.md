@@ -260,7 +260,8 @@ src/
 │   │                        #   is available and deliberately not taken here.
 │   ├── experiences/         # per-experience composition
 │   │   ├── web/             #   WebLayout + workspaceViews
-│   │   └── app/             #   spatial shell, gestures, AppToolScroll, workspaceViews
+│   │   └── app/             #   spatial shell, gestures, AppToolScroll, AppSessionsSurface,
+│   │                        #   workspaceViews
 │   ├── workspace/           # WorkspaceShell, capabilities.ts, viewBindings.ts,
 │   │                        #   workspaceContext.ts, presentation.ts
 │   ├── fixture/             # deterministic screens for /fixture visual tests

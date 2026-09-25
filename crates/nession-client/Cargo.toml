@@ -1,0 +1,60 @@
+[package]
+name = "nession-client"
+version.workspace = true
+edition.workspace = true
+
+# A Nession Server consumer's boundary: transport, request/reply correlation,
+# the `server.auth` handshake, and one typed method per Protocol Unit it speaks.
+#
+# It exists because two consumers share it — `nession-cli`, and the MCP host
+# #565 plans — and neither may own it. #1015's own non-goals forbid MCP
+# depending on the CLI, so a boundary living in the CLI could not be reached
+# from MCP. Same reasoning that put the two runtimes' shared execution
+# primitives in `nession-runtime` rather than inside one of them.
+#
+# The dependency list is the ownership rule here, for the reason
+# `nession-protocol`'s says it is there: what a crate can name is what it owns.
+#
+#   * no `nession-agent`, no `nession-server` — a *consumer* reads the contracts
+#     (`nession-protocol`), never a provider. This is the invariant made
+#     mechanical: this crate cannot spell the direct-to-agent management socket
+#     that #1015 exists to remove, because it cannot name the crate those types
+#     live in. `nession-cli` can, and does, today.
+#   * no `nession-common` — it is linked by every provider, and a provider runs
+#     no connection. Same omission, same reason, as `nession-runtime`.
+#   * no `anyhow` — a shared boundary is where typed errors pay. Callers attach
+#     their own user-facing sentences, and `nession-cli` has `anyhow` for that.
+#
+# It owns transport, correlation and errors. It owns no DTO: every request and
+# reply type it names is a `nession_protocol::contracts::…` type. A local copy
+# is how the boundary this replaces grew an `AgentInfo` that had quietly lost
+# eleven of `WebAgentInfo`'s fields.
+
+[dependencies]
+nession-protocol = { path = "../nession-protocol" }
+tokio.workspace = true
+tokio-tungstenite.workspace = true
+futures-util.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+
+# Test-only. A dev-dependency does not enter the shipped graph, so the rule
+# above still holds where it matters: nothing this crate *ships* can name a
+# provider. The integration tests need a real Server to prove typed decoding
+# against a real reply rather than against a fixture that agrees with itself.
+#
+# `nession-common` appears here and not above, and the distinction is the point
+# rather than a loophole: `ServerConfig` is how a caller *describes* a Server to
+# start, which is a thing a test does and this boundary never does. If the
+# boundary's own code ever needs it, that is the signal it has started owning a
+# Server instead of talking to one.
+[dev-dependencies]
+nession-server = { path = "../nession-server" }
+nession-common = { path = "../nession-common" }
+tempfile = "3"
+
+[lints]
+workspace = true

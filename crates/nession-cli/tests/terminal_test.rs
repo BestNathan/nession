@@ -55,16 +55,13 @@ async fn test_terminal_resize_message_format() {
 #[tokio::test]
 async fn test_extract_terminal_output_valid() {
     use base64::Engine;
-    let payload = nession_agent::server::websocket::TerminalOutputPayload {
+    let payload = nession_protocol::contracts::terminal::v1::TerminalOutputPayload {
         session_name: "s".into(),
         data: base64::engine::general_purpose::STANDARD.encode(b"test output"),
     };
-    let msg = nession_agent::server::websocket::Message {
-        msg_type: nession_agent::server::websocket::msg_types::TERMINAL_OUTPUT.to_string(),
-        id: "1".into(),
-        timestamp: 0,
-        payload,
-    };
+    // The agent's frame, built the way the agent builds it: the contract type
+    // and the wire constant this test is about.
+    let msg = nession_client::proto_msg(nession_client::wire::AGENT_TERMINAL_OUTPUT, payload);
     let s = serde_json::to_string(&msg).unwrap();
     let extracted = extract_terminal_output(&s);
     assert_eq!(extracted, Some(b"test output".to_vec()));
@@ -156,16 +153,13 @@ async fn test_message_routing_output_from_transport() {
     use base64::Engine;
 
     // Create a terminal.output message
-    let payload = nession_agent::server::websocket::TerminalOutputPayload {
+    let payload = nession_protocol::contracts::terminal::v1::TerminalOutputPayload {
         session_name: "s".into(),
         data: base64::engine::general_purpose::STANDARD.encode(b"output data"),
     };
-    let msg = nession_agent::server::websocket::Message {
-        msg_type: nession_agent::server::websocket::msg_types::TERMINAL_OUTPUT.to_string(),
-        id: "1".into(),
-        timestamp: 0,
-        payload,
-    };
+    // The agent's frame, built the way the agent builds it: the contract type
+    // and the wire constant this test is about.
+    let msg = nession_client::proto_msg(nession_client::wire::AGENT_TERMINAL_OUTPUT, payload);
     let msg_str = serde_json::to_string(&msg).unwrap();
 
     // Verify extraction

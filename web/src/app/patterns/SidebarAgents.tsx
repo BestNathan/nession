@@ -7,6 +7,15 @@ export interface SidebarAgentsProps {
   agents: Agent[];
   /** The agent the active Session runs on, if any. */
   activeAgentId: string | null;
+  /**
+   * Whether to draw the section's own "Agents" head.
+   *
+   * `false` for a caller that owns the head because it is also the section's
+   * disclosure trigger — the App's Sessions surface (#1050). Drawing it in both
+   * places would put two "Agents" labels in one disclosure. Defaults to `true`,
+   * which is what the Web sidebar renders and has always rendered.
+   */
+  showSectionHead?: boolean;
 }
 
 /**
@@ -27,7 +36,11 @@ export interface SidebarAgentsProps {
  * and the Boundary axis colours a node only when the boundary has been crossed —
  * see the note on the active marker below.
  */
-export function SidebarAgents({ agents, activeAgentId }: SidebarAgentsProps) {
+export function SidebarAgents({
+  agents,
+  activeAgentId,
+  showSectionHead = true,
+}: SidebarAgentsProps) {
   if (agents.length === 0) {
     return null;
   }
@@ -38,7 +51,7 @@ export function SidebarAgents({ agents, activeAgentId }: SidebarAgentsProps) {
       aria-label="Agents"
       className="flex shrink-0 flex-col px-[var(--shell-space-2)]"
     >
-      <SidebarSectionHead label="Agents" />
+      {showSectionHead ? <SidebarSectionHead label="Agents" /> : null}
       <ul className="flex flex-col">
         {agents.map((agent) => {
           const active = agent.agent_id === activeAgentId;

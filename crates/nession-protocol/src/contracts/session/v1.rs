@@ -128,15 +128,47 @@ pub(crate) fn default_attach_mode() -> String {
     "p2p".to_string()
 }
 
-/// Server → Client response to `server.session.attach`.
+/// `server.session.attach`'s reply: how to reach the session, or the refusal.
+///
+/// Untagged for the same reason its two siblings are — the arms are **disjoint**.
+/// A success always carries `mode` and never `message`; a refusal carries
+/// `message` and never `mode`. `status` is on both, so it is not what
+/// discriminates; the required `mode` against the required `message` is.
+///
+/// **This was one flat struct until #1015, and that is why it described neither
+/// arm.** It required `mode`, which a refusal does not send, so a
+/// contract-abiding client could not decode a failed attach *at all* — the
+/// error was `missing field 'mode'`, which is a decoder complaining about a
+/// shape the Server has never produced. And it declared an `error` field that
+/// no arm has ever sent: the refusal has always said `message`.
+///
+/// Found by pointing a typed consumer at the wire, which is the argument for
+/// having one. The handler was never wrong and does not change here; only the
+/// description of it does.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ClientSessionAttachReply {
+    Attached(ClientSessionAttachResponsePayload),
+    Refused(SessionRefusal),
+}
+
+/// The success arm of [`ClientSessionAttachReply`].
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientSessionAttachResponsePayload {
-    /// "success" or "error".
+    /// Always `"success"`. The refusal arm carries `"error"` under the same
+    /// name, which is why this is not an enum — see [`SessionRefusal::status`].
     pub status: String,
-    /// "p2p" or "relay".
+    /// `"p2p"` or `"relay"`.
     pub mode: String,
+    /// The session this reply describes, echoed back. Both arms send it, and
+    /// the browser's session runtime gates on it — but it was missing from this
+    /// type, so a consumer reading the contract could not know it was there.
+    #[serde(default)]
+    pub session_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_name: Option<String>,
     /// Legacy single endpoint (first/preferred address). Kept so old clients
@@ -149,8 +181,6 @@ pub struct ClientSessionAttachResponsePayload {
     pub addresses: Vec<ProbedAddress>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub connection_token: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
 }
 
 // --- Env application to sessions ---

@@ -39,15 +39,23 @@ env_snapshots: Array<EnvSnapshot>,
  * be one of the addresses returned in the attach response.
  */
 relay_url?: string | null, };
+export type ClientSessionAttachReply = ClientSessionAttachResponsePayload | SessionRefusal;
 export type ClientSessionAttachResponsePayload = { 
 /**
- * "success" or "error".
+ * Always `"success"`. The refusal arm carries `"error"` under the same
+ * name, which is why this is not an enum — see [`SessionRefusal::status`].
  */
 status: string, 
 /**
- * "p2p" or "relay".
+ * `"p2p"` or `"relay"`.
  */
-mode: string, session_name?: string | null, 
+mode: string, 
+/**
+ * The session this reply describes, echoed back. Both arms send it, and
+ * the browser's session runtime gates on it — but it was missing from this
+ * type, so a consumer reading the contract could not know it was there.
+ */
+session_id: string, session_name?: string | null, 
 /**
  * Legacy single endpoint (first/preferred address). Kept so old clients
  * that only read `agent_address` keep working.
@@ -57,7 +65,14 @@ agent_address?: string | null,
  * Full list of candidate endpoints with probe status, priority order.
  * Clients test latency across these and fall back address-by-address.
  */
-addresses: Array<ProbedAddress>, connection_token?: string | null, error?: string | null, };
+addresses: Array<ProbedAddress>, connection_token?: string | null, };
+export type SessionRefusal = { 
+/**
+ * Always `"error"` today. A string rather than an enum because nothing
+ * branches on its other values yet, and inventing them would be describing
+ * a wire that does not exist.
+ */
+status: string, message: string, };
 export type EnvSnapshot = { name: string, source: EnvSource, agent_id?: string | null, 
 /**
  * Ordered KEY/VALUE pairs (already deduplicated, last-wins).
@@ -116,23 +131,5 @@ env_snapshots: Array<EnvSnapshot>,
 relay_url?: string | null, };
 
 /** The payload the provider answers with. */
-export type SessionAttachReply = { 
-/**
- * "success" or "error".
- */
-status: string, 
-/**
- * "p2p" or "relay".
- */
-mode: string, session_name?: string | null, 
-/**
- * Legacy single endpoint (first/preferred address). Kept so old clients
- * that only read `agent_address` keep working.
- */
-agent_address?: string | null, 
-/**
- * Full list of candidate endpoints with probe status, priority order.
- * Clients test latency across these and fall back address-by-address.
- */
-addresses: Array<ProbedAddress>, connection_token?: string | null, error?: string | null, };
+export type SessionAttachReply = ClientSessionAttachResponsePayload | SessionRefusal;
 
