@@ -304,6 +304,39 @@ export async function expectTouchTarget(locator: Locator, opts: AssertOptions): 
  * construction) and App (36px inside a 44px target) without the spec knowing
  * which experience it is running.
  */
+/**
+ * Read an element's box once it has stopped moving.
+ *
+ * `measure` is a single `getBoundingClientRect()`. The capsule animates over
+ * `--motion-terminal-capsule`, so a lone read can land mid-flight and report the
+ * drawn affordance a few pixels off its control — which is indistinguishable
+ * from a real containment violation, and reads as one.
+ *
+ * The evidence that this is a timing dependency rather than static geometry:
+ * the same commit failed this assertion on one run and passed it on the next,
+ * with no change to the tree. Static geometry does not do that.
+ *
+ * Same technique the App emergence test already uses on the terminal geometry
+ * (`fixture-app.spec.ts`): read until two consecutive reads agree.
+ */
+async function settledMetrics(el: Locator, attempts = 20): Promise<BoxMetrics> {
+  let previous = await measure(el);
+  for (let i = 0; i < attempts; i += 1) {
+    await el.page().waitForTimeout(50);
+    const next = await measure(el);
+    if (
+      next.left === previous.left &&
+      next.top === previous.top &&
+      next.width === previous.width &&
+      next.height === previous.height
+    ) {
+      return next;
+    }
+    previous = next;
+  }
+  return previous;
+}
+
 export async function expectDrawnAffordance(control: Locator, opts: AssertOptions): Promise<void> {
   const block = blockFor(opts);
   if (block.visualSizeTokenPx === undefined) return; // pattern pins no drawn affordance
@@ -321,7 +354,12 @@ export async function expectDrawnAffordance(control: Locator, opts: AssertOption
   }
 
   const tolerance = opts.tolerance ?? 1;
-  const [c, v] = await Promise.all([measure(control), measure(visuals.first())]);
+  // Settled, not sampled: a mid-animation read is indistinguishable from a real
+  // containment violation. See `settledMetrics` (#1058).
+  const [c, v] = await Promise.all([
+    settledMetrics(control),
+    settledMetrics(visuals.first()),
+  ]);
 
   const sizeDelta = Math.max(
     diffTolerance(v.width, block.visualSizeTokenPx, tolerance),
