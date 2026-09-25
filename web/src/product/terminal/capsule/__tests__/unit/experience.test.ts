@@ -13,8 +13,9 @@ import { CAPSULE_EXPERIENCE } from '@/product/terminal/capsule/config/experience
  *      rather than catching them — so when #827 renamed the tokens to
  *      `terminalCapsule.*`, the ids here went stale and this test stayed green.
  *
- * They were also unread: `inputControls` is the only property anything takes off
- * an experience config, and these token ids have no consumer. That is recorded
+ * They were also unread: the properties anything actually takes off an
+ * experience config are the behavioural ones (`historyControl`,
+ * `intentPlaceholder`), and these token ids have no consumer. That is recorded
  * here rather than fixed silently — if they are meant to drive styling, wiring
  * them up is the change; until then this test's job is to notice a rename.
  *
@@ -45,20 +46,15 @@ describe('CAPSULE_EXPERIENCE', () => {
     }
   });
 
-  it('freezes desktop History + Send only on web input', () => {
-    expect(CAPSULE_EXPERIENCE.web.inputControls).toEqual({
-      history: true,
-      commands: false,
-      paste: false,
-      copy: false,
-      send: true,
-      modeToggle: false,
-    });
+  it('gives web its own history trigger and withholds it from app', () => {
+    // The resting App capsule is `+`, intent, send — a history trigger there
+    // would be permanent past-facing chrome on the primary input surface.
+    expect(CAPSULE_EXPERIENCE.web.historyControl).toBe(true);
+    expect(CAPSULE_EXPERIENCE.app.historyControl).toBe(false);
   });
 
-  it('enables app paste/copy and mode toggle', () => {
-    expect(CAPSULE_EXPERIENCE.app.inputControls.paste).toBe(true);
-    expect(CAPSULE_EXPERIENCE.app.inputControls.modeToggle).toBe(true);
-    expect(CAPSULE_EXPERIENCE.app.supportsCommandsMode).toBe(true);
+  it('asks for intent in each experience’s own words', () => {
+    expect(CAPSULE_EXPERIENCE.web.intentPlaceholder).toBe('Send input…');
+    expect(CAPSULE_EXPERIENCE.app.intentPlaceholder).toBe('Ask Nession…');
   });
 });

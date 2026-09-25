@@ -1,4 +1,3 @@
-import { CapsuleCommandsPopover } from '@/product/terminal/capsule/CapsuleCommandsPopover';
 import { CapsuleHistoryPopover } from '@/product/terminal/capsule/CapsuleHistoryPopover';
 import { CapsuleInputActionButtons } from '@/product/terminal/capsule/CapsuleInputActionButtons';
 import {
@@ -11,23 +10,15 @@ import type {
   CapsuleCapabilityDisclosure,
 } from '@/product/terminal/capsule/types';
 
-interface CapsuleInputActionsProps {
-  leading?: React.ReactNode;
-  /** Capabilities that earned no chip, reachable through the disclosure entry. */
-  capabilityDisclosure?: CapsuleCapabilityDisclosure;
+interface CapsuleInputTrailingActionsProps {
+  /** Whether this experience declares a history trigger in the composer row. */
+  historyControl: boolean;
   historyOpen: boolean;
   onHistoryOpenChange: (open: boolean) => void;
-  commandsOpen: boolean;
-  onCommandsOpenChange: (open: boolean) => void;
-  showCommandsButton: boolean;
-  showPasteCopy: boolean;
   disabled: boolean;
-  sendText: (text: string) => void;
   inputValue: string;
   onSelectHistory: (command: string) => void;
   onSend: () => void;
-  onPaste: () => void;
-  onCopy: () => void;
   /** Tooltips intercept touch on mobile — app surfaces rely on aria-label instead. */
   showTooltips?: boolean;
 }
@@ -62,76 +53,58 @@ function CapsuleCapabilityMore({ disclosure }: { disclosure: CapsuleCapabilityDi
   );
 }
 
-/** Optional leading slot (e.g. mobile mode toggle) — left side only. */
-export function CapsuleInputLeading({ leading }: { leading?: React.ReactNode }) {
-  if (!leading) {
+/**
+ * The leading slot — `+`, the Nession capability entry.
+ *
+ * It leads on both experiences, which is the order
+ * `terminal-capsule.md` §Anatomy draws (`[+] [ input ... ] [send]`) and the one
+ * the intent composer's resting row is built around. Nothing else earns this
+ * slot: the capsule is conversational first and extensible second.
+ */
+export function CapsuleInputLeading({
+  capabilityDisclosure,
+}: {
+  capabilityDisclosure?: CapsuleCapabilityDisclosure;
+}) {
+  if (!capabilityDisclosure || capabilityDisclosure.entries.length === 0) {
     return null;
   }
   return (
     <div data-testid="capsule-input-leading" className={capsuleControlRowClass}>
-      {leading}
+      <CapsuleCapabilityMore disclosure={capabilityDisclosure} />
     </div>
   );
 }
 
 /**
- * Trailing actions — always History + Send; Paste/Copy and Commands opt-in.
+ * Trailing actions — the experience's own history trigger, when it declares
+ * one, then send. The primary action is always last.
  */
 export function CapsuleInputTrailingActions({
-  capabilityDisclosure,
+  historyControl,
   historyOpen,
   onHistoryOpenChange,
-  commandsOpen,
-  onCommandsOpenChange,
-  showCommandsButton,
-  showPasteCopy,
   disabled,
-  sendText,
   inputValue,
   onSelectHistory,
   onSend,
-  onPaste,
-  onCopy,
   showTooltips = true,
-}: Omit<CapsuleInputActionsProps, 'leading'>) {
+}: CapsuleInputTrailingActionsProps) {
   return (
     <div data-testid="capsule-input-actions" className={capsuleControlRowClass}>
-      {capabilityDisclosure && capabilityDisclosure.entries.length > 0 ? (
-        <CapsuleCapabilityMore disclosure={capabilityDisclosure} />
-      ) : null}
-      <CapsuleHistoryPopover
-        open={historyOpen}
-        onOpenChange={(open) => {
-          onHistoryOpenChange(open);
-          if (open) {
-            onCommandsOpenChange(false);
-          }
-        }}
-        disabled={disabled}
-        onSelect={onSelectHistory}
-        triggerClassName="rounded-lg"
-      />
-      {showCommandsButton ? (
-        <CapsuleCommandsPopover
-          open={commandsOpen}
-          onOpenChange={(open) => {
-            onCommandsOpenChange(open);
-            if (open) {
-              onHistoryOpenChange(false);
-            }
-          }}
-          sendText={sendText}
+      {historyControl ? (
+        <CapsuleHistoryPopover
+          open={historyOpen}
+          onOpenChange={onHistoryOpenChange}
           disabled={disabled}
-          showPhysKeys={false}
+          onSelect={onSelectHistory}
+          triggerClassName="rounded-lg"
         />
       ) : null}
       <CapsuleInputActionButtons
         inputValue={inputValue}
         disabled={disabled}
-        showPasteCopy={showPasteCopy}
         onSend={onSend}
-        onPaste={onPaste}
-        onCopy={onCopy}
         showTooltips={showTooltips}
       />
     </div>

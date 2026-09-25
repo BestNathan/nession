@@ -172,21 +172,6 @@ export const capsuleChainBarClass =
 export const capsuleMiniButtonClass =
   'h-[length:var(--terminal-capsule-mini-control-height)] text-[length:var(--terminal-capsule-caption-font-size)]';
 
-export const capsuleQuickKeyAppButtonClass =
-  'shrink-0 rounded-[calc(var(--radius-capsule)/2)] px-[length:var(--terminal-capsule-quick-key-pad-x)] font-mono text-[length:var(--terminal-capsule-quick-key-font-size)] leading-none text-muted-foreground min-h-[length:var(--control-md)] min-w-[length:var(--control-sm)] hover:bg-accent/50 hover:text-foreground active:bg-accent/70 data-pressed:bg-accent/60';
-
-export const capsuleQuickKeyAppRowClass =
-  'gap-[length:var(--terminal-capsule-quick-key-gap)]';
-
-export const capsuleModeToggleGroupClass =
-  'gap-[length:var(--terminal-capsule-control-gap)]';
-
-export const capsuleModeToggleItemActiveClass =
-  'bg-accent/60 text-foreground';
-
-export const capsuleCommandsRowClass =
-  'flex min-w-0 flex-1 items-center';
-
 export const capsuleCommandsScrollClass =
   'flex min-w-0 flex-1 items-center overflow-x-auto scrollbar-none';
 
@@ -233,9 +218,6 @@ export const capsuleLabelTextClass =
 
 export const capsuleInlineFieldRowClass =
   'flex items-center gap-[length:var(--terminal-capsule-popover-gap)]';
-
-export const capsuleModeToggleItemClass =
-  'min-h-[length:var(--control-md)] min-w-[length:var(--control-md)] [&_svg]:size-[length:var(--icon-md)]';
 
 /**
  * An emerged capability projection — the Signal and Peek frame (`#826`).

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { TerminalCapsule } from '@/product/terminal/capsule/TerminalCapsule';
 
@@ -37,42 +37,55 @@ describe('TerminalCapsule', () => {
     expect(screen.queryByTestId('capsule-mode-toggle')).not.toBeInTheDocument();
   });
 
-  it('shows paste/copy on app input mode', () => {
+  it('renders the App resting capsule as one row: `+`, field, one action', () => {
+    // The App capsule at rest is a minimal intent composer — terminal-capsule.md
+    // §Anatomy's `[+] [ input ... ] [send]` — so the row is a single band at
+    // control.md height rather than a field stacked on a toolbar row.
     render(
       <TerminalCapsule
         experience="app"
-        mode="input"
-        onModeChange={vi.fn()}
         sendText={vi.fn()}
+        capabilityDisclosure={{
+          entries: [{ id: 'claude-code', title: 'Claude Code', state: 'active' }],
+          onSelect: vi.fn(),
+        }}
       />,
     );
-    expect(screen.getByTestId('capsule-paste')).toBeInTheDocument();
-    expect(screen.getByTestId('capsule-copy')).toBeInTheDocument();
+
+    expect(screen.getByTestId('capsule-input-row')).toHaveAttribute('data-layout', 'flat');
+    expect(screen.queryByTestId('capsule-input-toolbar-row')).not.toBeInTheDocument();
+    expect(screen.getByTestId('capsule-input-field')).toHaveAttribute(
+      'data-input-width',
+      'column',
+    );
+
+    const leading = within(screen.getByTestId('capsule-input-leading-slot'));
+    expect(leading.getByTestId('capsule-capability-more')).toBeInTheDocument();
+
+    // Exactly one action — the primary send. App gets no permanent history,
+    // paste, copy or mode control beside it.
+    const actions = within(screen.getByTestId('capsule-input-actions'));
+    expect(actions.getAllByRole('button')).toHaveLength(1);
+    for (const testId of [
+      'capsule-history-trigger',
+      'capsule-paste',
+      'capsule-copy',
+      'capsule-mode-toggle',
+    ]) {
+      expect(screen.queryByTestId(testId)).not.toBeInTheDocument();
+    }
   });
 
-  it('renders app mode toggle and switches body', async () => {
-    const onModeChange = vi.fn();
-    const { rerender } = render(
-      <TerminalCapsule
-        experience="app"
-        mode="input"
-        onModeChange={onModeChange}
-        sendText={vi.fn()}
-      />,
-    );
-    expect(screen.getByTestId('capsule-mode-toggle')).toBeInTheDocument();
-    await userEvent.click(screen.getByTestId('capsule-mode-commands'));
-    expect(onModeChange).toHaveBeenCalledWith('commands');
+  it('moves to the field-first layout once the input wraps', async () => {
+    render(<TerminalCapsule experience="app" sendText={vi.fn()} />);
+    const input = screen.getByTestId('capsule-ghost-input');
+    await userEvent.type(input, 'line1{Shift>}{Enter}{/Shift}line2');
 
-    rerender(
-      <TerminalCapsule
-        experience="app"
-        mode="commands"
-        onModeChange={onModeChange}
-        sendText={vi.fn()}
-      />,
-    );
-    expect(screen.getByTestId('capsule-commands-row')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByTestId('capsule-input-row')).toHaveAttribute('data-layout', 'stacked');
+    });
+    expect(screen.getByTestId('capsule-input-field')).toHaveAttribute('data-input-width', 'full');
+    expect(screen.getByTestId('capsule-input-toolbar-row')).toBeInTheDocument();
   });
 
   it('marks disabled state', () => {
@@ -100,9 +113,7 @@ describe('TerminalCapsule', () => {
   });
 
   it('uses inset positioning on app', () => {
-    render(
-      <TerminalCapsule experience="app" mode="input" onModeChange={vi.fn()} sendText={vi.fn()} />,
-    );
+    render(<TerminalCapsule experience="app" sendText={vi.fn()} />);
     const root = screen.getByTestId('terminal-capsule');
     expect(root).toHaveAttribute('data-experience', 'app');
     expect(root.className).toMatch(/terminal-capsule-shell-inset/);
@@ -130,19 +141,6 @@ describe('TerminalCapsule', () => {
     expect(root).toHaveAttribute('data-dock-height', 'multi');
     expect(root).toHaveAttribute('data-shell-shape', 'capsule');
     expect(screen.getByTestId('capsule-shell').className).toMatch(/radius-capsule/);
-  });
-
-  it('uses pill shape on app commands mode', () => {
-    render(
-      <TerminalCapsule
-        experience="app"
-        mode="commands"
-        onModeChange={vi.fn()}
-        sendText={vi.fn()}
-      />,
-    );
-    expect(screen.getByTestId('terminal-capsule')).toHaveAttribute('data-shell-shape', 'pill');
-    expect(screen.getByTestId('capsule-shell').className).toMatch(/terminal-capsule-shell-pill-radius/);
   });
 
   it('defaults to the web experience when none is given', () => {

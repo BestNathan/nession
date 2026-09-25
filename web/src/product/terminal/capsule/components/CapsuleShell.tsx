@@ -3,7 +3,6 @@ import {
   capsuleShellAppDockBottomClass,
   capsuleShellAppOuterClass,
   capsuleShellCapsuleRadiusClass,
-  capsuleShellContentGapClass,
   capsuleShellDockBottomClass,
   capsuleShellInnerClass,
   capsuleShellInnerPadClass,
@@ -11,10 +10,8 @@ import {
   capsuleShellSurfaceClass,
   capsuleShellWebOuterClass,
 } from '@/product/terminal/capsule/capsuleStyles';
-import { useCapsuleContext } from '@/product/terminal/capsule/state/useCapsuleContext';
 import type {
   CapsuleExperience,
-  CapsuleMode,
   ComposerLayout,
 } from '@/product/terminal/capsule/types';
 import { dockHeightFromLayout } from '@/product/terminal/capsule/measure/layoutFromLineCount';
@@ -22,7 +19,6 @@ import { dockHeightFromLayout } from '@/product/terminal/capsule/measure/layoutF
 interface CapsuleShellProps {
   experience: CapsuleExperience;
   layout?: ComposerLayout;
-  mode?: CapsuleMode;
   disabled?: boolean;
   dockRef?: React.Ref<HTMLDivElement>;
   shellRef?: React.Ref<HTMLDivElement>;
@@ -43,7 +39,6 @@ interface CapsuleShellProps {
 export function CapsuleShell({
   experience,
   layout = 'flat',
-  mode = 'input',
   disabled,
   dockRef,
   shellRef,
@@ -52,13 +47,8 @@ export function CapsuleShell({
   projection,
   children,
 }: CapsuleShellProps) {
-  const { commandsOpen } = useCapsuleContext();
-  const isCommandsMode = mode === 'commands';
-  const showLayout = !isCommandsMode;
   const isApp = experience === 'app';
-  const usePillShape =
-    (isApp && isCommandsMode && !commandsOpen) ||
-    (!isCommandsMode && layout === 'flat' && !isApp);
+  const usePillShape = !isApp && layout === 'flat';
 
   return (
     <div
@@ -66,8 +56,8 @@ export function CapsuleShell({
       data-testid="terminal-capsule"
       data-experience={experience}
       data-disabled={disabled ? 'true' : undefined}
-      data-layout={showLayout ? layout : undefined}
-      data-dock-height={showLayout ? dockHeightFromLayout(layout) : 'single'}
+      data-layout={layout}
+      data-dock-height={dockHeightFromLayout(layout)}
       data-shell-shape={usePillShape ? 'pill' : 'capsule'}
       className={cn(
         'absolute z-30 flex flex-col',
@@ -85,16 +75,12 @@ export function CapsuleShell({
           capsuleShellSurfaceClass,
           usePillShape ? capsuleShellPillRadiusClass : capsuleShellCapsuleRadiusClass,
           capsuleShellInnerPadClass,
-          isCommandsMode && capsuleShellContentGapClass,
         )}
       >
         <div
           ref={contentRef}
           data-testid="capsule-shell-content"
-          className={cn(
-            'flex min-w-0 flex-1 items-center overflow-hidden',
-            isCommandsMode && capsuleShellContentGapClass,
-          )}
+          className="flex min-w-0 flex-1 items-center overflow-hidden"
         >
           {children}
         </div>

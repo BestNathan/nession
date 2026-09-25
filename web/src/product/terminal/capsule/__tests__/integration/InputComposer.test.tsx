@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { TerminalCapsule } from '@/product/terminal/capsule/TerminalCapsule';
 
@@ -23,19 +23,19 @@ vi.mock('@/product/terminal/hooks/useCommandHistory', () => ({
   }),
 }));
 
-function renderWebCapsule(onLayoutChange?: never) {
-  void onLayoutChange;
+/** A capability that earned disclosure, so the leading `+` renders. */
+const disclosure = {
+  entries: [{ id: 'claude-code', title: 'Claude Code', state: 'active' as const }],
+  onSelect: vi.fn(),
+};
+
+function renderWebCapsule() {
   return render(<TerminalCapsule experience="web" sendText={vi.fn()} />);
 }
 
 function renderAppCapsule() {
   return render(
-    <TerminalCapsule
-      experience="app"
-      mode="input"
-      onModeChange={vi.fn()}
-      sendText={vi.fn()}
-    />,
+    <TerminalCapsule experience="app" sendText={vi.fn()} capabilityDisclosure={disclosure} />,
   );
 }
 
@@ -50,22 +50,40 @@ describe('InputComposer', () => {
     expect(screen.getByTestId('capsule-input-actions-slot')).toBeInTheDocument();
   });
 
-  it('shows paste/copy on app experience', () => {
+  it('leads with the capability entry, not the trailing actions', () => {
     render(
-      <TerminalCapsule
-        experience="app"
-        mode="input"
-        onModeChange={vi.fn()}
-        sendText={vi.fn()}
-      />,
+      <TerminalCapsule experience="web" sendText={vi.fn()} capabilityDisclosure={disclosure} />,
     );
-    expect(screen.getByTestId('capsule-paste')).toBeInTheDocument();
-    expect(screen.getByTestId('capsule-copy')).toBeInTheDocument();
+    // The resting capsule carries `+` in the leading slot and nothing else there
+    // (terminal-capsule.md §Anatomy: `[+] [ input ... ] [send]`).
+    const leading = within(screen.getByTestId('capsule-input-leading-slot'));
+    expect(leading.getByTestId('capsule-capability-more')).toBeInTheDocument();
+    expect(
+      within(screen.getByTestId('capsule-input-actions-slot')).queryByTestId(
+        'capsule-capability-more',
+      ),
+    ).not.toBeInTheDocument();
   });
 
-  it('wires the history trigger in the composer toolbar', () => {
-    render(<TerminalCapsule experience="web" sendText={vi.fn()} />);
+  it('wires the history trigger on web and omits it on app', () => {
+    const web = render(<TerminalCapsule experience="web" sendText={vi.fn()} />);
     expect(screen.getByTestId('capsule-history-trigger')).toHaveAttribute('aria-haspopup', 'dialog');
+    web.unmount();
+
+    renderAppCapsule();
+    expect(screen.queryByTestId('capsule-history-trigger')).not.toBeInTheDocument();
+  });
+
+  it('asks for intent in the experience’s own words', () => {
+    const web = render(<TerminalCapsule experience="web" sendText={vi.fn()} />);
+    expect(screen.getByTestId('capsule-ghost-input')).toHaveAttribute('placeholder', 'Send input…');
+    web.unmount();
+
+    renderAppCapsule();
+    expect(screen.getByTestId('capsule-ghost-input')).toHaveAttribute(
+      'placeholder',
+      'Ask Nession…',
+    );
   });
 
   it('disables send when empty and sends trimmed input with carriage return', async () => {
@@ -81,22 +99,28 @@ describe('InputComposer', () => {
     renderWebCapsule();
     const row = screen.getByTestId('capsule-input-row');
     expect(row).toHaveAttribute('data-layout', 'flat');
-    expect(row.className).toMatch(/grid-cols-\[minmax/);
+    expect(row.className).toMatch(/grid-cols-\[auto_minmax/);
     expect(screen.queryByTestId('capsule-input-toolbar-row')).not.toBeInTheDocument();
   });
 
-  it('uses full-width field on app even when flat', () => {
-    render(
-      <TerminalCapsule
-        experience="app"
-        mode="input"
-        onModeChange={vi.fn()}
-        sendText={vi.fn()}
-      />,
+  it('keeps the App resting capsule on the single row', () => {
+    // The App capsule is the intent composer at rest, not a two-row sheet:
+    // `+`, field, send, one band — which is why its row measures `control.md`
+    // (44px) rather than a field row stacked on a toolbar row.
+    renderAppCapsule();
+    const row = screen.getByTestId('capsule-input-row');
+    expect(row).toHaveAttribute('data-layout', 'flat');
+    expect(row).not.toHaveAttribute('data-field-first');
+    expect(screen.queryByTestId('capsule-input-toolbar-row')).not.toBeInTheDocument();
+    expect(screen.getByTestId('capsule-input-field')).toHaveAttribute(
+      'data-input-width',
+      'column',
     );
-    expect(screen.getByTestId('capsule-input-row')).toHaveAttribute('data-field-first', 'app');
-    expect(screen.getByTestId('capsule-input-field')).toHaveAttribute('data-input-width', 'full');
-    expect(screen.getByTestId('capsule-input-toolbar-row')).toBeInTheDocument();
+    expect(
+      within(screen.getByTestId('capsule-input-leading-slot')).getByTestId(
+        'capsule-capability-more',
+      ),
+    ).toBeInTheDocument();
   });
 
   it('stays flat when empty even if scrollHeight looks multi-line', async () => {
@@ -131,17 +155,14 @@ describe('InputComposer', () => {
   });
 
   it('renders every capsule control at the control token, never a smaller band', () => {
-    // Regression: App's secondary controls rendered at `control-sm` while
+    // Regression: the capsule's controls once rendered at `control-sm` while
     // `pattern.terminal-capsule` names `control.md` as the band for both
     // experiences. No px assertion could see it — on App both tokens are 44px —
-    // so the invariant is asserted on the token the class names.
+    // so the invariant is asserted on the token the class names. The band is
+    // asserted on the control itself; whatever sits *inside* it is the inner
+    // visual, which this test does not claim anything about.
     renderAppCapsule();
-    for (const testId of [
-      'capsule-history-trigger',
-      'capsule-paste',
-      'capsule-copy',
-      'capsule-send',
-    ]) {
+    for (const testId of ['capsule-capability-more', 'capsule-send']) {
       const control = screen.getByTestId(testId);
       expect(control.className).toMatch(/control-md/);
       expect(control.className).not.toMatch(/control-sm/);

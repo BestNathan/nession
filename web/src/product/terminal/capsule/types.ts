@@ -1,8 +1,6 @@
 import type { ReactNode } from 'react';
 import type { CapabilityDisclosureEntry, CapabilityId } from '@/product/capability';
 
-export type CapsuleMode = 'input' | 'commands';
-
 export type CapsuleExperience = 'web' | 'app';
 
 export type CapsulePopoverId = 'history' | 'commands';

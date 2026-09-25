@@ -1,7 +1,7 @@
-import { useState, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import { Loader2 } from 'lucide-react';
 import { useMediaQuery } from '@/shared/hooks/useMediaQuery';
-import { TerminalCapsule, type CapsuleMode } from '@/product/terminal/capsule/TerminalCapsule';
+import { TerminalCapsule } from '@/product/terminal/capsule/TerminalCapsule';
 import type { CapsuleCapabilityProjection } from '@/product/terminal/capsule/types';
 import type { CapsuleCapabilityContribution } from '@/app/capsulePresence';
 import type { TerminalController } from '@/platform/terminal-runtime/controller/TerminalController';
@@ -32,7 +32,6 @@ export function TerminalSurface({
   capsuleProjection,
 }: TerminalSurfaceProps) {
   const isDesktop = useMediaQuery('(min-width: 768px)');
-  const [capsuleMode, setCapsuleMode] = useState<CapsuleMode>('input');
   const capsuleExperience = isDesktop ? 'web' : 'app';
 
   const capsuleSendText = (text: string) => {
@@ -63,8 +62,6 @@ export function TerminalSurface({
       </div>
       <TerminalCapsule
         experience={capsuleExperience}
-        mode={capsuleMode}
-        onModeChange={capsuleExperience === 'app' ? setCapsuleMode : undefined}
         sendText={capsuleSendText}
         disabled={inputDisabled}
         capabilityDisclosure={capsuleCapabilities?.disclosure}
