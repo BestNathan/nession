@@ -276,7 +276,7 @@ test('committed sources validate clean and merge to 5 patterns', () => {
 
 test('real viewport matrix carries the canonical web/app rows', () => {
   const rows = REAL.viewports.viewports;
-  assert.equal(rows.length, 6);
+  assert.equal(rows.length, 7);
   assert.deepEqual(rows.map((row) => row.id), [
     'web.compact-laptop',
     'web.standard-desktop',
@@ -284,8 +284,18 @@ test('real viewport matrix carries the canonical web/app rows', () => {
     'app.narrow-phone',
     'app.standard-phone',
     'app.large-phone',
+    'app.landscape-phone',
   ]);
   assert.ok(rows.every((row) => Number.isInteger(row.width) && Number.isInteger(row.height)));
+  // Orientation is not a field in the schema — `width > height` is the only
+  // signal, so every consumer has to re-derive it. Asserted for the App rows
+  // specifically: the Web rows are all landscape by nature (they are desktop
+  // viewports), so the meaningful claim is that exactly one *mobile* viewport
+  // is, and a row that loses its orientation fails loudly here.
+  const appLandscape = rows.filter(
+    (row) => row.experience === 'app' && row.width > row.height,
+  );
+  assert.deepEqual(appLandscape.map((row) => row.id), ['app.landscape-phone']);
 });
 
 test('duplicate viewport id fails', () => {
