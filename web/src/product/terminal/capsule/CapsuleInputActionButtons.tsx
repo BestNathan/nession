@@ -1,16 +1,14 @@
-import { ClipboardPaste, Copy, ArrowUp } from 'lucide-react';
+import { ArrowUp } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/shared/lib/utils';
+import { CapsuleIconVisual } from '@/product/terminal/capsule/CapsuleIconVisual';
 import { capsuleIconButtonClass } from '@/product/terminal/capsule/capsuleStyles';
 
 interface CapsuleInputActionButtonsProps {
   inputValue: string;
   disabled: boolean;
-  showPasteCopy: boolean;
   onSend: () => void;
-  onPaste: () => void;
-  onCopy: () => void;
   /** Tooltips intercept touch on mobile — app surfaces rely on aria-label instead. */
   showTooltips?: boolean;
 }
@@ -37,84 +35,55 @@ function CapsuleIconAction({
   );
 }
 
+/**
+ * The composer's primary action, and the only one of them.
+ *
+ * The capsule used to mirror native paste/copy here. `terminal-capsule.md`
+ * §Anti-patterns names that directly ("duplicating native copy/paste/selection
+ * actions as Nession capabilities"), and the intended-entry surface is the
+ * platform's own long-press/selection affordances — so the capsule carries
+ * neither, on either experience.
+ */
 export function CapsuleInputActionButtons({
   inputValue,
   disabled,
-  showPasteCopy,
   onSend,
-  onPaste,
-  onCopy,
   showTooltips = true,
 }: CapsuleInputActionButtonsProps) {
   const canSend = !disabled && Boolean(inputValue.trim());
 
   return (
-    <>
-      {showPasteCopy ? (
-        <>
-          <CapsuleIconAction
-            showTooltips={showTooltips}
-            tooltip="Paste"
-            button={
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                disabled={disabled}
-                data-testid="capsule-paste"
-                aria-label="Paste"
-                className={capsuleIconButtonClass}
-                onClick={onPaste}
-              >
-                <ClipboardPaste />
-              </Button>
-            }
-          />
-          <CapsuleIconAction
-            showTooltips={showTooltips}
-            tooltip="Copy"
-            button={
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                disabled={disabled || !inputValue}
-                data-testid="capsule-copy"
-                aria-label="Copy"
-                className={capsuleIconButtonClass}
-                onClick={() => {
-                  void onCopy();
-                }}
-              >
-                <Copy />
-              </Button>
-            }
-          />
-        </>
-      ) : null}
-      <CapsuleIconAction
-        showTooltips={showTooltips}
-        tooltip="Send (Enter)"
-        button={
-          <Button
-            type="button"
-            size="icon"
-            disabled={!canSend}
-            data-testid="capsule-send"
-            aria-label="Send"
-            className={cn(
-              capsuleIconButtonClass,
-              'rounded-full border-0',
+    <CapsuleIconAction
+      showTooltips={showTooltips}
+      tooltip="Send (Enter)"
+      button={
+        <Button
+          type="button"
+          size="icon"
+          disabled={!canSend}
+          data-testid="capsule-send"
+          aria-label="Send"
+          // The `Button` *variant* paints the outer element (default →
+          // `bg-primary hover:bg-primary/80`), so the fill is neutralised here
+          // and painted on the drawn affordance instead — otherwise the 44px
+          // hit target fills on hover/touch and the smaller circle buys nothing.
+          className={cn(
+            capsuleIconButtonClass,
+            'rounded-full border-0 bg-transparent hover:bg-transparent',
+          )}
+          onClick={onSend}
+        >
+          <CapsuleIconVisual
+            className={
               canSend
-                ? 'bg-foreground text-background hover:bg-foreground/90'
-                : 'bg-muted text-muted-foreground',
-            )}
-            onClick={onSend}
+                ? 'bg-foreground text-background group-hover/button:bg-foreground/90'
+                : 'bg-muted text-muted-foreground'
+            }
           >
             <ArrowUp />
-          </Button>
-        }
-      />
-    </>
+          </CapsuleIconVisual>
+        </Button>
+      }
+    />
   );
 }

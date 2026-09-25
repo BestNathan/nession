@@ -34,6 +34,12 @@ const BLOCK_FIELDS = {
   pillRadiusToken: 'cssToken',
   scrollOwner: 'scrollOwner',
   touchTargetToken: 'token',
+  // The other token field that measures something *inside* the band rather than
+  // the band itself: the affordance a control paints (#1034). It is a plain
+  // `token` because it must resolve to px — that resolved number is what tells
+  // a 36px drawn circle apart from the 44px box holding it, which on App the
+  // height token alone cannot do (control.sm == control.md == 44px).
+  visualSizeToken: 'token',
   visibility: 'visibility',
 };
 
@@ -44,6 +50,7 @@ const TOKEN_TARGET_FIELDS = new Set([
   'minWidthToken',
   'maxWidthToken',
   'padXToken',
+  'visualSizeToken',
 ]);
 
 /** Fields emitted as a resolved CSS expression (`<field>Css`), not as px. */

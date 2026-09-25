@@ -1,14 +1,5 @@
 import type { CapsuleExperience } from '@/product/terminal/capsule/types';
 
-export interface CapsuleControlSlots {
-  history: boolean;
-  commands: boolean;
-  paste: boolean;
-  copy: boolean;
-  send: boolean;
-  modeToggle: boolean;
-}
-
 export interface CapsuleExperienceConfig {
   experience: CapsuleExperience;
   controlMd: string;
@@ -22,8 +13,15 @@ export interface CapsuleExperienceConfig {
   motionComposer: string;
   radiusCapsule: string;
   capsuleSurface: string;
-  inputControls: CapsuleControlSlots;
-  supportsCommandsMode: boolean;
+  /**
+   * Whether the experience's own history trigger belongs in the composer row.
+   *
+   * Web has a pointer and a persistent history affordance; App does not get one
+   * at rest (the resting App capsule is `+`, intent, send — nothing else).
+   */
+  historyControl: boolean;
+  /** The resting intent input's placeholder — the sentence the user answers. */
+  intentPlaceholder: string;
 }
 
 export const CAPSULE_EXPERIENCE: Record<CapsuleExperience, CapsuleExperienceConfig> = {
@@ -40,15 +38,8 @@ export const CAPSULE_EXPERIENCE: Record<CapsuleExperience, CapsuleExperienceConf
     motionComposer: 'experience.web.motion.terminalCapsule',
     radiusCapsule: 'semantic.radius-capsule',
     capsuleSurface: 'domain.terminal.capsuleSurface',
-    inputControls: {
-      history: true,
-      commands: false,
-      paste: false,
-      copy: false,
-      send: true,
-      modeToggle: false,
-    },
-    supportsCommandsMode: false,
+    historyControl: true,
+    intentPlaceholder: 'Send input…',
   },
   app: {
     experience: 'app',
@@ -63,14 +54,7 @@ export const CAPSULE_EXPERIENCE: Record<CapsuleExperience, CapsuleExperienceConf
     motionComposer: 'experience.app.motion.terminalCapsule',
     radiusCapsule: 'semantic.radius-capsule',
     capsuleSurface: 'domain.terminal.capsuleSurface',
-    inputControls: {
-      history: true,
-      commands: false,
-      paste: true,
-      copy: true,
-      send: true,
-      modeToggle: true,
-    },
-    supportsCommandsMode: true,
+    historyControl: false,
+    intentPlaceholder: 'Ask Nession…',
   },
 };

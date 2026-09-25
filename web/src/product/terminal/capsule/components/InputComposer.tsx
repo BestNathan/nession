@@ -1,4 +1,4 @@
-import { forwardRef } from 'react';
+import { forwardRef, type RefObject } from 'react';
 import { cn } from '@/shared/lib/utils';
 import type {
   CapsuleCapabilityDisclosure,
@@ -15,51 +15,74 @@ import {
 import { useCapsuleContext } from '@/product/terminal/capsule/state/useCapsuleContext';
 
 interface InputComposerProps {
-  leading?: React.ReactNode;
+  /** Capabilities that earned no chip, reachable through the leading entry. */
   capabilityDisclosure?: CapsuleCapabilityDisclosure;
+  /**
+   * The field's focus events, passed straight through to it.
+   *
+   * The composer is a layout; what focus *means* is the capsule's, so these two
+   * travel from the capsule to the field without a decision in between (see
+   * `CapsuleGhostInput`).
+   */
+  onFieldFocus?: () => void;
+  fieldRef?: RefObject<HTMLTextAreaElement>;
 }
 
 /**
  * Single DOM tree so flat ↔ stacked transitions keep textarea focus.
- * Web flat: inline field + tools. App / stacked: full-width field, toolbar below.
+ *
+ * Flat (the resting row, both experiences): `+`, field, send — one band, at
+ * `control.md` height, which is why the App row is 44px and not a two-row
+ * stack. Stacked (the input wrapped): the field takes its own full-width row
+ * and the tools sit beneath it, `+` still leftmost and send still rightmost.
  */
 export const InputComposer = forwardRef<HTMLDivElement, InputComposerProps>(
-  function InputComposer({ leading, capabilityDisclosure }, ref) {
+  function InputComposer({ capabilityDisclosure, onFieldFocus, fieldRef }, ref) {
     const ctx = useCapsuleContext();
     const {
       inputValue,
       setInputValue,
       composerLayout,
       historyOpen,
-      commandsOpen,
       setHistoryOpen,
-      setCommandsOpen,
       disabled,
       send,
-      pasteIntoInput,
-      copyInput,
-      sendText,
       experience,
       experienceConfig,
     } = ctx;
 
-    const isStacked = composerLayout === 'stacked';
     const isApp = experience === 'app';
-    const fieldFirstLayout = isApp || isStacked;
-    const hasLeading = Boolean(leading);
-    const controls = experienceConfig.inputControls;
+    const fieldFirstLayout = composerLayout === 'stacked';
+    const hasLeading = Boolean(capabilityDisclosure?.entries.length);
+    const { historyControl, intentPlaceholder } = experienceConfig;
+
+    const trailingActions = (
+      <CapsuleInputTrailingActions
+        historyControl={historyControl}
+        historyOpen={historyOpen}
+        onHistoryOpenChange={setHistoryOpen}
+        disabled={disabled}
+        inputValue={inputValue}
+        onSelectHistory={setInputValue}
+        onSend={send}
+        showTooltips={!isApp}
+      />
+    );
 
     return (
       <div
         ref={ref}
         data-testid="capsule-input-row"
         data-layout={composerLayout}
-        data-field-first={isApp && !isStacked ? 'app' : undefined}
         className={cn(
           'grid min-w-0 flex-1',
           fieldFirstLayout
             ? cn('grid-rows-[auto_auto]', capsuleComposerRowGapYClass)
-            : cn('grid-rows-1 items-center', capsuleComposerGridGapClass, 'grid-cols-[minmax(0,1fr)_auto]'),
+            : cn(
+                'grid-rows-1 items-center',
+                capsuleComposerGridGapClass,
+                'grid-cols-[auto_minmax(0,1fr)_auto]',
+              ),
         )}
       >
         <div
@@ -67,14 +90,17 @@ export const InputComposer = forwardRef<HTMLDivElement, InputComposerProps>(
           data-input-width={fieldFirstLayout ? 'full' : 'column'}
           className={cn(
             'min-w-0 w-full overflow-hidden',
-            !fieldFirstLayout && 'col-start-1 row-start-1',
+            !fieldFirstLayout && 'col-start-2 row-start-1',
           )}
         >
           <CapsuleGhostInput
             value={inputValue}
             onChange={setInputValue}
             disabled={disabled}
+            placeholder={intentPlaceholder}
             onEnter={send}
+            onFocus={onFieldFocus}
+            fieldRef={fieldRef}
           />
         </div>
 
@@ -85,62 +111,39 @@ export const InputComposer = forwardRef<HTMLDivElement, InputComposerProps>(
           >
             <div
               data-testid="capsule-input-leading-slot"
+              data-flip-id="tools-leading"
               className={cn('relative z-[1] min-w-0 shrink-0', !hasLeading && 'hidden')}
             >
-              <CapsuleInputLeading leading={leading} />
+              <CapsuleInputLeading capabilityDisclosure={capabilityDisclosure} />
             </div>
             <div
               data-testid="capsule-input-actions-slot"
               data-flip-id="tools-actions"
               className="relative z-[1] ml-auto shrink-0"
             >
-              <CapsuleInputTrailingActions
-                capabilityDisclosure={capabilityDisclosure}
-                historyOpen={historyOpen}
-                onHistoryOpenChange={setHistoryOpen}
-                commandsOpen={commandsOpen}
-                onCommandsOpenChange={setCommandsOpen}
-                showCommandsButton={controls.commands}
-                showPasteCopy={controls.paste || controls.copy}
-                disabled={disabled}
-                sendText={sendText}
-                inputValue={inputValue}
-                onSelectHistory={setInputValue}
-                onSend={send}
-                onPaste={pasteIntoInput}
-                onCopy={() => {
-                  void copyInput();
-                }}
-                showTooltips={!isApp}
-              />
+              {trailingActions}
             </div>
           </div>
         ) : (
-          <div
-            data-testid="capsule-input-actions-slot"
-            data-flip-id="tools-actions"
-            className="col-start-2 row-start-1 relative z-[1] shrink-0 justify-self-end"
-          >
-            <CapsuleInputTrailingActions
-              capabilityDisclosure={capabilityDisclosure}
-              historyOpen={historyOpen}
-              onHistoryOpenChange={setHistoryOpen}
-              commandsOpen={commandsOpen}
-              onCommandsOpenChange={setCommandsOpen}
-              showCommandsButton={controls.commands}
-              showPasteCopy={controls.paste || controls.copy}
-              disabled={disabled}
-              sendText={sendText}
-              inputValue={inputValue}
-              onSelectHistory={setInputValue}
-              onSend={send}
-              onPaste={pasteIntoInput}
-              onCopy={() => {
-                void copyInput();
-              }}
-              showTooltips={!isApp}
-            />
-          </div>
+          <>
+            <div
+              data-testid="capsule-input-leading-slot"
+              data-flip-id="tools-leading"
+              className={cn(
+                'relative z-[1] col-start-1 row-start-1 shrink-0',
+                !hasLeading && 'hidden',
+              )}
+            >
+              <CapsuleInputLeading capabilityDisclosure={capabilityDisclosure} />
+            </div>
+            <div
+              data-testid="capsule-input-actions-slot"
+              data-flip-id="tools-actions"
+              className="col-start-3 row-start-1 relative z-[1] shrink-0 justify-self-end"
+            >
+              {trailingActions}
+            </div>
+          </>
         )}
       </div>
     );

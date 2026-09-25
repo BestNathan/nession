@@ -146,6 +146,10 @@ export function useCapsuleCapability(
             // Absent when the capability declared it has no Peek: the frame
             // reads that as an inert title rather than a step into nothing.
             onDeeper: binding.supportsPeek ? onDeeper : undefined,
+            // The capability's own answer to "does this take the keyboard while
+            // it is up", copied through untouched. The capsule reacts to the
+            // boolean; only the capability knows which projections need it.
+            ownsInputFocus: binding.ownsInputFocus,
             onDismiss,
             onOpenWorkspace: (resourceId) =>
               input.onOpenWorkspace(active.capabilityId, resourceId),

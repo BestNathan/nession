@@ -287,6 +287,94 @@ export async function expectTouchTarget(locator: Locator, opts: AssertOptions): 
   }
 }
 
+/**
+ * The affordance a control *draws* must be the contract's `visualSizeToken`,
+ * sized to it, and inside the control that receives the tap (#1034).
+ *
+ * Why a second assertion is needed at all: `expectTokenHeight` and
+ * `expectTouchTarget` both measure the element they are handed, so both stop at
+ * the control's outer box. A 44px tap target painted with a 36px circle *is* a
+ * correct 44px control to them — and on App, where `control.sm` and `control.md`
+ * are both 44px, no measurement of the outer box can tell that drawing apart
+ * from one that grew back to fill it. The difference lives on a second node, so
+ * proving it takes a helper that reaches for one. That node is the contract's,
+ * not this helper's: `capsule-control-visual` is shipped by
+ * `CapsuleIconVisual`, and its size comes from `visualSizeTokenPx` — per
+ * experience, so one call covers Web (32px, equal to Web's own band by
+ * construction) and App (36px inside a 44px target) without the spec knowing
+ * which experience it is running.
+ */
+export async function expectDrawnAffordance(control: Locator, opts: AssertOptions): Promise<void> {
+  const block = blockFor(opts);
+  if (block.visualSizeTokenPx === undefined) return; // pattern pins no drawn affordance
+
+  const visuals = control.locator('[data-testid="capsule-control-visual"]');
+  const count = await visuals.count();
+  if (count !== 1) {
+    violation(
+      opts,
+      'drawn-affordance',
+      'exactly one drawn affordance inside the control',
+      `${count} found`,
+      'testid: capsule-control-visual',
+    );
+  }
+
+  const tolerance = opts.tolerance ?? 1;
+  const [c, v] = await Promise.all([measure(control), measure(visuals.first())]);
+
+  const sizeDelta = Math.max(
+    diffTolerance(v.width, block.visualSizeTokenPx, tolerance),
+    diffTolerance(v.height, block.visualSizeTokenPx, tolerance),
+  );
+  if (sizeDelta > 0) {
+    violation(
+      opts,
+      'drawn-affordance',
+      `${block.visualSizeToken} (${block.visualSizeTokenPx}px)`,
+      `${v.width.toFixed(1)}×${v.height.toFixed(1)}px`,
+      `measuredVisual: ${v.width.toFixed(1)}×${v.height.toFixed(1)}px`,
+    );
+  }
+
+  // It must be drawn *within* the control, not over or beside it. Containment,
+  // not inequality: on Web the two are equal by construction, so requiring a
+  // strict margin here would fail a contract that is deliberately a no-op there.
+  const escaped =
+    v.left < c.left - tolerance ||
+    v.right > c.right + tolerance ||
+    v.top < c.top - tolerance ||
+    v.bottom > c.bottom + tolerance;
+  if (escaped) {
+    violation(
+      opts,
+      'drawn-affordance',
+      'drawn affordance contained by its control',
+      `visual ${v.width.toFixed(1)}×${v.height.toFixed(1)} at (${v.left.toFixed(1)},${v.top.toFixed(1)})`,
+      `control ${c.width.toFixed(1)}×${c.height.toFixed(1)} at (${c.left.toFixed(1)},${c.top.toFixed(1)})`,
+    );
+  }
+
+  // Where the contract says the painted affordance is smaller than the band, the
+  // rendered box must actually be smaller — this is the #1034 invariant itself.
+  // Conditional because Web's `control.visualSize` equals its `control.md`: the
+  // band check above is what pins the size there, and requiring a margin would
+  // fail the experience the contract deliberately left unchanged.
+  if (
+    block.heightTokenPx !== undefined &&
+    block.visualSizeTokenPx < block.heightTokenPx &&
+    (v.width >= c.width - tolerance || v.height >= c.height - tolerance)
+  ) {
+    violation(
+      opts,
+      'drawn-affordance',
+      `drawn affordance smaller than its ${block.heightToken} band (${block.heightTokenPx}px)`,
+      `${v.width.toFixed(1)}×${v.height.toFixed(1)}px inside ${c.width.toFixed(1)}×${c.height.toFixed(1)}px`,
+      `measuredVisual: ${v.width.toFixed(1)}×${v.height.toFixed(1)}px`,
+    );
+  }
+}
+
 /** Target must be fully visible within a named container. */
 export async function expectVisibleWithin(
   target: Locator,

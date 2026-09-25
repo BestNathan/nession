@@ -1,15 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { TerminalCapsule } from '@/product/terminal/capsule/TerminalCapsule';
-
-vi.mock('@/capabilities/commands/hooks/useQuickCommands', () => ({
-  useQuickCommands: () => ({
-    userCommands: [],
-    addCommand: vi.fn().mockResolvedValue(undefined),
-    deleteCommand: vi.fn().mockResolvedValue(undefined),
-  }),
-}));
+import type { CapsuleCapabilityProjection } from '@/product/terminal/capsule/types';
 
 vi.mock('@/product/terminal/hooks/useCommandHistory', () => ({
   useCommandHistory: () => ({
@@ -20,6 +13,25 @@ vi.mock('@/product/terminal/hooks/useCommandHistory', () => ({
     filterHistory: vi.fn().mockReturnValue([]),
   }),
 }));
+
+/**
+ * A projection the capsule is showing, built here rather than taken from a real
+ * capability: what is under test is the capsule's reaction to the flag, and the
+ * flag is the capability's own declaration. `useCapsuleCapability.test.tsx` is
+ * what proves the real Terminal Keys binding carries it and Git's does not.
+ */
+function projection(
+  overrides: Partial<CapsuleCapabilityProjection> = {},
+): CapsuleCapabilityProjection {
+  return {
+    id: 'terminal-keys',
+    title: 'Terminal Keys',
+    depth: 'signal',
+    body: () => <p data-testid="projection-body">keys</p>,
+    onDismiss: vi.fn(),
+    ...overrides,
+  };
+}
 
 describe('TerminalCapsule', () => {
   it('never renders legacy sheet', () => {
@@ -37,42 +49,55 @@ describe('TerminalCapsule', () => {
     expect(screen.queryByTestId('capsule-mode-toggle')).not.toBeInTheDocument();
   });
 
-  it('shows paste/copy on app input mode', () => {
+  it('renders the App resting capsule as one row: `+`, field, one action', () => {
+    // The App capsule at rest is a minimal intent composer — terminal-capsule.md
+    // §Anatomy's `[+] [ input ... ] [send]` — so the row is a single band at
+    // control.md height rather than a field stacked on a toolbar row.
     render(
       <TerminalCapsule
         experience="app"
-        mode="input"
-        onModeChange={vi.fn()}
         sendText={vi.fn()}
+        capabilityDisclosure={{
+          entries: [{ id: 'claude-code', title: 'Claude Code', state: 'active' }],
+          onSelect: vi.fn(),
+        }}
       />,
     );
-    expect(screen.getByTestId('capsule-paste')).toBeInTheDocument();
-    expect(screen.getByTestId('capsule-copy')).toBeInTheDocument();
+
+    expect(screen.getByTestId('capsule-input-row')).toHaveAttribute('data-layout', 'flat');
+    expect(screen.queryByTestId('capsule-input-toolbar-row')).not.toBeInTheDocument();
+    expect(screen.getByTestId('capsule-input-field')).toHaveAttribute(
+      'data-input-width',
+      'column',
+    );
+
+    const leading = within(screen.getByTestId('capsule-input-leading-slot'));
+    expect(leading.getByTestId('capsule-capability-more')).toBeInTheDocument();
+
+    // Exactly one action — the primary send. App gets no permanent history,
+    // paste, copy or mode control beside it.
+    const actions = within(screen.getByTestId('capsule-input-actions'));
+    expect(actions.getAllByRole('button')).toHaveLength(1);
+    for (const testId of [
+      'capsule-history-trigger',
+      'capsule-paste',
+      'capsule-copy',
+      'capsule-mode-toggle',
+    ]) {
+      expect(screen.queryByTestId(testId)).not.toBeInTheDocument();
+    }
   });
 
-  it('renders app mode toggle and switches body', async () => {
-    const onModeChange = vi.fn();
-    const { rerender } = render(
-      <TerminalCapsule
-        experience="app"
-        mode="input"
-        onModeChange={onModeChange}
-        sendText={vi.fn()}
-      />,
-    );
-    expect(screen.getByTestId('capsule-mode-toggle')).toBeInTheDocument();
-    await userEvent.click(screen.getByTestId('capsule-mode-commands'));
-    expect(onModeChange).toHaveBeenCalledWith('commands');
+  it('moves to the field-first layout once the input wraps', async () => {
+    render(<TerminalCapsule experience="app" sendText={vi.fn()} />);
+    const input = screen.getByTestId('capsule-ghost-input');
+    await userEvent.type(input, 'line1{Shift>}{Enter}{/Shift}line2');
 
-    rerender(
-      <TerminalCapsule
-        experience="app"
-        mode="commands"
-        onModeChange={onModeChange}
-        sendText={vi.fn()}
-      />,
-    );
-    expect(screen.getByTestId('capsule-commands-row')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByTestId('capsule-input-row')).toHaveAttribute('data-layout', 'stacked');
+    });
+    expect(screen.getByTestId('capsule-input-field')).toHaveAttribute('data-input-width', 'full');
+    expect(screen.getByTestId('capsule-input-toolbar-row')).toBeInTheDocument();
   });
 
   it('marks disabled state', () => {
@@ -100,9 +125,7 @@ describe('TerminalCapsule', () => {
   });
 
   it('uses inset positioning on app', () => {
-    render(
-      <TerminalCapsule experience="app" mode="input" onModeChange={vi.fn()} sendText={vi.fn()} />,
-    );
+    render(<TerminalCapsule experience="app" sendText={vi.fn()} />);
     const root = screen.getByTestId('terminal-capsule');
     expect(root).toHaveAttribute('data-experience', 'app');
     expect(root.className).toMatch(/terminal-capsule-shell-inset/);
@@ -132,21 +155,94 @@ describe('TerminalCapsule', () => {
     expect(screen.getByTestId('capsule-shell').className).toMatch(/radius-capsule/);
   });
 
-  it('uses pill shape on app commands mode', () => {
-    render(
-      <TerminalCapsule
-        experience="app"
-        mode="commands"
-        onModeChange={vi.fn()}
-        sendText={vi.fn()}
-      />,
-    );
-    expect(screen.getByTestId('terminal-capsule')).toHaveAttribute('data-shell-shape', 'pill');
-    expect(screen.getByTestId('capsule-shell').className).toMatch(/terminal-capsule-shell-pill-radius/);
-  });
-
   it('defaults to the web experience when none is given', () => {
     render(<TerminalCapsule sendText={vi.fn()} />);
     expect(screen.getByTestId('terminal-capsule')).toHaveAttribute('data-experience', 'web');
+  });
+});
+
+/**
+ * #1034 criteria 7, 8 and 14 — the composer persists, and the accessory yields.
+ *
+ * One boolean the capability declared drives both halves, so the capsule never
+ * learns a capability id. Each direction is asserted for a projection that
+ * claims the keyboard *and* for one that does not: an implementation that
+ * always blurred, or always dismissed, would satisfy the first case of each
+ * pair and silently break `git commit` while Git's Signal is up.
+ */
+describe('capsule input focus', () => {
+  it('dismisses the keyboard when a projection that claims it appears', () => {
+    // Blurring the field is what dismisses a soft keyboard — there is no
+    // declarative equivalent — and leaving the IME up would cover the accessory
+    // it competes with.
+    const { rerender } = render(<TerminalCapsule experience="app" sendText={vi.fn()} />);
+    const field = screen.getByTestId('capsule-ghost-input');
+    field.focus();
+    expect(document.activeElement).toBe(field);
+
+    rerender(
+      <TerminalCapsule
+        experience="app"
+        sendText={vi.fn()}
+        capabilityProjection={projection({ ownsInputFocus: true })}
+      />,
+    );
+
+    expect(document.activeElement).not.toBe(field);
+  });
+
+  it('leaves the composer focused for a projection that is read while typing', () => {
+    // Git's shape: a Signal is not a reason to take the keyboard away from a
+    // `git commit` in progress.
+    const { rerender } = render(<TerminalCapsule experience="app" sendText={vi.fn()} />);
+    const field = screen.getByTestId('capsule-ghost-input');
+    field.focus();
+
+    rerender(
+      <TerminalCapsule
+        experience="app"
+        sendText={vi.fn()}
+        capabilityProjection={projection({ id: 'git', title: 'Git' })}
+      />,
+    );
+
+    expect(document.activeElement).toBe(field);
+  });
+
+  it('returns to text entry when the composer is tapped while the keys are up', async () => {
+    // Criterion 8 via 14: one secondary surface owns focus, and the way out of
+    // Terminal Keys is the composer itself. The projection steps out; nothing
+    // about the Session or the Terminal is part of what was dismissed.
+    const onDismiss = vi.fn();
+    render(
+      <TerminalCapsule
+        experience="app"
+        sendText={vi.fn()}
+        capabilityProjection={projection({ ownsInputFocus: true, onDismiss })}
+      />,
+    );
+
+    const field = screen.getByTestId('capsule-ghost-input');
+    await userEvent.click(field);
+
+    expect(document.activeElement).toBe(field);
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaves a projection up when the composer is tapped, if it never claimed the keyboard', async () => {
+    const onDismiss = vi.fn();
+    render(
+      <TerminalCapsule
+        experience="app"
+        sendText={vi.fn()}
+        capabilityProjection={projection({ id: 'git', title: 'Git', onDismiss })}
+      />,
+    );
+
+    const field = screen.getByTestId('capsule-ghost-input');
+    await userEvent.click(field);
+
+    expect(document.activeElement).toBe(field);
+    expect(onDismiss).not.toHaveBeenCalled();
   });
 });

@@ -4,6 +4,7 @@ export const control = {
   sm: 44,
   md: 44,
   lg: 52,
+  visualSize: 36,
 } as const;
 export const row = {
   sm: 40,

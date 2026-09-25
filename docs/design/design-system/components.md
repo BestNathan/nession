@@ -66,6 +66,31 @@ nothing objected — the scanner only saw brackets holding nothing but a number.
 `calc()` is exempt: `h-[calc(100%-1px)]` is arithmetic against an
 already-resolved dimension, not a design choice.
 
+### A tap target has two geometries, and the band owns only one
+
+The band above is the control's **hit target** — the box that receives the tap.
+A control may also paint something **inside** that box, and that is a second
+owner, not a second band:
+
+| Gets a Nession owner | Detail |
+|---|---|
+| the **hit target** | the Experience control band (`--control-md`) — `category.control`'s `heightToken`, and the touch floor on App |
+| the **affordance drawn in it** | `control.visualSize`, named per Experience by `pattern.terminal-capsule`'s `visualSizeToken` |
+
+Both are Nession's, and they are deliberately different sizes on App: the touch
+floor makes a full-band **hit target** correct, while a control that *paints* the
+whole band makes every secondary icon action read as a primary button. On Web
+there is no touch floor, so the drawn affordance may fill the control it sits in
+and the split is a no-op — which is why the token is declared in both
+experiences rather than App-only.
+
+**Two DOM nodes, never two values on one element.** Everything that asserts a
+control's geometry (`expectTokenHeight`, `expectTouchTarget`) measures the
+element it is handed, so shrinking the *class* would shrink the tap target —
+the opposite of the intent — and the smaller painting would be unmeasurable
+anywhere. The design gate fails a control whose painting reached its hit target,
+which is what stops the two from quietly converging back into one.
+
 ## Product identity
 
 Do not fork Button, Input, Tabs, Sheet, or Menu into Nession-branded variants merely to create identity.

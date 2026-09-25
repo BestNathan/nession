@@ -13,6 +13,7 @@
 import { expect, test } from '@playwright/test';
 import {
   expectAlignedY,
+  expectDrawnAffordance,
   expectNoUnexpectedOverflow,
   expectScrollable,
   expectSingleLine,
@@ -64,6 +65,32 @@ test.describe('assertion helpers detect deliberate violations', () => {
 
     await page.setContent(`<div id="root" style="height: ${expected + 12}px; box-sizing: border-box;"></div>`);
     await rejectsWith(expectTokenHeight(page.locator('#root'), capsule), 'height');
+  });
+
+  test('drawn affordance: a smaller circle inside the target passes, a filled one fails (terminal-capsule)', async ({ page }) => {
+    // #1034. The App capsule is a 44px touch target holding a smaller painted
+    // circle, and both halves are one DOM tree: a control carrying exactly one
+    // `capsule-control-visual`. No existing helper can see the inner node —
+    // they measure the element they are handed — which is why the pair needs
+    // its own assertion rather than a tighter height check.
+    //
+    // Failing case is the silent revert: an affordance that grew back to the
+    // band. Nothing about the control's own box changes when that happens, so
+    // `expectTouchTarget` keeps passing and only this helper notices.
+    const capsule = { pattern: 'pattern.terminal-capsule', experience: 'app' as const };
+    const bandPx = patternBlock(capsule.pattern, 'app').heightTokenPx!;
+    const visualPx = patternBlock(capsule.pattern, 'app').visualSizeTokenPx!;
+
+    const control = (inner: number) =>
+      `<div id="root" style="width: ${bandPx}px; height: ${bandPx}px;">
+         <span data-testid="capsule-control-visual" style="display: block; width: ${inner}px; height: ${inner}px;"></span>
+       </div>`;
+
+    await page.setContent(control(visualPx));
+    await expectDrawnAffordance(page.locator('#root'), capsule); // passes
+
+    await page.setContent(control(bandPx));
+    await rejectsWith(expectDrawnAffordance(page.locator('#root'), capsule), 'drawn-affordance');
   });
 
   test('overflow: overflowing child fails clip, contained content passes', async ({ page }) => {

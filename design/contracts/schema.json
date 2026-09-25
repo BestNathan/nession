@@ -71,6 +71,10 @@
           ]
         },
         "touchTargetToken": { "$ref": "#/$defs/tokenRef", "description": "Minimum hit area, App density (e.g. experience.app.touchTarget.min)." },
+        "visualSizeToken": {
+          "$ref": "#/$defs/tokenRef",
+          "description": "The affordance a control paints, as opposed to the box that receives the tap (#1034). Resolved value must be px-measurable, and it is the only field here that measures something *inside* the band: on App control.sm and control.md are both 44px, so heightToken alone cannot tell a control whose painting grew back to the band from one holding a smaller circle. The drawn-affordance check in design-gate.mjs fails a resolved value that is not strictly below the band."
+        },
         "visibility": { "$ref": "#/$defs/visibility" }
       },
       "additionalProperties": false

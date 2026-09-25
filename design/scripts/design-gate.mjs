@@ -2,6 +2,10 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+// One definition of "this token value is px-measurable" for the whole design
+// pipeline. A second parser here would drift from the resolver's, and the two
+// would disagree about exactly the values this check exists to catch.
+import { parseCssPx } from './resolve-contracts.mjs';
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(SCRIPT_DIR, '..', '..');
@@ -122,6 +126,61 @@ export function checkSemanticTokenIdentity({ pattern, expectedToken, actualToken
   }];
 }
 
+/**
+ * The affordance a control *paints* must be smaller than the box that gets the
+ * tap, and must be the token the contract names.
+ *
+ * The capsule's App experience is why this is a check rather than a convention.
+ * `control.sm == control.md == 44px` there, so a control that grew its painting
+ * back to a full 44px box is *pixel-identical* to one holding a 36px circle to
+ * every measurement that reads the band — `expectTokenHeight` and
+ * `expectTouchTarget` both measure the element they are handed, and both would
+ * keep passing. #1034 is the change that separates the two axes; this is what
+ * fails when it silently reverts.
+ *
+ * Numbers arrive as arguments (not read from disk) so the band can be exercised
+ * directly, and "no numeric value found" is a **violation, not a skip**: a check
+ * that quietly no-ops when it cannot measure is the failure mode
+ * `no-capsule-magic-metrics.test.js` exists to prevent.
+ */
+export function checkDrawnAffordanceBand({
+  pattern,
+  expectedToken,
+  actualToken,
+  visualPx,
+  bandPx,
+  floorPx,
+}) {
+  const violations = [];
+
+  if (actualToken !== expectedToken) {
+    violations.push({
+      pattern,
+      rule: 'drawn-affordance-token-identity',
+      actual: actualToken,
+      expected: expectedToken,
+      owner: 'design/contracts/patterns/terminal-capsule.json',
+      repair: 'name the contract\'s visualSizeToken in the drawn-affordance class',
+      note: 'the drawn affordance and the hit target are separate axes; naming the hit target here merges them back into one',
+    });
+  }
+
+  const measured = typeof visualPx === 'number' && Number.isFinite(visualPx);
+  if (!measured || visualPx < floorPx || visualPx >= bandPx) {
+    violations.push({
+      pattern,
+      rule: 'drawn-affordance-band',
+      actual: measured ? `${visualPx}px` : 'no numeric value found',
+      expected: `${floorPx}px <= drawn affordance < ${bandPx}px (the hit target)`,
+      owner: 'design/tokens/experience/*.json',
+      repair: 'keep the painted affordance below the control band — a value at the band makes every secondary action read as a primary button (#1034)',
+      note: 'measured, not skipped: an unreadable value is how this check would stop protecting anything',
+    });
+  }
+
+  return violations;
+}
+
 const RAW_COLOR_RE = /(?:#[0-9a-fA-F]{3,8}\b|\b(?:rgb|rgba|hsl|hsla|oklch|oklab)\s*\()/g;
 const METRIC_PREFIX = '(?:h|w|min-h|min-w|max-h|max-w|size|p|px|py|pt|pr|pb|pl|m|mx|my|mt|mr|mb|ml|gap|gap-x|gap-y|rounded|text|leading)';
 const ARBITRARY_METRIC_RE = new RegExp(`\\b${METRIC_PREFIX}-\\[(?:-?\\d+(?:\\.\\d+)?)(?:px|rem|em|vh|vw|%)?\\]`, 'g');
@@ -223,6 +282,22 @@ function logicalControlToken(token) {
   return match ? `control.${match[1]}` : null;
 }
 
+/**
+ * `control-visual-size` → `control.visualSize`.
+ *
+ * The style bridge names a CSS custom property (kebab, as emitted) while the
+ * contract names a token path (camel, as written). Normalizing here is what lets
+ * the two be compared as the same logical token instead of as two spellings of
+ * it — the same reason `logicalControlToken` reads `control.md` out of
+ * `experience.web.control.md`.
+ */
+function logicalControlTokenFromVar(name) {
+  const [head, ...rest] = name.replace(/^control-/, '').split('-');
+  return `control.${head}${rest
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join('')}`;
+}
+
 function extractExportedString(source, exportName) {
   const escaped = exportName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const re = new RegExp(`export\\s+const\\s+${escaped}\\s*=\\s*(["'\\x60])([\\s\\S]*?)\\1\\s*;`);
@@ -258,6 +333,35 @@ function checkCapsuleSemanticBridge(root) {
     expectedToken: webExpected,
     actualToken: actual,
     resolvedPx: 44,
+  }).map((violation) => ({
+    ...violation,
+    file: 'web/src/product/terminal/capsule/capsuleStyles.ts',
+  })));
+
+  // The drawn affordance (#1034). Both numbers are read from the token *source*
+  // rather than from design/generated/*: this check runs first, before
+  // `token-generated-integrity` has said whether the generated artifacts are
+  // current, so a stale artifact must not be able to answer for the source.
+  //
+  // The band is App's `control.md` (the tap floor) and the floor is Web's
+  // `control.visualSize` (32px) — Web's drawn affordance *is* its band, so a
+  // value below 32px would be smaller than the platform's own smallest painted
+  // control and is not a size this system has a use for.
+  const capsuleContract = JSON.parse(
+    readFileSync(join(root, 'design/contracts/patterns/terminal-capsule.json'), 'utf8'),
+  );
+  const appTokens = JSON.parse(
+    readFileSync(join(root, 'design/tokens/experience/app.json'), 'utf8'),
+  );
+  const visualBridge = extractExportedString(source, 'capsuleIconVisualClass');
+  const visualMatch = visualBridge?.match(/var\(--(control-[A-Za-z0-9_-]+)\)/);
+  violations.push(...checkDrawnAffordanceBand({
+    pattern: 'pattern.terminal-capsule',
+    expectedToken: logicalControlToken(capsuleContract.app?.visualSizeToken) ?? 'missing visualSizeToken',
+    actualToken: visualMatch ? logicalControlTokenFromVar(visualMatch[1]) : 'missing control token',
+    visualPx: parseCssPx(appTokens.control?.visualSize?.value),
+    bandPx: 44,
+    floorPx: 32,
   }).map((violation) => ({
     ...violation,
     file: 'web/src/product/terminal/capsule/capsuleStyles.ts',

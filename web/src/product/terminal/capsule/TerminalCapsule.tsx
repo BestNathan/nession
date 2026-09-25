@@ -1,11 +1,8 @@
-import { useCallback, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { CAPSULE_EXPERIENCE } from '@/product/terminal/capsule/config/experience';
-import { CapsuleModeToggle } from '@/product/terminal/capsule/CapsuleModeToggle';
 import { CapsuleShell } from '@/product/terminal/capsule/components/CapsuleShell';
-import { CommandsComposer } from '@/product/terminal/capsule/components/CommandsComposer';
 import { InputComposer } from '@/product/terminal/capsule/components/InputComposer';
 import { ComposerMeasureMirror } from '@/product/terminal/capsule/components/ComposerMeasureMirror';
-import { CapsuleCommandsHostOverlays } from '@/product/terminal/capsule/components/CapsuleCommandsHostOverlays';
 import { CapsuleProvider } from '@/product/terminal/capsule/state/CapsuleProvider';
 import { useComposerMeasure } from '@/product/terminal/capsule/state/useComposerMeasure';
 import { useCapsuleState } from '@/product/terminal/capsule/state/useCapsuleState';
@@ -15,7 +12,6 @@ import {
   type CapsuleCapabilityDisclosure,
   type CapsuleCapabilityProjection,
   type CapsuleExperience,
-  type CapsuleMode,
 } from '@/product/terminal/capsule/types';
 import { useCapsuleLayoutFlip } from '@/product/terminal/capsule/useCapsuleLayoutFlip';
 import { useCapsuleDockClearance } from '@/product/terminal/capsule/hooks/useCapsuleDockClearance';
@@ -24,8 +20,6 @@ export interface TerminalCapsuleProps {
   sendText: (text: string) => void;
   disabled?: boolean;
   experience?: CapsuleExperience;
-  mode?: CapsuleMode;
-  onModeChange?: (mode: CapsuleMode) => void;
   /** Capabilities that earned no chip, reachable through the disclosure entry. */
   capabilityDisclosure?: CapsuleCapabilityDisclosure;
   /**
@@ -41,30 +35,61 @@ export function TerminalCapsule({
   sendText,
   disabled = false,
   experience = 'web',
-  mode = 'input',
-  onModeChange,
   capabilityDisclosure,
   capabilityProjection,
 }: TerminalCapsuleProps) {
   const resolvedExperience = experience;
   const experienceConfig = CAPSULE_EXPERIENCE[resolvedExperience];
-  const isApp = resolvedExperience === 'app';
-  const activeMode = isApp ? mode : 'input';
-  const isCommandsMode = isApp && activeMode === 'commands';
-  const allowLayoutChanges = !isApp || activeMode === 'input';
 
-  const state = useCapsuleState({
-    sendText,
-    disabled,
-    mode: activeMode,
-    onModeChange,
-    allowLayoutChanges,
-  });
+  const state = useCapsuleState({ sendText, disabled });
 
   const shellRef = useRef<HTMLDivElement>(null);
   const dockRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const inputRowRef = useRef<HTMLDivElement>(null);
+  const fieldRef = useRef<HTMLTextAreaElement>(null);
+
+  /**
+   * A projection that claims the keyboard, and the composer competing for it.
+   *
+   * Both halves of #1034's input-focus rules read one boolean the capability
+   * declared — never a capability id — so the capsule stays generic: a second
+   * tap-driven accessory arrives with the flag and this file does not change.
+   */
+  const projectionOwnsInputFocus = Boolean(capabilityProjection?.ownsInputFocus);
+  const projectionId = capabilityProjection?.id ?? null;
+
+  /**
+   * The accessory takes the keyboard when it appears.
+   *
+   * Blurring the field is *how* a soft keyboard is dismissed — there is no
+   * declarative equivalent — and leaving it focused would put the IME on top of
+   * the keys the accessory exists to expose (#1034 §5, criterion 7).
+   *
+   * Keyed on the projection's identity as well as the flag: a projection that
+   * replaces another one still claims the keyboard on arrival, and two
+   * keyboard-owning surfaces are already mutually exclusive by construction.
+   */
+  useEffect(() => {
+    if (projectionOwnsInputFocus) {
+      fieldRef.current?.blur();
+    }
+  }, [projectionId, projectionOwnsInputFocus]);
+
+  /**
+   * …and the composer takes it back when the user reaches for it.
+   *
+   * Tapping the field dismisses the projection rather than merely focusing the
+   * field. That is what makes the two secondary surfaces exclusive (criterion
+   * 14) and what returns the user to text entry (criterion 8): the dismissal
+   * steps the projection out and nothing else — the Session and the Terminal are
+   * not touched, because neither is part of what was dismissed.
+   */
+  const handleFieldFocus = useCallback(() => {
+    if (projectionOwnsInputFocus) {
+      capabilityProjection?.onDismiss();
+    }
+  }, [capabilityProjection, projectionOwnsInputFocus]);
 
   // The shell, not the dock: the dock also carries a capability projection when
   // one has emerged, and reserving terminal height for a temporary surface
@@ -72,7 +97,6 @@ export function TerminalCapsule({
   // (see the hook).
   useCapsuleDockClearance(shellRef);
 
-  const showModeToggle = Boolean(isApp && onModeChange && experienceConfig.inputControls.modeToggle);
   const {
     applyLineCount,
     composerLayout,
@@ -108,7 +132,6 @@ export function TerminalCapsule({
     shellRef,
     contentWidthRef: contentRef,
     onLineCountChange: handleLineCountChange,
-    enabled: allowLayoutChanges && !isCommandsMode,
   });
 
   return (
@@ -126,7 +149,6 @@ export function TerminalCapsule({
       <CapsuleShell
         experience={resolvedExperience}
         layout={composerLayout}
-        mode={activeMode}
         disabled={disabled}
         dockRef={dockRef}
         shellRef={shellRef}
@@ -142,26 +164,13 @@ export function TerminalCapsule({
           ) : null
         }
       >
-        {isCommandsMode && onModeChange ? (
-          <>
-            <CapsuleModeToggle mode={mode} onModeChange={onModeChange} disabled={disabled} />
-            <CommandsComposer />
-          </>
-        ) : (
-          <InputComposer
-            ref={inputRowRef}
-            leading={
-              showModeToggle && onModeChange ? (
-                <CapsuleModeToggle mode={mode} onModeChange={onModeChange} disabled={disabled} />
-              ) : null
-            }
-            capabilityDisclosure={capabilityDisclosure}
-          />
-        )}
+        <InputComposer
+          ref={inputRowRef}
+          capabilityDisclosure={capabilityDisclosure}
+          onFieldFocus={handleFieldFocus}
+          fieldRef={fieldRef}
+        />
       </CapsuleShell>
-      <CapsuleCommandsHostOverlays dockRef={dockRef} />
     </CapsuleProvider>
   );
 }
-
-export type { CapsuleMode } from '@/product/terminal/capsule/types';

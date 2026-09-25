@@ -845,16 +845,17 @@ mod legacy_stage_two_tests {
     /// and fall through to its catch-all, "working" while testing nothing.
     #[cfg(unix)]
     fn recording_shim(dir: &std::path::Path) -> (String, PathBuf) {
-        use std::os::unix::fs::PermissionsExt;
         let stage1 = dir.join("stage1-ran");
         let path = dir.join("tmux");
-        std::fs::write(
+        // A child creates it; see `install_via_a_child` for why the exec'd path
+        // must not be one this process wrote (#1026).
+        crate::test_support::install_via_a_child(
             &path,
             // One file per call, claimed with an O_EXCL create, so two
             // processes recording at once cannot interleave. The mechanism and
             // the measurements are documented on `FakeTmux` in
             // `crate::test_support`; keep this body in step with it.
-            format!(
+            &format!(
                 "#!/bin/sh\n\
                  if [ \"$1\" = \"-S\" ]; then shift 2; fi\n\
                  n=0\n\
@@ -881,12 +882,7 @@ mod legacy_stage_two_tests {
                 stage1 = stage1.display(),
             ),
         )
-        .expect("write shim");
-        let mut perms = std::fs::metadata(&path)
-            .expect("shim metadata")
-            .permissions();
-        perms.set_mode(0o755);
-        std::fs::set_permissions(&path, perms).expect("chmod shim");
+        .expect("install the shim");
         (path.to_string_lossy().into_owned(), dir.to_path_buf())
     }
 
@@ -937,8 +933,7 @@ mod legacy_stage_two_tests {
         // `-t` order (the prefix assertion).
         let dir = tempfile::tempdir().expect("tempdir");
         let (shim, record_dir) = recording_shim(dir.path());
-        let mut mgr = SessionManager::new();
-        mgr.with_tmux_bin(shim);
+        let mgr = crate::test_support::manager_with_fake(&shim);
         let session = crate::test_support::TestSession::new("stage2-argv");
 
         mgr.create_session(session.name(), SESSION_WIDTH, SESSION_HEIGHT, "/tmp", &[])
@@ -1018,8 +1013,7 @@ mod legacy_stage_two_tests {
         // exists to prevent.
         let dir = tempfile::tempdir().expect("tempdir");
         let fake = stage_two_fake(dir.path(), "");
-        let mut mgr = SessionManager::new();
-        mgr.with_tmux_bin(fake.bin());
+        let mgr = crate::test_support::manager_with_fake(fake.bin());
         let session = crate::test_support::TestSession::new("claude-binding-stage2");
 
         mgr.create_session(session.name(), SESSION_WIDTH, SESSION_HEIGHT, "/tmp", &[])
@@ -1063,8 +1057,7 @@ mod legacy_stage_two_tests {
             dir.path(),
             "send-keys) echo 'injected tmux refuses send-keys' >&2; exit 1;;\n",
         );
-        let mut mgr = SessionManager::new();
-        mgr.with_tmux_bin(fake.bin());
+        let mgr = crate::test_support::manager_with_fake(fake.bin());
         let session = crate::test_support::TestSession::new("step7-required-stage2");
 
         let err = mgr
@@ -1109,8 +1102,7 @@ mod legacy_stage_two_tests {
             "clear-history) echo 'injected tmux refuses clear-history' >&2; exit 1;;\n\
              set-option) echo 'injected tmux refuses set-option' >&2; exit 1;;\n",
         );
-        let mut mgr = SessionManager::new();
-        mgr.with_tmux_bin(fake.bin());
+        let mgr = crate::test_support::manager_with_fake(fake.bin());
         let session = crate::test_support::TestSession::new("step7-best-effort-stage2");
 
         mgr.create_session(session.name(), SESSION_WIDTH, SESSION_HEIGHT, "/tmp", &[])
@@ -1169,8 +1161,7 @@ mod injected_tmux_tests {
             "case \"$1\" in set-environment) echo 'injected tmux refuses nession-fake' >&2; \
              exit 1;; *) exit 0;; esac",
         );
-        let mut mgr = SessionManager::new();
-        mgr.with_tmux_bin(fake.bin());
+        let mgr = crate::test_support::manager_with_fake(fake.bin());
 
         let err = mgr
             .env()
@@ -1211,8 +1202,7 @@ mod injected_tmux_tests {
         // it happens to have.
         let dir = tempfile::tempdir().expect("tempdir");
         let fake = crate::test_support::FakeTmux::new(dir.path(), "exit 0");
-        let mut mgr = SessionManager::new();
-        mgr.with_tmux_bin(fake.bin());
+        let mgr = crate::test_support::manager_with_fake(fake.bin());
         let session = crate::test_support::TestSession::new("claude-binding-env");
 
         mgr.create_session(session.name(), SESSION_WIDTH, SESSION_HEIGHT, "/tmp", &[])
@@ -1281,8 +1271,7 @@ mod injected_tmux_tests {
             "case \"$1\" in set-environment) echo 'unknown flag -e' >&2; exit 1;; \
              *) exit 0;; esac",
         );
-        let mut mgr = SessionManager::new();
-        mgr.with_tmux_bin(fake.bin());
+        let mgr = crate::test_support::manager_with_fake(fake.bin());
         let session = crate::test_support::TestSession::new("step6-best-effort");
 
         mgr.create_session(session.name(), SESSION_WIDTH, SESSION_HEIGHT, "/tmp", &[])
@@ -1339,8 +1328,7 @@ mod injected_tmux_tests {
             "case \"$1\" in kill-session) echo 'no such session: nession-fake-sess' >&2; exit 1;; \
              *) exit 0;; esac",
         );
-        let mut mgr = SessionManager::new();
-        mgr.with_tmux_bin(fake.bin());
+        let mgr = crate::test_support::manager_with_fake(fake.bin());
 
         let err = mgr
             .kill_session("nession-fake-sess")
