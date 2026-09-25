@@ -1,82 +1,19 @@
-use anyhow::Context;
-use std::path::Path;
-use tracing::{error, info};
+//! nession-server binary — a thin adapter over [`nession_server::runtime`].
+//!
+//! The Server's composition lives in the runtime, because
+//! `nession server start --foreground` starts the same one (#1014). This file
+//! decides which config to run and hands it over; nothing about what a Server
+//! *is* belongs here.
 
+use anyhow::Context;
 use nession_common::config::ServerConfig;
-use nession_server::db::Database;
-use nession_server::server::WebSocketServer;
+use std::path::Path;
+use tracing::info;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Diagnostic: print immediately to stderr to confirm process starts
-    eprintln!("[DIAGNOSTIC] nession-server process started");
-
-    // Load configuration first (needed for logging setup).
-    eprintln!("[DIAGNOSTIC] Loading configuration...");
-    let config = match load_config() {
-        Ok(c) => {
-            eprintln!("[DIAGNOSTIC] Configuration loaded successfully");
-            c
-        }
-        Err(e) => {
-            eprintln!("[DIAGNOSTIC] ERROR: Failed to load configuration: {e:?}");
-            return Err(e);
-        }
-    };
-
-    // Initialize logging (stdout + file).
-    eprintln!("[DIAGNOSTIC] Initializing logging...");
-    let _log_guard = match nession_common::logging::init_logging(
-        &config.logging,
-        &nession_common::paths::server_logs_dir()?,
-        "nession-server",
-    ) {
-        Ok(g) => {
-            eprintln!("[DIAGNOSTIC] Logging initialized successfully");
-            g
-        }
-        Err(e) => {
-            eprintln!("[DIAGNOSTIC] ERROR: Failed to initialize logging: {e:?}");
-            return Err(e.into());
-        }
-    };
-
-    eprintln!("[DIAGNOSTIC] About to log startup info...");
-    info!("Starting nession-server");
-    eprintln!("[DIAGNOSTIC] Startup info logged");
-    info!(
-        "Configuration loaded: listen_address={}, db_path={}",
-        config.listen_address, config.db_path
-    );
-
-    // Ensure component directories exist
-    eprintln!("[DIAGNOSTIC] Ensuring component directories...");
-    nession_common::paths::ensure_component_dirs()
-        .context("failed to create nession component directories")?;
-    eprintln!("[DIAGNOSTIC] Component directories ensured");
-
-    // Initialize database
-    eprintln!("[DIAGNOSTIC] Initializing database...");
-    info!("Initializing database at {}", config.db_path);
-    let database = Database::new(&config.db_path).await?;
-    eprintln!("[DIAGNOSTIC] Database initialized");
-    info!("Database initialized successfully");
-
-    // Create and run WebSocket server
-    eprintln!("[DIAGNOSTIC] Creating WebSocket server...");
-    info!("Creating WebSocket server");
-    let mut server = WebSocketServer::new(config, std::sync::Arc::new(database)).await?;
-    eprintln!("[DIAGNOSTIC] WebSocket server created, starting...");
-
-    eprintln!("[DIAGNOSTIC] Starting WebSocket server...");
-    info!("Starting WebSocket server");
-    if let Err(e) = server.run().await {
-        eprintln!("[DIAGNOSTIC] Server error: {e:?}");
-        error!("Server error: {}", e);
-        return Err(e);
-    }
-
-    Ok(())
+    let config = load_config()?;
+    nession_server::runtime::run(config).await
 }
 
 /// Load server configuration.
@@ -90,14 +27,15 @@ fn load_config() -> anyhow::Result<ServerConfig> {
 
     if Path::new(&config_path).exists() {
         info!("Loading configuration from {}", config_path);
-        let config_str = std::fs::read_to_string(&config_path)?;
-        let config: ServerConfig = toml::from_str(&config_str)?;
+        let config_str = std::fs::read_to_string(&config_path)
+            .with_context(|| format!("failed to read config file: {config_path}"))?;
+        let config: ServerConfig = toml::from_str(&config_str)
+            .with_context(|| format!("failed to parse config file: {config_path}"))?;
         Ok(config)
     } else {
-        info!(
-            "No config found at '{}', using default configuration",
-            config_path
-        );
+        // Reaches stdout only when no log destination exists yet; the runtime
+        // logs the same fact once logging is up.
+        eprintln!("No config found at '{config_path}', using default configuration");
         Ok(ServerConfig {
             listen_address: "127.0.0.1:8080".to_string(),
             ..Default::default()

@@ -241,33 +241,10 @@ fn load_server_config(path: &str) -> Result<ServerConfig> {
 
 /// Run the server in foreground mode (blocks until shutdown).
 async fn run_server_foreground(config: ServerConfig) -> Result<()> {
-    // Initialize logging (stdout + file).
-    let _log_guard = nession_common::logging::init_logging(
-        &config.logging,
-        &nession_common::paths::server_logs_dir()?,
-        "nession-server",
-    )?;
-
-    info!("nession-server {} starting", env!("CARGO_PKG_VERSION"));
-    info!("Listen address: {}", config.listen_address);
-    info!("Database: {}", config.db_path);
-
-    // Import and run the server components
-    use nession_server::db::Database;
-    use nession_server::server::WebSocketServer;
-
-    // Initialize database
-    info!("Initializing database at {}", config.db_path);
-    let database = Database::new(&config.db_path).await?;
-    info!("Database initialized successfully");
-
-    // Create and run WebSocket server
-    info!("Creating WebSocket server");
-    let mut server = WebSocketServer::new(config, std::sync::Arc::new(database)).await?;
-
-    info!("Starting WebSocket server");
-    server.run().await?;
-
-    info!("nession-server stopped");
-    Ok(())
+    // The composition is not here: `nession_server::runtime` owns it (#1014).
+    //
+    // This copy had already drifted the same way the Agent's had — it skipped
+    // `ensure_component_dirs`, so a Server started through this path depended on
+    // the directories already existing while `nession-server` created them.
+    nession_server::runtime::run(config).await
 }
