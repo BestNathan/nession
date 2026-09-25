@@ -2,6 +2,7 @@ import { ArrowUp } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/shared/lib/utils';
+import { CapsuleIconVisual } from '@/product/terminal/capsule/CapsuleIconVisual';
 import { capsuleIconButtonClass } from '@/product/terminal/capsule/capsuleStyles';
 
 interface CapsuleInputActionButtonsProps {
@@ -62,16 +63,25 @@ export function CapsuleInputActionButtons({
           disabled={!canSend}
           data-testid="capsule-send"
           aria-label="Send"
+          // The `Button` *variant* paints the outer element (default →
+          // `bg-primary hover:bg-primary/80`), so the fill is neutralised here
+          // and painted on the drawn affordance instead — otherwise the 44px
+          // hit target fills on hover/touch and the smaller circle buys nothing.
           className={cn(
             capsuleIconButtonClass,
-            'rounded-full border-0',
-            canSend
-              ? 'bg-foreground text-background hover:bg-foreground/90'
-              : 'bg-muted text-muted-foreground',
+            'rounded-full border-0 bg-transparent hover:bg-transparent',
           )}
           onClick={onSend}
         >
-          <ArrowUp />
+          <CapsuleIconVisual
+            className={
+              canSend
+                ? 'bg-foreground text-background group-hover/button:bg-foreground/90'
+                : 'bg-muted text-muted-foreground'
+            }
+          >
+            <ArrowUp />
+          </CapsuleIconVisual>
         </Button>
       }
     />

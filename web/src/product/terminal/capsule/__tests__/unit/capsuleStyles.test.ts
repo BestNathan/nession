@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   capsuleCommandsDismissLayerClass,
   capsuleCommandsAppOverlayPanelClass,
+  capsuleIconButtonClass,
+  capsuleIconVisualClass,
   capsulePhysKeyButtonClass,
   capsulePhysKeyGridGapClass,
   capsulePhysKeyIconClass,
@@ -45,5 +47,27 @@ describe('capsuleStyles', () => {
 
   it('dismiss layer sits below capsule dock z-index', () => {
     expect(capsuleCommandsDismissLayerClass).toContain('z-10');
+  });
+
+  // #1034: the hit target and the drawn affordance are two axes on two elements.
+  // On App `control.sm` and `control.md` are both 44px, so the *token a class
+  // names* is the only thing that can tell a 44px control apart from a 36px
+  // circle — asserting the px would pass either way.
+  it('keeps the hit target on control.md and the drawn affordance on control.visualSize', () => {
+    expect(capsuleIconButtonClass).toContain('var(--control-md)');
+    expect(capsuleIconVisualClass).toContain('var(--control-visual-size)');
+    expect(capsuleIconButtonClass).not.toContain('control-sm');
+    expect(capsuleIconVisualClass).not.toContain('control-sm');
+  });
+
+  it('carries no hit area on the drawn affordance and no paint on the hit target', () => {
+    // The split is only real if each class owns one axis: a size on the visual
+    // would be a second hit area, and a background on the control would fill the
+    // 44px box on hover/touch and paint over the smaller circle.
+    expect(capsuleIconVisualClass).toContain('size-[length:var(--control-visual-size)]');
+    expect(capsuleIconVisualClass).toContain('rounded-full');
+    expect(capsuleIconVisualClass).not.toContain('var(--control-md)');
+    expect(capsuleIconButtonClass).not.toMatch(/\bbg-/);
+    expect(capsuleIconButtonClass).not.toMatch(/hover:bg-/);
   });
 });

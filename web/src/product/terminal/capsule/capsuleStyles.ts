@@ -30,22 +30,64 @@ export const capsuleFieldPadClass =
   'px-[length:var(--terminal-capsule-field-inset-x)] py-[length:var(--terminal-capsule-field-inset-y)]';
 
 /**
- * Every capsule control — one size, no primary/secondary split.
+ * Every capsule control's **hit target** — one size, no primary/secondary split.
+ *
+ * A capsule control has two axes, and they are deliberately different objects:
+ *
+ *   hit target        this class        `control.md`  — 44px on App (the tap
+ *                                                       floor), 32px on Web
+ *   drawn affordance  the inner visual  `control.visualSize` — 36px on App, 32px
+ *                                       on Web (#1034)
+ *
+ * The split exists because a 44px *tap target* is correct while 44px of *painted*
+ * geometry makes every icon action read as a primary button. It is expressed as
+ * two DOM nodes rather than one class, because every assertion that measures a
+ * control — `expectTokenHeight`, `expectTouchTarget` — measures the element it
+ * is handed, so a smaller painting inside the same box is only measurable on a
+ * second node.
  *
  * There used to be a `capsuleSecondaryIconButtonClass` alongside this one,
  * documented as "smaller band so the field keeps width". It was applied in the
  * field-first layout and never in the single-row layout that actually trades
- * against the field, so it bought no width anywhere.
+ * against the field, so it bought no width anywhere. It was also a smaller *hit
+ * target*, which is the opposite of what is wanted here — and it contradicted
+ * the contract, which names `control.md` as the band for both experiences
+ * (`pattern.terminal-capsule`). Nothing caught that, because on App `control.sm`
+ * and `control.md` are both 44px: the contract records the token *and* the
+ * resolved px, and the matrix only measures the px, so any future divergence
+ * would have reopened the sub-44px tap target silently. **This is not a return
+ * to that class.** The hit target stays `control.md` here and is asserted on
+ * this element; only the painting moved inside it.
  *
- * It also contradicted the contract, which names `control.md` as the band for
- * both experiences (`pattern.terminal-capsule`). Nothing caught that, because
- * on App `control.sm` and `control.md` are both 44px — the contract records
- * the token *and* the resolved px, and the matrix only measures the px. Any
- * future divergence reopens the sub-44px tap target silently. One class, named
- * by the contract, is the whole fix.
+ * This string is read by `design-gate.mjs` (`checkCapsuleSemanticBridge`), which
+ * requires its first `var(--control-…)` to be the contract's band. Do not fold
+ * the visual into it with `cn()` — that would make the check read the wrong
+ * token and put the drawn affordance under the hit target's guarantee.
  */
 export const capsuleIconButtonClass =
   "h-[length:var(--control-md)] w-[length:var(--control-md)] shrink-0 touch-manipulation [&_svg:not([class*='size-'])]:size-[length:var(--icon-md)]";
+
+/**
+ * The **drawn affordance** inside a capsule control — the circle a caller paints.
+ *
+ * Split from `capsuleIconButtonClass` so the painted geometry can be smaller than
+ * the box that receives the tap (#1034) without either one losing its own
+ * guarantee: this class carries no hit area, and the control class carries no
+ * paint. Paint is the caller's, through `CapsuleIconVisual`'s `className`: send
+ * paints it continuously, because it is the primary action; the secondary
+ * actions leave it unpainted, and it is the geometry their state paint belongs
+ * on if they ever gain one — a state painted on the control would fill the hit
+ * target and undo the split.
+ *
+ * `size-[length:var(--control-visual-size)]` is the only metric here, and it is
+ * the token the contract names (`visualSizeToken`), which is what lets
+ * `design-gate.mjs` fail if the two drift apart. `var(--control-visual-size)`
+ * resolves on both experiences: the leaf is declared in `experience.web` as well
+ * as `experience.app`, so `:root` defines it and `[data-experience="app"]`
+ * remaps it.
+ */
+export const capsuleIconVisualClass =
+  'flex size-[length:var(--control-visual-size)] shrink-0 items-center justify-center rounded-full';
 
 export const capsuleControlRowClass =
   'relative z-[1] flex h-[length:var(--control-md)] shrink-0 items-center gap-[length:var(--terminal-capsule-control-gap)]';

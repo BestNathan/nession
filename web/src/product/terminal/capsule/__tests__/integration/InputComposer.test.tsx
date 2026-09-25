@@ -39,6 +39,25 @@ function renderAppCapsule() {
   );
 }
 
+/**
+ * #1034's two axes on one control: the box that takes the tap names
+ * `control.md`, and the affordance drawn inside it names `control.visualSize`.
+ *
+ * Both bands are asserted on the *token each class names*, never on px: on App
+ * `control.sm` and `control.md` are both 44px, so a control that regressed to
+ * the smaller band measures identically, and a 44px circle inside a 44px target
+ * is exactly the shape the split was introduced to end.
+ */
+function expectTwoBandControl(testId: string) {
+  const control = screen.getByTestId(testId);
+  expect(control.className).toMatch(/control-md/);
+  expect(control.className).not.toMatch(/control-sm/);
+  expect(within(control).getByTestId('capsule-control-visual').className).toMatch(
+    /control-visual-size/,
+  );
+  return control;
+}
+
 describe('InputComposer', () => {
   it('shows History + Send on the right by default (no paste/copy/commands)', () => {
     renderWebCapsule();
@@ -158,15 +177,51 @@ describe('InputComposer', () => {
     // Regression: the capsule's controls once rendered at `control-sm` while
     // `pattern.terminal-capsule` names `control.md` as the band for both
     // experiences. No px assertion could see it — on App both tokens are 44px —
-    // so the invariant is asserted on the token the class names. The band is
-    // asserted on the control itself; whatever sits *inside* it is the inner
-    // visual, which this test does not claim anything about.
+    // so the invariant is asserted on the token the class names.
+    //
+    // Two bands since #1034, and both are asserted because either alone passes
+    // for the wrong reason. The OUTER control is the hit target (`control.md`,
+    // 44px on App) and the inner `capsule-control-visual` is the affordance
+    // drawn inside it (`control.visualSize`, 36px on App). An outer that named
+    // `control-sm` is the old regression; an inner that named `control-md` is
+    // the silent revert of #1034 — every secondary action back to a 44px
+    // filled square, at a size no measurement can distinguish from the target
+    // around it.
+    const app = renderAppCapsule();
+    for (const testId of ['capsule-capability-more', 'capsule-send']) {
+      expectTwoBandControl(testId);
+    }
+    app.unmount();
+
+    // The history trigger is Web's (App declares no permanent history control);
+    // it is the third caller of the split, so it gets the same assertion.
+    renderWebCapsule();
+    expectTwoBandControl('capsule-history-trigger');
+  });
+
+  it('keeps the painted affordance off the hit target, so the box never fills', async () => {
+    // Point 4 of the split: the shadcn `Button` *variant* paints the outer
+    // element (`default` → `bg-primary`, `ghost` → `hover:bg-muted`), so moving
+    // the circle inside does not on its own stop the 44px box from filling. On
+    // touch the hover sticks, and every secondary action becomes a filled 44px
+    // square again — the exact regression #1034 exists to end. The paint belongs
+    // to the inner visual; the control is transparent at rest and on hover.
     renderAppCapsule();
     for (const testId of ['capsule-capability-more', 'capsule-send']) {
       const control = screen.getByTestId(testId);
-      expect(control.className).toMatch(/control-md/);
-      expect(control.className).not.toMatch(/control-sm/);
+      expect(control.className).not.toMatch(/bg-foreground/);
+      expect(control.className).toMatch(/hover:bg-transparent/);
+      expect(control.className).not.toMatch(/hover:bg-(?!transparent)/);
     }
+
+    // …and the fill the send control gave up is on its circle, not nowhere: the
+    // primary action stays a filled affordance, just a 36px one. Typed input so
+    // the fill under test is the enabled one (`bg-foreground`), not the
+    // disabled `bg-muted`.
+    await userEvent.type(screen.getByTestId('capsule-ghost-input'), 'ls');
+    expect(
+      within(screen.getByTestId('capsule-send')).getByTestId('capsule-control-visual').className,
+    ).toMatch(/bg-foreground/);
   });
 
   it('drops tooltips on app, where they would intercept touch', () => {

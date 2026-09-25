@@ -4,8 +4,10 @@ import {
   capsuleControlRowClass,
   capsuleIconButtonClass,
 } from '@/product/terminal/capsule/capsuleStyles';
+import { CapsuleIconVisual } from '@/product/terminal/capsule/CapsuleIconVisual';
 import { Plus } from 'lucide-react';
 import { CapabilityDisclosureMenu } from '@/product/capability/components/CapabilityDisclosureMenu';
+import { cn } from '@/shared/lib/utils';
 import type {
   CapsuleCapabilityDisclosure,
 } from '@/product/terminal/capsule/types';
@@ -44,9 +46,21 @@ function CapsuleCapabilityMore({ disclosure }: { disclosure: CapsuleCapabilityDi
           type="button"
           aria-label="More capabilities"
           data-testid="capsule-capability-more"
-          className={capsuleIconButtonClass}
+          // `inline-flex … justify-center` because the child is now a
+          // block-level box rather than an inline `<svg>`: without it the drawn
+          // circle would sit in the corner of the 44px hit target instead of
+          // being centered in it, and the button's own centering of inline
+          // content would not apply. Sibling triggers that are not `Button`s
+          // already carry the same pairing (CapsuleHistoryPopover,
+          // CapsuleCommandsPopover).
+          className={cn(
+            capsuleIconButtonClass,
+            'inline-flex items-center justify-center bg-transparent hover:bg-transparent',
+          )}
         >
-          <Plus className="size-[length:var(--icon-md)]" />
+          <CapsuleIconVisual>
+            <Plus className="size-[length:var(--icon-md)]" />
+          </CapsuleIconVisual>
         </button>
       }
     />

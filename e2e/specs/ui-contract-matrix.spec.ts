@@ -12,6 +12,7 @@
 // target); app rows enforce the app touch target from the app block.
 import { expect, test } from '@playwright/test';
 import {
+  expectDrawnAffordance,
   expectNoUnexpectedOverflow,
   expectMaxWidth,
   expectPaddingX,
@@ -148,6 +149,12 @@ async function assertCapsuleControls(
     const control = controls.nth(i);
     await expect(control).toBeVisible();
     await expectTokenHeight(control, optsFor(PATTERN_TERMINAL_CAPSULE, experience, viewportId));
+    // Both axes of a control (#1034), measured as the contract splits them: the
+    // hit target above, and the affordance painted inside it here. The second
+    // call is not a duplicate of the first — on App both tokens are 44px, so the
+    // height check alone cannot tell a 44px control holding a 36px circle from
+    // one that filled its box, and the matrix is where that would go unnoticed.
+    await expectDrawnAffordance(control, optsFor(PATTERN_TERMINAL_CAPSULE, experience, viewportId));
   }
 }
 

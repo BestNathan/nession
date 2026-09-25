@@ -1,7 +1,7 @@
 {
   "$description": "App experience density. Remapped under [data-experience=app] in generated web.css.",
   "control": {
-    "$description": "sm == md on purpose: app has a touch-target floor (touchTarget.min, 44px), so no control size may sit below it. Web keeps a real 28/32/36 scale because a pointer has no minimum hit area. Do not 'restore' a smaller app sm \u2014 that reintroduces sub-44px tap targets.",
+    "$description": "sm == md on purpose: app has a touch-target floor (touchTarget.min, 44px), so no control *hit target* may sit below it. Web keeps a real 28/32/36 scale because a pointer has no minimum hit area. Do not 'restore' a smaller app sm \u2014 that reintroduces sub-44px tap targets. `visualSize` is the one legitimate sub-44px dimension in this group and the only exception to the floor: it is not a hit target, it is the affordance painted *inside* one (#1034), so it must stay strictly below `md`.",
     "sm": {
       "value": "44px"
     },
@@ -10,6 +10,10 @@
     },
     "lg": {
       "value": "52px"
+    },
+    "visualSize": {
+      "$description": "The affordance actually painted inside a control \u2014 the circle a capsule icon action draws \u2014 as opposed to the box that receives the tap. A control keeps its `control.md` hit target (44px) and draws this smaller circle inside it (#1034), so a row of secondary actions stops reading as a row of primary buttons. The inequality is the point: 36 < 44 on App, and a value that reached or passed the hit target would be the silent revert the design gate fails. Declared in both experiences because one class serves both \u2014 an App-only leaf would resolve to nothing at `:root`.",
+      "value": "36px"
     }
   },
   "row": {

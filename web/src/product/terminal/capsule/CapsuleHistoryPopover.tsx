@@ -10,6 +10,7 @@ import {
 } from '@/components/ui/popover';
 import { useCommandHistory } from '@/product/terminal/hooks/useCommandHistory';
 import { cn } from '@/shared/lib/utils';
+import { CapsuleIconVisual } from '@/product/terminal/capsule/CapsuleIconVisual';
 import {
   capsuleCaptionTextClass,
   capsuleEmptyStatePadClass,
@@ -68,12 +69,14 @@ export function CapsuleHistoryPopover({
         aria-label="Command history"
         className={cn(
           capsuleIconButtonClass,
-          'inline-flex items-center justify-center rounded-lg',
+          'inline-flex items-center justify-center rounded-lg bg-transparent hover:bg-transparent',
           "[&_svg:not([class*='size-'])]:size-[length:var(--icon-md)]",
           triggerClassName,
         )}
       >
-        <History />
+        <CapsuleIconVisual>
+          <History />
+        </CapsuleIconVisual>
       </PopoverTrigger>
       <PopoverContent
         align="end"
