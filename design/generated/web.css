@@ -425,6 +425,7 @@
   --touch-target-min: 44;
   --touch-target-compact: 28;
   --shell-icon-button-size: 44px;
+  --shell-sessions-list-min-height: 30%;
   --terminal-font-size: 11.5px;
   --terminal-line-height: 1.31;
   --terminal-pad-x: 14px;
