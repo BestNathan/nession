@@ -2608,18 +2608,22 @@ mod tests {
     /// `crate::tmux::cmd`). Without the strip, `$1` would be `-S` and a script
     /// matching on subcommands would silently fall through to its catch-all —
     /// the shim would "work" while testing nothing.
+    ///
+    /// Installed by a child process, like the other fake-tmux fixtures: the path
+    /// a test execs must not be one this process has open for writing, because
+    /// `fork` copies the descriptor table and an `exec` of a write-opened file
+    /// fails with `ETXTBSY` (#1026). See [`install_via_a_child`] for the
+    /// measurements.
+    ///
+    /// [`install_via_a_child`]: crate::test_support::install_via_a_child
     #[cfg(unix)]
     fn write_fake_tmux(dir: &std::path::Path, script: &str) -> String {
-        use std::os::unix::fs::PermissionsExt;
         let path = dir.join("tmux");
-        std::fs::write(
+        crate::test_support::install_via_a_child(
             &path,
-            format!("#!/bin/sh\nif [ \"$1\" = \"-S\" ]; then shift 2; fi\n{script}\n"),
+            &format!("#!/bin/sh\nif [ \"$1\" = \"-S\" ]; then shift 2; fi\n{script}\n"),
         )
-        .unwrap();
-        let mut perms = std::fs::metadata(&path).unwrap().permissions();
-        perms.set_mode(0o755);
-        std::fs::set_permissions(&path, perms).unwrap();
+        .expect("install the fake tmux");
         path.to_string_lossy().into_owned()
     }
 
