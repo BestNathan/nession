@@ -184,15 +184,32 @@ describe('App Sessions surface (#1050 stage 1)', () => {
     });
   });
 
-  it('carries the shared search field', () => {
-    // Same `SearchBar` the Web column renders, placeholder included. That
-    // placeholder ("Search agents and sessions...") describes more than this
-    // surface filters — only Sessions are filtered — and is left alone here on
-    // purpose: it belongs to the shared component, so rewording it would move
-    // Web too. #1050 stage 3 owns that copy.
+  it("says what it searches instead of inheriting Web's copy", () => {
+    // The App filters Sessions only — `filterSessions` matches a Session's name
+    // and its Agent id, and Agents are a collapsed disclosure here, never a
+    // filtered set. `SearchBar`'s default promises both sets, so this surface
+    // passes its own copy (#1050 stage 3). Web is untouched: `SessionListHeader`
+    // passes no `placeholder` and `SearchBar.test.tsx` pins the default.
     render(<AppSessionsSurface {...props()} />);
 
-    expect(screen.getByRole('textbox')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Search sessions...')).toBeInTheDocument();
+    expect(
+      screen.queryByPlaceholderText('Search agents and sessions...'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('annotates its filter chips with no count', async () => {
+    render(<AppSessionsSurface {...props()} />);
+    await userEvent.click(screen.getByTestId('session-list-filters'));
+
+    // An accessible name is exact here, badge text included — so these resolve
+    // only while the chips are their bare labels. They used to read "Online 1"
+    // / "Offline 1" from Agent counts while filtering Sessions; a count is part
+    // of the name, which is why this is the assertion that fails if it returns
+    // (see `SessionsFilters` for why it is gone rather than corrected).
+    expect(screen.getByRole('button', { name: 'All' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Online' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Offline' })).toBeInTheDocument();
   });
 
   it('moves filters and sort behind a single trigger', async () => {
@@ -212,9 +229,7 @@ describe('App Sessions surface (#1050 stage 1)', () => {
 
     await userEvent.click(screen.getByTestId('session-list-filters'));
 
-    // Chip counts are Agent counts while the filter applies to Sessions — the
-    // inconsistency #1050 Finding 2 recorded, carried over rather than
-    // corrected here (stage 3).
+    // The chips filter Sessions and now say only that — no Agent counts.
     expect(screen.getByTestId('session-list-filters-panel')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: /Online/ }));
     expect(setStatusFilter).toHaveBeenCalledWith('online');
