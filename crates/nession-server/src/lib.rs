@@ -4,6 +4,7 @@ pub mod env;
 pub mod probe;
 pub mod protocol;
 pub mod registry;
+pub mod runtime;
 pub mod server;
 
 use std::sync::OnceLock;

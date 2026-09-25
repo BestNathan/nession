@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { TerminalKeysProjection } from '@/product/terminal/TerminalKeysProjection';
@@ -44,6 +44,53 @@ describe('Terminal Keys accessory', () => {
 
     expect(sendText).toHaveBeenCalledTimes(3);
     expect(screen.getByTestId('terminal-keys-body')).toBeInTheDocument();
+  });
+
+  it('keeps tapping through a combination and a directional key', async () => {
+    // The same §7 sentence, at the strength the criterion asks for: a tap, a
+    // *combination* built by holding a modifier, then a directional key — with
+    // the accessory asserted after each one.
+    //
+    // Two claims, and the case fails if either breaks. Presence is
+    // `getByTestId`, which throws when the accessory is gone; *identity* is
+    // `toBe`, because a re-render that replaced the subtree would leave a node
+    // matching the test id while having thrown away everything the user had in
+    // flight — the chain included. So the element captured before the first tap
+    // is the one that has to still be there after the last.
+    const { sendText } = renderKeys();
+
+    const body = screen.getByTestId('terminal-keys-body');
+    const row = screen.getByTestId('phys-key-row');
+
+    await userEvent.click(screen.getByTestId('phys-key-Esc'));
+    expect(sendText).toHaveBeenNthCalledWith(1, '\x1b');
+    expect(screen.getByTestId('terminal-keys-body')).toBe(body);
+
+    // A modifier combination, through the chord that makes one reachable from a
+    // touch keyboard: holding Shift starts a chain, tapping Del adds the key it
+    // modifies, and sending the chain produces Del's own sequence — a modifier
+    // in this row carries no bytes of its own.
+    const shift = screen.getByTestId('phys-key-Shift');
+    await userEvent.pointer({ target: shift, keys: '[MouseLeft>]' });
+    await waitFor(() => {
+      expect(screen.getByTestId('capsule-chain-bar')).toBeInTheDocument();
+    });
+    await userEvent.pointer({ target: shift, keys: '[/MouseLeft]' });
+    await userEvent.click(screen.getByTestId('phys-key-Del'));
+    await userEvent.click(
+      within(screen.getByTestId('capsule-chain-bar')).getByRole('button', { name: 'Send' }),
+    );
+    expect(sendText).toHaveBeenNthCalledWith(2, '\x1b[3~');
+    expect(screen.getByTestId('terminal-keys-body')).toBe(body);
+
+    await userEvent.click(screen.getByTestId('phys-key-↑'));
+    expect(sendText).toHaveBeenNthCalledWith(3, '\x1b[A');
+
+    // Three taps, three sends — so the presence above cannot be passing because
+    // the taps did nothing at all — over one accessory that never re-mounted.
+    expect(sendText).toHaveBeenCalledTimes(3);
+    expect(screen.getByTestId('terminal-keys-body')).toBe(body);
+    expect(screen.getByTestId('phys-key-row')).toBe(row);
   });
 
   it('offers no dismiss control of its own', () => {

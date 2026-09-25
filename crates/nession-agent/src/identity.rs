@@ -25,6 +25,21 @@ use tracing::{info, warn};
 ///
 /// Returns the resolved agent_id.
 pub fn resolve_agent_id(config_agent_id: &str, identity_path: &Path) -> Result<String> {
+    // The contract above says non-empty, and this is where it is enforced. It
+    // matters because every branch below *persists* what it is given: an empty
+    // id would be written to the identity file as this agent's identity, and a
+    // machine that did that would register as a new agent on every start —
+    // the duplicate-identity failure #425 describes.
+    //
+    // Enforced rather than defaulted so the two entrypoints cannot disagree
+    // about the fallback: choosing what an absent id means is the runtime's
+    // call, and it makes it before calling here (#1014).
+    if config_agent_id.is_empty() {
+        anyhow::bail!(
+            "refusing to resolve an empty agent id: it would be persisted as this \
+             agent's identity"
+        );
+    }
     if identity_path.exists() {
         match load_identity(identity_path) {
             Some(file_id) => {
@@ -86,6 +101,27 @@ fn persist_identity(path: &Path, agent_id: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An empty id must not reach the identity file.
+    ///
+    /// Every branch of `resolve_agent_id` persists what it is given, so before
+    /// this check an `agent_id = ""` in a hand-written config wrote an empty
+    /// identity — and the machine then registered as a new agent on every start
+    /// (#425). The caller decides what an absent id means; this refuses to guess
+    /// and refuses to write.
+    #[test]
+    fn an_empty_id_is_refused_rather_than_persisted() {
+        let dir = tempfile::tempdir().unwrap();
+        let identity_path = dir.path().join("identity");
+
+        let result = resolve_agent_id("", &identity_path);
+
+        assert!(result.is_err(), "an empty id must not resolve: {result:?}");
+        assert!(
+            !identity_path.exists(),
+            "nothing may be persisted for an empty id"
+        );
+    }
 
     #[test]
     fn resolve_when_no_file_creates_and_uses_config_value() {
