@@ -11,6 +11,10 @@ path = "src/main.rs"
 nession-common = { path = "../nession-common" }
 # The CLI is a protocol consumer, and the kernel is what a consumer reads.
 nession-protocol = { path = "../nession-protocol" }
+# How a protocol consumer speaks to a Server: transport, correlation, the
+# handshake, one typed method per unit (#1015). Shared with the MCP host #565
+# plans, which is why it is not in this crate.
+nession-client = { path = "../nession-client" }
 nession-agent = { path = "../nession-agent" }
 nession-server = { path = "../nession-server" }
 tokio.workspace = true

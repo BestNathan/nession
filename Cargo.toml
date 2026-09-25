@@ -9,6 +9,7 @@ members = [
     "crates/nession-server",
     "crates/nession-agent",
     "crates/nession-cli",
+    "crates/nession-client",
 ]
 resolver = "2"
 

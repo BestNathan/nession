@@ -945,7 +945,12 @@ wires: &["agent.session.kill"],
 wires: &["server.session.attach"],
             decls: vec![
                 decl_of::<nession_protocol::contracts::session::v1::ClientSessionAttachPayload>(cfg),
+                // The reply is a union: the attach plan, or the refusal. Both
+                // arms and the shared refusal type, or the generated binding
+                // carries an unresolved reference.
+                decl_of::<nession_protocol::contracts::session::v1::ClientSessionAttachReply>(cfg),
                 decl_of::<nession_protocol::contracts::session::v1::ClientSessionAttachResponsePayload>(cfg),
+                decl_of::<nession_protocol::contracts::session::v1::SessionRefusal>(cfg),
                 decl_of::<nession_protocol::contracts::env::v1::EnvSnapshot>(cfg),
                 decl_of::<nession_protocol::contracts::agent::v1::ProbedAddress>(cfg),
                 decl_of::<nession_protocol::contracts::env::v1::EnvSource>(cfg),
@@ -959,8 +964,8 @@ wires: &["server.session.attach"],
             )),
             response: Some((
                 "SessionAttachReply",
-                nession_protocol::contracts::session::v1::ClientSessionAttachResponsePayload::inline,
-                schema_of::<nession_protocol::contracts::session::v1::ClientSessionAttachResponsePayload>,
+                nession_protocol::contracts::session::v1::ClientSessionAttachReply::inline,
+                schema_of::<nession_protocol::contracts::session::v1::ClientSessionAttachReply>,
             )),
         },
         Unit {

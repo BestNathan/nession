@@ -1938,6 +1938,7 @@ dependencies = [
  "httptest",
  "libc",
  "nession-agent",
+ "nession-client",
  "nession-common",
  "nession-protocol",
  "nession-server",
@@ -1956,6 +1957,24 @@ dependencies = [
  "toml",
  "tracing",
  "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
+name = "nession-client"
+version = "0.35.0"
+dependencies = [
+ "futures-util",
+ "nession-common",
+ "nession-protocol",
+ "nession-server",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-tungstenite",
+ "tracing",
  "uuid",
 ]
 
