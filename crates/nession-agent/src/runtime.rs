@@ -22,6 +22,7 @@
 use anyhow::{Context, Result};
 use nession_claude_code::agent::ClaudeCodeAgentExtension;
 use nession_common::extension::AgentExtension;
+use nession_common::readiness::Readiness;
 use nession_common::system;
 use nession_git::GitAgentExtension;
 use nession_protocol::contracts::agent::v1::AgentMetadata;
@@ -51,12 +52,10 @@ use crate::tmux::manager::SessionManager;
 /// cannot be composed. Reaching the end of the composition is what "started"
 /// means.
 ///
-/// **Not yet a readiness signal.** A daemon parent needs to know the child
-/// reached this point (#1016), which will want a notification rather than this
-/// return value, since `run` does not return until shutdown. That seam is
-/// deliberately not added here: it has no consumer yet, and its shape depends on
-/// the acknowledgement design #1016 owns.
-pub async fn run(config: AgentConfig) -> Result<()> {
+/// `ready` is how a daemon parent is told the child got this far. This return
+/// value cannot serve that purpose: `run` does not return until shutdown, so a
+/// parent would learn "started" only when it stopped (#1016).
+pub async fn run(config: AgentConfig, ready: Readiness) -> Result<()> {
     // 1. Initialize logging (stdout + file)
     let _log_guard = nession_common::logging::init_logging(
         &config.logging,
@@ -185,9 +184,18 @@ pub async fn run(config: AgentConfig) -> Result<()> {
     // server-advertised heartbeat interval (falling back to the local config).
     let (client_handle, heartbeat_interval_secs) = if config.server_url.trim().is_empty() {
         info!("No server_url configured — running in standalone mode");
+        // Serving: the P2P socket is bound and the tmux socket is pinned. There
+        // is no provider set to compose on this path, and no remote to reach.
+        ready.announce();
         (None, config.heartbeat_interval_secs)
     } else {
         let ext_registry = compose_providers(&agent_id, Arc::clone(&tmux_for_client))?;
+
+        // Serving: the socket is bound and the provider set composed. Announced
+        // *before* the central-server connection on purpose — that one is
+        // allowed to fail, and a parent that waited for it would report a
+        // healthy agent as a failed start.
+        ready.announce();
 
         let server_client = ServerClient::new(
             &config.server_url,
