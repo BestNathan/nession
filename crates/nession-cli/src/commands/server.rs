@@ -15,12 +15,14 @@ pub async fn start(config_path: String, foreground: bool, pid_file: String) -> R
     nession_common::paths::ensure_component_dirs()
         .context("failed to create nession component directories")?;
 
-    // Check if server is already running
-    if let Ok(pid) = pid_file::read_pid_file(&pid_file) {
-        if pid_file::is_process_running(pid) {
-            anyhow::bail!("Server is already running with PID {pid}");
-        } else {
-            // Process not running but PID file exists, clean it up
+    // Already running, decided by ownership rather than by pid (#1016) — the
+    // same question the agent path asks, for the same reason: a stale file whose
+    // pid was reused must not read as "already running".
+    match pid_file::ownership(&pid_file) {
+        Ok(pid_file::Ownership::Alive(identity)) => {
+            anyhow::bail!("Server is already running with PID {}", identity.pid);
+        }
+        Ok(_) | Err(_) => {
             let _ = fs::remove_file(&pid_file);
         }
     }
@@ -36,9 +38,8 @@ pub async fn start(config_path: String, foreground: bool, pid_file: String) -> R
         println!("Database: {}", config.db_path);
         println!("Press Ctrl+C to stop");
 
-        // Write PID file for the current process (foreground mode)
-        let pid = std::process::id();
-        pid_file::write_pid_file(&pid_file, pid)?;
+        // Record this process's identity (foreground mode) — not a bare pid.
+        pid_file::write_identity(&pid_file, pid_file::Component::Server)?;
 
         // Run the server directly (this will block)
         let result = run_server_foreground(config).await;
@@ -104,22 +105,28 @@ pub async fn start(config_path: String, foreground: bool, pid_file: String) -> R
 
 /// Stop the server process.
 pub async fn stop(pid_file: String) -> Result<()> {
-    // Read PID file
-    let pid = match pid_file::read_pid_file(&pid_file) {
-        Ok(pid) => pid,
+    // Ownership, not liveness (#1016) — the same reading the agent's `stop`
+    // makes, and for the same reason: a reused pid is somebody else's process.
+    let pid = match pid_file::ownership(&pid_file) {
+        Ok(pid_file::Ownership::Alive(identity)) => identity.pid,
+        Ok(pid_file::Ownership::Reused(identity)) => {
+            println!(
+                "Recorded pid {} is running but is not this server — not signalling it.",
+                identity.pid
+            );
+            let _ = fs::remove_file(&pid_file);
+            return Ok(());
+        }
+        Ok(pid_file::Ownership::Stale(identity)) => {
+            println!("Server process {} is not running", identity.pid);
+            let _ = fs::remove_file(&pid_file);
+            return Ok(());
+        }
         Err(_) => {
-            println!("Server is not running (no PID file found)");
+            println!("Server is not running (no state file found)");
             return Ok(());
         }
     };
-
-    // Check if process is running
-    if !pid_file::is_process_running(pid) {
-        println!("Server process {pid} is not running");
-        // Clean up stale PID file
-        let _ = fs::remove_file(&pid_file);
-        return Ok(());
-    }
 
     println!("Stopping server (PID {pid})...");
 
@@ -183,22 +190,28 @@ pub async fn restart(config_path: String, foreground: bool, pid_file: String) ->
 
 /// Show server status.
 pub async fn status(pid_file: String) -> Result<()> {
-    // Read PID file
-    let pid = match pid_file::read_pid_file(&pid_file) {
-        Ok(pid) => pid,
+    // Ownership, like `stop` (#1016): reading a bare pid out of an identity
+    // file would report a serving server as stopped.
+    let pid = match pid_file::ownership(&pid_file) {
+        Ok(pid_file::Ownership::Alive(identity)) => identity.pid,
+        Ok(pid_file::Ownership::Reused(identity)) => {
+            println!(
+                "Status: stopped (pid {} is running but is not this server)",
+                identity.pid
+            );
+            let _ = fs::remove_file(&pid_file);
+            return Ok(());
+        }
+        Ok(pid_file::Ownership::Stale(_)) => {
+            println!("Status: stopped (process not running)");
+            let _ = fs::remove_file(&pid_file);
+            return Ok(());
+        }
         Err(_) => {
-            println!("Status: stopped (no PID file)");
+            println!("Status: stopped (no state file)");
             return Ok(());
         }
     };
-
-    // Check if process is running
-    if !pid_file::is_process_running(pid) {
-        println!("Status: stopped (process not running)");
-        // Clean up stale PID file
-        let _ = fs::remove_file(&pid_file);
-        return Ok(());
-    }
 
     // Get process start time for uptime calculation
     let uptime = process::get_process_uptime(pid).map(pid_file::format_duration);

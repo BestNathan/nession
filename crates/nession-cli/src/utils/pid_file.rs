@@ -9,9 +9,14 @@ use std::path::Path;
 
 /// Write the current process ID to a file.
 ///
-/// Creates or overwrites the file at `path` with the given PID.
-/// Returns the PID that was written.
-pub fn write_pid_file(path: &str, pid: u32) -> Result<()> {
+/// **Superseded by [`write_identity`]**, which records enough to answer whether
+/// the process is still the one that wrote the file. Kept only for the one
+/// reader that still parses a bare pid — see `read_pid_file` — because writing
+/// one is now a way to lose that information.
+///
+/// Not a `pub` API any more: nothing writes a bare pid (#1016).
+#[cfg(test)]
+fn write_pid_file(path: &str, pid: u32) -> Result<()> {
     fs::write(path, pid.to_string())
         .with_context(|| format!("Failed to write PID file: {path}"))?;
     Ok(())
