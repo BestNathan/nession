@@ -232,9 +232,14 @@ pub async fn attach_session(
         })?;
         println!("Connecting to agent at {agent_address} (P2P mode)...");
 
-        let agent_ws = nession_client::open_ws(&agent_address)
+        // Through the boundary's one agent-socket constructor, not `open_ws`.
+        // That is the seam #1013 needs: an agent connection will have to carry
+        // a server-issued credential, and one constructor is one signature to
+        // change rather than a search for every place a socket was opened.
+        let agent_ws = nession_client::P2pConnection::connect(&agent_address)
             .await
-            .with_context(|| format!("Failed to connect to agent at {agent_address}"))?;
+            .with_context(|| format!("Failed to connect to agent at {agent_address}"))?
+            .into_stream();
         let transport = crate::terminal::raw::WebSocketTransport::new(agent_ws);
 
         attach_and_run(transport, &session_name, false).await
@@ -252,26 +257,11 @@ async fn attach_and_run<T: crate::terminal::TerminalTransport>(
     session_name: &str,
     relay: bool,
 ) -> Result<()> {
-    // The agent's own module, not a contract: `agent.attach` is a wire the agent
-    // dispatches and the catalog does not carry, so there is nothing to import
-    // from `nession-protocol` yet. Removing this import is stage 3 of #1015 —
-    // see the R4 decision in its plan.
-    use nession_agent::server::websocket::{
-        msg_types as agent_msg_types, ClientAttachPayload, Message as AgentMessage,
-    };
-
+    // One builder for both transports. The two copies this replaces each built
+    // their own `agent.attach` frame, and had already diverged in where the
+    // session name came from.
     let (cols, rows) = crate::terminal::raw::RawTerminal::size()?;
-    let attach_msg = AgentMessage {
-        msg_type: agent_msg_types::CLIENT_ATTACH.to_string(),
-        id: uuid::Uuid::new_v4().to_string(),
-        timestamp: now_seconds(),
-        payload: ClientAttachPayload {
-            session_name: session_name.to_string(),
-            width: cols,
-            height: rows,
-            env_snapshots: Vec::new(),
-        },
-    };
+    let attach_msg = nession_client::attach_frame(session_name, cols, rows);
 
     // `send_text` comes from the `T: TerminalTransport` bound on this function,
     // so the trait needs no import of its own here.
@@ -506,9 +496,10 @@ async fn ask_agent(
     use futures_util::{SinkExt, StreamExt};
 
     let url = format!("ws://{agent_address}");
-    let mut ws = nession_client::open_ws(&url)
+    let mut ws = nession_client::P2pConnection::connect(&url)
         .await
-        .with_context(|| format!("Failed to connect to agent at {url}"))?;
+        .with_context(|| format!("Failed to connect to agent at {url}"))?
+        .into_stream();
 
     let request = Message::new(
         wire,

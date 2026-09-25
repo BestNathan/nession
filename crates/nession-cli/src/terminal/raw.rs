@@ -30,8 +30,15 @@ use tokio_tungstenite::{
 };
 use tracing::{debug, trace, warn};
 
-use nession_agent::server::websocket::{
-    msg_types, Message, TerminalInputPayload, TerminalOutputPayload, TerminalResizePayload,
+// The terminal's frames are contract types, and its wire names come from the
+// consumer boundary's own list. Both used to be reached through
+// `nession_agent::server::websocket`, which re-exports the contracts and
+// declares the wires — so a *consumer* was taking its protocol vocabulary from
+// a provider's private module, and the names it used were invisible to
+// `scripts/protocol-gate.mjs` (which matches call sites, and found none here).
+use nession_client::{proto_msg, wire};
+use nession_protocol::contracts::terminal::v1::{
+    TerminalInputPayload, TerminalOutputPayload, TerminalResizePayload,
 };
 
 // ---------------------------------------------------------------------------
@@ -206,17 +213,12 @@ pub fn build_terminal_input_message(session_name: &str, data: &[u8]) -> String {
         session_name: session_name.to_string(),
         data: base64::engine::general_purpose::STANDARD.encode(data),
     };
-    let msg = Message {
-        msg_type: msg_types::TERMINAL_INPUT.to_string(),
-        id: uuid::Uuid::new_v4().to_string(),
-        timestamp: std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis()
-            .try_into()
-            .unwrap_or(0),
-        payload,
-    };
+    // Through `proto_msg`, so the wire name is a call site the gate reads.
+    // The envelope's `id` and `timestamp` come from there too — the hand-built
+    // version had to reassemble both, and got the unit right only by luck:
+    // `as_millis().try_into().unwrap_or(0)` silently becomes 0 on a clock far
+    // enough from the epoch, which no reader would question.
+    let msg = proto_msg(wire::AGENT_TERMINAL_INPUT, payload);
     serde_json::to_string(&msg).unwrap_or_else(|_| String::new())
 }
 
@@ -227,17 +229,7 @@ pub fn build_terminal_resize_message(session_name: &str, cols: u16, rows: u16) -
         cols,
         rows,
     };
-    let msg = Message {
-        msg_type: msg_types::TERMINAL_RESIZE.to_string(),
-        id: uuid::Uuid::new_v4().to_string(),
-        timestamp: std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis()
-            .try_into()
-            .unwrap_or(0),
-        payload,
-    };
+    let msg = proto_msg(wire::AGENT_TERMINAL_RESIZE, payload);
     serde_json::to_string(&msg).unwrap_or_else(|_| String::new())
 }
 
@@ -245,8 +237,9 @@ pub fn build_terminal_resize_message(session_name: &str, cols: u16, rows: u16) -
 /// for non-output messages or messages that fail to decode.
 pub fn extract_terminal_output(msg_text: &str) -> Option<Vec<u8>> {
     use base64::Engine;
-    let msg: Message<TerminalOutputPayload> = serde_json::from_str(msg_text).ok()?;
-    if msg.msg_type != msg_types::TERMINAL_OUTPUT {
+    let msg: nession_protocol::Message<TerminalOutputPayload> =
+        serde_json::from_str(msg_text).ok()?;
+    if msg.msg_type != wire::AGENT_TERMINAL_OUTPUT {
         return None;
     }
     base64::engine::general_purpose::STANDARD
@@ -648,12 +641,7 @@ mod tests {
             session_name: "s".into(),
             data: base64::engine::general_purpose::STANDARD.encode(b"hi"),
         };
-        let msg = Message {
-            msg_type: msg_types::TERMINAL_OUTPUT.to_string(),
-            id: "1".into(),
-            timestamp: 0,
-            payload,
-        };
+        let msg = proto_msg(wire::AGENT_TERMINAL_OUTPUT, payload);
         let s = serde_json::to_string(&msg).unwrap();
         assert_eq!(extract_terminal_output(&s), Some(b"hi".to_vec()));
     }

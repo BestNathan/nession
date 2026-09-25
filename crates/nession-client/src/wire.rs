@@ -46,3 +46,31 @@ pub const SERVER_SESSION_LIST: &str = "server.session.list";
 
 /// `server.session.attach` — ask the Server how to reach a session.
 pub const SERVER_SESSION_ATTACH: &str = "server.session.attach";
+
+// ── The agent-facing wires ──────────────────────────────────────────────────
+//
+// These are sent on a socket to an **agent**, not to the Server, and they are
+// the terminal's traffic rather than a management path — see
+// [`crate::p2p`] for why that distinction is load-bearing. They are named here
+// for the same reason the server wires are: until this list existed, the only
+// place a consumer could get one was `nession_agent`'s own `msg_types`, which
+// made a provider's private module the source of a consumer's wire names.
+
+/// `agent.attach` — attach a PTY to a session.
+///
+/// Sent on **two** transports: a fresh agent socket in P2P mode, and the Server
+/// connection in relay mode.
+pub const AGENT_ATTACH: &str = "agent.attach";
+
+/// `agent.terminal.input` — keystrokes. One-way: nothing answers them.
+pub const AGENT_TERMINAL_INPUT: &str = "agent.terminal.input";
+
+/// `agent.terminal.resize` — a size change. One-way, like input.
+pub const AGENT_TERMINAL_RESIZE: &str = "agent.terminal.resize";
+
+/// `agent.terminal.output` — the agent pushing PTY output to a client.
+///
+/// A **notification**, not an operation: the agent emits it and nothing
+/// answers. It is declared in the file that sends it rather than carried by the
+/// catalog, which is why it has no sibling entry here for a reply.
+pub const AGENT_TERMINAL_OUTPUT: &str = "agent.terminal.output";
