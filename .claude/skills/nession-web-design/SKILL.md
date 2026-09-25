@@ -369,6 +369,8 @@ For visual, layout, interaction, responsive, Terminal, Workspace, or third-party
 
 The browser profile is wired into the repository E2E workflow and runs the canonical structured UI-contract assertions and viewport matrix. Follow `nession-development` for the repository's browser/E2E execution rules rather than inventing a separate local stack path.
 
+**Attach the evidence, don't just describe it.** Where structured assertions cannot carry the visual remainder, capture it and put it on the PR with `gh pr comment --attach <file>` — see `nession-development`. A pasted local path (`.playwright-mcp/…`) is gitignored and renders as a broken image, so the evidence silently does not exist for a reviewer. Measure as well as photograph where a claim is numeric (a control's hit target vs its drawn affordance, for instance): a screenshot shows the result, a `getBoundingClientRect()` reading proves it.
+
 Check the rendered behavior that matters to the contract, for example:
 
 - actual control size/alignment/wrapping;
