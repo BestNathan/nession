@@ -123,6 +123,13 @@ pub async fn run(config: AgentConfig, ready: Readiness) -> Result<()> {
     // is going to send, so the lane keeps one of them per session instead of
     // every intermediate one a busy pane produces (#961-D). See
     // `crate::server::resize`.
+    // What this agent will honour on its P2P listener (#1013). Created here,
+    // once, because two things need the same store: the Server connection,
+    // which is where grants arrive, and the P2P listener, which is where they
+    // are checked. #1014 put the composition in this file for exactly this
+    // reason — a second construction site is a second, emptier store.
+    let p2p_credentials = Arc::new(crate::p2p_credentials::P2pCredentials::new());
+
     let (resize, mut resize_updates) = crate::server::ResizeReporter::new();
     let agent_server = AgentServer::new(
         &config.listen_address,
@@ -211,6 +218,7 @@ pub async fn run(config: AgentConfig, ready: Readiness) -> Result<()> {
             tmux_for_client,
             config.default_working_dir.clone(),
             Some(ext_registry),
+            Arc::clone(&p2p_credentials),
         );
 
         // Attempt to connect with a timeout so the agent can still serve

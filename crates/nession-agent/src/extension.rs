@@ -926,9 +926,17 @@ mod tests {
         // `server.agent.heartbeat` left the core one, because a control wire is
         // not a unit and a manifest does not describe one. The surface is what
         // this agent is *asked* for; a heartbeat is not asked for.
+        //
+        // Then up by one, for `agent.p2p.grant` (#1013). It is asked for — the
+        // Server asks this agent to honour a P2P credential, and that arrives on
+        // the core transport like every other command — but it is the first unit
+        // on this surface whose caller is the *Server* rather than a client. The
+        // authority it carries is the reason it had to be declared rather than
+        // squeezed in: a credential the manifest does not describe is a
+        // credential the composition cannot be checked against.
         assert_eq!(
             manifest.protocols.len(),
-            28,
+            29,
             "the surface is {:?}",
             manifest.protocols.keys().collect::<Vec<_>>()
         );

@@ -93,6 +93,13 @@ impl CredentialScope {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct P2pGrantPayload {
     /// Correlates the Server's command with the Agent's acknowledgement.
+    ///
+    /// Defaulted because the Server does not fill it: the command transport
+    /// injects the authoritative value into this same object on the way out, so
+    /// a value set here would be overwritten rather than used. It is declared
+    /// because the Agent reads it back — every agent-command arm does — and a
+    /// field the reader names is owed a declaration.
+    #[serde(default)]
     pub request_id: String,
     /// The opaque credential, exactly as it will be presented on the agent URL.
     pub credential: String,
