@@ -132,6 +132,17 @@ App presentation should normally map it as follows:
 
 Exact detection is implementation-specific.
 
+## Device and viewport coverage
+
+The executable matrix is [`design/contracts/viewports.json`](../../../design/contracts/viewports.json) — the single source that the browser contract suite iterates. For App it currently pins portrait at 375 / 390 / 430 and landscape at 844×390.
+
+**Two scenarios are not covered, and are recorded here as limitations rather than left silently unchecked** (#1049):
+
+- **Safe area.** Every consumer of `env(safe-area-inset-*)` in the web client uses `-top` or `-bottom`; `-left` and `-right` appear nowhere. That is adequate in portrait, where the notches and the home indicator are top and bottom — but landscape is exactly the case where those insets move to the **sides**, and nothing accounts for that. No fixture sets a non-zero inset, and Playwright cannot synthesise `env()` values without a real device.
+- **Software keyboard.** Opening an IME changes the visual viewport, and the capsule is meant to stay docked above it. No test exercises this: jsdom has no keyboard, and the Playwright fixtures run without one. Resizing the viewport in a test is *not* a substitute — it emulates a smaller viewport, not an IME appearing over one.
+
+Closing either needs a real device or emulator. Until then this is a **known evidence gap, not a known defect**: nothing here says the App breaks under an IME or a landscape inset, only that no test would notice if it did.
+
 ## What App must not do
 
 - Ship as a responsive/shrunken Web dashboard.
