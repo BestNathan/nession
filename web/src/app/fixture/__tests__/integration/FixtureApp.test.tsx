@@ -8,40 +8,58 @@ vi.mock('@/app/fixture/FixtureTerminal', () => ({
 }));
 
 describe('FixtureApp', () => {
-  it('renders the spatial shell with the terminal page active', () => {
+  it('renders the Terminal root with neither layer mounted', () => {
     render(<FixtureApp />);
-    expect(screen.getByTestId('app-spatial-shell')).toBeInTheDocument();
-    // The spatial pager keeps every page mounted — the workspace page's
-    // ShellMain renders its own header line, so exactly two exist.
-    expect(screen.getAllByTestId('session-header-line')).toHaveLength(2);
+    expect(screen.getByTestId('app-layer-root')).toHaveAttribute(
+      'data-layer',
+      'terminal',
+    );
+    // Exactly one header line. The pager mounted all three pages at once, so a
+    // second one used to exist permanently; that duplicate is what this
+    // composition removes, and a regression would bring it back.
+    expect(screen.getAllByTestId('session-header-line')).toHaveLength(1);
     expect(screen.getByTestId('app-header-sessions')).toBeInTheDocument();
     expect(screen.getByTestId('app-header-workspace')).toBeInTheDocument();
     expect(screen.getByTestId('terminal-well')).toBeInTheDocument();
     expect(screen.getByTestId('fixture-terminal')).toBeInTheDocument();
+    expect(screen.queryByTestId('app-layer-workspace')).toBeNull();
+    expect(screen.queryByTestId('app-layer-sessions')).toBeNull();
   });
 
-  it('navigates to the workspace page via ☰ and back via ←', async () => {
+  it('opens Workspace as a layer and returns to the same Terminal', async () => {
     render(<FixtureApp />);
     const user = userEvent.setup();
+
     await user.click(screen.getByTestId('app-header-workspace'));
+    expect(screen.getByTestId('app-layer-workspace')).toBeInTheDocument();
     expect(screen.getByTestId('app-tool-header')).toBeInTheDocument();
     expect(screen.getByTestId('workspace-shell')).toBeInTheDocument();
     expect(screen.getByTestId('files-app-layout')).toBeInTheDocument();
-    // Surface derives from the pager position: the terminal page is now
-    // hidden — proves the pager moved, not just mounted.
-    expect(screen.getByTestId('terminal-well').classList.contains('hidden')).toBe(true);
-    await user.click(screen.getByTestId('app-tool-back'));
+    // The Terminal stays mounted underneath rather than being translated
+    // off-screen. That is the mechanism behind #1049's "returning restores the
+    // same Terminal state": there is no unmount, so there is no rebuild.
+    expect(screen.getByTestId('app-layer-terminal')).toBeInTheDocument();
     expect(screen.getByTestId('terminal-well')).toBeInTheDocument();
-    expect(screen.getByTestId('terminal-well').classList.contains('hidden')).toBe(false);
+
+    await user.click(screen.getByTestId('app-tool-back'));
+    expect(screen.queryByTestId('app-layer-workspace')).toBeNull();
+    expect(screen.getByTestId('terminal-well')).toBeInTheDocument();
   });
 
-  it('opens the sessions page via the header ≡ button', async () => {
+  it('opens Sessions as a layer and leaves the surface at the Terminal', async () => {
     render(<FixtureApp />);
     const user = userEvent.setup();
+
     await user.click(screen.getByTestId('app-header-sessions'));
+    expect(screen.getByTestId('app-layer-sessions')).toBeInTheDocument();
     expect(screen.getByTestId('sidebar')).toBeInTheDocument();
-    // The sessions page is a pager position, not a surface — the terminal
-    // page must stay visible behind it.
-    expect(screen.getByTestId('terminal-well').classList.contains('hidden')).toBe(false);
+    // Sessions is navigation, not a surface — the Terminal remains the surface
+    // and stays visible behind the layer. The old test recorded the same intent
+    // as "a pager position, not a surface"; the overlay model is what makes it
+    // literally true instead of a consequence of which page happened to mount.
+    expect(screen.getByTestId('app-layer-terminal')).toBeInTheDocument();
+    expect(
+      screen.getByTestId('terminal-well').classList.contains('hidden'),
+    ).toBe(false);
   });
 });

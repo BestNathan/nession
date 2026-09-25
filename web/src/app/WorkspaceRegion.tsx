@@ -1,5 +1,5 @@
-import { SpatialLayout } from '@/app/experiences/app/SpatialLayout';
-import { useAppSpatialIndex } from '@/app/experiences/app/useAppSpatialIndex';
+import { AppLayout } from '@/app/experiences/app/AppLayout';
+import { useAppLayer } from '@/app/experiences/app/useAppLayer';
 import { WebLayout, type MainProps } from '@/app/experiences/web/WebLayout';
 import type { SortDirection, SortField, StatusFilter } from '@/app/useDashboard';
 import type { DomainState } from '@/product/session/model/domainState';
@@ -64,7 +64,7 @@ export function WorkspaceRegion(props: WorkspaceRegionProps) {
   } = props;
 
   const useSpatial = !isWide && selectedId !== null;
-  const { spatialIndex, onIndexChange, onSpatialSelect } = useAppSpatialIndex({
+  const { layer, onLayerChange, onLayerSelect } = useAppLayer({
     selectedId,
     surface,
     active: useSpatial,
@@ -89,11 +89,11 @@ export function WorkspaceRegion(props: WorkspaceRegionProps) {
   // below it is a composition that lives in its own directory.
   if (useSpatial) {
     return (
-      <SpatialLayout
-        spatialIndex={spatialIndex}
-        onIndexChange={onIndexChange}
+      <AppLayout
+        layer={layer}
+        onLayerChange={onLayerChange}
         sidebarProps={sidebarProps}
-        onSpatialSelect={onSpatialSelect}
+        onLayerSelect={onLayerSelect}
         mainShared={mainShared}
       />
     );
