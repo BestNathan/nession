@@ -37,6 +37,7 @@ pub mod env;
 pub mod file;
 #[cfg(test)]
 mod fixtures;
+pub mod p2p;
 pub mod server;
 pub mod session;
 pub mod terminal;
