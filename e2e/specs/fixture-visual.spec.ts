@@ -85,6 +85,33 @@ test.describe('Web 1440×900', () => {
       ...FIXTURE_SCREENSHOT,
     });
   });
+
+  // #1102's second item — `#1046`'s second depth on the Web experience — and
+  // with its App counterpart above, criterion 13's "Web/App share capability
+  // semantics while geometry differs". That claim is a pair of images: the
+  // sequence is identical, the surfaces they land in are not.
+  test('Git Peek on the Terminal', async ({ page }) => {
+    await gotoFixtureShell(page);
+    await waitForFixtureTerminal(page);
+
+    await page.getByTestId('capsule-capability-more').click();
+    await page.getByTestId('capsule-capability-picker-git').click();
+    // The title is the step from Signal to Peek, and it goes inert once there —
+    // so `git-peek-body` below is what says this is a Peek rather than a Signal
+    // whose title happened to be tapped.
+    await page.getByTestId('capsule-capability-title').click();
+
+    await expect(page.getByTestId('git-peek-body')).toBeVisible();
+    // The capability's own Workspace action, which the Host no longer draws
+    // (#1046) — the same assertion the App case makes, because it is the same
+    // plugin rendering it.
+    await expect(page.getByTestId('capsule-capability-open-workspace')).toBeVisible();
+
+    await expect(page).toHaveScreenshot('web-git-peek.png', {
+      fullPage: true,
+      ...FIXTURE_SCREENSHOT,
+    });
+  });
 });
 
 test.describe('Web compact 1024×768', () => {
