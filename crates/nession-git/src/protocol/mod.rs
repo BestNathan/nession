@@ -36,6 +36,7 @@
 //! `json!` into a struct that emits identical bytes.
 
 pub mod branches;
+pub mod commit;
 pub mod diff;
 pub mod log;
 pub mod root;
@@ -156,6 +157,7 @@ pub fn descriptors() -> Result<Vec<ProtocolDescriptor>, IdentityError> {
         diff::descriptor()?,
         root::descriptor()?,
         log::descriptor()?,
+        commit::descriptor()?,
         branches::descriptor()?,
         worktrees::descriptor()?,
     ])
@@ -180,11 +182,12 @@ mod tests {
     /// These are what `v1_descriptor` validates, so asserting them here names
     /// the offending id instead of leaving it to whichever caller composes
     /// first.
-    const EXPECTED_IDS: [&str; 6] = [
+    const EXPECTED_IDS: [&str; 7] = [
         "git.status",
         "git.diff",
         "git.root",
         "git.log",
+        "git.commit",
         "git.branches",
         "git.worktrees",
     ];
@@ -236,7 +239,7 @@ mod tests {
         // payload schema.
         let manifest =
             nession_protocol::ProtocolManifest::from_descriptors(OWNER, &descriptors().unwrap());
-        assert_eq!(manifest.protocols.len(), 6);
+        assert_eq!(manifest.protocols.len(), 7);
         for id in EXPECTED_IDS {
             let id = nession_protocol::ProtocolId::new(id).unwrap();
             assert!(manifest.offers(&id), "manifest is missing {id}");

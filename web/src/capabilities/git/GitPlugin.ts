@@ -9,6 +9,11 @@ import {
   WIRE as DIFF_WIRE,
 } from '@/generated/protocol/git/diff/v1';
 import {
+  PROTOCOL as COMMIT_PROTOCOL,
+  VERSION as COMMIT_VERSION,
+  WIRE as COMMIT_WIRE,
+} from '@/generated/protocol/git/commit/v1';
+import {
   PROTOCOL as LOG_PROTOCOL,
   VERSION as LOG_VERSION,
   WIRE as LOG_WIRE,
@@ -36,6 +41,8 @@ import type {
   GitBranchesResponse,
   GitDiffRequest,
   GitDiffResponse,
+  GitCommitRequest,
+  GitCommitResponse,
   GitLogRequest,
   GitLogResponse,
   GitRootResponse,
@@ -63,6 +70,7 @@ const CONSUMER_REQUIREMENTS = {
   [DIFF_PROTOCOL]: [DIFF_VERSION],
   [ROOT_PROTOCOL]: [ROOT_VERSION],
   [LOG_PROTOCOL]: [LOG_VERSION],
+  [COMMIT_PROTOCOL]: [COMMIT_VERSION],
   [BRANCHES_PROTOCOL]: [BRANCHES_VERSION],
   [WORKTREES_PROTOCOL]: [WORKTREES_VERSION],
 } as const satisfies Record<string, readonly number[]>;
@@ -182,6 +190,14 @@ export class GitPlugin implements TransportPlugin {
     return this.requireConnection().request<GitLogResponse>(
       LOG_WIRE,
       this.addressed(LOG_PROTOCOL, req.agent_id, req),
+    );
+  }
+
+  /** One commit's metadata and changed-file summary (#1009). */
+  async gitCommit(req: GitCommitRequest): Promise<GitCommitResponse> {
+    return this.requireConnection().request<GitCommitResponse>(
+      COMMIT_WIRE,
+      this.addressed(COMMIT_PROTOCOL, req.agent_id, req),
     );
   }
 

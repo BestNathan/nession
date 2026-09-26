@@ -33,6 +33,10 @@ pub struct DiffRequestV1 {
     /// naming an absolute path is refused there, not here, because a
     /// client-side check would be a second and weaker boundary.
     pub path: String,
+    /// When set, diff this path between the commit's parent and the commit
+    /// instead of the working tree against HEAD.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commit: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

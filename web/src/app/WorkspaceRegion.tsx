@@ -34,6 +34,7 @@ export interface WorkspaceRegionProps {
   onCreate: () => void;
   onRefresh: () => void;
   onSelect: (session: Session) => void;
+  onOpenWorktreeSession?: (worktree: import('@/capabilities/git/types').GitWorktree) => Promise<void>;
   onConfigure: (session: Session) => void;
   onKill: (session: Session) => void;
   onSurfaceChange: (surface: Surface) => void;
@@ -59,7 +60,7 @@ export function WorkspaceRegion(props: WorkspaceRegionProps) {
     loadingSessions, searchQuery, setSearchQuery, statusFilter, setStatusFilter,
     sortField, sortDirection, toggleSort, isSearchActive, selectedSession,
     selectedAgent, domain, surface, tool, fileOps, onCreate, onRefresh, onSelect,
-    onConfigure, onKill, onSurfaceChange, onToolChange, isWide,
+    onConfigure, onKill, onSurfaceChange, onToolChange, onOpenWorktreeSession, isWide,
     showList, onBackToSessions, onCloseDrawer, terminal,
   } = props;
 
@@ -93,6 +94,7 @@ export function WorkspaceRegion(props: WorkspaceRegionProps) {
     // primary action opens the one creation flow rather than a second one
     // (#1082). Web ignores it — its empty state is a caption beside a sidebar.
     onCreate,
+    onOpenWorktreeSession,
   };
 
   // The two experiences, named. Which one renders is the whole of this

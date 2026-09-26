@@ -126,7 +126,7 @@ fn diff_shows_the_change_to_a_tracked_file() {
     let cmd = cmd_for(&dir);
     let result = tokio::runtime::Runtime::new()
         .unwrap()
-        .block_on(async { diff::file_diff(&cmd, "tracked.txt").await })
+        .block_on(async { diff::file_diff(&cmd, "tracked.txt", None).await })
         .unwrap();
 
     assert!(!result.binary);
@@ -152,7 +152,7 @@ fn diff_of_an_untracked_file_is_empty_rather_than_wrong() {
     // anyway.
     let result = tokio::runtime::Runtime::new()
         .unwrap()
-        .block_on(async { diff::file_diff(&cmd, "untracked.txt").await })
+        .block_on(async { diff::file_diff(&cmd, "untracked.txt", None).await })
         .unwrap();
     assert!(result.is_empty());
     assert!(!result.binary);
@@ -164,7 +164,7 @@ fn a_path_escaping_the_repository_is_rejected_before_git_runs() {
     let cmd = cmd_for(&dir);
     let result = tokio::runtime::Runtime::new()
         .unwrap()
-        .block_on(async { diff::file_diff(&cmd, "../../etc/passwd").await });
+        .block_on(async { diff::file_diff(&cmd, "../../etc/passwd", None).await });
     assert!(result.is_err(), "an escaping path must not reach git");
 }
 
@@ -282,7 +282,7 @@ fn history_reads_the_real_log() {
     let cmd = cmd_for(&dir);
     let history = tokio::runtime::Runtime::new()
         .unwrap()
-        .block_on(async { log::history(&cmd, Some(10)).await })
+        .block_on(async { log::history(&cmd, Some(10), None).await })
         .unwrap();
 
     assert_eq!(history.commits.len(), 2, "the fixture has two commits");
@@ -315,7 +315,7 @@ fn history_honours_the_count_it_was_asked_for() {
     let cmd = cmd_for(&dir);
     let history = tokio::runtime::Runtime::new()
         .unwrap()
-        .block_on(async { log::history(&cmd, Some(2)).await })
+        .block_on(async { log::history(&cmd, Some(2), None).await })
         .unwrap();
 
     assert_eq!(history.limit, 2);
