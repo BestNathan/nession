@@ -120,6 +120,33 @@ Baseline names should describe the product state being protected rather than imm
 5. Do not snapshot every component or every capability state.
 6. Do not use a golden screenshot as the sole reason to reject an intentional upstream product change.
 
+### What a typography review of an App baseline must check
+
+Comparing the App screens includes reading their type, not only their composition
+(#1073). When an App baseline changes — or when one is added — check:
+
+1. **same role, same size.** One semantic role renders at one size across every
+   App surface. Read `getComputedStyle().fontSize`, not the source class: a
+   literal and a role can resolve to the same number today.
+2. **the search/control text does not outweigh the content it acts on.** A field
+   is pinned at 16px by the iOS focus-zoom floor, so the content below it must be
+   at least that large — the field is the one text on the screen whose size is not
+   a design choice.
+3. **metadata is quieter, not unreadable.** Web's 10px is a desk density; on a
+   phone the row's agent/recency line is what tells two similar rows apart.
+4. **mono changes identity, not hierarchy.** A path is mono at its role's size;
+   if a mono slot is smaller than the product text beside it, family has leaked
+   into size.
+5. **no unowned intermediate size.** Every size on the screen resolves to a role
+   in `experience.app.typography`. The known exceptions are the 16px input floor,
+   `experience.app.terminal`'s glyph metrics, CodeMirror's `editorFontSize`, and
+   Markdown document typography.
+
+The four App roles Web also states are read from the same tokens under
+`[data-experience="app"]`; the two it does not (`title`, `body`) exist only
+there, and `web/src/app/experiences/app/appTypography.ts` is the composition
+boundary a component consumes them through.
+
 ## Canonical screen relationship
 
 Historical canonical screens are valuable visual records, but their authority is downstream:

@@ -158,6 +158,8 @@
     ]
   },
   "experienceAppVars": [
+    "typography-title-size",
+    "typography-body-size",
     "touch-target-min",
     "touch-target-compact",
     "shell-sessions-list-min-height",

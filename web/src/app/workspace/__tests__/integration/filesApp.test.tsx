@@ -10,6 +10,13 @@ vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }));
 
+/**
+ * The App title role, spelled out rather than imported. App-scoped in name
+ * because `--typography-title-size` is emitted only under
+ * `[data-experience="app"]` (`nession/no-cross-experience-token`).
+ */
+const AppTitleRoleClass = 'text-[length:var(--typography-title-size)]';
+
 const ENTRIES: FileEntry[] = [
   { name: 'docs', path: 'docs', full_path: '/root/docs', is_dir: true, size: 0, modified: 0 },
   {
@@ -67,6 +74,20 @@ describe('FilesAppLayout', () => {
     expect(screen.queryByTestId('files-app-nav')).not.toBeInTheDocument();
   });
 
+  it('sizes a file row name at the App primary role', async () => {
+    // #1073: a file row's name is the row's work item — the same role a Session
+    // row's name carries — so "a list row's name" has one answer rather than a
+    // Tailwind default per list. The token is shared, so the assertion is on the
+    // var rather than on a number: Web's desktop value lives at `:root` and the
+    // App's replaces it under `[data-experience="app"]`.
+    render(<FilesAppLayout ctx={ctx} />);
+    const name = (await screen.findByText('visual-language.md')).closest('span');
+    expect(name?.className).toContain(
+      'text-[length:var(--workspace-list-row-title-font-size)]',
+    );
+    expect(name?.className).not.toMatch(/(^|\s)text-sm(\s|$)/);
+  });
+
   it('pushes the editor with a sub-header and back affordance', async () => {
     const user = userEvent.setup();
     render(<FilesAppLayout ctx={ctx} />);
@@ -77,6 +98,22 @@ describe('FilesAppLayout', () => {
     await user.click(screen.getByTestId('files-app-back'));
     expect(screen.queryByTestId('files-app-nav')).not.toBeInTheDocument();
     expect(screen.getByTestId('files-app-layout')).toBeInTheDocument();
+  });
+
+  it('titles the pushed page at the App title role, in mono', async () => {
+    // #1073: `visual-language.md`'s page-title examples name "pushed detail
+    // title", so the path carries the title role — and mono, because it is a
+    // path. `text-sm` (14px) was the primitive default standing in for a title.
+    // Family and size are independent, so the assertion is on both: a path is
+    // not a smaller string.
+    const user = userEvent.setup();
+    render(<FilesAppLayout ctx={ctx} />);
+    await user.click(await screen.findByText('visual-language.md'));
+
+    const path = screen.getByTestId('files-app-nav').querySelector('span');
+    expect(path?.className).toContain(AppTitleRoleClass);
+    expect(path?.className).toContain('font-mono');
+    expect(path?.className).not.toMatch(/(^|\s)text-(?:xs|sm|base)(\s|$)/);
   });
 
   it('closes the pushed editor from the viewer close button and returns to the tree', async () => {

@@ -1,6 +1,7 @@
 import type { ComponentType } from 'react';
 import { Edit3, Save, Eye, Code, Info, Lock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { cn } from '@/shared/lib/utils';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Progress } from '@/components/ui/progress';
 import { CodeMirrorEditor } from './CodeMirrorEditor';
@@ -51,6 +52,16 @@ interface FileViewerToolbarProps {
   onCloseClick: () => void;
 }
 
+/**
+ * The toolbar's own controls — the body role, per Experience (#1073).
+ *
+ * They were `text-xs` from the shared `Button size="sm"` default, which is a
+ * desktop density: on App it made the actions smaller than everything they act
+ * on. The leaf exists on both experiences so this one class keeps working in
+ * the Web layout, which composes the same viewer.
+ */
+const fileViewerActionClass = 'text-[length:var(--workspace-editor-action-font-size)]';
+
 function FileViewerToolbar({
   path, filename, isDirty, isText, isReadOnly, saving, isMarkdown, viewMode, forceReadOnly, onSave, onEditToggle, onSetViewMode, onCloseClick,
 }: FileViewerToolbarProps) {
@@ -74,7 +85,7 @@ function FileViewerToolbar({
       </div>
       <div className="flex items-center gap-1">
         {isText && !isReadOnly && (
-          <Button variant="ghost" size="sm" className="h-7 text-xs text-muted-foreground" onClick={onSave} disabled={!isDirty || saving}>
+          <Button variant="ghost" size="sm" className={cn('h-7 text-muted-foreground', fileViewerActionClass)} onClick={onSave} disabled={!isDirty || saving}>
             <Save className="h-3 w-3 mr-1" />{saving ? 'Saving...' : 'Save'}
           </Button>
         )}
@@ -83,7 +94,7 @@ function FileViewerToolbar({
             <Button
               variant={viewMode === 'preview' ? 'secondary' : 'ghost'}
               size="sm"
-              className="h-6 text-xs px-2"
+              className={cn('h-6 px-2', fileViewerActionClass)}
               onClick={() => onSetViewMode('preview')}
               aria-pressed={viewMode === 'preview'}
             >
@@ -92,7 +103,7 @@ function FileViewerToolbar({
             <Button
               variant={viewMode === 'raw' ? 'secondary' : 'ghost'}
               size="sm"
-              className="h-6 text-xs px-2"
+              className={cn('h-6 px-2', fileViewerActionClass)}
               onClick={() => onSetViewMode('raw')}
               aria-pressed={viewMode === 'raw'}
             >
@@ -101,11 +112,11 @@ function FileViewerToolbar({
           </div>
         )}
         {showEditToggle && (
-          <Button variant="ghost" size="sm" className="h-7 text-xs text-muted-foreground" onClick={onEditToggle}>
+          <Button variant="ghost" size="sm" className={cn('h-7 text-muted-foreground', fileViewerActionClass)} onClick={onEditToggle}>
             <Edit3 className="h-3 w-3 mr-1" />{isReadOnly ? 'Edit' : 'View'}
           </Button>
         )}
-        <Button variant="ghost" size="sm" className="h-7 text-xs text-muted-foreground hover:text-destructive" onClick={onCloseClick} aria-label="Close file" title="Close file">✕</Button>
+        <Button variant="ghost" size="sm" className={cn('h-7 text-muted-foreground hover:text-destructive', fileViewerActionClass)} onClick={onCloseClick} aria-label="Close file" title="Close file">✕</Button>
       </div>
     </div>
   );
