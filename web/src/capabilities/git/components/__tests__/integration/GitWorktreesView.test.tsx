@@ -14,6 +14,7 @@ vi.mock('../../../GitPlugin', () => ({
     gitLog: vi.fn(),
     gitBranches: vi.fn(),
     gitWorktrees: vi.fn(),
+    onInvalidated: vi.fn(() => () => {}),
   },
 }));
 
