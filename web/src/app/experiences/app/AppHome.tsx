@@ -3,6 +3,27 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/shared/lib/utils';
 import { secondaryAppClass, titleAppClass } from './appTypography';
 
+/**
+ * The App's words for "start new work".
+ *
+ * Two screens offer this action — the root before any Session exists (#1082)
+ * and the Sessions layer when the list is empty (#1083 §9) — and #1083 requires
+ * that "create new work" has **one meaning everywhere**. Exporting the strings
+ * rather than repeating them is what makes that true by construction: a wording
+ * change lands on both screens or on neither.
+ *
+ * The issue's own sketch proposed different words for the Sessions empty state
+ * ("No sessions yet" / "Start a terminal workspace"). That sketch predates
+ * #1082, which shipped first and settled the wording; matching the shipped
+ * screen is what the requirement actually asks for.
+ */
+export const APP_START_SESSION_COPY = {
+  heading: 'Start a session',
+  supporting: 'Open a terminal workspace on an Agent.',
+  create: 'New Session',
+  noAgent: 'No online Agent available',
+} as const;
+
 export interface AppHomeProps {
   /** Opens the existing `CreateSessionDialog` — never a second creation flow. */
   onCreate: () => void;
@@ -39,8 +60,10 @@ export function AppHome({ onCreate, onBrowse, createDisabled }: AppHomeProps) {
       className="flex min-h-0 flex-1 flex-col items-center justify-center gap-[var(--shell-space-4)] px-[var(--shell-space-4)] text-center"
     >
       <div className="flex flex-col gap-[var(--shell-space-1)]">
-        <h1 className={cn('font-semibold', titleAppClass)}>Start a session</h1>
-        <p className={secondaryAppClass}>Open a terminal workspace on an Agent.</p>
+        <h1 className={cn('font-semibold', titleAppClass)}>
+          {APP_START_SESSION_COPY.heading}
+        </h1>
+        <p className={secondaryAppClass}>{APP_START_SESSION_COPY.supporting}</p>
       </div>
 
       <div className="flex flex-col items-center gap-[var(--shell-space-2)]">
@@ -51,14 +74,14 @@ export function AppHome({ onCreate, onBrowse, createDisabled }: AppHomeProps) {
           data-testid="app-home-new-session"
         >
           <Plus />
-          New Session
+          {APP_START_SESSION_COPY.create}
         </Button>
         {/* A disabled control that does not say why is a dead end one click
             earlier. The explanation is the reason the *button* is unavailable,
             so it sits with the button rather than under the heading. */}
         {createDisabled ? (
           <p className={secondaryAppClass} data-testid="app-home-no-agent">
-            No online Agent available
+            {APP_START_SESSION_COPY.noAgent}
           </p>
         ) : null}
       </div>
