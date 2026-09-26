@@ -164,8 +164,10 @@ Typography roles are semantic and relative.
 
 | Role | Visual intent | Typical use |
 |------|---------------|-------------|
+| Page title | The surface's own name | active Session, Workspace capability, pushed detail title |
 | Work / local primary | Highest within region | Session name, active file, current capability title, focused input |
-| Secondary | Supporting but fully readable | supporting labels, secondary actions |
+| Body / control | Ordinary reading size for actions | buttons, menu items, filters |
+| Secondary | Supporting but fully readable | supporting labels, secondary actions, infrastructure rows |
 | Metadata | Quiet | Agent/location, recency, status details |
 | Caption | Lowest readable hierarchy | helper text, keyboard hints |
 | Code / terminal / mono | Workload-specific | terminal text, paths, commands, code |
@@ -177,7 +179,10 @@ Rules:
 - monospace communicates code/terminal identity, not decoration;
 - Web and App share semantic roles while Experience tokens may change sizes/hit areas;
 - the first four roles are stated in the token layer as `typography.{primary,secondary,metadata,code}` (see [tokens.md](design-system/tokens.md#typography-roles)) — a role names the text's job, so use the role rather than a component-local size;
-- terminal glyph rendering remains owned by the terminal surface rather than chrome typography.
+- the scale is per Experience, not per component, and each Experience states its own sizes: `experience.web.typography` carries the roles Web consumes, `experience.app.typography` carries the App's (#1073). A role is *not* a promise that both Experiences resolve it to one number — it is a promise that both are naming the same job;
+- `pageTitle` and `body` have no Web leaf today because the Web shell renders no page header and has no App-style control set; an Experience may state a role the other does not consume, but neither may invent a size in a component instead;
+- controls take the body/control role rather than a size inherited from the primitive that rendered them, so a secondary action does not silently become a smaller text level;
+- terminal glyph rendering remains owned by the terminal surface rather than chrome typography, and document typography belongs to the document.
 
 ## Surface hierarchy
 

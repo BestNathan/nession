@@ -109,7 +109,13 @@ export function FileList({ fileOps, onFileClick, initialPath = '' }: FileListPro
             <FileIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
           )}
           <span className="flex min-w-0 flex-1 flex-col">
-            <span className="truncate text-sm text-foreground">{entry.name}</span>
+            {/* The row's work item. `text-sm` was a Tailwind primitive default
+                standing in for the primary role — the same role the Session
+                row's own name carries, which is what makes "a list row's name"
+                one answer instead of two (#1073). */}
+            <span className="truncate text-[length:var(--workspace-list-row-title-font-size)] text-foreground">
+              {entry.name}
+            </span>
             <span className="truncate text-[length:var(--workspace-tree-font-size)] text-muted-foreground">
               {entry.is_dir ? directoryMeta(counts[entry.path]) : formatSize(entry.size)}
             </span>

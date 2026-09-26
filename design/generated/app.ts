@@ -1,5 +1,25 @@
 // generated — do not edit
 
+export const typography = {
+  title: {
+    size: 17,
+  },
+  primary: {
+    size: 16,
+  },
+  body: {
+    size: 14,
+  },
+  secondary: {
+    size: 13,
+  },
+  metadata: {
+    size: 12,
+  },
+  code: {
+    size: 13,
+  },
+} as const;
 export const control = {
   sm: 44,
   md: 44,
@@ -24,6 +44,11 @@ export const touchTarget = {
 } as const;
 export const shell = {
   iconButtonSize: 44,
+  sessionRowTitleFontSize: 16,
+  sessionRowMetaFontSize: 12,
+  nodeFontSize: 13,
+  sectionHeadFontSize: 12,
+  footFontSize: 12,
   sessionsListMinHeight: "30%",
 } as const;
 export const terminal = {
@@ -96,3 +121,9 @@ export const motion = {
   terminalCapsule: "280ms cubic-bezier(0.22, 1, 0.36, 1)",
 } as const;
 export const dockTarget = 28 as const;
+export const workspace = {
+  treeFontSize: 13,
+  listRowTitleFontSize: 16,
+  editorHeadFontSize: 13,
+  editorActionFontSize: 14,
+} as const;

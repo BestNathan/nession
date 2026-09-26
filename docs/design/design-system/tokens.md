@@ -139,6 +139,57 @@ font sizes in production are still raw literals — `text-[10px]` (15),
 `text-[11px]` (3), `text-[9px]` (2), across seven files — and those bypass the
 token layer entirely. They are the next migration, not this one.
 
+#### The App states its own sizes for the same roles (#1073)
+
+The role vocabulary above was Web's, and the App inherited it by accident:
+`experience.web.typography` is emitted at `:root`, so every shared shell and
+workspace text token the App consumed resolved to Web's desktop density. That is
+why the App could have the correct *family* after #1050 stage 4 and still read
+typographically wrong — it mixed 10, 10.5, 11, 11.5, 12, 12.5, 14 and 16px on one
+390px screen, none of them chosen for a phone.
+
+`experience.app.typography` is the App's answer: `{title, primary, body,
+secondary, metadata, code}.size`, at 17 / 16 / 14 / 13 / 12 / 13. It is **not**
+a second design system — the two groups name the same jobs, and the values are
+the Experience difference the model already allows for density. Nor are they
+refs into Web's group: a ref would satisfy the schema while continuing to
+inherit exactly the numbers the group exists to replace, which is why a test
+asserts each App role states a `value`.
+
+Roles are assigned by the text's job, so two Experiences may reach different
+sizes for one role — that is the mechanism, not a drift:
+
+| Shared token | Web | App | Role |
+|---|---:|---:|---|
+| `shell.sessionRowTitleFontSize` | 12.5px | 16px | `primary` |
+| `shell.sessionRowMetaFontSize` | 10px | 12px | `metadata` |
+| `shell.sectionHeadFontSize` | 11px | 12px | `metadata` |
+| `shell.nodeFontSize` | 11.5px | 13px | `secondary` |
+| `shell.footFontSize` | 10.5px | 12px | `metadata` |
+| `workspace.treeFontSize` | 11px | 13px | `secondary` |
+| `workspace.editorHeadFontSize` | 11.5px | 13px | `code` |
+| `workspace.listRowTitleFontSize` | 14px | 16px | `primary` |
+| `workspace.editorActionFontSize` | 12px | 14px | `body` |
+
+Three of the four rows in the near-duplicate table above are resolved here for
+the App: `nodeFontSize` and `editorHeadFontSize` now derive from a role on both
+sides (`secondary` and `code`), and `footFontSize` derives from `metadata`.
+Web keeps its own stated values, because moving them would be a change to Web's
+screens and this change is not one.
+
+`title` and `body` are the two roles Web has no leaf for, so they exist only
+under `[data-experience="app"]`. That is a real constraint on the consuming
+code, not a detail: a binding that names one has to say which experience it
+belongs to, which is what `nession/no-cross-experience-token` reports and what
+`web/src/app/experiences/app/appTypography.ts` is for. See
+[`patterns/session-list.md`](patterns/session-list.md) and the token source
+descriptions for the observation behind each settled value.
+
+Work surfaces stay out of this scale deliberately: xterm reads
+`experience.app.terminal`, CodeMirror reads `workspace.editorFontSize` (12px on
+both experiences), and Markdown document typography belongs to the document.
+Those are the workload's own rendering, and #1073 names them as non-goals.
+
 Product UI must not consume Primitive palette values directly.
 
 Web and App share Primitive, Semantic, and Domain meaning. They specialize at Experience for density, touch/pointer behavior, safe areas, and control sizing. Do not create two independent design systems.

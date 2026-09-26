@@ -412,6 +412,14 @@
       "$description": "The file path above the code. Muted and below `text-xs`: it names what is open, it is not a title competing with the work.",
       "value": "11.5px"
     },
+    "listRowTitleFontSize": {
+      "$description": "A file/directory row's own name — the `text-sm` literal `FileList` used to carry. It is stated here as well as on App (#1073) because one class serves both: the leaf exists so the class resolves either way, and an App-only leaf would be dropped silently at `:root`. Not a ref to `typography.primary.size`: this is Web's desktop row size, and the size in the App's scale is the App group's business. `FileList` is composed by `FilesAppLayout` today, so this leaf's App value is the one that reaches a screen — the Web value is the fallback the shared class needs, not a claim about a Web surface that renders it.",
+      "value": "14px"
+    },
+    "editorActionFontSize": {
+      "$description": "The viewer toolbar's own controls (Edit / Save / View / Raw / close) — the `text-xs` the shared `Button size=\"sm\"` default gave them. Stated on both experiences for the same reason as `listRowTitleFontSize`: `FileViewer` is composed by both layouts, so the leaf has one consumer class and two densities (#1073).",
+      "value": "12px"
+    },
     "editorHeadPadX": {
       "$description": "Header horizontal inset. The mockup's 18px, which is wider than the shell's `space-4` — the header is inside the code surface, so it aligns to the code's own measure rather than to the pane's chrome padding.",
       "value": "18px"
