@@ -34,9 +34,9 @@ interface TerminalInternals {
  *
  * The access is a private field and *throws* until the renderer has finished
  * its first layout pass (right after `open()`, under a StrictMode remount, or
- * while WebGL is still initialising), so it is guarded and falls back. The
- * fallback is deliberately conservative: a grid computed from it is temporary,
- * and the caller re-measures.
+ * while WebGL is still initialising), so it is guarded. `null` means "not
+ * measured" and nothing else — `cellDimensionsOf` is the variant that answers
+ * with `FALLBACK_CELL` for callers that cannot wait.
  */
 export function measuredCellDimensionsOf(terminal: Terminal): PixelSize | null {
   try {
