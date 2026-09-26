@@ -117,9 +117,13 @@ test.describe('assertion helpers detect deliberate violations', () => {
     // The blind spot itself, reproduced. `expectTouchTarget` measures the box it
     // is handed; a row is 374×60 whether or not a 32px control is sitting in it,
     // so the first line below passes and only the enumeration notices.
+    // The first control is a floor-clear one in **both** axes (44×46), so the
+    // only thing this fixture can fail on is the control under test. At 40 wide
+    // it was itself under the 44px floor and the assertion fired on it instead
+    // — the enumeration was right, the fixture was wrong.
     const rowWith = (control: string) => `
       <div id="root" style="width: 374px; height: 60px; display: flex; gap: 8px;">
-        <button style="width: 40px; height: 46px; padding: 0;"></button>
+        <button style="width: 44px; height: 46px; padding: 0;"></button>
         ${control}
       </div>`;
 
