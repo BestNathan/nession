@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { fixtureGitSurface } from '@/app/fixture/fixtureGit';
+import { FIXTURE_AGENTS } from '@/app/fixture/fixtureData';
 import type { GitCommitResponse, GitLogResponse } from '@/capabilities/git';
 
 /**
@@ -10,6 +11,35 @@ import type { GitCommitResponse, GitLogResponse } from '@/capabilities/git';
  * that noticed was an e2e assertion three layers away (#1108).
  */
 describe('fixture git surface', () => {
+  /**
+   * A wire lives in **two** places in this fixture: the manifest the agents
+   * advertise, and the surface that answers it.
+   *
+   * `#1009`/`#1010` updated neither for `git.commit`, and the first fix for
+   * `#1108` updated only the surface — the route stayed broken, because a
+   * request is resolved against the manifest *before* it is sent, so an
+   * unadvertised wire never reaches the arm that would answer it.
+   *
+   * Named as literals rather than driven from a table: `scripts/protocol-gate.mjs`
+   * refuses a `request` call whose wire it cannot resolve, and it is right to —
+   * a wire passed as a variable is the shape that hides a misspelling. The set
+   * is written out for the same reason.
+   */
+  it('advertises every git wire it answers, so the request resolves at all', () => {
+    const advertised = Object.keys(FIXTURE_AGENTS[0]?.protocols?.protocols ?? {});
+
+    for (const wire of [
+      'git.status',
+      'git.diff',
+      'git.log',
+      'git.commit',
+      'git.branches',
+      'git.worktrees',
+    ]) {
+      expect(advertised, `${wire} is answered but not advertised`).toContain(wire);
+    }
+  });
+
   /**
    * The detail answers about the same commit the log offers.
    *
