@@ -92,12 +92,29 @@ Opening Workspace must preserve the originating Session and capability context. 
 ## Gestures and visible alternatives
 
 - Swipe right to reveal/open Sessions; swipe left to reveal/open Workspace.
-- The gesture spans the shell chrome, and is **bounded by work-surface
-  exclusion**: it does not begin inside a surface that owns its own touch
-  behaviour — the terminal viewport (selection, scrollback, TUI mouse
-  reporting), a CodeMirror editor, a text input, or the capsule composer. The
-  surface still needs the shell to define *where* top-level navigation may
-  start, not only which axis a captured drag resolved to.
+- The gesture spans the shell chrome. **A work surface owns every touch that
+  begins in it, except at the shell's own edges** (#1081). Inside a work surface
+  the shell may still claim a horizontal drag that starts within `EDGE_BAND_PX`
+  (28px) of a shell edge, and each edge owns one direction: the left band pulls
+  Sessions in (a rightward drag), the right band pulls Workspace in (a leftward
+  one). A drag from an edge band that moves the other way is surrendered back to
+  the surface.
+- The exclusion is what makes the band necessary, and also what keeps it small.
+  A surface keeps the touches that begin in it because a page that started there
+  would spend the surface's first horizontal pixels — an xterm selection, a
+  CodeMirror selection, a capsule drag — before the surface ever saw them
+  (#1049). On the Terminal screen the viewport and the capsule *are* the screen,
+  so applying that to the edges as well left the gesture with almost no
+  reachable start: the product said `Sessions ← Terminal → Workspace` was
+  spatial while the place a user actually swipes returned before the gesture
+  began. The band restores a reachable start; it does not give back the
+  surface's interior, and it takes nothing from the shell chrome, where the
+  gesture keeps its whole width.
+- The band is a **starting** value, not a measured one. A phone browser or an
+  installed PWA may reserve a screen edge for its own back gesture, and nothing
+  in this repository can see that: the band is exercised at the DOM level only.
+  If a platform does consume an edge, the visible control is the fallback — the
+  gesture is not widened back across the surface to compensate.
 - Gestures are accelerators, not the only discoverable or accessible path.
 - Sessions and Workspace must also have visible controls, but those controls should remain visually quiet when they are not the user's current intent.
 
