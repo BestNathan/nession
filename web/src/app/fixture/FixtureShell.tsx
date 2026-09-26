@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { FixtureTerminal } from '@/app/fixture/FixtureTerminal';
 import {
   FIXTURE_AGENTS,
@@ -5,8 +6,10 @@ import {
   FIXTURE_SELECTED_ID,
   FIXTURE_SESSIONS,
 } from '@/app/fixture/fixtureData';
+import { gitApi } from '@/capabilities/git';
 import { mapDomainState } from '@/product/session/model/domainState';
 import { WorkspaceRegion } from '@/app/WorkspaceRegion';
+import { fixtureGitSurface } from './fixtureGit';
 
 /**
  * Canonical Active Terminal screen (#561 Phase 2A): the real
@@ -20,6 +23,18 @@ import { WorkspaceRegion } from '@/app/WorkspaceRegion';
  * can reach (docs/design/migration.md).
  */
 export function FixtureShell() {
+  // The same stub `FixtureApp` installs, for the same reason (#838): a
+  // capability has to be *reachable* from a fixture to be captured, and the
+  // App route had this while the Web route did not — so the Web screen could
+  // show the capability entry but not a Signal or a Peek behind it, which is
+  // why `#1046`'s second depth had no Web baseline at all (#1102).
+  //
+  // Installed for the route's lifetime and released on unmount. Nothing
+  // emerges by default, so the canonical screenshots are unaffected unless a
+  // case opens one — the entry itself already renders here, because Terminal
+  // Keys earns disclosure without a stub.
+  useEffect(() => gitApi.install(fixtureGitSurface('')), []);
+
   const selectedId = FIXTURE_SELECTED_ID;
   const selectedSession =
     FIXTURE_SESSIONS.find((s) => s.session_id === selectedId) ?? null;
