@@ -18,6 +18,21 @@ export interface AgentContextProps {
   onOpenAgent: () => void;
 }
 
+/**
+ * The agent chip: the node's name, and — when the node is not reachable — its
+ * continuity copy.
+ *
+ * Set in the product face (#1050 stage 4). Both of its members are the Metadata
+ * role ("Agent/location", plus the status detail below it), and the same two
+ * values are product text wherever else they appear: the Sessions row's agent
+ * slot and its degraded copy line. The `font-mono` it carried came from the same
+ * reading of "a node name is infrastructure identity" that
+ * `SidebarAgents` and the `shell.nodeFontSize` description carried.
+ *
+ * No consumer renders this today — the Web header that owned it went with #748
+ * — so nothing here is verified by a baseline; the change keeps the component
+ * from being the place a mono node label gets reintroduced from.
+ */
 export function AgentContext({ agentLabel, state, onOpenAgent }: AgentContextProps) {
   const online = state.agent.channel === 'online';
 
@@ -25,7 +40,7 @@ export function AgentContext({ agentLabel, state, onOpenAgent }: AgentContextPro
     <button
       type="button"
       data-testid="agent-context"
-      className="truncate text-xs font-mono"
+      className="truncate text-xs"
       onClick={() => onOpenAgent()}
     >
       {online ? (

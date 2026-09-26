@@ -34,6 +34,13 @@ describe('SidebarFooter', () => {
     expect(screen.getByTestId('sidebar-foot-dot')).toBeInTheDocument();
   });
 
+  it('sets the status line in the product face', () => {
+    // #1050 stage 4: a service state and a node count are infrastructure chrome
+    // — not a command, an identifier or a path — so the foot is not monospaced.
+    renderFooter();
+    expect(screen.getByText('Connected · 3 nodes').className).not.toMatch(/font-mono/);
+  });
+
   it('singularises one node and names a degraded link', () => {
     renderFooter({ connectionStatus: 'reconnecting', nodeCount: 1 });
     expect(screen.getByText('Reconnecting · 1 node')).toBeInTheDocument();

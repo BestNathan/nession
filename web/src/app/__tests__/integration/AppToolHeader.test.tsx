@@ -11,6 +11,15 @@ describe('AppToolHeader', () => {
     expect(screen.getByTestId('app-tool-back')).toBeInTheDocument();
   });
 
+  it('sets the tool name in the product face', () => {
+    // #1050 stage 4: this heading is the page title — a capability's name, not a
+    // path or an identifier. The path inside the tool keeps its mono.
+    render(<AppToolHeader toolLabel="Files" onBack={vi.fn()} />);
+    const title = screen.getByRole('heading', { level: 1 });
+    expect(title).toHaveTextContent('Files');
+    expect(title.className).not.toMatch(/font-mono/);
+  });
+
   it('fires onBack from the ← button', async () => {
     const onBack = vi.fn();
     render(<AppToolHeader toolLabel="Files" onBack={onBack} />);

@@ -106,7 +106,7 @@
       "value": "6px"
     },
     "nodeFontSize": {
-      "$description": "Agent/node row text. Monospace at 11.5px: a node name is infrastructure identity, and `visual-language.md` gives monospace the code/host identity role rather than using it as decoration.",
+      "$description": "Agent/node row text. Product face at 11.5px: a node row is infrastructure *context* (a name and a count), and the typography rule reserves monospace for technical workload identity — \"foreground command; technical ID; path/location\" — adding that infrastructure/navigation chrome is not rendered in mono by default (#1050 stage 4). The earlier description here argued the opposite (\"a node name is infrastructure identity\") and cited `visual-language.md` for it; that document's mono role is \"terminal text, paths, commands, code\", so the citation did not support the claim. The count's alignment is carried by `tabular-nums`, which is a font feature rather than a family.",
       "value": "11.5px"
     },
     "sessionRowTitleFontSize": {
@@ -116,7 +116,7 @@
     },
     "sessionRowMetaFontSize": {
       "$owner": "pattern.session-item",
-      "$description": "Session metadata (agent / recency) — the metadata role. Monospace and a full step below the title, so the title leads and the metadata never outweighs the thing it describes (visual-language.md typography rules).",
+      "$description": "Session metadata (agent / recency) — the metadata role. A full step below the title, so the title leads and the metadata never outweighs the thing it describes (visual-language.md typography rules). Family is per slot since #1050 stage 4: the line's workload slot is the pane's foreground command, so it keeps monospace, while the node name and the recency are the metadata role's own \"Agent/location, recency\" and are set in the product face. The size is shared by all three because a role owns size, not family.",
       "ref": "experience.web.typography.metadata.size"
     },
     "footPadY": {
@@ -132,7 +132,7 @@
       "value": "5px"
     },
     "footFontSize": {
-      "$description": "Sidebar foot text. Monospace, matching the session metadata it sits under.",
+      "$description": "Sidebar foot text. Product face: the foot reports a service state and a node count, which is infrastructure chrome rather than a command, an identifier or a path (#1050 stage 4). It used to be monospace \"matching the session metadata it sits under\" — the metadata it sits under is itself product text now except for the row's workload slot, so the stated reason no longer holds.",
       "value": "10.5px"
     },
     "sectionHeadFontSize": {

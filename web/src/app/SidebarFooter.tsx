@@ -30,8 +30,19 @@ const CONNECTION_LABEL: Record<ConnectionState, string> = {
  * right.
  *
  * This is where the Web header's status line went (#748, SC1), and it takes the
- * mockup's shape: a 5px dot, the connection as a word, the node count, all in
- * monospace at `footFontSize`.
+ * mockup's shape: a 5px dot, the connection as a word, the node count, all at
+ * `footFontSize`.
+ *
+ * **Not monospace** (#1050 stage 4). The line's own description used to justify
+ * the family as "matching the session metadata it sits under" — but the Session
+ * row's metadata is now product text except for the workload hint, and the rule
+ * is explicit that infrastructure/navigation chrome is not rendered in mono by
+ * default. "Connected · 3 nodes" is a service state and a quantity: neither a
+ * command, an identifier, nor a path. (This file previously recorded the mockup
+ * as drawing the block monospaced; that is the one part of the block the
+ * typography rule overrides, and the deviation is recorded here rather than left
+ * to look like an oversight. The mockup itself is not in the repository, so the
+ * family is stated from the rule rather than re-read from the drawing.)
  *
  * **Healthy stays quiet, but it stays visible.** `visual-language.md` P6 and the
  * mockup agree on the intent — the mockup's own comment on this block is
@@ -74,7 +85,7 @@ export function SidebarFooter({
           healthy ? 'bg-[var(--action)]' : 'bg-destructive',
         )}
       />
-      <span className="min-w-0 flex-1 truncate font-mono text-[length:var(--shell-foot-font-size)] text-muted-foreground">
+      <span className="min-w-0 flex-1 truncate text-[length:var(--shell-foot-font-size)] text-muted-foreground">
         {serviceLabel}
       </span>
       {domain && chrome && chrome.connection !== 'quiet' ? (

@@ -97,6 +97,72 @@ describe('SessionItem', () => {
     expect(kill.className).not.toMatch(/(^|\s)pointer-events-none(\s|$)/);
   });
 
+  /**
+   * #1050 stage 4 — one line, three slots, two families.
+   *
+   * jsdom applies no stylesheet, so what is assertable here is the class
+   * composition that decides the family. What it resolves to in a browser is
+   * measured on the fixture (`just design-check browser` renders the App row at
+   * 390×844), because a computed font is not something this environment has.
+   */
+  describe('typography roles', () => {
+    function renderWith(overrides: Partial<Session> = {}, overridesDomain?: DomainState) {
+      return render(
+        <SessionItem
+          session={{ ...session, ...overrides }}
+          domain={overridesDomain ?? domain}
+          agentLabel="devbox-01"
+          selected={false}
+          onSelect={vi.fn()}
+        />,
+      );
+    }
+
+    it('sets only the workload hint in mono', () => {
+      renderWith({ foreground_command: 'claude' });
+      const meta = screen.getByTestId('session-item-meta');
+      const workload = screen.getByTestId('session-item-workload');
+
+      // The foreground command is the line's one technical string.
+      expect(workload).toHaveTextContent('claude');
+      expect(workload.className).toMatch(/font-mono/);
+
+      // The line that carries it does not, and neither do the two slots beside
+      // it: the node's name and the recency are the Metadata role's own members
+      // ("Agent/location, recency"), so the split is a family change and not a
+      // re-styling of the line. `textContent` is unchanged by it — the row is
+      // still one line reading `{workload} · {agent} · {recency}`.
+      expect(meta.className).not.toMatch(/font-mono/);
+      expect(meta).toHaveTextContent(/^claude · devbox-01 · /);
+    });
+
+    it('keeps the hint slot mono when the command is unreported', () => {
+      // `unknown` is the workload slot's documented value
+      // (`session-item.md`), not a word about the row — so the family must not
+      // flip with the data, or the least informative row would be the one that
+      // stops looking like a workload.
+      renderWith();
+      const workload = screen.getByTestId('session-item-workload');
+      expect(workload).toHaveTextContent('unknown');
+      expect(workload.className).toMatch(/font-mono/);
+      expect(screen.getByTestId('session-item-meta')).toHaveTextContent(
+        /^unknown · devbox-01 · /,
+      );
+    });
+
+    it('sets the degraded agent copy in the product face', () => {
+      renderWith({}, {
+        ...domain,
+        agent: { channel: 'offline', copy: 'Agent offline' },
+      });
+      const copy = screen.getByText('Agent offline');
+      // Continuity state about infrastructure — not a command, an ID or a path.
+      expect(copy.className).not.toMatch(/font-mono/);
+      // Typography is not what changes when the state does; colour is.
+      expect(copy.className).toMatch(/text-agent-offline/);
+    });
+  });
+
   it('uses design tokens for row spacing', () => {
     render(
       <SessionItem
