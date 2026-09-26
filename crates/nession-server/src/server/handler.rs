@@ -165,6 +165,40 @@ pub struct ConnectionHandlerDeps {
     pub p2p_broker: Arc<crate::broker::ConnectionBroker>,
 }
 
+/// Put a P2P credential on an agent URL (#1013).
+///
+/// A query parameter because that is the one mechanism every caller has: a
+/// browser cannot set a header on `new WebSocket()`, and the Web has been
+/// sending exactly this since before the Agent read it. The name is shared with
+/// the Web and the CLI, so a rename here that is not made there produces
+/// connections refused with an opaque 401 — the hardest failure in this design
+/// to diagnose, which is why it is one function rather than three format
+/// strings.
+fn with_credential(url: &str, credential: &str) -> String {
+    let separator = if url.contains('?') { '&' } else { '?' };
+    format!("{url}{separator}token={}", urlencode(credential))
+}
+
+/// Percent-encode the characters a token can contain and a URL cannot.
+///
+/// The token is base64url today, whose alphabet is URL-safe, so this is one
+/// `replace` and not a dependency. It exists because "the alphabet happens to
+/// be safe" is a property of the *current* generator, and the parameter is
+/// parsed on the other side of a `url::Url` — an unencoded `+` or `/` there
+/// would silently truncate the credential and read as "unknown token".
+fn urlencode(value: &str) -> String {
+    let mut encoded = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                encoded.push(byte as char);
+            }
+            other => encoded.push_str(&format!("%{other:02X}")),
+        }
+    }
+    encoded
+}
+
 impl ConnectionHandler {
     pub fn new(deps: ConnectionHandlerDeps, config: ConnectionHandlerConfig) -> Self {
         // Take this connection's identity from the broker, which is the only
@@ -1725,6 +1759,58 @@ impl ConnectionHandler {
             relay_urls.len(),
             session_name
         );
+
+        // Mint the relay credential and hand it to the agent that will verify
+        // it, **before any dial** (#1013). Same ordering as the p2p path, for
+        // the same reason: the dial is what presents it.
+        //
+        // The credential rides **on the URLs** rather than beside them, and that
+        // is what makes both relay dials work without knowing about it — the
+        // attach dial iterates this list, and the detach dial reuses the one that
+        // succeeded. A credential threaded alongside would have to reach both
+        // sites and stay in step with them; this way there is one place it can
+        // be forgotten, and it is here.
+        let credential = self
+            .p2p_broker
+            .mint(
+                &agent_id,
+                session_id,
+                &agent.ip_address,
+                agent.port,
+                CredentialScope::for_relay(&session_name),
+            )
+            .await;
+
+        let grant = P2pGrantPayload {
+            request_id: String::new(),
+            credential: credential.token.clone(),
+            agent_id: agent_id.clone(),
+            session_id: session_id.to_string(),
+            scope: credential.scope.clone(),
+            expires_at: credential.expires_at.to_rfc3339(),
+        };
+
+        if let Err(refusal) = self.grant_p2p_credential(&agent_id, &grant).await {
+            return Ok(HandlerAction::Reply(Some(Message::Text(
+                json!({
+                    "msg_type": "server.session.attach",
+                    "id": msg.id,
+                    "timestamp": current_timestamp(),
+                    "payload": {
+                        "status": "error",
+                        "message": format!(
+                            "Agent '{agent_id}' would not accept a relay credential: {refusal}"
+                        )
+                    }
+                })
+                .to_string(),
+            ))));
+        }
+
+        let relay_urls: Vec<String> = relay_urls
+            .into_iter()
+            .map(|url| with_credential(&url, &credential.token))
+            .collect();
 
         let client_id = uuid::Uuid::new_v4().to_string();
         if let Some(ref sender) = self.client_sender {
@@ -5893,14 +5979,47 @@ mod tests {
         assert_eq!(phase1["payload"]["mode"], "relay");
         assert_eq!(phase1["payload"]["session_id"], "a1:dev");
 
-        // Phase 2: begin relay — actually enters relay forwarding.
-        let action = h
-            .handle_message(proto_msg(
-                "server.session.relay.begin",
-                json!({ "session_id": "a1:dev" }),
-            ))
-            .await
-            .unwrap();
+        // Phase 2: begin relay. The Server hands the credential to the agent
+        // that will verify it **before** it dials (#1013), so this cannot
+        // complete without an agent that answers.
+        let (sender, mut rx) = WsMessageSender::new();
+        let generation = h.command_broker.new_connection_generation();
+        h.command_broker.claim_agent("a1", generation, sender).await;
+        let broker = Arc::clone(&h.command_broker);
+
+        let begin_fut = h.handle_message(proto_msg(
+            "server.session.relay.begin",
+            json!({ "session_id": "a1:dev" }),
+        ));
+        let grant_fut = async move {
+            let text = rx
+                .recv()
+                .await
+                .expect("the agent is told before the server dials it")
+                .message
+                .to_text()
+                .unwrap()
+                .to_string();
+            let grant: serde_json::Value = serde_json::from_str(&text).unwrap();
+            assert_eq!(grant["msg_type"], "agent.p2p.grant");
+            assert_eq!(grant["payload"]["scope"]["terminal"], "dev");
+            assert_eq!(
+                grant["payload"]["scope"]["files"], false,
+                "a relay credential is the narrow one: the relay leg never touches a file"
+            );
+            assert_eq!(
+                grant["payload"]["scope"]["sessions"], false,
+                "and it never creates or kills a session"
+            );
+
+            let request_id = grant["payload"]["request_id"].as_str().unwrap().to_string();
+            broker
+                .resolve_command("a1", &request_id, json!({ "success": true }))
+                .await;
+        };
+
+        let (action, ()) = tokio::join!(begin_fut, grant_fut);
+        let action = action.unwrap();
         match action {
             HandlerAction::Relay {
                 agent_ws_urls,
@@ -5915,6 +6034,15 @@ mod tests {
                 assert!(agent_ws_urls[0].contains("1.2.3.4"));
                 assert_eq!(session_name, "dev");
                 assert!(env_snapshots.is_empty());
+                // The credential rides **on the URLs**, which is what makes both
+                // relay dials carry it without knowing about it — the attach dial
+                // iterates this list, and the detach dial reuses the one that
+                // succeeded. A credential threaded beside the URL would have to
+                // be kept in step with two call sites.
+                assert!(
+                    agent_ws_urls.iter().all(|url| url.contains("token=")),
+                    "every candidate the dials use carries the credential: {agent_ws_urls:?}"
+                );
             }
             _ => panic!("expected Relay action"),
         }
