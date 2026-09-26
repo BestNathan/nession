@@ -2,7 +2,6 @@ import { useCallback } from 'react';
 import { Loader2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { useProbePolling } from '@/app/useProbePolling';
 import { ShellDialogs } from '@/app/ShellDialogs';
 import { WorkspaceRegion } from '@/app/WorkspaceRegion';
 import { useShellState } from '@/app/useShellState';
@@ -15,7 +14,6 @@ export interface ShellProps {
 export function Shell({ connectionStatus }: ShellProps) {
   const state = useShellState();
   const { data } = state;
-  useProbePolling(data.agents);
 
   // Creating and selecting are two hooks' jobs, so they are composed here
   // rather than one reaching into the other's state (#1082): the dashboard

@@ -266,7 +266,7 @@ src/
 │   │                        #   workspaceContext.ts, presentation.ts
 │   ├── fixture/             # deterministic screens for /fixture visual tests
 │   ├── useAppConnection.ts / useDashboard.ts / useDashboardFilter.ts /
-│   │   useDashboardModals.ts / useProbePolling.ts / useRealtimeUpdates.ts /
+│   │   useDashboardModals.ts / useRealtimeUpdates.ts /
 │   │   useVisibilityReconnect.ts / useDeepLinkRestore.ts /
 │   │   use{AttachFlow,DeepLink,MobileNav}.ts
 │   └── LoginPage.tsx

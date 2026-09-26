@@ -61,9 +61,6 @@ const attachChoice = vi.hoisted(() => ({
 vi.mock('@/app/useDashboard', () => ({
   useDashboard: () => dashboard.current,
 }));
-vi.mock('@/app/useProbePolling', () => ({
-  useProbePolling: () => {},
-}));
 vi.mock('@/app/TerminalRegion', () => ({
   TerminalRegion: () => <div data-testid="terminal" />,
 }));
