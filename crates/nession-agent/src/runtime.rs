@@ -130,6 +130,51 @@ pub async fn run(config: AgentConfig, ready: Readiness) -> Result<()> {
     // reason — a second construction site is a second, emptier store.
     let p2p_credentials = Arc::new(crate::p2p_credentials::P2pCredentials::new());
 
+    // A standalone agent has no Server to mint a credential for it and no
+    // outbound channel to receive one on, so `agent_token` is the one secret in
+    // the picture — see `CredentialScope::for_standalone`, which grants it every
+    // session on this node rather than one.
+    //
+    // **Refused rather than defaulted, and here rather than later.** The two
+    // alternatives both start successfully and then fail at the far end with
+    // nothing to go on: an empty store refuses every connection (a socket that
+    // looks like a network fault), and a permissive default is the anonymous
+    // socket #1013 exists to close. It is done before the listener is built so
+    // there is no window in which a connection arrives ahead of the grant.
+    if config.server_url.trim().is_empty() {
+        if config.agent_token.trim().is_empty() {
+            anyhow::bail!(
+                "standalone mode (server_url is empty) needs `agent_token`: it is the only \
+                 credential this agent can honour, since a Server is what mints and pushes one \
+                 otherwise. Fix: set `agent_token` in the agent config to the token clients \
+                 will present, or set `server_url` to join a server — which mints a credential \
+                 per attach, scoped to the one session it answers for."
+            );
+        }
+        p2p_credentials
+            .grant_configured(
+                &agent_id,
+                &config.agent_token,
+                nession_protocol::contracts::p2p::v1::CredentialScope::for_standalone(),
+            )
+            .map_err(|refusal| {
+                anyhow::anyhow!(
+                    "`agent_token` was refused by this agent's own store ({refusal:?}); this is \
+                     a bug, not a configuration problem"
+                )
+            })?;
+        info!("standalone mode: honouring `agent_token` as this agent's P2P credential");
+    } else if !config.agent_token.trim().is_empty() {
+        // Said out loud rather than ignored. A configured token that silently
+        // does nothing is the kind of field someone sets, tests, and concludes
+        // is honoured.
+        warn!(
+            "`agent_token` is set but `server_url` is too, so it is **not** used: this agent \
+             takes the credential the Server mints for each attach. Clear `agent_token` or \
+             empty `server_url` if that is not what you meant."
+        );
+    }
+
     let (resize, mut resize_updates) = crate::server::ResizeReporter::new();
     let agent_server = AgentServer::new(
         &config.listen_address,
@@ -138,7 +183,10 @@ pub async fn run(config: AgentConfig, ready: Readiness) -> Result<()> {
         config.default_working_dir.clone(),
         file_root,
         config.attach_mode.clone(),
-        resize,
+        crate::server::websocket::AgentServerContext {
+            resize,
+            credentials: Arc::clone(&p2p_credentials),
+        },
     )
     .context("failed to create agent server")?;
     let (server_handle, listen_addr) = agent_server

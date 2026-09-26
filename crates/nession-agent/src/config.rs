@@ -91,6 +91,26 @@ pub struct AgentConfig {
     pub server_url: String,
     /// Authentication token for the central server.
     pub auth_token: String,
+    /// The token clients present to this agent's own P2P socket (#1013).
+    ///
+    /// Used by **standalone** agents — `server_url` empty, where no Server is
+    /// there to mint a credential per attach and no outbound channel exists to
+    /// receive one on. The operator sets it, and a client reaching the agent
+    /// directly presents it. See `CredentialScope::for_standalone` for what one
+    /// shared secret has to cover.
+    ///
+    /// **Not consulted when `server_url` is set.** There the Server issues a
+    /// credential per attach, scoped to the one session it is answering for,
+    /// and pushes it to this agent — a narrower grant than any configured token
+    /// could be. A configured token that also worked on a connected agent would
+    /// be a second, wider way in that nothing rotates.
+    ///
+    /// A standalone agent with this empty **refuses to start**, naming the key:
+    /// an empty store refuses every connection, which reads as a network fault
+    /// from the other end, and a permissive default is the anonymous socket
+    /// #1013 exists to close.
+    #[serde(default)]
+    pub agent_token: String,
     /// How the agent attaches to tmux sessions.  Default: "plain".
     #[serde(default)]
     pub attach_mode: AttachMode,
@@ -173,6 +193,7 @@ impl Default for AgentConfig {
             display_name: None,
             server_url: "ws://localhost:8443".to_string(),
             auth_token: String::new(),
+            agent_token: String::new(),
             attach_mode: AttachMode::Plain,
             listen_address: default_listen_address(),
             tls_cert_path: None,

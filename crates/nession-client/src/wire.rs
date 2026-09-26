@@ -47,6 +47,12 @@ pub const SERVER_SESSION_LIST: &str = "server.session.list";
 /// `server.session.attach` — ask the Server how to reach a session.
 pub const SERVER_SESSION_ATTACH: &str = "server.session.attach";
 
+/// `server.session.create` — create a session on one agent.
+pub const SERVER_SESSION_CREATE: &str = "server.session.create";
+
+/// `server.session.kill` — kill one session.
+pub const SERVER_SESSION_KILL: &str = "server.session.kill";
+
 // ── The agent-facing wires ──────────────────────────────────────────────────
 //
 // These are sent on a socket to an **agent**, not to the Server, and they are
