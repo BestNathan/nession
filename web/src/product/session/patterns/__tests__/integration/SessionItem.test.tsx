@@ -106,7 +106,11 @@ describe('SessionItem', () => {
    * 390×844), because a computed font is not something this environment has.
    */
   describe('typography roles', () => {
-    function renderWith(overrides: Partial<Session> = {}, overridesDomain?: DomainState) {
+    function renderWith(
+      overrides: Partial<Session> = {},
+      overridesDomain?: DomainState,
+      props: { showRecency?: boolean } = {},
+    ) {
       return render(
         <SessionItem
           session={{ ...session, ...overrides }}
@@ -114,6 +118,7 @@ describe('SessionItem', () => {
           agentLabel="devbox-01"
           selected={false}
           onSelect={vi.fn()}
+          {...props}
         />,
       );
     }
@@ -147,6 +152,31 @@ describe('SessionItem', () => {
       expect(workload.className).toMatch(/font-mono/);
       expect(screen.getByTestId('session-item-meta')).toHaveTextContent(
         /^unknown · devbox-01 · /,
+      );
+    });
+
+    it('drops the recency slot whole when asked, separator included', () => {
+      // #1083: a time-grouped list states time once, in the group label. The
+      // separator has to go with the slot — leaving it would read
+      // `claude · devbox-01 · ` and still look like the three-slot line the
+      // Web canary above pins.
+      renderWith({ foreground_command: 'claude' }, domain, { showRecency: false });
+
+      const meta = screen.getByTestId('session-item-meta');
+      expect(meta).toHaveTextContent(/^claude · devbox-01$/);
+      expect(meta.textContent).not.toMatch(/ago|刚刚/);
+      // Still one line, still the same testid: the row's identity is unchanged.
+      expect(screen.getByTestId('session-item-workload')).toHaveTextContent('claude');
+    });
+
+    it('keeps the recency slot by default, so Web cannot move silently', () => {
+      // The default is the shipped three-slot line. Asserted here rather than
+      // assumed, because `showRecency` is what the App's grouping flips and a
+      // default that drifted would change Web's rows with it.
+      renderWith({ foreground_command: 'claude' });
+
+      expect(screen.getByTestId('session-item-meta')).toHaveTextContent(
+        /^claude · devbox-01 · /,
       );
     });
 

@@ -155,6 +155,18 @@ export interface SessionItemProps {
   /** Open the attach-settings (configure) dialog for this session. */
   onConfigure?: (session: Session) => void;
   onKill?: (session: Session) => void;
+  /**
+   * Whether the meta line carries the recency slot. Default `true`.
+   *
+   * Off when the list is grouped by time (`session-list.md` §Session row
+   * content): a group label above the rows already says when they happened, and
+   * stating it again on every row is the "never both" the App's navigator
+   * rejects. The default keeps Web's three-slot line — the shape
+   * `session-lifecycle.spec.ts` pins with its trailing separator.
+   *
+   * Absent or `true` are the same thing; only `false` changes the DOM.
+   */
+  showRecency?: boolean;
 }
 
 /**
@@ -180,9 +192,11 @@ export interface SessionItemProps {
 function SessionMetaLine({
   session,
   agentLabel,
+  showRecency,
 }: {
   session: Session;
   agentLabel: string;
+  showRecency: boolean;
 }) {
   return (
     <span
@@ -194,8 +208,16 @@ function SessionMetaLine({
       </span>
       {' · '}
       {agentLabel}
-      {' · '}
-      {formatRelativeTime(session.last_activity)}
+      {/* The separator belongs to the fragment, not to the line: dropping the
+          recency alone would leave `bash · devbox-01 · ` with a trailing
+          separator, which is the shape `session-lifecycle.spec.ts` reads as a
+          three-slot row. See `showRecency`. */}
+      {showRecency && (
+        <>
+          {' · '}
+          {formatRelativeTime(session.last_activity)}
+        </>
+      )}
     </span>
   );
 }
@@ -217,6 +239,7 @@ export function SessionItem({
   onSelect,
   onConfigure,
   onKill,
+  showRecency = true,
 }: SessionItemProps) {
   return (
     <div
@@ -260,7 +283,11 @@ export function SessionItem({
         >
           {session.session_name}
         </span>
-        <SessionMetaLine session={session} agentLabel={agentLabel} />
+        <SessionMetaLine
+          session={session}
+          agentLabel={agentLabel}
+          showRecency={showRecency}
+        />
         {domain.agent.copy !== null && (
           /* Product text too: continuity state about infrastructure, and the
              degraded reading of the agent slot two lines up. */

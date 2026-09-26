@@ -37,6 +37,12 @@ Possible parts:
 
 Do not force every row to show every metadata fragment. If six rows are all on the same healthy Location, repeating the Agent name six times may add no value.
 
+**Recency is the one fragment a list may take away from every row at once.** When
+the list is grouped by time, the group label states when those rows happened, and
+a row that repeated it would state the same fact twice ([session-list.md](session-list.md)
+§History grouping). The slot is then absent whole — its separator with it, so the
+line reads `{workload} · {agent}` rather than trailing off.
+
 ## Metadata priority
 
 Apply the principle "show only what matters now":

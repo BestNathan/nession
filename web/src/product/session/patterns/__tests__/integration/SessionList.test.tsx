@@ -85,4 +85,86 @@ describe('SessionList', () => {
     await userEvent.click(screen.getByTestId(`session-settings-${sess.session_id}`));
     expect(onConfigure).toHaveBeenCalledWith(sess);
   });
+
+  it('renders a caller-supplied header above its own rows (#1083)', () => {
+    const other: Session = { ...sess, session_id: 'a1:other', session_name: 'Other' };
+    render(
+      <SessionList
+        sessions={[sess, other]} agents={[agent]} staleAgentIds={[]} selectedId={null}
+        clientSessionId="" onSelect={vi.fn()}
+        groups={[
+          {
+            key: 'today',
+            header: <h2 data-testid="group">Today</h2>,
+            sessions: [sess],
+          },
+          {
+            key: 'older',
+            header: <h2 data-testid="group">Older</h2>,
+            sessions: [other],
+          },
+        ]}
+      />,
+    );
+
+    // Header-then-rows, in the caller's order, in one list.
+    const headings = screen.getAllByTestId('group').map((el) => el.textContent);
+    expect(headings).toEqual(['Today', 'Older']);
+    const order = screen
+      .getAllByTestId(/^session-item-row$/)
+      .map((row) => row.textContent);
+    expect(order[0]).toContain('Fix terminal reconnect');
+    expect(order[1]).toContain('Other');
+  });
+
+  it('renders a footer after the rows, and none by default (#1083)', () => {
+    // The App's Agents entry rides here — "below history" as literally DOM
+    // order inside the scroll area, so an expanded disclosure is the
+    // container's problem rather than a second region competing for height.
+    const withFooter = render(
+      <SessionList
+        sessions={[sess]} agents={[agent]} staleAgentIds={[]} selectedId={null}
+        clientSessionId="" onSelect={vi.fn()}
+        footer={<div data-testid="sl-footer">Agents</div>}
+      />,
+    );
+    const row = screen.getByTestId('session-item-row');
+    const footer = screen.getByTestId('sl-footer');
+    expect(row.compareDocumentPosition(footer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    withFooter.unmount();
+
+    // Absent is the default, and it is what keeps Web's DOM unchanged.
+    render(
+      <SessionList
+        sessions={[sess]} agents={[agent]} staleAgentIds={[]} selectedId={null}
+        clientSessionId="" onSelect={vi.fn()}
+      />,
+    );
+    expect(screen.queryByTestId('sl-footer')).not.toBeInTheDocument();
+  });
+
+  it('forwards showRowRecency to every row, defaulting to the three-slot line', () => {
+    const two = [sess, { ...sess, session_id: 'a1:two' }];
+    const without = render(
+      <SessionList
+        sessions={two} agents={[agent]} staleAgentIds={[]} selectedId={null}
+        clientSessionId="" onSelect={vi.fn()} showRowRecency={false}
+      />,
+    );
+    for (const meta of screen.getAllByTestId('session-item-meta')) {
+      expect(meta.textContent).toMatch(/^claude · /);
+      expect(meta.textContent).not.toMatch(/ago|刚刚/);
+    }
+    without.unmount();
+
+    render(
+      <SessionList
+        sessions={two} agents={[agent]} staleAgentIds={[]} selectedId={null}
+        clientSessionId="" onSelect={vi.fn()}
+      />,
+    );
+    for (const meta of screen.getAllByTestId('session-item-meta')) {
+      expect(meta.textContent).toMatch(/^claude · .+ · /);
+    }
+  });
 });

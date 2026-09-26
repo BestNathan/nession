@@ -37,7 +37,7 @@ SessionList
 
 | Part | Role |
 |------|------|
-| List viewport | Scrolls Session rows. No Agent section headers. |
+| List viewport | Scrolls Session rows, and any time-group labels with them. **No Agent section headers** — see §History grouping for the one axis that does group. |
 | SessionItem | One Session. See [session-item.md](session-item.md). |
 | Search/filter | Optional. Filters the flat list; does not turn Agent into a hierarchy. |
 | Empty | No Sessions / no matches. Copy talks about Sessions, not Agents. |
@@ -97,6 +97,41 @@ Session name is primary. Workload hint, Workspace Location/Agent identity, recen
 
 This supports work-first navigation without importing an IM/chat domain model or an Agent-first tree.
 
+## History grouping
+
+The App realizes SessionList as a **history navigator**, and a history list
+may group its rows by *when the work last happened* (#1083):
+
+```text
+Today
+  fix-terminal-reconnect
+  design-system
+
+Previous 7 days
+  prod-shell
+```
+
+Rules:
+
+- **Grouping is by time only.** Grouping Sessions under their Agent stays the
+  anti-pattern below; a time bucket is not a hierarchy, and the rows inside one
+  are not parented by the label.
+- **A bucket with no Sessions in it is not rendered.** Six Sessions on one day
+  produce one bucket, and one label over the whole list is noise — that case is
+  served better by the flat list.
+- **Time is expressed once.** When rows are grouped, they drop their per-row
+  recency; when they are not, recency stays in the row. Never both.
+- **Within a bucket, the list's own sort holds.** Grouping orders the buckets;
+  it does not re-order the rows the user sorted.
+- **The Web column is flat.** Grouping is the App's history presentation, not a
+  requirement of the pattern.
+
+A secondary navigation entry that belongs *below* history — the App's Agents
+entry (#1083) — is part of the list's scroll content rather than chrome. It is
+the last thing in the viewport, so it scrolls with the rows and anything it
+expands into is the scroll container's business rather than a second region
+competing with the list for a short viewport's height.
+
 ## Tokens
 
 | Surface | Token layer |
@@ -115,7 +150,7 @@ Do not introduce feature-specific palette literals or decorative per-Agent color
 | Placement | On-demand, collapsible, compact, or persistent when justified | Sessions spatial layer |
 | Opening | Must remain fast/discoverable; exact shell control may vary | Gesture + visible control |
 | Density | Web Experience row density | App/touch Experience density |
-| Grouping | Flat by default | Flat by default |
+| Grouping | Flat by default | Flat by default; the App may group by time (§History grouping) |
 | Infrastructure metadata | Secondary | Secondary |
 
 ## Visual contract
@@ -163,3 +198,5 @@ Derived from [visual-language.md](../../visual-language.md) and [composition.md]
 - [ ] Web placement can collapse/go on demand without changing SessionList semantics.
 - [ ] App Sessions layer is reachable without a swipe.
 - [ ] Navigation chrome yields before the active work surface yields.
+- [ ] Where rows are grouped by time, no row also states its own recency.
+- [ ] No time bucket renders without a Session in it.
