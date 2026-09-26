@@ -1,6 +1,7 @@
 import type { ComponentType } from 'react';
 import { Edit3, Save, Eye, Code, Info, Lock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { cn } from '@/shared/lib/utils';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Progress } from '@/components/ui/progress';
 import { CodeMirrorEditor } from './CodeMirrorEditor';
@@ -30,7 +31,12 @@ export interface FileViewerProps {
   filename: string;
   /** File size in bytes — when above the chunked threshold, forces read-only with progress. */
   fileSize?: number;
-  onClose: () => void;
+  /**
+   * Leave this file. Omitted when the caller owns leaving the depth the viewer
+   * sits in — the App's pushed detail has one Back, in its page header, and the
+   * ✕ that used to sit here was a second control for the same leave (#1051).
+   */
+  onClose?: () => void;
   onDirtyChange?: (dirty: boolean) => void;
 }
 
@@ -48,8 +54,19 @@ interface FileViewerToolbarProps {
   onSave: () => void;
   onEditToggle: () => void;
   onSetViewMode: (mode: ViewMode) => void;
-  onCloseClick: () => void;
+  /** Absent when the caller owns leaving — see `FileViewerProps.onClose`. */
+  onCloseClick?: () => void;
 }
+
+/**
+ * The toolbar's own controls — the body role, per Experience (#1073).
+ *
+ * They were `text-xs` from the shared `Button size="sm"` default, which is a
+ * desktop density: on App it made the actions smaller than everything they act
+ * on. The leaf exists on both experiences so this one class keeps working in
+ * the Web layout, which composes the same viewer.
+ */
+const fileViewerActionClass = 'text-[length:var(--workspace-editor-action-font-size)]';
 
 function FileViewerToolbar({
   path, filename, isDirty, isText, isReadOnly, saving, isMarkdown, viewMode, forceReadOnly, onSave, onEditToggle, onSetViewMode, onCloseClick,
@@ -74,7 +91,7 @@ function FileViewerToolbar({
       </div>
       <div className="flex items-center gap-1">
         {isText && !isReadOnly && (
-          <Button variant="ghost" size="sm" className="h-7 text-xs text-muted-foreground" onClick={onSave} disabled={!isDirty || saving}>
+          <Button variant="ghost" size="sm" className={cn('h-7 text-muted-foreground', fileViewerActionClass)} onClick={onSave} disabled={!isDirty || saving}>
             <Save className="h-3 w-3 mr-1" />{saving ? 'Saving...' : 'Save'}
           </Button>
         )}
@@ -83,7 +100,7 @@ function FileViewerToolbar({
             <Button
               variant={viewMode === 'preview' ? 'secondary' : 'ghost'}
               size="sm"
-              className="h-6 text-xs px-2"
+              className={cn('h-6 px-2', fileViewerActionClass)}
               onClick={() => onSetViewMode('preview')}
               aria-pressed={viewMode === 'preview'}
             >
@@ -92,7 +109,7 @@ function FileViewerToolbar({
             <Button
               variant={viewMode === 'raw' ? 'secondary' : 'ghost'}
               size="sm"
-              className="h-6 text-xs px-2"
+              className={cn('h-6 px-2', fileViewerActionClass)}
               onClick={() => onSetViewMode('raw')}
               aria-pressed={viewMode === 'raw'}
             >
@@ -101,11 +118,13 @@ function FileViewerToolbar({
           </div>
         )}
         {showEditToggle && (
-          <Button variant="ghost" size="sm" className="h-7 text-xs text-muted-foreground" onClick={onEditToggle}>
+          <Button variant="ghost" size="sm" className={cn('h-7 text-muted-foreground', fileViewerActionClass)} onClick={onEditToggle}>
             <Edit3 className="h-3 w-3 mr-1" />{isReadOnly ? 'Edit' : 'View'}
           </Button>
         )}
-        <Button variant="ghost" size="sm" className="h-7 text-xs text-muted-foreground hover:text-destructive" onClick={onCloseClick} aria-label="Close file" title="Close file">✕</Button>
+        {onCloseClick ? (
+          <Button variant="ghost" size="sm" className={cn('h-7 text-muted-foreground hover:text-destructive', fileViewerActionClass)} onClick={onCloseClick} aria-label="Close file" title="Close file">✕</Button>
+        ) : null}
       </div>
     </div>
   );
@@ -306,7 +325,7 @@ export function FileViewer({ fileOps, path, filename, fileSize, onClose, onDirty
         onSave={handleSave}
         onEditToggle={handleEditToggle}
         onSetViewMode={handleSetViewMode}
-        onCloseClick={handleCloseClick}
+        onCloseClick={onClose ? handleCloseClick : undefined}
       />
       <FileViewerContent
         loading={loading}
@@ -330,21 +349,25 @@ export function FileViewer({ fileOps, path, filename, fileSize, onClose, onDirty
         onSuggestionDismiss={handleSuggestionDismiss}
         onCancelLoad={handleCancelLoad}
       />
-
-      <AlertDialog open={showUnsavedDialog} onOpenChange={setShowUnsavedDialog}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Unsaved changes</AlertDialogTitle>
-            <AlertDialogDescription>
-              You have unsaved changes. Close anyway?
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleConfirmClose} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Close without saving</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      {/* The viewer's own unsaved dialog exists only for its own close
+          affordance. Without one the caller owns leaving, and the caller's
+          guard is the only one — two guards could disagree (#1051). */}
+      {onClose ? (
+        <AlertDialog open={showUnsavedDialog} onOpenChange={setShowUnsavedDialog}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Unsaved changes</AlertDialogTitle>
+              <AlertDialogDescription>
+                You have unsaved changes. Close anyway?
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={handleConfirmClose} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Close without saving</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      ) : null}
     </div>
   );
 }

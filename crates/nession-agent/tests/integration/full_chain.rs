@@ -139,8 +139,12 @@ async fn start_test_agent_server() -> anyhow::Result<(
     std::net::SocketAddr,
     nession_agent::server::ServerHandle,
     Arc<P2pCredentials>,
+    nession_agent::execution::MutationLane,
 )> {
     let tmp = Box::leak(Box::new(tempfile::tempdir()?));
+    // One lane for both paths, as in production — see `relay.rs` for the same
+    // pairing and why a lane each would leave #1021 unexercised.
+    let mutations = nession_agent::execution::mutation_scheduler();
     // Nothing drains this connection's resize lane, which is the point of the
     // lane: an unread resize costs one superseded value per session.
     let (resize, _resize_updates) = nession_agent::server::ResizeReporter::new();
@@ -162,11 +166,12 @@ async fn start_test_agent_server() -> anyhow::Result<(
         AgentServerContext {
             resize,
             credentials: Arc::clone(&credentials),
+            mutations: Arc::clone(&mutations),
         },
     )?;
     let (handle, addr) = server.start().await?;
 
-    Ok((addr, handle, credentials))
+    Ok((addr, handle, credentials, mutations))
 }
 
 /// Connect to central server and register an agent, returning the handle.
@@ -175,6 +180,7 @@ async fn register_agent_with_server(
     agent_id: &str,
     auth_token: &str,
     agent_port: u16,
+    mutations: nession_agent::execution::MutationLane,
 ) -> anyhow::Result<nession_agent::connection::ServerClientHandle> {
     let metadata = AgentMetadata {
         tmux_version: "3.3".to_string(),
@@ -206,6 +212,7 @@ async fn register_agent_with_server(
             nession_agent::protocol::served_descriptors()?,
         )?)),
         Arc::new(nession_agent::p2p_credentials::P2pCredentials::new()),
+        mutations,
     );
 
     Ok(client.connect_and_run().await?.0)
@@ -221,13 +228,18 @@ async fn test_full_agent_server_integration() {
     let (server_addr, server_handle, _db_dir) = start_test_server("test-token").await.unwrap();
 
     // Start a real agent server.
-    let (agent_addr, agent_handle, _) = start_test_agent_server().await.unwrap();
+    let (agent_addr, agent_handle, _, agent_mutations) = start_test_agent_server().await.unwrap();
 
     // Register agent with central server.
-    let client_handle =
-        register_agent_with_server(server_addr, "e2e-agent-1", "test-token", agent_addr.port())
-            .await
-            .unwrap();
+    let client_handle = register_agent_with_server(
+        server_addr,
+        "e2e-agent-1",
+        "test-token",
+        agent_addr.port(),
+        Arc::clone(&agent_mutations),
+    )
+    .await
+    .unwrap();
 
     // Give it time to register.
     tokio::time::sleep(Duration::from_millis(200)).await;
@@ -262,7 +274,8 @@ async fn test_full_agent_server_integration() {
 #[tokio::test]
 async fn test_client_connects_to_agent_via_p2p() {
     // Start agent server.
-    let (agent_addr, agent_handle, credentials) = start_test_agent_server().await.unwrap();
+    let (agent_addr, agent_handle, credentials, _agent_mutations) =
+        start_test_agent_server().await.unwrap();
 
     // Connect a client directly to the agent.
     let (mut sink, mut stream) = connect(&credentials, agent_addr).await.unwrap();
@@ -306,7 +319,8 @@ async fn test_terminal_io_through_full_chain() {
         .unwrap();
 
     // Start agent server.
-    let (agent_addr, agent_handle, credentials) = start_test_agent_server().await.unwrap();
+    let (agent_addr, agent_handle, credentials, _agent_mutations) =
+        start_test_agent_server().await.unwrap();
 
     // The dial comes after the session does: the credential it presents is bound
     // to `session_name`, which is generated per run.
@@ -409,7 +423,8 @@ async fn test_session_lifecycle() {
     let _tmux = SessionManager::new();
 
     // Start agent server.
-    let (agent_addr, agent_handle, credentials) = start_test_agent_server().await.unwrap();
+    let (agent_addr, agent_handle, credentials, _agent_mutations) =
+        start_test_agent_server().await.unwrap();
 
     // Connect client.
     let (mut sink, mut stream) = connect(&credentials, agent_addr).await.unwrap();
@@ -468,7 +483,7 @@ async fn test_agent_reconnects_after_server_restart() {
         start_test_server("reconnect-token").await.unwrap();
 
     // Start agent server.
-    let (agent_addr, agent_handle, _) = start_test_agent_server().await.unwrap();
+    let (agent_addr, agent_handle, _, agent_mutations) = start_test_agent_server().await.unwrap();
 
     // Register with first server.
     let client_handle = register_agent_with_server(
@@ -476,6 +491,7 @@ async fn test_agent_reconnects_after_server_restart() {
         "reconnect-agent",
         "reconnect-token",
         agent_addr.port(),
+        Arc::clone(&agent_mutations),
     )
     .await
     .unwrap();
@@ -501,6 +517,7 @@ async fn test_agent_reconnects_after_server_restart() {
         "reconnect-agent",
         "reconnect-token",
         agent_addr.port(),
+        Arc::clone(&agent_mutations),
     )
     .await
     .unwrap();
@@ -522,9 +539,12 @@ async fn test_multiple_agents_register() {
     let (server_addr, server_handle, _db_dir) = start_test_server("multi-token").await.unwrap();
 
     // Start multiple agent servers.
-    let (agent_addr1, agent_handle1, _) = start_test_agent_server().await.unwrap();
-    let (agent_addr2, agent_handle2, _) = start_test_agent_server().await.unwrap();
-    let (agent_addr3, agent_handle3, _) = start_test_agent_server().await.unwrap();
+    let (agent_addr1, agent_handle1, _, _agent_mutations1) =
+        start_test_agent_server().await.unwrap();
+    let (agent_addr2, agent_handle2, _, _agent_mutations2) =
+        start_test_agent_server().await.unwrap();
+    let (agent_addr3, agent_handle3, _, agent_mutations3) =
+        start_test_agent_server().await.unwrap();
 
     // Register all agents.
     let handle1 = register_agent_with_server(
@@ -532,6 +552,7 @@ async fn test_multiple_agents_register() {
         "multi-agent-1",
         "multi-token",
         agent_addr1.port(),
+        Arc::clone(&agent_mutations3),
     )
     .await
     .unwrap();
@@ -541,6 +562,7 @@ async fn test_multiple_agents_register() {
         "multi-agent-2",
         "multi-token",
         agent_addr2.port(),
+        Arc::clone(&agent_mutations3),
     )
     .await
     .unwrap();
@@ -550,6 +572,7 @@ async fn test_multiple_agents_register() {
         "multi-agent-3",
         "multi-token",
         agent_addr3.port(),
+        Arc::clone(&agent_mutations3),
     )
     .await
     .unwrap();
@@ -576,7 +599,7 @@ async fn test_multiple_agents_register() {
 #[tokio::test]
 async fn test_graceful_shutdown() {
     let (server_addr, server_handle, _db_dir) = start_test_server("shutdown-token").await.unwrap();
-    let (agent_addr, agent_handle, _) = start_test_agent_server().await.unwrap();
+    let (agent_addr, agent_handle, _, agent_mutations) = start_test_agent_server().await.unwrap();
 
     // Register agent.
     let client_handle = register_agent_with_server(
@@ -584,6 +607,7 @@ async fn test_graceful_shutdown() {
         "shutdown-agent",
         "shutdown-token",
         agent_addr.port(),
+        Arc::clone(&agent_mutations),
     )
     .await
     .unwrap();

@@ -1,14 +1,20 @@
-import { useMemo } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { cn } from '@/shared/lib/utils';
 import type { FileOps } from '@/capabilities/files';
 import type { CapabilityFacts, CapabilityId } from '@/product/capability';
 import type { DomainState } from '@/product/session/model/domainState';
 import type { Agent, Session } from '@/types';
-import { AppToolHeader } from '@/app/patterns/AppToolHeader';
+import { AppPageHeader } from '@/app/patterns/AppPageHeader';
 import type { Surface } from '@/app/patterns/SessionHeader';
 import { WorkspaceShell } from '@/app/workspace/WorkspaceShell';
 import { resolveWorkspaceCapabilities } from '@/app/workspace/capabilities';
-import type { CapabilityFocus, Experience, WorkspaceContext } from '@/app/workspace/workspaceContext';
+import type {
+  CapabilityFocus,
+  Experience,
+  WorkspaceContext,
+  WorkspaceDepthControl,
+  WorkspacePush,
+} from '@/app/workspace/workspaceContext';
 
 export interface WorkspacePanelProps {
   selectedSession: Session;
@@ -26,6 +32,25 @@ export interface WorkspacePanelProps {
   focus?: CapabilityFocus;
 }
 
+/** Which capability registered the push on screen. */
+interface PushedDepth {
+  capabilityId: CapabilityId;
+  push: WorkspacePush;
+}
+
+/**
+ * The Workspace page and its one navigation bar (#1051).
+ *
+ * The chrome owner for whatever depth the Workspace is at. It renders the App's
+ * page header, hands the capability's view a `WorkspaceDepthControl` to declare a
+ * pushed depth through, and tells the dock whether it is still at the depth that
+ * may show it.
+ *
+ * The push is stamped with the capability that registered it rather than cleared
+ * by an effect when `tool` changes. Switching capability unmounts the view that
+ * pushed, so there is no cleanup to run — and a stale push read for even one
+ * frame would put another capability's file name in the header.
+ */
 export function WorkspacePanel({
   selectedSession,
   selectedAgent,
@@ -40,6 +65,8 @@ export function WorkspacePanel({
   onToolChange,
   focus,
 }: WorkspacePanelProps) {
+  const [pushed, setPushed] = useState<PushedDepth | null>(null);
+
   const ctx: WorkspaceContext = useMemo(
     () => ({
       session: selectedSession,
@@ -75,6 +102,16 @@ export function WorkspacePanel({
     [ctx, tool],
   );
 
+  const setPush = useCallback(
+    (push: WorkspacePush | null) => {
+      setPushed(push === null ? null : { capabilityId: tool, push });
+    },
+    [tool],
+  );
+  const depth: WorkspaceDepthControl = useMemo(() => ({ setPush }), [setPush]);
+
+  const push = pushed && pushed.capabilityId === tool ? pushed.push : null;
+
   return (
     <div
       role="region"
@@ -83,12 +120,18 @@ export function WorkspacePanel({
       className={cn('flex min-h-0 flex-1 flex-col', surface !== 'workspace' && 'hidden')}
     >
       {experience === 'app' ? (
-        <AppToolHeader
-          toolLabel={activeLabel}
-          onBack={() => onSurfaceChange('terminal')}
+        <AppPageHeader
+          /* Back goes to the depth below this one, and nowhere else: the Terminal
+             from a capability root, the capability root from a pushed detail.
+             `#1051`'s rule is one predictable leave per depth, so this is the
+             only affordance in the App that leaves either of them. */
+          backLabel={push ? `Back to ${activeLabel}` : 'Back to terminal'}
+          onBack={push ? push.onLeave : () => onSurfaceChange('terminal')}
+          title={push ? push.title : activeLabel}
+          technical={push !== null}
         />
       ) : null}
-      <WorkspaceShell ctx={ctx} activeCapabilityId={tool} />
+      <WorkspaceShell ctx={ctx} activeCapabilityId={tool} depth={depth} pushed={push !== null} />
     </div>
   );
 }

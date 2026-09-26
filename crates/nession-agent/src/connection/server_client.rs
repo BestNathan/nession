@@ -72,6 +72,7 @@ use crate::p2p_credentials::P2pCredentials;
 use crate::protocol::core_routes;
 use crate::tmux::manager::SessionManager;
 use nession_protocol::contracts::p2p::v1::P2pGrantPayload;
+use nession_runtime::lane::KeyedLane;
 
 /// Type alias for the WebSocket stream.
 type WsStream = WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>;
@@ -186,6 +187,12 @@ pub struct ServerClient {
     env_store: EnvStore,
     /// Track sourced env files per session (session_id -> Vec<EnvFileRef>)
     sourced_envs: std::sync::Mutex<HashMap<String, Vec<EnvFileRef>>>,
+    /// The **process's** mutation lane (#1021).
+    ///
+    /// Shared with the peer-to-peer listener: both mutate the same tmux
+    /// sessions and the same file sandbox, and a lane per path orders each
+    /// path and not the two between them.
+    mutations: Arc<KeyedLane<ResourceKey>>,
 }
 
 /// Handle to a running [`ServerClient`] for sending messages and shutdown.
@@ -367,6 +374,7 @@ impl ServerClient {
         default_working_dir: String,
         extension_registry: Option<Arc<ExtensionRegistry>>,
         p2p_credentials: Arc<P2pCredentials>,
+        mutations: Arc<KeyedLane<ResourceKey>>,
     ) -> Self {
         let env_root = nession_common::paths::agent_envs_dir()
             .unwrap_or_else(|_| std::path::PathBuf::from(".nession/agent/envs"));
@@ -385,6 +393,7 @@ impl ServerClient {
             metadata,
             tmux,
             p2p_credentials,
+            mutations,
             env_store: EnvStore::new(env_root),
             sourced_envs: std::sync::Mutex::new(HashMap::new()),
         }
@@ -765,10 +774,19 @@ impl ServerClient {
     ) {
         // The lanes this connection reads into, and the only thing that admits
         // to them. Dropped with the loop, which is what ends their tasks.
-        let mut lanes = Lanes::with_key_worker_budget(
+        // The **agent's** lane rather than this connection's (#1021). The
+        // peer-to-peer listener's connections mutate the same tmux sessions and
+        // the same file sandbox, so a lane per path orders each path and not the
+        // two between them: a `kill` over one socket and an `env apply` over the
+        // other had no order at all.
+        //
+        // What stays this connection's is its **bound** on mutations in flight —
+        // that is what a bound protects, one connection's ability to make
+        // progress — and the lane it queues into is now shared by more than one.
+        let mut lanes = Lanes::shared(
             execution::DEFAULT_QUERY_CONCURRENCY,
-            execution::DEFAULT_KEY_QUEUE_DEPTH,
-            execution::DEFAULT_KEY_WORKERS,
+            Arc::clone(&self.mutations),
+            crate::server::execution::DEFAULT_MUTATIONS_IN_FLIGHT,
             execution::LANE_LABEL,
         );
 
@@ -1157,6 +1175,7 @@ mod tests {
             "/tmp".to_string(),
             None,
             Arc::new(P2pCredentials::new()),
+            crate::execution::mutation_scheduler(),
         );
 
         let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
@@ -1204,6 +1223,7 @@ mod tests {
             "/tmp".to_string(),
             None,
             Arc::new(P2pCredentials::new()),
+            crate::execution::mutation_scheduler(),
         );
 
         let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
@@ -1260,6 +1280,7 @@ mod tests {
             "/tmp".to_string(),
             None,
             Arc::new(P2pCredentials::new()),
+            crate::execution::mutation_scheduler(),
         );
 
         let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
@@ -1345,6 +1366,7 @@ mod tests {
             "/tmp".to_string(),
             None,
             Arc::new(P2pCredentials::new()),
+            crate::execution::mutation_scheduler(),
         );
 
         let (handle, interval) = client.connect_and_run().await.expect("connect failed");
@@ -1423,6 +1445,7 @@ mod tests {
             "/tmp".to_string(),
             None,
             Arc::new(P2pCredentials::new()),
+            crate::execution::mutation_scheduler(),
         );
         let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
 
@@ -1536,6 +1559,7 @@ mod tests {
             "/tmp".to_string(),
             None,
             Arc::new(P2pCredentials::new()),
+            crate::execution::mutation_scheduler(),
         );
 
         let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
@@ -1655,6 +1679,7 @@ mod tests {
             "/tmp".to_string(),
             None,
             Arc::new(P2pCredentials::new()),
+            crate::execution::mutation_scheduler(),
         );
 
         let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
@@ -1757,6 +1782,7 @@ mod tests {
             "/tmp".to_string(),
             None,
             Arc::new(P2pCredentials::new()),
+            crate::execution::mutation_scheduler(),
         );
 
         let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
@@ -1886,6 +1912,7 @@ mod tests {
             "/tmp".to_string(),
             Some(registry),
             Arc::new(P2pCredentials::new()),
+            crate::execution::mutation_scheduler(),
         );
         client.connect_and_run().await.expect("connect failed").0
     }
@@ -2234,6 +2261,7 @@ mod tests {
             "/tmp".to_string(),
             None,
             Arc::new(P2pCredentials::new()),
+            crate::execution::mutation_scheduler(),
         );
 
         let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
@@ -2327,6 +2355,7 @@ mod tests {
             "/tmp".to_string(),
             None,
             Arc::new(P2pCredentials::new()),
+            crate::execution::mutation_scheduler(),
         );
 
         let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
@@ -2419,6 +2448,7 @@ mod tests {
             "/tmp".to_string(),
             None,
             Arc::new(P2pCredentials::new()),
+            crate::execution::mutation_scheduler(),
         );
 
         let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
@@ -2525,6 +2555,7 @@ mod tests {
             "/tmp".to_string(),
             None,
             Arc::new(P2pCredentials::new()),
+            crate::execution::mutation_scheduler(),
         );
 
         let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
@@ -2575,6 +2606,7 @@ mod tests {
             "/tmp".to_string(),
             None,
             Arc::new(P2pCredentials::new()),
+            crate::execution::mutation_scheduler(),
         );
 
         let (handle, interval) = client.connect_and_run().await.expect("connect failed");
@@ -2765,6 +2797,7 @@ mod tests {
             "/tmp".to_string(),
             None,
             Arc::new(P2pCredentials::new()),
+            crate::execution::mutation_scheduler(),
         );
         let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
 
@@ -2842,6 +2875,7 @@ mod tests {
             "/tmp".to_string(),
             None,
             Arc::new(P2pCredentials::new()),
+            crate::execution::mutation_scheduler(),
         );
         let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
 
@@ -3179,6 +3213,7 @@ esac"#,
             "/tmp".to_string(),
             None,
             Arc::new(P2pCredentials::new()),
+            crate::execution::mutation_scheduler(),
         );
         client.connect_and_run().await.expect("connect failed").0
     }
@@ -4041,6 +4076,7 @@ mod versioned_routing {
             "/tmp".to_string(),
             None,
             Arc::new(P2pCredentials::new()),
+            crate::execution::mutation_scheduler(),
         )
     }
 

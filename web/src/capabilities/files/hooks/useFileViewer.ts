@@ -22,7 +22,15 @@ export interface UseFileViewerParams {
   fileOps: FileOps;
   path: string;
   filename: string;
-  onClose: () => void;
+  /**
+   * Leave this file. Omitted when the caller owns leaving the depth the viewer
+   * is in — the App's pushed detail has one Back, in its page header, and a ✕
+   * beside it would be a second control for the same leave (#1051). The viewer
+   * then renders no close affordance and asks no discard question: the caller's
+   * own guard is the only one, so there is one answer per leave rather than two
+   * that could disagree.
+   */
+  onClose?: () => void;
   onDirtyChange?: (dirty: boolean) => void;
   /**
    * File size in bytes, if known up-front from the FileEntry. Files larger than
@@ -301,15 +309,19 @@ export function useFileViewer({ fileOps, path, filename, onClose, onDirtyChange,
     }
   }, [fileOps, path, content, filename, onDirtyChange, setOriginalContent]);
 
+  // Only ever wired to a control when `onClose` was given (`FileViewer` passes
+  // `onCloseClick` conditionally), so the optional call is not a fallback —
+  // it is the same "no close affordance, no close" the rest of this hook
+  // implements, with no branch that cannot be taken.
   const handleCloseClick = () => {
     if (isDirty) {
       setShowUnsavedDialog(true);
       return;
     }
-    onClose();
+    onClose?.();
   };
 
-  const handleConfirmClose = () => { setShowUnsavedDialog(false); onClose(); };
+  const handleConfirmClose = () => { setShowUnsavedDialog(false); onClose?.(); };
 
   const handleSuggestionPreview = () => { setViewMode('preview'); setShowSuggestion(false); };
 

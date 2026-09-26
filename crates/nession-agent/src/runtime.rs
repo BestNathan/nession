@@ -129,6 +129,11 @@ pub async fn run(config: AgentConfig, ready: Readiness) -> Result<()> {
     // are checked. #1014 put the composition in this file for exactly this
     // reason — a second construction site is a second, emptier store.
     let p2p_credentials = Arc::new(crate::p2p_credentials::P2pCredentials::new());
+    // The process's one mutation lane (#1021): the peer-to-peer listener and the
+    // central connection both mutate the same tmux sessions and the same file
+    // sandbox, so they must queue in the same lane or ordering holds on each path
+    // and not between them.
+    let mutation_lane = crate::execution::mutation_scheduler();
 
     // A standalone agent has no Server to mint a credential for it and no
     // outbound channel to receive one on, so `agent_token` is the one secret in
@@ -186,6 +191,10 @@ pub async fn run(config: AgentConfig, ready: Readiness) -> Result<()> {
         crate::server::websocket::AgentServerContext {
             resize,
             credentials: Arc::clone(&p2p_credentials),
+            // Built here, once, because this is where the resources its keys
+            // name are built — one tmux server, one file sandbox — and handed
+            // to *both* mutating paths below (#1021).
+            mutations: Arc::clone(&mutation_lane),
         },
     )
     .context("failed to create agent server")?;
@@ -267,6 +276,7 @@ pub async fn run(config: AgentConfig, ready: Readiness) -> Result<()> {
             config.default_working_dir.clone(),
             Some(ext_registry),
             Arc::clone(&p2p_credentials),
+            Arc::clone(&mutation_lane),
         );
 
         // Attempt to connect with a timeout so the agent can still serve

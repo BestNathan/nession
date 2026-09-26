@@ -1,7 +1,9 @@
 import { Menu, PanelRight } from 'lucide-react';
 import { ConnectionStatus as SessionConnectionStatus } from '@/product/session/patterns/ConnectionStatus';
 import { Button } from '@/components/ui/button';
+import { cn } from '@/shared/lib/utils';
 import { shellIconButtonClass } from '@/app/shellStyles';
+import { metadataAppClass, titleAppClass } from '@/app/experiences/app/appTypography';
 import type { CapsuleExperience } from '@/product/terminal/capsule/types';
 import type { DomainState } from '@/product/session/model/domainState';
 import { resolveSessionChrome } from '@/product/session/model/sessionChrome';
@@ -62,7 +64,9 @@ export function SessionHeader({
   // while the *same* name is set in the product face on the Sessions row it was
   // chosen from — one string, two families, decided by which screen it is on.
   const title = (
-    <h1 className="min-w-0 truncate text-base font-semibold">{sessionName}</h1>
+    <h1 className={cn('min-w-0 truncate font-semibold', titleAppClass)}>
+      {sessionName}
+    </h1>
   );
   if (experience === 'app') {
     return (
@@ -83,10 +87,14 @@ export function SessionHeader({
             copy ("exited", "Agent offline", "Attach failed"). The Metadata role
             owns "status details", so the wrapper does not set the family — it
             was the `font-mono` here, not the child, that made this line read as
-            technical (#1050 stage 4). */}
+            technical (#1050 stage 4). The size follows the same role (#1073):
+            the `text-xs` that stood here was a Tailwind default that happened to
+            equal the App's metadata value, which is not the same as being owned
+            by it. The children set their own size, so this names the level the
+            member sits at rather than restating every child. */}
         <div
           data-testid="session-header-status"
-          className="flex min-w-0 flex-1 items-center gap-2 text-xs"
+          className={cn('flex min-w-0 flex-1 items-center gap-2', metadataAppClass)}
         >
           {chrome.agent !== 'quiet' || chrome.connection !== 'quiet' ? (
             <SessionConnectionStatus state={state} />

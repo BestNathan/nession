@@ -275,4 +275,22 @@ Run the deploy script.
     // Edit button should not be visible in preview mode
     expect(screen.queryByText('Edit')).not.toBeInTheDocument();
   });
+
+  it('sizes the toolbar controls by role, not by the Button size they use', async () => {
+    // #1073. The viewer is composed by both layouts, so the size is one leaf with
+    // two densities rather than a literal: `text-xs` came from `Button
+    // size="sm"`, and on the App it made the actions smaller than the path they
+    // sit beside. This pins the token, not a number — the App's value is the App
+    // token source's business.
+    const ops = mockFileOps();
+    render(<FileViewer fileOps={ops} path="/test/readme.md" filename="readme.md" onClose={vi.fn()} />);
+
+    const raw = await screen.findByRole('button', { name: /Raw/ });
+    expect(raw.className).toContain('text-[length:var(--workspace-editor-action-font-size)]');
+    expect(raw.className).not.toMatch(/(^|\s)text-xs(\s|$)/);
+
+    const close = screen.getByRole('button', { name: 'Close file' });
+    expect(close.className).toContain('text-[length:var(--workspace-editor-action-font-size)]');
+    expect(close.className).not.toMatch(/(^|\s)text-xs(\s|$)/);
+  });
 });

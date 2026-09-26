@@ -58,6 +58,7 @@ async fn start_server(
         AgentServerContext {
             resize,
             credentials: Arc::clone(&credentials),
+            mutations: nession_agent::execution::mutation_scheduler(),
         },
     )?;
     let (handle, addr) = server.start().await?;
@@ -601,6 +602,7 @@ async fn start_server_with_file_root() -> anyhow::Result<(
         AgentServerContext {
             resize,
             credentials: Arc::clone(&credentials),
+            mutations: nession_agent::execution::mutation_scheduler(),
         },
     )?;
     let (handle, addr) = server.start().await?;
@@ -641,6 +643,57 @@ fn release_parked_fifo(path: std::path::PathBuf) {
         // `File::create` is the blocking open; the guard closes on return.
         let _ = std::fs::File::create(path);
     });
+}
+
+/// A FIFO a test parks a read on, and whose release the test **cannot** forget.
+///
+/// The release runs on drop, so it does not depend on reaching the end of the
+/// test body. That is the entire point, and it is `#1022`:
+///
+/// A read parked at the end of a test parks a `spawn_blocking` task, and the
+/// runtime's shutdown waits for it. So a panic anywhere between parking and
+/// releasing — an assertion, or a bounded wait that expired because the machine
+/// was loaded — does not produce a failing test. It produces a **hanging** one:
+/// silent, indistinguishable from a slow machine, and it blocks pre-push, which
+/// this repository does not let anyone bypass. Measured on 2026-09-24 under an
+/// instrumented coverage build with the machine at load 9.5: **13 minutes of
+/// sleeping at ~0% CPU**, with a live 13-minute test session alongside it.
+///
+/// Releasing explicitly is still what a test does when the *ordering* matters —
+/// the two-park test below releases `second` and reads before it touches
+/// `first`, and that ordering is the thing under test. The drop is the backstop
+/// for the case where the test never gets there.
+struct ParkedFifo {
+    path: std::path::PathBuf,
+    released: bool,
+}
+
+impl ParkedFifo {
+    fn new(path: std::path::PathBuf) -> anyhow::Result<Self> {
+        make_fifo(&path)?;
+        Ok(Self {
+            path,
+            released: false,
+        })
+    }
+
+    /// Let the parked read finish, now.
+    fn release(&mut self) {
+        // Idempotent, and it has to be: releasing twice would spawn a second
+        // writer for a FIFO whose reader has already gone, and *that* open
+        // blocks — trading a hang on the failure path for a hang on the success
+        // path.
+        if std::mem::replace(&mut self.released, true) {
+            return;
+        }
+        release_parked_fifo(self.path.clone());
+    }
+}
+
+impl Drop for ParkedFifo {
+    fn drop(&mut self) {
+        self.release();
+    }
 }
 
 /// The next text frame within `window`, or `None` if none arrived.
@@ -1386,9 +1439,11 @@ async fn independent_queries_overlap_execution() {
     let (addr, handle, root, credentials) = start_server_with_file_root().await.unwrap();
     let (mut sink, mut stream) = connect(&credentials, addr).await.unwrap();
 
-    for name in ["first.fifo", "second.fifo"] {
-        make_fifo(&root.path().join(name)).unwrap();
-    }
+    // Guards, not bare paths: the release below has to happen even when an
+    // assertion or an expired window takes the test off its happy path — see
+    // [`ParkedFifo`] for what skipping it costs.
+    let mut first_park = ParkedFifo::new(root.path().join("first.fifo")).unwrap();
+    let mut second_park = ParkedFifo::new(root.path().join("second.fifo")).unwrap();
 
     let first = new_message(
         msg_types::FILE_READ,
@@ -1410,16 +1465,16 @@ async fn independent_queries_overlap_execution() {
     // Release only the second, and read: the reply that arrives now can only
     // be its, because the first read is parked on a FIFO with no writer.
     //
-    // The first is released *before* the assertions below, and that ordering is
-    // deliberate: it keeps this test's failure mode a failure. A read left
-    // parked at the end of a test parks a `spawn_blocking` task, and the
-    // runtime's own shutdown waits for it — so a run that never answered would
-    // hang the test binary instead of reporting. (It did, before this.)
-    release_parked_fifo(root.path().join("second.fifo"));
+    // The first is released *before* the assertions below, and that ordering
+    // keeps this test's failure mode a failure — but the ordering alone was not
+    // enough: `next_frame_within` can itself expire, and the `unwrap` after it
+    // then skipped the release entirely. The guards make that unreachable
+    // (#1022); releasing here is about the *order* the two parks finish in.
+    second_park.release();
     let answered = next_frame_within(&mut stream, Duration::from_secs(10))
         .await
         .unwrap();
-    release_parked_fifo(root.path().join("first.fifo"));
+    first_park.release();
 
     let answered = answered.expect("the second query never ran while the first was parked");
     assert_eq!(
@@ -1457,7 +1512,7 @@ async fn an_identity_transition_waits_for_the_frames_read_before_it() {
     let (addr, handle, root, credentials) = start_server_with_file_root().await.unwrap();
     let (mut sink, mut stream) = connect(&credentials, addr).await.unwrap();
 
-    make_fifo(&root.path().join("auth.fifo")).unwrap();
+    let mut park = ParkedFifo::new(root.path().join("auth.fifo")).unwrap();
     let read = new_message(
         msg_types::FILE_READ,
         serde_json::json!({ "path": "auth.fifo" }),
@@ -1479,11 +1534,12 @@ async fn an_identity_transition_waits_for_the_frames_read_before_it() {
     let early = next_frame_within(&mut stream, Duration::from_millis(300))
         .await
         .unwrap();
-    // Released before the assertion, as in the overlap test: a read left parked
-    // when a test panics parks a `spawn_blocking` task, and the runtime's own
-    // shutdown waits for it — so the failure would be a hung test binary instead
-    // of a reported one. (It was, when this assertion came first.)
-    release_parked_fifo(root.path().join("auth.fifo"));
+    // Released before the assertion, as in the overlap test — and now also by
+    // the guard if anything above panics, so the "hung test binary instead of a
+    // reported one" this comment used to describe cannot come back (#1022). The
+    // explicit call is still here because it sets the *order*: the read has to
+    // finish before the reply after it can be judged.
+    park.release();
     assert!(
         early.is_none(),
         "the identity transition was applied while a frame read before it was \

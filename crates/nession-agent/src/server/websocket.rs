@@ -30,7 +30,7 @@ use crate::p2p_credentials::{ConnectionAuthority, P2pCredentials, WireScope};
 use crate::protocol::p2p_routes;
 use crate::server::execution::ExecutionPolicy::{Inline, Key, Ordered, Query};
 use crate::server::execution::{
-    mutation_scheduler, ExecutionLanes, ResourceKey, DEFAULT_MUTATIONS_IN_FLIGHT, SHUTDOWN_GRACE,
+    ExecutionLanes, ResourceKey, DEFAULT_MUTATIONS_IN_FLIGHT, SHUTDOWN_GRACE,
 };
 // The lanes' boxed work is the shared type, and the constructors take this
 // socket's own bounds — see `nession_runtime::lane`.
@@ -520,6 +520,15 @@ pub struct AgentServerContext {
     pub resize: ResizeReporter,
     /// The credentials this agent will honour on its P2P listener (#1013).
     pub credentials: Arc<P2pCredentials>,
+    /// The **process's** mutation lane (`#1021`).
+    ///
+    /// Built once by the runtime and handed to the central connection as well
+    /// as to this server, so a session mutated over either path queues in one
+    /// lane and `same resource → FIFO` is a statement about the session rather
+    /// than about which socket carried the frame. That this arrives through the
+    /// context rather than being built here is the fix: this object used to mint
+    /// its own, which is precisely why the two paths could interleave.
+    pub mutations: Arc<KeyedLane<ResourceKey>>,
 }
 
 pub struct AgentServer {
@@ -1908,7 +1917,7 @@ impl AgentServer {
         Ok(Self {
             tmux_manager: SessionManager::new(),
             file_ops,
-            mutations: mutation_scheduler(),
+            mutations: context.mutations,
             shutdown_tx,
             shutdown_rx: Some(shutdown_rx),
             tls_acceptor,
@@ -2480,6 +2489,7 @@ mod tests {
             AgentServerContext {
                 resize,
                 credentials: Arc::clone(&credentials),
+                mutations: crate::execution::mutation_scheduler(),
             },
         )
         .expect("server creation should succeed");
@@ -2593,6 +2603,7 @@ mod tests {
             AgentServerContext {
                 resize,
                 credentials: Arc::new(P2pCredentials::new()),
+                mutations: crate::execution::mutation_scheduler(),
             },
         )
         .unwrap();

@@ -1,6 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { FileList, FileViewer, type FileEntry } from '@/capabilities/files';
-import { AppBackButton } from '@/app/patterns/AppBackButton';
 import {
   AlertDialog,
   AlertDialogContent,
@@ -11,17 +10,28 @@ import {
   AlertDialogAction,
   AlertDialogCancel,
 } from '@/components/ui/alert-dialog';
-import type { WorkspaceContext } from '@/app/workspace/workspaceContext';
+import type { WorkspaceAppViewProps } from '@/app/workspace/workspaceContext';
 
 interface SelectedFile { path: string; filename: string; size: number; }
 
 /**
- * App layout: tree full-screen → push editor with a sub-header (← + path).
- * The sub-header back is the layout's own close affordance, so it re-checks
- * the viewer's dirty state (tracked via onDirtyChange) and asks before
- * discarding — the FileViewer's own guard only covers its toolbar ✕.
+ * App layout: the file list at the capability root, the viewer pushed over it.
+ *
+ * `#1051` is why this file got smaller. It used to render its own push
+ * sub-header (← + path) *underneath* the Workspace page header, which itself sat
+ * underneath the file viewer's own bar (path + Edit/Save + ✕) — three rows, two
+ * of which offered a way out of the same editor. The push is now a depth the
+ * layout declares (`depth.setPush`), so the shell's one page header renders it,
+ * and the only leave action is that header's Back.
+ *
+ * The guard travels with the state it protects: `onLeave` is this layout's
+ * dirty-checking handler, so the shell's Back cannot discard an unsaved editor
+ * even though the shell does not know an editor exists. The viewer's own ✕ is
+ * gone with the row it lived in — `FileViewer` renders no close affordance when
+ * it is not given one, which is exactly this composition. `#1051` names that as
+ * the defect: Back and ✕ were two controls with the same meaning.
  */
-export function FilesAppLayout({ ctx }: { ctx: WorkspaceContext }) {
+export function FilesAppLayout({ ctx, depth }: WorkspaceAppViewProps) {
   const [selected, setSelected] = useState<SelectedFile | null>(null);
   const [dirty, setDirty] = useState(false);
   const [showDiscardDialog, setShowDiscardDialog] = useState(false);
@@ -33,6 +43,24 @@ export function FilesAppLayout({ ctx }: { ctx: WorkspaceContext }) {
   useEffect(() => {
     setSelected(null);
   }, [ctx.fileOps]);
+
+  const handleBackClick = useCallback(() => {
+    if (dirty) {
+      setShowDiscardDialog(true);
+      return;
+    }
+    setSelected(null);
+  }, [dirty]);
+
+  const setPush = depth.setPush;
+  const pushedTitle = selected ? selected.filename : null;
+  // Declared, not rendered. `setPush` is called from an effect rather than
+  // during render because the header it feeds is a sibling, and it re-runs only
+  // when the depth's own identity changes — `handleBackClick` is stable for as
+  // long as `dirty` is.
+  useEffect(() => {
+    setPush(pushedTitle === null ? null : { title: pushedTitle, onLeave: handleBackClick });
+  }, [setPush, pushedTitle, handleBackClick]);
 
   if (!ctx.fileOps) {
     return null;
@@ -46,14 +74,6 @@ export function FilesAppLayout({ ctx }: { ctx: WorkspaceContext }) {
     setSelected({ path: entry.path, filename: entry.name, size: entry.size });
   };
 
-  const handleBackClick = () => {
-    if (dirty) {
-      setShowDiscardDialog(true);
-      return;
-    }
-    setSelected(null);
-  };
-
   const handleConfirmDiscard = () => {
     setShowDiscardDialog(false);
     setSelected(null);
@@ -62,16 +82,6 @@ export function FilesAppLayout({ ctx }: { ctx: WorkspaceContext }) {
   if (selected) {
     return (
       <div className="flex h-full min-h-0 flex-col">
-        <div
-          data-testid="files-app-nav"
-          className="flex shrink-0 items-center gap-1 px-[var(--shell-space-2)] pt-[var(--shell-space-1)]"
-        >
-          <AppBackButton label="Back to files" testid="files-app-back" onClick={handleBackClick} />
-          {/* The path, to match the viewer's own header below it. Both name the
-              open file, so a filename here and a path there read as two
-              different files rather than one. */}
-          <span className="min-w-0 truncate font-mono text-sm font-semibold">{selected.path}</span>
-        </div>
         <div className="min-h-0 flex-1">
           <FileViewer
             key={selected.path}
@@ -79,7 +89,6 @@ export function FilesAppLayout({ ctx }: { ctx: WorkspaceContext }) {
             path={selected.path}
             filename={selected.filename}
             fileSize={selected.size}
-            onClose={() => setSelected(null)}
             onDirtyChange={setDirty}
           />
         </div>

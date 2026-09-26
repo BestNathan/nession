@@ -245,4 +245,30 @@ describe('App Sessions surface (#1050 stage 1)', () => {
     await userEvent.click(screen.getByTestId('create-session'));
     expect(onCreate).toHaveBeenCalledTimes(1);
   });
+
+  it('sizes its controls by role, not by the Button size they happen to use', () => {
+    // #1073: the surface's own controls answer "what is this text's job", not
+    // "which primitive rendered it". Every one of them was `text-xs` (12px)
+    // from `Button size="sm"` — smaller than the search placeholder above them
+    // and smaller than the metadata under the rows they act on.
+    const AppBodyRoleClass = 'text-[length:var(--typography-body-size)]';
+    render(<AppSessionsSurface {...props()} />);
+
+    expect(screen.getByTestId('create-session').className).toContain(AppBodyRoleClass);
+    expect(screen.getByTestId('session-list-filters').className).toContain(AppBodyRoleClass);
+  });
+
+  it('sizes the chips and the sort row by the same control role', async () => {
+    const AppBodyRoleClass = 'text-[length:var(--typography-body-size)]';
+    render(<AppSessionsSurface {...props()} />);
+
+    await userEvent.click(screen.getByTestId('session-list-filters'));
+
+    // The chips are `Button size="sm"` and the sort row is a plain div; both are
+    // controls on this surface, so both take the one role.
+    expect(screen.getByRole('button', { name: 'Online' }).className).toContain(AppBodyRoleClass);
+    expect(screen.getByRole('button', { name: 'Name' }).closest('div')?.className).toContain(
+      AppBodyRoleClass,
+    );
+  });
 });
