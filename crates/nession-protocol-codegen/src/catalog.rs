@@ -440,6 +440,26 @@ wires: &["server.agent.register"],
         },
         Unit {
             owner: "core",
+            id: "server.agent.git-invalidated",
+            version: 1,
+            wires: &["server.agent.git-invalidated"],
+            // One-way (#1008): the agent reports that a Session's git state may
+            // be stale; the server fans out `agent.git.invalidated` and answers
+            // nothing.
+            decls: vec![decl_of::<
+                nession_protocol::contracts::session::v1::AgentGitInvalidatedPayload,
+            >(cfg)],
+            request: Some((
+                "AgentGitInvalidatedCall",
+                nession_protocol::contracts::session::v1::AgentGitInvalidatedPayload::inline,
+                schema_of::<
+                    nession_protocol::contracts::session::v1::AgentGitInvalidatedPayload,
+                >,
+            )),
+            response: None,
+        },
+        Unit {
+            owner: "core",
             id: "server.agent.command-response",
             version: 1,
 wires: &["server.agent.command-response"],

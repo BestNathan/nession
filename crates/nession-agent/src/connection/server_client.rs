@@ -43,8 +43,8 @@ use nession_protocol::contracts::agent::v1::{
 };
 use nession_protocol::contracts::env::v1::{EnvFileRef, EnvSnapshot};
 use nession_protocol::contracts::session::v1::{
-    AgentSessionUpdatePayload, AgentTerminalResizePayload, ServerSessionCreatePayload,
-    ServerSessionEnvApplyPayload, ServerSessionEnvUnsetPayload,
+    AgentGitInvalidatedPayload, AgentSessionUpdatePayload, AgentTerminalResizePayload,
+    ServerSessionCreatePayload, ServerSessionEnvApplyPayload, ServerSessionEnvUnsetPayload,
 };
 use nession_protocol::{Message, ProtocolMessage};
 use serde::{Deserialize, Serialize};
@@ -121,6 +121,7 @@ pub mod msg_types {
     pub const CONTROL_PING: &str = "control.ping";
     pub const CONTROL_PONG: &str = "control.pong";
     pub const AGENT_SESSION_UPDATE: &str = "server.agent.session-update";
+    pub const AGENT_GIT_INVALIDATED: &str = "server.agent.git-invalidated";
     pub const AGENT_ADDRESS_UPDATE: &str = "server.agent.address-update";
     /// Server asks the agent for its live tmux session list. Used by the web
     /// UI's force-refresh so the server can rebuild its registry from the
@@ -323,6 +324,23 @@ impl ServerClientHandle {
         };
         let msg = new_message("agent.terminal.resize", payload);
         self.outbox.send_terminal_resize(session_id, frame(&msg)?)
+    }
+
+    /// Queue a git repository invalidation for the central server to fan out (#1008).
+    pub fn send_git_invalidated(
+        &self,
+        session: &str,
+        epoch: u64,
+        reason: Option<String>,
+    ) -> Result<()> {
+        let payload = AgentGitInvalidatedPayload {
+            agent_id: self.agent_id.clone(),
+            session: session.to_string(),
+            epoch,
+            reason,
+        };
+        let msg = new_message(msg_types::AGENT_GIT_INVALIDATED, payload);
+        self.outbox.send_git_invalidated(session, frame(&msg)?)
     }
 
     /// Request the client to shut down.

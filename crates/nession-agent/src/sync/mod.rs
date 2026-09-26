@@ -8,6 +8,7 @@
 //!   sends incremental updates.
 //! - [`terminal::send_terminal_resize`] sends terminal resize events to the server.
 
+pub mod git_invalidation;
 pub mod heartbeat;
 pub mod session_watcher;
 pub mod terminal;

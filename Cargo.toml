@@ -66,6 +66,8 @@ ts-rs = "12.0.1"
 # The same contracts, emitted as JSON Schema rather than TypeScript. Same rule:
 # codegen only, optional, never in a shipped graph.
 schemars = "1.2.2"
+notify = "7.0.0"
+notify-debouncer-mini = "0.6.0"
 
 # ── Workspace Lints (based on openai/codex codex-rs) ────────────────────
 [workspace.lints]

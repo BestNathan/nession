@@ -2188,6 +2188,35 @@ impl ConnectionHandler {
     /// resize for a session the registry has never heard of is not refused —
     /// the resize is a level, and a client attached to a session the registry
     /// has not caught up with is still a client that needs the size.
+    async fn handle_agent_git_invalidated(
+        &mut self,
+        msg: ProtocolMessage<serde_json::Value>,
+    ) -> anyhow::Result<HandlerAction> {
+        let value = msg.payload;
+        let Some(agent_id) = self
+            .authorized_agent_id(&value, "server.agent.git-invalidated")
+            .await
+        else {
+            return Ok(HandlerAction::Reply(None));
+        };
+        let payload: nession_protocol::contracts::session::v1::AgentGitInvalidatedPayload =
+            match serde_json::from_value(value) {
+                Ok(p) => p,
+                Err(e) => {
+                    warn!("server.agent.git-invalidated with invalid payload: {}", e);
+                    return Ok(HandlerAction::Reply(None));
+                }
+            };
+        if payload.agent_id != agent_id {
+            return Ok(HandlerAction::Reply(None));
+        }
+        if payload.session.is_empty() {
+            return Ok(HandlerAction::Reply(None));
+        }
+        self.web_client_registry.broadcast_git_invalidated(payload);
+        Ok(HandlerAction::Reply(None))
+    }
+
     async fn handle_agent_terminal_resize(
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
@@ -8032,6 +8061,7 @@ server_routes!(handler, msg, payload;
     // of the relay path — see the match there for why the position matters.
     "server.agent.session-update" => "server.agent.session-update" => 1 => Inline => handler.handle_agent_session_update(msg).await,
     "server.agent.command-response" => "server.agent.command-response" => 1 => Inline => handler.handle_agent_command_response(msg).await,
+    "server.agent.git-invalidated" => "server.agent.git-invalidated" => 1 => Inline => handler.handle_agent_git_invalidated(msg).await,
     "server.agent.terminal-resize" => "server.agent.terminal-resize" => 1 => Inline => handler.handle_agent_terminal_resize(msg).await,
     "server.agent.address-update" => "server.agent.address-update" => 1 => Inline => handler.handle_agent_address_update(msg).await,
     "server.auth" => "server.auth" => 1 => Ordered => handler.handle_client_auth(msg).await,

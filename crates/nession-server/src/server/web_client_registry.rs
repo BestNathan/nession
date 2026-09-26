@@ -31,6 +31,7 @@ use super::outbound::{OutboundError, WsMessageSender};
 pub const AGENTS_CHANGED: &str = "server.agents.changed";
 pub const SESSIONS_CHANGED: &str = "server.sessions.changed";
 pub const COMMANDS_CHANGED: &str = "server.commands.changed";
+pub const GIT_INVALIDATED: &str = "agent.git.invalidated";
 
 /// Shared broadcast channel for agent state pushes. A single sender is held
 /// by the server; every web-client connection spawns a relay task that
@@ -178,6 +179,29 @@ impl WebClientRegistry {
 
     /// Broadcast `server.commands.changed` to all connected web clients to
     /// notify them that the quick-command list has been modified.
+    /// Push `agent.git.invalidated` to every connected web client (#1008).
+    pub fn broadcast_git_invalidated(
+        &self,
+        payload: nession_protocol::contracts::session::v1::AgentGitInvalidatedPayload,
+    ) {
+        let envelope = serde_json::json!({
+            "msg_type": GIT_INVALIDATED,
+            "id": "",
+            "timestamp": std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+            "payload": payload,
+        });
+        match serde_json::to_string(&envelope) {
+            Ok(json) => self.broadcast(json),
+            Err(e) => error!(
+                "WebClientRegistry: failed to serialize {GIT_INVALIDATED}: {}",
+                e
+            ),
+        }
+    }
+
     pub async fn broadcast_commands_changed(&self) {
         let payload = serde_json::json!({
             "msg_type": COMMANDS_CHANGED,

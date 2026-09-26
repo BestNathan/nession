@@ -31,6 +31,7 @@ import {
 import { addressedPayload } from '@/platform/protocol';
 import type { TransportPlugin, PluginSurface } from '@/platform/socket/types';
 import type {
+  GitInvalidatedEvent,
   GitBranchesRequest,
   GitBranchesResponse,
   GitDiffRequest,
@@ -94,6 +95,7 @@ export class GitPlugin implements TransportPlugin {
 
   private connection: PluginSurface | null = null;
   private generation = 0;
+  private invalidatedListeners = new Set<(event: GitInvalidatedEvent) => void>();
 
   /**
    * Bind the plugin to a connection. A later install replaces an earlier
@@ -103,10 +105,40 @@ export class GitPlugin implements TransportPlugin {
   install(connection: PluginSurface): () => void {
     const generation = ++this.generation;
     this.connection = connection;
+
+    const unsubInvalidate = connection.subscribe('agent.git.invalidated', (payload) => {
+      const event = payload as GitInvalidatedEvent;
+      if (!event?.agent_id || !event?.session) {
+        return;
+      }
+      for (const listener of this.invalidatedListeners) {
+        listener(event);
+      }
+    });
+
+    const unsubReconnect = connection.onConnectionStateChange((state) => {
+      if (state !== 'connected') {
+        return;
+      }
+      for (const listener of this.invalidatedListeners) {
+        listener({ agent_id: '', session: '', epoch: 0, reason: 'reconnect' });
+      }
+    });
+
     return () => {
+      unsubInvalidate();
+      unsubReconnect();
       if (this.generation === generation && this.connection === connection) {
         this.connection = null;
       }
+    };
+  }
+
+  /** Register for repository invalidation events (including reconnect recovery). */
+  onInvalidated(listener: (event: GitInvalidatedEvent) => void): () => void {
+    this.invalidatedListeners.add(listener);
+    return () => {
+      this.invalidatedListeners.delete(listener);
     };
   }
 

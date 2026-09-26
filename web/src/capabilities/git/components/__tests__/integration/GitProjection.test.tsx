@@ -6,7 +6,12 @@ import { gitApi } from '../../../GitPlugin';
 import type { GitStatusResponse } from '../../../types';
 
 vi.mock('../../../GitPlugin', () => ({
-  gitApi: { gitStatus: vi.fn(), gitDiff: vi.fn(), gitRoot: vi.fn() },
+  gitApi: {
+    gitStatus: vi.fn(),
+    gitDiff: vi.fn(),
+    gitRoot: vi.fn(),
+    onInvalidated: vi.fn(() => () => {}),
+  },
 }));
 
 const mockedStatus = vi.mocked(gitApi.gitStatus);

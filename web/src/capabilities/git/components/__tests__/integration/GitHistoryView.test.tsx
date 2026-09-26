@@ -8,7 +8,13 @@ import type { WorkspaceContext } from '@/app/workspace/workspaceContext';
 import type { Agent, Session } from '@/types';
 
 vi.mock('../../../GitPlugin', () => ({
-  gitApi: { gitStatus: vi.fn(), gitDiff: vi.fn(), gitRoot: vi.fn(), gitLog: vi.fn() },
+  gitApi: {
+    gitStatus: vi.fn(),
+    gitDiff: vi.fn(),
+    gitRoot: vi.fn(),
+    gitLog: vi.fn(),
+    onInvalidated: vi.fn(() => () => {}),
+  },
 }));
 
 const mockedLog = vi.mocked(gitApi.gitLog);

@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { gitApi } from '../GitPlugin';
+import type { GitInvalidatedEvent } from '../types';
+
 /**
  * What a git request is addressed to. `agent_id` is routing, not context — the
  * server relays `extension.*` to the named agent and answers `missing agent_id`
@@ -70,6 +73,7 @@ export function useGitRequest<T>({
   // Bumped whenever the Session changes; a response that arrives after the
   // context moved on is dropped rather than written over the new one.
   const generation = useRef(0);
+  const lastInvalidationEpoch = useRef(0);
   const target = useRef<GitRequestTarget | null>(null);
 
   const run = useCallback(
@@ -101,6 +105,7 @@ export function useGitRequest<T>({
 
   useEffect(() => {
     generation.current += 1;
+    lastInvalidationEpoch.current = 0;
     const forGeneration = generation.current;
     target.current = agentId && sessionId ? { agent_id: agentId, session: sessionId } : null;
     setState({ data: null, loading: Boolean(target.current), error: null });
@@ -110,6 +115,30 @@ export function useGitRequest<T>({
     // The two ids are the dependencies, not a `target` object rebuilt on every
     // render: identity would re-run this effect without anything having changed.
   }, [run, agentId, sessionId]);
+
+  useEffect(() => {
+    const onInvalidated = (event: GitInvalidatedEvent) => {
+      const current = target.current;
+      if (!current) {
+        return;
+      }
+      if (event.reason === 'reconnect') {
+        generation.current += 1;
+        void run(generation.current);
+        return;
+      }
+      if (event.agent_id !== current.agent_id || event.session !== current.session) {
+        return;
+      }
+      if (event.epoch <= lastInvalidationEpoch.current) {
+        return;
+      }
+      lastInvalidationEpoch.current = event.epoch;
+      generation.current += 1;
+      void run(generation.current);
+    };
+    return gitApi.onInvalidated(onInvalidated);
+  }, [run]);
 
   const refresh = useCallback(() => {
     void run(generation.current);
