@@ -10,6 +10,13 @@ const healthy: DomainState = {
   attachment: { channel: 'attached', copy: null },
 };
 
+/**
+ * The App title role, spelled out rather than imported. App-scoped in name
+ * because `--typography-title-size` is emitted only under
+ * `[data-experience="app"]` (`nession/no-cross-experience-token`).
+ */
+const AppTitleRoleClass = 'text-[length:var(--typography-title-size)]';
+
 const base = {
   sessionName: 'fix-terminal-reconnect',
   agentLabel: 'devbox-01',
@@ -66,6 +73,35 @@ describe('SessionHeader app branch', () => {
       />,
     );
     expect(screen.getByTestId('session-header-status').className).not.toMatch(/font-mono/);
+  });
+
+  it('sets the session name at the App title role', () => {
+    // #1073: the App header renders one page title, and it is the same role the
+    // Workspace tool header and a pushed file detail state. `text-base` was the
+    // primitive's 16px, which put the page's name at exactly the size of the
+    // capsule's text field below it.
+    render(<SessionHeader {...base} experience="app" onOpenDrawer={vi.fn()} />);
+    const title = screen.getByRole('heading', { level: 1 });
+    expect(title.className).toContain(AppTitleRoleClass);
+    expect(title.className).not.toMatch(/(^|\s)text-(?:xs|sm|base)(\s|$)/);
+  });
+
+  it('sets the status member at the App metadata role', () => {
+    // #1073: the size follows the same role the family does. The `text-xs` it
+    // replaced happened to equal the App's metadata value, which is not the
+    // same as being owned by the role.
+    render(
+      <SessionHeader
+        {...base}
+        state={{ ...healthy, agent: { channel: 'offline', copy: 'Agent offline' } }}
+        experience="app"
+        onOpenDrawer={vi.fn()}
+        onOpenWorkspace={vi.fn()}
+      />,
+    );
+    const status = screen.getByTestId('session-header-status');
+    expect(status.className).toContain('text-[length:var(--typography-metadata-size)]');
+    expect(status.className).not.toMatch(/(^|\s)text-xs(\s|$)/);
   });
 
   it('renders the status line when the agent is unreachable', () => {

@@ -9,6 +9,7 @@ import {
   generateLintMetadata,
   generateAppTs,
   generateTerminalTs,
+  loadTokens,
   TERMINAL_THEME_SLOTS,
 } from './generate-tokens.mjs';
 
@@ -240,4 +241,148 @@ test('production terminal.ts carries no Catppuccin Mocha leftover', () => {
     'utf8',
   );
   assert.doesNotMatch(terminalTs, /1e1e2e|cdd6f4|89b4fa/i);
+});
+
+// ── #1073: the App owns its chrome type scale ──────────────────────────────
+//
+// `experience.web.typography` is emitted at `:root`, so before this group
+// existed every shared shell/workspace text token the App consumed resolved to
+// Web's desktop density. These tests pin the two halves of the fix: the App
+// group states its own values, and the shared pattern tokens derive from it.
+
+/** The App's chrome roles, in the order the ramp descends. */
+const APP_ROLES = ['title', 'primary', 'body', 'secondary', 'metadata', 'code'];
+
+/** Shared pattern tokens that must be remapped, not inherited. */
+const REMAPPED_TEXT_TOKENS = [
+  ['shell', 'sessionRowTitleFontSize'],
+  ['shell', 'sessionRowMetaFontSize'],
+  ['shell', 'nodeFontSize'],
+  ['shell', 'sectionHeadFontSize'],
+  ['shell', 'footFontSize'],
+  ['workspace', 'treeFontSize'],
+  ['workspace', 'editorHeadFontSize'],
+  ['workspace', 'listRowTitleFontSize'],
+  ['workspace', 'editorActionFontSize'],
+];
+
+const APP_BLOCK = '\\[data-experience="app"\\]';
+
+function readGeneratedWebCss() {
+  return readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), '../generated/web.css'),
+    'utf8',
+  );
+}
+
+/** The custom property's value inside a named block of the generated CSS. */
+function cssValueIn(css, block, name) {
+  const body = css.match(new RegExp(`${block} \\{([\\s\\S]*?)\\n\\}`))?.[1] ?? '';
+  return body.match(new RegExp(`--${name}: ([^;]+);`))?.[1]?.trim() ?? null;
+}
+
+test('the App states its own typography roles rather than aliasing Web\'s', () => {
+  const tokens = loadTokens();
+  for (const role of APP_ROLES) {
+    const leaf = tokens.experience?.app?.typography?.[role]?.size;
+    assert.ok(leaf, `experience.app.typography.${role}.size is missing`);
+    // A `ref` into Web's group would satisfy the schema while making the App
+    // inherit the exact values this group exists to stop inheriting (#1073:
+    // "Do not make App values aliases to Web values merely to satisfy the
+    // schema").
+    assert.ok(
+      'value' in leaf,
+      `experience.app.typography.${role}.size refs ${leaf.ref} instead of stating the App's own size`,
+    );
+  }
+});
+
+test('the App scale descends, so no two roles are a coincidence apart', () => {
+  const tokens = loadTokens();
+  const size = (role) =>
+    Number.parseFloat(resolveRef(tokens.experience.app.typography[role].size, tokens).value);
+  // Every step in the ramp is a real step: a role that did not separate from
+  // its neighbour would be two names for one value, which is the fragmentation
+  // with extra vocabulary.
+  for (let i = 0; i < APP_ROLES.length - 2; i += 1) {
+    assert.ok(
+      size(APP_ROLES[i]) > size(APP_ROLES[i + 1]),
+      `${APP_ROLES[i]} (${size(APP_ROLES[i])}px) does not lead ${APP_ROLES[i + 1]} (${size(APP_ROLES[i + 1])}px)`,
+    );
+  }
+  // `code` is a sibling of `secondary` rather than a step below `metadata`:
+  // mono is a family, not a smaller size (#1073 criterion 6).
+  assert.ok(size('code') >= size('metadata'));
+  assert.ok(size('title') > size('code'));
+});
+
+test('every shared pattern text token is remapped by Experience, not inherited', () => {
+  const tokens = loadTokens();
+  for (const [group, leaf] of REMAPPED_TEXT_TOKENS) {
+    const appLeaf = tokens.experience?.app?.[group]?.[leaf];
+    const webLeaf = tokens.experience?.web?.[group]?.[leaf];
+    assert.ok(
+      webLeaf,
+      `experience.web.${group}.${leaf} is missing — the shared class would resolve to nothing at :root`,
+    );
+    assert.ok(
+      appLeaf,
+      `experience.app.${group}.${leaf} is missing — App chrome would inherit Web's density`,
+    );
+    // The role, not the number: a value copied here would keep the App's text
+    // on Web's scale the moment the App scale moved.
+    assert.match(
+      String(appLeaf.ref ?? ''),
+      /^experience\.app\.typography\./,
+      `experience.app.${group}.${leaf} must derive from an App typography role`,
+    );
+    assert.notEqual(
+      resolveRef(appLeaf, tokens).value,
+      resolveRef(webLeaf, tokens).value,
+      `experience.app.${group}.${leaf} resolves to Web's value — the remap is a no-op`,
+    );
+  }
+});
+
+test('generated CSS carries the App scale under the App experience only', () => {
+  const css = readGeneratedWebCss();
+  for (const role of APP_ROLES) {
+    assert.ok(
+      cssValueIn(css, APP_BLOCK, `typography-${role}-size`),
+      `--typography-${role}-size is not emitted under [data-experience="app"]`,
+    );
+  }
+  // Three shared tokens the App remaps: the Web value stays at :root and the
+  // App value replaces it inside the App. Equal values would mean the leak is
+  // back — which is exactly the shape #1073 recorded.
+  const remapped = [
+    'shell-session-row-title-font-size',
+    'shell-foot-font-size',
+    'workspace-tree-font-size',
+  ];
+  for (const name of remapped) {
+    const root = cssValueIn(css, ':root', name);
+    const app = cssValueIn(css, APP_BLOCK, name);
+    assert.ok(root, `--${name} is missing at :root`);
+    assert.ok(app, `--${name} is missing under [data-experience="app"]`);
+    assert.notEqual(app, root, `--${name} has the same value in both experiences`);
+  }
+});
+
+test('the two App-only roles are declared App-only to the lint', () => {
+  const vars = generateLintMetadata(loadTokens()).experienceAppVars;
+  // `title` and `body` have no Web leaf, so they exist only under the App
+  // experience — and a binding that names one has to say which experience it
+  // belongs to (`nession/no-cross-experience-token`). If this list lost them
+  // the rule would stop protecting every App chrome class.
+  assert.ok(vars.includes('typography-title-size'), 'typography-title-size is not declared App-only');
+  assert.ok(vars.includes('typography-body-size'), 'typography-body-size is not declared App-only');
+  // The four shared roles also resolve at :root, so they are not App-only and
+  // a Web-side binding is not a hazard.
+  for (const role of ['primary', 'secondary', 'metadata', 'code']) {
+    assert.ok(
+      !vars.includes(`typography-${role}-size`),
+      `typography-${role}-size is declared App-only, but Web states it too`,
+    );
+  }
 });
