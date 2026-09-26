@@ -316,3 +316,56 @@ test.describe('App 390×844', () => {
     });
   });
 });
+
+// #1050 criterion 11 names **375/390**, and until now only 390 had goldens:
+// `app.narrow-phone` was exercised by `ui-contract-matrix`'s structured
+// assertions but never photographed. The narrowest canonical phone is also the
+// one where the App surface has least room, so it is the viewport most worth
+// having a picture of rather than only measurements of.
+//
+// Snapshot names carry the width. Playwright keys snapshots per *file*, so
+// reusing `app-sessions.png` here would collide with the 390 case rather than
+// produce a second baseline.
+test.describe('App 375×812', () => {
+  test.use({ viewport: { width: 375, height: 812 } });
+
+  test('Sessions layer', async ({ page }) => {
+    await gotoFixtureApp(page);
+    await page.getByTestId('app-header-sessions').first().click();
+    await expect(page.getByTestId('app-layer-sessions')).toBeInViewport();
+    await expect(page.getByTestId('session-item-row')).toHaveCount(6);
+
+    await expect(page).toHaveScreenshot('app-sessions-375.png', {
+      fullPage: true,
+      ...FIXTURE_SCREENSHOT,
+    });
+  });
+
+  test('Sessions layer, filtered', async ({ page }) => {
+    await gotoFixtureApp(page);
+    await page.getByTestId('app-header-sessions').first().click();
+    await expect(page.getByTestId('app-layer-sessions')).toBeInViewport();
+
+    await page.getByPlaceholder('Search sessions...').fill('devbox');
+    await expect(page.getByTestId('session-item-row')).toHaveCount(3);
+
+    await expect(page).toHaveScreenshot('app-sessions-filtered-375.png', {
+      fullPage: true,
+      ...FIXTURE_SCREENSHOT,
+    });
+  });
+
+  test('Sessions layer, degraded', async ({ page }) => {
+    await gotoFixtureApp(page, '?stale=macbook');
+    await page.getByTestId('app-header-sessions').first().click();
+    await expect(page.getByTestId('app-layer-sessions')).toBeInViewport();
+
+    await expect(page.getByText('Agent did not respond')).toHaveCount(2);
+    await expect(page.getByText('Agent offline')).toHaveCount(1);
+
+    await expect(page).toHaveScreenshot('app-sessions-degraded-375.png', {
+      fullPage: true,
+      ...FIXTURE_SCREENSHOT,
+    });
+  });
+});
