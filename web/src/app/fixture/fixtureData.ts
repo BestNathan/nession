@@ -22,6 +22,7 @@ const FIXTURE_MANIFEST: ProtocolManifest = {
     'git.diff': { versions: [1], wire: ['git.diff'] },
     'git.root': { versions: [1], wire: ['git.root'] },
     'git.log': { versions: [1], wire: ['git.log'] },
+    'git.commit': { versions: [1], wire: ['git.commit'] },
     'git.branches': { versions: [1], wire: ['git.branches'] },
     'git.worktrees': { versions: [1], wire: ['git.worktrees'] },
     'claude-code.list': { versions: [1], wire: ['claude-code.list'] },

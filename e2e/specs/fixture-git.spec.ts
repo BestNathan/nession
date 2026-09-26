@@ -102,12 +102,16 @@ test('History bounds what it offers, and unmounts the section it replaced (#826)
   // commits" over a log that ends there.
   await expect(page.getByTestId('git-history-more')).toHaveCount(0);
 
-  // Selecting a commit says which one it is — and says what it is not showing,
-  // which is the half a reader would otherwise read as a bug.
+  // Selecting a commit says which one it is — and what it changed. The detail
+  // used to carry a note that it was *not* showing the change ("What this commit
+  // changed is not shown here"), which is what this assertion used to check;
+  // #1009/#1010 made it show the files, so the assertion follows the view rather
+  // than the copy that is gone.
   await page.getByTestId('git-commit-row').first().click();
   const detail = page.getByTestId('git-commit-detail');
   await expect(detail).toBeVisible();
-  await expect(detail).toContainText('not shown here');
+  await expect(detail).toContainText('let a capability emerge beside the capsule');
+  await expect(detail).toContainText('Changed files');
 
   // Unmounted rather than hidden: a hidden section would have its own hook
   // fetching on mount, so the Changes list would still be there paying for a
