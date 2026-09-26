@@ -6,11 +6,16 @@
  * started there would consume the first horizontal pixels of a text selection,
  * a scrollback drag, or an editor gesture before the surface ever saw them.
  *
- * This is #1049's decision 1 — **work-surface exclusion, not an edge band**.
- * #473 asked for "edge-only shell swipes (~24px)"; a band narrows a documented
- * gesture to about a tenth of the surface and makes it undiscoverable, so the
- * gesture keeps its whole width and the *start* is bounded instead. See
- * `gesture.ts` for the full record of what this superseded.
+ * This is #1049's decision 1 — **work-surface exclusion** — and it still owns
+ * the interior of every surface. It is no longer the whole rule. #1081 found
+ * that on the Terminal screen, where the viewport and the capsule *are* the
+ * screen, exclusion alone left the gesture with almost nowhere to start, and
+ * re-admitted the shell's own edges as a bounded exception (`edgeBand.ts`).
+ *
+ * Read the two together: this module says a work surface owns the touches that
+ * begin in it, and that one says the shell may still claim one within
+ * `EDGE_BAND_PX` of its own edge — and only in the direction that edge's layer
+ * arrives from. The middle of a surface is unaffected.
  *
  * The list names what is **excluded**; it is not a whitelist. A start that
  * cannot be classified — no target, or a target outside any element — is
