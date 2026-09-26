@@ -27,23 +27,35 @@ export interface SessionHeaderProps {
   experience?: CapsuleExperience;
 }
 
-interface MenuButtonOptions {
-  label: string;
-  testid: string;
-  onClick: () => void;
-  className: string;
-}
+/**
+ * The App header band's geometry.
+ *
+ * Exported because the App now has a second bar that is the *same band*: the
+ * no-Session home's (#1082). They never render together — one bar per depth,
+ * and the home is a depth — but they do replace each other at the same
+ * position, so a difference in padding or safe-area handling would show up as
+ * the chrome jumping when a Session is selected. Sharing the string is what
+ * makes that impossible rather than merely unlikely.
+ */
+export const appHeaderBandClass =
+  'flex shrink-0 items-center gap-2 px-[var(--shell-space-3)] pt-[max(var(--shell-space-2),env(safe-area-inset-top))]';
 
-/** Ghost menu button for the App header's Sessions affordance. */
-function renderMenuButton({ label, testid, onClick, className }: MenuButtonOptions) {
+/**
+ * The Sessions affordance the App header carries.
+ *
+ * Both bars render this rather than each drawing their own, so the affordance
+ * the user learns in one is literally the control in the other — same testid
+ * included. They are never mounted at once, so the testid stays unique.
+ */
+export function SessionsMenuButton({ onClick }: { onClick: () => void }) {
   return (
     <Button
       type="button"
       variant="ghost"
       size="icon"
-      className={className}
-      aria-label={label}
-      data-testid={testid}
+      className={shellIconButtonClass}
+      aria-label="Sessions"
+      data-testid="app-header-sessions"
       onClick={() => onClick()}
     >
       <Menu className="size-5" />
@@ -70,18 +82,8 @@ export function SessionHeader({
   );
   if (experience === 'app') {
     return (
-      <header
-        data-testid="session-header-line"
-        className="flex shrink-0 items-center gap-2 px-[var(--shell-space-3)] pt-[max(var(--shell-space-2),env(safe-area-inset-top))]"
-      >
-        {onOpenDrawer
-          ? renderMenuButton({
-              label: 'Sessions',
-              testid: 'app-header-sessions',
-              onClick: onOpenDrawer,
-              className: shellIconButtonClass,
-            })
-          : null}
+      <header data-testid="session-header-line" className={appHeaderBandClass}>
+        {onOpenDrawer ? <SessionsMenuButton onClick={onOpenDrawer} /> : null}
         {title}
         {/* The status member: `ConnectionStatus` renders channel words and their
             copy ("exited", "Agent offline", "Attach failed"). The Metadata role

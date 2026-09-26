@@ -9,10 +9,18 @@ function probeAddresses(
   asyncKey: string,
   candidates: ProbedAddress[],
   agentAddress: string | null,
+  credential: string | undefined,
 ): Promise<string[]> {
   let inflight = inflightProbes.get(asyncKey);
   if (!inflight) {
-    inflight = orderAddressesByLatency(candidates).then((urls) => {
+    // The credential is deliberately NOT part of `asyncKey`. The server mints a
+    // fresh one per attach-info request, so joining it would make every request
+    // a distinct key — defeating this module-global dedupe and re-opening the
+    // empty-`orderedUrls` dead state that `useAddressPlan.test.ts` pins as
+    // regression #51. Two callers sharing one probe is correct: the result
+    // carries bare URLs, so a credential that was valid when the dial started
+    // measures the same thing for both.
+    inflight = orderAddressesByLatency(candidates, { credential }).then((urls) => {
       inflightProbes.delete(asyncKey);
       return urls.length > 0 ? urls : agentAddress ? [agentAddress] : [];
     }).catch((err) => {
@@ -98,11 +106,12 @@ export function useAddressPlan(
 
   const candidates: ProbedAddress[] = attachInfo?.addresses ?? [];
   const agentAddress = attachInfo?.agent_address ?? null;
+  const credential = attachInfo?.connection_token;
   // Stable key for the async effect — only changes when candidates actually differ.
   const asyncKey = `${candidates.map((a) => a.url).join(',')}|${agentAddress ?? ''}`;
 
-  const inputsRef = useRef({ candidates, agentAddress });
-  inputsRef.current = { candidates, agentAddress };
+  const inputsRef = useRef({ candidates, agentAddress, credential });
+  inputsRef.current = { candidates, agentAddress, credential };
 
   const activeKeyRef = useRef<string | null>(null);
 
@@ -118,7 +127,12 @@ export function useAddressPlan(
     activeKeyRef.current = asyncKey;
 
     let cancelled = false;
-    void probeAddresses(asyncKey, inputs.candidates, inputs.agentAddress).then((finalUrls) => {
+    void probeAddresses(
+      asyncKey,
+      inputs.candidates,
+      inputs.agentAddress,
+      inputs.credential,
+    ).then((finalUrls) => {
       if (cancelled || activeKeyRef.current !== asyncKey) {
         return;
       }

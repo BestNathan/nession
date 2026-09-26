@@ -178,7 +178,12 @@ describe('resolveTargetChoice', () => {
 
     const choice = await resolveTargetChoice(p2pSession, p2pChoice, new Map());
 
-    expect(testAddresses).toHaveBeenCalled();
+    // With the reply's credential, not bare: the agent refuses an uncredentialed
+    // upgrade since #1013, so a probe without it measures nothing (#1091).
+    expect(testAddresses).toHaveBeenCalledWith(
+      expect.anything(),
+      { credential: 'tok' },
+    );
     expect(choice.orderedUrls[0]).toBe('ws://fast/ws');
   });
 

@@ -13,7 +13,7 @@ interface UseAppLayerArgs {
 }
 
 /**
- * Which layer sits over the Terminal root (#1049 stage 2).
+ * Which layer sits over the Terminal root (#1049 stage 2, #1082).
  *
  * This replaces `useAppSpatialIndex`. The pager index and `surface` were two
  * representations of one fact that an effect had to keep in step; a layer *is*
@@ -27,6 +27,13 @@ interface UseAppLayerArgs {
  *    behaviour `FixtureApp.test.tsx` documents as "a pager position, not a
  *    surface" — the overlay model preserves the intent the pager had.
  * 2. **Selecting a Session returns to the Terminal root.**
+ *
+ * #1082 adds the case neither rule covered: **the App composition now exists
+ * before a Session does**, so this hook is reached with `selectedId === null`.
+ * Workspace is Session-scoped — it is the depth *around* a piece of work — so
+ * with no work there is nothing for it to show. `workspaceAvailable` is that
+ * fact, and it is returned rather than recomputed by the caller so the layer
+ * state and the rendered layers cannot disagree about it.
  */
 export function useAppLayer({
   selectedId,
@@ -36,6 +43,8 @@ export function useAppLayer({
   onSelect,
 }: UseAppLayerArgs) {
   const [layer, setLayer] = useState<AppLayer>('terminal');
+
+  const workspaceAvailable = selectedId !== null;
 
   useEffect(() => {
     if (selectedId) {
@@ -47,6 +56,13 @@ export function useAppLayer({
     if (!active) {
       return;
     }
+    if (!workspaceAvailable) {
+      // `surface` outlives the Session that justified it: killing the selected
+      // Session clears the selection but leaves `surface` where it was, so
+      // without this the home would be painted under an empty Workspace depth.
+      setLayer((current) => (current === 'workspace' ? 'terminal' : current));
+      return;
+    }
     if (surface === 'workspace') {
       setLayer('workspace');
       return;
@@ -54,7 +70,7 @@ export function useAppLayer({
     // Leaving the workspace closes its layer, but must not yank the user out
     // of Sessions — a capability can change surface while Sessions is open.
     setLayer((current) => (current === 'workspace' ? 'terminal' : current));
-  }, [active, surface]);
+  }, [active, surface, workspaceAvailable]);
 
   const onLayerChange = useCallback(
     (next: AppLayer) => {
@@ -76,5 +92,5 @@ export function useAppLayer({
     [onSelect],
   );
 
-  return { layer, onLayerChange, onLayerSelect };
+  return { layer, onLayerChange, onLayerSelect, workspaceAvailable };
 }

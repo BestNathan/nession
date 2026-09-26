@@ -1,7 +1,7 @@
+import { useCallback } from 'react';
 import { Loader2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { useProbePolling } from '@/app/useProbePolling';
 import { ShellDialogs } from '@/app/ShellDialogs';
 import { WorkspaceRegion } from '@/app/WorkspaceRegion';
 import { useShellState } from '@/app/useShellState';
@@ -14,14 +14,25 @@ export interface ShellProps {
 export function Shell({ connectionStatus }: ShellProps) {
   const state = useShellState();
   const { data } = state;
-  useProbePolling(data.agents);
+
+  // Creating and selecting are two hooks' jobs, so they are composed here
+  // rather than one reaching into the other's state (#1082): the dashboard
+  // refreshes its lists, the shell state waits for the new Session to appear
+  // and then selects it down the ordinary path.
+  const handleSessionCreated = useCallback(
+    (sessionId?: string) => {
+      data.handleSessionCreated();
+      state.awaitSession(sessionId);
+    },
+    [data, state],
+  );
 
   const dialogs = (
     <ShellDialogs
       showCreateModal={data.showCreateModal}
       setShowCreateModal={data.setShowCreateModal}
       agents={data.agents}
-      handleSessionCreated={data.handleSessionCreated}
+      handleSessionCreated={handleSessionCreated}
       sessionToKill={data.sessionToKill}
       setSessionToKill={data.setSessionToKill}
       onKilled={state.onKilled}

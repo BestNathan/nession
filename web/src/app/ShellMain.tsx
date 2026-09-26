@@ -2,6 +2,7 @@ import { useCallback, useState, type ReactNode } from 'react';
 import { cn } from '@/shared/lib/utils';
 import type { FileOps } from '@/capabilities/files';
 import type { DomainState } from '@/product/session/model/domainState';
+import { AppHome } from '@/app/experiences/app/AppHome';
 import { TerminalRegion } from '@/app/TerminalRegion';
 import type { CapsuleCapabilityContribution } from '@/app/capsulePresence';
 import type { CapsuleCapabilityProjection } from '@/product/terminal/capsule/types';
@@ -27,6 +28,19 @@ export interface ShellMainProps {
   onToolChange: (tool: CapabilityId) => void;
   onOpenDrawer?: () => void;
   onOpenWorkspace?: () => void;
+  /**
+   * Opens the existing `CreateSessionDialog`. Only the App's no-Session root
+   * reads it (#1082); Web reaches creation from the sidebar it always has.
+   */
+  onCreate?: () => void;
+  /**
+   * Reports whether a Workspace capability has pushed a detail depth (#1081).
+   *
+   * The App's pager reads this to stand down while a depth offers its own
+   * leave. Only the App passes it; Web has no top-level gesture to suppress, so
+   * the callback is absent there and the report is dropped.
+   */
+  onWorkspaceDepthChange?: (pushed: boolean) => void;
   /** Spatial shell: omit terminal on the Workspace page to avoid a second xterm. */
   showTerminal?: boolean;
   /** Spatial shell: omit workspace panel on the Terminal page. */
@@ -72,6 +86,45 @@ function renderTerminal(
   return terminal ?? null;
 }
 
+/**
+ * What the work area holds before a Session exists.
+ *
+ * Two answers, because the two experiences genuinely differ. Web keeps a
+ * caption: it always has the sidebar, so "Select a session" is a label beside a
+ * list of them. App gets a home with an action (#1082) — on a phone the list is
+ * a drawer that can be dismissed, so the caption was the whole screen with no
+ * way off it.
+ */
+function NoSessionSurface({
+  experience,
+  onCreate,
+  onBrowse,
+  createDisabled,
+}: {
+  experience: Experience;
+  onCreate: () => void;
+  onBrowse: () => void;
+  createDisabled: boolean;
+}) {
+  if (experience === 'app') {
+    return (
+      <AppHome
+        onCreate={onCreate}
+        onBrowse={onBrowse}
+        createDisabled={createDisabled}
+      />
+    );
+  }
+  return (
+    <div
+      data-testid="session-empty-state"
+      className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 text-sm text-muted-foreground"
+    >
+      <p>Select a session to start working</p>
+    </div>
+  );
+}
+
 export function ShellMain({
   selectedSession,
   selectedAgent,
@@ -84,6 +137,8 @@ export function ShellMain({
   onToolChange,
   onOpenDrawer,
   onOpenWorkspace,
+  onCreate,
+  onWorkspaceDepthChange,
   showTerminal = true,
   showWorkspace = true,
   terminal,
@@ -152,12 +207,12 @@ export function ShellMain({
           </div>
         ) : null}
         {!hasSession ? (
-          <div
-            data-testid="session-empty-state"
-            className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 text-sm text-muted-foreground"
-          >
-            <p>Select a session to start working</p>
-          </div>
+          <NoSessionSurface
+            experience={experience}
+            onCreate={() => onCreate?.()}
+            onBrowse={() => onOpenDrawer?.()}
+            createDisabled={agents.every((agent) => agent.status !== 'online')}
+          />
         ) : (
           <>
             {showTerminal ? (
@@ -192,6 +247,7 @@ export function ShellMain({
                 facts={facts}
                 onSurfaceChange={onSurfaceChange}
                 onToolChange={openTool}
+                onDepthChange={onWorkspaceDepthChange}
                 focus={focus}
               />
             ) : null}

@@ -235,7 +235,17 @@ export function SessionItem({
         type="button"
         data-testid={`session-item-${session.session_id}`}
         aria-current={selected ? 'true' : undefined}
-        className="flex min-w-0 flex-1 flex-col text-left"
+        /* The row's primary control is this button, not the row: the row's box
+           is 60px because of the `…` trigger beside it, and the 7px padding
+           around either is dead space. So the row measuring 374×60 said nothing
+           about the control a thumb actually hits, which was 36px — the two text
+           lines and nothing else — and under the App's floor. `control.sm` is
+           44px there and 28px on Web, where this button is already 36 and a
+           pointer needs no floor, so one class serves both. Enumerating a row's
+           controls is what found this (`expectTouchTargetsWithin`); the drawn
+           pixels are unchanged, because the row's height was never this
+           button's. */
+        className="flex min-h-[length:var(--control-sm)] min-w-0 flex-1 flex-col text-left"
         onClick={() => onSelect(session)}
       >
         {/* Both lines truncate rather than wrap. At the mockup's 246px the meta

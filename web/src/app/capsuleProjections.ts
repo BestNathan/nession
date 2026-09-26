@@ -24,18 +24,33 @@ import {
 export interface CapsuleProjectionBinding {
   id: CapabilityId;
   /**
-   * Whether this capability has anything to add at Peek.
+   * What this binding contributes to the capsule, which is what decides whether
+   * the capability entry may offer it (#1046).
    *
-   * Declared by the capability, because only it knows. Git has a changed-file
-   * summary worth a level of its own; Claude Code's richer surface is its
-   * Workspace view, so its Signal is where the Terminal stops. The frame turns
-   * an absent Peek into an inert title and reaches the Workspace from the
-   * Signal, rather than opening a surface with nothing in it.
+   * Capsule eligibility is a statement about the **Terminal**, not about the
+   * capability having a view somewhere: the entry lists what can be reached
+   * from where the user already is. So the role is declared here, beside the
+   * body that does the reaching, and it is **required** — a new binding cannot
+   * arrive without saying which of the three it is. That is the property
+   * `supportsPeek?: boolean` did not have: absent meant "no" for a capability
+   * that had never considered the question, and "not yet" for one that had.
    *
-   * Defaults to false — a capability that has not said it can go deeper has
-   * not earned a step that opens onto nothing.
+   * - `'peek'` — it contributes a Terminal-local Peek. This is the only thing
+   *   that earns a capability explicit discovery: "availability in Workspace is
+   *   not enough".
+   * - `'accessory'` — a built-in Terminal-local accessory rather than a
+   *   Workspace capability. It has no Workspace view to be confused with, so
+   *   the rule above does not exclude it; it is the entry's own family, and
+   *   `#1046`'s edge case keeps it listed so that a node with no Peek-capable
+   *   capability does not present an empty menu.
+   * - `'signal'` — a Terminal Signal and no Peek. It is **not** listed: it
+   *   still emerges by observation when Nession resolves it as relevant, but it
+   *   is not offered for explicit selection. Claude Code is the reference case,
+   *   and `#1046` is explicit that a Signal-only binding is insufficient for
+   *   explicit discovery; it returns to the entry when the plugin contributes a
+   *   Peek.
    */
-  supportsPeek?: boolean;
+  entry: 'peek' | 'accessory' | 'signal';
   /**
    * Whether this projection claims the soft keyboard while it is up (#1034).
    *
@@ -82,6 +97,16 @@ export interface CapsuleProjectionBinding {
      * which is also what keeps the registry free of transport.
      */
     sendText: (text: string) => void;
+    /**
+     * Deepen into the Workspace, at the item the body last reported or at one
+     * it names (#1046).
+     *
+     * Supplied by the host and rendered by the capability: the host used to draw
+     * this as a footer on every Peek, which made every capability end on the
+     * same borrowed sentence. Whether the action exists, where it sits and what
+     * it carries are the capability's answers.
+     */
+    openWorkspace: (resourceId?: string) => void;
     disabled: boolean;
   }) => ReactNode;
 }
@@ -115,5 +140,17 @@ export function projectionBindingFor(id: CapabilityId): CapsuleProjectionBinding
 export const CAPSULE_PROJECTION_IDS: readonly CapabilityId[] = CAPSULE_PROJECTIONS.map(
   (binding) => binding.id,
 );
+
+/**
+ * Capabilities the entry may offer, which is **not** the list above.
+ *
+ * `CAPSULE_PROJECTION_IDS` answers "can be drawn beside the capsule"; this
+ * answers "is worth offering". They differ by exactly the Signal-only
+ * bindings, and that difference is the whole of `#1046`: a capability that can
+ * emerge when it becomes relevant is not thereby one the entry should list.
+ */
+export const CAPSULE_ENTRY_IDS: readonly CapabilityId[] = CAPSULE_PROJECTIONS.filter(
+  (binding) => binding.entry !== 'signal',
+).map((binding) => binding.id);
 
 export { CLAUDE_CODE_ID, GIT_ID, TERMINAL_KEYS_ID };

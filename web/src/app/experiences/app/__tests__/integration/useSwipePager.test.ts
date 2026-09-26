@@ -1,8 +1,16 @@
 import { describe, it, expect, vi } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import type { TouchEvent } from 'react';
-import { SWIPE_COMMIT_PX } from '../../gesture';
+import type { ShellBounds } from '../../edgeBand';
+import { EDGE_BAND_PX, SWIPE_COMMIT_PX } from '../../gesture';
 import { useSwipePager } from '../../useSwipePager';
+
+/**
+ * The shell every test measures its edge bands against unless it says
+ * otherwise. 400 rather than a real phone width so the band arithmetic below
+ * reads as arithmetic; nothing in the hook depends on the number.
+ */
+const SHELL: ShellBounds = { left: 0, right: 400 };
 
 /**
  * Build a detached element tree and return the node `selector` picks out of it.
@@ -49,10 +57,21 @@ describe('SWIPE_COMMIT_PX', () => {
 describe('useSwipePager', () => {
   const width = 400;
 
-  function setup(index: number, pageCount = 3) {
+  function setup(
+    index: number,
+    pageCount = 3,
+    bounds: ShellBounds | null = SHELL,
+    shellMayPage = true,
+  ) {
     const onIndexChange = vi.fn();
     const { result } = renderHook(() =>
-      useSwipePager({ pageCount, index, onIndexChange }),
+      useSwipePager({
+        pageCount,
+        index,
+        onIndexChange,
+        getShellBounds: () => bounds,
+        shellMayPage,
+      }),
     );
     return { onIndexChange, result };
   }
@@ -71,10 +90,9 @@ describe('useSwipePager', () => {
   }
 
   it('turns the page from a drag that starts on shell chrome', () => {
-    // The gesture keeps its whole width: what bounds it is where it may start
-    // (`workSurface.ts`), not a strip at the screen edge. #473 asked for an
-    // edge band, #748 rejected it as undiscoverable, and #1049 settled it as a
-    // start gate instead of a band.
+    // Shell chrome is unconstrained: the edge band (#1081) is an exception
+    // added over work surfaces, so it takes nothing away here. The gesture
+    // keeps its whole width wherever the shell already owned the touch.
     const { onIndexChange, result } = setup(1);
 
     drag(result, [width / 2, 300], [width / 2 + SWIPE_COMMIT_PX + 10, 300]);
@@ -160,13 +178,19 @@ describe('useSwipePager', () => {
   });
 });
 
-describe('useSwipePager — top-level navigation is bounded by work-surface exclusion', () => {
+describe('useSwipePager — a work surface owns the touches that begin in it', () => {
   const width = 400;
 
-  function setup(index: number, pageCount = 3) {
+  function setup(index: number, pageCount = 3, shellMayPage = true) {
     const onIndexChange = vi.fn();
     const { result } = renderHook(() =>
-      useSwipePager({ pageCount, index, onIndexChange }),
+      useSwipePager({
+        pageCount,
+        index,
+        onIndexChange,
+        getShellBounds: () => SHELL,
+        shellMayPage,
+      }),
     );
     return { onIndexChange, result };
   }
@@ -274,5 +298,206 @@ describe('useSwipePager — top-level navigation is bounded by work-surface excl
     });
 
     expect(onIndexChange).toHaveBeenCalledWith(0);
+  });
+});
+
+describe('useSwipePager — the shell edges re-admit the work surface (#1081)', () => {
+  const width = 400;
+
+  function setup(
+    index: number,
+    pageCount = 3,
+    bounds: ShellBounds | null = SHELL,
+    shellMayPage = true,
+  ) {
+    const onIndexChange = vi.fn();
+    const { result } = renderHook(() =>
+      useSwipePager({
+        pageCount,
+        index,
+        onIndexChange,
+        getShellBounds: () => bounds,
+        shellMayPage,
+      }),
+    );
+    return { onIndexChange, result };
+  }
+
+  /** The terminal viewport, entered at a deep leaf so the walk-up is exercised. */
+  function xterm(): Element {
+    return element(
+      '<div data-terminal-viewport><div class="xterm"><div class="xterm-screen"></div></div></div>',
+      '.xterm-screen',
+    );
+  }
+
+  function drag(
+    result: { current: ReturnType<typeof useSwipePager> },
+    from: [number, number],
+    to: [number, number],
+    target: EventTarget | null = xterm(),
+  ) {
+    act(() => {
+      result.current.onTouchStart(touchEvent(from[0], from[1], target));
+      result.current.onTouchMove(touchEvent(to[0], to[1]));
+      result.current.onTouchEnd();
+    });
+  }
+
+  it('pulls Sessions in from the left band over the terminal', () => {
+    // The whole point: this is the touch the user actually makes — a rightward
+    // drag starting at the left edge of the terminal — and before #1081 the
+    // gate returned before the gesture began, so nothing happened.
+    const { onIndexChange, result } = setup(1);
+
+    drag(result, [2, 300], [2 + SWIPE_COMMIT_PX + 10, 300]);
+
+    expect(onIndexChange).toHaveBeenCalledWith(0);
+  });
+
+  it('pulls Workspace in from the right band over the terminal', () => {
+    const { onIndexChange, result } = setup(1);
+
+    drag(result, [width - 2, 300], [width - 2 - SWIPE_COMMIT_PX - 10, 300]);
+
+    expect(onIndexChange).toHaveBeenCalledWith(2);
+  });
+
+  it('starts a page on the band boundary and not one pixel further in', () => {
+    // Pinned as a pair so the band's width is a decision the suite states
+    // rather than a number the implementation happens to use.
+    const onEdge = setup(1);
+    drag(onEdge.result, [EDGE_BAND_PX, 300], [EDGE_BAND_PX + SWIPE_COMMIT_PX + 10, 300]);
+    expect(onEdge.onIndexChange).toHaveBeenCalledWith(0);
+
+    const past = setup(1);
+    drag(past.result, [EDGE_BAND_PX + 1, 300], [EDGE_BAND_PX + 1 + SWIPE_COMMIT_PX + 10, 300]);
+    expect(past.onIndexChange).not.toHaveBeenCalled();
+    expect(past.result.current.isDragging).toBe(false);
+  });
+
+  it('gives the frame back when the drag moves the other way', () => {
+    // Each edge owns one direction. A drag from the left edge going left is not
+    // shell navigation — it is the shape of an xterm selection — so the shell
+    // must let go rather than pull Workspace in from a start it does not own.
+    const { onIndexChange, result } = setup(1);
+
+    drag(result, [2, 300], [2 - (SWIPE_COMMIT_PX + 10), 300]);
+
+    expect(onIndexChange).not.toHaveBeenCalled();
+    expect(result.current.dragOffset).toBe(0);
+    expect(result.current.isDragging).toBe(false);
+  });
+
+  it('gives the frame back when a drag reverses past its own start', () => {
+    // The band constrains the net offset, not the opening move. A `0` here
+    // would commit index+1 — Workspace, the layer the *opposite* edge owns —
+    // from a drag that began at the left edge.
+    const { onIndexChange, result } = setup(1);
+
+    act(() => {
+      result.current.onTouchStart(touchEvent(2, 300, xterm()));
+      result.current.onTouchMove(touchEvent(2 + SWIPE_COMMIT_PX + 20, 300));
+      result.current.onTouchMove(touchEvent(2 - 200, 300));
+      result.current.onTouchEnd();
+    });
+
+    expect(onIndexChange).not.toHaveBeenCalled();
+    expect(result.current.dragOffset).toBe(0);
+  });
+
+  it('keeps the axis lock: a vertical drag from the band scrolls', () => {
+    const { onIndexChange, result } = setup(1);
+
+    act(() => {
+      result.current.onTouchStart(touchEvent(2, 100, xterm()));
+      // 20px across, 160px down — a scroll that drifted sideways, started at
+      // the edge. The band does not make this a page.
+      result.current.onTouchMove(touchEvent(22, 260));
+      result.current.onTouchMove(touchEvent(2 + 300, 260));
+      result.current.onTouchEnd();
+    });
+
+    expect(onIndexChange).not.toHaveBeenCalled();
+    expect(result.current.dragOffset).toBe(0);
+  });
+
+  it('measures the band from the shell, so an inset App still has edges', () => {
+    // A 390px App inside a 1200px window: x = 2 is at the window's edge and
+    // 180px outside the App, so it belongs to whatever is behind the App. The
+    // App's own left edge is at 182.
+    const inset: ShellBounds = { left: 182, right: 572 };
+
+    const atShellEdge = setup(1, 3, inset);
+    act(() => {
+      atShellEdge.result.current.onTouchStart(touchEvent(184, 300, xterm()));
+      atShellEdge.result.current.onTouchMove(touchEvent(184 + SWIPE_COMMIT_PX + 10, 300));
+      atShellEdge.result.current.onTouchEnd();
+    });
+    expect(atShellEdge.onIndexChange).toHaveBeenCalledWith(0);
+
+    const atWindowEdge = setup(1, 3, inset);
+    act(() => {
+      atWindowEdge.result.current.onTouchStart(touchEvent(2, 300, xterm()));
+      atWindowEdge.result.current.onTouchMove(touchEvent(2 + SWIPE_COMMIT_PX + 10, 300));
+      atWindowEdge.result.current.onTouchEnd();
+    });
+    expect(atWindowEdge.onIndexChange).not.toHaveBeenCalled();
+  });
+
+  it('declines a work-surface start when the shell cannot say where it ends', () => {
+    // The surface wins the tie. `isWorkSurface` fails open for an unclassifiable
+    // *target*; this is the other question — a classifiable target and an
+    // unmeasurable shell — and there the shell has to prove its case.
+    const { onIndexChange, result } = setup(1, 3, null);
+
+    drag(result, [2, 300], [2 + SWIPE_COMMIT_PX + 10, 300]);
+
+    expect(onIndexChange).not.toHaveBeenCalled();
+    expect(result.current.isDragging).toBe(false);
+  });
+
+  it('declines every start on a layer whose depth owns its leave (#1081)', () => {
+    // The Workspace layer at a pushed detail. Not even shell chrome is the
+    // shell's to page from there: the depth's page header carries the one leave
+    // (#1051), and unlike the shell's it is allowed to refuse — Files' Back
+    // blocks on an unsaved editor. A shell page from the same depth throws that
+    // guard away, which is what the header swipe and the band both did.
+    const { onIndexChange, result } = setup(2, 3, SHELL, false);
+
+    // Chrome: the page header band, which the gate would otherwise allow.
+    drag(result, [2, 300], [2 + SWIPE_COMMIT_PX + 10, 300], chrome());
+    expect(onIndexChange).not.toHaveBeenCalled();
+    expect(result.current.isDragging).toBe(false);
+
+    // The work surface, from inside the band.
+    drag(result, [2, 300], [2 - (SWIPE_COMMIT_PX + 10), 300], xterm());
+    expect(onIndexChange).not.toHaveBeenCalled();
+    expect(result.current.isDragging).toBe(false);
+  });
+
+  it('still pages the same layer from its root, where nothing competes', () => {
+    // The pair matters: standing down is scoped to a pushed detail, not to the
+    // layer. At the Workspace root the shell's leave and Back go to the same
+    // place — the Terminal — so there is nothing to compete over.
+    const { onIndexChange, result } = setup(2, 3, SHELL, true);
+
+    // Rightward, which from index 2 is the page back to the Terminal. (Leftward
+    // from here runs off the end of the pager, so it is not a page at all —
+    // which is why the suppression above removes the competing route and
+    // nothing else.)
+    drag(result, [2, 300], [2 + SWIPE_COMMIT_PX + 10, 300], chrome());
+
+    expect(onIndexChange).toHaveBeenCalledWith(1);
+  });
+
+  it('leaves an unconstrained start unconstrained even with bounds set', () => {
+    // The band is only consulted for a touch inside a work surface. Chrome at
+    // x = 2 — the same coordinate the band claims — pages in either direction.
+    const { onIndexChange, result } = setup(1);
+
+    drag(result, [2, 300], [2 - (SWIPE_COMMIT_PX + 10), 300], chrome());
+
+    expect(onIndexChange).toHaveBeenCalledWith(2);
   });
 });

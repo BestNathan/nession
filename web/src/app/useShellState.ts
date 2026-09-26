@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAtomValue } from 'jotai';
 import { toast } from 'sonner';
 import { useDashboard } from '@/app/useDashboard';
@@ -92,6 +92,32 @@ export function useShellState() {
     toast.success('Attach settings saved — applies to the next attach');
   }, [cancelAttach]);
 
+  // A Session that was just created, waiting for the refreshed list to carry
+  // it (#1082). Held as an **id**, not a name or a position: the list arrives
+  // from a separate request, and picking "the newest row" or "the one with this
+  // name" would select a different Session whenever the guess is wrong.
+  const [awaitingSessionId, setAwaitingSessionId] = useState<string | null>(null);
+
+  const awaitSession = useCallback((sessionId: string | undefined) => {
+    setAwaitingSessionId(sessionId ?? null);
+  }, []);
+
+  useEffect(() => {
+    if (awaitingSessionId === null) {
+      return;
+    }
+    const created = sessions.find((s) => s.session_id === awaitingSessionId);
+    if (!created) {
+      // Still absent — the refresh has not landed. Kept rather than cleared so
+      // the next list selects it; the home stays usable meanwhile.
+      return;
+    }
+    setAwaitingSessionId(null);
+    // The ordinary selection path, so creating enters the same attach flow as
+    // choosing a row. Nothing here is specific to having just created it.
+    handleSelect(created);
+  }, [awaitingSessionId, sessions, handleSelect]);
+
   const { isRestoringDeepLink } = useDeepLink({
     sessions,
     sessionsLoaded: data.sessionsLoaded,
@@ -119,6 +145,7 @@ export function useShellState() {
     saveAttachSettings,
     onKilled,
     handleSelect,
+    awaitSession,
     setSurface,
     setTool,
     isRestoringDeepLink,

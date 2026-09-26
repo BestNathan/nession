@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
 import { useAddressPlan } from '@/shared/hooks/useAddressPlan';
+import { orderAddressesByLatency } from '@/shared/lib/addressSelection';
 import type { AttachInfo, ProbedAddress } from '@/types';
 
 // Mock the latency ordering so the hook test is deterministic. The real
@@ -94,6 +95,24 @@ describe('useAddressPlan', () => {
     await waitFor(() => expect(result.current.ready).toBe(true));
     // Browser tests all addresses; server 'unreachable' is NOT a filter.
     expect(result.current.urls).toEqual(['ws://a/ws', 'ws://dead/ws']);
+  });
+
+  /**
+   * The probe must present the reply's credential (#1091): the agent refuses an
+   * uncredentialed upgrade since #1013, so a bare probe measures nothing and
+   * reports every candidate unreachable.
+   */
+  it('probes the candidates with the attach reply credential', async () => {
+    const info = attach({ addresses: [probed('ws://a/ws')], connection_token: 'tok' });
+    const { result } = renderHook(() =>
+      useAddressPlan(info, { orderedUrls: null, manualUrl: null }),
+    );
+    await waitFor(() => expect(result.current.ready).toBe(true));
+
+    expect(orderAddressesByLatency).toHaveBeenCalledWith(
+      [probed('ws://a/ws')],
+      { credential: 'tok' },
+    );
   });
 
   it('is immediately ready with no urls for relay attaches', async () => {

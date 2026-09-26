@@ -12,7 +12,8 @@ Navigation             Current Work             Contextual Depth
  Sessions     ←──────    Terminal    ──────→      Workspace
 ```
 
-Default focus is the active Session's Terminal.
+Default focus is the active Session's Terminal. **Before any Session exists there is no
+Terminal**, and the App's root is a home instead — see *The no-Session root* below.
 
 Conceptually:
 
@@ -89,15 +90,67 @@ Signal/Peek is session-scoped and intentionally shallow. Rich state, history, ma
 
 Opening Workspace must preserve the originating Session and capability context. Closing/dismissing returns the user to the same Terminal without rebuilding context.
 
+## The no-Session root
+
+`Sessions ← Terminal → Workspace` describes the model *around work*. Two facts were
+unstated, and both showed up as a dead end on a narrow viewport (#1082):
+
+- the App experience is chosen by **viewport**, not by whether work already exists. A
+  phone gets the App shell before anything is selected — otherwise the model, the
+  Sessions layer, and the top-level gesture are all absent exactly when the user has
+  nothing else to navigate with;
+- **Workspace is Session-scoped.** It is the depth *around* a piece of work, so with no
+  work there is nothing for it to show. It is not hidden or disabled: the layer does not
+  exist, and the gesture that would open it has no third position to page to.
+
+The root in that state is a **home**, and `visual-language.md` §Empty states governs it:
+an invitation to act, in the interface's voice, using the action's own name. It carries
+
+- a primary **New Session** action, opening the same creation flow as everywhere else —
+  and on success the created Session becomes the current work and the App enters its
+  Terminal, rather than creating something and leaving the user where they were;
+- a visible route to Sessions, plus the same Sessions affordance in the bar;
+- no Workspace affordance, and no invented Session identity in the bar.
+
+If creation cannot succeed the action says why, in place. A disabled control with no
+explanation is the same dead end one step earlier.
+
 ## Gestures and visible alternatives
 
 - Swipe right to reveal/open Sessions; swipe left to reveal/open Workspace.
-- The gesture spans the shell chrome, and is **bounded by work-surface
-  exclusion**: it does not begin inside a surface that owns its own touch
-  behaviour — the terminal viewport (selection, scrollback, TUI mouse
-  reporting), a CodeMirror editor, a text input, or the capsule composer. The
-  surface still needs the shell to define *where* top-level navigation may
-  start, not only which axis a captured drag resolved to.
+- **The shell does not claim the gesture on a layer whose depth offers its own
+  leave** (#1081). `Sessions ← Terminal → Workspace` describes the model *around*
+  work; inside the Workspace it is the pushed depth's business, and
+  [one navigation bar per depth](#one-navigation-bar-per-depth) gives that depth
+  exactly one leave — the page header's Back. Two routes out of one depth is the
+  defect #1051 names, and here it is worse than untidy: the Back is **allowed to
+  refuse** (Files' asks before discarding an unsaved editor) and the shell's
+  leave is not, so a shell page from there threw the work away. The gesture
+  returns at the Workspace root, where Back and the shell both mean the
+  Terminal and there is nothing to compete over.
+- The gesture spans the shell chrome. **A work surface owns every touch that
+  begins in it, except at the shell's own edges** (#1081). Inside a work surface
+  the shell may still claim a horizontal drag that starts within `EDGE_BAND_PX`
+  (28px) of a shell edge, and each edge owns one direction: the left band pulls
+  Sessions in (a rightward drag), the right band pulls Workspace in (a leftward
+  one). A drag from an edge band that moves the other way is surrendered back to
+  the surface.
+- The exclusion is what makes the band necessary, and also what keeps it small.
+  A surface keeps the touches that begin in it because a page that started there
+  would spend the surface's first horizontal pixels — an xterm selection, a
+  CodeMirror selection, a capsule drag — before the surface ever saw them
+  (#1049). On the Terminal screen the viewport and the capsule *are* the screen,
+  so applying that to the edges as well left the gesture with almost no
+  reachable start: the product said `Sessions ← Terminal → Workspace` was
+  spatial while the place a user actually swipes returned before the gesture
+  began. The band restores a reachable start; it does not give back the
+  surface's interior, and it takes nothing from the shell chrome, where the
+  gesture keeps its whole width.
+- The band is a **starting** value, not a measured one. A phone browser or an
+  installed PWA may reserve a screen edge for its own back gesture, and nothing
+  in this repository can see that: the band is exercised at the DOM level only.
+  If a platform does consume an edge, the visible control is the fallback — the
+  gesture is not widened back across the surface to compensate.
 - Gestures are accelerators, not the only discoverable or accessible path.
 - Sessions and Workspace must also have visible controls, but those controls should remain visually quiet when they are not the user's current intent.
 
