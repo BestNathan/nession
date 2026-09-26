@@ -582,7 +582,7 @@ describe('ClaudeCodeWorkspace', () => {
     expect(screen.queryByText('old-a.md')).not.toBeInTheDocument();
   });
 
-  it('keeps the browser heading on web and defers the app heading to AppToolHeader', () => {
+  it('keeps the browser heading on web and defers the app heading to AppPageHeader', () => {
     mockLists();
     const { unmount } = renderConfig(<ClaudeCodeWorkspace ctx={makeContext({ experience: 'web' })} />);
     expect(screen.getByRole('heading', { name: 'Claude Code' })).toBeInTheDocument();

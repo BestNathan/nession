@@ -92,7 +92,20 @@ export function AppLayout(props: {
           </div>
         }
         workspace={
-          <div className="flex h-full min-h-0 flex-col">
+          /* Opaque, deliberately (#1051). The layers are stacked at `inset-0`,
+             so a transparent Workspace layer showed the Terminal's chrome and
+             its scrollback through its own header band: the baseline drew two
+             session titles superimposed and `$ git status --short` under the
+             page header. Making the *layer* carry the Workspace's ground is what
+             makes "one navigation bar owns this depth" true of the pixels and
+             not only of the DOM — and it is what the Sessions layer already
+             does, so the two sibling layers stop disagreeing about whether the
+             Terminal is visible behind them.
+
+             `workspace.background` and not the canvas directly: `domain.json`
+             names this ground, and `WorkspaceShell` draws the work region on the
+             same token, so the layer and the region it contains cannot drift. */
+          <div className="flex h-full min-h-0 flex-col bg-workspace-background">
             <ShellMain
               {...mainShared}
               surface="workspace"

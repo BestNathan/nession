@@ -113,6 +113,46 @@ Workspace capabilities may use native push/pop navigation internally for deeper 
 
 Files may push an editor; Claude Code may open configuration/history; Git may expose repository state. These are capability-internal flows, not a requirement for one shared master/detail shell.
 
+### One navigation bar per depth
+
+Workspace is a stack of depths, and **at any moment exactly one navigation bar owns the
+depth on screen**:
+
+```text
+Terminal
+  ↓
+Workspace capability root
+  ↓
+capability internal push
+  ↓
+deeper detail
+```
+
+Each transition has one predictable back path: from a capability root, Back goes to the
+Terminal; from a pushed detail, Back goes to the capability root it was pushed from.
+
+What this rules out is the composition the App shipped with — a page header, a
+capability's own push sub-header and the file viewer's close bar rendered as three
+independent rows, each answering "what page am I on?" and "what does Back mean?" for
+itself. It is the *level*, not the component, that owns navigation.
+
+- **The App shell owns the bar; a capability owns its content and its local actions.**
+  A capability declares that it has pushed a depth and what leaving it means; it does
+  not render a competing bar. File actions such as Edit and Save belong to the editor
+  whose state they act on and may sit in a subordinate toolbar.
+- **One leave per depth.** Two controls with the same meaning — a Back and a ✕ both
+  ending the same view — are the defect, not a convenience.
+- **A guard travels with the state it protects.** Leaving a modified editor must still
+  ask before discarding; the capability supplies that guard, so the shell does not have
+  to know an editor exists to honour it.
+- **Session identity belongs to the Terminal.** It is the depth the Workspace was
+  opened from, and it is what the user returns to — not chrome to restate on every
+  Workspace screen.
+
+See `#1051` and [workspace.md](../workspace.md). The App presentation of this rule —
+including where the capability switcher may appear — is in
+[workspace-navigation.md](../design-system/patterns/workspace-navigation.md).
+
 See [workspace.md](../workspace.md).
 
 ## Current capability-state mapping

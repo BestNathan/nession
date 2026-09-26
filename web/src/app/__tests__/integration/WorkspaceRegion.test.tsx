@@ -270,7 +270,7 @@ describe('WorkspaceRegion app layer composition', () => {
     expect(screen.getByTestId('claude-code-workspace')).toBeInTheDocument();
     expect(screen.getAllByRole('heading', { name: 'Claude Code' })).toHaveLength(1);
 
-    await user.click(screen.getByTestId('app-tool-back'));
+    await user.click(screen.getByTestId('app-page-back'));
     await waitFor(() => {
       expectActiveAppLayer('terminal');
     });

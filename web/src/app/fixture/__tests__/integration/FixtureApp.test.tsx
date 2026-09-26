@@ -52,18 +52,78 @@ describe('FixtureApp', () => {
 
     await user.click(screen.getByTestId('app-header-workspace'));
     expect(screen.getByTestId('app-layer-workspace')).toBeInTheDocument();
-    expect(screen.getByTestId('app-tool-header')).toBeInTheDocument();
+    expect(screen.getByTestId('app-page-header')).toHaveTextContent('Files');
     expect(screen.getByTestId('workspace-shell')).toBeInTheDocument();
     expect(screen.getByTestId('files-app-layout')).toBeInTheDocument();
+    // The capability root is where the dock belongs (#1051): the peer
+    // capabilities are switchable from here and from nowhere deeper.
+    expect(screen.getByTestId('workspace-tool-bar')).toBeInTheDocument();
     // The Terminal stays mounted underneath rather than being translated
     // off-screen. That is the mechanism behind #1049's "returning restores the
     // same Terminal state": there is no unmount, so there is no rebuild.
     expect(screen.getByTestId('app-layer-terminal')).toBeInTheDocument();
     expect(screen.getByTestId('terminal-well')).toBeInTheDocument();
 
-    await user.click(screen.getByTestId('app-tool-back'));
+    await user.click(screen.getByTestId('app-page-back'));
     expect(screen.queryByTestId('app-layer-workspace')).toBeNull();
     expect(screen.getByTestId('terminal-well')).toBeInTheDocument();
+  });
+
+  it('draws no session bar over the Workspace layer', async () => {
+    // The fourth competing owner (#1051). The App mounts a `ShellMain` per
+    // layer, and the Workspace one rendered a `SessionMainHeader` at the same
+    // position as the Terminal layer's — two session titles superimposed, the
+    // opaquer one winning by z-order, neither legible.
+    //
+    // Two assertions, because they fail for different reasons. The count is the
+    // duplication; the containment is *which* one survives. A fix that dropped
+    // the Terminal's instead would pass a count and still be wrong: Session
+    // identity belongs to the depth the user opened the Workspace from, and the
+    // Terminal is what they return to.
+    renderFixture();
+    const user = userEvent.setup();
+
+    await user.click(screen.getByTestId('app-header-workspace'));
+    expect(screen.getByTestId('app-layer-workspace')).toBeInTheDocument();
+
+    expect(screen.getAllByTestId('session-header-line')).toHaveLength(1);
+    expect(
+      screen.getByTestId('app-layer-terminal').contains(
+        screen.getByTestId('session-header-line'),
+      ),
+    ).toBe(true);
+  });
+
+  it('converges the pushed file detail onto one navigation bar', async () => {
+    // #1051's Files target, asserted as a count rather than as a look: at the
+    // pushed depth the App renders exactly one page header and exactly one
+    // control in it. The screen this replaces stacked three rows — the page
+    // header, a Files push sub-header and the viewer's own close bar — under a
+    // session bar that drew at the same position as the page header's.
+    renderFixture();
+    const user = userEvent.setup();
+
+    await user.click(screen.getByTestId('app-header-workspace'));
+    await user.click(await screen.findByTestId('file-row-web'));
+    await user.click(await screen.findByTestId('file-row-web/src'));
+    await user.click(await screen.findByTestId('file-row-web/src/App.tsx'));
+
+    expect(screen.getByTestId('app-page-header')).toHaveTextContent('App.tsx');
+    expect(screen.getAllByTestId('app-page-header')).toHaveLength(1);
+    expect(screen.queryByTestId('files-app-nav')).not.toBeInTheDocument();
+    // One leave, and it is the header's — the viewer's ✕ is gone, so Back and ✕
+    // are not two names for the same pop.
+    expect(screen.queryByLabelText('Close file')).not.toBeInTheDocument();
+    expect(screen.getByTestId('app-page-back')).toHaveAccessibleName('Back to Files');
+
+    // The dock is the capability root's switcher, so it is not here.
+    expect(screen.queryByTestId('workspace-tool-bar')).not.toBeInTheDocument();
+
+    // And the one leave returns to the list, not to the Terminal.
+    await user.click(screen.getByTestId('app-page-back'));
+    expect(screen.getByTestId('files-app-layout')).toBeInTheDocument();
+    expect(screen.getByTestId('app-page-header')).toHaveTextContent('Files');
+    expect(screen.getByTestId('workspace-tool-bar')).toBeInTheDocument();
   });
 
   it('opens Sessions as a layer and leaves the surface at the Terminal', async () => {
