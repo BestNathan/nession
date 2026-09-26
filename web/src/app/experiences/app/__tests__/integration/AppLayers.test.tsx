@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { AppLayers } from '../../AppLayers';
 
@@ -67,6 +67,61 @@ describe('AppLayers — layers are not permanently mounted', () => {
     expect(screen.getByTestId('app-layer-sessions')).toBeInTheDocument();
     expect(screen.queryByTestId('app-layer-workspace')).toBeNull();
     unmount();
+  });
+});
+
+describe('AppLayers — the edge band is measured from this element (#1081)', () => {
+  /** Pin the App root's rect: jsdom reports zeros, which every x is inside. */
+  function pinShell(right: number) {
+    const root = screen.getByTestId('app-layer-root');
+    root.getBoundingClientRect = () =>
+      ({ left: 0, right, top: 0, bottom: 600, width: right, height: 600, x: 0, y: 0 }) as DOMRect;
+    return root;
+  }
+
+  function swipeRight(fromX: number, toX: number) {
+    // The touch lands on the work surface, not on the root: the gate walks up
+    // from the target, so a test that dispatched on the root itself would not
+    // exercise the branch the band exists for.
+    const surface = screen.getByTestId('stub-work-surface');
+    fireEvent.touchStart(surface, { touches: [{ clientX: fromX, clientY: 300 }] });
+    fireEvent.touchMove(surface, { touches: [{ clientX: toX, clientY: 300 }] });
+    fireEvent.touchEnd(surface);
+  }
+
+  function renderWithWorkSurface(onLayerChange = vi.fn()) {
+    render(
+      <AppLayers
+        layer="terminal"
+        onLayerChange={onLayerChange}
+        sessions={<div data-testid="stub-sessions" />}
+        terminal={<div data-testid="stub-work-surface" data-terminal-viewport />}
+        workspace={<div data-testid="stub-workspace" />}
+      />,
+    );
+    return onLayerChange;
+  }
+
+  it('pages Sessions from a left-edge drag that starts on the work surface', () => {
+    // The end-to-end wiring #1081 is: the band is only reachable if AppLayers
+    // hands the hook *this element's* rect. A `() => null` here, or a band
+    // measured from the window, compiles and leaves every unit test above
+    // green while the gesture stays dead in the App.
+    const onLayerChange = renderWithWorkSurface();
+    pinShell(390);
+
+    swipeRight(2, 120);
+
+    expect(onLayerChange).toHaveBeenCalledWith('sessions');
+  });
+
+  it('leaves a drag that starts on the work surface interior alone', () => {
+    const onLayerChange = renderWithWorkSurface();
+    pinShell(390);
+
+    swipeRight(200, 320);
+
+    expect(onLayerChange).not.toHaveBeenCalled();
   });
 });
 

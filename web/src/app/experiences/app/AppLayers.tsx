@@ -12,6 +12,7 @@ import {
   layerGeometry,
   type AppLayer,
 } from './appLayerPositions';
+import type { ShellBounds } from './edgeBand';
 import { useSwipePager } from './useSwipePager';
 
 const FALLBACK_WIDTH_PX = 375;
@@ -80,11 +81,27 @@ export function AppLayers({
     [onLayerChange],
   );
 
+  // The edge band is measured from this element, not from the window (#1081):
+  // the App is routinely narrower than the viewport — 390px inside a desktop
+  // browser, and inside the fixture the browser contract suite drives — and a
+  // band taken from `window.innerWidth` would sit off-screen there, leaving the
+  // gesture unreachable in exactly the case a test can see. Read per touch
+  // rather than cached, so it stays right through a resize or a scroll.
+  const getShellBounds = useCallback((): ShellBounds | null => {
+    const el = rootRef.current;
+    if (!el) {
+      return null;
+    }
+    const rect = el.getBoundingClientRect();
+    return { left: rect.left, right: rect.right };
+  }, []);
+
   const { dragOffset, onTouchStart, onTouchMove, onTouchEnd, onTouchCancel } =
     useSwipePager({
       pageCount: 3,
       index: indexFromLayer(layer),
       onIndexChange: handleIndexChange,
+      getShellBounds,
     });
 
   const { sessionsX, workspaceX, showSessions, showWorkspace } =

@@ -25,6 +25,7 @@ import {
   waitForSettledBox,
 } from '../helpers/ui-assert/assertions';
 import { loadContracts, type Experience } from '../helpers/ui-assert/contracts';
+import { swipeHorizontally } from '../helpers/shell';
 
 test.skip(!process.env.CI, 'local only — runs in CI workflow only');
 
@@ -322,6 +323,61 @@ for (const row of viewports.filter((v) => v.experience === 'app')) {
       for (let i = 0; i < (await controls.count()); i += 1) {
         await expectTouchTarget(controls.nth(i), optsFor(PATTERN_TERMINAL_CAPSULE, 'app', row.id));
       }
+    });
+
+    test('the top-level swipe reaches the work surface from the shell edge (#1081)', async ({ page }) => {
+      await page.goto('/#/fixture/app');
+      const layerRoot = page.getByTestId('app-layer-root');
+      await expect(layerRoot).toHaveAttribute('data-layer', 'terminal');
+
+      const shell = await layerRoot.boundingBox();
+      const surface = await page.locator('.xterm').first().boundingBox();
+      if (!shell || !surface) {
+        throw new Error('the App shell and its terminal surface must both be laid out');
+      }
+      const y = shell.y + shell.height / 2;
+
+      // The probe is 4px inside the *surface's own* left edge rather than a
+      // fixed 4px from the shell: what has to hold is that the band reaches
+      // past the terminal's padding gutter and onto the surface, and the
+      // gutter is `--terminal-pad-x`. Narrow the band below `surface.x + 4`
+      // and this fails — which is right, because the band would then add
+      // nothing the gate did not already allow.
+      await swipeHorizontally(page, { y, fromX: surface.x + 4, toX: surface.x + 144 });
+
+      await expect(page.getByTestId('app-layer-sessions')).toBeVisible();
+    });
+
+    test('the work surface keeps a drag that starts inside it (#1081)', async ({ page }) => {
+      await page.goto('/#/fixture/app');
+      const layerRoot = page.getByTestId('app-layer-root');
+      await expect(layerRoot).toHaveAttribute('data-layer', 'terminal');
+
+      const shell = await layerRoot.boundingBox();
+      const surface = await page.locator('.xterm').first().boundingBox();
+      if (!shell || !surface) {
+        throw new Error('the App shell and its terminal surface must both be laid out');
+      }
+      const y = shell.y + shell.height / 2;
+
+      // The middle of the surface is nobody's edge. Nothing may be claimed
+      // there — that is the half of #1049 that #1081 did not touch.
+      const middle = Math.round(surface.x + surface.width / 2);
+      await swipeHorizontally(page, { y, fromX: middle, toX: middle + 140 });
+
+      // Absence, so it needs a window in which a wrong commit could land: the
+      // shell's own state updates land a tick late (React commits out of band),
+      // and a bare `toHaveCount(0)` would pass before the gesture had been
+      // processed at all.
+      await page.waitForTimeout(300);
+      await expect(page.getByTestId('app-layer-sessions')).toHaveCount(0);
+
+      // …and the same swipe from the shell edge then opens it, which is what
+      // makes the silence above evidence rather than timing. Without this, a
+      // build where the pager was simply never wired up would pass.
+      const shellEdge = Math.round(surface.x + 4);
+      await swipeHorizontally(page, { y, fromX: shellEdge, toX: shellEdge + 140 });
+      await expect(page.getByTestId('app-layer-sessions')).toBeVisible();
     });
   });
 }
