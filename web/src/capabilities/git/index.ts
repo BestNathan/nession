@@ -10,6 +10,8 @@ export type {
   GitChangedFile,
   GitChangeKind,
   GitCommit,
+  GitCommitDetail,
+  GitCommitResponse,
   GitHistory,
   GitLogOk,
   GitLogRequest,
