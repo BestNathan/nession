@@ -116,8 +116,12 @@ export function FixtureTerminal({
     // pending, which is the common case. The face is self-hosted rather than a
     // CDN, so in CI it is a real fetch that the local cache hides.
     //
-    // `document.fonts` is absent outside a browser — jsdom, where the mount
-    // tests run — and there is nothing to wait for there.
+    // Guarded because the CSS Font Loading API is not implemented everywhere
+    // (jsdom has no `document.fonts`) and there is nothing to wait for where it
+    // is missing. `TerminalInstance` guards its own `document.fonts` call the
+    // same way. No test reaches this line today — both fixture mount tests
+    // replace the whole component with a stub — so the guard is for the
+    // environment, not for coverage.
     const fontsReady = document.fonts?.ready ?? Promise.resolve();
     void fontsReady.then(() => {
       if (disposed) {
