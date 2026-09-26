@@ -2,7 +2,10 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { AppLayers } from '../../AppLayers';
 
-function renderLayers(layer: 'sessions' | 'terminal' | 'workspace') {
+function renderLayers(
+  layer: 'sessions' | 'terminal' | 'workspace',
+  workspaceDetailPushed = false,
+) {
   return render(
     <AppLayers
       layer={layer}
@@ -10,6 +13,7 @@ function renderLayers(layer: 'sessions' | 'terminal' | 'workspace') {
       sessions={<div data-testid="stub-sessions" />}
       terminal={<div data-testid="stub-terminal" />}
       workspace={<div data-testid="stub-workspace" />}
+      workspaceDetailPushed={workspaceDetailPushed}
     />,
   );
 }
@@ -97,6 +101,7 @@ describe('AppLayers — the edge band is measured from this element (#1081)', ()
         sessions={<div data-testid="stub-sessions" />}
         terminal={<div data-testid="stub-work-surface" data-terminal-viewport />}
         workspace={<div data-testid="stub-workspace" />}
+        workspaceDetailPushed={false}
       />,
     );
     return onLayerChange;
@@ -125,6 +130,70 @@ describe('AppLayers — the edge band is measured from this element (#1081)', ()
   });
 });
 
+describe('AppLayers — a pushed Workspace detail owns its own leave (#1081)', () => {
+  /** The Workspace layer with a work surface in it — an editor, in the product. */
+  function renderWorkspaceLayer(
+    workspaceDetailPushed: boolean,
+    onLayerChange = vi.fn(),
+  ) {
+    render(
+      <AppLayers
+        layer="workspace"
+        onLayerChange={onLayerChange}
+        sessions={<div data-testid="stub-sessions" />}
+        terminal={<div data-testid="stub-terminal" />}
+        workspace={
+          <div>
+            <header data-testid="stub-page-header" />
+            <div data-testid="stub-editor" data-terminal-viewport />
+          </div>
+        }
+        workspaceDetailPushed={workspaceDetailPushed}
+      />,
+    );
+    return onLayerChange;
+  }
+
+  function dragOn(target: HTMLElement, fromX: number, toX: number) {
+    fireEvent.touchStart(target, { touches: [{ clientX: fromX, clientY: 300 }] });
+    fireEvent.touchMove(target, { touches: [{ clientX: fromX + (toX - fromX) / 2, clientY: 300 }] });
+    fireEvent.touchMove(target, { touches: [{ clientX: toX, clientY: 300 }] });
+    fireEvent.touchEnd(target);
+  }
+
+  it('does not page from the page header while a detail is pushed', () => {
+    // The header is chrome, so the work-surface gate never applied to it — this
+    // route to the shell's leave is older than #1081 and is what silently
+    // discarded an unsaved editor: Files' Back refuses, the shell's leave does
+    // not. The header drag is the one that reaches it without the band.
+    const onLayerChange = renderWorkspaceLayer(true);
+
+    dragOn(screen.getByTestId('stub-page-header'), 20, 170);
+
+    expect(onLayerChange).not.toHaveBeenCalled();
+  });
+
+  it('does not page from the editor itself while a detail is pushed', () => {
+    // The route #1081 introduced: the band re-admitted the work surface, and
+    // CodeMirror's line-number gutter sits at x = 0, inside the band.
+    const onLayerChange = renderWorkspaceLayer(true);
+
+    dragOn(screen.getByTestId('stub-editor'), 20, 170);
+
+    expect(onLayerChange).not.toHaveBeenCalled();
+  });
+
+  it('still pages the Workspace layer from its root', () => {
+    // The pair: standing down is scoped to a pushed detail. At the root the
+    // shell's leave and Back are the same destination, so the gesture stays.
+    const onLayerChange = renderWorkspaceLayer(false);
+
+    dragOn(screen.getByTestId('stub-page-header'), 20, 170);
+
+    expect(onLayerChange).toHaveBeenCalledWith('terminal');
+  });
+});
+
 describe('AppLayers — a null Workspace layer does not exist (#1082)', () => {
   function renderWithoutWorkspace(onLayerChange = vi.fn()) {
     render(
@@ -134,6 +203,7 @@ describe('AppLayers — a null Workspace layer does not exist (#1082)', () => {
         sessions={<div data-testid="stub-sessions" />}
         terminal={<div data-testid="stub-terminal" />}
         workspace={null}
+        workspaceDetailPushed={false}
       />,
     );
     return onLayerChange;

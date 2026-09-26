@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { AppLayers, type AppLayer } from './AppLayers';
 import { AppSessionsSurface } from './AppSessionsSurface';
 import { ShellMain } from '@/app/ShellMain';
@@ -75,11 +76,22 @@ export function AppLayout(props: {
     terminal,
   } = props;
 
+  // Whether a Workspace capability has pushed a detail (#1081).
+  //
+  // Held here because this is the nearest ancestor of both readers: the pager
+  // below must stand down, and the Workspace layer above is what knows. The
+  // layer is the only place that knows, so it reports through the same
+  // arrangement it already uses to report a surface change. Reset when the
+  // panel unmounts — the Workspace layer is unmounted whenever it is closed,
+  // and a stale `true` would silence the Terminal's own gesture.
+  const [workspaceDetailPushed, setWorkspaceDetailPushed] = useState(false);
+
   return (
     <div className="flex min-h-0 flex-1">
       <AppLayers
         layer={layer}
         onLayerChange={onLayerChange}
+        workspaceDetailPushed={workspaceDetailPushed}
         sessions={
           <div className="flex h-full min-h-0 flex-col">
             <AppSessionsSurface {...sidebarProps} onSelect={onLayerSelect} />
@@ -118,6 +130,7 @@ export function AppLayout(props: {
               surface="workspace"
               showTerminal={false}
               experience="app"
+              onWorkspaceDepthChange={setWorkspaceDetailPushed}
             />
           </div>
         )}

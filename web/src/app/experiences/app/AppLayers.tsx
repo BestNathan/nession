@@ -34,6 +34,16 @@ export interface AppLayersProps {
    * answer the gesture with a blank screen.
    */
   workspace: ReactNode | null;
+  /**
+   * Whether a Workspace capability has pushed a detail depth (#1081).
+   *
+   * A pushed detail has its own leave — the page header's Back — and the shell
+   * must not offer a second one for the same depth (#1051). That is not
+   * bookkeeping: `FilesAppLayout`'s Back is dirty-aware and refuses an unsaved
+   * editor, while the shell's leave cannot, so a shell page from there discards
+   * work the capability was guarding.
+   */
+  workspaceDetailPushed: boolean;
 }
 
 /**
@@ -55,6 +65,7 @@ export function AppLayers({
   sessions,
   terminal,
   workspace,
+  workspaceDetailPushed,
 }: AppLayersProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(FALLBACK_WIDTH_PX);
@@ -114,6 +125,11 @@ export function AppLayers({
       index: indexFromLayer(layer),
       onIndexChange: handleIndexChange,
       getShellBounds,
+      // A pushed Workspace detail is a depth with its own leave, and the shell
+      // stands down rather than offering a second one (#1081). The layer stays
+      // pageable from its root, where Back and the shell's leave are the same
+      // destination — the Terminal — so there is nothing to compete over.
+      shellMayPage: !(layer === 'workspace' && workspaceDetailPushed),
     });
 
   const { sessionsX, workspaceX, showSessions, showWorkspace } =

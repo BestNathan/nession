@@ -33,6 +33,14 @@ export interface ShellMainProps {
    * reads it (#1082); Web reaches creation from the sidebar it always has.
    */
   onCreate?: () => void;
+  /**
+   * Reports whether a Workspace capability has pushed a detail depth (#1081).
+   *
+   * The App's pager reads this to stand down while a depth offers its own
+   * leave. Only the App passes it; Web has no top-level gesture to suppress, so
+   * the callback is absent there and the report is dropped.
+   */
+  onWorkspaceDepthChange?: (pushed: boolean) => void;
   /** Spatial shell: omit terminal on the Workspace page to avoid a second xterm. */
   showTerminal?: boolean;
   /** Spatial shell: omit workspace panel on the Terminal page. */
@@ -130,6 +138,7 @@ export function ShellMain({
   onOpenDrawer,
   onOpenWorkspace,
   onCreate,
+  onWorkspaceDepthChange,
   showTerminal = true,
   showWorkspace = true,
   terminal,
@@ -238,6 +247,7 @@ export function ShellMain({
                 facts={facts}
                 onSurfaceChange={onSurfaceChange}
                 onToolChange={openTool}
+                onDepthChange={onWorkspaceDepthChange}
                 focus={focus}
               />
             ) : null}
