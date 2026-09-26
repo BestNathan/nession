@@ -63,11 +63,18 @@ export function WorkspaceRegion(props: WorkspaceRegionProps) {
     showList, onBackToSessions, onCloseDrawer, terminal,
   } = props;
 
-  const useSpatial = !isWide && selectedId !== null;
-  const { layer, onLayerChange, onLayerSelect } = useAppLayer({
+  // Which experience renders is a **viewport** fact, not a fact about the work
+  // (#1082). It used to additionally require `selectedId !== null`, which meant
+  // the App's composition — and everything that only exists inside it, the
+  // Sessions layer and the top-level gesture included — was absent until work
+  // already existed. Narrow viewports get the App experience; what the App
+  // shows *inside* it is then a question about the Session, not about whether
+  // the experience is on.
+  const isApp = !isWide;
+  const { layer, onLayerChange, onLayerSelect, workspaceAvailable } = useAppLayer({
     selectedId,
     surface,
-    active: useSpatial,
+    active: isApp,
     onSurfaceChange,
     onSelect,
   });
@@ -82,12 +89,16 @@ export function WorkspaceRegion(props: WorkspaceRegionProps) {
   const mainShared = {
     selectedSession, selectedAgent, agents, domain, tool, fileOps,
     onSurfaceChange, onToolChange,
+    // The same handler the sidebar's New Session calls, so the App home's
+    // primary action opens the one creation flow rather than a second one
+    // (#1082). Web ignores it — its empty state is a caption beside a sidebar.
+    onCreate,
   };
 
   // The two experiences, named. Which one renders is the whole of this
   // component's decision — everything above it is shared state, and everything
   // below it is a composition that lives in its own directory.
-  if (useSpatial) {
+  if (isApp) {
     return (
       <AppLayout
         layer={layer}
@@ -95,6 +106,7 @@ export function WorkspaceRegion(props: WorkspaceRegionProps) {
         sidebarProps={sidebarProps}
         onLayerSelect={onLayerSelect}
         mainShared={mainShared}
+        workspaceAvailable={workspaceAvailable}
       />
     );
   }

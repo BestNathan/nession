@@ -76,8 +76,26 @@ vi.mock('@/capabilities/env/components/EnvManager', () => ({
   ),
 }));
 vi.mock('@/product/session/components/CreateSessionDialog', () => ({
-  CreateSessionDialog: ({ isOpen }: { isOpen: boolean }) =>
-    isOpen ? <div data-testid="create-session-dialog" /> : null,
+  // The stub exposes what the real dialog hands over on success — the created
+  // Session's id (#1082) — so the composition that consumes it can be tested
+  // here rather than only in the dialog's own suite, where the consumer does
+  // not exist.
+  CreateSessionDialog: ({
+    isOpen,
+    onCreated,
+  }: {
+    isOpen: boolean;
+    onCreated: (sessionId?: string) => void;
+  }) =>
+    isOpen ? (
+      <div data-testid="create-session-dialog">
+        <button
+          type="button"
+          data-testid="create-session-submit"
+          onClick={() => onCreated('a1:created')}
+        />
+      </div>
+    ) : null,
 }));
 vi.mock('@/product/session/components/KillConfirmDialog', () => ({
   KillConfirmDialog: ({ isOpen }: { isOpen: boolean }) =>
@@ -305,13 +323,67 @@ describe('Shell', () => {
       sessions: [],
       filteredSessions: [],
     };
-    // No selection to restore with an empty list: enter via the mobile list
-    // pane, where the drawer is open at rest.
-    mobileNav.isWide = false;
-    mobileNav.showList = true;
-    mobileNav.showDetail = false;
+    // At wide this is the Web frame: the empty line sits beside the sidebar's
+    // own list copy. The narrow case is the App's home, and is its own test
+    // (#1082) — it no longer renders this line at all.
     renderShell();
     expect(screen.getByText(/No sessions/i)).toBeInTheDocument();
+  });
+
+  it('gives the no-session App root a home with an action instead of a status line (#1082)', () => {
+    dashboard.current = {
+      ...dashboard.current,
+      // The shared fixture Agent is offline; this case is the one where
+      // creation can succeed.
+      agents: [{ ...agent, status: 'online' }],
+      sessions: [],
+      filteredSessions: [],
+    };
+    mobileNav.isWide = false;
+    renderShell();
+
+    // The screen the issue was filed about: it used to say "Select a session to
+    // start working" and offer nothing — and once the Sessions drawer was
+    // dismissed there was no way back to one either.
+    expect(screen.queryByTestId('session-empty-state')).not.toBeInTheDocument();
+    const home = screen.getByTestId('app-home');
+    expect(home).toBeInTheDocument();
+
+    // The primary action is on the screen, named the way the control it opens
+    // is named everywhere, and it is the *enabled* case here: an Agent is
+    // online.
+    expect(screen.getByTestId('app-home-new-session')).toBeEnabled();
+    expect(screen.getByText('New Session')).toBeInTheDocument();
+    expect(screen.queryByTestId('app-home-no-agent')).not.toBeInTheDocument();
+
+    // Both routes out are visible controls, not gestures: Sessions in the
+    // header, and Browse on the surface.
+    expect(screen.getByTestId('app-header-sessions')).toBeInTheDocument();
+    expect(screen.getByTestId('app-home-browse-sessions')).toBeInTheDocument();
+
+    // Workspace is the depth around a piece of work; there is none yet.
+    expect(screen.queryByTestId('app-header-workspace')).not.toBeInTheDocument();
+  });
+
+  it('disables the home action and says why when no Agent is online (#1082)', () => {
+    dashboard.current = {
+      ...dashboard.current,
+      agents: [{ ...agent, status: 'offline' }],
+      sessions: [],
+      filteredSessions: [],
+    };
+    mobileNav.isWide = false;
+    renderShell();
+
+    // A disabled control with no explanation is the dead end one click earlier:
+    // the user cannot tell whether to wait, retry, or add an Agent.
+    expect(screen.getByTestId('app-home-new-session')).toBeDisabled();
+    expect(screen.getByTestId('app-home-no-agent')).toHaveTextContent(
+      'No online Agent available',
+    );
+    // The route to existing work is unaffected — it is not the thing that is
+    // unavailable.
+    expect(screen.getByTestId('app-home-browse-sessions')).toBeEnabled();
   });
 
   it('opens create dialog from sidebar header', async () => {
@@ -468,16 +540,98 @@ describe('Shell', () => {
   // needed one: at wide the sidebar is a column, and below `lg` a selected
   // Session hands off to the App's layer composition, which carries its own nav.
 
-  it('mounts the App layer composition on mobile when a session is selected (no XOR back)', async () => {
+  it('mounts the App layer composition on mobile, before and after selecting (no XOR back)', async () => {
     mobileNav.isWide = false;
     mobileNav.showList = true;
     mobileNav.showDetail = false;
     renderShell();
-    expect(screen.queryByTestId('app-layer-root')).not.toBeInTheDocument();
-
-    await userEvent.click(screen.getByTestId('session-item-a1:fix'));
+    // Present from the start since #1082 — the composition is the experience,
+    // not a reward for having selected something. Selecting then swaps what the
+    // Terminal layer holds (the home for the session's terminal) without
+    // remounting the composition around it.
     expect(screen.getByTestId('app-layer-root')).toBeInTheDocument();
+    expect(screen.getByTestId('app-home')).toBeInTheDocument();
+
+    // The rows live in the Sessions layer, which is closed at rest. That is the
+    // journey now: the header's affordance opens it, exactly as a user without
+    // a Session reaches their existing work.
+    await userEvent.click(screen.getByTestId('app-header-sessions'));
+    await userEvent.click(await screen.findByTestId('session-item-a1:fix'));
+
+    expect(screen.getByTestId('app-layer-root')).toBeInTheDocument();
+    // The Terminal layer now holds the Session's terminal instead of the home.
+    expect(screen.queryByTestId('app-home')).not.toBeInTheDocument();
     expect(screen.queryByTestId('back-to-list')).not.toBeInTheDocument();
+  });
+
+  it('makes the created Session current from the id the dialog returned (#1082)', async () => {
+    const created: Session = {
+      session_id: 'a1:created',
+      agent_id: 'a1',
+      session_name: 'Fresh work',
+      status: 'active',
+      window_count: 1,
+      attached_clients: 0,
+      last_activity: new Date().toISOString(),
+    };
+    dashboard.current = {
+      ...dashboard.current,
+      agents: [{ ...agent, status: 'online' }],
+      sessions: [],
+      filteredSessions: [],
+      showCreateModal: true,
+      // Creating refreshes the lists, and the new Session arrives with the
+      // refresh — a separate request the dialog's response does not wait for.
+      handleSessionCreated: vi.fn(() => {
+        dashboard.current = {
+          ...dashboard.current,
+          sessions: [created],
+          filteredSessions: [created],
+        };
+      }),
+    };
+    mobileNav.isWide = false;
+    renderShell();
+    expect(screen.getByTestId('app-home')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId('create-session-submit'));
+
+    // Creation is an entry into the work, not a refresh that leaves the user on
+    // the same empty home: the id is matched against the refreshed list and the
+    // ordinary selection path runs — attach, detail, Terminal root.
+    expect(mobileNav.openDetail).toHaveBeenCalled();
+    expect(screen.queryByTestId('app-home')).not.toBeInTheDocument();
+  });
+
+  it('does not select a same-named Session while the created one is missing (#1082)', async () => {
+    const impostor: Session = {
+      session_id: 'a1:other',
+      agent_id: 'a1',
+      session_name: 'Fresh work',
+      status: 'active',
+      window_count: 1,
+      attached_clients: 0,
+      last_activity: new Date().toISOString(),
+    };
+    dashboard.current = {
+      ...dashboard.current,
+      agents: [{ ...agent, status: 'online' }],
+      sessions: [impostor],
+      filteredSessions: [impostor],
+      showCreateModal: true,
+      // The refresh has not landed yet, so the created id is simply absent.
+      handleSessionCreated: vi.fn(),
+    };
+    mobileNav.isWide = false;
+    renderShell();
+
+    await userEvent.click(screen.getByTestId('create-session-submit'));
+
+    // The list holds a Session with the *same name* — the guess a name-based
+    // implementation would make. Selecting it would attach the user to a
+    // different piece of work than the one they just created.
+    expect(mobileNav.openDetail).not.toHaveBeenCalled();
+    expect(screen.getByTestId('app-home')).toBeInTheDocument();
   });
 
   it('does not mount the App layer composition on desktop after selecting a session', async () => {

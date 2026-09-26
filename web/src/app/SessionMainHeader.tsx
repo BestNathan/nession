@@ -1,4 +1,5 @@
 import { SessionHeader } from '@/app/patterns/SessionHeader';
+import { AppHomeHeader } from '@/app/experiences/app/AppHomeHeader';
 import type { DomainState } from '@/product/session/model/domainState';
 import type { Experience } from '@/app/workspace/workspaceContext';
 import type { Session } from '@/types';
@@ -34,7 +35,12 @@ export function SessionMainHeader({
     return null;
   }
   if (session === null || domain === null) {
-    return null;
+    // The no-Session root is a home, not an absence (#1082). It keeps the one
+    // piece of navigation the App has no second route to — Sessions — and
+    // deliberately not a Session title, Workspace, or status: there is no
+    // Session to describe, and faking its identity would be the dead end this
+    // state used to be, wearing chrome.
+    return <AppHomeHeader onOpenDrawer={onOpenDrawer} />;
   }
   return (
     <SessionHeader

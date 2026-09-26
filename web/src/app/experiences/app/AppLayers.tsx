@@ -24,7 +24,16 @@ export interface AppLayersProps {
   onLayerChange: (layer: AppLayer) => void;
   sessions: ReactNode;
   terminal: ReactNode;
-  workspace: ReactNode;
+  /**
+   * The Workspace layer, or `null` when there is nothing for it to show (#1082:
+   * Workspace is Session-scoped, so it does not exist before a Session does).
+   *
+   * `null` is not an empty node. It removes the layer from the pager as well as
+   * from the DOM, which is what stops a leftward drag from pulling an empty
+   * depth over the home — the alternative, rendering an empty Workspace, would
+   * answer the gesture with a blank screen.
+   */
+  workspace: ReactNode | null;
 }
 
 /**
@@ -98,7 +107,10 @@ export function AppLayers({
 
   const { dragOffset, onTouchStart, onTouchMove, onTouchEnd, onTouchCancel } =
     useSwipePager({
-      pageCount: 3,
+      // Two positions before a Session exists, three after (#1082). The pager
+      // already refuses to commit past `pageCount`, so this is what makes the
+      // leftward drag a no-op rather than a page onto nothing.
+      pageCount: workspace === null ? 2 : 3,
       index: indexFromLayer(layer),
       onIndexChange: handleIndexChange,
       getShellBounds,
@@ -141,7 +153,7 @@ export function AppLayers({
           </div>
         )}
 
-        {showWorkspace && (
+        {workspace !== null && showWorkspace && (
           <div
             data-testid="app-layer-workspace"
             className="absolute inset-0 z-40 overflow-hidden will-change-transform"

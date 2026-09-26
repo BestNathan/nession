@@ -125,6 +125,58 @@ describe('AppLayers — the edge band is measured from this element (#1081)', ()
   });
 });
 
+describe('AppLayers — a null Workspace layer does not exist (#1082)', () => {
+  function renderWithoutWorkspace(onLayerChange = vi.fn()) {
+    render(
+      <AppLayers
+        layer="terminal"
+        onLayerChange={onLayerChange}
+        sessions={<div data-testid="stub-sessions" />}
+        terminal={<div data-testid="stub-terminal" />}
+        workspace={null}
+      />,
+    );
+    return onLayerChange;
+  }
+
+  it('renders no Workspace layer', () => {
+    renderWithoutWorkspace();
+    expect(screen.getByTestId('app-layer-root')).toHaveAttribute('data-layer', 'terminal');
+    expect(screen.queryByTestId('app-layer-workspace')).toBeNull();
+  });
+
+  it('removes the leftward page rather than sliding onto nothing', () => {
+    // Null is "this layer does not exist", not "render an empty one": the pager
+    // counts two positions, so the gesture that would open Workspace is a no-op
+    // instead of a slide onto a blank depth.
+    const onLayerChange = renderWithoutWorkspace();
+    const root = screen.getByTestId('app-layer-root');
+    const surface = screen.getByTestId('stub-terminal');
+
+    fireEvent.touchStart(surface, { touches: [{ clientX: 300, clientY: 300 }] });
+    fireEvent.touchMove(surface, { touches: [{ clientX: 180, clientY: 300 }] });
+    fireEvent.touchMove(surface, { touches: [{ clientX: 40, clientY: 300 }] });
+    fireEvent.touchEnd(surface);
+
+    expect(onLayerChange).not.toHaveBeenCalled();
+    expect(root.querySelector('[data-testid="app-layer-workspace"]')).toBeNull();
+  });
+
+  it('still pages Sessions, because that layer does exist', () => {
+    // The pair matters: the assertion above would also pass if the pager were
+    // broken outright.
+    const onLayerChange = renderWithoutWorkspace();
+    const surface = screen.getByTestId('stub-terminal');
+
+    fireEvent.touchStart(surface, { touches: [{ clientX: 40, clientY: 300 }] });
+    fireEvent.touchMove(surface, { touches: [{ clientX: 160, clientY: 300 }] });
+    fireEvent.touchMove(surface, { touches: [{ clientX: 300, clientY: 300 }] });
+    fireEvent.touchEnd(surface);
+
+    expect(onLayerChange).toHaveBeenCalledWith('sessions');
+  });
+});
+
 describe('AppLayers — the shell does not put navigation chrome on the work surface', () => {
   it('renders no navigation affordance of its own over the Terminal', () => {
     // Carried over from `AppSpatialShell.test.tsx`, whose file was deleted with
