@@ -26,6 +26,7 @@ import {
 } from '../helpers/ui-assert/assertions';
 import { loadContracts, type Experience } from '../helpers/ui-assert/contracts';
 import { swipeHorizontally } from '../helpers/shell';
+import { waitForFixtureTerminal } from '../helpers/fixtureVisual';
 
 test.skip(!process.env.CI, 'local only — runs in CI workflow only');
 
@@ -324,6 +325,115 @@ for (const row of viewports.filter((v) => v.experience === 'app')) {
       for (let i = 0; i < (await controls.count()); i += 1) {
         await expectTouchTarget(controls.nth(i), optsFor(PATTERN_TERMINAL_CAPSULE, 'app', row.id));
       }
+    });
+
+    test('the terminal grid is drawn inside the surface inset (#1092)', async ({ page }) => {
+      await page.goto('/#/fixture/app');
+      // Waits for the *sized* terminal, not just for `.xterm-screen` — see the
+      // helper. Measuring the pre-fit grid would report the defect itself.
+      await waitForFixtureTerminal(page);
+
+      const boxes = await page.evaluate(() => {
+        const rect = (selector: string) => {
+          const el = document.querySelector(selector);
+          if (!el) {
+            return null;
+          }
+          const b = el.getBoundingClientRect();
+          return { left: b.left, right: b.right, top: b.top, bottom: b.bottom };
+        };
+        return {
+          surface: rect('[data-terminal-viewport]'),
+          cell: rect('.xterm'),
+          screen: rect('.xterm-screen'),
+        };
+      });
+      if (!boxes.surface || !boxes.cell || !boxes.screen) {
+        throw new Error('the fixture terminal must lay out a surface, a box and a screen');
+      }
+
+      // The grid is sized from the container's *content* box, so it is fitted to
+      // the box the inset has already been taken out of. Fitted against the
+      // padded box it was not: 373px of screen inside a 362px `.xterm` — 14px of
+      // inset on the left, 3px on the right, in every App baseline.
+      //
+      // The bound is **one column**, not zero, and the reason is a property of
+      // the approach rather than of this fix: xterm re-measures its cell while
+      // applying the resize, and draws `cols * thatCell`. When the settled cell
+      // is a fraction wider than the one the fit divided by, the difference
+      // compounds across the column count — measured on CI, a ~0.1px per-column
+      // difference over 50 columns is ~3px of overhang, where the same build
+      // locally is 2px *inside* the box. The product reads and resizes in the
+      // same order (`ResizeController`), so this is not a fixture-only tolerance.
+      //
+      // One column still separates it from the defect: fitted against the padded
+      // box the overhang was ~1.5 columns, because the inset is 28px and
+      // FitAddon subtracted only its ~17px scrollbar allowance.
+      const measured = await page.evaluate(() => {
+        // One character's advance, as the *row's* width over its character
+        // count, so nothing here depends on how xterm grouped its markup: it
+        // emits one span per styled run, and the runs it finds are not stable
+        // across profiles — measured on CI at `app.narrow-phone`, where the
+        // App profile renders `$ git status --short` as four spans, so a
+        // measurement taken from the first text node found one character where
+        // it expected a word.
+        //
+        // Rows are used only where the text is exactly the rendered text — no
+        // leading or trailing space — so the divisor is the glyph count and
+        // not the cell count. A row of a monospace grid is uniform, so any
+        // such row measures the advance; the longest is taken to average out
+        // subpixel rounding.
+        const rows = [...document.querySelectorAll('.xterm-rows > div')];
+        let best: { text: string; width: number } | null = null;
+        for (const row of rows) {
+          const text = row.textContent ?? '';
+          if (text !== text.trim() || text.length < 12) {
+            continue;
+          }
+          const range = document.createRange();
+          range.selectNodeContents(row);
+          const width = range.getBoundingClientRect().width;
+          if (width <= 0) {
+            continue;
+          }
+          if (best === null || text.length > best.text.length) {
+            best = { text, width };
+          }
+        }
+        return best === null ? null : best.width / best.text.length;
+      });
+      if (measured === null) {
+        throw new Error('no full-width rendered row to measure a column from');
+      }
+      // A divisor that is nonsense would make both bounds below meaningless, so
+      // it is checked before it is used rather than trusted.
+      expect(measured).toBeGreaterThan(2);
+      expect(measured).toBeLessThan(20);
+      const advance = measured;
+      const boxesMessage = `xterm ${boxes.cell.left}..${boxes.cell.right}, screen ${boxes.screen.left}..${boxes.screen.right}, column ${advance}`;
+      expect(boxes.screen.left, boxesMessage).toBeGreaterThanOrEqual(boxes.cell.left - advance);
+      expect(boxes.screen.right, boxesMessage).toBeLessThanOrEqual(boxes.cell.right + advance);
+      // …and the fit is tight: a grid that fitted by a column too few is as
+      // wrong as one that fitted by a column too many.
+      expect(boxes.screen.right, boxesMessage).toBeGreaterThanOrEqual(boxes.cell.right - advance);
+
+      // Non-vacuity: a screen that "fits" by collapsing to a couple of columns
+      // would satisfy the lines above, and so would a terminal whose buffer was
+      // never written. Both are ruled out by the content, in the two shapes it
+      // takes across the matrix: short lines stay whole on one row, long ones
+      // take more rows than the buffer has lines.
+      //
+      // The line named is the *first* buffer line, 20 columns, because this
+      // test runs at every viewport in the matrix and the longest line (52)
+      // does not fit the 46 columns `app.narrow-phone` lays out. Asserting the
+      // long line whole was what failed there — it holds where the grid is wide,
+      // which is a different property from the one under test.
+      //
+      // The row count is a floor rather than an equality for the same reason:
+      // the buffer has 9 non-empty lines, and wrapping only ever adds rows.
+      const rows = await page.locator('.xterm-rows > div').allTextContents();
+      expect(rows.some((row) => row.includes('$ git status --short'))).toBe(true);
+      expect(rows.filter((row) => row.trim() !== '').length).toBeGreaterThanOrEqual(9);
     });
 
     test('a pushed Workspace detail keeps its own leave (#1081)', async ({ page }) => {

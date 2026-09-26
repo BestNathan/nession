@@ -87,7 +87,27 @@ export async function gotoFixtureApp(page: Page, search = ''): Promise<void> {
   await page.getByTestId('app-layer-root').waitFor();
 }
 
-/** Wait for xterm to paint fixture buffer (renderer-agnostic). */
+/**
+ * Wait for xterm to paint the fixture buffer.
+ *
+ * Waiting for `.xterm-screen` is not enough, and the difference matters to
+ * anything that measures or photographs the terminal: xterm creates that
+ * element on `open()`, when the grid is still its 80x24 default — 600px of
+ * terminal inside a 362px well, which reads as the *opposite* of what the
+ * fixture draws a frame later. The buffer is the signal, because the fixture
+ * writes it only once it has sized the grid (#1092) — the two are one step.
+ *
+ * This used to be described as renderer-agnostic, which it no longer is:
+ * `.xterm-rows` is the DOM renderer's. The fixture constructs a bare `Terminal`
+ * with no renderer addon, so the DOM renderer is what draws it — the honest
+ * note is that the wait now depends on that, rather than on a property nobody
+ * checks.
+ */
 export async function waitForFixtureTerminal(page: Page): Promise<void> {
   await page.locator('[data-testid="fixture-terminal"] .xterm-screen').waitFor();
+  await expect
+    .poll(async () => (await page.locator('.xterm-rows > div').allTextContents()).join('\n'), {
+      timeout: 10_000,
+    })
+    .toContain('$ git status --short');
 }
