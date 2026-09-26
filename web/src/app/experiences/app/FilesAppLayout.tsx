@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { FileList, FileViewer, type FileEntry } from '@/capabilities/files';
+import { cn } from '@/shared/lib/utils';
 import { AppBackButton } from '@/app/patterns/AppBackButton';
+import { titleAppClass } from './appTypography';
 import {
   AlertDialog,
   AlertDialogContent,
@@ -69,8 +71,18 @@ export function FilesAppLayout({ ctx }: { ctx: WorkspaceContext }) {
           <AppBackButton label="Back to files" testid="files-app-back" onClick={handleBackClick} />
           {/* The path, to match the viewer's own header below it. Both name the
               open file, so a filename here and a path there read as two
-              different files rather than one. */}
-          <span className="min-w-0 truncate font-mono text-sm font-semibold">{selected.path}</span>
+              different files rather than one.
+
+              It carries the title role, not a size of its own: this is the
+              pushed page's title, and `visual-language.md`'s role vocabulary
+              names "pushed detail title" in the same breath as the Session
+              title. Mono, because it is a path — family and size are
+              independent, so a path is not a smaller string (#1073). Web's
+              `text-sm` was the primitive's desktop default standing in for a
+              title. */}
+          <span className={cn('min-w-0 truncate font-mono font-semibold', titleAppClass)}>
+            {selected.path}
+          </span>
         </div>
         <div className="min-h-0 flex-1">
           <FileViewer

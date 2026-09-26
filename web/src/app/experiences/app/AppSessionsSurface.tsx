@@ -14,6 +14,7 @@ import { SidebarAgents } from '@/app/patterns/SidebarAgents';
 import { SidebarSectionHead } from '@/app/patterns/SidebarSectionHead';
 import { SidebarFooter } from '@/app/SidebarFooter';
 import { shellMotionClass, shellRowControlMinClass } from '@/app/shellStyles';
+import { bodyAppClass } from './appTypography';
 import type { SidebarProps } from '@/app/Sidebar';
 import type { SortDirection, SortField, StatusFilter } from '@/app/useDashboard';
 
@@ -201,6 +202,7 @@ function SessionsFilters({
                 shellRowControlMinClass,
                 'max-lg:min-h-11 text-muted-foreground hover:text-foreground',
                 shellMotionClass,
+                bodyAppClass,
               )}
             >
               <Filter className="size-4" />
@@ -222,14 +224,14 @@ function SessionsFilters({
                   size="sm"
                   onClick={() => setStatusFilter(filter.key)}
                   aria-pressed={isActive}
-                  className={cn(shellRowControlMinClass, 'flex-shrink-0')}
+                  className={cn(shellRowControlMinClass, 'flex-shrink-0', bodyAppClass)}
                 >
                   {filter.label}
                 </Button>
               );
             })}
           </div>
-          <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+          <div className={cn('flex items-center gap-2 font-medium text-muted-foreground', bodyAppClass)}>
             <SortButton
               label="Name"
               field="name"
@@ -338,6 +340,7 @@ function SessionsChrome({
           className={cn(
             'justify-start rounded-none px-1 text-muted-foreground hover:text-foreground max-lg:min-h-11',
             shellMotionClass,
+            bodyAppClass,
           )}
           data-testid="create-session"
           aria-label="Create session"
