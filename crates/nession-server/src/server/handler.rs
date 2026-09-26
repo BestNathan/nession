@@ -1900,6 +1900,12 @@ impl ConnectionHandler {
                 json!({
                     "request_id": request_id,
                     "name": name,
+                    // Ignored on the far side: the Agent creates every session at
+                    // its own fixed starting size and lets the first attach
+                    // resize it (`TmuxManager::create_session`, and the sizing
+                    // decision of 2026-08-15). Kept because the agent payload
+                    // field exists and a missing key is not the same wire as one
+                    // that says 80×24 — see the note on the CLI's `--width`.
                     "width": 80,
                     "height": 24,
                     "env_snapshots": env_snapshots,

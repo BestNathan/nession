@@ -6,7 +6,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use nession_client::{AttachMode, ClientConfig, ClientConnection};
 use nession_protocol::contracts::agent::v1::{AgentListReply, WebAgentInfo};
 use nession_protocol::contracts::session::v1::{ClientSessionAttachReply, ServerSessionListReply};
-use nession_protocol::Message;
 
 /// Connect to the server, with this CLI's own failure sentence attached.
 ///
@@ -311,17 +310,35 @@ async fn attach_and_run<T: crate::terminal::TerminalTransport>(
 }
 
 /// Seconds since the Unix epoch, for the agent-facing envelopes built here.
-fn now_seconds() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|elapsed| elapsed.as_secs())
-        .unwrap_or_default()
-}
-
 /// Create a new tmux session on an agent.
 ///
-/// Connects to the server to look up the agent's address, then connects
-/// directly to the agent to send the `session.create` command.
+/// **One request on one authenticated connection.** It used to be three steps
+/// over two sockets: list every agent on the Server connection, pick this one
+/// out of the reply, *close* that connection, then dial the agent directly and
+/// speak a management command to it. That is the Server's job — authenticate,
+/// authorize, resolve the target, route — performed by a client that had
+/// already authenticated, which is why #1015 removes it rather than patches it.
+///
+/// It is also what makes the operation expressible at all now: the direct dial
+/// carried no credential, and the Agent refuses an uncredentialed connection
+/// (#1013). A consumer that never contacts the Server has nothing to present.
+///
+/// # ⚠ `--width` and `--height` do not do anything
+///
+/// They are accepted and ignored, and **always have been** — including on the
+/// direct-agent path this replaces, which passed them to an Agent function whose
+/// own doc says the parameters are ignored. Every session is created at
+/// `SESSION_WIDTH` × `SESSION_HEIGHT` (200×60) and resized by the first client
+/// to attach; the size a session has is a property of whoever attached last, not
+/// of who created it (the sizing decision of 2026-08-15).
+///
+/// Verified rather than inferred: a session created with `--width 111` came up
+/// at 200 on both paths.
+///
+/// They are still here, still named in the shell, and still passed through,
+/// because **what to do about them is a product decision this change must not
+/// take on its own** — either they go, or a create-time size becomes something
+/// the Agent honours, and that second one edits a deliberate design.
 ///
 /// # Arguments
 ///
@@ -329,60 +346,49 @@ fn now_seconds() -> u64 {
 /// * `auth_token` - Authentication token
 /// * `agent_id` - ID of the agent to create the session on
 /// * `session_name` - Name for the new session
-/// * `width` - Terminal width in columns
-/// * `height` - Terminal height in rows
+/// * `_width` - Ignored; see above
+/// * `_height` - Ignored; see above
 pub async fn create_session(
     server_url: &str,
     auth_token: &str,
     agent_id: &str,
     session_name: &str,
-    width: u16,
-    height: u16,
+    _width: u16,
+    _height: u16,
 ) -> Result<()> {
-    // Connect to server to look up agent address
     let mut client = connect(server_url, auth_token).await?;
+    println!("Creating session '{session_name}' on agent '{agent_id}'...");
 
-    // Find the agent
-    let agents = match client.list_agents().await? {
-        AgentListReply::Listed(list) => list.agents,
-        AgentListReply::Refused(refusal) => {
-            anyhow::bail!("Server refused to list agents: {}", refusal.message)
-        }
-    };
-    client.close().await.ok();
-
-    let agent = agents
-        .iter()
-        .find(|a| a.agent_id == agent_id)
-        .with_context(|| format!("Agent '{agent_id}' not found. Is it registered?"))?;
-
-    if agent.status != "online" {
-        anyhow::bail!(
-            "Agent '{}' is not online (status: {}). Cannot create session.",
-            agent_id,
-            agent.status
-        );
-    }
-
-    let agent_address = format!("{}:{}", agent.ip_address, agent.port);
-    println!("Creating session '{session_name}' on agent '{agent_id}' ({width}x{height})...");
-
-    let created_name = create_session_on_agent(&agent_address, session_name, width, height)
+    let reply = client
+        .create_session(agent_id, session_name)
         .await
         .with_context(|| {
             format!("Failed to create session '{session_name}' on agent '{agent_id}'")
         })?;
+    client.close().await.ok();
 
-    println!("Session '{created_name}' created successfully.");
+    if !reply.success {
+        // The Server's own sentence, not a paraphrase of it. It knows which of
+        // the cases this is — an unknown agent, an offline one, a name already
+        // taken — and a client that restates it can only be less specific.
+        let reason = reply.error.unwrap_or_else(|| "no reason given".to_string());
+        anyhow::bail!("Server refused to create session '{session_name}': {reason}");
+    }
+
+    println!(
+        "Session '{}' created successfully.",
+        reply.session_id.as_deref().unwrap_or(session_name)
+    );
 
     Ok(())
 }
 
 /// Kill a tmux session on an agent.
 ///
-/// Parses the session_id (format: `agent_id:session_name`), looks up the
-/// agent's address from the server, then connects directly to the agent
-/// to send the `session.kill` command.
+/// Parses the session_id (format: `agent_id:session_name`) and asks the Server,
+/// which resolves the agent and routes the kill. The parse stays because the
+/// wire takes a whole `session_id` and a malformed one is worth naming here
+/// rather than sending for the Server to reject.
 ///
 /// # Arguments
 ///
@@ -390,171 +396,26 @@ pub async fn create_session(
 /// * `auth_token` - Authentication token
 /// * `session_id` - Session ID in format "agent_id:session_name"
 pub async fn kill_session(server_url: &str, auth_token: &str, session_id: &str) -> Result<()> {
-    // Parse session_id (format: agent_id:session_name)
     let (agent_id, session_name) = session_id.split_once(':').with_context(|| {
         format!("Invalid session ID '{session_id}'. Expected format: agent_id:session_name")
     })?;
 
-    // Connect to server to look up agent address
     let mut client = connect(server_url, auth_token).await?;
-
-    // Find the agent
-    let agents = match client.list_agents().await? {
-        AgentListReply::Listed(list) => list.agents,
-        AgentListReply::Refused(refusal) => {
-            anyhow::bail!("Server refused to list agents: {}", refusal.message)
-        }
-    };
-    client.close().await.ok();
-
-    let agent = agents
-        .iter()
-        .find(|a| a.agent_id == agent_id)
-        .with_context(|| format!("Agent '{agent_id}' not found. Is it registered?"))?;
-
-    let agent_address = format!("{}:{}", agent.ip_address, agent.port);
     println!("Killing session '{session_name}' on agent '{agent_id}'...");
 
-    let killed_name = kill_session_on_agent(&agent_address, session_name)
-        .await
-        .with_context(|| {
-            format!("Failed to kill session '{session_name}' on agent '{agent_id}'")
-        })?;
+    let reply = client.kill_session(session_id).await.with_context(|| {
+        format!("Failed to kill session '{session_name}' on agent '{agent_id}'")
+    })?;
+    client.close().await.ok();
 
-    println!("Session '{killed_name}' killed successfully.");
+    if !reply.success {
+        let reason = reply.error.unwrap_or_else(|| "no reason given".to_string());
+        anyhow::bail!("Server refused to kill session '{session_name}': {reason}");
+    }
+
+    println!("Session '{session_name}' killed successfully.");
 
     Ok(())
-}
-
-// ── The direct-to-agent management path ─────────────────────────────────────
-//
-// **Stage 2 of #1015 deletes both of these**, and they are here rather than in
-// `nession-client` on purpose.
-//
-// Creating and killing a session goes *direct to the agent* today. The Server
-// already serves `server.session.create` and `server.session.kill` — this crate
-// has simply never asked it — so what an operator runs is a second control
-// plane that skips the Server's whole authenticate → authorize → resolve target
-// → route path, over a socket the agent asks no authentication for.
-//
-// It lives in the CLI because that is the shape of the mistake: a CLI-local
-// shortcut. `nession-client`'s dependency list has no `nession-agent` and no
-// `nession-server`, so the shared boundary *cannot spell this* — which is the
-// point. Moving these two functions there would make the accidental management
-// plane part of the official client and hand it to the next consumer.
-
-// TODO(#1015 stage 2): delete both, and send `server.session.*` on the
-// authenticated connection instead.
-//
-// Note the wire is a literal here rather than a `nession-client` constant: the
-// boundary carries no `agent.*` unit yet, and giving it one is stage 3's job
-// (it is also where the P2P credential lands, so the two changes are one).
-async fn create_session_on_agent(
-    agent_address: &str,
-    session_name: &str,
-    width: u16,
-    height: u16,
-) -> Result<String> {
-    let reply = ask_agent(
-        agent_address,
-        "agent.session.create",
-        "create",
-        serde_json::json!({ "name": session_name, "width": width, "height": height }),
-    )
-    .await?;
-
-    Ok(agent_session_name(&reply, session_name))
-}
-
-async fn kill_session_on_agent(agent_address: &str, session_name: &str) -> Result<String> {
-    let reply = ask_agent(
-        agent_address,
-        "agent.session.kill",
-        "kill",
-        serde_json::json!({ "name": session_name }),
-    )
-    .await?;
-
-    Ok(agent_session_name(&reply, session_name))
-}
-
-/// The name the agent reported, falling back to the one we asked about.
-fn agent_session_name(reply: &serde_json::Value, asked_for: &str) -> String {
-    reply
-        .get("payload")
-        .and_then(|payload| payload.get("name"))
-        .and_then(|name| name.as_str())
-        .unwrap_or(asked_for)
-        .to_string()
-}
-
-/// Put one request on a direct agent socket and read one answer.
-///
-/// Envelopes here go through [`Message`] rather than a hand-built `json!` block
-/// for a reason worth stating: a literal envelope key in this file would make it
-/// a *declaring* file to `scripts/protocol-gate.mjs`, and a declaring file has
-/// every dotted constant in it added to the wire set the gate checks against.
-/// There are none here today, and the gate's selftest now fails if one appears.
-async fn ask_agent(
-    agent_address: &str,
-    wire: &str,
-    id_prefix: &str,
-    payload: serde_json::Value,
-) -> Result<serde_json::Value> {
-    use futures_util::{SinkExt, StreamExt};
-
-    let url = format!("ws://{agent_address}");
-    // No credential: this helper never contacts the Server, so it has none to
-    // present. It is the alternate management path #1013 removes — stage 2's
-    // next step routes create/kill through `server.session.*` and deletes this.
-    let mut ws = nession_client::P2pConnection::connect(&url, "")
-        .await
-        .with_context(|| format!("Failed to connect to agent at {url}"))?
-        .into_stream();
-
-    let request = Message::new(
-        wire,
-        format!("{id_prefix}-{}", now_seconds()),
-        now_seconds(),
-        payload,
-    );
-    ws.send(tokio_tungstenite::tungstenite::Message::Text(
-        serde_json::to_string(&request)?,
-    ))
-    .await
-    .with_context(|| format!("Failed to send {wire} to agent"))?;
-
-    let Some(frame) = ws.next().await else {
-        anyhow::bail!("Agent closed the connection before answering {wire}")
-    };
-    let tokio_tungstenite::tungstenite::Message::Text(text) = frame? else {
-        anyhow::bail!("Unexpected message type from agent")
-    };
-    let response: serde_json::Value = serde_json::from_str(&text)?;
-
-    let msg_type = response
-        .get("msg_type")
-        .and_then(|value| value.as_str())
-        .unwrap_or("");
-    match msg_type {
-        "ok" => Ok(response),
-        "error" => {
-            let code = response
-                .get("payload")
-                .and_then(|payload| payload.get("code"))
-                .and_then(|code| code.as_str())
-                .unwrap_or("unknown");
-            let message = response
-                .get("payload")
-                .and_then(|payload| payload.get("message"))
-                .and_then(|message| message.as_str())
-                .unwrap_or("unknown error");
-            anyhow::bail!("Agent error ({code}): {message}")
-        }
-        other => {
-            anyhow::bail!("Unexpected response from agent: expected 'ok' or 'error', got '{other}'")
-        }
-    }
 }
 
 /// Format a timestamp string (ISO 8601 or Unix seconds) into "Xs ago" or "Xm ago".
