@@ -145,6 +145,46 @@ test.describe('App 390×844', () => {
     });
   });
 
+  // #1083 §9's two empty states. Neither was reachable before this change:
+  // `?selection=none` only deselects and the list still held six rows, and the
+  // fixture advertised one online Agent unconditionally — so the screens the
+  // issue specifies existed only in the issue. Same reasoning as the no-Session
+  // home above: a rendering no route can produce is a rendering nobody checked.
+  test('Sessions with no Sessions at all', async ({ page }) => {
+    await gotoFixtureApp(page, '?sessions=none');
+    await page.getByTestId('app-header-sessions').first().click();
+    await expect(page.getByTestId('app-layer-sessions')).toBeInViewport();
+
+    // The empty state is an invitation, and the assertion that it is one is
+    // that its action is live — an empty list with a dead button is the status
+    // report `visual-language.md` §Empty states replaces.
+    await expect(page.getByTestId('app-sessions-empty')).toBeVisible();
+    await expect(page.getByTestId('app-sessions-empty-new-session')).toBeEnabled();
+    await expect(page.getByTestId('app-sessions-empty-no-agent')).toHaveCount(0);
+
+    await expect(page).toHaveScreenshot('app-sessions-empty.png', {
+      fullPage: true,
+      ...FIXTURE_SCREENSHOT,
+    });
+  });
+
+  test('Sessions with no online Agent', async ({ page }) => {
+    await gotoFixtureApp(page, '?sessions=none&agents=offline');
+    await page.getByTestId('app-header-sessions').first().click();
+    await expect(page.getByTestId('app-layer-sessions')).toBeInViewport();
+
+    // Creation cannot succeed, so the control stays visible and says why. Both
+    // halves are asserted: the disabled button alone would photograph the same
+    // whether or not the explanation rendered.
+    await expect(page.getByTestId('app-sessions-empty-new-session')).toBeDisabled();
+    await expect(page.getByTestId('app-sessions-empty-no-agent')).toBeVisible();
+
+    await expect(page).toHaveScreenshot('app-sessions-empty-no-agent.png', {
+      fullPage: true,
+      ...FIXTURE_SCREENSHOT,
+    });
+  });
+
   // #838: a capability emerging beside the capsule. It had no fixture route
   // until the capsule rendered in one — `terminal ?? <TerminalRegion/>` meant
   // neither fixture drew a composer at all.

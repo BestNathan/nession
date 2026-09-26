@@ -47,6 +47,17 @@ export interface SessionListProps {
   /** Forwarded to every row. See `SessionItemProps['showRecency']`. */
   showRowRecency?: boolean;
   /**
+   * Replaces the "No sessions yet" block. Defaults to it.
+   *
+   * The caller supplies the whole block, not copy: the App's empty state offers
+   * the creation action, and threading `onCreate`/`createDisabled` down here
+   * would make this shared pattern know about creation — which is the App's
+   * question, and one Web answers differently.
+   */
+  emptyState?: ReactNode;
+  /** Replaces the "No sessions match your search" block. Defaults to it. */
+  searchMissState?: ReactNode;
+  /**
    * Rendered after the last row, inside the scroll area.
    *
    * For a secondary navigation entry that belongs *below* history rather than
@@ -73,6 +84,8 @@ export function SessionList({
   groups,
   showRowRecency = true,
   footer,
+  emptyState,
+  searchMissState,
 }: SessionListProps) {
   if (loading) {
     return (
@@ -87,16 +100,24 @@ export function SessionList({
   if (sessions.length === 0) {
     if (isSearchActive) {
       return (
-        <div className="flex flex-col items-center px-4 py-8 text-muted-foreground">
-          <SearchX className="mb-2 size-8" />
-          <p className="text-sm">No sessions match your search</p>
-        </div>
+        <>
+          {searchMissState ?? (
+            <div className="flex flex-col items-center px-4 py-8 text-muted-foreground">
+              <SearchX className="mb-2 size-8" />
+              <p className="text-sm">No sessions match your search</p>
+            </div>
+          )}
+        </>
       );
     }
     return (
-      <div className="flex h-full items-center justify-center p-4 text-muted-foreground text-sm">
-        No sessions yet. Select New Session to get started.
-      </div>
+      <>
+        {emptyState ?? (
+          <div className="flex h-full items-center justify-center p-4 text-muted-foreground text-sm">
+            No sessions yet. Select New Session to get started.
+          </div>
+        )}
+      </>
     );
   }
 
