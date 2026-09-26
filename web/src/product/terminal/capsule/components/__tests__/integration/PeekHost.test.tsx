@@ -226,7 +226,7 @@ describe('capability projection frame', () => {
       depth: 'signal',
       ownsInputFocus: true,
       onDismiss: vi.fn(),
-      body: (focus, setFocus, actions) =>
+      body: (_focus, setFocus, actions) =>
         terminalKeysProjection.body({
           agentId: 'a1',
           sessionId: 's1',
