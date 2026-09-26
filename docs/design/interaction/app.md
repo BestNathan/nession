@@ -20,7 +20,11 @@ Conceptually:
 Navigation  ←  Work  →  Context
 ```
 
-This is a navigation relationship, not a claim that Workspace is a static feature page.
+This is a navigation relationship, not a claim that Workspace is a static feature page,
+and it is a statement about the **product** rather than about how the App is built. The
+App is not required to render a pager, a carousel, or three permanently translated pages.
+What the model constrains is where the user can go and what is adjacent to what — not the
+mechanism that gets them there.
 
 ## Terminal-first Session surface
 
@@ -29,6 +33,16 @@ When the user creates or attaches to a Session, the Terminal should occupy the w
 The surrounding UI stays quiet. Session identity, connectivity, and controls are visible only to the degree needed to understand or recover the work.
 
 The App should feel like returning to an active place of work, not entering a management dashboard.
+
+**The Terminal is the root of a selected Session.** Sessions and Workspace are reached
+*from* it and return to it, and while either is open the Terminal stays mounted
+underneath. This constrains the implementation, not only the look: a navigation event must
+not unmount the Terminal, because unmounting rebuilds xterm, the attach state and the
+scrollback, and turns "return to where I was" into a state-restoration problem. Layers,
+drawers and pushed views satisfy this by construction. A translated pager satisfies it
+only by keeping every page mounted at all times — which worked, but also meant the App
+rendered two page headers and two sets of navigation controls at all times, and gave the
+shell no way to say which page was current.
 
 ## Contextual interaction capsule
 
@@ -77,8 +91,13 @@ Opening Workspace must preserve the originating Session and capability context. 
 
 ## Gestures and visible alternatives
 
-- Swipe right from the Terminal surface to reveal/open Sessions.
-- Swipe left from the Terminal surface to reveal/open Workspace.
+- Swipe right to reveal/open Sessions; swipe left to reveal/open Workspace.
+- The gesture spans the shell chrome, and is **bounded by work-surface
+  exclusion**: it does not begin inside a surface that owns its own touch
+  behaviour — the terminal viewport (selection, scrollback, TUI mouse
+  reporting), a CodeMirror editor, a text input, or the capsule composer. The
+  surface still needs the shell to define *where* top-level navigation may
+  start, not only which axis a captured drag resolved to.
 - Gestures are accelerators, not the only discoverable or accessible path.
 - Sessions and Workspace must also have visible controls, but those controls should remain visually quiet when they are not the user's current intent.
 
@@ -113,6 +132,17 @@ App presentation should normally map it as follows:
 
 Exact detection is implementation-specific.
 
+## Device and viewport coverage
+
+The executable matrix is [`design/contracts/viewports.json`](../../../design/contracts/viewports.json) — the single source that the browser contract suite iterates. For App it currently pins portrait at 375 / 390 / 430 and landscape at 844×390.
+
+**Two scenarios are not covered, and are recorded here as limitations rather than left silently unchecked** (#1049):
+
+- **Safe area.** Every consumer of `env(safe-area-inset-*)` in the web client uses `-top` or `-bottom`; `-left` and `-right` appear nowhere. That is adequate in portrait, where the notches and the home indicator are top and bottom — but landscape is exactly the case where those insets move to the **sides**, and nothing accounts for that. No fixture sets a non-zero inset, and Playwright cannot synthesise `env()` values without a real device.
+- **Software keyboard.** Opening an IME changes the visual viewport, and the capsule is meant to stay docked above it. No test exercises this: jsdom has no keyboard, and the Playwright fixtures run without one. Resizing the viewport in a test is *not* a substitute — it emulates a smaller viewport, not an IME appearing over one.
+
+Closing either needs a real device or emulator. Until then this is a **known evidence gap, not a known defect**: nothing here says the App breaks under an IME or a landscape inset, only that no test would notice if it did.
+
 ## What App must not do
 
 - Ship as a responsive/shrunken Web dashboard.
@@ -126,6 +156,9 @@ Exact detection is implementation-specific.
 ## Implementation boundary
 
 The implementation does not need to literally maintain three permanently translated pages. Sessions may be a drawer/layer, Terminal the root content, Workspace a contextual layer, and capability details overlays or pushed views.
+
+The App ships this way (#1049): the Terminal is the root and Sessions and Workspace are
+layers over it, so opening either one does not unmount the work surface.
 
 The product requirements are:
 

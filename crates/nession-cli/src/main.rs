@@ -7,8 +7,6 @@ mod commands;
 
 mod update;
 
-mod client;
-
 mod terminal;
 
 mod utils;

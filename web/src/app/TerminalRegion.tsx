@@ -2,13 +2,18 @@ import { cn } from '@/shared/lib/utils';
 import { TerminalPane } from '@/product/terminal/TerminalPane';
 import { TerminalSurface } from '@/product/terminal/patterns/TerminalSurface';
 import type { CapsuleCapabilityContribution } from '@/app/capsulePresence';
-import type { CapsuleCapabilityProjection } from '@/product/terminal/capsule/types';
+import type {
+  CapsuleCapabilityProjection,
+  CapsuleExperience,
+} from '@/product/terminal/capsule/types';
 import { useTerminalOrchestration } from '@/product/terminal/useTerminalOrchestration';
 
 export interface TerminalRegionProps {
   hidden: boolean;
   onDisconnect: () => void;
   onError: (error: Error) => void;
+  /** Which experience's capsule to render — supplied by the shell. */
+  experience: CapsuleExperience;
   /** What the capsule may show: the chip that earned presence, plus the rest on demand. */
   capsuleCapabilities?: CapsuleCapabilityContribution;
   capsuleProjection?: CapsuleCapabilityProjection;
@@ -22,6 +27,7 @@ export function TerminalRegion({
   hidden,
   onDisconnect,
   onError,
+  experience,
   capsuleCapabilities,
   capsuleProjection,
 }: TerminalRegionProps) {
@@ -46,6 +52,7 @@ export function TerminalRegion({
         </div>
       ) : (
         <TerminalSurface
+          experience={experience}
           inputDisabled={inputDisabled}
           controller={controller}
           isSwitching={isSwitching}

@@ -9,6 +9,12 @@ SERVER_BACKEND="${SERVER_BACKEND:-127.0.0.1:19090}"
 AGENT_ID="${AGENT_ID:-docker-agent}"
 AGENT_SERVER_URL="${AGENT_SERVER_URL:-}"
 AGENT_AUTH_TOKEN="${AGENT_AUTH_TOKEN:-}"
+# The token clients present to this agent's own P2P socket (#1013). Required in
+# standalone mode (AGENT_SERVER_URL empty), where no Server is there to mint a
+# credential per attach; the agent refuses to start without one, because an
+# empty store would refuse every connection. Unused when AGENT_SERVER_URL is
+# set, and the agent says so at startup rather than ignoring it silently.
+AGENT_TOKEN="${AGENT_TOKEN:-}"
 AGENT_CONNECT_URL="${AGENT_CONNECT_URL:-}"
 # tmux socket. Left empty the agent uses /tmp/nession-<uid>/tmux.sock, which is
 # always writable in a container. Override only if /tmp is unsuitable — do NOT
@@ -34,6 +40,7 @@ agent_id = "${AGENT_ID}"
 listen_address = "${AGENT_LISTEN}"
 server_url = "${AGENT_SERVER_URL}"
 auth_token = "${AGENT_AUTH_TOKEN}"
+agent_token = "${AGENT_TOKEN}"
 heartbeat_interval_secs = 10
 session_poll_interval_secs = 5
 TOML
@@ -86,6 +93,9 @@ echo "=== nession-agent ==="
 echo "  Agent ID:    $AGENT_ID"
 echo "  Listen:      $AGENT_LISTEN"
 echo "  Server URL:  ${AGENT_SERVER_URL:-<standalone>}"
+if [ -z "${AGENT_SERVER_URL}" ]; then
+  echo "  P2P token:   ${AGENT_TOKEN:+set}"
+fi
 echo "  Nginx:       :${LISTEN_PORT} -> $SERVER_BACKEND"
 echo "  Connect URL: ${AGENT_CONNECT_URL:-<auto>}"
 echo "  tmux:        $(tmux -V 2>/dev/null || echo 'not found')"

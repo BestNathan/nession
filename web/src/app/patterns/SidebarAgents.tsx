@@ -7,6 +7,15 @@ export interface SidebarAgentsProps {
   agents: Agent[];
   /** The agent the active Session runs on, if any. */
   activeAgentId: string | null;
+  /**
+   * Whether to draw the section's own "Agents" head.
+   *
+   * `false` for a caller that owns the head because it is also the section's
+   * disclosure trigger — the App's Sessions surface (#1050). Drawing it in both
+   * places would put two "Agents" labels in one disclosure. Defaults to `true`,
+   * which is what the Web sidebar renders and has always rendered.
+   */
+  showSectionHead?: boolean;
 }
 
 /**
@@ -26,8 +35,30 @@ export interface SidebarAgentsProps {
  * Rows are neutral. `session-list.md` forbids "decorative per-Agent coloring",
  * and the Boundary axis colours a node only when the boundary has been crossed —
  * see the note on the active marker below.
+ *
+ * **Rows are set in the product face, not monospace** (#1050 stage 4). This row
+ * is infrastructure *context* — a node's name and how much work sits on it — and
+ * the typography rule reserves monospace for technical workload identity
+ * ("foreground command; technical ID; path/location where appropriate"), adding
+ * explicitly that infrastructure/navigation chrome is not rendered in mono by
+ * default. The token description that used to argue the opposite ("a node name
+ * is infrastructure identity" → monospace) cited `visual-language.md` for a
+ * licence the document does not give: its mono role is "terminal text, paths,
+ * commands, code". Both experiences render this section, so the fix is shared
+ * rather than App-only.
+ *
+ * The count keeps `tabular-nums`. That is the property monospace was actually
+ * contributing here — digits that do not jitter as a heartbeat changes them —
+ * and it is a font feature, so the product face provides it. It is also what the
+ * sibling Agents count in the App's disclosure trigger already uses
+ * (`AppSessionsSurface`), which would otherwise be the same quantity set two
+ * ways in one surface.
  */
-export function SidebarAgents({ agents, activeAgentId }: SidebarAgentsProps) {
+export function SidebarAgents({
+  agents,
+  activeAgentId,
+  showSectionHead = true,
+}: SidebarAgentsProps) {
   if (agents.length === 0) {
     return null;
   }
@@ -38,7 +69,7 @@ export function SidebarAgents({ agents, activeAgentId }: SidebarAgentsProps) {
       aria-label="Agents"
       className="flex shrink-0 flex-col px-[var(--shell-space-2)]"
     >
-      <SidebarSectionHead label="Agents" />
+      {showSectionHead ? <SidebarSectionHead label="Agents" /> : null}
       <ul className="flex flex-col">
         {agents.map((agent) => {
           const active = agent.agent_id === activeAgentId;
@@ -50,7 +81,7 @@ export function SidebarAgents({ agents, activeAgentId }: SidebarAgentsProps) {
               data-agent-active={active ? 'true' : undefined}
               title={`${agentDisplayName(agent)} — ${online ? 'online' : agent.status}`}
               className={cn(
-                'flex w-full items-center gap-[var(--shell-space-2)] rounded-[var(--shell-session-row-radius)] px-[var(--shell-space-2)] py-[var(--shell-node-row-pad-y)] font-mono text-[length:var(--shell-node-font-size)]',
+                'flex w-full items-center gap-[var(--shell-space-2)] rounded-[var(--shell-session-row-radius)] px-[var(--shell-space-2)] py-[var(--shell-node-row-pad-y)] text-[length:var(--shell-node-font-size)]',
                 active ? 'text-foreground' : 'text-[color:var(--text-secondary)]',
               )}
             >

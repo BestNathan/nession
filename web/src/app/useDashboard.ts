@@ -69,7 +69,21 @@ interface FilterSessionsOpts {
   sortDirection: SortDirection;
 }
 
-function filterSessions(
+/**
+ * The Session list as the product renders it: filtered by Agent status and by
+ * query, then sorted.
+ *
+ * Exported because the fixture route has to produce the *same* list rather than
+ * a second one that could disagree with it. `FixtureApp` composes this with
+ * `useDashboardFilter` and its own deterministic data — `useDashboard` minus
+ * the transport (#1050 stage 5). A fixture that filtered another way, by
+ * Session name alone say, would assert a result the product does not produce.
+ *
+ * The sort is not separable from the filter: the product never renders an
+ * unsorted list, so a caller that took only the filtering half would be
+ * rendering an order nothing else in the app can reach.
+ */
+export function filterSessions(
   sessions: Session[],
   agents: Agent[],
   opts: FilterSessionsOpts,

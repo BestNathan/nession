@@ -12,7 +12,7 @@ use base64::Engine;
 use futures_util::{SinkExt, StreamExt};
 use nession_agent::config::AttachMode;
 use nession_agent::connection::ServerClient;
-use nession_agent::server::websocket::AgentServer;
+use nession_agent::server::websocket::{AgentServer, AgentServerContext};
 use nession_agent::sync::heartbeat::HeartbeatLoop;
 use nession_agent::sync::session_watcher::SessionWatcher;
 use nession_agent::tmux::manager::SessionManager;
@@ -90,7 +90,9 @@ async fn start_server(
     let addr = server.local_addr()?;
 
     let handle = tokio::spawn(async move {
-        let _ = server.run().await;
+        let _ = server
+            .run(nession_common::readiness::Readiness::Unwatched)
+            .await;
     });
 
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -98,12 +100,27 @@ async fn start_server(
 }
 
 /// Start the agent's internal WebSocket server (for P2P/relay connections).
-/// OS picks a free port; returns the real bound address.
+/// OS picks a free port; returns the real bound address, and the credential
+/// store that listener verifies against.
+///
+/// The store is returned rather than kept private because the `ServerClient`
+/// [`register_agent`] builds must write into **this** one. The Server pushes
+/// the relay credential as `agent.p2p.grant` over the connection the agent
+/// dialled out, and the Agent checks it on the listener the Server then dials —
+/// so two stores would mean a credential granted into one and verified against
+/// the other, which is a relay that refuses every legitimate attach. `runtime`
+/// builds it once for exactly that reason (#1013); in production the store
+/// reaches both through `AgentServerContext`.
 async fn start_agent(
     agent_id: &str,
-) -> anyhow::Result<(std::net::SocketAddr, nession_agent::server::ServerHandle)> {
+) -> anyhow::Result<(
+    std::net::SocketAddr,
+    nession_agent::server::ServerHandle,
+    Arc<nession_agent::p2p_credentials::P2pCredentials>,
+)> {
     let tmp = Box::leak(Box::new(tempfile::tempdir()?));
     let (resize, _resize_updates) = nession_agent::server::ResizeReporter::new();
+    let credentials = Arc::new(nession_agent::p2p_credentials::P2pCredentials::new());
     let server = AgentServer::new(
         "127.0.0.1:0",
         agent_id,
@@ -111,20 +128,28 @@ async fn start_agent(
         "/tmp".to_string(),
         tmp.path().to_string_lossy().as_ref(),
         AttachMode::Plain,
-        resize,
+        AgentServerContext {
+            resize,
+            credentials: Arc::clone(&credentials),
+        },
     )?;
 
     let (handle, addr) = server.start().await?;
 
-    Ok((addr, handle))
+    Ok((addr, handle, credentials))
 }
 
 /// Register an agent with the central server so it shows as Online.
+///
+/// `credentials` must be the store [`start_agent`] handed its listener, not a
+/// fresh one: this connection is where the Server's `agent.p2p.grant` lands,
+/// and the listener is where it is checked (#1013).
 async fn register_agent(
     server_addr: std::net::SocketAddr,
     agent_id: &str,
     auth_token: &str,
     agent_port: u16,
+    credentials: Arc<nession_agent::p2p_credentials::P2pCredentials>,
 ) -> anyhow::Result<nession_agent::connection::ServerClientHandle> {
     let metadata = AgentMetadata {
         tmux_version: "3.3".to_string(),
@@ -157,6 +182,7 @@ async fn register_agent(
             Vec::new(),
             nession_agent::protocol::served_descriptors()?,
         )?)),
+        credentials,
     );
 
     Ok(client.connect_and_run().await?.0)
@@ -219,7 +245,8 @@ async fn relay_attach_and_terminal_io() {
 
     // 1. Start server and agent.
     let (server_addr, server_handle, _db_dir) = start_server("test-token").await.unwrap();
-    let (agent_addr, agent_handle) = start_agent("relay-test-agent").await.unwrap();
+    let (agent_addr, agent_handle, agent_credentials) =
+        start_agent("relay-test-agent").await.unwrap();
 
     // 2. Create a tmux session.
     let tmux = SessionManager::new();
@@ -233,6 +260,7 @@ async fn relay_attach_and_terminal_io() {
         "relay-test-agent",
         "test-token",
         agent_addr.port(),
+        Arc::clone(&agent_credentials),
     )
     .await
     .unwrap();

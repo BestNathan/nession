@@ -332,6 +332,53 @@ describe('Shell', () => {
     expect(screen.getByTestId('kill-session-dialog')).toBeInTheDocument();
   });
 
+  /**
+   * The row's Kill action — now inside the `…` menu below `lg` (#1050 stage 2)
+   * — has to reach the confirmation, not the kill. `setSessionToKill` is the
+   * seam: typing the Session's name is what unlocks the destructive button, and
+   * a row that killed directly would bypass it.
+   *
+   * The dashboard is mocked here, so the mock writes the field the real
+   * `useDashboardModals` state owns and the Shell is re-rendered on the result
+   * — the `sessionToKill !== null` that `ShellDialogs` turns into the dialog.
+   * What this adds over `opens kill dialog` above is the half that test cannot
+   * see: that the row routes to that state at all.
+   */
+  it('routes the row overflow Kill action to the kill confirmation', async () => {
+    const setSessionToKill = vi.fn((killed: Session | null) => {
+      dashboard.current = { ...dashboard.current, sessionToKill: killed };
+    });
+    dashboard.current = {
+      ...dashboard.current,
+      agents: [agent],
+      sessions: [sess],
+      filteredSessions: [sess],
+      staleAgents: [],
+      sessionToKill: null,
+      setSessionToKill,
+    };
+    const view = renderShell();
+    expect(screen.queryByTestId('kill-session-dialog')).not.toBeInTheDocument();
+
+    await userEvent.click(
+      screen.getByTestId(`session-actions-${sess.session_id}`),
+    );
+    const kill = await screen.findByTestId(
+      `session-actions-kill-${sess.session_id}`,
+    );
+    await waitFor(() => {
+      expect(kill).not.toHaveStyle({ pointerEvents: 'none' });
+    });
+    await userEvent.click(kill);
+
+    expect(setSessionToKill).toHaveBeenCalledWith(sess);
+    expect(dashboard.current.sessionToKill).toEqual(sess);
+
+    view.unmount();
+    renderShell();
+    expect(screen.getByTestId('kill-session-dialog')).toBeInTheDocument();
+  });
+
   it('disables create when no online agents', async () => {
     dashboard.current = {
       ...dashboard.current,
@@ -419,27 +466,27 @@ describe('Shell', () => {
 
   // The Web back-to-list control is gone with the header (#748). Web never
   // needed one: at wide the sidebar is a column, and below `lg` a selected
-  // Session hands off to the App spatial shell, which carries its own nav.
+  // Session hands off to the App's layer composition, which carries its own nav.
 
-  it('mounts AppSpatialShell on mobile when a session is selected (no XOR back)', async () => {
+  it('mounts the App layer composition on mobile when a session is selected (no XOR back)', async () => {
     mobileNav.isWide = false;
     mobileNav.showList = true;
     mobileNav.showDetail = false;
     renderShell();
-    expect(screen.queryByTestId('app-spatial-shell')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('app-layer-root')).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByTestId('session-item-a1:fix'));
-    expect(screen.getByTestId('app-spatial-shell')).toBeInTheDocument();
+    expect(screen.getByTestId('app-layer-root')).toBeInTheDocument();
     expect(screen.queryByTestId('back-to-list')).not.toBeInTheDocument();
   });
 
-  it('does not mount AppSpatialShell on desktop after selecting a session', async () => {
+  it('does not mount the App layer composition on desktop after selecting a session', async () => {
     mobileNav.isWide = true;
     mobileNav.showList = true;
     mobileNav.showDetail = true;
     deepLink.sessionIdFromUrl = sess.session_id;
     renderShell();
     await userEvent.click(screen.getByTestId('session-item-a1:fix'));
-    expect(screen.queryByTestId('app-spatial-shell')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('app-layer-root')).not.toBeInTheDocument();
   });
 });

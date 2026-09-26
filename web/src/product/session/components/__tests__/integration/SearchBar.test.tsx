@@ -3,12 +3,23 @@ import { render, screen, act, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { SearchBar } from '@/product/session/components/SearchBar';
 
+/**
+ * Copy is asserted in exactly two places — the default, and an experience's
+ * override. Every other case locates the field by role rather than by its
+ * placeholder: a locator that restates the copy would turn each experience's
+ * next wording decision into a failing behaviour test about debouncing.
+ */
 describe('SearchBar', () => {
   afterEach(() => {
     vi.useRealTimers();
   });
 
-  it('renders search input and all 3 toggle buttons', () => {
+  it("defaults to the Web column's copy", () => {
+    // The default is Web's string and stays Web's: `SessionListHeader` renders
+    // `SearchBar` with no `placeholder`, so this literal is what the Web
+    // sidebar shows. The App passes its own instead of moving this one (#1050
+    // stage 3) — because changing a shared default would move Web's copy and
+    // Web's goldens as a side effect of an App issue.
     render(
       <SearchBar
         searchQuery=""
@@ -26,6 +37,26 @@ describe('SearchBar', () => {
     expect(screen.getByRole('button', { name: /Offline/ })).toBeInTheDocument();
   });
 
+  it('renders the copy its experience passes instead of the default', () => {
+    render(
+      <SearchBar
+        searchQuery=""
+        setSearchQuery={vi.fn()}
+        statusFilter="all"
+        setStatusFilter={vi.fn()}
+        onlineCount={3}
+        offlineCount={5}
+        placeholder="Search sessions..."
+      />,
+    );
+
+    expect(screen.getByPlaceholderText('Search sessions...')).toBeInTheDocument();
+    // Not both: a field that renders one string must not also match the other.
+    expect(
+      screen.queryByPlaceholderText('Search agents and sessions...'),
+    ).not.toBeInTheDocument();
+  });
+
   it('calls setSearchQuery after 200ms debounce', () => {
     vi.useFakeTimers();
     const setSearchQuery = vi.fn();
@@ -41,7 +72,7 @@ describe('SearchBar', () => {
       />,
     );
 
-    const input = screen.getByPlaceholderText('Search agents and sessions...');
+    const input = screen.getByRole('textbox');
     fireEvent.change(input, { target: { value: 'dev' } });
 
     // Should not have been called yet
@@ -68,7 +99,7 @@ describe('SearchBar', () => {
       />,
     );
 
-    const input = screen.getByPlaceholderText('Search agents and sessions...');
+    const input = screen.getByRole('textbox');
     fireEvent.change(input, { target: { value: 'dev' } });
 
     // Advance time only 100ms — before the 200ms debounce
@@ -148,7 +179,7 @@ describe('SearchBar', () => {
       />,
     );
 
-    const input = screen.getByPlaceholderText('Search agents and sessions...') as HTMLInputElement;
+    const input = screen.getByRole('textbox') as HTMLInputElement;
     expect(input.value).toBe('test query');
   });
 
@@ -183,7 +214,7 @@ describe('SearchBar', () => {
       />,
     );
 
-    const input = screen.getByPlaceholderText('Search agents and sessions...');
+    const input = screen.getByRole('textbox');
     fireEvent.change(input, { target: { value: 'abort-me' } });
 
     // Before debounce fires, parent updates searchQuery externally
@@ -222,7 +253,7 @@ describe('SearchBar', () => {
       />,
     );
 
-    const input = screen.getByPlaceholderText('Search agents and sessions...');
+    const input = screen.getByRole('textbox');
 
     // First keystroke
     fireEvent.change(input, { target: { value: 'a' } });

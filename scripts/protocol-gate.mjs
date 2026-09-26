@@ -613,8 +613,19 @@ function scanFile(file) {
         // misspelling hides, and it is the same class of mistake as a bad
         // literal.
         if (wireOnlyIfDotted) continue; // a computed frame payload, not a protocol
-        const shown = target.trim().split('\n')[0].slice(0, 40);
-        const ident = /&?\s*(?:[\w]+::)*([A-Za-z_][\w]*)\s*$/.exec(shown);
+        // Resolve against the *whole* first line, and truncate only the message.
+        //
+        // These were the same string until #1015, and the sharing was a false
+        // positive waiting for a long name: a path-qualified constant such as
+        // `nession_client::wire::SERVER_SESSION_CAPTURE_PREVIEW` is cut
+        // mid-identifier by a 40-character window, so the identifier regex below
+        // captured `…_CAP` and the call site was reported as naming no declared
+        // wire. A false positive is how a gate teaches people to write the
+        // `// not-protocol:` exemption that turns it off, so this one is worth
+        // more than the message it shortens.
+        const firstLine = target.trim().split('\n')[0];
+        const shown = firstLine.slice(0, 40);
+        const ident = /&?\s*(?:[\w]+::)*([A-Za-z_][\w]*)\s*$/.exec(firstLine);
         const resolved = ident && lang === 'rs' ? constWires.get(ident[1]) : undefined;
         const imported = ident && lang === 'ts' && tsWireImports.get(ident[1]);
         if (resolved) {

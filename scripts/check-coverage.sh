@@ -34,6 +34,11 @@ declare -A THRESHOLDS=(
     ["nession-git"]=80
     ["nession-protocol"]=80
     ["nession-runtime"]=80
+    # A consumer boundary: pure library, and the one crate whose whole job is to
+    # be testable without a provider. Same threshold as `nession-runtime` for
+    # the same reason — shared by more than one consumer, so its correctness is
+    # not any one consumer's to notice.
+    ["nession-client"]=80
 )
 
 # macOS tmux 3.6b crashes when control-mode clients disconnect in parallel
@@ -55,6 +60,7 @@ declare -A FIX_HINTS=(
     ["nession-git"]="Add unit tests in crates/nession-git/src/ and integration tests in crates/nession-git/tests/ (they build a real temporary repository). Run: cargo test -p nession-git"
     ["nession-protocol"]="Add unit tests in crates/nession-protocol/src/. The kernel is pure data and resolution and the contracts are pure wire shapes, so every rule it enforces has a test that fails when the rule is removed: kernel rules in src/kernel/, a contract's own tests in src/contracts/<family>/tests.rs. Run: cargo test -p nession-protocol"
     ["nession-runtime"]="Add unit tests in crates/nession-runtime/src/. The lanes and the outbound queue are pure mechanism, so every rule they enforce has a `#[tokio::test]` that fails when the rule is removed — including the ones the three runtimes' copies were each carrying. Run: cargo test -p nession-runtime"
+    ["nession-client"]="Add tests in crates/nession-client/. The mock suite in tests/mock_server.rs owns correlation (it answers by `id` and echoes the request's own wire, so it cannot disagree with the client about a name); tests/against_server.rs owns the contracts, and runs every call against a real Server so a contract that drifted from its handler fails there. Run: cargo test -p nession-client"
 )
 
 # Filter to specified crates if arguments provided

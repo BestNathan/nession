@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import {
@@ -115,45 +115,34 @@ function AppNavigationHarness() {
   );
 }
 
-type AppSpatialPage = 'terminal' | 'workspace';
-
-const appSpatialPageTestIds: Record<AppSpatialPage, string> = {
-  terminal: 'app-spatial-page-terminal',
-  workspace: 'app-spatial-page-workspace',
-};
+type AppLayerName = 'terminal' | 'workspace';
 
 /**
- * AppSpatialShell keeps every page mounted and exposes no active-page
- * attribute. Its page-track transform is the current-page signal, so derive
- * the expected offset from the track's actual children instead of duplicating
- * the pager's page-count/layout assumptions in the test.
+ * `AppLayers` mounts only the layer that is open and names it on the root's
+ * `data-layer`, so the current layer is asserted directly.
+ *
+ * The helper this replaces had to reverse-engineer the active page out of the
+ * pager's track transform, because the shell exposed no active-page signal —
+ * the transform *was* the state. That indirection is gone with the pager.
+ *
+ * The Terminal layer is asserted present in every case. It is the root: a
+ * navigation that unmounted it would rebuild xterm, the attach state and the
+ * scrollback, which #1049 forbids.
  */
-function expectActiveAppPage(page: AppSpatialPage) {
-  const shell = screen.getByTestId('app-spatial-shell');
-  const pageTrack = within(shell).getByTestId('app-spatial-page-terminal').parentElement;
-  if (!pageTrack) {
-    throw new Error('App spatial page track is missing');
-  }
-
-  const pageCount = pageTrack.children.length;
-  const trackWidth = Number.parseFloat(pageTrack.style.width);
-  const pageElement = within(pageTrack).getByTestId(appSpatialPageTestIds[page]);
-  const pageIndex = Array.from(pageTrack.children).indexOf(pageElement);
-
-  expect(pageCount).toBeGreaterThan(0);
-  expect(trackWidth).toBeGreaterThan(0);
-  expect(pageIndex).toBeGreaterThanOrEqual(0);
-  expect(pageTrack.style.transform).toBe(
-    `translateX(${-(pageIndex * trackWidth) / pageCount}px)`,
+function expectActiveAppLayer(layer: AppLayerName) {
+  expect(screen.getByTestId('app-layer-root')).toHaveAttribute(
+    'data-layer',
+    layer,
   );
+  expect(screen.getByTestId('app-layer-terminal')).toBeInTheDocument();
 }
 
-describe('WorkspaceRegion spatial shell', () => {
+describe('WorkspaceRegion app layer composition', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it('mounts app-spatial-shell when mobile and a session is selected', () => {
+  it('mounts app-layer-root when mobile and a session is selected', () => {
     render(
       <WorkspaceRegion
         {...baseProps({
@@ -167,11 +156,11 @@ describe('WorkspaceRegion spatial shell', () => {
         })}
       />,
     );
-    expect(screen.getByTestId('app-spatial-shell')).toBeInTheDocument();
+    expect(screen.getByTestId('app-layer-root')).toBeInTheDocument();
     expect(screen.queryByTestId('back-to-list')).not.toBeInTheDocument();
   });
 
-  it('does not mount app-spatial-shell when mobile and no session selected', () => {
+  it('does not mount app-layer-root when mobile and no session selected', () => {
     render(
       <WorkspaceRegion
         {...baseProps({
@@ -182,11 +171,11 @@ describe('WorkspaceRegion spatial shell', () => {
         })}
       />,
     );
-    expect(screen.queryByTestId('app-spatial-shell')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('app-layer-root')).not.toBeInTheDocument();
     expect(screen.getByText('Fix terminal reconnect')).toBeInTheDocument();
   });
 
-  it('does not mount app-spatial-shell on desktop even with a selection', () => {
+  it('does not mount app-layer-root on desktop even with a selection', () => {
     render(
       <WorkspaceRegion
         {...baseProps({
@@ -198,7 +187,7 @@ describe('WorkspaceRegion spatial shell', () => {
         })}
       />,
     );
-    expect(screen.queryByTestId('app-spatial-shell')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('app-layer-root')).not.toBeInTheDocument();
     // Desktop is two columns: the Session's identity is its row in the sidebar,
     // not a heading above the work area (the header is gone — #748).
     expect(screen.getByTestId('sidebar-column')).toBeInTheDocument();
@@ -270,11 +259,11 @@ describe('WorkspaceRegion spatial shell', () => {
     const user = userEvent.setup();
     render(<AppNavigationHarness />);
 
-    expectActiveAppPage('terminal');
+    expectActiveAppLayer('terminal');
 
     await user.click(screen.getByTestId('app-header-workspace'));
     await waitFor(() => {
-      expectActiveAppPage('workspace');
+      expectActiveAppLayer('workspace');
     });
     await user.click(screen.getByTestId('workspace-capability-more'));
     await user.click(await screen.findByRole('menuitem', { name: 'Claude Code' }));
@@ -283,7 +272,7 @@ describe('WorkspaceRegion spatial shell', () => {
 
     await user.click(screen.getByTestId('app-tool-back'));
     await waitFor(() => {
-      expectActiveAppPage('terminal');
+      expectActiveAppLayer('terminal');
     });
     expect(screen.getByTestId('terminal-well')).not.toHaveClass('hidden');
   });

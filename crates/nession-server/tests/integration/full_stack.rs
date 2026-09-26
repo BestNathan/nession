@@ -55,7 +55,9 @@ impl TestServer {
 
         let handle = tokio::spawn(async move {
             // Errors are expected when tests tear down — ignore them.
-            let _ = server.run().await;
+            let _ = server
+                .run(nession_common::readiness::Readiness::Unwatched)
+                .await;
         });
 
         // Give the accept-loop a moment to start.
@@ -1372,6 +1374,42 @@ async fn test_client_session_attach_p2p_mode() {
     .await
     .unwrap();
 
+    // The Server hands the credential to the agent that will verify it
+    // **before** it answers the client (#1013), so the attach cannot complete
+    // until this is answered. That the grant has to be read first is the
+    // property under test as much as the token is: without the ordering, a
+    // client could dial the agent before the verifier held the record, and be
+    // refused for a reason it could do nothing about.
+    let grant_raw = recv_text(&mut agent_ws).await;
+    let grant: serde_json::Value = serde_json::from_str(&grant_raw).unwrap();
+    assert_eq!(
+        grant["msg_type"].as_str(),
+        Some("agent.p2p.grant"),
+        "the credential must reach the agent before the client is answered"
+    );
+    assert!(
+        grant["payload"]["credential"]
+            .as_str()
+            .is_some_and(|token| !token.is_empty()),
+        "the grant carries the credential the client will present: {grant}"
+    );
+    assert_eq!(
+        grant["payload"]["scope"]["terminal"].as_str(),
+        Some("p2p-sess"),
+        "and it is bound to the session it was minted for"
+    );
+    let grant_request_id = grant["payload"]["request_id"].as_str().unwrap().to_string();
+    send_text(
+        &mut agent_ws,
+        serde_json::json!({
+            "msg_type":"server.agent.command-response","id":"grant-ack","timestamp":current_timestamp(),
+            "payload":{"request_id":grant_request_id,"command":"p2p.grant","success":true}
+        })
+        .to_string(),
+    )
+    .await
+    .unwrap();
+
     // Skip any broadcast messages that arrive before the attach response.
     let attach_resp = loop {
         let raw = recv_text(&mut client).await;
@@ -1386,9 +1424,14 @@ async fn test_client_session_attach_p2p_mode() {
         attach_resp["payload"]["agent_address"],
         "ws://agent.example.com/ws"
     );
-    assert!(attach_resp["payload"]["connection_token"]
+    let issued = attach_resp["payload"]["connection_token"]
         .as_str()
-        .is_some());
+        .expect("the client is given the credential");
+    assert_eq!(
+        Some(issued),
+        grant["payload"]["credential"].as_str(),
+        "the client must be given the credential the agent was already granted"
+    );
 }
 
 // ---------------------------------------------------------------------------

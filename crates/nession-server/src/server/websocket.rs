@@ -18,6 +18,7 @@ use crate::server::execution::{
 use crate::server::outbound::WsMessageSender;
 use crate::server::web_client_registry::WebClientRegistry;
 use nession_common::config::ServerConfig;
+use nession_common::readiness::Readiness;
 use nession_protocol::contracts::env::v1::EnvSnapshot;
 use nession_protocol::ProtocolMessage;
 use nession_runtime::lane::KeyedLane;
@@ -35,6 +36,12 @@ pub struct WebSocketServer {
     /// Built here because the resources its keys name — the registries and the
     /// env store — are built here. See `server::execution::mutation_scheduler`.
     mutations: Arc<KeyedLane<ResourceKey>>,
+    /// The P2P credential ledger (#1013).
+    ///
+    /// Held here because a credential outlives the attach that minted it, and
+    /// because the process that checks it is an *Agent* rather than this one —
+    /// so this side is only the issuer's record, kept for expiry.
+    p2p_broker: Arc<crate::broker::ConnectionBroker>,
     listener: Option<TcpListener>,
 }
 
@@ -73,8 +80,16 @@ impl WebSocketServer {
             }
         }
 
+        // The ledger's expiry is the revocation window (#1013): how long a
+        // credential the Server has already forgotten stays useful to whoever
+        // is holding it.
+        let p2p_broker = Arc::new(crate::broker::ConnectionBroker::new(
+            config.p2p_token_expiry_secs,
+        ));
+
         Ok(Self {
             config,
+            p2p_broker,
             agent_registry,
             session_registry,
             command_broker,
@@ -87,7 +102,7 @@ impl WebSocketServer {
         })
     }
 
-    pub async fn run(&mut self) -> anyhow::Result<()> {
+    pub async fn run(&mut self, ready: Readiness) -> anyhow::Result<()> {
         let listener = self
             .listener
             .take()
@@ -103,6 +118,13 @@ impl WebSocketServer {
         } else {
             None
         };
+
+        // Serving. Deliberately *after* the TLS acceptor and not at the bind in
+        // `new`: a configured certificate that cannot be read is a start that
+        // fails here, and announcing at the bind would report it as a success
+        // (#1016). Everything from this point to the accept loop is `spawn`,
+        // which cannot fail.
+        ready.announce();
 
         let heartbeat_interval_secs = self.config.heartbeat_interval_secs;
 
@@ -233,6 +255,7 @@ impl WebSocketServer {
                 env_service: Arc::clone(&self.env_service),
                 db: Arc::clone(&self.db),
                 mutations: Arc::clone(&self.mutations),
+                p2p_broker: Arc::clone(&self.p2p_broker),
                 auth_token: self.config.auth_token.clone(),
                 heartbeat_interval_secs,
                 terminal_stall_grace: std::time::Duration::from_secs(
@@ -298,6 +321,7 @@ struct ServerContext {
     /// Server's rather than any one connection's. See
     /// `server::execution::mutation_scheduler`.
     mutations: Arc<KeyedLane<ResourceKey>>,
+    p2p_broker: Arc<crate::broker::ConnectionBroker>,
     auth_token: String,
     heartbeat_interval_secs: u64,
     terminal_stall_grace: std::time::Duration,
@@ -340,6 +364,7 @@ where
         heartbeat_interval_secs,
         terminal_stall_grace,
         query_concurrency,
+        p2p_broker,
     } = ctx;
 
     let ws_stream = accept_async(stream).await?;
@@ -360,6 +385,7 @@ where
             web_client_registry: web_client_registry.clone(),
             env_service,
             db,
+            p2p_broker,
         },
         crate::server::handler::ConnectionHandlerConfig {
             server_auth_token: auth_token,
@@ -1611,6 +1637,47 @@ mod tests {
         assert_eq!(
             classify_client_frame(&Message::Text(r#"{"msg_type":7}"#.to_string())),
             ClientFrame::Other
+        );
+    }
+
+    /// A Server that cannot build its TLS acceptor must not announce readiness.
+    ///
+    /// This is the whole reason the announcement sits after the TLS acceptor
+    /// rather than at the bind: the listener binds perfectly well with a
+    /// certificate that cannot be read, so announcing in [`WebSocketServer::new`]
+    /// would report a Server that is about to exit as a successful start — the
+    /// defect #1016 removes. Moving the call earlier makes this test fail.
+    #[tokio::test]
+    async fn an_unreadable_certificate_fails_the_start_without_announcing() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let marker = dir.path().join("ready");
+        let missing = dir.path().join("missing");
+        let config = nession_common::config::ServerConfig {
+            // OS-assigned: two runs of this suite must not contend for a port.
+            listen_address: "127.0.0.1:0".to_string(),
+            db_path: dir.path().join("server.db").to_string_lossy().into_owned(),
+            tls_cert_path: missing.with_extension("pem").to_string_lossy().into_owned(),
+            tls_key_path: missing.with_extension("key").to_string_lossy().into_owned(),
+            ..Default::default()
+        };
+        let db = Database::new(&config.db_path).await.expect("database");
+        let mut server = WebSocketServer::new(config, Arc::new(db))
+            .await
+            .expect("the listener binds before the certificate is ever read");
+        assert!(
+            server.local_addr().is_ok(),
+            "a bound listener is exactly what makes an early announcement wrong"
+        );
+
+        let result = server.run(Readiness::Announced(marker.clone())).await;
+
+        assert!(
+            result.is_err(),
+            "an unreadable certificate must fail the start, not serve"
+        );
+        assert!(
+            !marker.exists(),
+            "a Server that never served must not announce that it did"
         );
     }
 }

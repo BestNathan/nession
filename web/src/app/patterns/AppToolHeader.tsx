@@ -18,7 +18,13 @@ export function AppToolHeader({ toolLabel, onBack }: AppToolHeaderProps) {
       className="flex shrink-0 items-center gap-1 px-[var(--shell-space-2)] pt-[max(var(--shell-space-1),env(safe-area-inset-top))]"
     >
       <AppBackButton label="Back to terminal" testid="app-tool-back" onClick={onBack} />
-      <h1 className="min-w-0 truncate font-mono text-sm font-semibold">{toolLabel}</h1>
+      {/* The tool's name is the page's title — `visual-language.md`'s primary
+          role names "current capability title", and the typography criterion
+          puts page titles in the product face. It was monospaced, which read a
+          capability's name as if it were a path or an identifier (#1050
+          stage 4). The path inside the tool is the technical string, and
+          `FilesAppLayout` still sets that one in mono. */}
+      <h1 className="min-w-0 truncate text-sm font-semibold">{toolLabel}</h1>
     </header>
   );
 }

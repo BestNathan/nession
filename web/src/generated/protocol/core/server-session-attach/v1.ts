@@ -39,15 +39,23 @@ env_snapshots: Array<EnvSnapshot>,
  * be one of the addresses returned in the attach response.
  */
 relay_url?: string | null, };
+export type ClientSessionAttachReply = ClientSessionAttachResponsePayload | SessionRefusal;
 export type ClientSessionAttachResponsePayload = { 
 /**
- * "success" or "error".
+ * Always `"success"`. The refusal arm carries `"error"` under the same
+ * name, which is why this is not an enum — see [`SessionRefusal::status`].
  */
 status: string, 
 /**
- * "p2p" or "relay".
+ * `"p2p"` or `"relay"`.
  */
-mode: string, session_name?: string | null, 
+mode: string, 
+/**
+ * The session this reply describes, echoed back. Both arms send it, and
+ * the browser's session runtime gates on it — but it was missing from this
+ * type, so a consumer reading the contract could not know it was there.
+ */
+session_id: string, session_name?: string | null, 
 /**
  * Legacy single endpoint (first/preferred address). Kept so old clients
  * that only read `agent_address` keep working.
@@ -57,7 +65,64 @@ agent_address?: string | null,
  * Full list of candidate endpoints with probe status, priority order.
  * Clients test latency across these and fall back address-by-address.
  */
-addresses: Array<ProbedAddress>, connection_token?: string | null, error?: string | null, };
+addresses: Array<ProbedAddress>, 
+/**
+ * The credential for the P2P connection this reply describes (#1013).
+ *
+ * Present when `mode` is `"p2p"`, absent for `"relay"` — the Server dials
+ * in relay mode, so the browser never touches the agent and has nothing to
+ * present.
+ *
+ * **Issuer:** the Server. It is the only thing that mints one.
+ *
+ * **Verifier:** the agent named in this reply, and only that one. A
+ * credential is pushed to the agent over the connection *the agent itself
+ * dialled out* — the one channel here that is already authenticated in the
+ * direction that matters, since the agent is the client on it — and that
+ * agent stores it before this reply is sent. So a client that dials the
+ * instant it holds a token is correct by construction: the verifier already
+ * has the record. The token is opaque to the agent, which looks it up and
+ * never parses it, and that is why it is not signed — signing would mean key
+ * delivery and rotation in the one crate that listens on a port.
+ *
+ * **Scope:** what the credential may do, carried beside it in the grant
+ * (`contracts::p2p::v1::CredentialScope`). A credential for an attach is
+ * bound to **one session** — its terminal wires are refused for any other —
+ * and carries session management and the file sandbox; a credential for a
+ * relay is bound to one session and carries neither. The agent checks the
+ * scope per wire, so "the credential was valid" never implies "every
+ * operation is allowed".
+ *
+ * **Expiry:** a deadline the Server sets (default 300s) and the agent
+ * compares against its own clock. This is the real revocation: it is
+ * deterministic and needs no round trip.
+ *
+ * **Replay:** time-bounded and **repeatable — not single-use**, and that is
+ * a requirement rather than a relaxation. A browser re-presents the same
+ * URL on every reconnect (its reconnect budget is ten attempts), and the
+ * Server's relay leg makes two dials on one credential, attach and detach.
+ * Spending the token on first use would break both, and single-use is
+ * therefore a client rewrite rather than a policy choice.
+ *
+ * **Transport:** the `token` query parameter on the agent URL
+ * ([`super::super::p2p::CREDENTIAL_PARAM`]). A query parameter because a
+ * browser cannot set a header on `new WebSocket()`. **It therefore reaches
+ * every access log on the path** — which is why the value is opaque and
+ * short-lived rather than a durable secret.
+ *
+ * Renaming this field would cost a codegen regeneration and every web
+ * fixture for nothing a comment does not buy; the wire name and the
+ * parameter name are independent, and only the latter is shared with the
+ * browser.
+ */
+connection_token?: string | null, };
+export type SessionRefusal = { 
+/**
+ * Always `"error"` today. A string rather than an enum because nothing
+ * branches on its other values yet, and inventing them would be describing
+ * a wire that does not exist.
+ */
+status: string, message: string, };
 export type EnvSnapshot = { name: string, source: EnvSource, agent_id?: string | null, 
 /**
  * Ordered KEY/VALUE pairs (already deduplicated, last-wins).
@@ -116,23 +181,5 @@ env_snapshots: Array<EnvSnapshot>,
 relay_url?: string | null, };
 
 /** The payload the provider answers with. */
-export type SessionAttachReply = { 
-/**
- * "success" or "error".
- */
-status: string, 
-/**
- * "p2p" or "relay".
- */
-mode: string, session_name?: string | null, 
-/**
- * Legacy single endpoint (first/preferred address). Kept so old clients
- * that only read `agent_address` keep working.
- */
-agent_address?: string | null, 
-/**
- * Full list of candidate endpoints with probe status, priority order.
- * Clients test latency across these and fall back address-by-address.
- */
-addresses: Array<ProbedAddress>, connection_token?: string | null, error?: string | null, };
+export type SessionAttachReply = ClientSessionAttachResponsePayload | SessionRefusal;
 

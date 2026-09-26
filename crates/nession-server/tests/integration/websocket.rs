@@ -27,7 +27,7 @@ async fn start_test_server(
     let addr = server.local_addr()?;
     let handle = tokio::spawn(async move {
         server
-            .run()
+            .run(nession_common::readiness::Readiness::Unwatched)
             .await
             .unwrap_or_else(|e| panic!("test server run failed: {e}"));
     });
@@ -2599,6 +2599,37 @@ async fn start_streaming_mock_agent_endpoint(
 }
 
 /// The next frame of a given type the endpoint received, skipping others.
+/// Answer the P2P grant the Server pushes before it dials (#1013).
+///
+/// The Server will not dial until the agent that will verify the credential has
+/// acknowledged it, so any test driving a relay has to stand in for the agent
+/// here. The wait is also the assertion: a Server that dialled first would never
+/// send this frame at all, and the timeout says so.
+async fn acknowledge_grant(agent: &mut TestWs) -> anyhow::Result<()> {
+    let command = tokio::time::timeout(tokio::time::Duration::from_secs(5), next_json(agent))
+        .await
+        .map_err(|_| {
+            anyhow::anyhow!("the server never granted a credential before dialling the agent")
+        })??;
+
+    let request_id = payload_of(&command, "agent.p2p.grant")?
+        .get("request_id")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| anyhow::anyhow!("the grant carries no request id: {command}"))?
+        .to_string();
+
+    send_json(
+        agent,
+        serde_json::json!({
+            "msg_type": "server.agent.command-response",
+            "id": "grant-ack",
+            "timestamp": current_timestamp(),
+            "payload": { "request_id": request_id, "success": true },
+        }),
+    )
+    .await
+}
+
 async fn expect_frame_of_type(
     frames: &mut tokio::sync::mpsc::UnboundedReceiver<serde_json::Value>,
     msg_type: &str,
@@ -2761,6 +2792,7 @@ async fn relay_mode_owns_the_connections_frames_until_it_ends() -> anyhow::Resul
         }),
     )
     .await?;
+    acknowledge_grant(&mut agent).await?;
 
     // The Server dials the agent and asks it to attach. Nothing is forwarded
     // until that answer arrives, so this frame is also the proof the relay is
@@ -2874,6 +2906,7 @@ async fn a_terminal_client_that_stops_draining_is_closed_by_the_bound() -> anyho
         }),
     )
     .await?;
+    acknowledge_grant(&mut agent).await?;
 
     // The relay is live: the Server has dialled the agent and been told the
     // attach succeeded, which is also the start of the stream.

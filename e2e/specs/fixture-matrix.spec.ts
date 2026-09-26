@@ -47,13 +47,18 @@ test.describe('Web compact 1024×768', () => {
 test.describe('App Sessions 390×844', () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
-  test('Sessions spatial page shows the flat session list', async ({ page }, testInfo) => {
+  test('Sessions layer shows the flat session list', async ({ page }, testInfo) => {
     await page.goto('/#/fixture/app');
     await page.getByTestId('app-header-sessions').first().click();
 
-    const sessionsPage = page.getByTestId('app-spatial-page-sessions');
+    const sessionsPage = page.getByTestId('app-layer-sessions');
     await expect(sessionsPage).toBeInViewport();
-    await expect(page.getByTestId('sidebar')).toBeVisible();
+    // The App composes its own Sessions surface (#1050 stage 1) rather than
+    // rendering the Web `Sidebar` at 390px.
+    await expect(page.getByTestId('app-sessions-surface')).toBeVisible();
+    // `toBeVisible` requires a non-empty box, so this is the regression guard
+    // for the squeeze #1057 found: the list wrapper used to measure 0px tall.
+    await expect(page.getByTestId('app-sessions-list')).toBeVisible();
     await expect(page.getByTestId('session-item-row')).toHaveCount(6);
     await expect(page.locator('[data-selected="true"]')).toHaveCount(1);
 

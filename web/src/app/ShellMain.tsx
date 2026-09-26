@@ -160,6 +160,7 @@ export function ShellMain({
                     hidden={surface !== 'terminal' || !selectedSession}
                     onDisconnect={() => undefined}
                     onError={() => undefined}
+                    experience={experience}
                     capsuleCapabilities={capsuleCapabilities}
                     capsuleProjection={projection}
                   />

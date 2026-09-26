@@ -22,6 +22,10 @@ services:
       AGENT_ID: agent-docker
       AGENT_LISTEN: "0.0.0.0:19090"
       AGENT_SERVER_URL: ""   # standalone, no server
+      # Required by the line above: with no Server there is nothing to mint a
+      # credential, so the agent refuses to start without one rather than
+      # binding a socket that refuses every connection (#1013).
+      AGENT_TOKEN: "change-me-standalone"
       LISTEN_PORT: "10080"
       SERVER_BACKEND: "127.0.0.1:19090"
     healthcheck:

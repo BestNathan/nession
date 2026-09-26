@@ -20,6 +20,7 @@ GREEN='\033[0;32m'
 NC='\033[0m'
 
 GATE="$(cd "$(dirname "$0")" && pwd)/protocol-gate.mjs"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
@@ -287,6 +288,92 @@ export function go(socket: { request(t: string, p: unknown): void }) {
 }
 TS
 expect_fail "an unresolvable name is reported" 'names no declared wire'
+
+# ── A consumer's own wire list (#1015) ──────────────────────────────────────
+#
+# Until #1015 no Rust consumer named a wire through a constant: the CLI spelled
+# literals, and `nession-client` is the first crate to keep its own list and
+# refer to it by module path. Two properties of that shape are worth pinning —
+# it resolves at all, and it does not stop resolving because the path is long.
+
+reset_fixture
+cat > "$WORK/tree/crates/thing/src/wire.rs" <<'RS'
+pub mod wire {
+    pub const ALPHA: &str = "alpha.one";
+}
+RS
+cat > "$WORK/tree/crates/thing/src/lib.rs" <<'RS'
+pub fn go() -> String {
+    proto_msg(wire::ALPHA).msg_type
+}
+RS
+write_caller <<'TS'
+export function go(socket: { request(t: string, p: unknown): void }) {
+  socket.request('beta.two', {});
+}
+TS
+expect_pass "a path-qualified consumer constant resolves"
+
+# The same shape, misspelled. This is the protection the constant exists for.
+reset_fixture
+cat > "$WORK/tree/crates/thing/src/wire.rs" <<'RS'
+pub mod wire {
+    pub const ALPHA: &str = "alpha.gone";
+}
+RS
+cat > "$WORK/tree/crates/thing/src/lib.rs" <<'RS'
+pub fn go() -> String {
+    proto_msg(wire::ALPHA).msg_type
+}
+RS
+write_caller <<'TS'
+export function go(socket: { request(t: string, p: unknown): void }) {
+  socket.request('beta.two', {});
+}
+TS
+expect_fail "a path-qualified consumer constant naming nothing is reported" \
+    'which no runtime answers'
+
+# A path longer than the message window. Resolution and the reported name were
+# one `slice(0, 40)` until #1015, so a constant reached through a long module
+# path was cut mid-identifier and reported as naming no wire — a false positive
+# on correct code, which is how a gate teaches people to write the exemption
+# that turns it off.
+reset_fixture
+cat > "$WORK/tree/crates/thing/src/wire.rs" <<'RS'
+pub mod wire {
+    pub const A_VERY_LONG_CONSUMER_WIRE_CONSTANT_NAME: &str = "alpha.one";
+}
+RS
+cat > "$WORK/tree/crates/thing/src/lib.rs" <<'RS'
+pub fn go() -> String {
+    proto_msg(wire::A_VERY_LONG_CONSUMER_WIRE_CONSTANT_NAME).msg_type
+}
+RS
+write_caller <<'TS'
+export function go(socket: { request(t: string, p: unknown): void }) {
+  socket.request('beta.two', {});
+}
+TS
+expect_pass "a path-qualified consumer constant resolves past the message window"
+
+# ── The real consumer's wire list stays outside the advertised set ──────────
+#
+# Not a fixture case, because the file it guards is in the tree. `wire.rs`
+# documents the rule at length; this is what happens when one is broken.
+#
+# A declaring file contributes *every* dotted constant in it to the advertised
+# set, so the moment that file contains an envelope key its constants stop being
+# claims to check and become the standard they are checked against — and a
+# misspelling at a call site is accepted because it advertises itself (#913).
+if grep -q '"msg_type"[[:space:]]*:' "$ROOT/crates/nession-client/src/wire.rs"; then
+    echo -e "${RED}✗${NC} the consumer wire list became a declaring file"
+    echo "      it contains an envelope key, so its constants are now advertised and a"
+    echo "      misspelled one is accepted at every call site — see wire.rs's own header"
+    failures=$((failures + 1))
+else
+    echo -e "${GREEN}✓${NC} the consumer wire list stays outside the advertised set"
+fi
 
 # ── The escape hatches themselves ───────────────────────────────────────────
 reset_fixture

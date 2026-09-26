@@ -680,6 +680,32 @@ wires: &["client.auth"],
         },
         Unit {
             owner: "core",
+            id: "agent.p2p.grant",
+            version: 1,
+            wires: &["agent.p2p.grant"],
+            // Server -> agent, and the direction is the point (#1013). The
+            // Server issues a P2P credential and the Agent is what honours it,
+            // so the record has to reach the verifier *before* the client that
+            // will present it is given the token. The caller is the Server's
+            // push on this same connection.
+            decls: vec![
+                decl_of::<nession_protocol::contracts::p2p::v1::P2pGrantPayload>(cfg),
+                decl_of::<nession_protocol::contracts::p2p::v1::P2pGrantResponse>(cfg),
+                decl_of::<nession_protocol::contracts::p2p::v1::CredentialScope>(cfg),
+            ],
+            request: Some((
+                "P2pGrantCall",
+                nession_protocol::contracts::p2p::v1::P2pGrantPayload::inline,
+                schema_of::<nession_protocol::contracts::p2p::v1::P2pGrantPayload>,
+            )),
+            response: Some((
+                "P2pGrantReply",
+                nession_protocol::contracts::p2p::v1::P2pGrantResponse::inline,
+                schema_of::<nession_protocol::contracts::p2p::v1::P2pGrantResponse>,
+            )),
+        },
+        Unit {
+            owner: "core",
             id: "client.sessions.list",
             version: 1,
             wires: &["client.sessions.list"],
@@ -945,7 +971,12 @@ wires: &["agent.session.kill"],
 wires: &["server.session.attach"],
             decls: vec![
                 decl_of::<nession_protocol::contracts::session::v1::ClientSessionAttachPayload>(cfg),
+                // The reply is a union: the attach plan, or the refusal. Both
+                // arms and the shared refusal type, or the generated binding
+                // carries an unresolved reference.
+                decl_of::<nession_protocol::contracts::session::v1::ClientSessionAttachReply>(cfg),
                 decl_of::<nession_protocol::contracts::session::v1::ClientSessionAttachResponsePayload>(cfg),
+                decl_of::<nession_protocol::contracts::session::v1::SessionRefusal>(cfg),
                 decl_of::<nession_protocol::contracts::env::v1::EnvSnapshot>(cfg),
                 decl_of::<nession_protocol::contracts::agent::v1::ProbedAddress>(cfg),
                 decl_of::<nession_protocol::contracts::env::v1::EnvSource>(cfg),
@@ -959,8 +990,8 @@ wires: &["server.session.attach"],
             )),
             response: Some((
                 "SessionAttachReply",
-                nession_protocol::contracts::session::v1::ClientSessionAttachResponsePayload::inline,
-                schema_of::<nession_protocol::contracts::session::v1::ClientSessionAttachResponsePayload>,
+                nession_protocol::contracts::session::v1::ClientSessionAttachReply::inline,
+                schema_of::<nession_protocol::contracts::session::v1::ClientSessionAttachReply>,
             )),
         },
         Unit {

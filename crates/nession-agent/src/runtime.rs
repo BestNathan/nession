@@ -22,6 +22,7 @@
 use anyhow::{Context, Result};
 use nession_claude_code::agent::ClaudeCodeAgentExtension;
 use nession_common::extension::AgentExtension;
+use nession_common::readiness::Readiness;
 use nession_common::system;
 use nession_git::GitAgentExtension;
 use nession_protocol::contracts::agent::v1::AgentMetadata;
@@ -51,12 +52,10 @@ use crate::tmux::manager::SessionManager;
 /// cannot be composed. Reaching the end of the composition is what "started"
 /// means.
 ///
-/// **Not yet a readiness signal.** A daemon parent needs to know the child
-/// reached this point (#1016), which will want a notification rather than this
-/// return value, since `run` does not return until shutdown. That seam is
-/// deliberately not added here: it has no consumer yet, and its shape depends on
-/// the acknowledgement design #1016 owns.
-pub async fn run(config: AgentConfig) -> Result<()> {
+/// `ready` is how a daemon parent is told the child got this far. This return
+/// value cannot serve that purpose: `run` does not return until shutdown, so a
+/// parent would learn "started" only when it stopped (#1016).
+pub async fn run(config: AgentConfig, ready: Readiness) -> Result<()> {
     // 1. Initialize logging (stdout + file)
     let _log_guard = nession_common::logging::init_logging(
         &config.logging,
@@ -124,6 +123,58 @@ pub async fn run(config: AgentConfig) -> Result<()> {
     // is going to send, so the lane keeps one of them per session instead of
     // every intermediate one a busy pane produces (#961-D). See
     // `crate::server::resize`.
+    // What this agent will honour on its P2P listener (#1013). Created here,
+    // once, because two things need the same store: the Server connection,
+    // which is where grants arrive, and the P2P listener, which is where they
+    // are checked. #1014 put the composition in this file for exactly this
+    // reason — a second construction site is a second, emptier store.
+    let p2p_credentials = Arc::new(crate::p2p_credentials::P2pCredentials::new());
+
+    // A standalone agent has no Server to mint a credential for it and no
+    // outbound channel to receive one on, so `agent_token` is the one secret in
+    // the picture — see `CredentialScope::for_standalone`, which grants it every
+    // session on this node rather than one.
+    //
+    // **Refused rather than defaulted, and here rather than later.** The two
+    // alternatives both start successfully and then fail at the far end with
+    // nothing to go on: an empty store refuses every connection (a socket that
+    // looks like a network fault), and a permissive default is the anonymous
+    // socket #1013 exists to close. It is done before the listener is built so
+    // there is no window in which a connection arrives ahead of the grant.
+    if config.server_url.trim().is_empty() {
+        if config.agent_token.trim().is_empty() {
+            anyhow::bail!(
+                "standalone mode (server_url is empty) needs `agent_token`: it is the only \
+                 credential this agent can honour, since a Server is what mints and pushes one \
+                 otherwise. Fix: set `agent_token` in the agent config to the token clients \
+                 will present, or set `server_url` to join a server — which mints a credential \
+                 per attach, scoped to the one session it answers for."
+            );
+        }
+        p2p_credentials
+            .grant_configured(
+                &agent_id,
+                &config.agent_token,
+                nession_protocol::contracts::p2p::v1::CredentialScope::for_standalone(),
+            )
+            .map_err(|refusal| {
+                anyhow::anyhow!(
+                    "`agent_token` was refused by this agent's own store ({refusal:?}); this is \
+                     a bug, not a configuration problem"
+                )
+            })?;
+        info!("standalone mode: honouring `agent_token` as this agent's P2P credential");
+    } else if !config.agent_token.trim().is_empty() {
+        // Said out loud rather than ignored. A configured token that silently
+        // does nothing is the kind of field someone sets, tests, and concludes
+        // is honoured.
+        warn!(
+            "`agent_token` is set but `server_url` is too, so it is **not** used: this agent \
+             takes the credential the Server mints for each attach. Clear `agent_token` or \
+             empty `server_url` if that is not what you meant."
+        );
+    }
+
     let (resize, mut resize_updates) = crate::server::ResizeReporter::new();
     let agent_server = AgentServer::new(
         &config.listen_address,
@@ -132,7 +183,10 @@ pub async fn run(config: AgentConfig) -> Result<()> {
         config.default_working_dir.clone(),
         file_root,
         config.attach_mode.clone(),
-        resize,
+        crate::server::websocket::AgentServerContext {
+            resize,
+            credentials: Arc::clone(&p2p_credentials),
+        },
     )
     .context("failed to create agent server")?;
     let (server_handle, listen_addr) = agent_server
@@ -185,9 +239,18 @@ pub async fn run(config: AgentConfig) -> Result<()> {
     // server-advertised heartbeat interval (falling back to the local config).
     let (client_handle, heartbeat_interval_secs) = if config.server_url.trim().is_empty() {
         info!("No server_url configured — running in standalone mode");
+        // Serving: the P2P socket is bound and the tmux socket is pinned. There
+        // is no provider set to compose on this path, and no remote to reach.
+        ready.announce();
         (None, config.heartbeat_interval_secs)
     } else {
         let ext_registry = compose_providers(&agent_id, Arc::clone(&tmux_for_client))?;
+
+        // Serving: the socket is bound and the provider set composed. Announced
+        // *before* the central-server connection on purpose — that one is
+        // allowed to fail, and a parent that waited for it would report a
+        // healthy agent as a failed start.
+        ready.announce();
 
         let server_client = ServerClient::new(
             &config.server_url,
@@ -203,6 +266,7 @@ pub async fn run(config: AgentConfig) -> Result<()> {
             tmux_for_client,
             config.default_working_dir.clone(),
             Some(ext_registry),
+            Arc::clone(&p2p_credentials),
         );
 
         // Attempt to connect with a timeout so the agent can still serve

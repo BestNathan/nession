@@ -27,6 +27,8 @@ use nession_protocol::contracts::env::v1::{
     ClientEnvGetResponsePayload, ClientEnvListPayload, ClientEnvListResponsePayload,
     ClientEnvWritePayload, ClientEnvWriteResponsePayload, EnvFileRef, EnvSnapshot, EnvSource,
 };
+use nession_protocol::contracts::p2p::agent_url_with_credential;
+use nession_protocol::contracts::p2p::v1::{CredentialScope, P2pGrantPayload};
 use nession_protocol::contracts::session::v1::{
     AgentTerminalResizePayload, ClientRelayBeginPayload, ClientSessionCapturePreviewPayload,
     ClientSessionCreatePayload, ClientSessionCreateResponsePayload, ClientSessionEnvActivePayload,
@@ -95,6 +97,8 @@ pub struct ConnectionHandler {
     attached_session_id: Option<String>,
     /// Unique client id for this relay attachment (for cleanup on disconnect).
     attached_client_id: Option<String>,
+    /// The P2P credential ledger, for minting on attach (#1013).
+    p2p_broker: Arc<crate::broker::ConnectionBroker>,
 }
 
 /// A clone is a **snapshot of one connection's identity at one moment** — what
@@ -122,6 +126,9 @@ impl Clone for ConnectionHandler {
             web_client_registry: Arc::clone(&self.web_client_registry),
             env_service: Arc::clone(&self.env_service),
             db: Arc::clone(&self.db),
+            // Shared, not connection-local: the ledger is the Server's, and a
+            // clone that took a copy of it would be a clone that could not mint.
+            p2p_broker: Arc::clone(&self.p2p_broker),
             config: ConnectionHandlerConfig {
                 server_auth_token: self.config.server_auth_token.clone(),
                 heartbeat_interval_secs: self.config.heartbeat_interval_secs,
@@ -151,6 +158,12 @@ pub struct ConnectionHandlerDeps {
     pub web_client_registry: Arc<WebClientRegistry>,
     pub env_service: Arc<EnvService>,
     pub db: Arc<crate::db::Database>,
+    /// The P2P credential ledger (#1013).
+    ///
+    /// A shared dependency rather than per-connection configuration, for the
+    /// same reason `command_broker` is: the credentials it holds outlive any one
+    /// connection and are visible to every one of them.
+    pub p2p_broker: Arc<crate::broker::ConnectionBroker>,
 }
 
 impl ConnectionHandler {
@@ -166,6 +179,7 @@ impl ConnectionHandler {
             web_client_registry: deps.web_client_registry,
             env_service: deps.env_service,
             db: deps.db,
+            p2p_broker: deps.p2p_broker,
             config,
             authenticated_client: false,
             registered_agent_id: None,
@@ -1385,7 +1399,36 @@ impl ConnectionHandler {
             .or_else(|| agent.connect_url.clone())
             .unwrap_or_else(|| format!("ws://{}:{}/ws", agent.ip_address, agent.port));
         let agent_address = agent_ws_url.clone();
-        let connection_token = uuid::Uuid::new_v4().to_string();
+
+        // Mint the credential, and hand it to the agent that will **verify** it
+        // before the client that will **present** it is told the token (#1013).
+        //
+        // That ordering is the whole design. A client dials the agent the
+        // instant it holds a token, so a grant that had not arrived yet would
+        // refuse a legitimate attach — a race the client cannot detect and the
+        // user cannot act on. Awaiting the acknowledgement first makes it
+        // impossible rather than unlikely.
+        let credential = self
+            .p2p_broker
+            .mint(
+                &agent_id,
+                session_id,
+                &agent.ip_address,
+                agent.port,
+                CredentialScope::for_attach(&session_name),
+            )
+            .await;
+
+        let grant = P2pGrantPayload {
+            // The command transport injects the authoritative one.
+            request_id: String::new(),
+            credential: credential.token.clone(),
+            agent_id: agent_id.clone(),
+            session_id: session_id.to_string(),
+            scope: credential.scope.clone(),
+            expires_at: credential.expires_at.to_rfc3339(),
+        };
+
         // Serialise the full probed-address list for multi-address clients.
         let addresses_json = serde_json::to_value(&agent.addresses).unwrap_or(json!([]));
 
@@ -1516,6 +1559,32 @@ impl ConnectionHandler {
             // the browser subscribing to terminal.output.
             Ok(HandlerAction::Reply(None))
         } else {
+            // The credential is handed to the client **only here**, so this is
+            // the only branch that needs the agent to have been told (#1013).
+            // The relay branch mints one too — it did before this change — but
+            // nothing presents it until relay carries a credential of its own.
+            // A credential the verifier never received can only fail later, in the
+            // browser, with less to go on — so a refused grant fails the attach
+            // here, where the reason is still in hand.
+            if let Err(refusal) = self.grant_p2p_credential(&agent_id, &grant).await {
+                return Ok(HandlerAction::Reply(Some(Message::Text(
+                    json!({
+                        "msg_type": "server.session.attach",
+                        "id": msg.id,
+                        "timestamp": current_timestamp(),
+                        "payload": {
+                            "status": "error",
+                            "message": format!(
+                                "Agent '{agent_id}' would not accept a P2P credential: {refusal}"
+                            )
+                        }
+                    })
+                    .to_string(),
+                ))));
+            }
+
+            let connection_token = credential.token.clone();
+
             // P2P mode: return the full candidate list (with probe status) plus
             // the legacy single `agent_address` for backward compatibility. The
             // client tests latency across `addresses` and falls back per-address.
@@ -1658,6 +1727,58 @@ impl ConnectionHandler {
             session_name
         );
 
+        // Mint the relay credential and hand it to the agent that will verify
+        // it, **before any dial** (#1013). Same ordering as the p2p path, for
+        // the same reason: the dial is what presents it.
+        //
+        // The credential rides **on the URLs** rather than beside them, and that
+        // is what makes both relay dials work without knowing about it — the
+        // attach dial iterates this list, and the detach dial reuses the one that
+        // succeeded. A credential threaded alongside would have to reach both
+        // sites and stay in step with them; this way there is one place it can
+        // be forgotten, and it is here.
+        let credential = self
+            .p2p_broker
+            .mint(
+                &agent_id,
+                session_id,
+                &agent.ip_address,
+                agent.port,
+                CredentialScope::for_relay(&session_name),
+            )
+            .await;
+
+        let grant = P2pGrantPayload {
+            request_id: String::new(),
+            credential: credential.token.clone(),
+            agent_id: agent_id.clone(),
+            session_id: session_id.to_string(),
+            scope: credential.scope.clone(),
+            expires_at: credential.expires_at.to_rfc3339(),
+        };
+
+        if let Err(refusal) = self.grant_p2p_credential(&agent_id, &grant).await {
+            return Ok(HandlerAction::Reply(Some(Message::Text(
+                json!({
+                    "msg_type": "server.session.attach",
+                    "id": msg.id,
+                    "timestamp": current_timestamp(),
+                    "payload": {
+                        "status": "error",
+                        "message": format!(
+                            "Agent '{agent_id}' would not accept a relay credential: {refusal}"
+                        )
+                    }
+                })
+                .to_string(),
+            ))));
+        }
+
+        let relay_urls: Vec<String> = relay_urls
+            .into_iter()
+            .map(|url| agent_url_with_credential(&url, &credential.token))
+            .collect();
+
         let client_id = uuid::Uuid::new_v4().to_string();
         if let Some(ref sender) = self.client_sender {
             self.client_registry
@@ -1779,6 +1900,12 @@ impl ConnectionHandler {
                 json!({
                     "request_id": request_id,
                     "name": name,
+                    // Ignored on the far side: the Agent creates every session at
+                    // its own fixed starting size and lets the first attach
+                    // resize it (`TmuxManager::create_session`, and the sizing
+                    // decision of 2026-08-15). Kept because the agent payload
+                    // field exists and a missing key is not the same wire as one
+                    // that says 80×24 — see the note on the CLI's `--width`.
                     "width": 80,
                     "height": 24,
                     "env_snapshots": env_snapshots,
@@ -2599,6 +2726,38 @@ impl ConnectionHandler {
     /// Same as [`Self::agent_command`] but with a caller-chosen timeout.
     /// Interactive paths (a user waiting on a click) want a much shorter
     /// deadline than background bookkeeping.
+    /// Push a P2P credential to the agent that will verify it (#1013).
+    ///
+    /// Waits for the acknowledgement, because the caller is about to hand the
+    /// token to a client that will dial immediately. The deadline is short on
+    /// purpose: a client's attach is blocked on this, and a wedged agent should
+    /// fail one in two seconds rather than hold a browser for ten.
+    async fn grant_p2p_credential(
+        &self,
+        agent_id: &str,
+        grant: &P2pGrantPayload,
+    ) -> Result<(), String> {
+        let payload = serde_json::to_value(grant).map_err(|e| e.to_string())?;
+        let response = self
+            .agent_command_with_timeout(
+                agent_id,
+                "agent.p2p.grant",
+                payload,
+                Duration::from_secs(2),
+            )
+            .await?;
+
+        if response.get("success").and_then(serde_json::Value::as_bool) == Some(true) {
+            return Ok(());
+        }
+
+        Err(response
+            .get("error")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("the agent gave no reason")
+            .to_string())
+    }
+
     async fn agent_command_with_timeout(
         &self,
         agent_id: &str,
@@ -3934,6 +4093,8 @@ mod tests {
                 web_client_registry,
                 env_service,
                 db,
+
+                p2p_broker: std::sync::Arc::new(crate::broker::ConnectionBroker::new(300)),
             },
             ConnectionHandlerConfig {
                 server_auth_token: auth_token.to_string(),
@@ -5672,14 +5833,53 @@ mod tests {
         ))
         .await
         .unwrap();
-        // Attach in P2P mode
-        let action = h
-            .handle_message(proto_msg(
-                "server.session.attach",
-                json!({ "session_id": "a1:dev", "preferred_mode": "p2p" }),
-            ))
-            .await
-            .unwrap();
+        // The Server hands the credential to the agent that will verify it
+        // **before** it answers the client (#1013), so the attach cannot
+        // complete unless the agent answers. Standing one in for the test is
+        // the point rather than an inconvenience: what this exercises is the
+        // ordering, and the assertions below would hang for the grant deadline
+        // if the Server answered the client first.
+        let (sender, mut rx) = WsMessageSender::new();
+        let generation = h.command_broker.new_connection_generation();
+        h.command_broker.claim_agent("a1", generation, sender).await;
+        let broker = Arc::clone(&h.command_broker);
+
+        let attach_fut = h.handle_message(proto_msg(
+            "server.session.attach",
+            json!({ "session_id": "a1:dev", "preferred_mode": "p2p" }),
+        ));
+        let grant_fut = async move {
+            let text = rx
+                .recv()
+                .await
+                .expect("the agent is told before the client is answered")
+                .message
+                .to_text()
+                .unwrap()
+                .to_string();
+            let grant: serde_json::Value = serde_json::from_str(&text).unwrap();
+            assert_eq!(grant["msg_type"], "agent.p2p.grant");
+            assert_eq!(grant["payload"]["agent_id"], "a1");
+            assert_eq!(grant["payload"]["session_id"], "a1:dev");
+            assert_eq!(
+                grant["payload"]["scope"]["terminal"], "dev",
+                "the credential is bound to the session it was minted for"
+            );
+            assert!(
+                grant["payload"]["credential"]
+                    .as_str()
+                    .is_some_and(|token| !token.is_empty()),
+                "and it carries the credential the client will present"
+            );
+
+            let request_id = grant["payload"]["request_id"].as_str().unwrap().to_string();
+            broker
+                .resolve_command("a1", &request_id, json!({ "success": true }))
+                .await;
+        };
+
+        let (action, ()) = tokio::join!(attach_fut, grant_fut);
+        let action = action.unwrap();
         let reply = parse_reply(action);
         assert_eq!(reply["payload"]["status"], "success");
         assert_eq!(reply["payload"]["mode"], "p2p");
@@ -5752,14 +5952,47 @@ mod tests {
         assert_eq!(phase1["payload"]["mode"], "relay");
         assert_eq!(phase1["payload"]["session_id"], "a1:dev");
 
-        // Phase 2: begin relay — actually enters relay forwarding.
-        let action = h
-            .handle_message(proto_msg(
-                "server.session.relay.begin",
-                json!({ "session_id": "a1:dev" }),
-            ))
-            .await
-            .unwrap();
+        // Phase 2: begin relay. The Server hands the credential to the agent
+        // that will verify it **before** it dials (#1013), so this cannot
+        // complete without an agent that answers.
+        let (sender, mut rx) = WsMessageSender::new();
+        let generation = h.command_broker.new_connection_generation();
+        h.command_broker.claim_agent("a1", generation, sender).await;
+        let broker = Arc::clone(&h.command_broker);
+
+        let begin_fut = h.handle_message(proto_msg(
+            "server.session.relay.begin",
+            json!({ "session_id": "a1:dev" }),
+        ));
+        let grant_fut = async move {
+            let text = rx
+                .recv()
+                .await
+                .expect("the agent is told before the server dials it")
+                .message
+                .to_text()
+                .unwrap()
+                .to_string();
+            let grant: serde_json::Value = serde_json::from_str(&text).unwrap();
+            assert_eq!(grant["msg_type"], "agent.p2p.grant");
+            assert_eq!(grant["payload"]["scope"]["terminal"], "dev");
+            assert_eq!(
+                grant["payload"]["scope"]["files"], false,
+                "a relay credential is the narrow one: the relay leg never touches a file"
+            );
+            assert_eq!(
+                grant["payload"]["scope"]["sessions"], false,
+                "and it never creates or kills a session"
+            );
+
+            let request_id = grant["payload"]["request_id"].as_str().unwrap().to_string();
+            broker
+                .resolve_command("a1", &request_id, json!({ "success": true }))
+                .await;
+        };
+
+        let (action, ()) = tokio::join!(begin_fut, grant_fut);
+        let action = action.unwrap();
         match action {
             HandlerAction::Relay {
                 agent_ws_urls,
@@ -5774,6 +6007,15 @@ mod tests {
                 assert!(agent_ws_urls[0].contains("1.2.3.4"));
                 assert_eq!(session_name, "dev");
                 assert!(env_snapshots.is_empty());
+                // The credential rides **on the URLs**, which is what makes both
+                // relay dials carry it without knowing about it — the attach dial
+                // iterates this list, and the detach dial reuses the one that
+                // succeeded. A credential threaded beside the URL would have to
+                // be kept in step with two call sites.
+                assert!(
+                    agent_ws_urls.iter().all(|url| url.contains("token=")),
+                    "every candidate the dials use carries the credential: {agent_ws_urls:?}"
+                );
             }
             _ => panic!("expected Relay action"),
         }
@@ -7077,6 +7319,8 @@ mod tests {
                     web_client_registry: Arc::clone(&web_client_registry),
                     env_service: EnvService::new(Arc::clone(&db)),
                     db: Arc::clone(&db),
+
+                    p2p_broker: std::sync::Arc::new(crate::broker::ConnectionBroker::new(300)),
                 },
                 ConnectionHandlerConfig {
                     server_auth_token: String::new(),

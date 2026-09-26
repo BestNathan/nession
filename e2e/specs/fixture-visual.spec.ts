@@ -117,7 +117,7 @@ test.describe('App 390×844', () => {
 
   test('Active Terminal', async ({ page }) => {
     await gotoFixtureApp(page);
-    await expect(page.getByTestId('app-spatial-page-terminal')).toBeInViewport();
+    await expect(page.getByTestId('app-layer-terminal')).toBeInViewport();
     await waitForFixtureTerminal(page);
 
     await expect(page).toHaveScreenshot('app-terminal.png', {
@@ -215,13 +215,71 @@ test.describe('App 390×844', () => {
     });
   });
 
-  test('Sessions spatial page', async ({ page }) => {
+  test('Sessions layer', async ({ page }) => {
     await gotoFixtureApp(page);
     await page.getByTestId('app-header-sessions').first().click();
-    await expect(page.getByTestId('app-spatial-page-sessions')).toBeInViewport();
+    await expect(page.getByTestId('app-layer-sessions')).toBeInViewport();
     await expect(page.getByTestId('session-item-row')).toHaveCount(6);
 
     await expect(page).toHaveScreenshot('app-sessions.png', {
+      fullPage: true,
+      ...FIXTURE_SCREENSHOT,
+    });
+  });
+
+  // #1050 criterion 11's second state. The field filtered nothing until #1050
+  // stage 5 — the route passed `searchQuery: ''` and the unfiltered list as
+  // static props, so typing into it was a screenshot of nothing happening.
+  // `FixtureApp` now composes the product's own filter state
+  // (`useDashboardFilter`) and the product's own filter (`filterSessions`), so
+  // this is the screen the app produces for this query, and the assertions
+  // below the field are what say the list narrowed rather than that the field
+  // rendered the text.
+  test('Sessions layer, filtered', async ({ page }) => {
+    await gotoFixtureApp(page);
+    await page.getByTestId('app-header-sessions').first().click();
+    await expect(page.getByTestId('app-layer-sessions')).toBeInViewport();
+    await expect(page.getByTestId('session-item-row')).toHaveCount(6);
+
+    // `filterSessions` matches a Session's name *or* its Agent id, so this keeps
+    // the three Sessions on `devbox-01` — including one whose name says nothing
+    // about the query, which is the half a name-only search would miss.
+    await page.getByPlaceholder('Search sessions...').fill('devbox');
+
+    await expect(page.getByTestId('session-item-row')).toHaveCount(3);
+    await expect(page.getByTestId('session-item-devbox-01:design-system')).toBeVisible();
+    await expect(page.getByTestId('session-item-macbook:dotfiles')).toHaveCount(0);
+    await expect(page.getByTestId('session-item-sg-prod:prod-shell')).toHaveCount(0);
+
+    await expect(page).toHaveScreenshot('app-sessions-filtered.png', {
+      fullPage: true,
+      ...FIXTURE_SCREENSHOT,
+    });
+  });
+
+  // The third state, and the one the fixture cannot produce on its own: an Agent
+  // is stale when a *refresh got no answer from it*, so nothing this route does
+  // can make one. `?stale=` names that input (`session.stale_agents` in the
+  // product) rather than the reading it resolves to, exactly as `?pane=` names a
+  // pane's command rather than the capability it emerges — a fixture that could
+  // ask for "the degraded row" would assert a state the app never decided on.
+  //
+  // `macbook` is listed as online and is the Agent that did not answer, so both
+  // degraded readings are in one frame: its two Sessions read "Agent did not
+  // respond" in the error colour, while `sg-prod`'s keeps the offline one.
+  test('Sessions layer, degraded', async ({ page }) => {
+    await gotoFixtureApp(page, '?stale=macbook');
+    await page.getByTestId('app-header-sessions').first().click();
+    await expect(page.getByTestId('app-layer-sessions')).toBeInViewport();
+    await expect(page.getByTestId('session-item-row')).toHaveCount(6);
+
+    // Produced by `mapDomainState` from that input, not written here: every
+    // Session on a stale Agent carries the line, and the offline Agent's keeps
+    // its own reading.
+    await expect(page.getByText('Agent did not respond')).toHaveCount(2);
+    await expect(page.getByText('Agent offline')).toHaveCount(1);
+
+    await expect(page).toHaveScreenshot('app-sessions-degraded.png', {
       fullPage: true,
       ...FIXTURE_SCREENSHOT,
     });
@@ -253,6 +311,59 @@ test.describe('App 390×844', () => {
     await expect(page.getByTestId('file-row-web')).toContainText('1 file', { timeout: 10_000 });
 
     await expect(page).toHaveScreenshot('app-files-list.png', {
+      fullPage: true,
+      ...FIXTURE_SCREENSHOT,
+    });
+  });
+});
+
+// #1050 criterion 11 names **375/390**, and until now only 390 had goldens:
+// `app.narrow-phone` was exercised by `ui-contract-matrix`'s structured
+// assertions but never photographed. The narrowest canonical phone is also the
+// one where the App surface has least room, so it is the viewport most worth
+// having a picture of rather than only measurements of.
+//
+// Snapshot names carry the width. Playwright keys snapshots per *file*, so
+// reusing `app-sessions.png` here would collide with the 390 case rather than
+// produce a second baseline.
+test.describe('App 375×812', () => {
+  test.use({ viewport: { width: 375, height: 812 } });
+
+  test('Sessions layer', async ({ page }) => {
+    await gotoFixtureApp(page);
+    await page.getByTestId('app-header-sessions').first().click();
+    await expect(page.getByTestId('app-layer-sessions')).toBeInViewport();
+    await expect(page.getByTestId('session-item-row')).toHaveCount(6);
+
+    await expect(page).toHaveScreenshot('app-sessions-375.png', {
+      fullPage: true,
+      ...FIXTURE_SCREENSHOT,
+    });
+  });
+
+  test('Sessions layer, filtered', async ({ page }) => {
+    await gotoFixtureApp(page);
+    await page.getByTestId('app-header-sessions').first().click();
+    await expect(page.getByTestId('app-layer-sessions')).toBeInViewport();
+
+    await page.getByPlaceholder('Search sessions...').fill('devbox');
+    await expect(page.getByTestId('session-item-row')).toHaveCount(3);
+
+    await expect(page).toHaveScreenshot('app-sessions-filtered-375.png', {
+      fullPage: true,
+      ...FIXTURE_SCREENSHOT,
+    });
+  });
+
+  test('Sessions layer, degraded', async ({ page }) => {
+    await gotoFixtureApp(page, '?stale=macbook');
+    await page.getByTestId('app-header-sessions').first().click();
+    await expect(page.getByTestId('app-layer-sessions')).toBeInViewport();
+
+    await expect(page.getByText('Agent did not respond')).toHaveCount(2);
+    await expect(page.getByText('Agent offline')).toHaveCount(1);
+
+    await expect(page).toHaveScreenshot('app-sessions-degraded-375.png', {
       fullPage: true,
       ...FIXTURE_SCREENSHOT,
     });

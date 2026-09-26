@@ -42,6 +42,32 @@ describe('SessionHeader app branch', () => {
     expect(screen.queryByTestId('connection-status')).not.toBeInTheDocument();
   });
 
+  it('sets the session name in the product face', () => {
+    // #1050 stage 4: the name is Session identity — the same string the Sessions
+    // row it was chosen from sets in the product face.
+    render(<SessionHeader {...base} experience="app" onOpenDrawer={vi.fn()} />);
+    const title = screen.getByRole('heading', { level: 1 });
+    expect(title).toHaveTextContent('fix-terminal-reconnect');
+    expect(title.className).not.toMatch(/font-mono/);
+  });
+
+  it('sets the status member in the product face', () => {
+    // #1050 stage 4: the member reports channel words with their copy, which is
+    // the Metadata role's "status details". The wrapper is what carried
+    // `font-mono` — `ConnectionStatus` never set a family of its own — so the
+    // assertion is on the wrapper that decides it.
+    render(
+      <SessionHeader
+        {...base}
+        state={{ ...healthy, agent: { channel: 'offline', copy: 'Agent offline' } }}
+        experience="app"
+        onOpenDrawer={vi.fn()}
+        onOpenWorkspace={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId('session-header-status').className).not.toMatch(/font-mono/);
+  });
+
   it('renders the status line when the agent is unreachable', () => {
     render(
       <SessionHeader

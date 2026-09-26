@@ -62,7 +62,12 @@ function renderTerminal(hidden: boolean, store = createStore()) {
   const onError = vi.fn();
   const view = (
     <Provider store={store}>
-      <TerminalRegion hidden={hidden} onDisconnect={onDisconnect} onError={onError} />
+      <TerminalRegion
+        hidden={hidden}
+        onDisconnect={onDisconnect}
+        onError={onError}
+        experience="web"
+      />
     </Provider>
   );
   const result = render(view);
@@ -72,7 +77,12 @@ function renderTerminal(hidden: boolean, store = createStore()) {
     rerenderHidden: (next: boolean) =>
       result.rerender(
         <Provider store={store}>
-          <TerminalRegion hidden={next} onDisconnect={onDisconnect} onError={onError} />
+          <TerminalRegion
+            hidden={next}
+            onDisconnect={onDisconnect}
+            onError={onError}
+            experience="web"
+          />
         </Provider>,
       ),
   };

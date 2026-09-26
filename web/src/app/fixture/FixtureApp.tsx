@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
-import {
-  AppSpatialShell,
-  type SpatialPageIndex,
-} from '@/app/experiences/app/AppSpatialShell';
+import { useEffect, useMemo, useState } from 'react';
+import { useLocation } from 'react-router-dom';
+import { AppLayout } from '@/app/experiences/app/AppLayout';
+import { useAppLayer } from '@/app/experiences/app/useAppLayer';
+import { filterSessions } from '@/app/useDashboard';
+import { useDashboardFilter } from '@/app/useDashboardFilter';
 import { mapDomainState } from '@/product/session/model/domainState';
 import { FixtureTerminal } from '@/app/fixture/FixtureTerminal';
 import {
@@ -11,23 +12,37 @@ import {
   FIXTURE_SELECTED_ID,
   FIXTURE_SESSIONS,
 } from '@/app/fixture/fixtureData';
-import { ShellMain } from '@/app/ShellMain';
-import { Sidebar } from '@/app/Sidebar';
 import type { Surface } from '@/app/patterns/SessionHeader';
 import type { CapabilityId } from '@/product/capability';
 import { gitApi } from '@/capabilities/git';
 import { fixtureFileOps } from './fixtureFileOps';
 import { fixtureGitSurface } from './fixtureGit';
+import { fixtureStaleAgents } from './fixtureStaleAgents';
 
 // Module-stable — the stub is immutable and stateless (same pattern as
 // FixtureWorkspace's fixtureOps).
 const fixtureOps = fixtureFileOps();
 
 /**
- * Canonical App Active Terminal screen (#561 Phase 2C): the spatial
- * 3-page pager at 390×844 — single-row App header, static terminal with
- * the app scroll overlay, files plugin app layout, deterministic data.
- * No network. Also the Phase 6 baseline source.
+ * Canonical App Active Terminal screen (#561 Phase 2C): the Terminal-root
+ * layer composition at 390×844 (#1049) — single-row App header, static
+ * terminal with the app scroll overlay, files plugin app layout,
+ * deterministic data. No network. Also the Phase 6 baseline source.
+ *
+ * The fixture renders `AppLayout` directly rather than reimplementing the
+ * composition, so the canonical baseline reflects shipped geometry. It used to
+ * build its own `AppSpatialShell` with a reversed surface/index derivation,
+ * which meant the fixture and the product could disagree about the shell
+ * without any test noticing.
+ *
+ * The Session list is the product's, not a snapshot of one (#1050 stage 5):
+ * the filter/sort state is `useDashboardFilter` and the list is
+ * `filterSessions`, which is exactly the pair `useDashboard` composes with its
+ * transport. So the search field filters, the Filters disclosure sorts, and the
+ * route renders an order the app can reach — the three props that used to be
+ * static (`searchQuery: ''`, `setSearchQuery: () => {}` and the unfiltered
+ * list) made the field inert and left the canonical screen showing a Session
+ * order no sort in the product produces.
  */
 export function FixtureApp() {
   // A capability projection has to be reachable from a fixture to be captured,
@@ -37,11 +52,31 @@ export function FixtureApp() {
   // screenshots are unaffected unless a case opens one.
   useEffect(() => gitApi.install(fixtureGitSurface('')), []);
 
-  const [spatialIndex, setSpatialIndex] = useState<SpatialPageIndex>(1);
-  // Surface derives from the pager position — page 2 is the workspace,
-  // every other position is the terminal page.
-  const surface: Surface = spatialIndex === 2 ? 'workspace' : 'terminal';
+  const [surface, setSurface] = useState<Surface>('terminal');
   const [tool, setTool] = useState<CapabilityId>('files');
+
+  const {
+    searchQuery, setSearchQuery,
+    statusFilter, setStatusFilter,
+    sortField, sortDirection, toggleSort,
+    isSearchActive,
+  } = useDashboardFilter();
+
+  const filteredSessions = useMemo(
+    () =>
+      filterSessions(FIXTURE_SESSIONS, FIXTURE_AGENTS, {
+        statusFilter,
+        searchQuery,
+        sortField,
+        sortDirection,
+      }),
+    [statusFilter, searchQuery, sortField, sortDirection],
+  );
+
+  // The route's Session-list input. Nothing here can produce staleness (it takes
+  // a refresh getting no answer), so the parameter names the input — see
+  // `fixtureStaleAgents`.
+  const staleAgents = fixtureStaleAgents(useLocation().search);
 
   const selectedId = FIXTURE_SELECTED_ID;
   const selectedSession =
@@ -53,7 +88,10 @@ export function FixtureApp() {
     ? mapDomainState({
         session: selectedSession,
         agent: selectedAgent,
-        staleAgentIds: [],
+        // The same input the rows are given (`useShellState` hands the product's
+        // footer the whole stale list): a footer that stayed healthy while the
+        // list said otherwise would be a disagreement the product does not have.
+        staleAgentIds: staleAgents,
         clientSessionId: FIXTURE_CLIENT_SESSION_ID,
         attachInFlightId: null,
         attachFailedId: null,
@@ -62,19 +100,19 @@ export function FixtureApp() {
 
   const sidebarProps = {
     agents: FIXTURE_AGENTS,
-    filteredSessions: FIXTURE_SESSIONS,
-    staleAgents: [],
+    filteredSessions,
+    staleAgents,
     selectedId,
     clientSessionId: FIXTURE_CLIENT_SESSION_ID,
     loadingSessions: false,
-    searchQuery: '',
-    setSearchQuery: () => {},
-    statusFilter: 'all' as const,
-    setStatusFilter: () => {},
-    sortField: 'name' as const,
-    sortDirection: 'desc' as const,
-    toggleSort: () => {},
-    isSearchActive: false,
+    searchQuery,
+    setSearchQuery,
+    statusFilter,
+    setStatusFilter,
+    sortField,
+    sortDirection,
+    toggleSort,
+    isSearchActive,
     connectionStatus: 'connected' as const,
     domain,
     onCreate: () => {},
@@ -91,11 +129,18 @@ export function FixtureApp() {
     tool,
     fileOps: fixtureOps,
     connectionStatus: 'connected' as const,
-    onSurfaceChange: (s: Surface) =>
-      setSpatialIndex(s === 'workspace' ? 2 : 1),
+    onSurfaceChange: setSurface,
     onToolChange: setTool,
     onOpenAgent: () => {},
   };
+
+  const { layer, onLayerChange, onLayerSelect } = useAppLayer({
+    selectedId,
+    surface,
+    active: true,
+    onSurfaceChange: setSurface,
+    onSelect: () => {},
+  });
 
   return (
     <div
@@ -104,42 +149,15 @@ export function FixtureApp() {
       data-experience="app"
       className="shell flex h-[100dvh] flex-col bg-background"
     >
-      <AppSpatialShell
-        index={spatialIndex}
-        onIndexChange={setSpatialIndex}
-        sessions={
-          <Sidebar
-            {...sidebarProps}
-            onSelect={() => setSpatialIndex(1)}
-          />
-        }
-        terminal={
-          <div className="flex h-full min-h-0 flex-col">
-            <ShellMain
-              {...mainShared}
-              surface={surface}
-              showWorkspace={false}
-              experience="app"
-              onOpenDrawer={() => setSpatialIndex(0)}
-              onOpenWorkspace={() => setSpatialIndex(2)}
-              terminal={(chrome) => (
-                <div className="relative h-full">
-                  <FixtureTerminal chrome={chrome} />
-                </div>
-              )}
-            />
-          </div>
-        }
-        workspace={
-          <div className="flex h-full min-h-0 flex-col">
-            <ShellMain
-              {...mainShared}
-              surface={surface}
-              showTerminal={false}
-              experience="app"
-            />
-          </div>
-        }
+      <AppLayout
+        layer={layer}
+        onLayerChange={onLayerChange}
+        sidebarProps={sidebarProps}
+        onLayerSelect={onLayerSelect}
+        mainShared={mainShared}
+        terminal={(chrome) => (
+          <FixtureTerminal chrome={chrome} experience="app" />
+        )}
       />
     </div>
   );

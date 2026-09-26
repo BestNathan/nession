@@ -73,9 +73,18 @@ export async function gotoFixtureWorkspace(page: Page): Promise<void> {
   await page.getByTestId('workspace-shell').waitFor();
 }
 
-export async function gotoFixtureApp(page: Page): Promise<void> {
-  await page.goto('/#/fixture/app');
-  await page.getByTestId('app-spatial-shell').waitFor();
+/**
+ * Open the App route, optionally with a route parameter.
+ *
+ * `search` is the query string verbatim (leading `?` included) and is how a
+ * case names an *input* the fixture cannot otherwise be given — `?stale=…` for
+ * an Agent the last refresh got no answer from. Omitted, the route is the
+ * canonical screen the golden baselines capture, which is why the parameter is
+ * optional rather than a second helper.
+ */
+export async function gotoFixtureApp(page: Page, search = ''): Promise<void> {
+  await page.goto(`/#/fixture/app${search}`);
+  await page.getByTestId('app-layer-root').waitFor();
 }
 
 /** Wait for xterm to paint fixture buffer (renderer-agnostic). */

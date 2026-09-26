@@ -27,6 +27,8 @@ async fn make_handler() -> anyhow::Result<ConnectionHandler> {
             web_client_registry,
             env_service,
             db,
+
+            p2p_broker: std::sync::Arc::new(nession_server::broker::ConnectionBroker::new(300)),
         },
         ConnectionHandlerConfig {
             server_auth_token: "test_token".to_string(),

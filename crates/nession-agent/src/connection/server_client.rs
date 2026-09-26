@@ -68,8 +68,10 @@ use nession_runtime::lane::Work;
 use crate::connection::execution::ExecutionPolicy::{Inline, Key, Query};
 use crate::env::EnvStore;
 use crate::extension::ExtensionRegistry;
+use crate::p2p_credentials::P2pCredentials;
 use crate::protocol::core_routes;
 use crate::tmux::manager::SessionManager;
+use nession_protocol::contracts::p2p::v1::P2pGrantPayload;
 
 /// Type alias for the WebSocket stream.
 type WsStream = WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>;
@@ -170,6 +172,12 @@ pub struct ServerClient {
     default_working_dir: String,
     /// Registry for dispatching the units the composed providers declare.
     extension_registry: Option<Arc<ExtensionRegistry>>,
+    /// The P2P credentials this agent honours (#1013).
+    ///
+    /// Shared with the P2P listener, which is where they are *checked*; this
+    /// side is where they *arrive*, because the channel that delivers them is
+    /// the one this client dialled out.
+    p2p_credentials: Arc<P2pCredentials>,
     /// Agent metadata.
     metadata: AgentMetadata,
     /// Tmux manager for handling session commands.
@@ -358,6 +366,7 @@ impl ServerClient {
         tmux: Arc<SessionManager>,
         default_working_dir: String,
         extension_registry: Option<Arc<ExtensionRegistry>>,
+        p2p_credentials: Arc<P2pCredentials>,
     ) -> Self {
         let env_root = nession_common::paths::agent_envs_dir()
             .unwrap_or_else(|_| std::path::PathBuf::from(".nession/agent/envs"));
@@ -375,6 +384,7 @@ impl ServerClient {
             extension_registry,
             metadata,
             tmux,
+            p2p_credentials,
             env_store: EnvStore::new(env_root),
             sourced_envs: std::sync::Mutex::new(HashMap::new()),
         }
@@ -1146,6 +1156,7 @@ mod tests {
             Arc::new(SessionManager::new()),
             "/tmp".to_string(),
             None,
+            Arc::new(P2pCredentials::new()),
         );
 
         let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
@@ -1192,6 +1203,7 @@ mod tests {
             Arc::new(SessionManager::new()),
             "/tmp".to_string(),
             None,
+            Arc::new(P2pCredentials::new()),
         );
 
         let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
@@ -1247,6 +1259,7 @@ mod tests {
             Arc::new(SessionManager::new()),
             "/tmp".to_string(),
             None,
+            Arc::new(P2pCredentials::new()),
         );
 
         let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
@@ -1331,6 +1344,7 @@ mod tests {
             Arc::new(SessionManager::new()),
             "/tmp".to_string(),
             None,
+            Arc::new(P2pCredentials::new()),
         );
 
         let (handle, interval) = client.connect_and_run().await.expect("connect failed");
@@ -1408,6 +1422,7 @@ mod tests {
             Arc::new(SessionManager::new()),
             "/tmp".to_string(),
             None,
+            Arc::new(P2pCredentials::new()),
         );
         let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
 
@@ -1520,6 +1535,7 @@ mod tests {
             Arc::new(SessionManager::new()),
             "/tmp".to_string(),
             None,
+            Arc::new(P2pCredentials::new()),
         );
 
         let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
@@ -1638,6 +1654,7 @@ mod tests {
             Arc::new(SessionManager::new()),
             "/tmp".to_string(),
             None,
+            Arc::new(P2pCredentials::new()),
         );
 
         let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
@@ -1739,6 +1756,7 @@ mod tests {
             Arc::new(SessionManager::new()),
             "/tmp".to_string(),
             None,
+            Arc::new(P2pCredentials::new()),
         );
 
         let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
@@ -1867,6 +1885,7 @@ mod tests {
             Arc::new(SessionManager::new()),
             "/tmp".to_string(),
             Some(registry),
+            Arc::new(P2pCredentials::new()),
         );
         client.connect_and_run().await.expect("connect failed").0
     }
@@ -2214,6 +2233,7 @@ mod tests {
             Arc::new(SessionManager::new()),
             "/tmp".to_string(),
             None,
+            Arc::new(P2pCredentials::new()),
         );
 
         let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
@@ -2306,6 +2326,7 @@ mod tests {
             Arc::new(SessionManager::new()),
             "/tmp".to_string(),
             None,
+            Arc::new(P2pCredentials::new()),
         );
 
         let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
@@ -2397,6 +2418,7 @@ mod tests {
             Arc::new(SessionManager::new()),
             "/tmp".to_string(),
             None,
+            Arc::new(P2pCredentials::new()),
         );
 
         let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
@@ -2502,6 +2524,7 @@ mod tests {
             Arc::new(SessionManager::new()),
             "/tmp".to_string(),
             None,
+            Arc::new(P2pCredentials::new()),
         );
 
         let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
@@ -2551,6 +2574,7 @@ mod tests {
             Arc::new(SessionManager::new()),
             "/tmp".to_string(),
             None,
+            Arc::new(P2pCredentials::new()),
         );
 
         let (handle, interval) = client.connect_and_run().await.expect("connect failed");
@@ -2740,6 +2764,7 @@ mod tests {
             tmux,
             "/tmp".to_string(),
             None,
+            Arc::new(P2pCredentials::new()),
         );
         let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
 
@@ -2816,6 +2841,7 @@ mod tests {
             tmux,
             "/tmp".to_string(),
             None,
+            Arc::new(P2pCredentials::new()),
         );
         let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
 
@@ -3152,6 +3178,7 @@ esac"#,
             tmux,
             "/tmp".to_string(),
             None,
+            Arc::new(P2pCredentials::new()),
         );
         client.connect_and_run().await.expect("connect failed").0
     }
@@ -3488,6 +3515,57 @@ fn is_control(wire: &str) -> bool {
 }
 
 core_routes!(agent, msg, responses;
+    "agent.p2p.grant" => "agent.p2p.grant" => 1 => Key(ResourceKey::Authority) => {
+                    let grant: P2pGrantPayload =
+                        match serde_json::from_value(msg.payload.clone()) {
+                            Ok(grant) => grant,
+                            Err(e) => {
+                                warn!("Invalid agent.p2p.grant payload: {e}");
+                                return Ok(());
+                            }
+                        };
+                    let request_id = grant.request_id.clone();
+
+                    // Stored, not enforced. The Server is waiting on this
+                    // acknowledgement before it hands the token to a client, so
+                    // the reply has to say whether the credential was taken —
+                    // and a refusal here fails the client's attach, which is the
+                    // only honest outcome: an attach that proceeds with a
+                    // credential this agent will not honour fails later, in the
+                    // browser, with less to go on.
+                    let (success, error) = match agent.p2p_credentials.grant(&agent.agent_id, &grant)
+                    {
+                        Ok(credential_id) => {
+                            info!(
+                                credential = %credential_id,
+                                session_id = %grant.session_id,
+                                "Granted a P2P credential"
+                            );
+                            (true, None)
+                        }
+                        Err(refusal) => {
+                            warn!(
+                                ?refusal,
+                                session_id = %grant.session_id,
+                                "Refused a P2P grant"
+                            );
+                            (false, Some(format!("{refusal:?}")))
+                        }
+                    };
+
+                    let response = serde_json::json!({
+                        "msg_type": "server.agent.command-response",
+                        "id": uuid::Uuid::new_v4().to_string(),
+                        "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                        "payload": {
+                            "request_id": request_id,
+                            "command": "p2p.grant",
+                            "success": success,
+                            "error": error,
+                        }
+                    });
+                    responses.send(WsMessage::Text(response.to_string())).await?;
+    }
     "agent.session.create" => "agent.session.create" => 1 => Key(session_by_name(&msg.payload)) => {
                     let payload: ServerSessionCreatePayload =
                         match serde_json::from_value(msg.payload.clone()) {
@@ -3962,6 +4040,7 @@ mod versioned_routing {
             Arc::new(SessionManager::new()),
             "/tmp".to_string(),
             None,
+            Arc::new(P2pCredentials::new()),
         )
     }
 
