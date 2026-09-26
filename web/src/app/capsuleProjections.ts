@@ -97,6 +97,16 @@ export interface CapsuleProjectionBinding {
      * which is also what keeps the registry free of transport.
      */
     sendText: (text: string) => void;
+    /**
+     * Deepen into the Workspace, at the item the body last reported or at one
+     * it names (#1046).
+     *
+     * Supplied by the host and rendered by the capability: the host used to draw
+     * this as a footer on every Peek, which made every capability end on the
+     * same borrowed sentence. Whether the action exists, where it sits and what
+     * it carries are the capability's answers.
+     */
+    openWorkspace: (resourceId?: string) => void;
     disabled: boolean;
   }) => ReactNode;
 }

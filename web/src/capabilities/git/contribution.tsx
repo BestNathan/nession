@@ -70,12 +70,13 @@ export const gitProjection: CapsuleProjectionBinding = {
   // so Git has a Peek of its own.
   // A Peek, and that is what earns the entry (#1046).
   entry: 'peek',
-  body: ({ agentId, sessionId, depth, onFocusChange }) => (
+  body: ({ agentId, sessionId, depth, onFocusChange, openWorkspace }) => (
     <GitProjection
       agentId={agentId}
       sessionId={sessionId}
       depth={depth}
       onFocusChange={onFocusChange}
+      onOpenWorkspace={openWorkspace}
     />
   ),
 };

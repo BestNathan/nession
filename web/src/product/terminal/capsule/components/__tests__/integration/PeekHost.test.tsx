@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
-import { CapabilityProjection } from '../../CapabilityProjection';
+import { PeekHost } from '../../PeekHost';
 import type { CapsuleCapabilityProjection } from '@/product/terminal/capsule/types';
 
 const sendText = vi.fn();
@@ -26,7 +26,7 @@ function projection(
  * draws. Nothing here exercises it — Terminal Keys' own test does that.
  */
 function frame(value: CapsuleCapabilityProjection) {
-  return <CapabilityProjection projection={value} sendText={sendText} disabled={false} />;
+  return <PeekHost projection={value} sendText={sendText} disabled={false} />;
 }
 
 function renderFrame(value: CapsuleCapabilityProjection) {
@@ -77,24 +77,42 @@ describe('capability projection frame', () => {
     expect(onDeeper).not.toHaveBeenCalled();
   });
 
-  it('offers the Workspace only from a Peek, when a Peek is what comes next', async () => {
+  it('renders no Workspace action of its own, at either depth', () => {
+    // **The inversion (#1046).** The host used to draw this as a footer on every
+    // Peek, which made every capability end on the same borrowed sentence, and
+    // it decided *for* the capability whether the action existed. It now hands
+    // the action to the body; the host drawing one at any depth is the
+    // regression this asserts against.
     const { rerender } = renderFrame(projection());
     expect(screen.queryByTestId('capsule-capability-open-workspace')).toBeNull();
 
     rerender(frame(projection({ depth: 'peek' })));
-    expect(screen.getByTestId('capsule-capability-open-workspace')).toBeInTheDocument();
+    expect(screen.queryByTestId('capsule-capability-open-workspace')).toBeNull();
   });
 
-  it('reaches the Workspace from the Signal when there is no Peek', async () => {
-    // Claude Code's shape: it has one Terminal depth, so hiding the way in
-    // behind a step that does not exist would leave the Workspace unreachable
-    // from the Terminal entirely.
+  it('hands the body an action that deepens where the body says', async () => {
+    // The capability names the target when it knows one — a file it just listed,
+    // a row the user is looking at.
     const onOpenWorkspace = vi.fn();
-    renderFrame(projection({ onDeeper: undefined, onOpenWorkspace }));
+    renderFrame(
+      projection({
+        depth: 'peek',
+        onOpenWorkspace,
+        body: (_focus, _setFocus, actions) => (
+          <button
+            type="button"
+            data-testid="deepen"
+            onClick={() => actions.openWorkspace('src/a.ts')}
+          >
+            open
+          </button>
+        ),
+      }),
+    );
 
-    await userEvent.click(screen.getByTestId('capsule-capability-open-workspace'));
+    await userEvent.click(screen.getByTestId('deepen'));
 
-    expect(onOpenWorkspace).toHaveBeenCalledTimes(1);
+    expect(onOpenWorkspace).toHaveBeenCalledWith('src/a.ts');
   });
 
   it('makes the title inert rather than opening an empty Peek', async () => {
@@ -123,24 +141,36 @@ describe('capability projection frame', () => {
     expect(onDismiss).toHaveBeenCalledTimes(1);
   });
 
-  it('carries what the body reported into the Workspace handoff', async () => {
-    // The frame owns the selection the body produces: the body says what the
-    // user picked, the frame is what knows where it is going.
+  it('deepens at the item the body reported, when the action names none', async () => {
+    // The host still owns the selection — that is what makes the transition land
+    // on the right thing (#826) — and `openWorkspace()` with no argument uses it,
+    // which is what the footer used to do.
+    //
+    // Two clicks, and that is not incidental: the action closes over the focus as
+    // of its render, so a body that picks *and* deepens inside one handler would
+    // pass the value from before the pick. That is the real reason a capability
+    // with a selection to carry should name it (the test above) rather than rely
+    // on the host's.
     const onOpenWorkspace = vi.fn();
     renderFrame(
       projection({
         depth: 'peek',
         onOpenWorkspace,
-        body: (_focus, setFocus) => (
-          <button type="button" data-testid="pick" onClick={() => setFocus('src/a.ts')}>
-            pick
-          </button>
+        body: (_focus, setFocus, actions) => (
+          <>
+            <button type="button" data-testid="pick" onClick={() => setFocus('src/a.ts')}>
+              pick
+            </button>
+            <button type="button" data-testid="deepen" onClick={() => actions.openWorkspace()}>
+              open
+            </button>
+          </>
         ),
       }),
     );
 
     await userEvent.click(screen.getByTestId('pick'));
-    await userEvent.click(screen.getByTestId('capsule-capability-open-workspace'));
+    await userEvent.click(screen.getByTestId('deepen'));
 
     expect(onOpenWorkspace).toHaveBeenCalledWith('src/a.ts');
   });
@@ -149,9 +179,19 @@ describe('capability projection frame', () => {
     // Opening the Workspace from a Peek with no selection is the capability
     // landing page, which is a legitimate thing to want.
     const onOpenWorkspace = vi.fn();
-    renderFrame(projection({ depth: 'peek', onOpenWorkspace }));
+    renderFrame(
+      projection({
+        depth: 'peek',
+        onOpenWorkspace,
+        body: (_focus, _setFocus, actions) => (
+          <button type="button" data-testid="deepen" onClick={() => actions.openWorkspace()}>
+            open
+          </button>
+        ),
+      }),
+    );
 
-    await userEvent.click(screen.getByTestId('capsule-capability-open-workspace'));
+    await userEvent.click(screen.getByTestId('deepen'));
 
     expect(onOpenWorkspace).toHaveBeenCalledWith(undefined);
   });
