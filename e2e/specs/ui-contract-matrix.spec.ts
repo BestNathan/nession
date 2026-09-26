@@ -20,7 +20,9 @@ import {
   expectSingleLine,
   expectTokenHeight,
   expectTouchTarget,
+  expectTouchTargetsWithin,
   expectVisibleWithin,
+  waitForSettledBox,
 } from '../helpers/ui-assert/assertions';
 import { loadContracts, type Experience } from '../helpers/ui-assert/contracts';
 
@@ -31,6 +33,7 @@ const { viewports } = loadContracts();
 const PATTERN_SESSION_ITEM = 'pattern.session-item';
 const PATTERN_WORKSPACE_NAV = 'pattern.workspace-navigation';
 const PATTERN_TERMINAL_CAPSULE = 'pattern.terminal-capsule';
+const PATTERN_POPUP_MENU = 'pattern.popup-menu';
 
 function optsFor(pattern: string, experience: Experience, viewport: string) {
   return { pattern, experience, viewport } as const;
@@ -44,13 +47,64 @@ async function assertSessionRowsClipped(page: Parameters<typeof test>[0]['page']
   }
 }
 
+/**
+ * Open the list behind `trigger` and hold it to `pattern.popup-menu` (#1066).
+ *
+ * The list is the one control surface no other assertion in this file can
+ * reach: base-ui mounts it on `<body>`, so it is a sibling of `#root` rather
+ * than a descendant of the bar, band or row it was opened from. That is also why
+ * it used to render at the wrong density — it inherited from `:root` instead of
+ * from the `[data-experience]` scope its trigger sits in — and why the contract
+ * is measured on the *items*: `expectTokenHeight` on the menu would only say how
+ * tall the box is.
+ *
+ * Both experiences call this. On Web the touch floor is a no-op by contract
+ * (`experience.web` declares no `touchTargetToken`) and the height assertion
+ * pins the 28px rows Web already had, so "the App stops inheriting Web's, and
+ * Web does not adopt App's" is checked from both sides.
+ */
+async function assertPopupMenu(
+  page: import('@playwright/test').Page,
+  experience: Experience,
+  viewportId: string,
+  trigger: import('@playwright/test').Locator,
+): Promise<void> {
+  const opts = optsFor(PATTERN_POPUP_MENU, experience, viewportId);
+
+  await trigger.click();
+  const menu = page.getByRole('menu');
+  await expect(menu).toBeVisible();
+  // `toBeVisible` resolves on the animation's first frame, where a 44px row
+  // measures 43.57px. Measured, not assumed: the floor is pixel-exact, so the
+  // read has to come from a settled frame (see `waitForSettledBox`).
+  await waitForSettledBox(menu);
+
+  const items = menu.getByRole('menuitem');
+  const count = await items.count();
+  expect(count).toBeGreaterThan(0);
+
+  for (let i = 0; i < count; i += 1) {
+    await expectTokenHeight(items.nth(i), opts);
+    await expectSingleLine(items.nth(i), opts);
+  }
+  await expectNoUnexpectedOverflow(menu, opts);
+
+  // The items *are* the controls; the menu is only their box. A height check on
+  // the menu passes for a list of 32px rows in a 340px column, which is the
+  // shape this pattern exists to forbid.
+  await expectTouchTargetsWithin(menu, opts);
+
+  await page.keyboard.press('Escape');
+  await expect(menu).toHaveCount(0);
+}
+
 // ── Web experience ─────────────────────────────────────────────────────────
 
 for (const row of viewports.filter((v) => v.experience === 'web')) {
   test.describe(`${row.id} ${row.width}×${row.height}`, () => {
     test.use({ viewport: { width: row.width, height: row.height } });
 
-    test('session rows stay clipped; workspace direct chrome stays bounded inside the bar', async ({ page }) => {
+    test('session rows stay clipped; workspace chrome and the menu it discloses stay bounded', async ({ page }) => {
       await page.goto('/#/fixture');
       await assertSessionRowsClipped(page, 'web', row.id);
 
@@ -75,6 +129,8 @@ for (const row of viewports.filter((v) => v.experience === 'web')) {
       await expect(more).toBeVisible();
       await expectSingleLine(more, optsFor(PATTERN_WORKSPACE_NAV, 'web', row.id));
       await expectVisibleWithin(more, bar, optsFor(PATTERN_WORKSPACE_NAV, 'web', row.id));
+
+      await assertPopupMenu(page, 'web', row.id, more);
     });
 
     test('terminal capsule controls hold the control token height', async ({ page }) => {
@@ -202,7 +258,34 @@ for (const row of viewports.filter((v) => v.experience === 'app')) {
       for (let i = 0; i < 6; i += 1) {
         await expectTouchTarget(rows.nth(i), optsFor(PATTERN_SESSION_ITEM, 'app', row.id));
         await expectNoUnexpectedOverflow(rows.nth(i), optsFor(PATTERN_SESSION_ITEM, 'app', row.id));
+        // The row is not its controls (#1066). The two assertions above measure
+        // the row's own box — 374×60, comfortably over the floor — and so kept
+        // passing while the App drew 32px Settings/Kill icons inside it. This is
+        // the one that enumerates them.
+        await expectTouchTargetsWithin(rows.nth(i), optsFor(PATTERN_SESSION_ITEM, 'app', row.id));
       }
+    });
+
+    test('a collapsed control opens a menu of App-density rows', async ({ page }) => {
+      await page.goto('/#/fixture/app');
+
+      // The capsule's `+` — `CapabilityDisclosureMenu`, the list #1066 found
+      // already shipping 28px rows inside a 44px floor.
+      await assertPopupMenu(page, 'app', row.id, page.getByTestId('capsule-capability-more'));
+
+      // The session row's `…` — the menu the issue was measured on, and a
+      // different trigger path: the capsule is inside the Terminal layer, the
+      // row inside the Sessions one, so a container that only worked for one of
+      // them would fail here.
+      await page.getByTestId('app-header-sessions').first().click();
+      const rowLocator = page.getByTestId('session-item-row').first();
+      await expect(rowLocator).toBeVisible();
+      await assertPopupMenu(
+        page,
+        'app',
+        row.id,
+        rowLocator.getByRole('button', { name: /^Session actions for/ }),
+      );
     });
 
     test('terminal capsule controls meet the App touch target', async ({ page }) => {
