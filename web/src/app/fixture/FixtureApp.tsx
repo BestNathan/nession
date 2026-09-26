@@ -11,6 +11,7 @@ import type { Surface } from '@/app/patterns/SessionHeader';
 import type { CapabilityId } from '@/product/capability';
 import { gitApi } from '@/capabilities/git';
 import { fixtureAgents } from './fixtureAgents';
+import { fixtureConnection } from './fixtureConnection';
 import { fixtureFileOps } from './fixtureFileOps';
 import { fixtureGitSurface } from './fixtureGit';
 import { fixtureSelectedId } from './fixtureSelection';
@@ -68,6 +69,7 @@ export function FixtureApp() {
   const staleAgents = fixtureStaleAgents(search);
   const sessions = useMemo(() => fixtureSessions(search), [search]);
   const agents = useMemo(() => fixtureAgents(search), [search]);
+  const connectionStatus = fixtureConnection(search);
 
   const filteredSessions = useMemo(
     () =>
@@ -115,7 +117,7 @@ export function FixtureApp() {
     sortDirection,
     toggleSort,
     isSearchActive,
-    connectionStatus: 'connected' as const,
+    connectionStatus,
     domain,
     onCreate: () => {},
     onRefresh: () => {},
@@ -130,7 +132,7 @@ export function FixtureApp() {
     domain,
     tool,
     fileOps: fixtureOps,
-    connectionStatus: 'connected' as const,
+    connectionStatus,
     onSurfaceChange: setSurface,
     onToolChange: setTool,
     onOpenAgent: () => {},

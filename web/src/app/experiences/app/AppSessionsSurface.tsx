@@ -6,6 +6,7 @@ import {
   Filter,
   Plus,
   SearchX,
+  X,
 } from 'lucide-react';
 import { cn } from '@/shared/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -204,92 +205,121 @@ function AgentsDisclosure({
  * untouched: its chips are `SearchBar`'s own, and this surface renders none of
  * them (`showStatusFilters={false}`).
  */
-function SessionsFilters({
+function SessionsFilterTrigger({
+  open,
+  onToggle,
+}: {
+  open: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon"
+      className={cn(
+        shellIconButtonClass,
+        'text-muted-foreground hover:text-foreground',
+        shellMotionClass,
+      )}
+      aria-label="Filters"
+      aria-expanded={open}
+      data-testid="session-list-filters"
+      onClick={() => onToggle()}
+    >
+      <Filter className="size-4" />
+    </Button>
+  );
+}
+
+/**
+ * The status filter, once chosen, as one removable indicator under the field.
+ *
+ * This is the half of #1083's progressive disclosure that keeps the state
+ * *visible*: a filter that has been applied must not be something the user has
+ * to open a panel to rediscover, and `session-list.md` asks for exactly this
+ * ("search result/state chip only while a filter is active"). The panel holds
+ * the choice; the chip holds the fact.
+ *
+ * It carries no count, for the reason the panel does not — see `SessionsFilterPanel`.
+ */
+function SessionsActiveFilter({
+  label,
+  onClear,
+}: {
+  label: string;
+  onClear: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      data-testid="session-list-filter-chip"
+      onClick={() => onClear()}
+      className={cn(
+        shellRowControlMinClass,
+        shellMotionClass,
+        'flex w-fit items-center gap-[var(--shell-space-1)] rounded-full bg-muted px-[var(--shell-space-2)] text-muted-foreground',
+        bodyAppClass,
+      )}
+    >
+      {label}
+      <X aria-hidden className="size-3" />
+      <span className="sr-only">Clear filter</span>
+    </button>
+  );
+}
+
+function SessionsFilterPanel({
   statusFilter,
   setStatusFilter,
   sortField,
   sortDirection,
   toggleSort,
-  onRefresh,
-  loadingSessions,
 }: {
   statusFilter: StatusFilter;
   setStatusFilter: (f: StatusFilter) => void;
   sortField: SortField;
   sortDirection: SortDirection;
   toggleSort: (field: SortField) => void;
-  onRefresh: () => void;
-  loadingSessions: boolean;
 }) {
-  const [filtersOpen, setFiltersOpen] = useState(false);
-
   return (
-    <div className="flex items-center justify-between gap-2">
-      <Collapsible open={filtersOpen} onOpenChange={setFiltersOpen}>
-        <CollapsibleTrigger
-          data-testid="session-list-filters"
-          render={
+    <div
+      data-testid="session-list-filters-panel"
+      className="flex flex-col gap-2"
+    >
+      <div className="flex flex-wrap items-center gap-1">
+        {STATUS_FILTERS.map((filter) => {
+          const isActive = statusFilter === filter.key;
+          return (
             <Button
-              type="button"
-              variant="ghost"
+              key={filter.key}
+              variant={isActive ? 'default' : 'outline'}
               size="sm"
-              className={cn(
-                shellRowControlMinClass,
-                'max-lg:min-h-11 text-muted-foreground hover:text-foreground',
-                shellMotionClass,
-                bodyAppClass,
-              )}
+              onClick={() => setStatusFilter(filter.key)}
+              aria-pressed={isActive}
+              className={cn(shellRowControlMinClass, 'flex-shrink-0', bodyAppClass)}
             >
-              <Filter className="size-4" />
-              Filters
+              {filter.label}
             </Button>
-          }
+          );
+        })}
+      </div>
+      <div className={cn('flex items-center gap-2 font-medium text-muted-foreground', bodyAppClass)}>
+        <SortButton
+          label="Name"
+          field="name"
+          activeField={sortField}
+          direction={sortDirection}
+          onToggle={toggleSort}
         />
-        <CollapsibleContent
-          data-testid="session-list-filters-panel"
-          className="mt-2 flex flex-col gap-2"
-        >
-          <div className="flex flex-wrap items-center gap-1">
-            {STATUS_FILTERS.map((filter) => {
-              const isActive = statusFilter === filter.key;
-              return (
-                <Button
-                  key={filter.key}
-                  variant={isActive ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => setStatusFilter(filter.key)}
-                  aria-pressed={isActive}
-                  className={cn(shellRowControlMinClass, 'flex-shrink-0', bodyAppClass)}
-                >
-                  {filter.label}
-                </Button>
-              );
-            })}
-          </div>
-          <div className={cn('flex items-center gap-2 font-medium text-muted-foreground', bodyAppClass)}>
-            <SortButton
-              label="Name"
-              field="name"
-              activeField={sortField}
-              direction={sortDirection}
-              onToggle={toggleSort}
-            />
-            <SortButton
-              label="Activity"
-              field="activity"
-              activeField={sortField}
-              direction={sortDirection}
-              onToggle={toggleSort}
-            />
-          </div>
-        </CollapsibleContent>
-      </Collapsible>
-      <RefreshButton
-        onClick={() => onRefresh()}
-        loading={loadingSessions}
-        variant="ghost"
-        ariaLabel="Refresh sessions"
-      />
+        <SortButton
+          label="Activity"
+          field="activity"
+          activeField={sortField}
+          direction={sortDirection}
+          onToggle={toggleSort}
+        />
+      </div>
     </div>
   );
 }
@@ -577,8 +607,6 @@ function SessionsChrome({
   sortField,
   sortDirection,
   toggleSort,
-  onRefresh,
-  loadingSessions,
 }: {
   searchQuery: string;
   setSearchQuery: (q: string) => void;
@@ -589,9 +617,14 @@ function SessionsChrome({
   sortField: SortField;
   sortDirection: SortDirection;
   toggleSort: (field: SortField) => void;
-  onRefresh: () => void;
-  loadingSessions: boolean;
 }) {
+  const [filtersOpen, setFiltersOpen] = useState(false);
+
+  // Named once, so the chip and the panel cannot disagree about what is active.
+  const activeFilter = STATUS_FILTERS.find(
+    (filter) => filter.key === statusFilter && filter.key !== 'all',
+  );
+
   return (
     /* The yielding region. `min-h-0` lets it shrink below its content and
        `overflow-y-auto` keeps what no longer fits reachable rather than
@@ -621,16 +654,32 @@ function SessionsChrome({
              this field promises, so neither is the other's default (#1050
              stage 3). */
           placeholder="Search sessions..."
+          /* #1083 §5: the filter entry lives in the field rather than in a row
+             of its own, which is what makes search the only persistent control
+             above history. The testid is the one the standing row had — the ids
+             name the controls, not the layout, and this is the same control. */
+          fieldAction={
+            <SessionsFilterTrigger
+              open={filtersOpen}
+              onToggle={() => setFiltersOpen((open) => !open)}
+            />
+          }
         />
-        <SessionsFilters
-          statusFilter={statusFilter}
-          setStatusFilter={setStatusFilter}
-          sortField={sortField}
-          sortDirection={sortDirection}
-          toggleSort={toggleSort}
-          onRefresh={onRefresh}
-          loadingSessions={loadingSessions}
-        />
+        {activeFilter ? (
+          <SessionsActiveFilter
+            label={activeFilter.label}
+            onClear={() => setStatusFilter('all')}
+          />
+        ) : null}
+        {filtersOpen ? (
+          <SessionsFilterPanel
+            statusFilter={statusFilter}
+            setStatusFilter={setStatusFilter}
+            sortField={sortField}
+            sortDirection={sortDirection}
+            toggleSort={toggleSort}
+          />
+        ) : null}
       </div>
     </div>
   );
@@ -739,8 +788,6 @@ export function AppSessionsSurface({
         sortField={sortField}
         sortDirection={sortDirection}
         toggleSort={toggleSort}
-        onRefresh={onRefresh}
-        loadingSessions={loadingSessions}
       />
       <SessionsListRegion
         buckets={buckets}
@@ -762,16 +809,42 @@ export function AppSessionsSurface({
         activeAgentId={activeAgentId}
         onlineCount={onlineCount}
       />
-      <div
-        data-testid="sidebar-footer"
-        className="flex shrink-0 items-center gap-[var(--shell-foot-gap)] border-t px-[var(--shell-space-3)] py-[var(--shell-foot-pad-y)] pb-[max(var(--shell-foot-pad-y),env(safe-area-inset-bottom))]"
-      >
-        <SidebarFooter
-          domain={domain}
-          connectionStatus={connectionStatus}
-          nodeCount={agents.length}
-        />
-      </div>
+      {/* Healthy infrastructure is invisible; degraded infrastructure is
+          contextual (#1083 §8, `information-architecture.md`: "infrastructure
+          context stays quiet when healthy and gains prominence when it affects
+          the work"). The region is not hidden when healthy — it is not rendered,
+          because an empty one leaves the strip the last attempt at this left
+          behind.
+
+          The retry lives here rather than in the resting chrome, which is where
+          #1083 §6 puts it: Sessions already arrive over a live connection, and a
+          permanent refresh gives an implementation concern the same weight as
+          navigation. What is left is the only case a manual refresh helps.
+
+          `SidebarFooter` is unchanged and is still what the Web column renders
+          when healthy — the owner's ruling that the *sidebar's* foot stays
+          visible is about that column, and the mockup draws it there with the
+          rail the App does not have. Its App overlay draws no foot at all. */}
+      {connectionStatus === 'connected' ? null : (
+        <div
+          data-testid="app-sessions-problem"
+          className="flex shrink-0 items-center gap-[var(--shell-space-2)] border-t px-[var(--shell-space-3)] py-[var(--shell-foot-pad-y)] pb-[max(var(--shell-foot-pad-y),env(safe-area-inset-bottom))]"
+        >
+          <div className="min-w-0 flex-1">
+            <SidebarFooter
+              domain={domain}
+              connectionStatus={connectionStatus}
+              nodeCount={agents.length}
+            />
+          </div>
+          <RefreshButton
+            onClick={() => onRefresh()}
+            loading={loadingSessions}
+            variant="ghost"
+            ariaLabel="Refresh sessions"
+          />
+        </div>
+      )}
     </div>
   );
 }
