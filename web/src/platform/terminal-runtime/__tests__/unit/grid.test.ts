@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { Terminal } from '@xterm/xterm';
-import { FALLBACK_CELL, cellDimensionsOf, gridFor } from '../../grid';
+import {
+  FALLBACK_CELL,
+  cellDimensionsOf,
+  gridFor,
+  measuredCellDimensionsOf,
+} from '../../grid';
 
 /** The App fixture's real numbers at 390×844, measured in a browser. */
 const CONTENT_BOX = { width: 362, height: 792 };
@@ -51,6 +56,31 @@ describe('gridFor', () => {
   it('refuses a cell it cannot divide by', () => {
     expect(gridFor(CONTENT_BOX, { width: 0, height: 17.5 })).toBeNull();
     expect(gridFor(CONTENT_BOX, { width: 7.5, height: 0 })).toBeNull();
+  });
+});
+
+describe('measuredCellDimensionsOf', () => {
+  it('says "not measured" rather than guessing, before the renderer has run', () => {
+    // The distinction the fixture needs: a caller that can wait must be able to
+    // tell "no measurement yet" from "a measured 8x16", because fitting a grid
+    // to the fallback asks for the wrong column count and nothing corrects it
+    // afterwards. Measured on CI at 844×390 — 102 columns drawn 864px wide in
+    // an 816px well, from exactly this confusion.
+    expect(measuredCellDimensionsOf(new Terminal())).toBeNull();
+  });
+
+  it('says "not measured" for a zero cell rather than reporting zero', () => {
+    const zeroed = {
+      _core: { _renderService: { dimensions: { css: { cell: { width: 0, height: 0 } } } } },
+    } as unknown as Terminal;
+    expect(measuredCellDimensionsOf(zeroed)).toBeNull();
+  });
+
+  it('reports a real measurement verbatim', () => {
+    const measured = {
+      _core: { _renderService: { dimensions: { css: { cell: { width: 7.5, height: 17.5 } } } } },
+    } as unknown as Terminal;
+    expect(measuredCellDimensionsOf(measured)).toEqual({ width: 7.5, height: 17.5 });
   });
 });
 

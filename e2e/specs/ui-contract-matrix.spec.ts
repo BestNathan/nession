@@ -370,11 +370,22 @@ for (const row of viewports.filter((v) => v.experience === 'app')) {
       // box the overhang was ~1.5 columns, because the inset is 28px and
       // FitAddon subtracted only its ~17px scrollbar allowance.
       const advance = await page.evaluate(() => {
+        // One character's advance, measured from a range over a single
+        // character rather than by dividing a run: xterm wraps styled runs in
+        // spans and leaves plain text as bare text nodes, so a span-based
+        // measurement works on one renderer's output and not another's.
         for (const row of document.querySelectorAll('.xterm-rows > div')) {
-          const span = row.querySelector('span');
-          const length = span?.textContent?.length ?? 0;
-          if (span && length >= 20) {
-            return span.getBoundingClientRect().width / length;
+          const walker = document.createTreeWalker(row, NodeFilter.SHOW_TEXT);
+          const node = walker.nextNode();
+          if (!(node instanceof Text) || node.length < 8) {
+            continue;
+          }
+          const range = document.createRange();
+          range.setStart(node, 0);
+          range.setEnd(node, 1);
+          const width = range.getBoundingClientRect().width;
+          if (width > 0) {
+            return width;
           }
         }
         return null;

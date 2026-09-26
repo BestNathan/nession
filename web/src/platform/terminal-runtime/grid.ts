@@ -38,20 +38,30 @@ interface TerminalInternals {
  * fallback is deliberately conservative: a grid computed from it is temporary,
  * and the caller re-measures.
  */
-export function cellDimensionsOf(terminal: Terminal): PixelSize {
+export function measuredCellDimensionsOf(terminal: Terminal): PixelSize | null {
   try {
     const rs = (terminal as unknown as TerminalInternals)._core?._renderService;
-    if (!rs) {
-      return FALLBACK_CELL;
+    const cell = rs?.dimensions?.css?.cell;
+    if (!cell || !cell.width || !cell.height) {
+      return null;
     }
-    const cell = rs.dimensions?.css?.cell;
-    return {
-      width: cell?.width || FALLBACK_CELL.width,
-      height: cell?.height || FALLBACK_CELL.height,
-    };
+    return { width: cell.width, height: cell.height };
   } catch {
-    return FALLBACK_CELL;
+    return null;
   }
+}
+
+/**
+ * `measuredCellDimensionsOf` with a conservative fallback.
+ *
+ * For a caller that must produce *a* number now — `ResizeController` sizes a
+ * live terminal whose container has already changed. A caller that can wait
+ * should use the measurement directly: fitting a grid to the fallback cell
+ * asks for the wrong number of columns, and if nothing resizes the container
+ * afterwards nothing corrects it.
+ */
+export function cellDimensionsOf(terminal: Terminal): PixelSize {
+  return measuredCellDimensionsOf(terminal) ?? FALLBACK_CELL;
 }
 
 /**

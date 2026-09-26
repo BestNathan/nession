@@ -2,8 +2,8 @@ import { useEffect, useRef } from 'react';
 import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
 import {
-  cellDimensionsOf,
   gridFor,
+  measuredCellDimensionsOf,
   type PixelSize,
 } from '@/platform/terminal-runtime/grid';
 import {
@@ -20,6 +20,17 @@ import {
 import { TerminalSurface } from '@/product/terminal/patterns/TerminalSurface';
 import type { CapsuleExperience } from '@/product/terminal/capsule/types';
 import type { TerminalChrome } from '@/app/ShellMain';
+
+/**
+ * How many frames to wait for xterm's renderer to measure a cell before giving
+ * up on sizing the grid.
+ *
+ * The renderer measures on its first layout pass, so this is normally one or
+ * two frames; the bound exists so a terminal that never measures cannot spin
+ * the tab, and it is generous rather than tight because a fixture that gave up
+ * early would draw at xterm's 80x24 default and a baseline would capture it.
+ */
+const MAX_FIT_ATTEMPTS = 30;
 
 const FIXTURE_BUFFER = [
   '$ git status --short',
@@ -117,11 +128,29 @@ export function FixtureTerminal({
     let size: PixelSize | null = null;
     let written = false;
     let frame = 0;
+    let attempts = 0;
     const applyGrid = () => {
       if (size === null) {
         return;
       }
-      const grid = gridFor(size, cellDimensionsOf(term));
+      const cell = measuredCellDimensionsOf(term);
+      if (cell === null) {
+        // The renderer has not measured a cell yet, and a grid fitted to the
+        // fallback would be wrong *permanently*: nothing corrects it, because
+        // the observer fires again only when the host resizes. Measured on CI
+        // at 844×390, where one frame was not enough — the fallback's 8px cell
+        // asked for 102 columns and xterm drew 864px into an 816px well.
+        //
+        // Retried on the frame after, bounded so a terminal that never measures
+        // cannot spin the tab. `FitAddon` declined to fit in this state too,
+        // which is the guard this replaced.
+        if (attempts < MAX_FIT_ATTEMPTS) {
+          attempts += 1;
+          frame = requestAnimationFrame(applyGrid);
+        }
+        return;
+      }
+      const grid = gridFor(size, cell);
       if (grid === null) {
         return;
       }
