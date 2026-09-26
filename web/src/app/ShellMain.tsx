@@ -121,13 +121,25 @@ export function ShellMain({
 
   return (
     <>
-      <SessionMainHeader
-        session={selectedSession}
-        domain={domain}
-        experience={experience}
-        onOpenDrawer={onOpenDrawer}
-        onOpenWorkspace={onOpenWorkspace}
-      />
+      {/* Session identity is the **Terminal surface's** navigation bar (#1051).
+          The App's Workspace layer mounts its own `ShellMain`, and that one used
+          to render a second `SessionMainHeader` at the same position — two
+          session titles drawn on top of each other, neither legible, because the
+          Workspace layer's own header region is transparent. The Workspace
+          depth's bar is its page header, which announces what the user opened;
+          Session identity belongs to the depth they opened it from.
+
+          The Web experience is unaffected: it renders no header on any surface
+          (#748), so the gate is inert there. */}
+      {surface === 'terminal' ? (
+        <SessionMainHeader
+          session={selectedSession}
+          domain={domain}
+          experience={experience}
+          onOpenDrawer={onOpenDrawer}
+          onOpenWorkspace={onOpenWorkspace}
+        />
+      ) : null}
       <div
         data-testid="main-content"
         className="relative flex min-h-0 flex-1 flex-col gap-0">

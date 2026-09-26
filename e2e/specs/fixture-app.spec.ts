@@ -1,5 +1,6 @@
 // e2e/specs/fixture-app.spec.ts
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
+import { openFixtureFile } from '../helpers/fixtureVisual';
 
 // Local runs are forbidden: the webServer stack compiles and runs
 // nession-server/agent (which operate tmux), and globalSetup executes
@@ -112,14 +113,84 @@ test('an emerged capability does not reflow the terminal (#826)', async ({ page 
   expect(await geometry()).toEqual(dormant);
 });
 
+/**
+ * What is navigating the Workspace screen right now (#1051).
+ *
+ * "One navigation bar owns the current App page/depth" is only a fact if it is
+ * counted, so this is the count. A **header** answers "what page am I on?"; a
+ * **leave** answers "what does Back mean?". The criterion is one of each at
+ * every depth, and the dock is measured separately because it is the *root's*
+ * capability switcher rather than a bar owning a page.
+ *
+ * Scoped to the Workspace layer: the Terminal layer keeps its own header
+ * mounted underneath (#1049 — the Terminal is never unmounted), and the layer
+ * is opaque, so what the user reads is what is inside this element.
+ *
+ * The candidates are written out rather than derived from a class, and they
+ * include the owners this change *removed* — `app-tool-header`, `files-app-nav`,
+ * `files-app-back`, the viewer's `Close file`. A set built from what currently
+ * exists could not count a reintroduced owner; this one fails on one.
+ */
+function workspaceNavigationOwners(page: Page) {
+  const layer = page.getByTestId('app-layer-workspace');
+  return {
+    headers: layer.locator(
+      '[data-testid="app-page-header"], [data-testid="app-tool-header"], [data-testid="files-app-nav"]',
+    ),
+    leaves: layer.locator(
+      '[data-testid="app-page-back"], [data-testid="app-tool-back"], [data-testid="files-app-back"], button[aria-label="Close file"]',
+    ),
+    dock: layer.getByTestId('workspace-tool-bar'),
+  };
+}
+
 test('App workspace page shows the files plugin app layout', async ({ page }) => {
   await page.goto('/#/fixture/app');
   await page.getByTestId('app-header-workspace').click();
 
-  await expect(page.getByTestId('app-tool-header')).toBeVisible();
+  await expect(page.getByTestId('app-page-header')).toBeVisible();
   await expect(page.getByTestId('workspace-shell')).toBeVisible();
   await expect(page.getByTestId('files-app-layout')).toBeVisible();
   await expect(page.getByTestId('workspace-tool-bar')).toBeVisible();
 
   await page.screenshot({ path: 'test-results/canonical-app-workspace.png', fullPage: true });
+});
+
+test('the Workspace owns one navigation bar per depth (#1051)', async ({ page }) => {
+  await page.goto('/#/fixture/app');
+  await page.getByTestId('app-header-workspace').click();
+
+  // Depth 1 — the capability root. One header naming the capability, one leave
+  // going to the depth below it, and the dock, which is where peer switching
+  // is conceptually valid.
+  await expect(page.getByTestId('app-page-header')).toContainText('Files');
+  await expect(page.getByTestId('files-app-layout')).toBeVisible();
+
+  const root = workspaceNavigationOwners(page);
+  await expect(root.headers).toHaveCount(1);
+  await expect(root.leaves).toHaveCount(1);
+  await expect(root.dock).toHaveCount(1);
+  await expect(page.getByTestId('app-page-back')).toHaveAccessibleName('Back to terminal');
+
+  // Depth 2 — the pushed file. Still one header and one leave; the title is now
+  // the pushed page's, and the one leave returns to the capability root rather
+  // than to the Terminal. The dock is gone: a peer-capability switcher over a
+  // pushed page is a second navigation owner, answering to a depth it has no
+  // place at.
+  await openFixtureFile(page);
+  await expect(page.getByTestId('app-page-header')).toContainText('App.tsx');
+
+  const pushed = workspaceNavigationOwners(page);
+  await expect(pushed.headers).toHaveCount(1);
+  await expect(pushed.leaves).toHaveCount(1);
+  await expect(pushed.dock).toHaveCount(0);
+  await expect(page.getByTestId('app-page-back')).toHaveAccessibleName('Back to Files');
+
+  await page.screenshot({ path: 'test-results/canonical-app-workspace-pushed.png', fullPage: true });
+
+  // …and the one leave goes back one depth, not two.
+  await page.getByTestId('app-page-back').click();
+  await expect(page.getByTestId('files-app-list')).toBeVisible();
+  await expect(page.getByTestId('app-page-header')).toContainText('Files');
+  await expect(workspaceNavigationOwners(page).dock).toHaveCount(1);
 });

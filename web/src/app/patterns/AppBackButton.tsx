@@ -12,8 +12,9 @@ export interface AppBackButtonProps {
 
 /**
  * App back affordance: 44px ghost icon button with the shared motion tokens.
- * Used by the workspace page header and tool-internal sub-headers — top-level
- * navigation and push/pop both render the same physical affordance.
+ *
+ * The physical affordance every App depth's Back renders through, so the pushed
+ * detail's Back and the capability root's Back cannot drift apart (#1051).
  */
 export function AppBackButton({ label, testid, onClick }: AppBackButtonProps) {
   return (

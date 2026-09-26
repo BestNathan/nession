@@ -1,21 +1,14 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { EditorView } from '@uiw/react-codemirror';
 import { describe, expect, it, vi } from 'vitest';
 import { FilesAppLayout } from '@/app/experiences/app/FilesAppLayout';
 import type { FileEntry, FileOps } from '@/capabilities/files';
-import type { WorkspaceContext } from '@/app/workspace/workspaceContext';
+import type { WorkspaceContext, WorkspacePush } from '@/app/workspace/workspaceContext';
 
 vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }));
-
-/**
- * The App title role, spelled out rather than imported. App-scoped in name
- * because `--typography-title-size` is emitted only under
- * `[data-experience="app"]` (`nession/no-cross-experience-token`).
- */
-const AppTitleRoleClass = 'text-[length:var(--typography-title-size)]';
 
 const ENTRIES: FileEntry[] = [
   { name: 'docs', path: 'docs', full_path: '/root/docs', is_dir: true, size: 0, modified: 0 },
@@ -44,7 +37,7 @@ function makeFileOps(): FileOps {
   };
 }
 
-const ctx: WorkspaceContext = {
+const baseCtx: WorkspaceContext = {
   session: null,
   agent: undefined,
   agents: [],
@@ -53,6 +46,27 @@ const ctx: WorkspaceContext = {
   experience: 'app',
   onToolChange: vi.fn(),
 };
+
+/**
+ * Render the layout with a spy in the shell's place.
+ *
+ * The depth it declares *is* the layout's navigation contract now (#1051): the
+ * layout renders no bar of its own, so what it hands the shell is what the user
+ * ends up seeing. A test that rendered a header itself would be asserting on its
+ * own harness rather than on the composition.
+ */
+function renderLayout(ctx: WorkspaceContext = baseCtx) {
+  const setPush = vi.fn<(push: WorkspacePush | null) => void>();
+  render(<FilesAppLayout ctx={ctx} depth={{ setPush }} />);
+  return { setPush };
+}
+
+/** The depth the layout last declared — `null` means it is at its root. */
+function lastPush(setPush: ReturnType<typeof renderLayout>['setPush']): WorkspacePush | null {
+  const calls = setPush.mock.calls;
+  expect(calls.length).toBeGreaterThan(0);
+  return calls[calls.length - 1][0];
+}
 
 /** Drive a real content change through CodeMirror (the jsdom-safe path the
  * CodeMirrorEditor tests use) so FileViewer marks the editor dirty. */
@@ -68,10 +82,15 @@ async function makeEditorDirty() {
 }
 
 describe('FilesAppLayout', () => {
-  it('renders the tree full-screen with no sub-header', () => {
-    render(<FilesAppLayout ctx={ctx} />);
+  it('renders the list full-screen with no sub-header of its own', () => {
+    renderLayout();
     expect(screen.getByTestId('files-app-layout')).toBeInTheDocument();
     expect(screen.queryByTestId('files-app-nav')).not.toBeInTheDocument();
+  });
+
+  it('declares no depth while it is at the capability root', () => {
+    const { setPush } = renderLayout();
+    expect(lastPush(setPush)).toBeNull();
   });
 
   it('sizes a file row name at the App primary role', async () => {
@@ -80,7 +99,7 @@ describe('FilesAppLayout', () => {
     // Tailwind default per list. The token is shared, so the assertion is on the
     // var rather than on a number: Web's desktop value lives at `:root` and the
     // App's replaces it under `[data-experience="app"]`.
-    render(<FilesAppLayout ctx={ctx} />);
+    renderLayout();
     const name = (await screen.findByText('visual-language.md')).closest('span');
     expect(name?.className).toContain(
       'text-[length:var(--workspace-list-row-title-font-size)]',
@@ -88,92 +107,78 @@ describe('FilesAppLayout', () => {
     expect(name?.className).not.toMatch(/(^|\s)text-sm(\s|$)/);
   });
 
-  it('pushes the editor with a sub-header and back affordance', async () => {
+  it('declares a pushed depth naming the file it opened', async () => {
+    // The pushed page's title, and the one leave action for it. `#1051`'s Files
+    // target is `< Files   App.tsx`: the shell draws that bar from this.
     const user = userEvent.setup();
-    render(<FilesAppLayout ctx={ctx} />);
-    const row = await screen.findByText('visual-language.md');
-    await user.click(row);
-    expect(screen.getByTestId('files-app-nav')).toBeInTheDocument();
-    expect(screen.getByTestId('files-app-back')).toBeInTheDocument();
-    await user.click(screen.getByTestId('files-app-back'));
-    expect(screen.queryByTestId('files-app-nav')).not.toBeInTheDocument();
-    expect(screen.getByTestId('files-app-layout')).toBeInTheDocument();
-  });
-
-  it('titles the pushed page at the App title role, in mono', async () => {
-    // #1073: `visual-language.md`'s page-title examples name "pushed detail
-    // title", so the path carries the title role — and mono, because it is a
-    // path. `text-sm` (14px) was the primitive default standing in for a title.
-    // Family and size are independent, so the assertion is on both: a path is
-    // not a smaller string.
-    const user = userEvent.setup();
-    render(<FilesAppLayout ctx={ctx} />);
+    const { setPush } = renderLayout();
     await user.click(await screen.findByText('visual-language.md'));
 
-    const path = screen.getByTestId('files-app-nav').querySelector('span');
-    expect(path?.className).toContain(AppTitleRoleClass);
-    expect(path?.className).toContain('font-mono');
-    expect(path?.className).not.toMatch(/(^|\s)text-(?:xs|sm|base)(\s|$)/);
+    const push = lastPush(setPush);
+    expect(push).not.toBeNull();
+    expect(push?.title).toBe('visual-language.md');
+    expect(typeof push?.onLeave).toBe('function');
   });
 
-  it('closes the pushed editor from the viewer close button and returns to the tree', async () => {
+  it('renders no close affordance, so Back is the only way out', async () => {
+    // The defect #1051 names: the viewer's ✕ and the sub-header's ← both left
+    // the same editor. Neither is rendered here — the shell's header Back is the
+    // one leave, and it reaches this layout's guard through `onLeave`.
     const user = userEvent.setup();
-    render(<FilesAppLayout ctx={ctx} />);
-    expect(screen.getByTestId('files-app-layout')).toBeInTheDocument();
+    renderLayout();
     await user.click(await screen.findByText('visual-language.md'));
-    expect(screen.queryByTestId('files-app-layout')).not.toBeInTheDocument();
-    expect(screen.getByTestId('files-app-nav')).toBeInTheDocument();
-    // The path, in both the App sub-header and the viewer's own header — the
-    // tree row beside them shows only the basename, so this string is what
-    // proves the viewer opened the row that was clicked.
-    expect(screen.getAllByText('docs/visual-language.md').length).toBeGreaterThanOrEqual(2);
-    await user.click(screen.getByLabelText('Close file'));
-    expect(screen.getByTestId('files-app-layout')).toBeInTheDocument();
-  });
-
-  it('clears the selection when fileOps detaches then reattaches', async () => {
-    const user = userEvent.setup();
-    const { rerender } = render(<FilesAppLayout ctx={ctx} />);
-    await user.click(await screen.findByText('visual-language.md'));
-    expect(screen.queryByTestId('files-app-layout')).not.toBeInTheDocument();
-
-    rerender(<FilesAppLayout ctx={{ ...ctx, fileOps: null }} />);
-    expect(screen.queryByLabelText('Close file')).not.toBeInTheDocument();
-
-    rerender(<FilesAppLayout ctx={ctx} />);
-    expect(screen.getByTestId('files-app-layout')).toBeInTheDocument();
     expect(screen.queryByLabelText('Close file')).not.toBeInTheDocument();
   });
 
-  it('asks before leaving an unsaved editor via the sub-header back', async () => {
+  it('returns to the list when the shell calls the declared leave', async () => {
     const user = userEvent.setup();
-    render(<FilesAppLayout ctx={ctx} />);
+    const { setPush } = renderLayout();
+    await user.click(await screen.findByText('visual-language.md'));
+    expect(screen.queryByTestId('files-app-layout')).not.toBeInTheDocument();
+
+    act(() => {
+      lastPush(setPush)?.onLeave();
+    });
+
+    expect(screen.getByTestId('files-app-layout')).toBeInTheDocument();
+    expect(lastPush(setPush)).toBeNull();
+  });
+
+  it('asks before leaving an unsaved editor, through the declared leave', async () => {
+    const user = userEvent.setup();
+    const { setPush } = renderLayout();
     await user.click(await screen.findByText('visual-language.md'));
     // Markdown opens in preview; raw view exposes the editor and the Edit toggle.
     await user.click(screen.getByText('Raw'));
     await user.click(await screen.findByText('Edit'));
     await makeEditorDirty();
 
-    // Dirty back → confirmation dialog, not an immediate pop.
-    await user.click(screen.getByTestId('files-app-back'));
+    // Dirty leave → confirmation dialog, not an immediate pop. This is the
+    // guard travelling with the state it protects: the shell does not know an
+    // editor exists, which is why it must not be the thing that decides.
+    act(() => {
+      lastPush(setPush)?.onLeave();
+    });
     expect(await screen.findByText('Unsaved changes')).toBeInTheDocument();
-    expect(screen.getByTestId('files-app-nav')).toBeInTheDocument();
+    expect(screen.queryByTestId('files-app-layout')).not.toBeInTheDocument();
 
     // Cancel keeps the editor.
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(screen.queryByText('Unsaved changes')).not.toBeInTheDocument();
-    expect(screen.getByTestId('files-app-nav')).toBeInTheDocument();
+    expect(screen.queryByTestId('files-app-layout')).not.toBeInTheDocument();
 
-    // Confirm discards and pops back to the tree.
-    await user.click(screen.getByTestId('files-app-back'));
+    // Confirm discards and pops back to the list.
+    act(() => {
+      lastPush(setPush)?.onLeave();
+    });
     await user.click(screen.getByRole('button', { name: 'Leave without saving' }));
     expect(screen.getByTestId('files-app-layout')).toBeInTheDocument();
-    expect(screen.queryByTestId('files-app-nav')).not.toBeInTheDocument();
+    expect(lastPush(setPush)).toBeNull();
   });
 
   it('pops directly when the editor is clean even after a saved edit', async () => {
     const user = userEvent.setup();
-    render(<FilesAppLayout ctx={ctx} />);
+    const { setPush } = renderLayout();
     await user.click(await screen.findByText('visual-language.md'));
     await user.click(screen.getByText('Raw'));
     await user.click(await screen.findByText('Edit'));
@@ -185,9 +190,27 @@ describe('FilesAppLayout', () => {
       expect(screen.queryByText('Unsaved changes')).not.toBeInTheDocument();
     });
 
-    // …so back pops without asking.
-    await user.click(screen.getByTestId('files-app-back'));
+    // …so the declared leave pops without asking.
+    act(() => {
+      lastPush(setPush)?.onLeave();
+    });
     expect(screen.getByTestId('files-app-layout')).toBeInTheDocument();
-    expect(screen.queryByTestId('files-app-nav')).not.toBeInTheDocument();
+    expect(lastPush(setPush)).toBeNull();
+  });
+
+  it('clears the pushed depth when fileOps detaches then reattaches', async () => {
+    const user = userEvent.setup();
+    const setPush = vi.fn<(push: WorkspacePush | null) => void>();
+    const depth = { setPush };
+    const { rerender } = render(<FilesAppLayout ctx={baseCtx} depth={depth} />);
+    await user.click(await screen.findByText('visual-language.md'));
+    expect(screen.queryByTestId('files-app-layout')).not.toBeInTheDocument();
+
+    rerender(<FilesAppLayout ctx={{ ...baseCtx, fileOps: null }} depth={depth} />);
+    expect(screen.queryByLabelText('Close file')).not.toBeInTheDocument();
+
+    rerender(<FilesAppLayout ctx={baseCtx} depth={depth} />);
+    expect(screen.getByTestId('files-app-layout')).toBeInTheDocument();
+    expect(lastPush(setPush)).toBeNull();
   });
 });
