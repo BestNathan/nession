@@ -114,35 +114,60 @@ test('an emerged capability does not reflow the terminal (#826)', async ({ page 
 });
 
 /**
- * What is navigating the Workspace screen right now (#1051).
+ * How many elements matching `selector` a user could actually read right now.
  *
- * "One navigation bar owns the current App page/depth" is only a fact if it is
- * counted, so this is the count. A **header** answers "what page am I on?"; a
- * **leave** answers "what does Back mean?". The criterion is one of each at
- * every depth, and the dock is measured separately because it is the *root's*
- * capability switcher rather than a bar owning a page.
+ * Occlusion-aware on purpose. `locator.count()` answers "is it in the DOM", and
+ * the defect this measures was exactly a bar that *was* in the DOM and drawn
+ * under an opaque layer — the Terminal's session header above the Workspace
+ * layer (`#1051`). `elementFromPoint` at each candidate's own centre is what
+ * turns "present" into "painted", and it is the same measurement the depth table
+ * in the issue was taken with.
  *
- * Scoped to the Workspace layer: the Terminal layer keeps its own header
- * mounted underneath (#1049 — the Terminal is never unmounted), and the layer
- * is opaque, so what the user reads is what is inside this element.
- *
- * The candidates are written out rather than derived from a class, and they
- * include the owners this change *removed* — `app-tool-header`, `files-app-nav`,
- * `files-app-back`, the viewer's `Close file`. A set built from what currently
- * exists could not count a reintroduced owner; this one fails on one.
+ * Painted means: it has a box, its centre is on screen, and the topmost element
+ * there is it, an ancestor, or a descendant. An ancestor counts because a
+ * wrapper can own the hit area of what it contains.
  */
-function workspaceNavigationOwners(page: Page) {
-  const layer = page.getByTestId('app-layer-workspace');
-  return {
-    headers: layer.locator(
-      '[data-testid="app-page-header"], [data-testid="app-tool-header"], [data-testid="files-app-nav"]',
-    ),
-    leaves: layer.locator(
-      '[data-testid="app-page-back"], [data-testid="app-tool-back"], [data-testid="files-app-back"], button[aria-label="Close file"]',
-    ),
-    dock: layer.getByTestId('workspace-tool-bar'),
-  };
+async function paintedCount(page: Page, selector: string): Promise<number> {
+  return page.evaluate((sel) => {
+    const painted = (el: Element): boolean => {
+      const r = el.getBoundingClientRect();
+      if (r.width === 0 || r.height === 0) {
+        return false;
+      }
+      const x = r.left + r.width / 2;
+      const y = r.top + r.height / 2;
+      if (x < 0 || y < 0 || x >= window.innerWidth || y >= window.innerHeight) {
+        return false;
+      }
+      const top = document.elementFromPoint(x, y);
+      return top !== null && (el === top || el.contains(top) || top.contains(el));
+    };
+    return Array.from(document.querySelectorAll(sel)).filter(painted).length;
+  }, selector);
 }
+
+/**
+ * The navigation owners that could be counted at a Workspace depth (`#1051`).
+ *
+ * A **header** answers "what page am I on?"; a **leave** answers "what does
+ * Back mean?". The criterion is one of each at every depth. The dock is counted
+ * separately because it is the *root's* capability switcher rather than a bar
+ * owning a page — the issue permits it at the root and requires it absent over
+ * a pushed detail.
+ *
+ * The candidates are written out rather than derived from what currently
+ * exists, and they include the owners this change *removed* — `app-tool-header`,
+ * `files-app-nav`, `files-app-back`, the viewer's `Close file`. A set built from
+ * the current tree could not count a reintroduced owner; this one fails on one.
+ */
+const WORKSPACE_HEADERS =
+  '[data-testid="app-page-header"], [data-testid="app-tool-header"], [data-testid="files-app-nav"]';
+const WORKSPACE_LEAVES =
+  '[data-testid="app-page-back"], [data-testid="app-tool-back"], [data-testid="files-app-back"], button[aria-label="Close file"]';
+const WORKSPACE_DOCK = '[data-testid="workspace-tool-bar"]';
+
+/** The App's session bar, whichever layer it was drawn by. */
+const SESSION_BAR = '[data-testid="session-header-line"]';
 
 test('App workspace page shows the files plugin app layout', async ({ page }) => {
   await page.goto('/#/fixture/app');
@@ -156,6 +181,35 @@ test('App workspace page shows the files plugin app layout', async ({ page }) =>
   await page.screenshot({ path: 'test-results/canonical-app-workspace.png', fullPage: true });
 });
 
+test('the Workspace layer hides the Terminal it is stacked over (#1051)', async ({ page }) => {
+  // The fourth competing owner, measured as a mechanism rather than as a count.
+  //
+  // The App mounts a `ShellMain` per layer, so the Workspace layer used to draw
+  // a second `SessionMainHeader` at the same position as the Terminal layer's —
+  // and because its own ground was transparent, the Terminal's bar *and* its
+  // scrollback showed through the Workspace's header band. That is the screen
+  // the old baseline `app-files-list` captured: two session titles superimposed
+  // and `$ git status --short` under the page header.
+  //
+  // Two assertions, failing for different reasons. The Terminal's bar is still
+  // in the DOM — #1049 requires the Terminal never to unmount — so a DOM count
+  // proves nothing; what proves the fix is that it is not *painted* while the
+  // Workspace is the active layer. And the Terminal's own layer must still be
+  // painted when it is the active layer, so "not painted" cannot be satisfied by
+  // breaking the Terminal instead.
+  await page.goto('/#/fixture/app');
+  await expect.poll(() => paintedCount(page, SESSION_BAR)).toBe(1);
+
+  await page.getByTestId('app-header-workspace').click();
+  await expect(page.getByTestId('app-layer-workspace')).toBeInViewport();
+  await expect.poll(() => paintedCount(page, SESSION_BAR)).toBe(0);
+
+  // …and the Terminal's session bar is still there to come back to.
+  await page.getByTestId('app-page-back').click();
+  await expect(page.getByTestId('app-layer-workspace')).toHaveCount(0);
+  await expect.poll(() => paintedCount(page, SESSION_BAR)).toBe(1);
+});
+
 test('the Workspace owns one navigation bar per depth (#1051)', async ({ page }) => {
   await page.goto('/#/fixture/app');
   await page.getByTestId('app-header-workspace').click();
@@ -166,10 +220,9 @@ test('the Workspace owns one navigation bar per depth (#1051)', async ({ page })
   await expect(page.getByTestId('app-page-header')).toContainText('Files');
   await expect(page.getByTestId('files-app-layout')).toBeVisible();
 
-  const root = workspaceNavigationOwners(page);
-  await expect(root.headers).toHaveCount(1);
-  await expect(root.leaves).toHaveCount(1);
-  await expect(root.dock).toHaveCount(1);
+  await expect.poll(() => paintedCount(page, WORKSPACE_HEADERS)).toBe(1);
+  await expect.poll(() => paintedCount(page, WORKSPACE_LEAVES)).toBe(1);
+  await expect.poll(() => paintedCount(page, WORKSPACE_DOCK)).toBe(1);
   await expect(page.getByTestId('app-page-back')).toHaveAccessibleName('Back to terminal');
 
   // Depth 2 — the pushed file. Still one header and one leave; the title is now
@@ -180,10 +233,9 @@ test('the Workspace owns one navigation bar per depth (#1051)', async ({ page })
   await openFixtureFile(page);
   await expect(page.getByTestId('app-page-header')).toContainText('App.tsx');
 
-  const pushed = workspaceNavigationOwners(page);
-  await expect(pushed.headers).toHaveCount(1);
-  await expect(pushed.leaves).toHaveCount(1);
-  await expect(pushed.dock).toHaveCount(0);
+  await expect.poll(() => paintedCount(page, WORKSPACE_HEADERS)).toBe(1);
+  await expect.poll(() => paintedCount(page, WORKSPACE_LEAVES)).toBe(1);
+  await expect.poll(() => paintedCount(page, WORKSPACE_DOCK)).toBe(0);
   await expect(page.getByTestId('app-page-back')).toHaveAccessibleName('Back to Files');
 
   await page.screenshot({ path: 'test-results/canonical-app-workspace-pushed.png', fullPage: true });
@@ -192,5 +244,5 @@ test('the Workspace owns one navigation bar per depth (#1051)', async ({ page })
   await page.getByTestId('app-page-back').click();
   await expect(page.getByTestId('files-app-list')).toBeVisible();
   await expect(page.getByTestId('app-page-header')).toContainText('Files');
-  await expect(workspaceNavigationOwners(page).dock).toHaveCount(1);
+  await expect.poll(() => paintedCount(page, WORKSPACE_DOCK)).toBe(1);
 });
