@@ -19,6 +19,7 @@ import {
   expectSingleLine,
   expectTokenHeight,
   expectTouchTarget,
+  expectTouchTargetsWithin,
   expectVisibleWithin,
 } from '../helpers/ui-assert/assertions';
 import { patternBlock } from '../helpers/ui-assert/contracts';
@@ -110,6 +111,30 @@ test.describe('assertion helpers detect deliberate violations', () => {
 
     await page.setContent(`<button id="root" style="width: 48px; height: 48px; padding: 0;"></button>`);
     await expectTouchTarget(page.locator('#root'), ITEM_APP); // passes
+  });
+
+  test('touch target inside: a row that passes while a control in it does not (#1066)', async ({ page }) => {
+    // The blind spot itself, reproduced. `expectTouchTarget` measures the box it
+    // is handed; a row is 374×60 whether or not a 32px control is sitting in it,
+    // so the first line below passes and only the enumeration notices.
+    const rowWith = (control: string) => `
+      <div id="root" style="width: 374px; height: 60px; display: flex; gap: 8px;">
+        <button style="width: 40px; height: 46px; padding: 0;"></button>
+        ${control}
+      </div>`;
+
+    await page.setContent(rowWith('<button style="width: 32px; height: 32px; padding: 0;"></button>'));
+    await expectTouchTarget(page.locator('#root'), ITEM_APP); // passes — the row's own box is fine
+    await rejectsWith(expectTouchTargetsWithin(page.locator('#root'), ITEM_APP), 'touch-target-inside');
+
+    await page.setContent(rowWith('<button style="width: 44px; height: 44px; padding: 0;"></button>'));
+    await expectTouchTargetsWithin(page.locator('#root'), ITEM_APP); // passes
+
+    // A control that cannot receive the tap is not one: SessionItem keeps both
+    // presentations in the DOM and a breakpoint picks one, so counting the
+    // `display: none` half would make every row fail in one experience.
+    await page.setContent(rowWith('<button style="display: none; width: 32px; height: 32px; padding: 0;"></button>'));
+    await expectTouchTargetsWithin(page.locator('#root'), ITEM_APP); // passes
   });
 
   test('visibility: target sticking out of its container fails', async ({ page }) => {

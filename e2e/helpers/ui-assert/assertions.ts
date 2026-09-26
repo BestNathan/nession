@@ -288,6 +288,112 @@ export async function expectTouchTarget(locator: Locator, opts: AssertOptions): 
 }
 
 /**
+ * What makes an element a control a user can hit. Structural (tag) plus
+ * ARIA-role forms, because the same control is a `<button>` in one primitive and
+ * a `<div role="menuitem">` in another — a menu item is exactly the second kind.
+ */
+const CONTROL_SELECTOR = [
+  'button',
+  'a[href]',
+  'input',
+  'select',
+  'textarea',
+  '[role="button"]',
+  '[role="menuitem"]',
+  '[role="menuitemcheckbox"]',
+  '[role="menuitemradio"]',
+  '[role="option"]',
+  '[role="tab"]',
+  '[role="switch"]',
+  '[role="checkbox"]',
+  '[role="radio"]',
+].join(',');
+
+/**
+ * Every control inside `root`, **and `root` itself**, must meet the contract's
+ * App touch floor.
+ *
+ * The third instance of one blind spot (#1066), not a variant of the first two.
+ * `measure()` reads `getBoundingClientRect()` on the element it is handed, so
+ * `expectTouchTarget` constrains the box it is given and says nothing about what
+ * is inside it — and it is handed `session-item-row`. A row whose *own* box is
+ * 374×60 therefore passes while a 32px control sits in it, which is how the
+ * App's inline Settings/Kill icons shipped under the floor and stayed there
+ * until #1050 removed them. The row is not the control; the controls are.
+ *
+ * `expectDrawnAffordance` reaches a second node, but only the one the contract
+ * names (`capsule-control-visual`) — it does not enumerate either.
+ *
+ * Two properties make the answer honest:
+ *
+ * - **Only what is rendered counts.** `display: none` and `visibility: hidden`
+ *   controls, and `pointer-events: none` ones, are skipped: they cannot receive
+ *   the tap this floor exists for. A `lg:`-hidden icon in an App row is not an
+ *   App control, and the same markup at `lg` is not a Web one. The filter is
+ *   what lets one call serve both experiences without a breakpoint in the spec.
+ * - **The floor is the contract's**, so on Web this is a no-op by construction
+ *   rather than by a branch: `experience.web` declares no `touchTargetToken`,
+ *   and a pointer has no minimum hit area.
+ *
+ * A violation names the offending control, not the container it was found in —
+ * "374×60" is the number that hid the defect.
+ */
+export async function expectTouchTargetsWithin(root: Locator, opts: AssertOptions): Promise<void> {
+  const block = blockFor(opts);
+  if (block.touchTargetTokenPx === undefined) return; // this experience has no floor
+  const floor = block.touchTargetTokenPx - (opts.tolerance ?? 0);
+
+  const offenders = await root.evaluate(
+    (node, args) => {
+      const describe = (el: Element): string => {
+        const testId = el.getAttribute('data-testid');
+        if (testId !== null) return `${el.tagName.toLowerCase()}[data-testid="${testId}"]`;
+        const label = el.getAttribute('aria-label');
+        if (label !== null) return `${el.tagName.toLowerCase()}[aria-label="${label}"]`;
+        const text = (el.textContent ?? '').trim().replace(/\s+/g, ' ').slice(0, 24);
+        const role = el.getAttribute('role');
+        return `${el.tagName.toLowerCase()}${role === null ? '' : `[role="${role}"]`}${text === '' ? '' : ` "${text}"`}`;
+      };
+
+      const controls = [
+        ...(node.matches(args.selector) ? [node] : []),
+        ...node.querySelectorAll(args.selector),
+      ];
+
+      const out: { label: string; width: number; height: number }[] = [];
+      for (const el of controls) {
+        const style = getComputedStyle(el);
+        if (style.visibility === 'hidden' || style.pointerEvents === 'none') continue;
+        const rect = el.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) continue; // not rendered
+        if (Math.min(rect.width, rect.height) >= args.floor) continue;
+        out.push({
+          label: describe(el),
+          width: rect.width,
+          height: rect.height,
+        });
+      }
+      return out;
+    },
+    { selector: CONTROL_SELECTOR, floor },
+  );
+
+  if (offenders.length > 0) {
+    const shown = offenders.slice(0, 5).map((o) => `${o.label} ${o.width.toFixed(1)}×${o.height.toFixed(1)}`);
+    if (offenders.length > shown.length) {
+      shown.push(`+${offenders.length - shown.length} more`);
+    }
+    violation(
+      opts,
+      'touch-target-inside',
+      `every control inside it ≥ ${block.touchTargetToken} (${block.touchTargetTokenPx}px)`,
+      `${offenders.length} under the floor — ${shown.join(', ')}`,
+      undefined,
+    );
+  }
+}
+
+/**
  * The affordance a control *draws* must be the contract's `visualSizeToken`,
  * sized to it, and inside the control that receives the tap (#1034).
  *

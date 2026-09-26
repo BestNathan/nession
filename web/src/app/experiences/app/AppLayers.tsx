@@ -5,6 +5,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
+import { AppPopupPortal } from './AppPopupPortal';
 import {
   indexFromLayer,
   layerFromIndex,
@@ -101,32 +102,38 @@ export function AppLayers({
       onTouchEnd={onTouchEnd}
       onTouchCancel={onTouchCancel}
     >
-      <div
-        data-testid="app-layer-terminal"
-        className="relative flex min-h-0 flex-1 flex-col overflow-hidden"
-      >
-        {terminal}
-      </div>
-
-      {showSessions && (
+      {/* Every layer is inside the App's popup container, so a menu opened from
+          any of them is mounted into a node that states `data-experience="app"`
+          — the scope this element opens, which a popup on `<body>` would
+          otherwise leave (#1066). */}
+      <AppPopupPortal>
         <div
-          data-testid="app-layer-sessions"
-          className="absolute inset-0 z-40 overflow-hidden will-change-transform"
-          style={{ transform: `translateX(${sessionsX}px)` }}
+          data-testid="app-layer-terminal"
+          className="relative flex min-h-0 flex-1 flex-col overflow-hidden"
         >
-          {sessions}
+          {terminal}
         </div>
-      )}
 
-      {showWorkspace && (
-        <div
-          data-testid="app-layer-workspace"
-          className="absolute inset-0 z-40 overflow-hidden will-change-transform"
-          style={{ transform: `translateX(${workspaceX}px)` }}
-        >
-          {workspace}
-        </div>
-      )}
+        {showSessions && (
+          <div
+            data-testid="app-layer-sessions"
+            className="absolute inset-0 z-40 overflow-hidden will-change-transform"
+            style={{ transform: `translateX(${sessionsX}px)` }}
+          >
+            {sessions}
+          </div>
+        )}
+
+        {showWorkspace && (
+          <div
+            data-testid="app-layer-workspace"
+            className="absolute inset-0 z-40 overflow-hidden will-change-transform"
+            style={{ transform: `translateX(${workspaceX}px)` }}
+          >
+            {workspace}
+          </div>
+        )}
+      </AppPopupPortal>
     </div>
   );
 }
