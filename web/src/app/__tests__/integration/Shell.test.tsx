@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { Provider, createStore } from 'jotai';
@@ -363,6 +363,38 @@ describe('Shell', () => {
 
     // Workspace is the depth around a piece of work; there is none yet.
     expect(screen.queryByTestId('app-header-workspace')).not.toBeInTheDocument();
+  });
+
+  it('returns to the home, with its actions, when the Sessions layer is closed (#1082)', async () => {
+    // The criterion is "closing Sessions cannot leave the user trapped on a
+    // non-interactive message". It used to: `useMobileNav` opens the list at
+    // rest, and dismissing it left the status line with no route back.
+    dashboard.current = {
+      ...dashboard.current,
+      agents: [{ ...agent, status: 'online' }],
+      sessions: [],
+      filteredSessions: [],
+    };
+    mobileNav.isWide = false;
+    renderShell();
+
+    await userEvent.click(screen.getByTestId('app-header-sessions'));
+    expect(screen.getByTestId('app-layer-sessions')).toBeInTheDocument();
+
+    // Closed the way the App closes it — a leftward page from Sessions — since
+    // there is no Back at the top level by design.
+    const root = screen.getByTestId('app-layer-root');
+    fireEvent.touchStart(root, { touches: [{ clientX: 300, clientY: 300 }] });
+    fireEvent.touchMove(root, { touches: [{ clientX: 180, clientY: 300 }] });
+    fireEvent.touchMove(root, { touches: [{ clientX: 40, clientY: 300 }] });
+    fireEvent.touchEnd(root);
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('app-layer-sessions')).not.toBeInTheDocument();
+    });
+    // Back on the home, and still able to act.
+    expect(screen.getByTestId('app-home-new-session')).toBeEnabled();
+    expect(screen.getByTestId('app-home-browse-sessions')).toBeInTheDocument();
   });
 
   it('disables the home action and says why when no Agent is online (#1082)', () => {
