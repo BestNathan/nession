@@ -326,6 +326,48 @@ for (const row of viewports.filter((v) => v.experience === 'app')) {
       }
     });
 
+    test('a pushed Workspace detail keeps its own leave (#1081)', async ({ page }) => {
+      await page.goto('/#/fixture/app');
+      const layerRoot = page.getByTestId('app-layer-root');
+      await expect(layerRoot).toHaveAttribute('data-layer', 'terminal');
+
+      await page.getByTestId('app-header-workspace').first().click();
+      await expect(layerRoot).toHaveAttribute('data-layer', 'workspace');
+
+      // Push a file detail. Files declares the push, so the shell's page header
+      // becomes that depth's bar and Back now names the depth below it.
+      await page.getByTestId('file-row-web').click();
+      await page.getByTestId('file-row-web/src').click();
+      await page.getByTestId('file-row-web/src/App.tsx').click();
+      const back = page.getByTestId('app-page-back');
+      await expect(back).toHaveAttribute('aria-label', 'Back to Files');
+
+      const shell = await layerRoot.boundingBox();
+      const editor = await page.locator('.cm-editor').boundingBox();
+      if (!shell || !editor) {
+        throw new Error('the pushed detail must lay out a shell and an editor');
+      }
+      const y = Math.round(editor.y + editor.height / 2);
+
+      // From inside the editor's own left edge — CodeMirror's line-number
+      // gutter sits at x = 0, so this is the touch the edge band re-admitted,
+      // and before this rule it left the whole depth and discarded whatever
+      // `Back to Files` was guarding.
+      await swipeHorizontally(page, { y, fromX: shell.x + 10, toX: shell.x + 170 });
+      await page.waitForTimeout(300);
+      await expect(layerRoot).toHaveAttribute('data-layer', 'workspace');
+      await expect(back).toHaveAttribute('aria-label', 'Back to Files');
+
+      // …and the depth's own leave still works, one level, as its Back says.
+      await back.click();
+      await expect(page.getByTestId('app-page-back')).toHaveAttribute('aria-label', 'Back to terminal');
+
+      // The pair: at the capability root the shell's gesture is back, because
+      // there Back and the shell both mean the Terminal.
+      await swipeHorizontally(page, { y, fromX: shell.x + 10, toX: shell.x + 170 });
+      await expect(layerRoot).toHaveAttribute('data-layer', 'terminal');
+    });
+
     test('the no-Session root is a home with an action, not a status line (#1082)', async ({ page }) => {
       await page.goto('/#/fixture/app?selection=none');
 

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { cn } from '@/shared/lib/utils';
 import type { FileOps } from '@/capabilities/files';
 import type { CapabilityFacts, CapabilityId } from '@/product/capability';
@@ -28,6 +28,13 @@ export interface WorkspacePanelProps {
   facts: CapabilityFacts | undefined;
   onSurfaceChange: (surface: Surface) => void;
   onToolChange: (tool: CapabilityId) => void;
+  /**
+   * Reports whether a capability has pushed a detail depth (#1081).
+   *
+   * Read by the App's pager, which must not offer a second leave for a depth
+   * that already has one. Absent on Web, which has no top-level gesture.
+   */
+  onDepthChange?: (pushed: boolean) => void;
   /** What opened this view, when the entry carried context (`#826`). */
   focus?: CapabilityFocus;
 }
@@ -63,9 +70,24 @@ export function WorkspacePanel({
   facts,
   onSurfaceChange,
   onToolChange,
+  onDepthChange,
   focus,
 }: WorkspacePanelProps) {
   const [pushed, setPushed] = useState<PushedDepth | null>(null);
+
+  // Report the depth upward rather than keeping it private (#1081): the App's
+  // pager needs it, and this is the component that owns it. The panel is
+  // unmounted whenever the Workspace layer is closed, so the reset on the way
+  // out is what keeps a stale `true` from silencing the Terminal's gesture —
+  // and it is a separate effect because the reporting one would otherwise clear
+  // and re-set on every push, which is a state change nothing asked for.
+  useEffect(() => {
+    onDepthChange?.(pushed !== null);
+  }, [pushed, onDepthChange]);
+
+  useEffect(() => {
+    return () => onDepthChange?.(false);
+  }, [onDepthChange]);
 
   const ctx: WorkspaceContext = useMemo(
     () => ({

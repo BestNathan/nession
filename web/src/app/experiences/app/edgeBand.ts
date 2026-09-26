@@ -38,6 +38,14 @@ import { EDGE_BAND_PX } from './gesture';
  *   rightward drag belongs to the left band and a leftward drag to the right
  *   band. An edge band is not an unconditional licence: a drag from the left
  *   edge going left is not shell navigation, and the surface keeps it.
+ *
+ * The band is additionally mute on a layer whose depth owns its own leave
+ * (#1081), which is a question that outranks this one — see `shellMayPage` in
+ * `useSwipePager.ts`. In practice that is the whole Workspace layer: its only
+ * work surfaces are inside a pushed detail, and there the capability's page
+ * header owns the leave. Measured on the fixture, 390 of 705 band cells sit
+ * over a work surface on the Terminal layer and 0 of 705 at the Workspace root,
+ * so the two rules overlap nowhere and nothing was given up to state both.
  */
 
 /** The shell's horizontal extent, in the same client coordinates as a touch. */

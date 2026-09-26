@@ -118,6 +118,16 @@ explanation is the same dead end one step earlier.
 ## Gestures and visible alternatives
 
 - Swipe right to reveal/open Sessions; swipe left to reveal/open Workspace.
+- **The shell does not claim the gesture on a layer whose depth offers its own
+  leave** (#1081). `Sessions ← Terminal → Workspace` describes the model *around*
+  work; inside the Workspace it is the pushed depth's business, and
+  [one navigation bar per depth](#one-navigation-bar-per-depth) gives that depth
+  exactly one leave — the page header's Back. Two routes out of one depth is the
+  defect #1051 names, and here it is worse than untidy: the Back is **allowed to
+  refuse** (Files' asks before discarding an unsaved editor) and the shell's
+  leave is not, so a shell page from there threw the work away. The gesture
+  returns at the Workspace root, where Back and the shell both mean the
+  Terminal and there is nothing to compete over.
 - The gesture spans the shell chrome. **A work surface owns every touch that
   begins in it, except at the shell's own edges** (#1081). Inside a work surface
   the shell may still claim a horizontal drag that starts within `EDGE_BAND_PX`
