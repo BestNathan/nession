@@ -110,13 +110,72 @@ function props(
 }
 
 describe('App Sessions surface (#1050 stage 1)', () => {
-  it('renders the Session list and the service foot', () => {
+  it('renders the Session list, and no service foot while connected', () => {
+    // #1083 §8 / criterion 10. The foot is not hidden — it is not rendered, so
+    // there is no empty strip where it was (which is what the last attempt at
+    // this left behind). Criterion 15's counterpart is the degraded case below.
     render(<AppSessionsSurface {...props()} />);
 
     expect(screen.getByTestId('app-sessions-surface')).toBeInTheDocument();
     expect(screen.getAllByTestId('session-item-row')).toHaveLength(2);
-    expect(screen.getByTestId('sidebar-footer')).toBeInTheDocument();
+    expect(screen.queryByTestId('app-sessions-problem')).not.toBeInTheDocument();
     expect(screen.getByTestId('create-session')).toBeEnabled();
+  });
+
+  it('shows the service state and a retry only when the link is degraded', async () => {
+    // Criterion 11: degraded state stays visible where it affects action. The
+    // retry is the action, and it is here rather than in the resting chrome
+    // because a live connection makes a permanent one noise (#1083 §6).
+    const onRefresh = vi.fn();
+    render(
+      <AppSessionsSurface
+        {...props({ connectionStatus: 'reconnecting', onRefresh })}
+      />,
+    );
+
+    const problem = screen.getByTestId('app-sessions-problem');
+    expect(problem).toHaveTextContent('Reconnecting');
+    // The healthy case renders nothing here at all — asserted above; this is
+    // the same region, so the two tests cannot both pass on a region that is
+    // always present.
+    await userEvent.click(screen.getByLabelText('Refresh sessions'));
+    expect(onRefresh).toHaveBeenCalled();
+  });
+
+  it('keeps the filter entry in the field, and the panel closed until asked', async () => {
+    // Criterion 4: search is the only persistent control row above history. The
+    // trigger rides in the field's own box; the chips and sort are behind it,
+    // and the testid is the one the standing row had — ids name controls.
+    render(<AppSessionsSurface {...props()} />);
+
+    const trigger = screen.getByTestId('session-list-filters');
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByTestId('session-list-filters-panel')).not.toBeInTheDocument();
+
+    await userEvent.click(trigger);
+    expect(screen.getByTestId('session-list-filters-panel')).toBeInTheDocument();
+  });
+
+  it('states an active filter outside the panel, and clears it in one tap', async () => {
+    // The panel holds the choice; the chip holds the fact. A filter that has
+    // been applied must not be something the user has to open a panel to
+    // rediscover (`session-list.md`: "search result/state chip only while a
+    // filter is active").
+    const setStatusFilter = vi.fn();
+    render(
+      <AppSessionsSurface
+        {...props({ statusFilter: 'offline', setStatusFilter })}
+      />,
+    );
+
+    const chip = screen.getByTestId('session-list-filter-chip');
+    expect(chip).toHaveTextContent('Offline');
+    // The panel is closed, so the chip is not a restatement of something else
+    // already on screen.
+    expect(screen.queryByTestId('session-list-filters-panel')).not.toBeInTheDocument();
+
+    await userEvent.click(chip);
+    expect(setStatusFilter).toHaveBeenCalledWith('all');
   });
 
   it('offers no way to collapse itself into a rail', () => {
@@ -247,11 +306,10 @@ describe('App Sessions surface (#1050 stage 1)', () => {
   it('moves filters and sort behind a single trigger', async () => {
     const setStatusFilter = vi.fn();
     const toggleSort = vi.fn();
-    const onRefresh = vi.fn();
     const onCreate = vi.fn();
     render(
       <AppSessionsSurface
-        {...props({ setStatusFilter, toggleSort, onRefresh, onCreate })}
+        {...props({ setStatusFilter, toggleSort, onCreate })}
       />,
     );
 
@@ -271,8 +329,9 @@ describe('App Sessions surface (#1050 stage 1)', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Activity' }));
     expect(toggleSort).toHaveBeenCalledWith('activity');
 
-    await userEvent.click(screen.getByRole('button', { name: 'Refresh sessions' }));
-    expect(onRefresh).toHaveBeenCalledTimes(1);
+    // Refresh is no longer reachable from here: it belongs to the degraded
+    // region, and its own test drives it there.
+    expect(screen.queryByLabelText('Refresh sessions')).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByTestId('create-session'));
     expect(onCreate).toHaveBeenCalledTimes(1);
@@ -354,11 +413,16 @@ describe('App Sessions surface (#1050 stage 1)', () => {
     const AppIconButtonSizeClass = 'size-[length:var(--shell-icon-button-size)]';
     render(<AppSessionsSurface {...props()} />);
 
-    expect(screen.getByTestId('session-list-filters').className).toContain(AppBodyRoleClass);
-
-    const create = screen.getByTestId('create-session');
-    expect(create.className).not.toContain(AppBodyRoleClass);
-    expect(create.className).toContain(AppIconButtonSizeClass);
+    // Both resting controls are icons now — creation in the header, the filter
+    // entry in the field (#1083 §3, §5). Neither has text, so neither takes a
+    // type role; both take the icon token, which is where the 44px floor the
+    // App contract measures actually comes from. The text-bearing controls
+    // (the chips and the sort row) are asserted in the test below.
+    for (const id of ['create-session', 'session-list-filters']) {
+      const control = screen.getByTestId(id);
+      expect(control.className).not.toContain(AppBodyRoleClass);
+      expect(control.className).toContain(AppIconButtonSizeClass);
+    }
   });
 
   it('states the page title in the App title role (#1073)', () => {

@@ -399,6 +399,30 @@ test.describe('App 390×844', () => {
     });
   });
 
+  // #1083 §8's other half. "Healthy infrastructure is invisible" was checkable —
+  // the resting baselines have no foot — but the half that *renders* something
+  // had no route, because both fixture frames hardcoded a connected socket. A
+  // region nobody can produce is a region nobody has looked at, which is how
+  // the last attempt at this shipped an empty strip.
+  test('Sessions layer, link degraded', async ({ page }) => {
+    await gotoFixtureApp(page, '?connection=reconnecting');
+    await page.getByTestId('app-header-sessions').first().click();
+    await expect(page.getByTestId('app-layer-sessions')).toBeInViewport();
+
+    // Asserted, not just photographed: a banner and the state it announces are
+    // two different things to get wrong, and the retry is the action the state
+    // exists to offer.
+    const problem = page.getByTestId('app-sessions-problem');
+    await expect(problem).toBeVisible();
+    await expect(problem).toContainText('Reconnecting');
+    await expect(page.getByLabel('Refresh sessions')).toBeVisible();
+
+    await expect(page).toHaveScreenshot('app-sessions-degraded-link.png', {
+      fullPage: true,
+      ...FIXTURE_SCREENSHOT,
+    });
+  });
+
   test('Workspace / Files', async ({ page }) => {
     await gotoFixtureApp(page);
     await page.getByTestId('app-header-workspace').first().click();
