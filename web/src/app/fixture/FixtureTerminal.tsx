@@ -1,7 +1,11 @@
 import { useEffect, useRef } from 'react';
 import { Terminal } from '@xterm/xterm';
-import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
+import {
+  cellDimensionsOf,
+  gridFor,
+  type PixelSize,
+} from '@/platform/terminal-runtime/grid';
 import {
   NESSION_TERMINAL_THEME,
   TERMINAL_MINIMUM_CONTRAST_RATIO,
@@ -99,36 +103,56 @@ export function FixtureTerminal({
     // the surface the product actually shows, and the visual gate was
     // protecting a screen no user sees.
     //
-    // `FitAddon` is already a dependency. The product path uses
-    // `ResizeController` instead because it also has to publish cols/rows to the
-    // transport and debounce the PTY notification; a static fixture has no
-    // transport to notify.
-    const fit = new FitAddon();
-    term.loadAddon(fit);
+    // Sized the way the product sizes it — `gridFor`, from the container's
+    // **content box**. `FitAddon` stood here and measured the parent's border
+    // box, so the `--terminal-pad-x` inset was never subtracted: the grid came
+    // out 11px wider than the well, 14px of inset on the left and 3px on the
+    // right, in every App baseline (#1092). The arithmetic is shared with
+    // `ResizeController` rather than reimplemented, so the fixture and the
+    // product cannot drift again; only the *observation* differs, because a
+    // static fixture has no transport to publish cols/rows to and nothing to
+    // debounce.
     term.open(host);
-    term.write(FIXTURE_BUFFER);
 
-    // Guarded rather than caught: FitAddon throws below a 2x2 grid, and a
-    // zero-size host is a real state here (first paint, and every test that
-    // mounts the surface without laying it out).
-    //
-    // Deferred by a frame as well as guarded. `fit()` reads the cell metrics off
-    // xterm's render service, and that service has no dimensions until the
-    // renderer's first layout pass — measuring in the same tick as `open()`
-    // throws inside `Viewport.syncScrollArea`. `TerminalInstance` guards the
-    // same race on its own metrics accessor. The observer's own first fire
-    // lands in that window too, so every fit goes through this path.
+    let size: PixelSize | null = null;
+    let written = false;
     let frame = 0;
-    const scheduleFit = () => {
-      cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => {
-        if (host.clientWidth > 0 && host.clientHeight > 0) {
-          fit.fit();
-        }
-      });
+    const applyGrid = () => {
+      if (size === null) {
+        return;
+      }
+      const grid = gridFor(size, cellDimensionsOf(term));
+      if (grid === null) {
+        return;
+      }
+      term.resize(grid.cols, grid.rows);
+      // Written once the grid is right, rather than before sizing it. A write
+      // at xterm's 80x24 default followed by a resize leaves the buffer to
+      // reflow, and a line that was never wrapped is not re-split — the
+      // fixture's longest line lost three characters off its tail that way.
+      if (!written) {
+        written = true;
+        term.write(FIXTURE_BUFFER);
+      }
     };
-    scheduleFit();
-    const observer = new ResizeObserver(scheduleFit);
+
+    // Deferred by a frame rather than applied in the callback, because the
+    // observer's first fire lands before xterm's render service has measured a
+    // cell — the same race `TerminalInstance` guards on its own accessor, where
+    // `dimensions` throws until the renderer's first layout pass. The frame
+    // puts the apply after that pass, so the first grid and the write both use
+    // real metrics. A zero-size host (first paint, and every test that mounts
+    // the surface without laying it out) yields a degenerate grid and is
+    // skipped until the observer reports a real size.
+    const observer = new ResizeObserver((entries) => {
+      const rect = entries[entries.length - 1]?.contentRect;
+      if (rect === undefined) {
+        return;
+      }
+      size = { width: rect.width, height: rect.height };
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(applyGrid);
+    });
     observer.observe(host);
 
     return () => {

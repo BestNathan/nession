@@ -26,6 +26,7 @@ import {
 } from '../helpers/ui-assert/assertions';
 import { loadContracts, type Experience } from '../helpers/ui-assert/contracts';
 import { swipeHorizontally } from '../helpers/shell';
+import { waitForFixtureTerminal } from '../helpers/fixtureVisual';
 
 test.skip(!process.env.CI, 'local only — runs in CI workflow only');
 
@@ -324,6 +325,47 @@ for (const row of viewports.filter((v) => v.experience === 'app')) {
       for (let i = 0; i < (await controls.count()); i += 1) {
         await expectTouchTarget(controls.nth(i), optsFor(PATTERN_TERMINAL_CAPSULE, 'app', row.id));
       }
+    });
+
+    test('the terminal grid is drawn inside the surface inset (#1092)', async ({ page }) => {
+      await page.goto('/#/fixture/app');
+      await waitForFixtureTerminal(page);
+
+      const boxes = await page.evaluate(() => {
+        const rect = (selector: string) => {
+          const el = document.querySelector(selector);
+          if (!el) {
+            return null;
+          }
+          const b = el.getBoundingClientRect();
+          return { left: b.left, right: b.right, top: b.top, bottom: b.bottom };
+        };
+        return {
+          surface: rect('[data-terminal-viewport]'),
+          cell: rect('.xterm'),
+          screen: rect('.xterm-screen'),
+        };
+      });
+      if (!boxes.surface || !boxes.cell || !boxes.screen) {
+        throw new Error('the fixture terminal must lay out a surface, a box and a screen');
+      }
+
+      // The grid is sized from the container's *content* box, and xterm draws
+      // its screen at `cols * cell.width`, so a fitted grid cannot leave the box
+      // that box already excludes the inset from. Fitted against the padded box
+      // it did: 373px of screen inside a 362px `.xterm` — 14px of inset on the
+      // left, 3px on the right, in every App baseline. Sub-pixel only, because a
+      // floor-based fit leaves slack *inside* the box, never outside it.
+      expect(boxes.screen.left).toBeGreaterThanOrEqual(boxes.cell.left - 0.5);
+      expect(boxes.screen.right).toBeLessThanOrEqual(boxes.cell.right + 0.5);
+
+      // Non-vacuity: a screen that "fits" by collapsing to a couple of columns
+      // would satisfy the two lines above. The fixture's longest line renders
+      // whole on one row only if the grid is at least as wide as that line.
+      const rows = await page.locator('.xterm-rows > div').allTextContents();
+      expect(
+        rows.some((row) => row.includes('─ sessions are terminal-first; chrome stays quiet ─')),
+      ).toBe(true);
     });
 
     test('a pushed Workspace detail keeps its own leave (#1081)', async ({ page }) => {

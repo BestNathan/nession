@@ -1,9 +1,8 @@
 import type { Terminal } from '@xterm/xterm';
+import { cellDimensionsOf } from '../grid';
 
 /** Max finger movement (px) still counted as a tap rather than a scroll. */
 const TAP_MOVE_THRESHOLD = 10;
-/** Fallback cell size when xterm's render service has not measured yet. */
-const FALLBACK_CELL = { width: 8, height: 16 };
 
 export interface MobileImeInputCallbacks {
   onSend: (text: string) => void;
@@ -271,18 +270,7 @@ export class MobileImeInput {
 
   /** Cell pixel size from xterm's render service, with a sane fallback. */
   private get cellDimensions(): { width: number; height: number } {
-    const internals = this.terminal as unknown as {
-      _core?: {
-        _renderService?: {
-          dimensions?: { css?: { cell?: { width: number; height: number } } };
-        };
-      };
-    };
-    const cell = internals._core?._renderService?.dimensions?.css?.cell;
-    return {
-      width: cell?.width ?? FALLBACK_CELL.width,
-      height: cell?.height ?? FALLBACK_CELL.height,
-    };
+    return cellDimensionsOf(this.terminal);
   }
 
   focus(): void {
