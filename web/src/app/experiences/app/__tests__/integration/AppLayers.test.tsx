@@ -29,6 +29,21 @@ describe('AppLayers — Terminal is the root', () => {
     }
   });
 
+  it('supplies the App popup container to every layer (#1066)', () => {
+    // This element is the scope (`data-experience="app"`), so it is also the
+    // one that has to give its popups a node carrying that scope — a menu
+    // portalled to `<body>` is not a descendant of anything this root says.
+    // Asserted from the composition, not from `AppPopupPortal` alone: removing
+    // the wrapper from `AppLayers` is the way this regresses.
+    for (const layer of ['terminal', 'sessions', 'workspace'] as const) {
+      const { unmount } = renderLayers(layer);
+      const host = screen.getByTestId('app-popup-portal');
+      expect(host).toHaveAttribute('data-experience', 'app');
+      expect(host.parentElement).toBe(document.body);
+      unmount();
+    }
+  });
+
   it('reports which layer is active', () => {
     renderLayers('workspace');
     expect(screen.getByTestId('app-layer-root')).toHaveAttribute(

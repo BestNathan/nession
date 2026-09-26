@@ -1,0 +1,18 @@
+{
+  "id": "pattern.popup-menu",
+  "$description": "The list a control collapses into (#1066) — the surface `DropdownMenu`/`Popover` open, whose items are controls in their own right. It is a generic case rather than a Nession product concept: `category.control` already says that a control which cannot fit its content \"collapses into a menu (web) or sheet (app)\", and this is the menu's own block. It exists because the menu is the one control no row/band assertion can see — the popup is mounted on `document.body`, so it is not a descendant of the element every other contract is measured against, and its items resolve from the container they were mounted into rather than from their trigger. heightToken is `control.sm` on both experiences deliberately: on App `sm == md == 44px` (no App hit target may sit below the touch floor, design/tokens/experience/app.json), while on Web `sm` is 28px — the height a menu row has always measured — where the category's `md` (32px) would have raised Web's menu density, which #1066 forbids. The Web value is stated for the same reason `FileList`'s is: one class serves both experiences, so the leaf has to resolve under either.",
+  "patternRef": "docs/design/design-system/patterns/popup-menu.md",
+  "web": {
+    "wrap": false,
+    "heightToken": "experience.web.control.sm",
+    "overflow": "scroll",
+    "scrollOwner": true
+  },
+  "app": {
+    "wrap": false,
+    "heightToken": "experience.app.control.sm",
+    "overflow": "scroll",
+    "scrollOwner": true,
+    "touchTargetToken": "experience.app.touchTarget.min"
+  }
+}
