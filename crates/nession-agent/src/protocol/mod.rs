@@ -267,7 +267,7 @@ pub(crate) use core_routes;
 /// dispatcher below: the policy is read before the arm runs, and the arm
 /// consumes the payload, so this half may only look at it.
 macro_rules! p2p_routes {
-    ($ctx:ident, $msg_type:ident, $payload:ident $(,)? ; $( $id:literal => $wire:literal => $version:literal => $policy:expr => $body:block )* $(,)?) => {
+    ($ctx:ident, $msg_type:ident, $payload:ident $(,)? ; $( $id:literal => $wire:literal => $version:literal => $scope:expr => $policy:expr => $body:block )* $(,)?) => {
         /// Every Protocol Unit this agent serves on its peer-to-peer socket.
         ///
         /// Unioned with [`crate::connection::core_descriptors`] into the one
@@ -307,6 +307,35 @@ macro_rules! p2p_routes {
         ) -> Option<crate::server::execution::ExecutionPolicy> {
             match ($msg_type, crate::protocol::named_contract_version($payload)) {
                 $( ($wire, $version) => Some($policy), )*
+                _ => None,
+            }
+        }
+
+        /// What one peer-to-peer wire needs before a connection may run it
+        /// (`#1013`).
+        ///
+        /// The **other** column on the same row, read at a different moment than
+        /// the policy: the policy says how a frame the connection may run is
+        /// dispatched, and this says whether it may be run at all. Both are
+        /// derived from the same arms, so a wire cannot be given a lane without
+        /// being given a scope — which is the shape that keeps a new arm from
+        /// arriving with an implicit "everything is allowed".
+        ///
+        /// A reference over the payload for the same reason the policy column
+        /// is: `Session` names the session the frame is about, and which field
+        /// carries that name is a property of the operation rather than of the
+        /// wire.
+        ///
+        /// `None` means this table does not carry the wire. The caller routes it
+        /// on rather than refusing, so an unknown name is still answered
+        /// `unknown_message_type` — a permission error for a wire nobody serves
+        /// would be a false statement about why it failed.
+        pub(crate) fn p2p_scope(
+            $msg_type: &str,
+            $payload: &serde_json::Value,
+        ) -> Option<crate::p2p_credentials::WireScope> {
+            match ($msg_type, crate::protocol::named_contract_version($payload)) {
+                $( ($wire, $version) => Some($scope), )*
                 _ => None,
             }
         }

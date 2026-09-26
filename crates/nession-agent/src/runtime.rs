@@ -138,7 +138,10 @@ pub async fn run(config: AgentConfig, ready: Readiness) -> Result<()> {
         config.default_working_dir.clone(),
         file_root,
         config.attach_mode.clone(),
-        resize,
+        crate::server::websocket::AgentServerContext {
+            resize,
+            credentials: Arc::clone(&p2p_credentials),
+        },
     )
     .context("failed to create agent server")?;
     let (server_handle, listen_addr) = agent_server

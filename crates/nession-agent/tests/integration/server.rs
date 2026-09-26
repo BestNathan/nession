@@ -4,41 +4,64 @@
 //! bind, connect, send requests, and receive responses. They require a
 //! working tmux installation (same as the tmux manager / pty tests).
 
-use super::{unique_session_name, TestSession};
+use super::{
+    browser_scope, mint_credential, unique_session_name, TestSession, TEST_AGENT_ID,
+    TEST_CREDENTIAL,
+};
 use futures_util::{SinkExt, StreamExt};
 use nession_agent::config::AttachMode;
+use nession_agent::p2p_credentials::P2pCredentials;
 use nession_agent::server::websocket::{
-    msg_types, new_message, AgentServer, ClientAttachPayload, ClientAttachResponse,
-    ClientDetachPayload, ClientDetachResponse, OkPayload, SessionCreatePayload,
-    SessionCreateResponse, SessionKillPayload, SessionKillResponse,
+    msg_types, new_message, AgentServer, AgentServerContext, ClientAttachPayload,
+    ClientAttachResponse, ClientDetachPayload, ClientDetachResponse, OkPayload,
+    SessionCreatePayload, SessionCreateResponse, SessionKillPayload, SessionKillResponse,
 };
 use nession_agent::tmux::manager::SessionManager;
+use nession_protocol::contracts::p2p::agent_url_with_credential;
 use serde::Serialize;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 
 /// Start a test server (OS picks a free port) and return the real bound
-/// address + handle.
+/// address + handle, together with the credential its listener will honour.
+///
+/// The credential is returned rather than kept here because the dial is what
+/// presents it ([`connect`]), and every dial in this file goes through that
+/// helper. Minting it now is what lets the commit that switches the listener's
+/// check on (#1013) leave these tests alone.
 async fn start_server(
     _port: u16,
-) -> anyhow::Result<(SocketAddr, nession_agent::server::ServerHandle)> {
+) -> anyhow::Result<(SocketAddr, nession_agent::server::ServerHandle, String)> {
     let tmp = Box::leak(Box::new(tempfile::tempdir()?));
     let (resize, _resize_updates) = nession_agent::server::ResizeReporter::new();
+    // Built, granted into, and only then handed to the listener — the store the
+    // listener checks has to be the one the credential was granted into
+    // ([`mint_credential`]).
+    let credentials = P2pCredentials::new();
+    mint_credential(
+        &credentials,
+        TEST_AGENT_ID,
+        TEST_CREDENTIAL,
+        browser_scope(),
+    )?;
     let server = AgentServer::new(
         "127.0.0.1:0",
-        "test-agent",
+        TEST_AGENT_ID,
         None,
         "/tmp".to_string(),
         tmp.path().to_string_lossy().as_ref(),
         AttachMode::Plain,
-        resize,
+        AgentServerContext {
+            resize,
+            credentials: Arc::new(credentials),
+        },
     )?;
     let (handle, addr) = server.start().await?;
-    Ok((addr, handle))
+    Ok((addr, handle, TEST_CREDENTIAL.to_string()))
 }
 
-/// Connect a WebSocket client and return the split sink / stream.
 type WsSink = futures_util::stream::SplitSink<
     tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
     WsMessage,
@@ -47,8 +70,17 @@ type WsStream = futures_util::stream::SplitStream<
     tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
 >;
 
-async fn connect(addr: SocketAddr) -> anyhow::Result<(WsSink, WsStream)> {
-    let url = format!("ws://{addr}");
+/// Connect a WebSocket client, presenting `credential`, and return the split
+/// sink / stream.
+///
+/// The credential travels **in** the URL rather than beside it, and through the
+/// shared builder rather than by hand. The listener binds `127.0.0.1:0`, so
+/// this URL has no path, and writing the query onto it by hand gives the
+/// request target `?token=x` — not origin-form, so the peer drops the
+/// connection mid-handshake and the client reports an opaque
+/// `HandshakeIncomplete` with no URL in it (#1013).
+async fn connect(addr: SocketAddr, credential: &str) -> anyhow::Result<(WsSink, WsStream)> {
+    let url = agent_url_with_credential(&format!("ws://{addr}"), credential);
     let (ws, _resp) = connect_async(&url).await?;
     Ok(ws.split())
 }
@@ -83,14 +115,14 @@ async fn round_trip<Req: Serialize, Resp: serde::de::DeserializeOwned>(
 #[tokio::test]
 async fn integration_server_startup() {
     // Verify that the server binds, starts, and can be cleanly shut down.
-    let (_, handle) = start_server(19081).await.unwrap();
+    let (_, handle, _credential) = start_server(19081).await.unwrap();
     handle.shutdown().await.unwrap();
 }
 
 #[tokio::test]
 async fn integration_session_list() {
-    let (addr, handle) = start_server(19082).await.unwrap();
-    let (mut sink, mut stream) = connect(addr).await.unwrap();
+    let (addr, handle, credential) = start_server(19082).await.unwrap();
+    let (mut sink, mut stream) = connect(addr, &credential).await.unwrap();
 
     let req = new_message(msg_types::SESSION_LIST, serde_json::json!({}));
     let resp: nession_agent::server::websocket::Message<serde_json::Value> =
@@ -104,8 +136,8 @@ async fn integration_session_list() {
 
 #[tokio::test]
 async fn integration_session_create_and_kill() {
-    let (addr, handle) = start_server(19083).await.unwrap();
-    let (mut sink, mut stream) = connect(addr).await.unwrap();
+    let (addr, handle, credential) = start_server(19083).await.unwrap();
+    let (mut sink, mut stream) = connect(addr, &credential).await.unwrap();
 
     let session = TestSession::new("create-kill");
     let session_name = session.name().to_string();
@@ -145,8 +177,8 @@ async fn integration_session_create_and_kill() {
 async fn integration_session_create_env_snapshot_lands_in_tmux() {
     use std::time::Duration;
 
-    let (addr, handle) = start_server(0).await.unwrap();
-    let (mut sink, mut stream) = connect(addr).await.unwrap();
+    let (addr, handle, credential) = start_server(0).await.unwrap();
+    let (mut sink, mut stream) = connect(addr, &credential).await.unwrap();
 
     let session = TestSession::new("env-lands");
     let name = session.name().to_string();
@@ -218,8 +250,8 @@ async fn integration_session_create_env_snapshot_lands_in_tmux() {
 async fn a_refused_env_mutation_is_an_error_reply_not_a_warning() {
     use std::time::Duration;
 
-    let (addr, handle) = start_server(0).await.unwrap();
-    let (mut sink, mut stream) = connect(addr).await.unwrap();
+    let (addr, handle, credential) = start_server(0).await.unwrap();
+    let (mut sink, mut stream) = connect(addr, &credential).await.unwrap();
 
     let session = TestSession::new("env-refused");
     let create = new_message(
@@ -271,8 +303,8 @@ async fn a_refused_env_mutation_is_an_error_reply_not_a_warning() {
 
 #[tokio::test]
 async fn integration_client_attach_creates_pty() {
-    let (addr, handle) = start_server(19084).await.unwrap();
-    let (mut sink, mut stream) = connect(addr).await.unwrap();
+    let (addr, handle, credential) = start_server(19084).await.unwrap();
+    let (mut sink, mut stream) = connect(addr, &credential).await.unwrap();
 
     let tmux = SessionManager::new();
     let session = TestSession::new("attach");
@@ -310,8 +342,8 @@ async fn integration_client_attach_creates_pty() {
 
 #[tokio::test]
 async fn integration_terminal_io_flow() {
-    let (addr, handle) = start_server(19085).await.unwrap();
-    let (mut sink, mut stream) = connect(addr).await.unwrap();
+    let (addr, handle, credential) = start_server(19085).await.unwrap();
+    let (mut sink, mut stream) = connect(addr, &credential).await.unwrap();
 
     let tmux = SessionManager::new();
     let session = TestSession::new("io");
@@ -393,8 +425,8 @@ use nession_agent::server::websocket::{
 
 #[tokio::test]
 async fn integration_web_ui_client_auth() {
-    let (addr, handle) = start_server(19086).await.unwrap();
-    let (mut sink, mut stream) = connect(addr).await.unwrap();
+    let (addr, handle, credential) = start_server(19086).await.unwrap();
+    let (mut sink, mut stream) = connect(addr, &credential).await.unwrap();
 
     let req = new_message(
         msg_types::CLIENT_AUTH,
@@ -410,8 +442,8 @@ async fn integration_web_ui_client_auth() {
 
 #[tokio::test]
 async fn integration_web_ui_sessions_list() {
-    let (addr, handle) = start_server(19088).await.unwrap();
-    let (mut sink, mut stream) = connect(addr).await.unwrap();
+    let (addr, handle, credential) = start_server(19088).await.unwrap();
+    let (mut sink, mut stream) = connect(addr, &credential).await.unwrap();
 
     let req = new_message(msg_types::CLIENT_SESSIONS_LIST, serde_json::json!({}));
     let resp: nession_agent::server::websocket::Message<WebSessionsListResponse> =
@@ -423,8 +455,8 @@ async fn integration_web_ui_sessions_list() {
 
 #[tokio::test]
 async fn integration_web_ui_session_create() {
-    let (addr, handle) = start_server(19089).await.unwrap();
-    let (mut sink, mut stream) = connect(addr).await.unwrap();
+    let (addr, handle, credential) = start_server(19089).await.unwrap();
+    let (mut sink, mut stream) = connect(addr, &credential).await.unwrap();
 
     let session = TestSession::new("web-create");
     let payload = WebSessionCreatePayload {
@@ -455,8 +487,8 @@ async fn integration_web_ui_session_create() {
 
 #[tokio::test]
 async fn integration_web_ui_session_kill() {
-    let (addr, handle) = start_server(19090).await.unwrap();
-    let (mut sink, mut stream) = connect(addr).await.unwrap();
+    let (addr, handle, credential) = start_server(19090).await.unwrap();
+    let (mut sink, mut stream) = connect(addr, &credential).await.unwrap();
 
     // Create a session first.
     let tmux = SessionManager::new();
@@ -480,8 +512,8 @@ async fn integration_web_ui_session_kill() {
 
 #[tokio::test]
 async fn integration_web_ui_session_attach() {
-    let (addr, handle) = start_server(19091).await.unwrap();
-    let (mut sink, mut stream) = connect(addr).await.unwrap();
+    let (addr, handle, credential) = start_server(19091).await.unwrap();
+    let (mut sink, mut stream) = connect(addr, &credential).await.unwrap();
 
     let payload = serde_json::json!({
         "session_id": "local-agent:webui_attach",
@@ -503,8 +535,8 @@ async fn integration_web_ui_session_attach() {
 
 #[tokio::test]
 async fn integration_detach_not_attached() {
-    let (addr, handle) = start_server(19092).await.unwrap();
-    let (mut sink, mut stream) = connect(addr).await.unwrap();
+    let (addr, handle, credential) = start_server(19092).await.unwrap();
+    let (mut sink, mut stream) = connect(addr, &credential).await.unwrap();
 
     let detach = ClientDetachPayload {
         session_name: "nonexistent".to_string(),
@@ -520,8 +552,8 @@ async fn integration_detach_not_attached() {
 
 #[tokio::test]
 async fn integration_terminal_input_not_attached() {
-    let (addr, handle) = start_server(19093).await.unwrap();
-    let (mut sink, mut stream) = connect(addr).await.unwrap();
+    let (addr, handle, credential) = start_server(19093).await.unwrap();
+    let (mut sink, mut stream) = connect(addr, &credential).await.unwrap();
 
     use base64::Engine;
     let input = base64::engine::general_purpose::STANDARD.encode(b"test");
@@ -550,24 +582,38 @@ async fn integration_terminal_input_not_attached() {
 /// The root is the one thing a file-op test must be able to reach into, and
 /// `AgentServer::new` canonicalizes it at construction — so the caller has to
 /// keep the directory alive for as long as the server runs.
+///
+/// The credential comes back with it, for the same reason [`start_server`]
+/// returns one.
 async fn start_server_with_file_root() -> anyhow::Result<(
     SocketAddr,
     nession_agent::server::ServerHandle,
     tempfile::TempDir,
+    String,
 )> {
     let root = tempfile::tempdir()?;
     let (resize, _resize_updates) = nession_agent::server::ResizeReporter::new();
+    let credentials = P2pCredentials::new();
+    mint_credential(
+        &credentials,
+        TEST_AGENT_ID,
+        TEST_CREDENTIAL,
+        browser_scope(),
+    )?;
     let server = AgentServer::new(
         "127.0.0.1:0",
-        "test-agent",
+        TEST_AGENT_ID,
         None,
         "/tmp".to_string(),
         root.path().to_string_lossy().as_ref(),
         AttachMode::Plain,
-        resize,
+        AgentServerContext {
+            resize,
+            credentials: Arc::new(credentials),
+        },
     )?;
     let (handle, addr) = server.start().await?;
-    Ok((addr, handle, root))
+    Ok((addr, handle, root, TEST_CREDENTIAL.to_string()))
 }
 
 /// Create a FIFO. Not tmux, and not spawnable through anything else on this
@@ -660,8 +706,8 @@ async fn next_frame_within(
 async fn a_blocked_file_read_no_longer_holds_the_peer_connection() {
     use std::time::Duration;
 
-    let (addr, handle, root) = start_server_with_file_root().await.unwrap();
-    let (mut sink, mut stream) = connect(addr).await.unwrap();
+    let (addr, handle, root, credential) = start_server_with_file_root().await.unwrap();
+    let (mut sink, mut stream) = connect(addr, &credential).await.unwrap();
 
     let fifo = root.path().join("blocked.fifo");
     make_fifo(&fifo).unwrap();
@@ -966,7 +1012,7 @@ async fn wait_for_delete_to_start(dir: &std::path::Path, entries: usize) -> anyh
 async fn two_peers_mutating_one_session_are_ordered() {
     use std::time::Duration;
 
-    let (addr, handle) = start_server(0).await.unwrap();
+    let (addr, handle, credential) = start_server(0).await.unwrap();
     let tmux = SessionManager::new();
     let session = TestSession::new("peers");
     let name = session.name().to_string();
@@ -974,8 +1020,8 @@ async fn two_peers_mutating_one_session_are_ordered() {
         .await
         .unwrap();
 
-    let (mut sink_a, mut stream_a) = connect(addr).await.unwrap();
-    let (mut sink_b, mut stream_b) = connect(addr).await.unwrap();
+    let (mut sink_a, mut stream_a) = connect(addr, &credential).await.unwrap();
+    let (mut sink_b, mut stream_b) = connect(addr, &credential).await.unwrap();
 
     let attach = new_message(msg_types::CLIENT_ATTACH, attach_with_long_park(&name));
     let probe = new_message(msg_types::SESSION_LIST, serde_json::json!({}));
@@ -1064,8 +1110,8 @@ async fn two_peers_mutating_one_session_are_ordered() {
 async fn a_file_mutation_is_ordered_against_every_other_file_mutation() {
     use std::time::Duration;
 
-    let (addr, handle, root) = start_server_with_file_root().await.unwrap();
-    let (mut sink, mut stream) = connect(addr).await.unwrap();
+    let (addr, handle, root, credential) = start_server_with_file_root().await.unwrap();
+    let (mut sink, mut stream) = connect(addr, &credential).await.unwrap();
 
     make_big_tree(root.path(), "big", SHORT_PARK_ENTRIES).unwrap();
     std::fs::write(root.path().join("a.txt"), b"renamed").unwrap();
@@ -1169,9 +1215,9 @@ fn write_content(text: &str) -> String {
 async fn two_peers_mutating_one_file_are_ordered() {
     use std::time::Duration;
 
-    let (addr, handle, root) = start_server_with_file_root().await.unwrap();
-    let (mut sink_a, mut stream_a) = connect(addr).await.unwrap();
-    let (mut sink_b, mut stream_b) = connect(addr).await.unwrap();
+    let (addr, handle, root, credential) = start_server_with_file_root().await.unwrap();
+    let (mut sink_a, mut stream_a) = connect(addr, &credential).await.unwrap();
+    let (mut sink_b, mut stream_b) = connect(addr, &credential).await.unwrap();
 
     let big = make_big_tree(root.path(), "big", PARK_ENTRIES).unwrap();
 
@@ -1266,8 +1312,8 @@ async fn a_peer_naming_many_sessions_gets_workers_for_a_bounded_number_of_them()
     const FLOOD: usize = 48;
     const PARK_VARS: usize = 400;
 
-    let (addr, handle) = start_server(0).await.unwrap();
-    let (mut sink, _stream) = connect(addr).await.unwrap();
+    let (addr, handle, credential) = start_server(0).await.unwrap();
+    let (mut sink, _stream) = connect(addr, &credential).await.unwrap();
     let tmux = SessionManager::new();
     let prefix = unique_session_name("flood");
 
@@ -1344,8 +1390,8 @@ async fn a_peer_naming_many_sessions_gets_workers_for_a_bounded_number_of_them()
 async fn independent_queries_overlap_execution() {
     use std::time::Duration;
 
-    let (addr, handle, root) = start_server_with_file_root().await.unwrap();
-    let (mut sink, mut stream) = connect(addr).await.unwrap();
+    let (addr, handle, root, credential) = start_server_with_file_root().await.unwrap();
+    let (mut sink, mut stream) = connect(addr, &credential).await.unwrap();
 
     for name in ["first.fifo", "second.fifo"] {
         make_fifo(&root.path().join(name)).unwrap();
@@ -1415,8 +1461,8 @@ async fn independent_queries_overlap_execution() {
 async fn an_identity_transition_waits_for_the_frames_read_before_it() {
     use std::time::Duration;
 
-    let (addr, handle, root) = start_server_with_file_root().await.unwrap();
-    let (mut sink, mut stream) = connect(addr).await.unwrap();
+    let (addr, handle, root, credential) = start_server_with_file_root().await.unwrap();
+    let (mut sink, mut stream) = connect(addr, &credential).await.unwrap();
 
     make_fifo(&root.path().join("auth.fifo")).unwrap();
     let read = new_message(
@@ -1531,7 +1577,7 @@ fn one_byte_input(session_name: &str) -> serde_json::Value {
 async fn a_sessions_frames_are_applied_in_order() {
     use std::time::Duration;
 
-    let (addr, handle) = start_server(0).await.unwrap();
+    let (addr, handle, credential) = start_server(0).await.unwrap();
     let tmux = SessionManager::new();
     let session = TestSession::new("ordered");
     let session_name = session.name().to_string();
@@ -1539,7 +1585,7 @@ async fn a_sessions_frames_are_applied_in_order() {
         .await
         .unwrap();
 
-    let (mut sink, mut stream) = connect(addr).await.unwrap();
+    let (mut sink, mut stream) = connect(addr, &credential).await.unwrap();
     let attach = new_message(msg_types::CLIENT_ATTACH, attach_parked(&session_name));
     let input = new_message(msg_types::TERMINAL_INPUT, one_byte_input(&session_name));
     for request in [
@@ -1589,7 +1635,7 @@ async fn a_sessions_frames_are_applied_in_order() {
 async fn a_slow_sessions_mutation_does_not_delay_another_sessions_frame() {
     use std::time::Duration;
 
-    let (addr, handle) = start_server(0).await.unwrap();
+    let (addr, handle, credential) = start_server(0).await.unwrap();
     let tmux = SessionManager::new();
     let slow = TestSession::new("keyslow");
     let slow_name = slow.name().to_string();
@@ -1597,7 +1643,7 @@ async fn a_slow_sessions_mutation_does_not_delay_another_sessions_frame() {
         .await
         .unwrap();
 
-    let (mut sink, mut stream) = connect(addr).await.unwrap();
+    let (mut sink, mut stream) = connect(addr, &credential).await.unwrap();
     let attach = new_message(msg_types::CLIENT_ATTACH, attach_parked(&slow_name));
     // A session that is attached to nothing: its `not_attached` is built from
     // the map alone, so it answers as soon as the reader hands it over.

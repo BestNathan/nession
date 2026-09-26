@@ -126,6 +126,129 @@ async fn linger() {
     tokio::time::sleep(Duration::from_millis(50)).await;
 }
 
+// ── Session management ──────────────────────────────────────────────────────
+
+/// A create names the agent and the session, and **no size**.
+///
+/// The size is the assertion worth having: `nession sessions create` has
+/// `--width`/`--height` flags, the Server used to hard-code 80×24 when
+/// forwarding, and the Agent ignores both — so a `width` on this payload would
+/// be a field nothing honours. Measured on the real path before this was
+/// written: a session created at `--width 111` came up at `SESSION_WIDTH`.
+#[tokio::test]
+async fn a_session_create_round_trips() {
+    let (listener, url) = bind().await.unwrap();
+
+    let server = async {
+        let mut ws = accept(&listener).await?;
+        handshake(&mut ws).await?;
+        let create = next_request(&mut ws).await?;
+        assert_eq!(create["msg_type"], "server.session.create");
+        assert_eq!(create["payload"]["agent_id"], "a1");
+        assert_eq!(create["payload"]["name"], "work");
+        assert!(
+            create["payload"].get("width").is_none(),
+            "this wire carries no size: the Agent ignores one, so sending one \
+             would be a value nothing reads"
+        );
+        answer(
+            &mut ws,
+            &create,
+            json!({ "success": true, "session_id": "a1:work" }),
+        )
+        .await?;
+        linger().await;
+        Ok::<_, Box<dyn std::error::Error + Send + Sync>>(())
+    };
+
+    let (server, ()) = tokio::join!(server, async {
+        let mut client = ClientConnection::connect(ClientConfig::new(&url, "t"))
+            .await
+            .unwrap();
+        let reply = client
+            .create_session("a1", "work")
+            .await
+            .expect("the reply arrives");
+        assert!(reply.success);
+        assert_eq!(reply.session_id.as_deref(), Some("a1:work"));
+    });
+
+    server.unwrap();
+}
+
+/// A refusal is a **reply**, not a transport error.
+///
+/// The Server answers `success: false` with its own sentence for every case it
+/// can name, and the caller is the one that decides what that means — the same
+/// reading the list and attach replies get. Mapping it into `ClientError` here
+/// would replace the Server's reason with a code.
+#[tokio::test]
+async fn a_refused_session_create_comes_back_as_a_reply() {
+    let (listener, url) = bind().await.unwrap();
+
+    let server = async {
+        let mut ws = accept(&listener).await?;
+        handshake(&mut ws).await?;
+        let create = next_request(&mut ws).await?;
+        answer(
+            &mut ws,
+            &create,
+            json!({ "success": false, "error": "Agent 'a1' is offline" }),
+        )
+        .await?;
+        linger().await;
+        Ok::<_, Box<dyn std::error::Error + Send + Sync>>(())
+    };
+
+    let (server, ()) = tokio::join!(server, async {
+        let mut client = ClientConnection::connect(ClientConfig::new(&url, "t"))
+            .await
+            .unwrap();
+        let reply = client
+            .create_session("a1", "work")
+            .await
+            .expect("a refusal is a reply, not a failure");
+        assert!(!reply.success);
+        assert_eq!(reply.error.as_deref(), Some("Agent 'a1' is offline"));
+    });
+
+    server.unwrap();
+}
+
+/// A kill carries the whole `agent:session` id the wire takes.
+#[tokio::test]
+async fn a_session_kill_round_trips() {
+    let (listener, url) = bind().await.unwrap();
+
+    let server = async {
+        let mut ws = accept(&listener).await?;
+        handshake(&mut ws).await?;
+        let kill = next_request(&mut ws).await?;
+        assert_eq!(kill["msg_type"], "server.session.kill");
+        assert_eq!(
+            kill["payload"]["session_id"], "a1:work",
+            "the wire takes the whole id, not a name to be re-assembled"
+        );
+        answer(&mut ws, &kill, json!({ "success": true })).await?;
+        linger().await;
+        Ok::<_, Box<dyn std::error::Error + Send + Sync>>(())
+    };
+
+    let (server, ()) = tokio::join!(server, async {
+        let mut client = ClientConnection::connect(ClientConfig::new(&url, "t"))
+            .await
+            .unwrap();
+        let reply = client
+            .kill_session("a1:work")
+            .await
+            .expect("the reply arrives");
+        assert!(reply.success);
+        assert_eq!(reply.error, None);
+    });
+
+    server.unwrap();
+}
+
 // ── Correlation ─────────────────────────────────────────────────────────────
 
 /// A push arriving before the reply must be **skipped**, not fail the call.

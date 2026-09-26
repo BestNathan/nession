@@ -26,6 +26,7 @@
 
 use crate::config::AttachMode;
 use crate::fs::ops::FileOps;
+use crate::p2p_credentials::{ConnectionAuthority, P2pCredentials, WireScope};
 use crate::protocol::p2p_routes;
 use crate::server::execution::ExecutionPolicy::{Inline, Key, Ordered, Query};
 use crate::server::execution::{
@@ -44,9 +45,12 @@ use nession_runtime::lane::{KeyedLane, Work};
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use tokio::net::TcpListener;
 use tokio::sync::{mpsc, Mutex};
+use tokio_tungstenite::tungstenite::handshake::server::{
+    Request as UpgradeRequest, Response as UpgradeResponse,
+};
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 use tokio_tungstenite::WebSocketStream;
 use tracing::{debug, error, info, warn};
@@ -501,6 +505,23 @@ fn make_ok(request_id: &str, message: &str) -> Message<OkPayload> {
 
 /// WebSocket server that accepts P2P client connections and routes
 /// terminal I/O to/from per-client PTY sessions.
+/// What the runtime composition lends this server, as opposed to what it
+/// configures it with.
+///
+/// Grouped because they travel together and for no other reason: `runtime.rs`
+/// builds each of them exactly once and hands the *same* values to the
+/// `ServerClient`, because a second instance of either is a second, emptier
+/// one — a resize lane nothing reads, a credential store nothing writes grants
+/// into. Passing them separately was one parameter past the lint's limit and
+/// eight positional arguments at every call site, which is the smell the lint
+/// exists to report rather than a rule to get around.
+pub struct AgentServerContext {
+    /// The lane resize events are published to for the central server (relay).
+    pub resize: ResizeReporter,
+    /// The credentials this agent will honour on its P2P listener (#1013).
+    pub credentials: Arc<P2pCredentials>,
+}
+
 pub struct AgentServer {
     tmux_manager: SessionManager,
     file_ops: Arc<FileOps>,
@@ -524,6 +545,14 @@ pub struct AgentServer {
     /// for why a level-valued signal gets a coalescing lane rather than a
     /// queue.
     resize: ResizeReporter,
+    /// What this agent will honour on its P2P listener (#1013).
+    ///
+    /// **The same store the Server connection writes grants into**, not a copy:
+    /// the connection is where a grant arrives and this is where it is checked,
+    /// and two stores would mean a credential that is issued and never honoured
+    /// with nothing to show for it. `runtime.rs` constructs it once for that
+    /// reason.
+    credentials: Arc<P2pCredentials>,
 }
 
 /// Apply env snapshots to a tmux session via `set-environment`.
@@ -649,6 +678,32 @@ struct Connection {
     attach_mode: AttachMode,
     resize: ResizeReporter,
     addr: SocketAddr,
+    /// What this connection proved about itself at the upgrade (#1013).
+    ///
+    /// Immutable for the connection's life, and the thing every later
+    /// authorization question is answered from — the shape the Server already
+    /// uses for `registered_agent_id`: a per-connection fact established once
+    /// and consulted by every gate, rather than re-derived per handler.
+    authority: ConnectionAuthority,
+}
+
+/// The refusal an uncredentialed peer gets, and **the only one they get**.
+///
+/// One status, one body, whatever the reason — no credential, an unknown one, an
+/// expired one, one issued for a different agent. They are separated in
+/// `P2pCredentials::Refusal` for the log and collapsed here, because a body that
+/// distinguished them would tell a caller which of its guesses was closest. The
+/// wording says nothing about credentials at all; a peer that reached the agent
+/// port by accident gets no vocabulary from this to aim at.
+fn unauthorized_upgrade() -> tokio_tungstenite::tungstenite::handshake::server::ErrorResponse {
+    use tokio_tungstenite::tungstenite::http::{header, Response, StatusCode};
+    let mut refusal = Response::new(Some("connection not authorized".to_string()));
+    *refusal.status_mut() = StatusCode::UNAUTHORIZED;
+    refusal.headers_mut().insert(
+        header::CONTENT_TYPE,
+        header::HeaderValue::from_static("text/plain"),
+    );
+    refusal
 }
 
 /// One text frame, parsed as far as routing needs, and the connection it came
@@ -744,7 +799,43 @@ impl Frame {
                 debug!("control.heartbeat received");
                 Routed::Silent
             }
-            _ => Routed::Operation,
+            // The scope gate (#1013), and this is the only place it can go.
+            //
+            // It runs on the reader task, before any lane handoff and before
+            // `p2p_policy` is consulted, so the decision is made once, per frame,
+            // in the order the frames arrived — which is what makes "this
+            // credential was valid" stop implying "every later operation on this
+            // connection is allowed". Putting it in `serve` would run it on a
+            // lane task, concurrently with sibling frames and after the policy
+            // had already picked a lane for a frame that turns out to be
+            // forbidden; putting it in the arms is the ~30 scattered inline
+            // checks the Server has and that #879 died of.
+            //
+            // A refusal **answers and keeps the connection**: a caller that
+            // strayed outside its scope has made an ordinary mistake, and
+            // tearing the socket down would turn it into a reattach storm. The
+            // reply names the wire and says nothing about the credential — the
+            // reason goes to the log, where the operator can see it and a
+            // guessing peer cannot.
+            _ => match p2p_scope(&self.msg_type, &self.payload) {
+                Some(required) if !self.connection.authority.covers(&required) => {
+                    warn!(
+                        wire = %self.msg_type,
+                        credential = %self.connection.authority.credential_id,
+                        session = %self.connection.authority.session_id,
+                        "refusing a peer-to-peer wire outside the credential's scope"
+                    );
+                    Routed::Answer(
+                        serde_json::to_string(&make_error(
+                            &self.id,
+                            "forbidden",
+                            &format!("not permitted for this credential: {}", self.msg_type),
+                        ))
+                        .unwrap_or_default(),
+                    )
+                }
+                _ => Routed::Operation,
+            },
         }
     }
 
@@ -847,6 +938,29 @@ fn session_named(payload_value: &serde_json::Value) -> ResourceKey {
     )
 }
 
+/// The terminal scope a frame needs: the session it names as `session_name`.
+///
+/// The scope column's counterpart to [`session_named`], and deliberately not
+/// derived from it. They read the same field and answer different questions —
+/// which lane orders this frame, and which session's PTY it may touch — and the
+/// two coincide here only by current convention. Deriving one from the other
+/// would make the day they diverge (`client.session.attach` already differs: it
+/// resolves a session rather than binding to it) a silent mis-scoping.
+///
+/// A frame that names no session yields `Session("")`, which no credential
+/// covers: [`ConnectionAuthority::covers`] refuses an unnamed session rather
+/// than treating it as "any". Failing closed is the only reading that cannot be
+/// turned into a way around the check.
+fn terminal_scope(payload_value: &serde_json::Value) -> WireScope {
+    WireScope::Session(
+        payload_value
+            .get("session_name")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string(),
+    )
+}
+
 /// The session a frame names as `name` — `session.create` and `session.kill`,
 /// whose payloads were written around the session rather than around a client.
 fn session_by(payload_value: &serde_json::Value) -> ResourceKey {
@@ -887,7 +1001,7 @@ fn session_by_id(payload_value: &serde_json::Value) -> ResourceKey {
 // connection's reader hands this unit to a lane. The key helpers above are what
 // the `Key` policies are written in terms of.
 p2p_routes! { ctx, msg_type, payload_value;
-            "agent.session.list" => "agent.session.list" => 1 => Query => { match ctx.tmux.list_sessions().await {
+            "agent.session.list" => "agent.session.list" => 1 => WireScope::Sessions => Query => { match ctx.tmux.list_sessions().await {
                 Ok(sessions_list) => {
                     let payload = SessionListResponse {
                         sessions: sessions_list,
@@ -900,7 +1014,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                 }
                 Err(e) => ctx.err("list_failed", &e.to_string()),
             } }
-            "agent.session.create" => "agent.session.create" => 1 => Key(session_by(payload_value)) => {
+            "agent.session.create" => "agent.session.create" => 1 => WireScope::Sessions => Key(session_by(payload_value)) => {
                 let payload: SessionCreatePayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -946,7 +1060,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     Err(e) => ctx.err("create_failed", &e.to_string()),
                 }
             }
-            "agent.session.kill" => "agent.session.kill" => 1 => Key(session_by(payload_value)) => {
+            "agent.session.kill" => "agent.session.kill" => 1 => WireScope::Sessions => Key(session_by(payload_value)) => {
                 let payload: SessionKillPayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -960,7 +1074,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     Err(e) => ctx.err("kill_failed", &e.to_string()),
                 }
             }
-            "agent.session.capture-preview" => "agent.session.capture-preview" => 1 => Query => {
+            "agent.session.capture-preview" => "agent.session.capture-preview" => 1 => terminal_scope(payload_value) => Query => {
                 info!(
                     "agent: received session.capture_preview request id={}",
                     ctx.id
@@ -1021,7 +1135,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     }
                 }
             }
-            "agent.attach" => "agent.attach" => 1 => Key(session_named(payload_value)) => {
+            "agent.attach" => "agent.attach" => 1 => terminal_scope(payload_value) => Key(session_named(payload_value)) => {
                 let payload: ClientAttachPayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -1345,7 +1459,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     }
                 }
             }
-            "agent.detach" => "agent.detach" => 1 => Key(session_named(payload_value)) => {
+            "agent.detach" => "agent.detach" => 1 => terminal_scope(payload_value) => Key(session_named(payload_value)) => {
                 let payload: ClientDetachPayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -1392,7 +1506,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                 serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
                     .unwrap_or_default()
             }
-            "agent.terminal.input" => "agent.terminal.input" => 1 => Key(session_named(payload_value)) => {
+            "agent.terminal.input" => "agent.terminal.input" => 1 => terminal_scope(payload_value) => Key(session_named(payload_value)) => {
                 let payload: TerminalInputPayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -1420,7 +1534,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     ),
                 }
             }
-            "agent.terminal.resize" => "agent.terminal.resize" => 1 => Key(session_named(payload_value)) => {
+            "agent.terminal.resize" => "agent.terminal.resize" => 1 => terminal_scope(payload_value) => Key(session_named(payload_value)) => {
                 let payload: TerminalResizePayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -1452,7 +1566,7 @@ p2p_routes! { ctx, msg_type, payload_value;
             }
 
             // --- Web UI compatibility handlers ---
-            "client.auth" => "client.auth" => 1 => Ordered => {
+            "client.auth" => "client.auth" => 1 => WireScope::Connection => Ordered => {
                 let payload: ClientAuthPayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => {
@@ -1490,7 +1604,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                 };
                 serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp)).unwrap_or_default()
             }
-            "client.sessions.list" => "client.sessions.list" => 1 => Query => { match ctx.tmux.list_sessions().await {
+            "client.sessions.list" => "client.sessions.list" => 1 => WireScope::Sessions => Query => { match ctx.tmux.list_sessions().await {
                 Ok(sessions_list) => {
                     let sessions: Vec<WebSessionInfo> = sessions_list
                         .into_iter()
@@ -1526,7 +1640,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                 }
                 Err(e) => ctx.err("list_failed", &e.to_string()),
             } }
-            "client.session.attach" => "client.session.attach" => 1 => Inline => {
+            "client.session.attach" => "client.session.attach" => 1 => WireScope::Sessions => Inline => {
                 let payload: WebSessionAttachPayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -1541,7 +1655,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                 serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
                     .unwrap_or_default()
             }
-            "client.session.create" => "client.session.create" => 1 => Key(session_by(payload_value)) => {
+            "client.session.create" => "client.session.create" => 1 => WireScope::Sessions => Key(session_by(payload_value)) => {
                 let payload: WebSessionCreatePayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => {
@@ -1586,7 +1700,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     }
                 }
             }
-            "client.session.kill" => "client.session.kill" => 1 => Key(session_by_id(payload_value)) => {
+            "client.session.kill" => "client.session.kill" => 1 => WireScope::Sessions => Key(session_by_id(payload_value)) => {
                 let payload: WebSessionKillPayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => {
@@ -1620,7 +1734,7 @@ p2p_routes! { ctx, msg_type, payload_value;
             }
 
             // --- File operations ---
-            "agent.file.list" => "agent.file.list" => 1 => Query => {
+            "agent.file.list" => "agent.file.list" => 1 => WireScope::Files => Query => {
                 let payload: FileListPayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -1634,7 +1748,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     Err(e) => ctx.err("list_failed", &format_error_chain(&e)),
                 }
             }
-            "agent.file.read" => "agent.file.read" => 1 => Query => {
+            "agent.file.read" => "agent.file.read" => 1 => WireScope::Files => Query => {
                 let payload: FileReadPayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -1660,7 +1774,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     }
                 }
             }
-            "agent.file.write" => "agent.file.write" => 1 => Key(ResourceKey::Filesystem) => {
+            "agent.file.write" => "agent.file.write" => 1 => WireScope::Files => Key(ResourceKey::Filesystem) => {
                 let payload: FileWritePayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -1675,7 +1789,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     Err(e) => ctx.err("write_error", &e.to_string()),
                 }
             }
-            "agent.file.delete" => "agent.file.delete" => 1 => Key(ResourceKey::Filesystem) => {
+            "agent.file.delete" => "agent.file.delete" => 1 => WireScope::Files => Key(ResourceKey::Filesystem) => {
                 let payload: FileDeletePayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -1693,7 +1807,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     Err(e) => ctx.err("delete_failed", &format_error_chain(&e)),
                 }
             }
-            "agent.file.create-dir" => "agent.file.create-dir" => 1 => Key(ResourceKey::Filesystem) => {
+            "agent.file.create-dir" => "agent.file.create-dir" => 1 => WireScope::Files => Key(ResourceKey::Filesystem) => {
                 let payload: FileCreateDirPayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -1711,7 +1825,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     Err(e) => ctx.err("create_dir_failed", &format_error_chain(&e)),
                 }
             }
-            "agent.file.rename" => "agent.file.rename" => 1 => Key(ResourceKey::Filesystem) => {
+            "agent.file.rename" => "agent.file.rename" => 1 => WireScope::Files => Key(ResourceKey::Filesystem) => {
                 let payload: FileRenamePayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -1731,7 +1845,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     Err(e) => ctx.err("rename_failed", &e.to_string()),
                 }
             }
-            "agent.file.cwd" => "agent.file.cwd" => 1 => Query => {
+            "agent.file.cwd" => "agent.file.cwd" => 1 => WireScope::Files => Query => {
                 let payload: FileCwdPayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -1760,8 +1874,8 @@ impl AgentServer {
     /// `default_working_dir` is the working directory for new tmux sessions.
     /// `file_root` is the sandbox root for file operations.
     /// `attach_mode` controls whether to use plain PTY or control-mode tmux attach.
-    /// `resize` is the lane `%window-resize` events are published to for the
-    /// central server (relay).
+    /// `context` carries the values the runtime builds once and shares; see
+    /// [`AgentServerContext`] for why they arrive together.
     pub fn new(
         listen_address: impl Into<String>,
         agent_id: impl Into<String>,
@@ -1772,7 +1886,7 @@ impl AgentServer {
         default_working_dir: String,
         file_root: &str,
         attach_mode: AttachMode,
-        resize: ResizeReporter,
+        context: AgentServerContext,
     ) -> Result<Self> {
         let tls_acceptor = match tls {
             Some((certs, key)) => {
@@ -1802,7 +1916,8 @@ impl AgentServer {
             agent_id: agent_id.into(),
             default_working_dir,
             attach_mode,
-            resize,
+            resize: context.resize,
+            credentials: context.credentials,
         })
     }
 
@@ -1837,6 +1952,7 @@ impl AgentServer {
         let agent_id = self.agent_id.clone();
         let attach_mode = self.attach_mode.clone();
         let resize = self.resize.clone();
+        let credentials = Arc::clone(&self.credentials);
 
         tokio::spawn(async move {
             let shutdown_rx = Mutex::new(shutdown_rx);
@@ -1860,11 +1976,12 @@ impl AgentServer {
                                 let aid = agent_id.clone();
                                 let am = attach_mode.clone();
                                 let rtx = resize.clone();
+                                let creds = Arc::clone(&credentials);
                                 tokio::spawn(async move {
                                     if let Err(e) =
                                         Self::handle_connection(
                                             stream, addr, tmux, tls, wd, fops, lanes, &la, &aid,
-                                            am, rtx,
+                                            am, rtx, creds,
                                         )
                                         .await
                                     {
@@ -1907,6 +2024,7 @@ impl AgentServer {
         agent_id: &str,
         attach_mode: AttachMode,
         resize: ResizeReporter,
+        credentials: Arc<P2pCredentials>,
     ) -> Result<()> {
         // Box the underlying stream so that TLS and plain connections
         // share a single WebSocket stream type.
@@ -1921,12 +2039,71 @@ impl AgentServer {
             TcpOrTls::Plain(stream)
         };
 
-        let ws = tokio_tungstenite::accept_async(io)
-            .await
-            .context("WebSocket upgrade failed")?;
+        // The half of #1013 that asks *is there a credential, and is it this
+        // agent's*, decided at the upgrade rather than after it.
+        //
+        // `accept_hdr_async` because its callback can **refuse**: returning
+        // `Err` rejects the upgrade, so a caller with no credential never has a
+        // WebSocket, never has a connection, and cannot leave one in a
+        // half-authenticated state — the property is structural rather than
+        // something every later handler has to keep honouring.
+        //
+        // The callback is **synchronous** (verified in the vendored
+        // tungstenite: `Callback::on_request` is an `FnOnce`, not an async fn),
+        // which is why the credential store is a `std::sync::RwLock` and why the
+        // authority has to come back out through a cell the closure wrote to.
+        // `OnceLock` rather than a `Mutex`: it is written once, on the path that
+        // returns `Ok`, and read once below.
+        let authority: Arc<OnceLock<ConnectionAuthority>> = Arc::new(OnceLock::new());
+        let captured = Arc::clone(&authority);
+        let store = Arc::clone(&credentials);
+        let ws = tokio_tungstenite::accept_hdr_async(
+            io,
+            move |request: &UpgradeRequest, response: UpgradeResponse| {
+                let presented = request
+                    .uri()
+                    .query()
+                    .and_then(nession_protocol::contracts::p2p::credential_from_query);
+
+                match presented.as_deref().map(|token| store.authorize(token)) {
+                    Some(Ok(found)) => {
+                        let _ = captured.set(found);
+                        Ok(response)
+                    }
+                    refusal => {
+                        // One line, one shape, whatever the reason. `refusal` is
+                        // `None` for "nothing presented" and `Some(Err(_))` for
+                        // unknown, expired and wrong-agent alike, and they are
+                        // deliberately indistinguishable to the peer: a message
+                        // that said "expired" would tell a caller which of its
+                        // guesses was closest. The reason is logged and not sent.
+                        warn!(
+                            %addr,
+                            reason = ?refusal,
+                            "refusing a peer-to-peer connection: no valid credential"
+                        );
+                        Err(unauthorized_upgrade())
+                    }
+                }
+            },
+        )
+        .await
+        .context("WebSocket upgrade failed")?;
         let (ws_sink, ws_stream) = ws.split();
 
-        info!("WebSocket connection from {}", addr);
+        // The callback sets this on every path that returns `Ok`. A `None` here
+        // would mean a connection that passed the upgrade with no record of what
+        // it may do, so it ends rather than running on an assumed scope — there
+        // is no safe default, and "assume it is allowed" is exactly the
+        // anonymous fallback this design forbids.
+        let Some(authority) = authority.get().cloned() else {
+            anyhow::bail!("upgrade completed without a credential authority");
+        };
+
+        info!(
+            "WebSocket connection from {} (credential {}, session {})",
+            addr, authority.credential_id, authority.session_id
+        );
 
         // The outbound path: a bounded queue with a policy per lane, and one
         // writer task that owns the socket (`#961-E`). Every lane's task — and
@@ -1957,6 +2134,7 @@ impl AgentServer {
             attach_mode,
             resize,
             addr,
+            authority,
         });
 
         let result = Self::run_message_loop(ws_stream, connection, mutations).await;
@@ -2203,15 +2381,72 @@ mod tests {
     use crate::test_support::TestSession;
     use base64::Engine;
     use futures_util::SinkExt;
+    use nession_protocol::contracts::p2p::agent_url_with_credential;
+    use nession_protocol::contracts::p2p::v1::{CredentialScope, P2pGrantPayload};
     use std::time::Duration;
     use tokio_tungstenite::connect_async;
     use tokio_tungstenite::tungstenite::Message as WsMessage;
 
     /// Start a test server (OS picks a free port). Returns the real bound
     /// address and a shutdown handle.
+    /// The credential every dial in this module presents.
+    ///
+    /// A fixed value, not a fresh UUID: each test's server has its own store, so
+    /// a per-test token would be unique in a place where nothing else is shared
+    /// — and the alternative is threading a returned token through thirty-odd
+    /// call sites, which is a large mechanical diff for no property.
+    const TEST_CREDENTIAL: &str = "test-credential";
+
+    /// A valid credential that is deliberately narrow: terminal for one session,
+    /// no session management, no file sandbox. Minted by the same helper, so a
+    /// test can tell "the credential was refused" apart from "the credential was
+    /// not valid" — the two are the same 401 and would be one test otherwise.
+    const NARROW_CREDENTIAL: &str = "narrow-credential";
+
+    /// Grant a credential into a test server's store (#1013).
+    ///
+    /// Goes through [`P2pCredentials::grant`], the method the Server's
+    /// `agent.p2p.grant` calls, so the handshake and the scope gate these tests
+    /// exercise are the production ones — only *delivery* differs. There is no
+    /// `AgentServer` helper for this because the only one possible would sit
+    /// behind a cargo feature, and `scripts/filtered-test.sh` runs
+    /// `cargo test --workspace` with no features at all: a minter that does not
+    /// exist in the gate's build tests nothing on the day the gate runs.
+    fn grant_credential(credentials: &P2pCredentials, credential: &str, scope: CredentialScope) {
+        credentials
+            .grant(
+                "test-agent",
+                &P2pGrantPayload {
+                    request_id: "test-grant".to_string(),
+                    credential: credential.to_string(),
+                    agent_id: "test-agent".to_string(),
+                    session_id: "test-agent:test".to_string(),
+                    scope,
+                    expires_at: (chrono::Utc::now() + chrono::Duration::seconds(300)).to_rfc3339(),
+                },
+            )
+            .expect("the agent accepts a credential it minted for itself");
+    }
+
     async fn start_test_server_on(_port: u16) -> (SocketAddr, ServerHandle) {
         let tmp = tempfile::tempdir().expect("tempdir");
         let (resize, _resize_updates) = ResizeReporter::new();
+        // Granted **before** `start`, which consumes the server: the store is an
+        // `Arc` shared with the running listener, so a credential granted here
+        // is the one the listener checks.
+        let credentials = Arc::new(P2pCredentials::new());
+        grant_credential(
+            &credentials,
+            TEST_CREDENTIAL,
+            CredentialScope::for_attach("test"),
+        );
+        // And one that deliberately lacks the two management scopes, so the
+        // gate can be tested against a credential that is valid but narrow.
+        grant_credential(
+            &credentials,
+            NARROW_CREDENTIAL,
+            CredentialScope::for_relay("test"),
+        );
         let server = AgentServer::new(
             "127.0.0.1:0",
             "test-agent",
@@ -2219,7 +2454,10 @@ mod tests {
             "/tmp".to_string(),
             tmp.path().to_string_lossy().as_ref(),
             AttachMode::Plain,
-            resize,
+            AgentServerContext {
+                resize,
+                credentials,
+            },
         )
         .expect("server creation should succeed");
         // Leak the TempDir so the sandbox root persists for the server lifetime.
@@ -2244,7 +2482,12 @@ mod tests {
             >,
         >,
     ) {
-        let url = format!("ws://{addr}");
+        // The credential is a constant rather than something each caller
+        // threads in, because there are thirty-odd dial sites in this module and
+        // every one of them mints into its own server. What has to stay real is
+        // the *check*, and it does: the upgrade runs the production handshake
+        // against a store filled through the production `grant`.
+        let url = agent_url_with_credential(&format!("ws://{addr}"), TEST_CREDENTIAL);
         let (ws_stream, _response) = connect_async(&url).await.expect("connect should succeed");
         ws_stream.split()
     }
@@ -2303,7 +2546,10 @@ mod tests {
             "/tmp".to_string(),
             tmp.path().to_string_lossy().as_ref(),
             AttachMode::Plain,
-            resize,
+            AgentServerContext {
+                resize,
+                credentials: Arc::new(P2pCredentials::new()),
+            },
         )
         .unwrap();
         let (handle, _addr) = server.start().await.unwrap();
@@ -3733,5 +3979,188 @@ mod tests {
             "the wire spelling is not an id — `ProtocolId` refuses underscores, \
              so the hyphenated form is the only one that can exist"
         );
+    }
+
+    // ── The P2P credential (#1013) ──────────────────────────────────────────
+    //
+    // Two layers, one test each, because they answer different questions and a
+    // suite that tested only one would pass with the other absent: the
+    // **upgrade** asks whether there is a credential at all, and the **gate in
+    // `Frame::route`** asks whether this credential covers this wire.
+
+    /// A dial with no credential is refused at the upgrade.
+    ///
+    /// Refused *before* a WebSocket exists, which is the property worth having:
+    /// there is no connection to leave in a half-authenticated state, and no
+    /// later handler that has to remember to check. `connect_async` failing here
+    /// is the whole assertion — if the upgrade had succeeded, this call would
+    /// have returned a socket.
+    #[tokio::test]
+    async fn a_connection_with_no_credential_is_refused() {
+        let (addr, handle) = start_test_server_on(0).await;
+
+        let refused = connect_async(format!("ws://{addr}")).await;
+
+        assert!(
+            refused.is_err(),
+            "a peer that presented nothing must not get a WebSocket"
+        );
+
+        handle.shutdown().await.ok();
+    }
+
+    /// A credential nobody issued is refused, and refused the same way.
+    ///
+    /// The second half is the one worth stating: the peer is told nothing about
+    /// *why*, so "unknown", "expired" and "issued for another agent" are
+    /// indistinguishable from out here. A message that distinguished them would
+    /// tell a caller which of its guesses was closest.
+    #[tokio::test]
+    async fn a_credential_nobody_issued_is_refused() {
+        let (addr, handle) = start_test_server_on(0).await;
+
+        let url = agent_url_with_credential(&format!("ws://{addr}"), "a-guess");
+        let refused = connect_async(&url).await;
+
+        assert!(refused.is_err(), "an invented credential must not connect");
+
+        handle.shutdown().await.ok();
+    }
+
+    /// The credential the server minted is accepted — the other direction.
+    ///
+    /// Without this, both tests above pass for a listener that refuses
+    /// everything, which is a different bug with the same green.
+    #[tokio::test]
+    async fn the_minted_credential_is_accepted() {
+        let (addr, handle) = start_test_server_on(0).await;
+
+        // `connect_client` presents `TEST_CREDENTIAL`, which
+        // `start_test_server_on` minted; reaching the next line is the assertion.
+        let (mut sink, mut stream) = connect_client(addr).await;
+        let req: Message<serde_json::Value> = Message {
+            msg_type: msg_types::CONTROL_PING.to_string(),
+            id: "cred-ok".to_string(),
+            timestamp: now_timestamp(),
+            payload: serde_json::json!({}),
+        };
+        let resp: Message<serde_json::Value> = send_and_receive(&mut sink, &mut stream, &req).await;
+
+        assert_eq!(resp.msg_type, msg_types::CONTROL_PONG);
+
+        handle.shutdown().await.ok();
+    }
+
+    /// A scope refusal answers the frame and **keeps the connection**.
+    ///
+    /// The wire is refused, the reason is not the peer's, and the socket still
+    /// works for the next frame — which is what separates a scope check from a
+    /// hangup. A caller that strayed outside its credential has made an ordinary
+    /// mistake, and closing the connection would turn it into a reattach storm
+    /// that reports nothing about the cause.
+    #[tokio::test]
+    async fn a_frame_outside_the_scope_is_refused_and_the_connection_survives() {
+        let (addr, handle) = start_test_server_on(0).await;
+
+        // A relay credential: terminal for one session, and neither session
+        // management nor the file sandbox. Presented directly rather than
+        // through `connect_client`, which mints the broad one — the point here
+        // is the narrow credential.
+        let url = agent_url_with_credential(&format!("ws://{addr}"), NARROW_CREDENTIAL);
+        let (ws, _response) = connect_async(&url)
+            .await
+            .expect("a granted credential connects");
+        let (mut sink, mut stream) = ws.split();
+
+        // `agent.file.list` needs the file sandbox, which this credential does
+        // not have — and which is a real boundary rather than a precaution,
+        // because the relay leg never touches a file.
+        let req: Message<serde_json::Value> = Message {
+            msg_type: msg_types::FILE_LIST.to_string(),
+            id: "scope-1".to_string(),
+            timestamp: now_timestamp(),
+            payload: serde_json::json!({ "path": "." }),
+        };
+        let resp: Message<ErrorPayload> = send_and_receive(&mut sink, &mut stream, &req).await;
+
+        assert_eq!(resp.msg_type, msg_types::ERROR);
+        assert_eq!(resp.id, "scope-1");
+        assert_eq!(resp.payload.code, "forbidden");
+        assert!(
+            !resp.payload.message.contains("token"),
+            "the reply must not hand the peer vocabulary about credentials: {}",
+            resp.payload.message
+        );
+
+        // Still usable.
+        let ping: Message<serde_json::Value> = Message {
+            msg_type: msg_types::CONTROL_PING.to_string(),
+            id: "scope-2".to_string(),
+            timestamp: now_timestamp(),
+            payload: serde_json::json!({}),
+        };
+        let pong: Message<serde_json::Value> =
+            send_and_receive(&mut sink, &mut stream, &ping).await;
+        assert_eq!(
+            pong.msg_type,
+            msg_types::CONTROL_PONG,
+            "a scope refusal must leave the connection usable"
+        );
+
+        handle.shutdown().await.ok();
+    }
+
+    /// A wire this socket does not carry is still reported as unknown, not
+    /// forbidden.
+    ///
+    /// The two answers mean different things and the gate has to keep them
+    /// apart: `p2p_scope` returns `None` for a name no arm carries, and routing
+    /// that as a permission failure would be a false statement about why the
+    /// call failed — it would send a caller to look at its credential when the
+    /// problem is the wire name.
+    #[tokio::test]
+    async fn an_unknown_wire_is_not_reported_as_a_scope_refusal() {
+        let (addr, handle) = start_test_server_on(0).await;
+        let (mut sink, mut stream) = connect_client(addr).await;
+
+        let req: Message<serde_json::Value> = Message {
+            msg_type: "agent.nothing.here".to_string(),
+            id: "unknown-1".to_string(),
+            timestamp: now_timestamp(),
+            payload: serde_json::json!({}),
+        };
+        let resp: Message<ErrorPayload> = send_and_receive(&mut sink, &mut stream, &req).await;
+
+        assert_eq!(resp.payload.code, "unknown_message_type");
+
+        handle.shutdown().await.ok();
+    }
+
+    /// A credential for one agent is refused by another.
+    ///
+    /// The credential is well formed, unexpired, and minted through the same
+    /// production `grant` — it simply names someone else. Two agents, two
+    /// stores, and the second has never heard of this token.
+    #[tokio::test]
+    async fn one_agents_credential_is_refused_by_another() {
+        let (addr_a, handle_a) = start_test_server_on(0).await;
+        let (addr_b, handle_b) = start_test_server_on(0).await;
+
+        // Both servers mint `TEST_CREDENTIAL` for their own `test-agent` id, so
+        // the tokens are equal strings in two stores — which is exactly why the
+        // refusal has to come from the *store*, not from the string. Presenting
+        // b's address with the credential a minted must fail.
+        let url =
+            agent_url_with_credential(&format!("ws://{addr_b}"), "a-credential-b-never-issued");
+        assert!(
+            connect_async(&url).await.is_err(),
+            "an agent must refuse a credential it never issued"
+        );
+        // And a's own credential still works, so the refusal above is about the
+        // credential rather than about the server.
+        let _ok = connect_client(addr_a).await;
+
+        handle_a.shutdown().await.ok();
+        handle_b.shutdown().await.ok();
     }
 }

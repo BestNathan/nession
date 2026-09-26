@@ -81,6 +81,63 @@ fn is_authority_only(url: &str) -> bool {
     !rest.contains('/')
 }
 
+/// Read a credential back out of a URL query string.
+///
+/// The inverse of [`agent_url_with_credential`], and in the same module so the
+/// two cannot drift: a change to what the writer escapes that the reader does
+/// not follow is a credential that arrives subtly wrong, which the far end can
+/// only report as "unknown token".
+///
+/// **`+` is a literal plus, not a space.** The usual form-urlencoded reading is
+/// the other way round, and taking it would be wrong here for a reason that is
+/// checkable rather than stylistic: [`urlencode`] percent-encodes `+`, and so
+/// does the Web's `encodeURIComponent`, so no producer of this parameter ever
+/// emits a bare `+` meaning a space. Decoding one as a space would therefore
+/// never help a correct producer and would silently corrupt a credential that
+/// legitimately contained one — and a credential is opaque here, so there is no
+/// alphabet to appeal to.
+///
+/// Percent-decoding is byte-wise and lossy on invalid UTF-8: a malformed escape
+/// yields `None` rather than a replacement character, because a credential that
+/// decoded to something is a credential nobody issued and the refusal for it
+/// should be "unknown", not "a near miss".
+pub fn credential_from_query(query: &str) -> Option<String> {
+    for pair in query.split('&') {
+        // A parameter with no `=` is skipped rather than ending the search: the
+        // credential is not required to be the first one, and a query this
+        // function cannot read is a query it should keep looking in.
+        let Some((key, value)) = pair.split_once('=') else {
+            continue;
+        };
+        if key == CREDENTIAL_PARAM {
+            return percent_decode(value);
+        }
+    }
+    None
+}
+
+/// Decode `%XX` escapes. `+` is left alone; see [`credential_from_query`].
+fn percent_decode(value: &str) -> Option<String> {
+    let bytes = value.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    // `get` rather than indexing throughout: an escape at the very end of the
+    // input is the ordinary malformed case, and it should be `None` rather than
+    // a panic inside a function whose whole job is to be suspicious of its
+    // input.
+    while let Some(byte) = bytes.get(index).copied() {
+        if byte == b'%' {
+            let hex = bytes.get(index + 1..index + 3)?;
+            decoded.push(u8::from_str_radix(std::str::from_utf8(hex).ok()?, 16).ok()?);
+            index += 3;
+        } else {
+            decoded.push(byte);
+            index += 1;
+        }
+    }
+    String::from_utf8(decoded).ok()
+}
+
 /// Percent-encode the characters a credential can contain and a URL cannot.
 fn urlencode(value: &str) -> String {
     let mut encoded = String::with_capacity(value.len());

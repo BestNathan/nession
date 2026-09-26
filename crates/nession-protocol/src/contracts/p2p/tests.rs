@@ -1,6 +1,77 @@
 use super::agent_url_with_credential;
+use super::credential_from_query;
 use super::v1::*;
 use serde_json::json;
+
+/// Whatever the writer puts on a URL, the reader gets back.
+///
+/// The property that makes the two functions one convention rather than two:
+/// each is tested against its own literal elsewhere, and a literal on both sides
+/// is a boundary nothing crosses. This crosses it — the encoder's output is the
+/// decoder's input, so an escape the writer adds and the reader does not
+/// understand fails here rather than in a connection refused as "unknown token".
+/// The empty credential is **not** in the list, and that is the design rather
+/// than an omission: an empty credential is the absence of one, the writer
+/// conveys it by adding no parameter, and `an_url_with_no_credential_reads_back_as_none`
+/// is the test that pins that half. Including it here would assert that the
+/// writer can express a value it exists to keep unexpressible.
+#[test]
+fn a_credential_survives_the_round_trip() {
+    for credential in ["abc", "a+b/c", "with space", "unicode-é", "%2B"] {
+        let url = agent_url_with_credential("ws://agent/ws", credential);
+        let query = url.split_once('?').map(|(_, q)| q).unwrap_or_default();
+
+        assert_eq!(
+            credential_from_query(query).as_deref(),
+            Some(credential),
+            "round trip broke for {credential:?} (url was {url:?})"
+        );
+    }
+}
+
+/// An empty credential is not read back as one.
+///
+/// The writer omits the parameter entirely for an empty credential, so the
+/// reader must not invent one — "no credential" and "the empty credential" are
+/// the two cases [`agent_url_with_credential`] exists to keep apart, and this
+/// is the half that would collapse them again.
+#[test]
+fn an_url_with_no_credential_reads_back_as_none() {
+    let url = agent_url_with_credential("ws://agent/ws", "");
+
+    assert_eq!(credential_from_query(""), None);
+    assert_eq!(credential_from_query("x=1"), None);
+    assert_eq!(credential_from_query("token"), None);
+    assert_eq!(
+        credential_from_query(url.split_once('?').map(|(_, q)| q).unwrap_or_default()),
+        None
+    );
+}
+
+/// The credential does not have to be the first parameter.
+///
+/// The writer only ever appends, but the URL it appends to can already carry a
+/// query — that is the `&` case — and a reader that stopped at the first
+/// parameter would refuse every such connection as uncredentialed.
+#[test]
+fn a_credential_after_another_parameter_is_found() {
+    assert_eq!(
+        credential_from_query("x=1&token=abc&y=2").as_deref(),
+        Some("abc")
+    );
+}
+
+/// A plus is a plus, and a bad escape is not a credential.
+#[test]
+fn the_reader_does_not_invent_characters() {
+    // The form-urlencoded reading of `+` is a space. Our writer never emits a
+    // bare `+` for one — it percent-encodes it — so taking that reading here
+    // would corrupt a credential that legitimately contained a plus.
+    assert_eq!(credential_from_query("token=a+b").as_deref(), Some("a+b"));
+    // A malformed escape is not a near miss at a credential.
+    assert_eq!(credential_from_query("token=%zz"), None);
+    assert_eq!(credential_from_query("token=%2"), None);
+}
 
 /// The two scopes the Server mints differ, and in the direction that matters.
 ///

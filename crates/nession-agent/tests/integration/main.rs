@@ -12,6 +12,8 @@ mod tmux;
 // unique_session_name: defined 5× across the 6 files, 4 of them byte-identical.
 // Extract to crate root. control_mode's copy differs (extra ctrl- segment) and
 // stays module-private.
+use nession_agent::p2p_credentials::P2pCredentials;
+use nession_protocol::contracts::p2p::v1::{CredentialScope, P2pGrantPayload};
 use rand::Rng;
 
 /// Prefix shared by every tmux session these tests create, so the contents of
@@ -23,6 +25,77 @@ pub(crate) const TEST_SESSION_PREFIX: &str = "nession-test-";
 pub(crate) fn unique_session_name(prefix: &str) -> String {
     let suffix: u32 = rand::thread_rng().gen();
     format!("{TEST_SESSION_PREFIX}{prefix}-{suffix}")
+}
+
+/// The agent id every test `AgentServer` in this crate registers under.
+///
+/// One constant because two things have to agree on it: the id the server is
+/// built with, and the id a granted credential names. The store refuses a grant
+/// addressed to another agent, so a mismatch is a credential that is never
+/// honoured — silence at the dial, with nothing pointing at the cause.
+pub(crate) const TEST_AGENT_ID: &str = "test-agent";
+
+/// The credential every test dial presents.
+///
+/// **A literal, not a fresh UUID per server.** The store is per-server and the
+/// servers are per-test, so uniqueness buys nothing — and a value that has to
+/// appear twice in a function (granted, then put on the URL) is a value that
+/// can drift.
+pub(crate) const TEST_CREDENTIAL: &str = "nession-test-credential";
+
+/// The scope a test dial presents to an agent's P2P listener: a browser's, at
+/// its broadest.
+///
+/// The session name is a **placeholder**, and that is not a shortcut. The
+/// server is started before the test creates the session it will attach to, so
+/// no credential granted here can name the right one, and `CredentialScope` has
+/// no "any session" value to reach for (#1013). Nothing reads the scope while
+/// the listener's check is off; the test that needs a narrowed credential is
+/// the test that grants its own.
+pub(crate) fn browser_scope() -> CredentialScope {
+    CredentialScope::for_attach("any-session")
+}
+
+/// Grant `credential` into `credentials`, so a dial presenting it is honoured
+/// (#1013).
+///
+/// Goes through [`P2pCredentials::grant`] — the method the Server's
+/// `agent.p2p.grant` arrives at — rather than inserting into the map, so the
+/// store's own rules (the target-agent binding, the refusal of an unreadable
+/// expiry) apply to the credential a test presents: one a helper slipped past
+/// them would be a test green on a credential production would refuse.
+///
+/// **Deliberately not a method on `AgentServer`.** A minter there is test-only
+/// API on a production type, and the one this work first reached for was gated
+/// on a cargo feature that this repo's test command never enables
+/// (`scripts/filtered-test.sh` → `cargo test --workspace`, no `--features`) — so
+/// it did not exist in the build that matters, and nothing said so until the
+/// gate ran. `grant` is public and unconditional and is the same path, so the
+/// wrapper was buying nothing but that hazard.
+///
+/// `p2p_credentials::Refusal` carries no `Error` impl and so cannot ride out on
+/// `anyhow`'s `?`; it is rendered rather than chained.
+pub(crate) fn mint_credential(
+    credentials: &P2pCredentials,
+    agent_id: &str,
+    credential: &str,
+    scope: CredentialScope,
+) -> anyhow::Result<()> {
+    let grant = P2pGrantPayload {
+        request_id: "test-grant".to_string(),
+        credential: credential.to_string(),
+        agent_id: agent_id.to_string(),
+        session_id: format!("{agent_id}:test"),
+        scope,
+        expires_at: (chrono::Utc::now() + chrono::Duration::seconds(300)).to_rfc3339(),
+    };
+    // `grant` hands back the credential's log tag, which is the store's answer
+    // to "did this land"; the tag is what a warning would carry, and a test that
+    // fails to grant has nothing to log it to.
+    credentials.grant(agent_id, &grant).map_err(|refusal| {
+        anyhow::anyhow!("the agent refused its own test credential: {refusal:?}")
+    })?;
+    Ok(())
 }
 
 /// A fake `tmux` binary, for substitution through
