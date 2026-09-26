@@ -103,6 +103,9 @@ export function FixtureTerminal({
     if (!host) {
       return;
     }
+    let disposed = false;
+    let teardown: (() => void) | undefined;
+
     // Opened only once the font has settled. xterm measures one cell when it
     // opens and every glyph afterwards is laid out from it, so a terminal
     // opened against a not-yet-loaded face is fitted to the substitute's
@@ -112,9 +115,7 @@ export function FixtureTerminal({
     // and `remeasureOnFontLoad`); it resolves immediately when nothing is
     // pending, which is the common case. The face is self-hosted rather than a
     // CDN, so in CI it is a real fetch that the local cache hides.
-    let disposed = false;
-    let teardown: (() => void) | undefined;
-
+    //
     // `document.fonts` is absent outside a browser — jsdom, where the mount
     // tests run — and there is nothing to wait for there.
     const fontsReady = document.fonts?.ready ?? Promise.resolve();
