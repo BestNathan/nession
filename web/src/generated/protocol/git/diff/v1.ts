@@ -27,7 +27,12 @@ export type DiffRequestV1 = {
  * naming an absolute path is refused there, not here, because a
  * client-side check would be a second and weaker boundary.
  */
-path: string, session: string, };
+path: string, 
+/**
+ * When set, diff this path between the commit's parent and the commit
+ * instead of the working tree against HEAD.
+ */
+commit?: string | null, session: string, };
 export type DiffOkV1 = { diff: FileDiff, };
 export type FileDiff = { path: string, 
 /**
@@ -54,7 +59,12 @@ export type DiffRequest = {
  * naming an absolute path is refused there, not here, because a
  * client-side check would be a second and weaker boundary.
  */
-path: string, session: string, };
+path: string, 
+/**
+ * When set, diff this path between the commit's parent and the commit
+ * instead of the working tree against HEAD.
+ */
+commit?: string | null, session: string, };
 
 /** The payload the provider answers with. */
 export type DiffResponse = { "state": "ok", diff: FileDiff, } | { "state": "unavailable", reason: string, message: string, } | { "state": "not_a_repository", message: string, } | { "state": "error", message: string, };

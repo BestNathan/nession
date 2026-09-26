@@ -16,6 +16,7 @@ pub struct SessionInfo {
     /// one. Held in memory only: it is a runtime observation that the agents
     /// re-report after a reconnect, so persisting it would only add write churn.
     pub foreground_command: Option<String>,
+    pub working_dir: Option<String>,
     pub created_at: DateTime<Utc>,
     pub last_activity: DateTime<Utc>,
 }
@@ -67,6 +68,7 @@ impl SessionRegistry {
                         // Not persisted: it is re-reported by the agent's first
                         // update after a reconnect.
                         foreground_command: None,
+                        working_dir: None,
                         created_at,
                         last_activity,
                     };
@@ -240,6 +242,7 @@ mod tests {
             window_count: 1,
             attached_clients: 0,
             foreground_command: None,
+            working_dir: None,
             created_at: Utc::now(),
             last_activity: Utc::now(),
         }

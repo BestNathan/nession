@@ -38,25 +38,40 @@ const RECORD_SEP: char = '\u{1e}';
 const FORMAT: &str = "--format=%H\x1f%h\x1f%an\x1f%ar\x1f%aI\x1f%s\x1f%D\x1e";
 
 /// Recent commits on the current branch, newest first.
-pub async fn history(cmd: &GitCmd, limit: Option<usize>) -> anyhow::Result<History> {
+pub async fn history(
+    cmd: &GitCmd,
+    limit: Option<usize>,
+    before: Option<&str>,
+) -> anyhow::Result<History> {
     let limit = limit
         .unwrap_or(crate::runtime::security::DEFAULT_LOG_LIMIT)
         .clamp(1, MAX_LOG_LIMIT);
     let max_count = format!("--max-count={limit}");
 
-    // `--no-color` for the same reason the other commands pass it: a caller's
-    // `color.ui = always` would put escape sequences inside a `%D` decoration.
-    let out = cmd
-        .run(&["log", "--no-color", &max_count, FORMAT], MAX_LOG_BYTES)
-        .await?;
+    let mut args: Vec<String> = vec!["log".into(), "--no-color".into(), max_count, FORMAT.into()];
+    if let Some(cursor) = before {
+        let resolved = crate::runtime::commit::resolve_revision(cmd, cursor).await?;
+        args.push(format!("{resolved}^"));
+    }
+
+    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    let out = cmd.run(&arg_refs, MAX_LOG_BYTES).await?;
 
     let commits = parse(&out.stdout_string());
+    let next_cursor = if commits.len() == limit {
+        commits.last().map(|c| c.hash.clone())
+    } else {
+        None
+    };
+    let end_of_history = commits.len() < limit;
 
     Ok(History {
         commits,
         limit,
         truncated_bytes: out.truncated_bytes,
         truncated: out.truncated(),
+        next_cursor,
+        end_of_history,
     })
 }
 

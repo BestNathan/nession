@@ -70,6 +70,7 @@ fn test_server_session_create_payload() {
         name: "my-session".to_string(),
         width: 120,
         height: 40,
+        working_dir: None,
         env_snapshots: Vec::new(),
     };
     let json = serde_json::to_string(&payload).unwrap();
@@ -136,6 +137,7 @@ fn test_client_session_create_payload() {
     let payload = ClientSessionCreatePayload {
         agent_id: "agent-1".to_string(),
         name: "new-session".to_string(),
+        working_dir: None,
         env_files: Vec::new(),
     };
     let json = serde_json::to_string(&payload).unwrap();

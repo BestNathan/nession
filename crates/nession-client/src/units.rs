@@ -181,6 +181,7 @@ impl ClientConnection {
                 ClientSessionCreatePayload {
                     agent_id: agent_id.to_string(),
                     name: name.to_string(),
+                    working_dir: None,
                     env_files: Vec::new(),
                 },
             ),

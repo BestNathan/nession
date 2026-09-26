@@ -22,6 +22,7 @@ const AGENT_MANIFEST: ProtocolManifest = {
     'git.diff': { versions: [1] },
     'git.root': { versions: [1] },
     'git.log': { versions: [1] },
+    'git.commit': { versions: [1] },
     'git.branches': { versions: [1] },
     'git.worktrees': { versions: [1] },
   },

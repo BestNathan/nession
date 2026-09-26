@@ -107,6 +107,7 @@ export function Shell({ connectionStatus }: ShellProps) {
             onCreate={() => data.setShowCreateModal(true)}
             onRefresh={() => { void data.fetchSessions({ force: true }); }}
             onSelect={state.handleSelect}
+            onOpenWorktreeSession={state.handleOpenWorktreeSession}
             onConfigure={state.openAttachSettings}
             onKill={(s) => data.setSessionToKill(s)}
             onSurfaceChange={state.setSurface}

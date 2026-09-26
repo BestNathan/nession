@@ -1028,13 +1028,20 @@ p2p_routes! { ctx, msg_type, payload_value;
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
                 };
+                let working_dir = match payload.working_dir.as_deref() {
+                    Some(wd) => match SessionManager::validate_initial_working_dir(wd) {
+                        Ok(path) => path,
+                        Err(e) => return ctx.err("invalid_working_dir", &e.to_string()),
+                    },
+                    None => ctx.default_working_dir.to_string(),
+                };
                 match ctx
                     .tmux
                     .create_session(
                         &payload.name,
                         payload.width,
                         payload.height,
-                        ctx.default_working_dir,
+                        &working_dir,
                         &[],
                     )
                     .await
@@ -1634,6 +1641,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                                 // carry the foreground command; the Server
                                 // fills it in from a later query.
                                 foreground_command: None,
+                                working_dir: None,
                                 last_activity: chrono::Utc::now().to_rfc3339(),
                             }
                         })
@@ -1677,13 +1685,28 @@ p2p_routes! { ctx, msg_type, payload_value;
                             .unwrap_or_default();
                     }
                 };
+                let working_dir = match payload.working_dir.as_deref() {
+                    Some(wd) => match SessionManager::validate_initial_working_dir(wd) {
+                        Ok(path) => path,
+                        Err(e) => {
+                            let resp = WebSessionCreateResponse {
+                                success: false,
+                                session_id: None,
+                                error: Some(e.to_string()),
+                            };
+                            return serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
+                                .unwrap_or_default();
+                        }
+                    },
+                    None => ctx.default_working_dir.to_string(),
+                };
                 match ctx
                     .tmux
                     .create_session(
                         &payload.name,
                         payload.width,
                         payload.height,
-                        ctx.default_working_dir,
+                        &working_dir,
                         &[],
                     )
                     .await
@@ -2846,6 +2869,7 @@ mod tests {
             name: session_name.clone(),
             width: 80,
             height: 24,
+            working_dir: None,
             env_snapshots: Vec::new(),
         };
         let create_req = new_message(msg_types::SESSION_CREATE, create_payload);
@@ -3822,6 +3846,7 @@ mod tests {
             name: session_name.clone(),
             width: 100,
             height: 30,
+            working_dir: None,
         };
         let create_req = new_message(msg_types::CLIENT_SESSION_CREATE, create_payload);
         let create_resp: Message<WebSessionCreateResponse> =

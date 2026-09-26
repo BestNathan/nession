@@ -250,6 +250,29 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
         },
         Unit {
             owner: "git",
+            id: "git.commit",
+            version: 1,
+            wires: &["git.commit"],
+            decls: vec![
+                decl_of::<nession_git::protocol::commit::v1::CommitRequestV1>(cfg),
+                decl_of::<nession_git::protocol::commit::v1::CommitOkV1>(cfg),
+                decl_of::<nession_git::protocol::commit::v1::CommitDetail>(cfg),
+                decl_of::<nession_git::protocol::commit::v1::ChangedFileEntry>(cfg),
+                decl_of::<nession_git::protocol::SessionTargetV1>(cfg),
+            ],
+            request: Some((
+                "CommitRequest",
+                nession_git::protocol::commit::v1::CommitRequestV1::inline,
+                schema_of::<nession_git::protocol::commit::v1::CommitRequestV1>,
+            )),
+            response: Some((
+                "CommitResponse",
+                nession_git::protocol::commit::v1::CommitResponseV1::inline,
+                schema_of::<nession_git::protocol::commit::v1::CommitResponseV1>,
+            )),
+        },
+        Unit {
+            owner: "git",
             id: "git.branches",
             version: 1,
             wires: &["git.branches"],
