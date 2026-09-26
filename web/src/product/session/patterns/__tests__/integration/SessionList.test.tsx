@@ -143,6 +143,51 @@ describe('SessionList', () => {
     expect(screen.queryByTestId('sl-footer')).not.toBeInTheDocument();
   });
 
+  it('renders a caller-supplied empty state, and its own by default (#1083)', () => {
+    // The App's empty state offers the creation action, so it is passed whole
+    // rather than as copy: threading `onCreate` down here would make this shared
+    // pattern know about creation. Web passes nothing.
+    const withEmpty = render(
+      <SessionList
+        sessions={[]} agents={[agent]} staleAgentIds={[]} selectedId={null}
+        clientSessionId="" onSelect={vi.fn()}
+        emptyState={<div data-testid="custom-empty">Start a session</div>}
+      />,
+    );
+    expect(screen.getByTestId('custom-empty')).toBeInTheDocument();
+    expect(screen.queryByText(/No sessions yet/i)).not.toBeInTheDocument();
+    withEmpty.unmount();
+
+    render(
+      <SessionList
+        sessions={[]} agents={[agent]} staleAgentIds={[]} selectedId={null}
+        clientSessionId="" onSelect={vi.fn()}
+      />,
+    );
+    expect(screen.getByText(/No sessions yet/i)).toBeInTheDocument();
+  });
+
+  it('renders a caller-supplied search miss, and its own by default (#1083)', () => {
+    const withMiss = render(
+      <SessionList
+        sessions={[]} agents={[agent]} staleAgentIds={[]} selectedId={null}
+        clientSessionId="" onSelect={vi.fn()} isSearchActive
+        searchMissState={<div data-testid="custom-miss">No sessions match "x"</div>}
+      />,
+    );
+    expect(screen.getByTestId('custom-miss')).toBeInTheDocument();
+    expect(screen.queryByText(/No sessions match your search/i)).not.toBeInTheDocument();
+    withMiss.unmount();
+
+    render(
+      <SessionList
+        sessions={[]} agents={[agent]} staleAgentIds={[]} selectedId={null}
+        clientSessionId="" onSelect={vi.fn()} isSearchActive
+      />,
+    );
+    expect(screen.getByText(/No sessions match your search/i)).toBeInTheDocument();
+  });
+
   it('forwards showRowRecency to every row, defaulting to the three-slot line', () => {
     const two = [sess, { ...sess, session_id: 'a1:two' }];
     const without = render(

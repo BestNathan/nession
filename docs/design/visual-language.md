@@ -96,6 +96,8 @@ An empty screen is an invitation to act, not a status report. "No sessions" desc
 - Reuse the action's own name, so the word on the empty screen is the word on the control. Session creation is called **New Session** everywhere.
 - Sentence case, active voice, no apology, no vagueness.
 - A *search* that found nothing is a different case: it reports what happened ("No sessions match your search") rather than inviting an action, because the action is to change the query.
+  - The distinction is about **which** action, not about whether one may appear. **Clear search** is not an exception to this rule: the action a failed search wants is to change the query, and clearing it is that action — the same subject, wider. What the rule rules out is answering a failed search with *new work*, which silently changes the subject: the user asked to narrow a list, and being offered a different task reads as "your list is gone".
+  - Name the query ("No sessions match `"foo"`"). "No sessions match" without saying what was searched is a status report the reader cannot act on.
 
 ## Where the values come from
 

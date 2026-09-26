@@ -5,6 +5,7 @@ import {
   AppSessionsSurface,
   type AppSessionsSurfaceProps,
 } from '@/app/experiences/app/AppSessionsSurface';
+import { APP_START_SESSION_COPY } from '@/app/experiences/app/AppHome';
 import type { Agent, Session } from '@/types';
 
 const agents: Agent[] = [
@@ -275,6 +276,67 @@ describe('App Sessions surface (#1050 stage 1)', () => {
 
     await userEvent.click(screen.getByTestId('create-session'));
     expect(onCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it('leads an empty list straight to New Session (#1083 §9)', () => {
+    // Criterion 12. The empty state is an invitation, not a report — and the
+    // words are `AppHome`'s, imported rather than repeated, because #1083
+    // requires creation to mean one thing on both screens.
+    render(<AppSessionsSurface {...props({ filteredSessions: [] })} />);
+
+    expect(screen.getByTestId('app-sessions-empty')).toBeInTheDocument();
+    expect(screen.getByText(APP_START_SESSION_COPY.heading)).toBeInTheDocument();
+    expect(screen.getByText(APP_START_SESSION_COPY.supporting)).toBeInTheDocument();
+
+    const create = screen.getByTestId('app-sessions-empty-new-session');
+    expect(create).toBeEnabled();
+    expect(create).toHaveTextContent(APP_START_SESSION_COPY.create);
+
+    // Online Agents exist, so creation is possible and there is nothing to
+    // explain.
+    expect(screen.queryByTestId('app-sessions-empty-no-agent')).not.toBeInTheDocument();
+  });
+
+  it('keeps New Session visible but disabled when no Agent is online', () => {
+    // The issue is explicit that the affordance must not be hidden: a user who
+    // cannot see the control cannot tell whether it is missing or unavailable.
+    // The explanation travels with the button, not with the heading.
+    const offlineOnly = agents.filter((agent) => agent.status !== 'online');
+    render(
+      <AppSessionsSurface
+        {...props({ filteredSessions: [], agents: offlineOnly })}
+      />,
+    );
+
+    const create = screen.getByTestId('app-sessions-empty-new-session');
+    expect(create).toBeVisible();
+    expect(create).toBeDisabled();
+    expect(screen.getByTestId('app-sessions-empty-no-agent')).toHaveTextContent(
+      APP_START_SESSION_COPY.noAgent,
+    );
+  });
+
+  it('reports a search miss and offers to clear it (#1083 §9)', async () => {
+    // The query is quoted: "no sessions match" without saying what was searched
+    // is a status report the reader cannot act on.
+    const setSearchQuery = vi.fn();
+    render(
+      <AppSessionsSurface
+        {...props({
+          filteredSessions: [],
+          isSearchActive: true,
+          searchQuery: 'nothing',
+          setSearchQuery,
+        })}
+      />,
+    );
+
+    expect(screen.getByTestId('app-sessions-search-miss')).toHaveTextContent(
+      'No sessions match "nothing"',
+    );
+
+    await userEvent.click(screen.getByTestId('app-sessions-clear-search'));
+    expect(setSearchQuery).toHaveBeenCalledWith('');
   });
 
   it('sizes its text controls by role, and its icon control by the icon token', () => {

@@ -6,17 +6,15 @@ import { filterSessions } from '@/app/useDashboard';
 import { useDashboardFilter } from '@/app/useDashboardFilter';
 import { mapDomainState } from '@/product/session/model/domainState';
 import { FixtureTerminal } from '@/app/fixture/FixtureTerminal';
-import {
-  FIXTURE_AGENTS,
-  FIXTURE_CLIENT_SESSION_ID,
-  FIXTURE_SESSIONS,
-} from '@/app/fixture/fixtureData';
+import { FIXTURE_CLIENT_SESSION_ID } from '@/app/fixture/fixtureData';
 import type { Surface } from '@/app/patterns/SessionHeader';
 import type { CapabilityId } from '@/product/capability';
 import { gitApi } from '@/capabilities/git';
+import { fixtureAgents } from './fixtureAgents';
 import { fixtureFileOps } from './fixtureFileOps';
 import { fixtureGitSurface } from './fixtureGit';
 import { fixtureSelectedId } from './fixtureSelection';
+import { fixtureSessions } from './fixtureSessions';
 import { fixtureStaleAgents } from './fixtureStaleAgents';
 
 // Module-stable — the stub is immutable and stateless (same pattern as
@@ -62,28 +60,30 @@ export function FixtureApp() {
     isSearchActive,
   } = useDashboardFilter();
 
+  const search = useLocation().search;
+
+  // The route's inputs. Each names what the *server* answered rather than a
+  // rendering, so the surface below decides what to draw — see
+  // `fixtureStaleAgents`, `fixtureSessions`, `fixtureAgents`.
+  const staleAgents = fixtureStaleAgents(search);
+  const sessions = useMemo(() => fixtureSessions(search), [search]);
+  const agents = useMemo(() => fixtureAgents(search), [search]);
+
   const filteredSessions = useMemo(
     () =>
-      filterSessions(FIXTURE_SESSIONS, FIXTURE_AGENTS, {
+      filterSessions(sessions, agents, {
         statusFilter,
         searchQuery,
         sortField,
         sortDirection,
       }),
-    [statusFilter, searchQuery, sortField, sortDirection],
+    [sessions, agents, statusFilter, searchQuery, sortField, sortDirection],
   );
-
-  const search = useLocation().search;
-
-  // The route's Session-list input. Nothing here can produce staleness (it takes
-  // a refresh getting no answer), so the parameter names the input — see
-  // `fixtureStaleAgents`.
-  const staleAgents = fixtureStaleAgents(search);
 
   const selectedId = fixtureSelectedId(search);
   const selectedSession =
-    FIXTURE_SESSIONS.find((s) => s.session_id === selectedId) ?? null;
-  const selectedAgent = FIXTURE_AGENTS.find(
+    sessions.find((s) => s.session_id === selectedId) ?? null;
+  const selectedAgent = agents.find(
     (a) => a.agent_id === selectedSession?.agent_id,
   );
   const domain = selectedSession
@@ -101,7 +101,7 @@ export function FixtureApp() {
     : null;
 
   const sidebarProps = {
-    agents: FIXTURE_AGENTS,
+    agents,
     filteredSessions,
     staleAgents,
     selectedId,
@@ -126,7 +126,7 @@ export function FixtureApp() {
   const mainShared = {
     selectedSession,
     selectedAgent,
-    agents: FIXTURE_AGENTS,
+    agents,
     domain,
     tool,
     fileOps: fixtureOps,

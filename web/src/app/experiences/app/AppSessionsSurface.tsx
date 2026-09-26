@@ -1,5 +1,12 @@
 import { useMemo, useState } from 'react';
-import { ArrowDown, ArrowUp, ChevronDown, Filter, Plus } from 'lucide-react';
+import {
+  ArrowDown,
+  ArrowUp,
+  ChevronDown,
+  Filter,
+  Plus,
+  SearchX,
+} from 'lucide-react';
 import { cn } from '@/shared/lib/utils';
 import { Button } from '@/components/ui/button';
 import { RefreshButton } from '@/components/ui/RefreshButton';
@@ -19,7 +26,8 @@ import {
   shellRowControlMinClass,
 } from '@/app/shellStyles';
 import { bodyAppClass, secondaryAppClass, titleAppClass } from './appTypography';
-import { bucketSessions } from './sessionHistory';
+import { APP_START_SESSION_COPY } from './AppHome';
+import { bucketSessions, type SessionBucket } from './sessionHistory';
 import type { SidebarProps } from '@/app/Sidebar';
 import type { SortDirection, SortField, StatusFilter } from '@/app/useDashboard';
 
@@ -287,6 +295,218 @@ function SessionsFilters({
 }
 
 /**
+ * The list region: the rows, and everything the shared pattern is handed to
+ * render *around* them.
+ *
+ * Extracted rather than inlined for the reason `SessionsChrome` is: the surface
+ * reads as the order of its regions — header, chrome, list, foot — and the list
+ * is where the App's decisions about the shared pattern accumulate. Four of
+ * them live here and each is the App's to make, not `SessionList`'s:
+ *
+ * - **`groups`**, with the label's element and type class, so the shared pattern
+ *   stays free of type decisions (`secondary` outranks the `metadata` its rows
+ *   use, and `--typography-metadata-size` resolves to Web's value at `:root`).
+ * - **`showRowRecency={!grouped}`**, which is the "never both" rule as one
+ *   expression.
+ * - **`emptyState` / `searchMissState`**, which the App words because it owns
+ *   the creation action the empty state offers.
+ * - **`footer`**, the Agents entry, which belongs below history rather than in
+ *   the chrome.
+ */
+function SessionsListRegion({
+  buckets,
+  grouped,
+  filteredSessions,
+  agents,
+  staleAgents,
+  selectedId,
+  clientSessionId,
+  loadingSessions,
+  isSearchActive,
+  onSelect,
+  onConfigure,
+  onKill,
+  createDisabled,
+  onCreate,
+  searchQuery,
+  setSearchQuery,
+  activeAgentId,
+  onlineCount,
+}: {
+  buckets: SessionBucket[];
+  grouped: boolean;
+  filteredSessions: AppSessionsSurfaceProps['filteredSessions'];
+  agents: AppSessionsSurfaceProps['agents'];
+  staleAgents: AppSessionsSurfaceProps['staleAgents'];
+  selectedId: AppSessionsSurfaceProps['selectedId'];
+  clientSessionId: AppSessionsSurfaceProps['clientSessionId'];
+  loadingSessions: boolean;
+  isSearchActive: boolean;
+  onSelect: AppSessionsSurfaceProps['onSelect'];
+  onConfigure: AppSessionsSurfaceProps['onConfigure'];
+  onKill: AppSessionsSurfaceProps['onKill'];
+  createDisabled: boolean;
+  onCreate: () => void;
+  searchQuery: string;
+  setSearchQuery: (q: string) => void;
+  activeAgentId: string | null;
+  onlineCount: number;
+}) {
+  return (
+    <div
+      data-testid="app-sessions-list"
+      className={cn(
+        'flex flex-1 flex-col overflow-hidden',
+        sessionsListFloorAppClass,
+      )}
+    >
+      <SessionList
+        sessions={filteredSessions}
+        agents={agents}
+        staleAgentIds={staleAgents}
+        selectedId={selectedId}
+        clientSessionId={clientSessionId}
+        loading={loadingSessions}
+        isSearchActive={isSearchActive}
+        onSelect={onSelect}
+        onConfigure={onConfigure}
+        onKill={onKill}
+        groups={
+          grouped
+            ? buckets.map((bucket) => ({
+                key: bucket.key,
+                header: (
+                  <h2
+                    data-testid="session-group-label"
+                    className={cn(
+                      'px-[var(--shell-space-2)] pt-[var(--shell-space-3)] pb-[var(--shell-space-1)] text-muted-foreground',
+                      secondaryAppClass,
+                    )}
+                  >
+                    {bucket.label}
+                  </h2>
+                ),
+                sessions: bucket.sessions,
+              }))
+            : undefined
+        }
+        showRowRecency={!grouped}
+        emptyState={
+          <SessionsEmptyState
+            createDisabled={createDisabled}
+            onCreate={onCreate}
+          />
+        }
+        searchMissState={
+          <SessionsSearchMiss
+            searchQuery={searchQuery}
+            onClearSearch={() => setSearchQuery('')}
+          />
+        }
+        footer={
+          <AgentsDisclosure
+            agents={agents}
+            activeAgentId={activeAgentId}
+            onlineCount={onlineCount}
+          />
+        }
+      />
+    </div>
+  );
+}
+
+/**
+ * The Sessions layer with no Sessions at all (#1083 §9).
+ *
+ * Not the same screen as `AppHome`, and deliberately the same words: the root
+ * exists before any Session does, this exists when the list is empty, and
+ * #1083's requirement is that "create new work" means one thing on both. The
+ * copy is imported from `AppHome` rather than repeated, so the two cannot drift.
+ *
+ * The heading is an `h2` where `AppHome`'s is an `h1` — this one sits under the
+ * surface's own `Sessions` title, so it heads a section rather than the page.
+ * The words are shared; the depth is not.
+ *
+ * A disabled control that does not say why is a dead end one click earlier, so
+ * the explanation travels with the button, not with the heading.
+ */
+function SessionsEmptyState({
+  createDisabled,
+  onCreate,
+}: {
+  createDisabled: boolean;
+  onCreate: () => void;
+}) {
+  return (
+    <div
+      data-testid="app-sessions-empty"
+      className="flex h-full flex-col items-center justify-center gap-[var(--shell-space-2)] px-[var(--shell-space-4)] text-center"
+    >
+      <div className="flex flex-col gap-[var(--shell-space-1)]">
+        <h2 className={cn('font-semibold', titleAppClass)}>
+          {APP_START_SESSION_COPY.heading}
+        </h2>
+        <p className={secondaryAppClass}>{APP_START_SESSION_COPY.supporting}</p>
+      </div>
+      <Button
+        type="button"
+        onClick={() => onCreate()}
+        disabled={createDisabled}
+        data-testid="app-sessions-empty-new-session"
+      >
+        <Plus />
+        {APP_START_SESSION_COPY.create}
+      </Button>
+      {createDisabled ? (
+        <p className={secondaryAppClass} data-testid="app-sessions-empty-no-agent">
+          {APP_START_SESSION_COPY.noAgent}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * The Sessions layer when a search matched nothing (#1083 §9).
+ *
+ * `visual-language.md` has a rule for this case — a search that found nothing
+ * "reports what happened rather than inviting an action" — and **Clear search**
+ * is an action, so the distinction it draws has to be stated rather than
+ * assumed. The rule is about not answering a failed search with *new work*,
+ * which would silently change the subject: the user asked to narrow a list, and
+ * being offered a different task reads as "your list is gone". Clearing the
+ * query returns them to the list they were searching — the same subject, wider.
+ *
+ * The query is quoted because "no sessions match" without saying what was
+ * searched is a status report the user cannot act on.
+ */
+function SessionsSearchMiss({
+  searchQuery,
+  onClearSearch,
+}: {
+  searchQuery: string;
+  onClearSearch: () => void;
+}) {
+  return (
+    <div
+      data-testid="app-sessions-search-miss"
+      className="flex h-full flex-col items-center justify-center gap-[var(--shell-space-2)] px-[var(--shell-space-4)] text-center text-muted-foreground"
+    >
+      <SearchX aria-hidden className="size-8" />
+      <p className={secondaryAppClass}>No sessions match "{searchQuery}"</p>
+      <Button
+        type="button"
+        variant="ghost"
+        onClick={() => onClearSearch()}
+        data-testid="app-sessions-clear-search"
+      >
+        Clear search
+      </Button>
+    </div>
+  );
+}
+
+/**
  * The Sessions page header (#1083): the title, and the one creation action.
  *
  * The App has no bar above this layer — `AppLayers` stacks the Sessions layer
@@ -522,56 +742,26 @@ export function AppSessionsSurface({
         onRefresh={onRefresh}
         loadingSessions={loadingSessions}
       />
-      <div
-        data-testid="app-sessions-list"
-        className={cn(
-          'flex flex-1 flex-col overflow-hidden',
-          sessionsListFloorAppClass,
-        )}
-      >
-        <SessionList
-          sessions={filteredSessions}
-          agents={agents}
-          staleAgentIds={staleAgents}
-          selectedId={selectedId}
-          clientSessionId={clientSessionId}
-          loading={loadingSessions}
-          isSearchActive={isSearchActive}
-          onSelect={onSelect}
-          onConfigure={onConfigure}
-          onKill={onKill}
-          groups={
-            grouped
-              ? buckets.map((bucket) => ({
-                  key: bucket.key,
-                  // The label's element, role and type class are the App's, so
-                  // the shared pattern stays free of type decisions: on App
-                  // `secondary` outranks the `metadata` its rows use.
-                  header: (
-                    <h2
-                      data-testid="session-group-label"
-                      className={cn(
-                        'px-[var(--shell-space-2)] pt-[var(--shell-space-3)] pb-[var(--shell-space-1)] text-muted-foreground',
-                        secondaryAppClass,
-                      )}
-                    >
-                      {bucket.label}
-                    </h2>
-                  ),
-                  sessions: bucket.sessions,
-                }))
-              : undefined
-          }
-          showRowRecency={!grouped}
-          footer={
-            <AgentsDisclosure
-              agents={agents}
-              activeAgentId={activeAgentId}
-              onlineCount={onlineCount}
-            />
-          }
-        />
-      </div>
+      <SessionsListRegion
+        buckets={buckets}
+        grouped={grouped}
+        filteredSessions={filteredSessions}
+        agents={agents}
+        staleAgents={staleAgents}
+        selectedId={selectedId}
+        clientSessionId={clientSessionId}
+        loadingSessions={loadingSessions}
+        isSearchActive={isSearchActive}
+        onSelect={onSelect}
+        onConfigure={onConfigure}
+        onKill={onKill}
+        createDisabled={createDisabled}
+        onCreate={onCreate}
+        searchQuery={searchQuery}
+        setSearchQuery={setSearchQuery}
+        activeAgentId={activeAgentId}
+        onlineCount={onlineCount}
+      />
       <div
         data-testid="sidebar-footer"
         className="flex shrink-0 items-center gap-[var(--shell-foot-gap)] border-t px-[var(--shell-space-3)] py-[var(--shell-foot-pad-y)] pb-[max(var(--shell-foot-pad-y),env(safe-area-inset-bottom))]"
