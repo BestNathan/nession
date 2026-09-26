@@ -93,6 +93,13 @@ impl std::fmt::Display for ResourceKey {
 /// place for a second key type to grow back.
 pub type Lanes = RuntimeLanes<ResourceKey>;
 
+/// The process's mutation lane, as the runtime hands it around (#1021).
+///
+/// Named because it appears in two public signatures — `ServerClient::new`
+/// and `AgentServerContext` — and a type spelled out at both is a type
+/// that drifts at one of them.
+pub type MutationLane = Arc<KeyedLane<ResourceKey>>;
+
 /// The one mutation lane this **process** mutates through.
 ///
 /// Built once, where the resources its keys name are built — one tmux server and

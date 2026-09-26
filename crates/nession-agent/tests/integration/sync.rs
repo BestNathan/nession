@@ -84,6 +84,7 @@ async fn get_handle(addr: std::net::SocketAddr) -> anyhow::Result<ServerClientHa
         "/tmp".to_string(),
         None, // extension_registry
         Arc::new(nession_agent::p2p_credentials::P2pCredentials::new()),
+        nession_agent::execution::mutation_scheduler(),
     );
 
     Ok(client.connect_and_run().await?.0)

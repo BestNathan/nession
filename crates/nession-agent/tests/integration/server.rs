@@ -58,6 +58,7 @@ async fn start_server(
         AgentServerContext {
             resize,
             credentials: Arc::clone(&credentials),
+            mutations: nession_agent::execution::mutation_scheduler(),
         },
     )?;
     let (handle, addr) = server.start().await?;
@@ -601,6 +602,7 @@ async fn start_server_with_file_root() -> anyhow::Result<(
         AgentServerContext {
             resize,
             credentials: Arc::clone(&credentials),
+            mutations: nession_agent::execution::mutation_scheduler(),
         },
     )?;
     let (handle, addr) = server.start().await?;
