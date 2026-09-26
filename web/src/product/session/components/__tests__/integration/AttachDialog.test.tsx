@@ -5,8 +5,7 @@ import { createStore, Provider } from 'jotai';
 import { AttachDialog } from '@/product/session/components/AttachDialog';
 import { envApi } from '@/capabilities/env';
 import { sessionsApi } from '@/product/session';
-import type { Session, AttachInfo } from '@/types';
-import { probeResultsAtom, probeRefreshRequestAtom, type AgentProbe } from '@/product/agent/state';
+import type { Session, AttachInfo, AddressLatency } from '@/types';
 import { attachInfoAtom } from '@/product/session/state';
 import { saveSessionProfile, type PersistedAttachChoice } from '@/platform/attach/sessionAttachProfile';
 
@@ -16,6 +15,28 @@ vi.mock('@/capabilities/env', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/capabilities/env')>()),
   envApi: { listEnvFiles: vi.fn() },
 }));
+
+/**
+ * Only `testAddresses` is mocked — the ordering a caller reads is the real one,
+ * so these tests exercise the dialog's own probe rather than a seeded result.
+ * The dialog used to read a cache filled by an app-level poll; it now measures
+ * the candidates it was handed, with the attach reply's credential (#1091).
+ */
+const { testAddressesMock } = vi.hoisted(() => ({ testAddressesMock: vi.fn() }));
+
+vi.mock('@/shared/lib/addressSelection', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/lib/addressSelection')>()),
+  testAddresses: testAddressesMock,
+}));
+
+/** Every candidate answers with the given latency, in the order given. */
+function measures(...latencies: (number | null)[]): void {
+  testAddressesMock.mockImplementation(async (addresses: { url: string }[]) =>
+    addresses.map(
+      (a, i): AddressLatency => ({ url: a.url, latencyMs: latencies[i] ?? null }),
+    ),
+  );
+}
 
 vi.mock('@/product/session', () => ({
   sessionsApi: { requestAttach: vi.fn() },
@@ -52,6 +73,7 @@ beforeEach(() => {
   localStorage.clear();
   mockedEnvApi.listEnvFiles.mockResolvedValue({ files: [] });
   mockedSessionsApi.requestAttach.mockImplementation(async () => attachInfo());
+  measures();
 });
 
 describe('AttachDialog', () => {
@@ -99,32 +121,26 @@ describe('AttachDialog', () => {
         { url: 'ws://vpn/ws', label: 'VPN', network_type: 'vpn', priority: 20, status: 'unreachable' },
       ]),
     );
-    const store = createStore();
-    store.set(probeResultsAtom, new Map<string, AgentProbe>([[
-      'agent-1',
-      {
-        latencies: [
-          { url: 'ws://lan/ws', latencyMs: 10 },
-          { url: 'ws://vpn/ws', latencyMs: 20 },
-        ],
-        orderedUrls: ['ws://lan/ws', 'ws://vpn/ws'],
-        probedAt: Date.now(),
-      },
-    ]]));
+    measures(10, 20);
     const user = userEvent.setup();
     render(
-      <Provider store={store}>
-        <AttachDialog
-          isOpen
-          onClose={vi.fn()}
-          session={session()}
-          onConfirm={onConfirm}
-        />
-      </Provider>,
+      <AttachDialog
+        isOpen
+        onClose={vi.fn()}
+        session={session()}
+        onConfirm={onConfirm}
+      />,
     );
     // Both candidate labels appear once attach info resolves.
     expect(await screen.findByText('LAN')).toBeInTheDocument();
     expect(screen.getByText('VPN')).toBeInTheDocument();
+    // …and the dialog measured them itself, with the reply's credential.
+    await waitFor(() =>
+      expect(testAddressesMock).toHaveBeenCalledWith(
+        expect.anything(),
+        { credential: 'tok' },
+      ),
+    );
     // Pick the VPN path explicitly (server marked it unreachable — user override
     // still allowed).
     await user.click(screen.getByText('VPN'));
@@ -144,58 +160,96 @@ describe('AttachDialog', () => {
     );
   });
 
-  it('shows cached latency without live probing', async () => {
+  it('shows the latency it measured for each candidate', async () => {
     mockedSessionsApi.requestAttach.mockImplementation(async () =>
       attachInfo([
         { url: 'ws://lan/ws', label: 'LAN', network_type: 'lan', priority: 10, status: 'reachable' },
         { url: 'ws://vpn/ws', label: 'VPN', network_type: 'vpn', priority: 20, status: 'unreachable' },
       ]),
     );
-    const store = createStore();
-    store.set(probeResultsAtom, new Map<string, AgentProbe>([[
-      'agent-1',
-      {
-        latencies: [{ url: 'ws://lan/ws', latencyMs: 12 }],
-        orderedUrls: ['ws://lan/ws'],
-        probedAt: Date.now(),
-      },
-    ]]));
+    measures(12, 40);
     render(
-      <Provider store={store}>
-        <AttachDialog
-          isOpen
-          onClose={vi.fn()}
-          session={session()}
-          onConfirm={vi.fn()}
-        />
-      </Provider>,
+      <AttachDialog isOpen onClose={vi.fn()} session={session()} onConfirm={vi.fn()} />,
     );
+
     expect(await screen.findByText('12ms')).toBeInTheDocument();
-    expect(screen.queryByText(/Testing…/)).not.toBeInTheDocument();
+    expect(screen.getByText('40ms')).toBeInTheDocument();
+    // The Auto row names the fastest *reachable* one and how long it took.
+    expect(screen.getByRole('button', { name: /fastest reachable path · 12ms/ })).toBeInTheDocument();
   });
 
-  it('re-test button requests a fresh probe via probeRefreshRequestAtom', async () => {
+  /**
+   * The state that used to be mislabelled: `orderByLatency` appends failed
+   * addresses rather than dropping them, so a total failure leaves
+   * `orderedUrls[0]` a *failed* URL. Reading that as "the best path" is how the
+   * Auto row came to promise a fastest reachable path that did not exist.
+   */
+  it('does not promise a fastest path when nothing answered', async () => {
     mockedSessionsApi.requestAttach.mockImplementation(async () =>
       attachInfo([
         { url: 'ws://lan/ws', label: 'LAN', network_type: 'lan', priority: 10, status: 'reachable' },
-        { url: 'ws://vpn/ws', label: 'VPN', network_type: 'vpn', priority: 20, status: 'unreachable' },
       ]),
     );
-    const store = createStore();
+    measures(null);
+    render(
+      <AttachDialog isOpen onClose={vi.fn()} session={session()} onConfirm={vi.fn()} />,
+    );
+
+    expect(await screen.findByText(/nothing answered from this browser/)).toBeInTheDocument();
+    expect(screen.queryByText(/fastest reachable path/)).not.toBeInTheDocument();
+  });
+
+  /**
+   * The same defect in the branch that does not involve this browser at all:
+   * relay rows render from the *server's* probe status, and `unknown` — the
+   * server saying it has not looked — was drawn with the offline icon and a
+   * destructive label, i.e. "this failed".
+   */
+  it('shows an unprobed relay address as unmeasured, not as a failure', async () => {
+    mockedSessionsApi.requestAttach.mockImplementation(async () => ({
+      mode: 'relay' as const,
+      session_id: 'agent-1:dev',
+      session_name: 'dev',
+      addresses: [
+        { url: 'ws://relay/ws', label: 'LAN', network_type: 'lan', priority: 10, status: 'unknown' as const },
+      ],
+    }));
     const user = userEvent.setup();
     render(
-      <Provider store={store}>
-        <AttachDialog
-          isOpen
-          onClose={vi.fn()}
-          session={session()}
-          onConfirm={vi.fn()}
-        />
-      </Provider>,
+      <AttachDialog isOpen onClose={vi.fn()} session={session()} onConfirm={vi.fn()} />,
     );
-    const retest = await screen.findByRole('button', { name: /Re-test/ });
-    await user.click(retest);
-    expect(store.get(probeRefreshRequestAtom)?.agentId).toBe('agent-1');
+
+    await user.click(screen.getByRole('button', { name: /^Relay/ }));
+
+    expect(await screen.findByText('not measured')).toBeInTheDocument();
+    const label = screen.getByText('unknown');
+    expect(label).toBeInTheDocument();
+    expect(label).not.toHaveClass('text-destructive');
+  });
+
+  it('re-test re-requests attach info and measures again', async () => {
+    mockedSessionsApi.requestAttach.mockImplementation(async () =>
+      attachInfo([
+        { url: 'ws://lan/ws', label: 'LAN', network_type: 'lan', priority: 10, status: 'reachable' },
+      ]),
+    );
+    measures(30);
+    const user = userEvent.setup();
+    render(
+      <AttachDialog isOpen onClose={vi.fn()} session={session()} onConfirm={vi.fn()} />,
+    );
+
+    await screen.findByText('30ms');
+    expect(testAddressesMock).toHaveBeenCalledTimes(1);
+
+    // A fresh reply carries a fresh credential, which is what re-measures — so
+    // Re-test must re-request rather than re-probe a token that expires at
+    // p2p_token_expiry_secs.
+    measures(7);
+    await user.click(await screen.findByRole('button', { name: /Re-test/ }));
+
+    await waitFor(() => expect(mockedSessionsApi.requestAttach).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText('7ms')).toBeInTheDocument();
   });
 
   it('renders a Renderer row with WebGL and Canvas options', () => {
