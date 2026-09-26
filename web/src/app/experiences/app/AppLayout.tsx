@@ -53,6 +53,12 @@ export function AppLayout(props: {
   onLayerSelect: (session: Session) => void;
   mainShared: MainShared;
   /**
+   * Whether a Session exists for Workspace to be the depth *around* (#1082).
+   * False means the layer is not rendered at all — `AppLayers` takes `null` as
+   * "this layer does not exist", not as "render an empty one".
+   */
+  workspaceAvailable: boolean;
+  /**
    * Fixture/testing override for the terminal, same contract as
    * `WorkspaceRegion.terminal`. The canonical App fixtures pass the static
    * `FixtureTerminal` here so a baseline can be captured without a live attach.
@@ -65,6 +71,7 @@ export function AppLayout(props: {
     sidebarProps,
     onLayerSelect,
     mainShared,
+    workspaceAvailable,
     terminal,
   } = props;
 
@@ -91,7 +98,7 @@ export function AppLayout(props: {
             />
           </div>
         }
-        workspace={
+        workspace={!workspaceAvailable ? null : (
           /* Opaque, deliberately (#1051). The layers are stacked at `inset-0`,
              so a transparent Workspace layer showed the Terminal's chrome and
              its scrollback through its own header band: the baseline drew two
@@ -113,7 +120,7 @@ export function AppLayout(props: {
               experience="app"
             />
           </div>
-        }
+        )}
       />
     </div>
   );

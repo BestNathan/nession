@@ -9,7 +9,6 @@ import { FixtureTerminal } from '@/app/fixture/FixtureTerminal';
 import {
   FIXTURE_AGENTS,
   FIXTURE_CLIENT_SESSION_ID,
-  FIXTURE_SELECTED_ID,
   FIXTURE_SESSIONS,
 } from '@/app/fixture/fixtureData';
 import type { Surface } from '@/app/patterns/SessionHeader';
@@ -17,6 +16,7 @@ import type { CapabilityId } from '@/product/capability';
 import { gitApi } from '@/capabilities/git';
 import { fixtureFileOps } from './fixtureFileOps';
 import { fixtureGitSurface } from './fixtureGit';
+import { fixtureSelectedId } from './fixtureSelection';
 import { fixtureStaleAgents } from './fixtureStaleAgents';
 
 // Module-stable — the stub is immutable and stateless (same pattern as
@@ -73,12 +73,14 @@ export function FixtureApp() {
     [statusFilter, searchQuery, sortField, sortDirection],
   );
 
+  const search = useLocation().search;
+
   // The route's Session-list input. Nothing here can produce staleness (it takes
   // a refresh getting no answer), so the parameter names the input — see
   // `fixtureStaleAgents`.
-  const staleAgents = fixtureStaleAgents(useLocation().search);
+  const staleAgents = fixtureStaleAgents(search);
 
-  const selectedId = FIXTURE_SELECTED_ID;
+  const selectedId = fixtureSelectedId(search);
   const selectedSession =
     FIXTURE_SESSIONS.find((s) => s.session_id === selectedId) ?? null;
   const selectedAgent = FIXTURE_AGENTS.find(
@@ -132,9 +134,13 @@ export function FixtureApp() {
     onSurfaceChange: setSurface,
     onToolChange: setTool,
     onOpenAgent: () => {},
+    // Inert, like every other handler here: the home's "New Session" opens the
+    // product's dialog, and a fixture that opened one would be asserting on a
+    // flow it does not own (#1082).
+    onCreate: () => {},
   };
 
-  const { layer, onLayerChange, onLayerSelect } = useAppLayer({
+  const { layer, onLayerChange, onLayerSelect, workspaceAvailable } = useAppLayer({
     selectedId,
     surface,
     active: true,
@@ -155,6 +161,7 @@ export function FixtureApp() {
         sidebarProps={sidebarProps}
         onLayerSelect={onLayerSelect}
         mainShared={mainShared}
+        workspaceAvailable={workspaceAvailable}
         terminal={(chrome) => (
           <FixtureTerminal chrome={chrome} experience="app" />
         )}

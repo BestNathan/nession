@@ -212,6 +212,38 @@ describe('CreateSessionDialog', () => {
     });
   });
 
+  it('hands the created Session id to onCreated, not only a signal (#1082)', async () => {
+    // The response carries the identity and the caller needs it: a caller that
+    // receives only "something was created" has to find the new Session again
+    // in a later list, which means guessing. Passed through verbatim.
+    createSessionMock.mockResolvedValueOnce({
+      success: true,
+      session_id: 'agent-1:fresh',
+    });
+    const user = userEvent.setup();
+    const { CreateSessionDialog } = CreateSessionDialogModule;
+    const onCreated = vi.fn();
+
+    render(
+      <CreateSessionDialog
+        isOpen={true}
+        onClose={vi.fn()}
+        agents={[makeAgent()]}
+        onCreated={onCreated}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText('my-session')).toBeInTheDocument();
+    });
+    await user.type(screen.getByPlaceholderText('my-session'), 'my-session');
+    await user.click(screen.getByRole('button', { name: 'Create' }));
+
+    await waitFor(() => {
+      expect(onCreated).toHaveBeenCalledWith('agent-1:fresh');
+    });
+  });
+
   // ── Form submission: failure ──────────────────────────────────────────
 
   it('shows error when createSession returns success=false', async () => {

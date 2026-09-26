@@ -21,7 +21,8 @@ export function ShellDialogs({
   showCreateModal: boolean;
   setShowCreateModal: (show: boolean) => void;
   agents: ReturnType<typeof useDashboard>['agents'];
-  handleSessionCreated: () => void;
+  /** Forwarded unchanged from `CreateSessionDialog`; see its `onCreated`. */
+  handleSessionCreated: (sessionId?: string) => void;
   sessionToKill: Session | null;
   setSessionToKill: (session: Session | null) => void;
   onKilled: () => void;
