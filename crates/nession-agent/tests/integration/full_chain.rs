@@ -8,7 +8,10 @@
 //! - Heartbeat and session sync between agent and server
 //! - Graceful shutdown
 
-use super::{browser_scope, mint_credential, TestSession, TEST_AGENT_ID, TEST_CREDENTIAL};
+use super::{
+    browser_scope, connect, connect_for, mint_credential, TestSession, TEST_AGENT_ID,
+    TEST_CREDENTIAL,
+};
 use futures_util::{SinkExt, StreamExt};
 use nession_agent::config::AttachMode;
 use nession_agent::connection::ServerClient;
@@ -22,12 +25,10 @@ use nession_agent::sync::session_watcher::SessionWatcher;
 use nession_agent::tmux::manager::SessionManager;
 use nession_common::config::ServerConfig;
 use nession_protocol::contracts::agent::v1::AgentMetadata;
-use nession_protocol::contracts::p2p::agent_url_with_credential;
 use nession_server::db::Database;
 use nession_server::server::WebSocketServer;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 
 // ---------------------------------------------------------------------------
@@ -128,22 +129,23 @@ async fn next_text_frame(stream: &mut WsStreamHalf, what: &str) -> String {
 }
 
 /// Start a real agent WebSocket server on an OS-assigned port, and mint the
-/// credential its listener will honour.
+/// broad credential its listener honours.
 ///
-/// The credential comes back with the address because the dial is what presents
-/// it: every connection this file makes to the agent puts it on the URL through
-/// [`agent_url_with_credential`] (#1013).
+/// The **store** comes back with the address, not the credential string: a dial
+/// that has to name a session (the terminal wires, #1013) can only mint its
+/// credential once the test has generated that name — see [`connect_for`]. It is
+/// the same `Arc` the listener holds.
 async fn start_test_agent_server() -> anyhow::Result<(
     std::net::SocketAddr,
     nession_agent::server::ServerHandle,
-    String,
+    Arc<P2pCredentials>,
 )> {
     let tmp = Box::leak(Box::new(tempfile::tempdir()?));
     // Nothing drains this connection's resize lane, which is the point of the
     // lane: an unread resize costs one superseded value per session.
     let (resize, _resize_updates) = nession_agent::server::ResizeReporter::new();
     // Granted into before it is handed to the listener — see [`mint_credential`].
-    let credentials = P2pCredentials::new();
+    let credentials = Arc::new(P2pCredentials::new());
     mint_credential(
         &credentials,
         TEST_AGENT_ID,
@@ -159,12 +161,12 @@ async fn start_test_agent_server() -> anyhow::Result<(
         AttachMode::Plain,
         AgentServerContext {
             resize,
-            credentials: Arc::new(credentials),
+            credentials: Arc::clone(&credentials),
         },
     )?;
     let (handle, addr) = server.start().await?;
 
-    Ok((addr, handle, TEST_CREDENTIAL.to_string()))
+    Ok((addr, handle, credentials))
 }
 
 /// Connect to central server and register an agent, returning the handle.
@@ -219,7 +221,7 @@ async fn test_full_agent_server_integration() {
     let (server_addr, server_handle, _db_dir) = start_test_server("test-token").await.unwrap();
 
     // Start a real agent server.
-    let (agent_addr, agent_server_handle, _credential) = start_test_agent_server().await.unwrap();
+    let (agent_addr, agent_handle, _) = start_test_agent_server().await.unwrap();
 
     // Register agent with central server.
     let client_handle =
@@ -247,7 +249,7 @@ async fn test_full_agent_server_integration() {
     // Clean shutdown.
     heartbeat_shutdown.shutdown().await.ok();
     client_handle.shutdown().await.ok();
-    agent_server_handle.shutdown().await.ok();
+    agent_handle.shutdown().await.ok();
     server_handle.abort();
 
     // Clean up database.
@@ -260,12 +262,10 @@ async fn test_full_agent_server_integration() {
 #[tokio::test]
 async fn test_client_connects_to_agent_via_p2p() {
     // Start agent server.
-    let (agent_addr, agent_handle, credential) = start_test_agent_server().await.unwrap();
+    let (agent_addr, agent_handle, credentials) = start_test_agent_server().await.unwrap();
 
     // Connect a client directly to the agent.
-    let url = agent_url_with_credential(&format!("ws://{agent_addr}"), &credential);
-    let (ws, _) = connect_async(&url).await.expect("client connection failed");
-    let (mut sink, mut stream) = ws.split();
+    let (mut sink, mut stream) = connect(&credentials, agent_addr).await.unwrap();
 
     // Send a session.list request.
     let req = new_message(agent_msg_types::SESSION_LIST, serde_json::json!({}));
@@ -306,12 +306,13 @@ async fn test_terminal_io_through_full_chain() {
         .unwrap();
 
     // Start agent server.
-    let (agent_addr, agent_handle, credential) = start_test_agent_server().await.unwrap();
+    let (agent_addr, agent_handle, credentials) = start_test_agent_server().await.unwrap();
 
-    // Connect client.
-    let url = agent_url_with_credential(&format!("ws://{agent_addr}"), &credential);
-    let (ws, _) = connect_async(&url).await.expect("connection failed");
-    let (mut sink, mut stream) = ws.split();
+    // The dial comes after the session does: the credential it presents is bound
+    // to `session_name`, which is generated per run.
+    let (mut sink, mut stream) = connect_for(&credentials, agent_addr, &session_name)
+        .await
+        .unwrap();
 
     // Attach to session.
     let attach = ClientAttachPayload {
@@ -408,12 +409,10 @@ async fn test_session_lifecycle() {
     let _tmux = SessionManager::new();
 
     // Start agent server.
-    let (agent_addr, agent_handle, credential) = start_test_agent_server().await.unwrap();
+    let (agent_addr, agent_handle, credentials) = start_test_agent_server().await.unwrap();
 
     // Connect client.
-    let url = agent_url_with_credential(&format!("ws://{agent_addr}"), &credential);
-    let (ws, _) = connect_async(&url).await.expect("connection failed");
-    let (mut sink, mut stream) = ws.split();
+    let (mut sink, mut stream) = connect(&credentials, agent_addr).await.unwrap();
 
     // Create a session.
     let session = TestSession::new("e2e-lifecycle");
@@ -469,7 +468,7 @@ async fn test_agent_reconnects_after_server_restart() {
         start_test_server("reconnect-token").await.unwrap();
 
     // Start agent server.
-    let (agent_addr, agent_handle, _credential) = start_test_agent_server().await.unwrap();
+    let (agent_addr, agent_handle, _) = start_test_agent_server().await.unwrap();
 
     // Register with first server.
     let client_handle = register_agent_with_server(
@@ -523,9 +522,9 @@ async fn test_multiple_agents_register() {
     let (server_addr, server_handle, _db_dir) = start_test_server("multi-token").await.unwrap();
 
     // Start multiple agent servers.
-    let (agent_addr1, agent_handle1, _credential1) = start_test_agent_server().await.unwrap();
-    let (agent_addr2, agent_handle2, _credential2) = start_test_agent_server().await.unwrap();
-    let (agent_addr3, agent_handle3, _credential3) = start_test_agent_server().await.unwrap();
+    let (agent_addr1, agent_handle1, _) = start_test_agent_server().await.unwrap();
+    let (agent_addr2, agent_handle2, _) = start_test_agent_server().await.unwrap();
+    let (agent_addr3, agent_handle3, _) = start_test_agent_server().await.unwrap();
 
     // Register all agents.
     let handle1 = register_agent_with_server(
@@ -577,7 +576,7 @@ async fn test_multiple_agents_register() {
 #[tokio::test]
 async fn test_graceful_shutdown() {
     let (server_addr, server_handle, _db_dir) = start_test_server("shutdown-token").await.unwrap();
-    let (agent_addr, agent_handle, _credential) = start_test_agent_server().await.unwrap();
+    let (agent_addr, agent_handle, _) = start_test_agent_server().await.unwrap();
 
     // Register agent.
     let client_handle = register_agent_with_server(

@@ -2387,15 +2387,38 @@ mod tests {
     use tokio_tungstenite::connect_async;
     use tokio_tungstenite::tungstenite::Message as WsMessage;
 
-    /// Start a test server (OS picks a free port). Returns the real bound
-    /// address and a shutdown handle.
-    /// The credential every dial in this module presents.
+    /// The halves of a dialed connection, named once: this module has three dial
+    /// helpers, and a signature that spells them out runs to twelve lines.
+    type WsSink = futures_util::stream::SplitSink<
+        tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
+        WsMessage,
+    >;
+    type WsStream = futures_util::stream::SplitStream<
+        tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
+    >;
+
+    /// The credential every dial through [`connect_client`] presents.
     ///
     /// A fixed value, not a fresh UUID: each test's server has its own store, so
     /// a per-test token would be unique in a place where nothing else is shared
     /// — and the alternative is threading a returned token through thirty-odd
     /// call sites, which is a large mechanical diff for no property.
     const TEST_CREDENTIAL: &str = "test-credential";
+
+    /// The session [`TEST_CREDENTIAL`]'s terminal binding names.
+    ///
+    /// A placeholder, and deliberately one **no frame in this module carries**:
+    /// the scope gate compares the name in the frame against the name in the
+    /// credential, so a credential bound here reaches no session at all. That is
+    /// what makes it the right credential for the thirty-odd tests that touch no
+    /// terminal wire, and it is why a test that sends one of the five
+    /// session-scoped wires waits until it knows its session's name and dials
+    /// through [`connect_client_for`] instead.
+    const PLACEHOLDER_SESSION: &str = "test";
 
     /// A valid credential that is deliberately narrow: terminal for one session,
     /// no session management, no file sandbox. Minted by the same helper, so a
@@ -2428,7 +2451,7 @@ mod tests {
             .expect("the agent accepts a credential it minted for itself");
     }
 
-    async fn start_test_server_on(_port: u16) -> (SocketAddr, ServerHandle) {
+    async fn start_test_server_on(_port: u16) -> (SocketAddr, ServerHandle, Arc<P2pCredentials>) {
         let tmp = tempfile::tempdir().expect("tempdir");
         let (resize, _resize_updates) = ResizeReporter::new();
         // Granted **before** `start`, which consumes the server: the store is an
@@ -2438,14 +2461,14 @@ mod tests {
         grant_credential(
             &credentials,
             TEST_CREDENTIAL,
-            CredentialScope::for_attach("test"),
+            CredentialScope::for_attach(PLACEHOLDER_SESSION),
         );
         // And one that deliberately lacks the two management scopes, so the
         // gate can be tested against a credential that is valid but narrow.
         grant_credential(
             &credentials,
             NARROW_CREDENTIAL,
-            CredentialScope::for_relay("test"),
+            CredentialScope::for_relay(PLACEHOLDER_SESSION),
         );
         let server = AgentServer::new(
             "127.0.0.1:0",
@@ -2456,57 +2479,78 @@ mod tests {
             AttachMode::Plain,
             AgentServerContext {
                 resize,
-                credentials,
+                credentials: Arc::clone(&credentials),
             },
         )
         .expect("server creation should succeed");
         // Leak the TempDir so the sandbox root persists for the server lifetime.
         Box::leak(Box::new(tmp));
         let (handle, addr) = server.start().await.expect("start should succeed");
-        (addr, handle)
+        (addr, handle, credentials)
+    }
+
+    /// Dial `addr`, presenting `credential`.
+    ///
+    /// The store is asked first, so a dial presenting something it never minted
+    /// fails here with that sentence rather than as the opaque refused upgrade
+    /// this socket gives a peer — `HandshakeIncomplete`, with nothing in it
+    /// about which end said no.
+    async fn dial_presenting(
+        credentials: &P2pCredentials,
+        addr: SocketAddr,
+        credential: &str,
+    ) -> (WsSink, WsStream) {
+        assert!(
+            credentials.authorize(credential).is_ok(),
+            "the credential a test dial presents must be one its server's store honours"
+        );
+        let url = agent_url_with_credential(&format!("ws://{addr}"), credential);
+        let (ws_stream, _response) = connect_async(&url).await.expect("connect should succeed");
+        ws_stream.split()
     }
 
     /// Connect a WebSocket client to a test server.
-    async fn connect_client(
+    ///
+    /// Presents [`TEST_CREDENTIAL`], the credential `start_test_server_on`
+    /// granted, and so reaches every wire **except** the five the scope gate
+    /// binds to a session name (#1013). A test that sends one of those says which
+    /// session it means through [`connect_client_for`].
+    async fn connect_client(credentials: &P2pCredentials, addr: SocketAddr) -> (WsSink, WsStream) {
+        dial_presenting(credentials, addr, TEST_CREDENTIAL).await
+    }
+
+    /// Connect presenting a credential bound to `session`.
+    ///
+    /// Mints into the server's own store, so the credential these tests present
+    /// is one the production `grant` path accepted — and mints it *here* rather
+    /// than at `start_test_server_on`, because the session names these tests
+    /// attach to are generated per run and do not exist yet when the server
+    /// starts.
+    ///
+    /// The credential string is derived from the session name: the store is per
+    /// server and the servers are per test, so uniqueness only has to hold within
+    /// one test, and a second dial for the same session re-grants the same value
+    /// instead of needing a counter.
+    async fn connect_client_for(
+        credentials: &P2pCredentials,
         addr: SocketAddr,
-    ) -> (
-        futures_util::stream::SplitSink<
-            tokio_tungstenite::WebSocketStream<
-                tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
-            >,
-            WsMessage,
-        >,
-        futures_util::stream::SplitStream<
-            tokio_tungstenite::WebSocketStream<
-                tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
-            >,
-        >,
-    ) {
-        // The credential is a constant rather than something each caller
-        // threads in, because there are thirty-odd dial sites in this module and
-        // every one of them mints into its own server. What has to stay real is
-        // the *check*, and it does: the upgrade runs the production handshake
-        // against a store filled through the production `grant`.
-        let url = agent_url_with_credential(&format!("ws://{addr}"), TEST_CREDENTIAL);
-        let (ws_stream, _response) = connect_async(&url).await.expect("connect should succeed");
-        ws_stream.split()
+        session: &str,
+    ) -> (WsSink, WsStream) {
+        let credential = format!("credential-for-{session}");
+        grant_credential(
+            credentials,
+            &credential,
+            CredentialScope::for_attach(session),
+        );
+        dial_presenting(credentials, addr, &credential).await
     }
 
     /// Send a JSON request and receive the matching JSON response.
     /// Skips over unsolicited messages (e.g., terminal.output) that may
     /// arrive from background tasks.
     async fn send_and_receive<S, R>(
-        sink: &mut futures_util::stream::SplitSink<
-            tokio_tungstenite::WebSocketStream<
-                tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
-            >,
-            WsMessage,
-        >,
-        stream: &mut futures_util::stream::SplitStream<
-            tokio_tungstenite::WebSocketStream<
-                tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
-            >,
-        >,
+        sink: &mut WsSink,
+        stream: &mut WsStream,
         request: &Message<S>,
     ) -> Message<R>
     where
@@ -2760,8 +2804,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_session_list_request() {
-        let (addr, handle) = start_test_server_on(18081).await;
-        let (mut sink, mut stream) = connect_client(addr).await;
+        let (addr, handle, credentials) = start_test_server_on(18081).await;
+        let (mut sink, mut stream) = connect_client(&credentials, addr).await;
 
         let req = new_message(msg_types::SESSION_LIST, serde_json::json!({}));
         let resp: Message<serde_json::Value> = send_and_receive(&mut sink, &mut stream, &req).await;
@@ -2776,8 +2820,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_session_create_and_kill() {
-        let (addr, handle) = start_test_server_on(18082).await;
-        let (mut sink, mut stream) = connect_client(addr).await;
+        let (addr, handle, credentials) = start_test_server_on(18082).await;
+        let (mut sink, mut stream) = connect_client(&credentials, addr).await;
 
         let session = TestSession::new("srv-create-kill");
         let session_name = session.name().to_string();
@@ -2816,8 +2860,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_client_attach_detach() {
-        let (addr, handle) = start_test_server_on(18083).await;
-        let (mut sink, mut stream) = connect_client(addr).await;
+        let (addr, handle, credentials) = start_test_server_on(18083).await;
 
         // Create a real tmux session first so attach has something to
         // connect to.
@@ -2830,6 +2873,10 @@ mod tests {
         tmux.create_session(&session_name, 80, 24, "/tmp", &[])
             .await
             .unwrap();
+
+        // The dial comes after the session does: the credential it presents is
+        // bound to `session_name`, which is generated per run.
+        let (mut sink, mut stream) = connect_client_for(&credentials, addr, &session_name).await;
 
         // Attach via WebSocket.
         let attach_payload = ClientAttachPayload {
@@ -2863,8 +2910,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_terminal_io_flow() {
-        let (addr, handle) = start_test_server_on(18084).await;
-        let (mut sink, mut stream) = connect_client(addr).await;
+        let (addr, handle, credentials) = start_test_server_on(18084).await;
 
         let tmux = SessionManager::new();
         let session = TestSession::new("srv-io");
@@ -2873,6 +2919,10 @@ mod tests {
         tmux.create_session(&session_name, 80, 24, "/tmp", &[])
             .await
             .unwrap();
+
+        // The dial comes after the session does: the credential it presents is
+        // bound to `session_name`, which is generated per run.
+        let (mut sink, mut stream) = connect_client_for(&credentials, addr, &session_name).await;
 
         // Attach.
         let attach_payload = ClientAttachPayload {
@@ -2947,8 +2997,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_unknown_message_type_returns_error() {
-        let (addr, handle) = start_test_server_on(18085).await;
-        let (mut sink, mut stream) = connect_client(addr).await;
+        let (addr, handle, credentials) = start_test_server_on(18085).await;
+        let (mut sink, mut stream) = connect_client(&credentials, addr).await;
 
         let req: Message<serde_json::Value> = Message {
             msg_type: "unknown.type".to_string(),
@@ -2967,8 +3017,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_capture_preview_lines_zero_rejected() {
-        let (addr, handle) = start_test_server_on(0).await;
-        let (mut sink, mut stream) = connect_client(addr).await;
+        let (addr, handle, credentials) = start_test_server_on(0).await;
+        let (mut sink, mut stream) = connect_client_for(&credentials, addr, "any").await;
 
         let payload = SessionCapturePreviewPayload {
             session_name: "any".to_string(),
@@ -2985,8 +3035,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_capture_preview_lines_too_large_rejected() {
-        let (addr, handle) = start_test_server_on(0).await;
-        let (mut sink, mut stream) = connect_client(addr).await;
+        let (addr, handle, credentials) = start_test_server_on(0).await;
+        let (mut sink, mut stream) = connect_client_for(&credentials, addr, "any").await;
 
         let payload = SessionCapturePreviewPayload {
             session_name: "any".to_string(),
@@ -3003,8 +3053,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_capture_preview_unknown_session_returns_error() {
-        let (addr, handle) = start_test_server_on(0).await;
-        let (mut sink, mut stream) = connect_client(addr).await;
+        let (addr, handle, credentials) = start_test_server_on(0).await;
+        let (mut sink, mut stream) =
+            connect_client_for(&credentials, addr, "nession-test-does-not-exist-xyz").await;
 
         let payload = SessionCapturePreviewPayload {
             session_name: "nession-test-does-not-exist-xyz".to_string(),
@@ -3021,8 +3072,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_capture_preview_valid_request_returns_base64() {
-        let (addr, handle) = start_test_server_on(0).await;
-        let (mut sink, mut stream) = connect_client(addr).await;
+        let (addr, handle, credentials) = start_test_server_on(0).await;
 
         let tmux = SessionManager::new();
         let session = TestSession::new("srv-preview");
@@ -3036,6 +3086,10 @@ mod tests {
             .await
             .unwrap();
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+        // The dial comes after the session does: the credential it presents is
+        // bound to `session_name`, which is generated per run.
+        let (mut sink, mut stream) = connect_client_for(&credentials, addr, &session_name).await;
 
         let payload = SessionCapturePreviewPayload {
             session_name: session_name.clone(),
@@ -3068,8 +3122,8 @@ mod tests {
     /// id echoed by the sender, not a correlation the receiver derives.
     #[tokio::test]
     async fn a_control_ping_is_met_with_a_control_pong() {
-        let (addr, handle) = start_test_server_on(18092).await;
-        let (mut sink, mut stream) = connect_client(addr).await;
+        let (addr, handle, credentials) = start_test_server_on(18092).await;
+        let (mut sink, mut stream) = connect_client(&credentials, addr).await;
 
         let req: Message<serde_json::Value> = Message {
             msg_type: msg_types::CONTROL_PING.to_string(),
@@ -3096,8 +3150,8 @@ mod tests {
         // The argument is vestigial — `start_test_server_on` ignores it and
         // binds `127.0.0.1:0` — so it is `0` rather than a number that reads
         // like a real port.
-        let (addr, handle) = start_test_server_on(0).await;
-        let (mut sink, mut stream) = connect_client(addr).await;
+        let (addr, handle, credentials) = start_test_server_on(0).await;
+        let (mut sink, mut stream) = connect_client(&credentials, addr).await;
 
         for wire in [msg_types::CONTROL_PONG, msg_types::CONTROL_HEARTBEAT] {
             let req: Message<serde_json::Value> = Message {
@@ -3142,8 +3196,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_invalid_json_returns_error() {
-        let (addr, handle) = start_test_server_on(18086).await;
-        let (mut sink, mut stream) = connect_client(addr).await;
+        let (addr, handle, credentials) = start_test_server_on(18086).await;
+        let (mut sink, mut stream) = connect_client(&credentials, addr).await;
 
         sink.send(WsMessage::Text("not valid json".to_string()))
             .await
@@ -3164,8 +3218,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_file_list_root() {
-        let (addr, handle) = start_test_server_on(18087).await;
-        let (mut sink, mut stream) = connect_client(addr).await;
+        let (addr, handle, credentials) = start_test_server_on(18087).await;
+        let (mut sink, mut stream) = connect_client(&credentials, addr).await;
 
         let req = new_message(
             msg_types::FILE_LIST,
@@ -3182,8 +3236,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_file_write_and_read_roundtrip() {
-        let (addr, handle) = start_test_server_on(18088).await;
-        let (mut sink, mut stream) = connect_client(addr).await;
+        let (addr, handle, credentials) = start_test_server_on(18088).await;
+        let (mut sink, mut stream) = connect_client(&credentials, addr).await;
 
         let content = b"nession file test";
         let b64 = base64::engine::general_purpose::STANDARD.encode(content);
@@ -3220,8 +3274,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_file_list_then_read_roundtrip() {
-        let (addr, handle) = start_test_server_on(18091).await;
-        let (mut sink, mut stream) = connect_client(addr).await;
+        let (addr, handle, credentials) = start_test_server_on(18091).await;
+        let (mut sink, mut stream) = connect_client(&credentials, addr).await;
 
         // 1. Write a file.
         let content = b"roundtrip via list_dir path";
@@ -3314,8 +3368,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_file_delete() {
-        let (addr, handle) = start_test_server_on(18089).await;
-        let (mut sink, mut stream) = connect_client(addr).await;
+        let (addr, handle, credentials) = start_test_server_on(18089).await;
+        let (mut sink, mut stream) = connect_client(&credentials, addr).await;
 
         let b64 = base64::engine::general_purpose::STANDARD.encode(b"to delete");
         let write_req = new_message(
@@ -3361,8 +3415,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_file_permission_denied_on_escape() {
-        let (addr, handle) = start_test_server_on(18090).await;
-        let (mut sink, mut stream) = connect_client(addr).await;
+        let (addr, handle, credentials) = start_test_server_on(18090).await;
+        let (mut sink, mut stream) = connect_client(&credentials, addr).await;
 
         let req = new_message(
             msg_types::FILE_READ,
@@ -3381,8 +3435,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_file_create_dir() {
-        let (addr, handle) = start_test_server_on(18093).await;
-        let (mut sink, mut stream) = connect_client(addr).await;
+        let (addr, handle, credentials) = start_test_server_on(18093).await;
+        let (mut sink, mut stream) = connect_client(&credentials, addr).await;
 
         // Create a nested directory
         let create_req = new_message(
@@ -3435,8 +3489,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_file_rename() {
-        let (addr, handle) = start_test_server_on(18094).await;
-        let (mut sink, mut stream) = connect_client(addr).await;
+        let (addr, handle, credentials) = start_test_server_on(18094).await;
+        let (mut sink, mut stream) = connect_client(&credentials, addr).await;
 
         // Write a file
         let content = b"rename test";
@@ -3500,8 +3554,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_terminal_input_invalid_base64() {
-        let (addr, handle) = start_test_server_on(18095).await;
-        let (mut sink, mut stream) = connect_client(addr).await;
+        let (addr, handle, credentials) = start_test_server_on(18095).await;
 
         let tmux = SessionManager::new();
         let session = TestSession::new("srv-invalid-b64");
@@ -3510,6 +3563,10 @@ mod tests {
         tmux.create_session(&session_name, 80, 24, "/tmp", &[])
             .await
             .unwrap();
+
+        // The dial comes after the session does: the credential it presents is
+        // bound to `session_name`, which is generated per run.
+        let (mut sink, mut stream) = connect_client_for(&credentials, addr, &session_name).await;
 
         // Attach first
         let attach_payload = ClientAttachPayload {
@@ -3657,8 +3714,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_web_ui_client_auth() {
-        let (addr, handle) = start_test_server_on(18096).await;
-        let (mut sink, mut stream) = connect_client(addr).await;
+        let (addr, handle, credentials) = start_test_server_on(18096).await;
+        let (mut sink, mut stream) = connect_client(&credentials, addr).await;
 
         let auth_payload = ClientAuthPayload {
             auth_token: "test-token".to_string(),
@@ -3677,8 +3734,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_web_ui_client_auth_generates_id() {
-        let (addr, handle) = start_test_server_on(18097).await;
-        let (mut sink, mut stream) = connect_client(addr).await;
+        let (addr, handle, credentials) = start_test_server_on(18097).await;
+        let (mut sink, mut stream) = connect_client(&credentials, addr).await;
 
         let auth_payload = ClientAuthPayload {
             auth_token: "test-token".to_string(),
@@ -3703,8 +3760,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_web_ui_sessions_list() {
-        let (addr, handle) = start_test_server_on(18099).await;
-        let (mut sink, mut stream) = connect_client(addr).await;
+        let (addr, handle, credentials) = start_test_server_on(18099).await;
+        let (mut sink, mut stream) = connect_client(&credentials, addr).await;
 
         let req = new_message(msg_types::CLIENT_SESSIONS_LIST, serde_json::json!({}));
         let resp: Message<WebSessionsListResponse> =
@@ -3719,8 +3776,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_web_ui_session_attach() {
-        let (addr, handle) = start_test_server_on(18100).await;
-        let (mut sink, mut stream) = connect_client(addr).await;
+        let (addr, handle, credentials) = start_test_server_on(18100).await;
+        let (mut sink, mut stream) = connect_client(&credentials, addr).await;
 
         let payload = WebSessionAttachPayload {
             session_id: "test-agent:my-session".to_string(),
@@ -3739,8 +3796,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_web_ui_session_create_and_kill() {
-        let (addr, handle) = start_test_server_on(18101).await;
-        let (mut sink, mut stream) = connect_client(addr).await;
+        let (addr, handle, credentials) = start_test_server_on(18101).await;
+        let (mut sink, mut stream) = connect_client(&credentials, addr).await;
 
         let session = TestSession::new("web-create-kill");
         let session_name = session.name().to_string();
@@ -3782,8 +3839,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_web_ui_session_kill_nonexistent() {
-        let (addr, handle) = start_test_server_on(18102).await;
-        let (mut sink, mut stream) = connect_client(addr).await;
+        let (addr, handle, credentials) = start_test_server_on(18102).await;
+        let (mut sink, mut stream) = connect_client(&credentials, addr).await;
 
         let kill_payload = WebSessionKillPayload {
             session_id: "agent:nonexistent-session-xyz".to_string(),
@@ -3801,8 +3858,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_web_ui_session_create_invalid_payload() {
-        let (addr, handle) = start_test_server_on(18103).await;
-        let (mut sink, mut stream) = connect_client(addr).await;
+        let (addr, handle, credentials) = start_test_server_on(18103).await;
+        let (mut sink, mut stream) = connect_client(&credentials, addr).await;
 
         // Send a completely invalid payload (missing name field)
         let req = new_message(
@@ -3821,8 +3878,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_client_detach_not_attached() {
-        let (addr, handle) = start_test_server_on(18104).await;
-        let (mut sink, mut stream) = connect_client(addr).await;
+        let (addr, handle, credentials) = start_test_server_on(18104).await;
+        let (mut sink, mut stream) =
+            connect_client_for(&credentials, addr, "never-attached-session").await;
 
         let detach_payload = ClientDetachPayload {
             session_name: "never-attached-session".to_string(),
@@ -3838,8 +3896,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_terminal_input_not_attached() {
-        let (addr, handle) = start_test_server_on(18105).await;
-        let (mut sink, mut stream) = connect_client(addr).await;
+        let (addr, handle, credentials) = start_test_server_on(18105).await;
+        let (mut sink, mut stream) =
+            connect_client_for(&credentials, addr, "no-such-session").await;
 
         use base64::Engine;
         let input_payload = TerminalInputPayload {
@@ -3857,8 +3916,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_terminal_resize_not_attached() {
-        let (addr, handle) = start_test_server_on(18106).await;
-        let (mut sink, mut stream) = connect_client(addr).await;
+        let (addr, handle, credentials) = start_test_server_on(18106).await;
+        let (mut sink, mut stream) =
+            connect_client_for(&credentials, addr, "no-such-session").await;
 
         let resize_payload = TerminalResizePayload {
             session_name: "no-such-session".to_string(),
@@ -3997,7 +4057,7 @@ mod tests {
     /// have returned a socket.
     #[tokio::test]
     async fn a_connection_with_no_credential_is_refused() {
-        let (addr, handle) = start_test_server_on(0).await;
+        let (addr, handle, _) = start_test_server_on(0).await;
 
         let refused = connect_async(format!("ws://{addr}")).await;
 
@@ -4017,7 +4077,7 @@ mod tests {
     /// tell a caller which of its guesses was closest.
     #[tokio::test]
     async fn a_credential_nobody_issued_is_refused() {
-        let (addr, handle) = start_test_server_on(0).await;
+        let (addr, handle, _) = start_test_server_on(0).await;
 
         let url = agent_url_with_credential(&format!("ws://{addr}"), "a-guess");
         let refused = connect_async(&url).await;
@@ -4033,11 +4093,11 @@ mod tests {
     /// everything, which is a different bug with the same green.
     #[tokio::test]
     async fn the_minted_credential_is_accepted() {
-        let (addr, handle) = start_test_server_on(0).await;
+        let (addr, handle, credentials) = start_test_server_on(0).await;
 
         // `connect_client` presents `TEST_CREDENTIAL`, which
         // `start_test_server_on` minted; reaching the next line is the assertion.
-        let (mut sink, mut stream) = connect_client(addr).await;
+        let (mut sink, mut stream) = connect_client(&credentials, addr).await;
         let req: Message<serde_json::Value> = Message {
             msg_type: msg_types::CONTROL_PING.to_string(),
             id: "cred-ok".to_string(),
@@ -4060,7 +4120,7 @@ mod tests {
     /// that reports nothing about the cause.
     #[tokio::test]
     async fn a_frame_outside_the_scope_is_refused_and_the_connection_survives() {
-        let (addr, handle) = start_test_server_on(0).await;
+        let (addr, handle, _) = start_test_server_on(0).await;
 
         // A relay credential: terminal for one session, and neither session
         // management nor the file sandbox. Presented directly rather than
@@ -4120,8 +4180,8 @@ mod tests {
     /// problem is the wire name.
     #[tokio::test]
     async fn an_unknown_wire_is_not_reported_as_a_scope_refusal() {
-        let (addr, handle) = start_test_server_on(0).await;
-        let (mut sink, mut stream) = connect_client(addr).await;
+        let (addr, handle, credentials) = start_test_server_on(0).await;
+        let (mut sink, mut stream) = connect_client(&credentials, addr).await;
 
         let req: Message<serde_json::Value> = Message {
             msg_type: "agent.nothing.here".to_string(),
@@ -4143,8 +4203,8 @@ mod tests {
     /// stores, and the second has never heard of this token.
     #[tokio::test]
     async fn one_agents_credential_is_refused_by_another() {
-        let (addr_a, handle_a) = start_test_server_on(0).await;
-        let (addr_b, handle_b) = start_test_server_on(0).await;
+        let (addr_a, handle_a, credentials_a) = start_test_server_on(0).await;
+        let (addr_b, handle_b, _) = start_test_server_on(0).await;
 
         // Both servers mint `TEST_CREDENTIAL` for their own `test-agent` id, so
         // the tokens are equal strings in two stores — which is exactly why the
@@ -4158,7 +4218,7 @@ mod tests {
         );
         // And a's own credential still works, so the refusal above is about the
         // credential rather than about the server.
-        let _ok = connect_client(addr_a).await;
+        let _ok = connect_client(&credentials_a, addr_a).await;
 
         handle_a.shutdown().await.ok();
         handle_b.shutdown().await.ok();

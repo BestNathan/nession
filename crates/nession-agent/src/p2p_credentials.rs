@@ -88,21 +88,13 @@ pub enum WireScope {
     /// the connection itself — the legacy handshake, and anything that describes
     /// or keeps alive the socket rather than acting on the agent's resources.
     Connection,
-    /// The terminal plane, bound to one session.
+    /// The terminal plane, bound to one session **by name**.
     ///
-    /// **Stage 2 enforces the binding's presence, not its value.** A credential
-    /// with no terminal binding at all is refused here; one bound to a *different*
-    /// session is not yet, and that comparison is Stage 3's — the stage whose
-    /// evidence is "a session-scoped credential refused on a different session".
-    ///
-    /// The split is not laziness. Comparing the name is the half that changes
-    /// what every existing terminal test has to do: their session names are
-    /// generated per test (`nession-test-<prefix>-<nanos>`), so a test credential
-    /// bound to one name cannot cover the session the test creates, and each of
-    /// those sites has to mint for its own session instead. Doing that in the
-    /// same change as turning enforcement on would put a mechanical rewrite of
-    /// thirty dial sites and the enforcement decision in one diff, where a
-    /// failure could be either.
+    /// The name in the frame is compared against the name in the credential.
+    /// Anything else — a credential with no binding, a binding for another
+    /// session, a frame that named none — is refused, and  those are three
+    /// different rules that a single "has a terminal binding" test would collapse
+    /// into one that grants all three.
     Session(String),
     /// Session management on this agent: create, kill, list.
     Sessions,
@@ -122,16 +114,25 @@ impl ConnectionAuthority {
     pub fn covers(&self, required: &WireScope) -> bool {
         match required {
             WireScope::Connection => true,
-            // Two conditions, and the first is the one that will not relax:
-            // a frame that named no session is refused, because the answer to
-            // "may I act on the session I did not name" is no, and a credential
-            // that treats an unnamed frame as *any* session is a credential
-            // every caller can reach every session with by omitting a field.
+            // The name is compared, not merely required to be present.
             //
-            // The second is Stage 2's reading of the binding: present, not
-            // compared. See [`WireScope::Session`] for why the comparison is
-            // Stage 3's.
-            WireScope::Session(name) => !name.is_empty() && self.scope.terminal.is_some(),
+            // "Has a terminal binding" is not the boundary a credential for one
+            // session is supposed to be: an agent serving a hundred sessions
+            // would honour any of them for a credential minted for one, and a
+            // relay credential — terminal for the session being relayed and
+            // nothing else — would open a different session's PTY. The binding
+            // is only a binding if it is checked against the name the frame
+            // carries.
+            //
+            // The empty name is refused for the same reason and separately: the
+            // answer to "may I act on the session I did not name" is no, and a
+            // credential that read an unnamed frame as *any* session would let
+            // every caller reach every session by omitting a field.
+            WireScope::Session(name) => {
+                !name.is_empty()
+                    && (self.scope.terminal_all_sessions
+                        || self.scope.terminal.as_deref() == Some(name.as_str()))
+            }
             WireScope::Sessions => self.scope.sessions,
             WireScope::Files => self.scope.files,
         }
@@ -209,6 +210,41 @@ impl P2pCredentials {
         );
 
         Ok(id)
+    }
+
+    /// Hold a credential this agent was **configured** with, rather than
+    /// granted.
+    ///
+    /// The standalone path's only way in. `server_url = ""` has no Server to
+    /// mint a credential and no outbound channel to receive a grant on, so the
+    /// operator's own token is the one secret in the picture. Everything
+    /// downstream is unchanged — same store, same lookup, same scope gate — so
+    /// the only thing this bypasses is *delivery*, which is precisely what a
+    /// grant exists to do.
+    ///
+    /// **Never expires**, and that is a property of having no issuer rather than
+    /// a relaxation: a Server's credential is short-lived because the Server can
+    /// mint another, and a configured token has no second source. Restarting
+    /// the agent with a different token is the rotation.
+    ///
+    /// The expiry is written as the far future rather than as an absence so it
+    /// travels the same path as every other credential: a store with two kinds
+    /// of entry would need every reader to know which kind it had.
+    pub fn grant_configured(
+        &self,
+        this_agent: &str,
+        credential: &str,
+        scope: CredentialScope,
+    ) -> Result<String, Refusal> {
+        let grant = P2pGrantPayload {
+            request_id: "configured".to_string(),
+            credential: credential.to_string(),
+            agent_id: this_agent.to_string(),
+            session_id: this_agent.to_string(),
+            scope,
+            expires_at: (Utc::now() + chrono::Duration::days(3650)).to_rfc3339(),
+        };
+        self.grant(this_agent, &grant)
     }
 
     /// What a presented credential proves, or why it proves nothing.
@@ -437,28 +473,47 @@ mod tests {
         assert!(bare.covers(&WireScope::Connection));
     }
 
-    /// A terminal credential covers terminal frames; one without a binding does
-    /// not.
+    /// A terminal credential covers its own session and no other.
     ///
-    /// **Stage 2's row.** The deliberately-absent assertion is that a credential
-    /// for `"work"` is refused on `"other"` — it is not, yet, and this test says
-    /// so by not claiming it. When Stage 3 adds the comparison, the row that
-    /// fails is this one, which is where that change should have to come.
+    /// The row that makes the binding a boundary rather than a formality. An
+    /// agent serves many sessions, so "this credential has *a* terminal binding"
+    /// would honour any of them for a credential minted for one — and the
+    /// relay's credential, terminal for the session being relayed, would reach
+    /// every other session on the node.
     #[test]
-    fn a_terminal_credential_covers_terminal_wires_and_a_bare_one_does_not() {
+    fn a_terminal_credential_covers_only_the_session_it_names() {
         let attach = authority_for(CredentialScope::for_attach("work"));
-        assert!(attach.covers(&WireScope::Session("work".to_string())));
 
+        assert!(attach.covers(&WireScope::Session("work".to_string())));
+        assert!(
+            !attach.covers(&WireScope::Session("other".to_string())),
+            "a credential minted for one session must not open another's PTY"
+        );
+    }
+
+    /// A credential with no terminal binding covers no terminal wire at all.
+    ///
+    /// Separate from the row above because it fails separately: a `covers` that
+    /// compared names without first checking there was a name to compare would
+    /// pass that test and fail this one only if `None` happened to match, which
+    /// is the shape a `Some`/`None` mix-up produces. The empty name is in the
+    /// list for the same reason — it is the third way to name no session.
+    #[test]
+    fn a_credential_with_no_terminal_binding_covers_no_terminal_wire() {
         let no_terminal = authority_for(CredentialScope {
             terminal: None,
+            terminal_all_sessions: false,
             sessions: true,
             files: true,
         });
-        assert!(
-            !no_terminal.covers(&WireScope::Session("work".to_string())),
-            "a credential with no terminal binding must not reach a terminal wire, \
-             whatever session the frame names"
-        );
+
+        for named in ["work", "", "other"] {
+            assert!(
+                !no_terminal.covers(&WireScope::Session(named.to_string())),
+                "a credential with no terminal binding must not reach a terminal \
+                 wire, whatever session the frame names ({named:?})"
+            );
+        }
     }
 
     /// A frame that names no session is refused, not treated as "any".
@@ -503,6 +558,7 @@ mod tests {
     fn a_terminal_only_credential_covers_no_management_row() {
         let terminal_only = authority_for(CredentialScope {
             terminal: Some("work".to_string()),
+            terminal_all_sessions: false,
             sessions: false,
             files: false,
         });
@@ -510,6 +566,72 @@ mod tests {
         assert!(terminal_only.covers(&WireScope::Session("work".to_string())));
         assert!(!terminal_only.covers(&WireScope::Sessions));
         assert!(!terminal_only.covers(&WireScope::Files));
+    }
+
+    // ── The standalone path (#1013 Stage 5) ─────────────────────────────────
+
+    /// A standalone credential covers every session, and still refuses an
+    /// unnamed one.
+    ///
+    /// Both halves matter and they fail differently. The broad grant is the
+    /// point of `for_standalone` — one operator token has to reach every
+    /// session on the node, because there is no Server to mint one per session.
+    /// The refusal is the part that must **not** come along with it: a
+    /// credential that read an unnamed frame as "any session" would let a
+    /// caller reach any of them by omitting a field, and that hole is not
+    /// narrower for being on a standalone agent.
+    #[test]
+    fn a_standalone_credential_covers_every_session() {
+        let standalone = authority_for(CredentialScope::for_standalone());
+
+        for named in ["work", "other", "nession-test-abc-123"] {
+            assert!(
+                standalone.covers(&WireScope::Session(named.to_string())),
+                "a standalone credential must reach {named:?}"
+            );
+        }
+        assert!(
+            !standalone.covers(&WireScope::Session(String::new())),
+            "even the broad grant refuses a frame that named no session"
+        );
+        assert!(standalone.covers(&WireScope::Sessions));
+        assert!(standalone.covers(&WireScope::Files));
+    }
+
+    /// A configured credential is held like a granted one, and survives the
+    /// sweep that drops expired ones.
+    ///
+    /// The sweep is the specific hazard: `grant` prunes what has expired on
+    /// every write, and a configured token carries a far-future deadline rather
+    /// than no deadline at all precisely so it travels the same path. A store
+    /// that dropped it would leave a standalone agent refusing every connection
+    /// the first time any other credential arrived.
+    #[test]
+    fn a_configured_credential_is_honoured_and_outlives_the_sweep() {
+        let credentials = P2pCredentials::new();
+        credentials
+            .grant_configured(
+                AGENT,
+                "the-operator-token",
+                CredentialScope::for_standalone(),
+            )
+            .expect("an agent accepts the credential it was configured with");
+
+        let authority = credentials
+            .authorize("the-operator-token")
+            .expect("authorized");
+        assert!(authority.covers(&WireScope::Session("any".to_string())));
+
+        // A write goes through the same store, which is what triggers the sweep.
+        credentials
+            .grant(AGENT, &grant_for(AGENT, "old", Duration::seconds(-1)))
+            .expect("granted");
+
+        assert!(
+            credentials.authorize("the-operator-token").is_ok(),
+            "a write to the store dropped the configured credential; it has no issuer to \\
+             re-mint it, so losing it means the agent refuses every connection from then on"
+        );
     }
 
     /// The id in a log line is not the credential.

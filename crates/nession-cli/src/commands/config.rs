@@ -1,7 +1,8 @@
 //! Config CLI commands — init, show, and modify agent/server configuration.
 //!
-//! Agent and Server configs carry `auth_token`, so two invariants hold at this
-//! boundary (#1017):
+//! Agent and Server configs carry credentials — `auth_token` for a Server, and
+//! since `#1013` `agent_token` for an agent's own P2P socket — so two invariants
+//! hold at this boundary (#1017):
 //!
 //! - a secret value is never printed by default — neither by `show` nor in the
 //!   confirmation `set` prints;
@@ -50,7 +51,7 @@ const MASK: &str = "********";
 /// depth, and `set` asks the same question before echoing a value. Adding a
 /// credential is therefore one line rather than one line per command — which is
 /// the property that keeps the next command from leaking it by omission.
-const SECRET_KEYS: [&str; 1] = ["auth_token"];
+const SECRET_KEYS: [&str; 2] = ["auth_token", "agent_token"];
 
 fn is_secret(key: &str) -> bool {
     SECRET_KEYS.contains(&key)
@@ -358,13 +359,44 @@ mod tests {
         Ok(toml::to_string_pretty(&config)?)
     }
 
+    /// The agent's token **for a Server**: `auth_token`, outbound.
+    ///
+    /// Named for that direction, because there is now a second agent token
+    /// going the other way and this test was called
+    /// `show_redacts_the_agent_token` — a name that would have gone on being
+    /// true of the wrong field.
     #[test]
-    fn show_redacts_the_agent_token() {
+    fn show_redacts_the_agent_auth_token() {
         let shown =
             rendered_config("agent", &agent_with_token().expect("serialize")).expect("render");
         assert!(
             !shown.contains(TOKEN),
-            "the agent token reached `show`: {shown}"
+            "the agent's server token reached `show`: {shown}"
+        );
+        assert!(shown.contains(MASK), "nothing was redacted: {shown}");
+    }
+
+    /// The agent's token **for its clients**: `agent_token`, inbound.
+    ///
+    /// Masked because a `config show` output most often ends up pasted
+    /// somewhere — a bug report, a chat — and this is the secret that opens the
+    /// agent's P2P socket, which dispatches session management and the file
+    /// sandbox as well as the terminal.
+    #[test]
+    fn show_redacts_the_agent_token() {
+        let mut value: toml::Value =
+            toml::from_str(&agent_with_token().expect("serialize")).expect("parse");
+        value.as_table_mut().expect("a document").insert(
+            "agent_token".to_string(),
+            toml::Value::String(TOKEN.to_string()),
+        );
+
+        let shown = rendered_config("agent", &toml::to_string_pretty(&value).expect("serialize"))
+            .expect("render");
+
+        assert!(
+            !shown.contains(TOKEN),
+            "the agent's P2P token reached `show`: {shown}"
         );
         assert!(shown.contains(MASK), "nothing was redacted: {shown}");
     }
