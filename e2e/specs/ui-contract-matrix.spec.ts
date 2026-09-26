@@ -22,6 +22,7 @@ import {
   expectTouchTarget,
   expectTouchTargetsWithin,
   expectVisibleWithin,
+  waitForSettledBox,
 } from '../helpers/ui-assert/assertions';
 import { loadContracts, type Experience } from '../helpers/ui-assert/contracts';
 
@@ -73,6 +74,10 @@ async function assertPopupMenu(
   await trigger.click();
   const menu = page.getByRole('menu');
   await expect(menu).toBeVisible();
+  // `toBeVisible` resolves on the animation's first frame, where a 44px row
+  // measures 43.57px. Measured, not assumed: the floor is pixel-exact, so the
+  // read has to come from a settled frame (see `waitForSettledBox`).
+  await waitForSettledBox(menu);
 
   const items = menu.getByRole('menuitem');
   const count = await items.count();

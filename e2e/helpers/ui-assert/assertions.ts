@@ -288,6 +288,45 @@ export async function expectTouchTarget(locator: Locator, opts: AssertOptions): 
 }
 
 /**
+ * Wait until `locator`'s box stops changing, then return.
+ *
+ * A popup animates on open (`data-open:zoom-in-95 … duration-100`), so the rect
+ * read the moment `toBeVisible()` resolves is a rect *during* a 0.95 → 1 scale.
+ * Measured on the App capability menu: 43.57px for a 44px item one frame after
+ * it appeared, 43.96px a frame later. A pixel floor cannot be measured in flight
+ * — the assertion would fail on the animation's first frame rather than on the
+ * layout, and would pass or fail depending on machine speed. So the read is
+ * taken from a settled frame, which is what `settledPair` already does for the
+ * capsule's drawn affordance (#1058) and for the same reason.
+ *
+ * It returns after `attempts` regardless: a box that never settles is a real
+ * failure, and it should be reported by the assertion that follows rather than
+ * as a timeout here.
+ */
+export async function waitForSettledBox(locator: Locator, attempts = 20): Promise<void> {
+  const read = () =>
+    locator.evaluate((node: Element) => {
+      const rect = node.getBoundingClientRect();
+      return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+    });
+
+  let previous = await read();
+  for (let i = 0; i < attempts; i += 1) {
+    await locator.page().waitForTimeout(50);
+    const next = await read();
+    if (
+      next.x === previous.x &&
+      next.y === previous.y &&
+      next.width === previous.width &&
+      next.height === previous.height
+    ) {
+      return;
+    }
+    previous = next;
+  }
+}
+
+/**
  * What makes an element a control a user can hit. Structural (tag) plus
  * ARIA-role forms, because the same control is a `<button>` in one primitive and
  * a `<div role="menuitem">` in another — a menu item is exactly the second kind.
