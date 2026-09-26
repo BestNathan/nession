@@ -164,6 +164,34 @@ test.describe('App 390×844', () => {
     });
   });
 
+  // #1102: the Peek is the surface #1046 creates — the Signal's second depth —
+  // and until this test it was in no image at all. Every capsule state *around*
+  // it was captured (the Signal above, the entry and the accessory below) and
+  // the one the requirement is about was not, so a regression inside the Peek
+  // had nothing that could fail.
+  test('Git Peek on the Terminal', async ({ page }) => {
+    await gotoFixtureApp(page);
+    await waitForFixtureTerminal(page);
+
+    await page.getByTestId('capsule-capability-more').click();
+    await page.getByTestId('capsule-capability-picker-git').click();
+    // The title is the step from Signal to Peek, and it goes inert once there —
+    // so `git-peek-body` below is what says this is a Peek rather than a Signal
+    // whose title happened to be tapped.
+    await page.getByTestId('capsule-capability-title').click();
+
+    await expect(page.getByTestId('git-peek-body')).toBeVisible();
+    // The capability's own Workspace action, which the Host no longer draws
+    // (#1046). An image can show that something is there; this is the assertion
+    // that the something is the plugin's, not the frame's.
+    await expect(page.getByTestId('capsule-capability-open-workspace')).toBeVisible();
+
+    await expect(page).toHaveScreenshot('app-git-peek.png', {
+      fullPage: true,
+      ...FIXTURE_SCREENSHOT,
+    });
+  });
+
   // #1034's other three capsule states. Resting and the capability Signal were
   // the two with baselines; the entry, Terminal Keys and the multiline composer
   // had none, so a change to any of them had no image that could fail.
