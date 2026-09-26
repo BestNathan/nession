@@ -117,6 +117,35 @@ App should prefer native spatial and push/pop interaction:
 - system/back navigation returns through capability detail before leaving Workspace;
 - nested navigation must not fight the top-level `Sessions ← Terminal → Workspace` spatial model.
 
+### The dock is the root's, not the stack's (`#1051`)
+
+The capability switcher is the **capability root's** control. It is present where
+switching between peer Workspace capabilities is conceptually valid — at the root — and
+it is absent once the user pushes into capability-owned detail.
+
+```text
+Files root       -> dock visible
+open App.tsx     -> dock hidden; the page belongs to Files' own navigation stack
+```
+
+The reason is the one-navigation-bar rule
+([interaction/app.md](../../interaction/app.md#one-navigation-bar-per-depth)): a pushed
+detail has its own header and its own Back, so a peer-capability switcher floating over
+it would be a second navigation owner answering to a depth it has no place at. It would
+also put "switch capability" and "leave this file" within one thumb reach of each other
+while meaning opposite things.
+
+Two consequences for the rest of the App:
+
+- The bottom clearance the dock needs is the **root's** clearance. A pushed detail must
+  not reserve permanent padding for a dock that is not there.
+- The `+` stays capability disclosure. Its accessible name and its tooltip both say
+  "capabilities", and the menu it opens is built from capability snapshots — so it
+  cannot become a resource-creation affordance without that line changing too.
+
+This narrows the open question recorded below (where the band floats) without settling
+it: the band is root-only on whichever page owns it.
+
 ### Web: the capability dock
 
 Capability navigation on Web is a **bottom-centred dock** of rounded icon targets,
@@ -220,5 +249,6 @@ Existing components should migrate incrementally. Do not remove reliable capabil
 - [ ] Extensions cannot independently fragment the global navigation model.
 - [ ] Web/App may present the same capability differently while preserving semantic state.
 - [ ] The App band meets its declared compact touch floor (`experience.app.touchTarget.compact`), enforced by the viewport matrix.
+- [ ] The dock appears only at capability-root depth, and is absent over capability-owned detail.
 - [ ] Files-specific layout remains local to Files.
 - [ ] The visible capability set can grow without forcing the shell to grow proportionally.
