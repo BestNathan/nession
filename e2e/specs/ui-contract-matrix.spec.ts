@@ -329,6 +329,8 @@ for (const row of viewports.filter((v) => v.experience === 'app')) {
 
     test('the terminal grid is drawn inside the surface inset (#1092)', async ({ page }) => {
       await page.goto('/#/fixture/app');
+      // Waits for the *sized* terminal, not just for `.xterm-screen` — see the
+      // helper. Measuring the pre-fit grid would report the defect itself.
       await waitForFixtureTerminal(page);
 
       const boxes = await page.evaluate(() => {
