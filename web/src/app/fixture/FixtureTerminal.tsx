@@ -1,7 +1,11 @@
 import { useEffect, useRef } from 'react';
 import { Terminal } from '@xterm/xterm';
-import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
+import {
+  gridFor,
+  measuredCellDimensionsOf,
+  type PixelSize,
+} from '@/platform/terminal-runtime/grid';
 import {
   NESSION_TERMINAL_THEME,
   TERMINAL_MINIMUM_CONTRAST_RATIO,
@@ -16,6 +20,24 @@ import {
 import { TerminalSurface } from '@/product/terminal/patterns/TerminalSurface';
 import type { CapsuleExperience } from '@/product/terminal/capsule/types';
 import type { TerminalChrome } from '@/app/ShellMain';
+
+/**
+ * How many frames to keep re-deriving the grid for, after each change to the
+ * well's box.
+ *
+ * A grid is a function of two inputs — the well's content box and xterm's cell
+ * — and either can move after the other has been read. The box arrives through
+ * the observer; the cell is sampled per frame, so this is the window in which a
+ * cell that changes on its own is still caught. The cell is measured on xterm's
+ * first layout pass and re-measured when the font finishes loading, which is a
+ * change no resize accompanies.
+ *
+ * The bound exists so a terminal that never measures cannot spin the tab, and
+ * it is generous rather than tight because stopping early leaves the grid sized
+ * for a cell that is no longer drawn — a wrong terminal that a baseline would
+ * capture. Half a second of idle frame callbacks costs a static page nothing.
+ */
+const SETTLE_FRAMES = 30;
 
 const FIXTURE_BUFFER = [
   '$ git status --short',
@@ -81,61 +103,40 @@ export function FixtureTerminal({
     if (!host) {
       return;
     }
-    const metrics = PROFILES[detectProfile(window.innerWidth)];
-    const term = new Terminal({
-      theme: NESSION_TERMINAL_THEME,
-      fontFamily: DEFAULT_FONT,
-      fontSize: metrics.fontSize,
-      lineHeight: metrics.lineHeight,
-      minimumContrastRatio: TERMINAL_MINIMUM_CONTRAST_RATIO,
-      convertEol: true,
-      cursorBlink: false,
-      disableStdin: true,
+    let disposed = false;
+    let teardown: (() => void) | undefined;
+
+    // Opened only once the font has settled. xterm measures one cell when it
+    // opens and every glyph afterwards is laid out from it, so a terminal
+    // opened against a not-yet-loaded face is fitted to the substitute's
+    // advance — measured on CI at 844×390, fitted at 7.5px per column and
+    // redrawn at 8px, 864px of terminal in an 816px well. `document.fonts.ready`
+    // is the product's own signal for this (`TerminalInstance.warmTerminalFont`
+    // and `remeasureOnFontLoad`); it resolves immediately when nothing is
+    // pending, which is the common case. The face is self-hosted rather than a
+    // CDN, so in CI it is a real fetch that the local cache hides.
+    //
+    // Guarded because the CSS Font Loading API is not implemented everywhere
+    // (jsdom has no `document.fonts`) and there is nothing to wait for where it
+    // is missing. `TerminalInstance` guards its own `document.fonts` call the
+    // same way. No test reaches this line today — both fixture mount tests
+    // replace the whole component with a stub — so the guard is for the
+    // environment, not for coverage.
+    const fontsReady = document.fonts?.ready ?? Promise.resolve();
+    void fontsReady.then(() => {
+      if (disposed) {
+        return;
+      }
+      teardown = startFixtureTerminal(host);
     });
 
-    // Fitted, and re-fitted when the well resizes. Without this, xterm sits at
-    // its 80x24 default for the life of the page — so every terminal baseline
-    // pinned a small terminal in the corner of a much larger well instead of
-    // the surface the product actually shows, and the visual gate was
-    // protecting a screen no user sees.
-    //
-    // `FitAddon` is already a dependency. The product path uses
-    // `ResizeController` instead because it also has to publish cols/rows to the
-    // transport and debounce the PTY notification; a static fixture has no
-    // transport to notify.
-    const fit = new FitAddon();
-    term.loadAddon(fit);
-    term.open(host);
-    term.write(FIXTURE_BUFFER);
-
-    // Guarded rather than caught: FitAddon throws below a 2x2 grid, and a
-    // zero-size host is a real state here (first paint, and every test that
-    // mounts the surface without laying it out).
-    //
-    // Deferred by a frame as well as guarded. `fit()` reads the cell metrics off
-    // xterm's render service, and that service has no dimensions until the
-    // renderer's first layout pass — measuring in the same tick as `open()`
-    // throws inside `Viewport.syncScrollArea`. `TerminalInstance` guards the
-    // same race on its own metrics accessor. The observer's own first fire
-    // lands in that window too, so every fit goes through this path.
-    let frame = 0;
-    const scheduleFit = () => {
-      cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => {
-        if (host.clientWidth > 0 && host.clientHeight > 0) {
-          fit.fit();
-        }
-      });
-    };
-    scheduleFit();
-    const observer = new ResizeObserver(scheduleFit);
-    observer.observe(host);
-
     return () => {
-      cancelAnimationFrame(frame);
-      observer.disconnect();
-      term.dispose();
+      disposed = true;
+      teardown?.();
     };
+    // Depends on nothing reactive: the host is a ref, and the profile comes from
+    // the viewport. `experience` is deliberately not here — it selects which
+    // capsule the surface renders, not how the grid is fitted.
   }, []);
 
   return (
@@ -157,4 +158,101 @@ export function FixtureTerminal({
       />
     </TerminalSurface>
   );
+}
+
+/** Open, size and fill the fixture terminal. Returns its teardown. */
+function startFixtureTerminal(host: HTMLDivElement): () => void {
+  const metrics = PROFILES[detectProfile(window.innerWidth)];
+  const term = new Terminal({
+    theme: NESSION_TERMINAL_THEME,
+    fontFamily: DEFAULT_FONT,
+    fontSize: metrics.fontSize,
+    lineHeight: metrics.lineHeight,
+    minimumContrastRatio: TERMINAL_MINIMUM_CONTRAST_RATIO,
+    convertEol: true,
+    cursorBlink: false,
+    disableStdin: true,
+  });
+
+  // Fitted, and re-fitted whenever one of the grid's two inputs moves. Without
+  // this, xterm sits at its 80x24 default for the life of the page — so every
+  // terminal baseline pinned a small terminal in the corner of a much larger
+  // well instead of the surface the product actually shows, and the visual gate
+  // was protecting a screen no user sees.
+  //
+  // Sized the way the product sizes it — `gridFor`, from the container's
+  // **content box**. `FitAddon` stood here and measured the parent's border
+  // box, so the `--terminal-pad-x` inset was never subtracted: the grid came
+  // out 11px wider than the well, 14px of inset on the left and 3px on the
+  // right, in every App baseline (#1092). The arithmetic is shared with
+  // `ResizeController` rather than reimplemented, so the fixture and the
+  // product cannot drift again; only the *observation* differs, because a
+  // static fixture has no transport to publish cols/rows to and nothing to
+  // debounce.
+  term.open(host);
+
+  let size: PixelSize | null = null;
+  let written = false;
+  let frame = 0;
+  let remaining = 0;
+  // Fit to the cell xterm reports, and skip the grid it already has. Both
+  // halves matter while the cell is still settling: a resize to the same
+  // dimensions is churn, and the write below must not be repeated.
+  const applyGrid = () => {
+    if (size !== null) {
+      const cell = measuredCellDimensionsOf(term);
+      // A cell of `null` is "the renderer has not measured one yet", not a
+      // measurement — and a grid fitted to the *fallback* is wrong
+      // permanently, because nothing corrects it: the observer fires again
+      // only when the host resizes. `FitAddon` declined to fit in this state
+      // too, which is the guard this replaced.
+      const grid = cell === null ? null : gridFor(size, cell);
+      if (grid !== null && (term.cols !== grid.cols || term.rows !== grid.rows)) {
+        term.resize(grid.cols, grid.rows);
+      }
+      // Written once the grid is right, rather than before sizing it. A write
+      // at xterm's 80x24 default followed by a resize leaves the buffer to
+      // reflow, and a line that was never wrapped is not re-split — the
+      // fixture's longest line lost three characters off its tail that way.
+      if (grid !== null && !written) {
+        written = true;
+        term.write(FIXTURE_BUFFER);
+      }
+    }
+    // The cell, the grid's other input — sampled per frame for the settle
+    // window rather than watched, because a re-measure is not an event xterm
+    // publishes. See `SETTLE_FRAMES`.
+    if (remaining > 0) {
+      remaining -= 1;
+      frame = requestAnimationFrame(applyGrid);
+    }
+  };
+
+  // The well's box, one of the grid's two inputs. Re-armed on every fire, so a
+  // resize long after the first grid still gets its own settle window. A
+  // zero-size host (first paint, and every test that mounts the surface
+  // without laying it out) yields a degenerate grid and is skipped until the
+  // observer reports a real size.
+  //
+  // Deferred by a frame rather than applied in the callback, because the
+  // observer's first fire lands before xterm's render service has measured a
+  // cell — the same race `TerminalInstance` guards on its own accessor, where
+  // `dimensions` throws until the renderer's first layout pass.
+  const observer = new ResizeObserver((entries) => {
+    const rect = entries[entries.length - 1]?.contentRect;
+    if (rect === undefined) {
+      return;
+    }
+    size = { width: rect.width, height: rect.height };
+    cancelAnimationFrame(frame);
+    remaining = SETTLE_FRAMES;
+    frame = requestAnimationFrame(applyGrid);
+  });
+  observer.observe(host);
+
+  return () => {
+    cancelAnimationFrame(frame);
+    observer.disconnect();
+    term.dispose();
+  };
 }
