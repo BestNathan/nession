@@ -97,10 +97,7 @@
 //! enough ([`DEFAULT_KEY_QUEUE_DEPTH`]) that reaching it means the client is
 //! genuinely ahead of the backend rather than merely bursty.
 
-use std::sync::Arc;
 use std::time::Duration;
-
-use nession_runtime::lane::KeyedLane;
 
 /// The default number of queries one peer-to-peer connection may have running.
 ///
@@ -141,22 +138,6 @@ pub const DEFAULT_KEY_QUEUE_DEPTH: usize = 16;
 /// and how many resources at once.
 pub const DEFAULT_MUTATIONS_IN_FLIGHT: usize = 16;
 
-/// The mutation lane every peer-to-peer connection of this agent dispatches
-/// into.
-///
-/// Built once, where the resources its keys name are built — one tmux server and
-/// one file sandbox, both process-wide — and handed to every connection that
-/// accepts on this socket ([`crate::server::websocket::AgentServer`]). See
-/// [`ResourceKey`] for what "the same resource" means here, and
-/// `nession_runtime::lane::Lanes::shared` for what a shared lane buys.
-///
-/// No worker budget: what bounds how many resources are mutated at once is the
-/// *connection's* admission bound ([`DEFAULT_MUTATIONS_IN_FLIGHT`]), which is
-/// where the waiter is. See `nession_runtime::lane`.
-pub fn mutation_scheduler() -> Arc<KeyedLane<ResourceKey>> {
-    Arc::new(KeyedLane::new(DEFAULT_KEY_QUEUE_DEPTH, LANE_LABEL))
-}
-
 /// How long a connection's lanes are given to stop when it ends.
 ///
 /// The lanes are *aborted* rather than drained (see `Lanes::shutdown`), so this
@@ -178,72 +159,10 @@ pub const LANE_LABEL: &str = "peer-to-peer ";
 /// checks the key space it hands over. A connection builds one with
 /// [`ExecutionLanes::shared`](nession_runtime::lane::Lanes::shared), handing it
 /// the agent's [`mutation_scheduler`].
+pub use crate::execution::ResourceKey;
+
+/// The lanes one connection's reader dispatches into, over this agent's keys.
 pub type ExecutionLanes = nession_runtime::lane::Lanes<ResourceKey>;
-
-/// The resource a mutation is ordered against.
-///
-/// A key is what makes two mutations "the same thing": same key, they run one
-/// after the other in arrival order; different keys, they do not wait for each
-/// other at all. The variants name the *kind* of resource because the same
-/// string can be both — a session called `notes` and a file called `notes` are
-/// not the same resource, and a bare `String` key would merge them.
-///
-/// The key is derived from the request payload, per unit, in the same
-/// `p2p_routes!` invocation that declares everything else about the unit. It is
-/// never inferred from the wire name: that is the `extension.*`-shaped guess the
-/// constraints rule out, and it would also be wrong — `agent.session.kill` takes
-/// a `name` field and `agent.file.delete` takes a `path`, and nothing about
-/// either wire says so.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum ResourceKey {
-    /// A tmux session, by the name this agent knows it by.
-    Session(String),
-    /// **The file sandbox as one resource**, rather than a path within it.
-    ///
-    /// A deliberately coarse key, and the reason is that a path is not the whole
-    /// of what a file mutation touches:
-    ///
-    /// * `agent.file.rename` mutates two paths — `from` and `to` — and a key can
-    ///   name only one of them, so keyed by `from` a `write` of the destination
-    ///   runs concurrently with the rename that is about to overwrite it;
-    /// * recursive `agent.file.delete` mutates a directory *and everything under
-    ///   it*, so keyed by the directory itself a `write` of `dir/x` is a
-    ///   different key and the write lands in a tree that is being removed;
-    /// * `agent.file.create-dir` and `agent.file.write` both create parents, so
-    ///   either may be making a path a queued mutation of a *descendant* is
-    ///   about to use.
-    ///
-    /// The alternative is multi-key acquisition — take the keys of every path a
-    /// unit touches, in a fixed order — and it is more machinery than the
-    /// ordering is worth: it needs a lock order to keep it deadlock-free, a
-    /// parent-chain walk per frame, and an answer to what a key *is* on a
-    /// hierarchical namespace (a prefix? a glob?). File mutations are also not a
-    /// throughput-critical path — a UI's edits and an occasional bulk delete —
-    /// while a session-key mistake is a stuck terminal. So the coarse answer,
-    /// which is the direction `#961`'s review prefers: one key for the sandbox,
-    /// and every file mutation of this agent is ordered against every other.
-    ///
-    /// What it costs is parallelism between *unrelated* file mutations: two
-    /// browsers editing two different files now take turns where they did not.
-    /// What it buys is that no two file mutations can interleave at all, which
-    /// is what makes "a rename cannot race a write of its destination" and "a
-    /// recursive delete cannot race a write of a descendant" properties of the
-    /// design rather than of a path comparison that has to be right about
-    /// symlinks, `..`, and trailing separators.
-    ///
-    /// Reads are untouched: `agent.file.list` and `agent.file.read` are queries
-    /// on the connection's own lane and were never ordered against mutations.
-    Filesystem,
-}
-
-impl std::fmt::Display for ResourceKey {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Session(name) => write!(f, "session:{name}"),
-            Self::Filesystem => write!(f, "filesystem"),
-        }
-    }
-}
 
 /// How the reader dispatches one frame.
 ///

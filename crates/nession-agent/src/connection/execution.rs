@@ -150,50 +150,10 @@ pub const LANE_LABEL: &str = "central ";
 /// [`Lanes`] is shared; this is the alias that fixes its key type to *this*
 /// connection's resource key, so a call site names one type and the compiler
 /// checks the key space it hands over.
+pub use crate::execution::ResourceKey;
+
+/// The lanes one connection's reader dispatches into, over this agent's keys.
 pub type Lanes = nession_runtime::lane::Lanes<ResourceKey>;
-
-/// The resource a mutation is ordered against.
-///
-/// A key is what makes two mutations "the same thing": same key, they run one
-/// after the other in arrival order; different keys, they do not wait for each
-/// other at all. The variants name the *kind* of resource because the same
-/// string can be both — a session called `staging.env` and an env file called
-/// `staging.env` are not the same resource, and a bare `String` key would merge
-/// them.
-///
-/// The key is derived from the request payload, per unit, in the same
-/// `core_routes!` invocation that declares everything else about the unit. It is
-/// never inferred from the wire name: that is the `extension.*`-shaped guess the
-/// constraints rule out, and it would also be wrong — every unit on this
-/// connection names its target in a field called `name`, whether that target is
-/// a tmux session or an env file, and nothing about either wire says which.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum ResourceKey {
-    /// A tmux session, by the name this agent knows it by.
-    Session(String),
-    /// A locally stored env file, by name.
-    Env(String),
-    /// **This agent's P2P authority**, as one resource (#1013).
-    ///
-    /// The credentials this agent honours are agent-global state, and the only
-    /// ordering that matters for them is against each other. A key of their own
-    /// is what keeps a grant from queueing behind a session mutation — and that
-    /// matters more here than elsewhere, because a client's attach is
-    /// *synchronously waiting* on the grant's acknowledgement: a grant stuck
-    /// behind a slow `session.create` would be a browser attach stuck behind
-    /// it too.
-    Authority,
-}
-
-impl std::fmt::Display for ResourceKey {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Session(name) => write!(f, "session:{name}"),
-            Self::Env(name) => write!(f, "env:{name}"),
-            Self::Authority => write!(f, "authority"),
-        }
-    }
-}
 
 /// How the reader dispatches one frame.
 ///

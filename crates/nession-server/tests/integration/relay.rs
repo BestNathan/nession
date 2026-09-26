@@ -117,10 +117,15 @@ async fn start_agent(
     std::net::SocketAddr,
     nession_agent::server::ServerHandle,
     Arc<nession_agent::p2p_credentials::P2pCredentials>,
+    nession_agent::execution::MutationLane,
 )> {
     let tmp = Box::leak(Box::new(tempfile::tempdir()?));
     let (resize, _resize_updates) = nession_agent::server::ResizeReporter::new();
     let credentials = Arc::new(nession_agent::p2p_credentials::P2pCredentials::new());
+    // One lane for both paths, as in production: this test pairs a listener
+    // with a central connection over one agent, which is exactly the shape
+    // #1021 is about, so a lane each would leave the invariant unexercised.
+    let mutations = nession_agent::execution::mutation_scheduler();
     let server = AgentServer::new(
         "127.0.0.1:0",
         agent_id,
@@ -131,12 +136,13 @@ async fn start_agent(
         AgentServerContext {
             resize,
             credentials: Arc::clone(&credentials),
+            mutations: Arc::clone(&mutations),
         },
     )?;
 
     let (handle, addr) = server.start().await?;
 
-    Ok((addr, handle, credentials))
+    Ok((addr, handle, credentials, mutations))
 }
 
 /// Register an agent with the central server so it shows as Online.
@@ -150,6 +156,7 @@ async fn register_agent(
     auth_token: &str,
     agent_port: u16,
     credentials: Arc<nession_agent::p2p_credentials::P2pCredentials>,
+    mutations: nession_agent::execution::MutationLane,
 ) -> anyhow::Result<nession_agent::connection::ServerClientHandle> {
     let metadata = AgentMetadata {
         tmux_version: "3.3".to_string(),
@@ -183,6 +190,7 @@ async fn register_agent(
             nession_agent::protocol::served_descriptors()?,
         )?)),
         credentials,
+        mutations,
     );
 
     Ok(client.connect_and_run().await?.0)
@@ -245,7 +253,7 @@ async fn relay_attach_and_terminal_io() {
 
     // 1. Start server and agent.
     let (server_addr, server_handle, _db_dir) = start_server("test-token").await.unwrap();
-    let (agent_addr, agent_handle, agent_credentials) =
+    let (agent_addr, agent_handle, agent_credentials, agent_mutations) =
         start_agent("relay-test-agent").await.unwrap();
 
     // 2. Create a tmux session.
@@ -261,6 +269,9 @@ async fn relay_attach_and_terminal_io() {
         "test-token",
         agent_addr.port(),
         Arc::clone(&agent_credentials),
+        // The listener's own lane, so this test really does exercise one agent
+        // with two mutating paths rather than two agents' worth of wiring.
+        Arc::clone(&agent_mutations),
     )
     .await
     .unwrap();
