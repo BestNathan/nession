@@ -3,15 +3,23 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { GitHistoryView } from '../../GitHistoryView';
 import { gitApi } from '../../../GitPlugin';
-import type { GitCommit, GitLogResponse } from '../../../types';
+import type { GitCommit, GitCommitResponse, GitLogResponse } from '../../../types';
 import type { WorkspaceContext } from '@/app/workspace/workspaceContext';
 import type { Agent, Session } from '@/types';
 
 vi.mock('../../../GitPlugin', () => ({
-  gitApi: { gitStatus: vi.fn(), gitDiff: vi.fn(), gitRoot: vi.fn(), gitLog: vi.fn() },
+  gitApi: {
+    gitStatus: vi.fn(),
+    gitDiff: vi.fn(),
+    gitRoot: vi.fn(),
+    gitLog: vi.fn(),
+    gitCommit: vi.fn(),
+    onInvalidated: vi.fn(() => () => {}),
+  },
 }));
 
 const mockedLog = vi.mocked(gitApi.gitLog);
+const mockedCommit = vi.mocked(gitApi.gitCommit);
 
 const agent = { agent_id: 'a1', hostname: 'devbox' } as Agent;
 const session = { session_id: 'a1:work', agent_id: 'a1', session_name: 'work' } as Session;
@@ -42,17 +50,53 @@ function commit(overrides: Partial<GitCommit> = {}): GitCommit {
 }
 
 function ok(commits: GitCommit[], extra: Partial<GitLogResponse & { state: 'ok' }> = {}) {
+  const limit = commits.length;
   return {
     state: 'ok',
-    history: { commits, limit: commits.length, truncatedBytes: 0, truncated: false },
+    history: {
+      commits,
+      limit,
+      truncatedBytes: 0,
+      truncated: false,
+      endOfHistory: true,
+      nextCursor: undefined,
+    },
     ...extra,
   } as GitLogResponse;
+}
+
+function commitDetailFrom(row: GitCommit) {
+  return {
+    state: 'ok' as const,
+    commit: {
+      oid: row.hash,
+      shortOid: row.shortHash,
+      parents: ['p'.repeat(40)],
+      author: row.author,
+      authorDate: row.date,
+      committer: row.author,
+      commitDate: row.date,
+      subject: row.subject,
+      body: '',
+      decorations: row.refs,
+      files: [{ path: 'README.md', status: 'M', binary: false }],
+      filesTruncated: false,
+      filesTruncatedBytes: 0,
+      messageTruncated: false,
+      messageTruncatedBytes: 0,
+      mergeDiffParent: row.hash,
+    },
+  } satisfies GitCommitResponse;
 }
 
 describe('GitHistoryView', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockedLog.mockResolvedValue(ok([commit()]));
+    mockedCommit.mockImplementation(async (req) => {
+      const row = commit({ hash: req.oid, shortHash: req.oid.slice(0, 7) });
+      return commitDetailFrom(row);
+    });
   });
 
   it('asks the agent for history, naming the agent to route to', async () => {
@@ -79,10 +123,7 @@ describe('GitHistoryView', () => {
     ]);
   });
 
-  it('shows which commit is selected, and says what it is not showing', async () => {
-    // A commit patch is a diff of unknown size and is deliberately not here.
-    // Saying so on the screen is cheaper than a reader concluding its absence is
-    // a bug.
+  it('loads commit detail when a row is selected', async () => {
     render(<GitHistoryView ctx={ctx()} />);
 
     await userEvent.click((await screen.findAllByTestId('git-commit-row'))[0]);
@@ -90,16 +131,24 @@ describe('GitHistoryView', () => {
     const detail = await screen.findByTestId('git-commit-detail');
     expect(detail).toHaveTextContent('feat: something');
     expect(detail).toHaveTextContent('a'.repeat(40));
-    expect(detail).toHaveTextContent('not shown here');
+    expect(detail).toHaveTextContent('README.md');
+    expect(mockedCommit).toHaveBeenCalledWith({
+      agent_id: 'a1',
+      session: 'a1:work',
+      oid: 'a'.repeat(40),
+    });
   });
 
   it('shows refs only when a commit has them', async () => {
-    mockedLog.mockResolvedValue(
-      ok([
-        commit({ hash: 'b'.repeat(40), refs: 'HEAD -> main' }),
-        commit({ hash: 'a'.repeat(40), refs: '' }),
-      ]),
-    );
+    const withRefs = commit({ hash: 'b'.repeat(40), refs: 'HEAD -> main' });
+    const noRefs = commit({ hash: 'a'.repeat(40), refs: '' });
+    mockedLog.mockResolvedValue(ok([withRefs, noRefs]));
+    mockedCommit.mockImplementation(async (req) => {
+      if (req.oid === withRefs.hash) {
+        return commitDetailFrom(withRefs);
+      }
+      return commitDetailFrom(noRefs);
+    });
 
     const view = render(<GitHistoryView ctx={ctx()} />);
     const rows = await screen.findAllByTestId('git-commit-row');
@@ -123,15 +172,20 @@ describe('GitHistoryView', () => {
     ];
     mockedLog.mockResolvedValue(
       ok(commits, {
-        history: { commits, limit: 2, truncatedBytes: 0, truncated: false },
+        history: {
+          commits,
+          limit: 2,
+          truncatedBytes: 0,
+          truncated: false,
+          endOfHistory: true,
+        },
       }),
     );
 
     render(<GitHistoryView ctx={ctx()} />);
 
-    // The count that was answered for, not a guess: `limit` is what the agent
-    // clamped to, so the notice cannot promise more than exists.
-    expect(await screen.findByTestId('git-history-more')).toHaveTextContent('most recent 2');
+    expect(await screen.findByTestId('git-history-more')).toHaveTextContent('End of history');
+    expect(screen.getByTestId('git-history-more')).toHaveTextContent('2 commits loaded');
   });
 
   it('does not claim there is more when the answer is not full', async () => {
@@ -140,7 +194,13 @@ describe('GitHistoryView', () => {
     // reader would act on.
     mockedLog.mockResolvedValue(
       ok([commit()], {
-        history: { commits: [commit()], limit: 50, truncatedBytes: 0, truncated: false },
+        history: {
+          commits: [commit()],
+          limit: 50,
+          truncatedBytes: 0,
+          truncated: false,
+          endOfHistory: true,
+        },
       }),
     );
 
@@ -153,7 +213,13 @@ describe('GitHistoryView', () => {
   it('reports truncation rather than a history that quietly stops', async () => {
     mockedLog.mockResolvedValue(
       ok([commit()], {
-        history: { commits: [commit()], limit: 1, truncatedBytes: 4096, truncated: true },
+        history: {
+          commits: [commit()],
+          limit: 1,
+          truncatedBytes: 4096,
+          truncated: true,
+          endOfHistory: true,
+        },
       }),
     );
 

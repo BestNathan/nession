@@ -115,6 +115,8 @@ Rows should remain highly scannable. Prefer two concise lines over multiple badg
 
 Web can use compact navigation density; App must preserve touch targets without inflating every metadata element.
 
+The App's floor belongs to the row's **controls**, not to the row's box. The row measures taller than its primary control — the `…` trigger beside it is what sets the App row's height — so a row measuring 374×60 is compatible with a 36px control inside it, and did contain one (#1066). The primary select control and every action control take the experience's control band (`control.sm`: 44px on App, where it equals `control.md`; 28px on Web, where the control is already taller and a pointer needs no floor). `expectTouchTargetsWithin` is the assertion that enumerates them; the pattern's own `touchTargetToken` covers the row box and cannot.
+
 ### Surface treatment
 
 - Flat list rows, not nested cards.

@@ -19,6 +19,7 @@ import { CustomInputHandler } from '../input/CustomInputHandler';
 import { CapsuleOcclusionScroll } from '../capsule/occlusionScroll';
 import { TerminalInstance } from '../instance/TerminalInstance';
 import { MobileImeInput } from '../input/MobileImeInput';
+import { gridFor } from '../grid';
 import type { FontSizeManager } from '../FontSizeManager';
 
 export interface TerminalControllerEvents {
@@ -495,34 +496,35 @@ export class ResizeController {
 
     this.observer = new ResizeObserver((entries) => {
       for (const entry of entries) {
-        const { width, height } = entry.contentRect;
-        this.lastContainer = { width, height };
-        // Use the live cell size (refreshed by remeasure() on font-size zoom),
-        // not the stale observe()-time closure params.
-        const cell = this.lastCell;
-        const cols = Math.max(1, Math.floor(width / cell.width));
-        const rows = Math.max(1, Math.floor(height / cell.height));
-        if (cols < 2 || rows < 2) { continue; }
+        const size = entry.contentRect;
+        this.lastContainer = { width: size.width, height: size.height };
+        // The content box, not the border box: `contentRect` excludes the
+        // container's padding, which is the whole of `--terminal-pad-x`. Fitted
+        // against the padded box the grid draws wider than the well that holds
+        // it — #1092, in the fixture. Use the live cell size (refreshed by
+        // remeasure() on font-size zoom), not the stale observe()-time params.
+        const grid = gridFor(size, this.lastCell);
+        if (grid === null) { continue; }
 
         // Publish to the atom the state machine reads on (re)attach so
         // client.attach / beginRelay carry the current viewport size. Covers
         // both the immediate first fire and the debounced subsequent fires.
-        this.controller.publishViewportResize(cols, rows);
+        this.controller.publishViewportResize(grid.cols, grid.rows);
 
         if (this.isFirstFire) {
           this.isFirstFire = false;
-          this.controller.resize(cols, rows);
+          this.controller.resize(grid.cols, grid.rows);
           continue;
         }
 
         // Local grid now — the container has already changed size, so xterm
         // must repaint at the new size in this same frame.
-        this.controller.resizeLocal(cols, rows);
+        this.controller.resizeLocal(grid.cols, grid.rows);
 
         // PTY notification debounced, so a drag sends one final size.
         if (this.debounceTimer) { clearTimeout(this.debounceTimer); }
         this.debounceTimer = setTimeout(() => {
-          this.controller.sendResize(cols, rows);
+          this.controller.sendResize(grid.cols, grid.rows);
         }, 200);
       }
     });
@@ -539,13 +541,12 @@ export class ResizeController {
     const cell = this.controller.cellDimensions;
     if (cell.width <= 0 || cell.height <= 0) { return; }
     this.lastCell = cell;
-    const cols = Math.max(1, Math.floor(width / cell.width));
-    const rows = Math.max(1, Math.floor(height / cell.height));
-    if (cols < 2 || rows < 2) { return; }
+    const grid = gridFor({ width, height }, cell);
+    if (grid === null) { return; }
     // Keep the atom fresh after a font-size zoom so a (re)attach uses the
     // recomputed cell count, not the stale pre-zoom size.
-    this.controller.publishViewportResize(cols, rows);
-    this.controller.resize(cols, rows);
+    this.controller.publishViewportResize(grid.cols, grid.rows);
+    this.controller.resize(grid.cols, grid.rows);
   }
 
   dispose(): void {

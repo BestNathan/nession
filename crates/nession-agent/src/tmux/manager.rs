@@ -98,12 +98,13 @@ pub use nession_protocol::contracts::session::v1::SessionInfo;
 /// command stays part of it instead of shifting the row into the unparseable
 /// branch. Session names are the first field and still positional.
 fn parse_session_line(line: &str) -> Option<SessionInfo> {
-    let parts: Vec<&str> = line.splitn(7, '|').collect();
-    if parts.len() != 7 {
+    let parts: Vec<&str> = line.splitn(8, '|').collect();
+    if parts.len() != 8 {
         return None;
     }
 
-    let foreground = parts.get(6).copied().unwrap_or_default();
+    let working_dir = parts.get(6).copied().unwrap_or_default();
+    let foreground = parts.get(7).copied().unwrap_or_default();
     Some(SessionInfo {
         name: parts
             .first()
@@ -114,6 +115,7 @@ fn parse_session_line(line: &str) -> Option<SessionInfo> {
         attached_clients: parts.get(3).and_then(|s| s.parse().ok())?,
         width: parts.get(4).and_then(|s| s.parse().ok())?,
         height: parts.get(5).and_then(|s| s.parse().ok())?,
+        working_dir: (!working_dir.is_empty()).then(|| working_dir.to_string()),
         foreground_command: (!foreground.is_empty()).then(|| foreground.to_string()),
     })
 }
@@ -216,7 +218,7 @@ impl SessionManager {
             // Use | (pipe) as delimiter. Tmux converts tab characters (0x09)
             // in -F format strings to underscores (0x5F), so \t is unusable.
             // pane_current_command is last so a | inside it cannot shift the row.
-            "#{session_name}|#{session_created}|#{session_windows}|#{session_attached}|#{window_width}|#{window_height}|#{pane_current_command}",
+            "#{session_name}|#{session_created}|#{session_windows}|#{session_attached}|#{window_width}|#{window_height}|#{pane_current_path}|#{pane_current_command}",
         ]);
         let output = tmux_output(&mut cmd, self.list_timeout).await?;
 
@@ -298,6 +300,25 @@ impl SessionManager {
     /// resize the window at all; locking it would freeze the pane at the
     /// create-time size. `window_size_lock_tests` below asserts that it stays
     /// unset.
+    /// Validate a client-requested initial cwd before tmux starts.
+    pub fn validate_initial_working_dir(path: &str) -> Result<String> {
+        let trimmed = path.trim();
+        if trimmed.is_empty() {
+            anyhow::bail!("working_dir is empty");
+        }
+        let p = std::path::Path::new(trimmed);
+        if !p.is_absolute() {
+            anyhow::bail!("working_dir must be absolute");
+        }
+        if !p.exists() {
+            anyhow::bail!("working_dir does not exist");
+        }
+        if !p.is_dir() {
+            anyhow::bail!("working_dir is not a directory");
+        }
+        Ok(trimmed.to_string())
+    }
+
     pub async fn create_session(
         &self,
         name: &str,
@@ -1358,7 +1379,8 @@ mod session_line_tests {
 
     #[test]
     fn parses_the_session_row_including_foreground_command() {
-        let info = parse_session_line("work|1700000000|2|1|120|40|claude").expect("row parses");
+        let info =
+            parse_session_line("work|1700000000|2|1|120|40|/repo|claude").expect("row parses");
         assert_eq!(info.name, "work");
         assert_eq!(info.created_at, 1_700_000_000);
         assert_eq!(info.window_count, 2);
@@ -1372,13 +1394,14 @@ mod session_line_tests {
     fn keeps_a_pipe_inside_the_foreground_command() {
         // The command is the last field, so a delimiter inside it must survive
         // instead of shifting every row into the "unparseable" branch.
-        let info = parse_session_line("work|1700000000|1|0|80|24|we|ird").expect("row parses");
+        let info =
+            parse_session_line("work|1700000000|1|0|80|24|/repo|we|ird").expect("row parses");
         assert_eq!(info.foreground_command.as_deref(), Some("we|ird"));
     }
 
     #[test]
     fn reports_an_absent_foreground_command_as_none() {
-        let info = parse_session_line("work|1700000000|1|0|80|24|").expect("row parses");
+        let info = parse_session_line("work|1700000000|1|0|80|24|/repo|").expect("row parses");
         assert_eq!(info.foreground_command, None);
     }
 
@@ -1389,6 +1412,6 @@ mod session_line_tests {
 
     #[test]
     fn rejects_rows_with_unparseable_numbers() {
-        assert!(parse_session_line("work|not-a-number|1|0|80|24|claude").is_none());
+        assert!(parse_session_line("work|not-a-number|1|0|80|24|/repo|claude").is_none());
     }
 }

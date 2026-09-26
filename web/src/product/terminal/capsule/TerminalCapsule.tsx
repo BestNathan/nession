@@ -6,7 +6,7 @@ import { ComposerMeasureMirror } from '@/product/terminal/capsule/components/Com
 import { CapsuleProvider } from '@/product/terminal/capsule/state/CapsuleProvider';
 import { useComposerMeasure } from '@/product/terminal/capsule/state/useComposerMeasure';
 import { useCapsuleState } from '@/product/terminal/capsule/state/useCapsuleState';
-import { CapabilityProjection } from '@/product/terminal/capsule/components/CapabilityProjection';
+import { PeekHost } from '@/product/terminal/capsule/components/PeekHost';
 import {
   layoutFromLineCount,
   type CapsuleCapabilityDisclosure,
@@ -156,7 +156,7 @@ export function TerminalCapsule({
         measureMirror={<ComposerMeasureMirror mirrorRef={measureMirrorRef} />}
         projection={
           capabilityProjection ? (
-            <CapabilityProjection
+            <PeekHost
               projection={capabilityProjection}
               sendText={sendText}
               disabled={disabled}

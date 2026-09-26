@@ -37,6 +37,8 @@ export function resolveTerminalKeysState(sessionId: string | undefined): Capabil
 
 export const terminalKeysProjection: CapsuleProjectionBinding = {
   id: TERMINAL_KEYS_ID,
+  // A built-in Terminal-local accessory, not a Workspace capability (#1046).
+  entry: 'accessory',
   // The keys are tapped, not typed into, and the soft keyboard is the one thing
   // that would make them unusable: it covers the row the user is reaching for,
   // and it takes the vertical space the accessory needs. So this one projection

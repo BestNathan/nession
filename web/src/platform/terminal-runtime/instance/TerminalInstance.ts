@@ -4,6 +4,7 @@ import { TERMINAL_METRICS } from '../../../../../design/generated/terminal';
 import { Renderer } from '../Renderer';
 import { ThemeManager, TERMINAL_MINIMUM_CONTRAST_RATIO } from '../ThemeManager';
 import { FontSizeManager } from '../FontSizeManager';
+import { cellDimensionsOf } from '../grid';
 import type { TerminalInstanceOptions } from '../types';
 
 /**
@@ -148,33 +149,7 @@ export class TerminalInstance {
   }
 
   get cellDimensions(): { width: number; height: number } {
-    const fallback = { width: 8, height: 16 };
-    try {
-      const rs = (this.terminal as unknown as {
-        _core?: {
-          _renderService?: {
-            dimensions?: {
-              css?: {
-                cell?: { width: number; height: number };
-              };
-            };
-          };
-        };
-      })._core?._renderService;
-      if (!rs) {
-        return fallback;
-      }
-      const dims = rs.dimensions;
-      return {
-        width: dims?.css?.cell?.width || fallback.width,
-        height: dims?.css?.cell?.height || fallback.height,
-      };
-    } catch {
-      // xterm's dimensions getter throws until the renderer finishes its first
-      // layout pass (common right after open(), under StrictMode remount, or
-      // when WebGL is still initializing).
-      return fallback;
-    }
+    return cellDimensionsOf(this.terminal);
   }
 
   scrollToBottom(): void { this.terminal.scrollToBottom(); }

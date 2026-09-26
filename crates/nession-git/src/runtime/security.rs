@@ -66,6 +66,15 @@ pub const MAX_BRANCH_BYTES: usize = 256 * 1024;
 /// because a path and a lock reason are unbounded strings.
 pub const MAX_WORKTREES_BYTES: usize = 256 * 1024;
 
+/// How many changed paths one commit detail may list.
+pub const MAX_COMMIT_FILES: usize = 500;
+
+/// Ceiling on commit message body bytes in one answer.
+pub const MAX_COMMIT_MESSAGE_BYTES: usize = 64 * 1024;
+
+/// Ceiling on `diff-tree` / `show` output for the file list.
+pub const MAX_COMMIT_FILES_BYTES: usize = 512 * 1024;
+
 /// Validate a client-supplied repository-relative path.
 ///
 /// Returns the path normalised to forward slashes, suitable for handing to git.
@@ -73,6 +82,27 @@ pub const MAX_WORKTREES_BYTES: usize = 256 * 1024;
 /// paths, any `..` component, and Windows-style prefixes. `git` itself would
 /// also refuse most of these, but the point is that this capability is not
 /// allowed to *try* — the boundary is checked before a process is spawned.
+/// Validate a client-supplied git object name before it reaches argv.
+///
+/// Only lowercase hex, length 4–40, no leading `-` — enough for `rev-parse` to
+/// resolve without accepting option-like tokens.
+pub fn validate_object_name(candidate: &str) -> Result<String> {
+    let trimmed = candidate.trim();
+    if trimmed.is_empty() || trimmed.starts_with('-') {
+        bail!("invalid revision");
+    }
+    if trimmed.len() < 4 || trimmed.len() > 40 {
+        bail!("invalid revision");
+    }
+    if !trimmed
+        .chars()
+        .all(|c| c.is_ascii_digit() || matches!(c, 'a'..='f' | 'A'..='F'))
+    {
+        bail!("invalid revision");
+    }
+    Ok(trimmed.to_ascii_lowercase())
+}
+
 pub fn validate_repo_relative_path(candidate: &str) -> Result<String> {
     let trimmed = candidate.trim();
     if trimmed.is_empty() {

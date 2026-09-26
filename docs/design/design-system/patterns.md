@@ -37,6 +37,7 @@ Patterns that display capabilities must respect that lifecycle and progressive d
 | [AgentDetail](patterns/agent-detail.md) | detail | Infrastructure/location detail |
 | [TerminalCapsule](patterns/terminal-capsule.md) | interaction | Conversational/contextual interaction surface over the Terminal |
 | [TerminalSurface](patterns/terminal-surface.md) | work surface | xterm well, focus, scroll, clearance, attachment lifecycle |
+| [PopupMenu](patterns/popup-menu.md) | primitive-backed surface | The list a control collapses into; contracted here because a popup is not a DOM descendant of its trigger (#1066) |
 
 The catalog is not a mandatory shell anatomy. Each pattern is used only when the current product context justifies it.
 

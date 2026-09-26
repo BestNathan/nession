@@ -2,6 +2,7 @@ import * as React from "react"
 import { Popover as PopoverPrimitive } from "@base-ui/react/popover"
 
 import { cn } from "@/shared/lib/utils"
+import { usePopupPortalContainer } from "@/components/ui/popup-portal"
 
 function Popover({ ...props }: PopoverPrimitive.Root.Props) {
   return <PopoverPrimitive.Root data-slot="popover" {...props} />
@@ -23,8 +24,12 @@ function PopoverContent({
     PopoverPrimitive.Positioner.Props,
     "align" | "alignOffset" | "side" | "sideOffset"
   >) {
+  // Same mount as `DropdownMenuContent`: a popover opened inside a scope that
+  // supplies a container mounts there, so the Experience tokens it reads are the
+  // ones its trigger was rendered under (issue 1066).
+  const container = usePopupPortalContainer() ?? undefined
   return (
-    <PopoverPrimitive.Portal>
+    <PopoverPrimitive.Portal container={container}>
       <PopoverPrimitive.Positioner
         align={align}
         alignOffset={alignOffset}

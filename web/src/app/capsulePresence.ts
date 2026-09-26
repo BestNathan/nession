@@ -12,6 +12,7 @@ import type {
 import type { DomainState } from '@/product/session/model/domainState';
 import type { FileOps } from '@/capabilities/files';
 import type { Agent, Session } from '@/types';
+import { CAPSULE_ENTRY_IDS } from '@/app/capsuleProjections';
 import { resolveWorkspaceCapabilities } from '@/app/workspace/capabilities';
 import type { Experience } from '@/app/workspace/workspaceContext';
 
@@ -90,7 +91,16 @@ export function resolveCapsuleCapabilities(
 
   const disclosure = capsuleDisclosure(snapshots);
 
+  // Reachable **and** worth offering, which is not the same set (#1046). The
+  // disclosure answers "is this capability present for this Session"; this
+  // answers "does peeking at it from here lead anywhere". A capability with a
+  // Workspace view and no Terminal depth is present and not offered — that is
+  // the whole of what this requirement changes, and it is why the filter is
+  // here rather than the entry being taught to hide things.
   const entries: CapabilityDisclosureEntry[] = disclosure.discoverable.flatMap((presence) => {
+    if (!CAPSULE_ENTRY_IDS.includes(presence.capabilityId)) {
+      return [];
+    }
     const snapshot = snapshots.find((candidate) => candidate.id === presence.capabilityId);
     return snapshot ? [{ id: snapshot.id, title: snapshot.title, state: snapshot.state }] : [];
   });

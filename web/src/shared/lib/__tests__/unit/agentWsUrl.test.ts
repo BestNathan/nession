@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildAgentWsUrl } from '@/platform/socket/WebSocketService';
+import { buildAgentWsUrl } from '@/shared/lib/agentWsUrl';
 
 /**
  * The one place a P2P credential reaches an agent URL from the browser.
@@ -9,6 +9,9 @@ import { buildAgentWsUrl } from '@/platform/socket/WebSocketService';
  * copies already differed. This file pins the shared convention from the third
  * language, so a change to any one of them is a visible decision rather than a
  * silent drift.
+ *
+ * It moved here with the function in #1091, when the address probe became its
+ * second consumer — and a `shared` consumer is what makes `shared` its home.
  */
 describe('buildAgentWsUrl', () => {
   it('appends the credential as the token parameter', () => {

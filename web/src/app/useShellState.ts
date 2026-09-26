@@ -16,6 +16,8 @@ import type { AttachChoice } from '@/product/session/components/AttachDialog';
 import type { Surface } from '@/app/patterns/SessionHeader';
 import type { CapabilityId } from '@/product/capability';
 import type { Session } from '@/types';
+import { useOpenWorktreeSession } from '@/app/useOpenWorktreeSession';
+import { useAwaitCreatedSession } from '@/app/useAwaitCreatedSession';
 
 export function useShellState() {
   const data = useDashboard();
@@ -78,6 +80,18 @@ export function useShellState() {
     requestAttach(s);
   }, [openDetail, requestAttach]);
 
+  const selectSessionInWorkspace = useCallback((s: Session) => {
+    setSelectedId(s.session_id);
+    setSurface('workspace');
+    setTool('git');
+    openDetail();
+  }, [openDetail]);
+
+  const handleOpenWorktreeSession = useOpenWorktreeSession({
+    agentId: selectedAgent?.agent_id,
+    selectSessionInWorkspace,
+  });
+
   const onRestoreSession = useCallback((s: Session) => {
     setSelectedId(s.session_id);
     setSurface('terminal');
@@ -91,6 +105,8 @@ export function useShellState() {
     cancelAttach();
     toast.success('Attach settings saved — applies to the next attach');
   }, [cancelAttach]);
+
+  const { awaitSession } = useAwaitCreatedSession(sessions, handleSelect);
 
   const { isRestoringDeepLink } = useDeepLink({
     sessions,
@@ -119,6 +135,8 @@ export function useShellState() {
     saveAttachSettings,
     onKilled,
     handleSelect,
+    handleOpenWorktreeSession,
+    awaitSession,
     setSurface,
     setTool,
     isRestoringDeepLink,

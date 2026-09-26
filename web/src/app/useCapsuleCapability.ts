@@ -77,19 +77,19 @@ export function useCapsuleCapability(
   });
 
   /**
-   * Choosing a capability deepens it to the shallowest depth it supports.
+   * Choosing a capability emerges it beside the capsule.
    *
-   * A capability with a Terminal projection emerges beside the capsule; one
-   * without goes straight to its Workspace view, which is what the entry has
-   * always done. The difference is the capability's, not the entry's.
+   * **There is no path from here to the Workspace** (#1046). This used to fall
+   * back to `onToolChange` + `onSurfaceChange` for anything without a
+   * projection, which made the entry a shortcut into the Workspace and is the
+   * behaviour the requirement removes: selecting a capsule item must not change
+   * surface. That fallback is gone rather than guarded, because the entry can
+   * no longer offer a capability without a Terminal depth — `CAPSULE_ENTRY_IDS`
+   * decides what reaches `choose` at all, so the branch it guarded is
+   * unreachable by construction rather than by care.
    */
   const choose = useCallback(
     (id: CapabilityId) => {
-      if (!projectionBindingFor(id)) {
-        input.onToolChange(id);
-        input.onSurfaceChange();
-        return;
-      }
       setEmergence((current) => ({
         chosen: id,
         opened: false,
@@ -98,7 +98,11 @@ export function useCapsuleCapability(
         dismissed: current.dismissed.filter((candidate) => candidate !== id),
       }));
     },
-    [input],
+    // No `input`: the fallback into the Workspace was the only thing this read
+    // from it, and the entry can no longer offer a capability that would need
+    // it. A dependency kept "just in case" is one that re-creates the callback
+    // for reasons the callback does not have.
+    [],
   );
 
   const onDeeper = useCallback(() => {
@@ -145,7 +149,7 @@ export function useCapsuleCapability(
             depth: active.depth,
             // Absent when the capability declared it has no Peek: the frame
             // reads that as an inert title rather than a step into nothing.
-            onDeeper: binding.supportsPeek ? onDeeper : undefined,
+            onDeeper: binding.entry === 'peek' ? onDeeper : undefined,
             // The capability's own answer to "does this take the keyboard while
             // it is up", copied through untouched. The capsule reacts to the
             // boolean; only the capability knows which projections need it.

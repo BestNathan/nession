@@ -35,7 +35,7 @@ belongs to core runtime; layout/selection state belongs to app/workbench.
 |---|---|---|
 | Agent list + loading/error + heartbeat history | `features/agents/hooks/useAgentData` per mount | Composed by `app/useDashboard`. Deliberately **no** list atom |
 | Push updates (`server.agents.changed`) + refetch on reconnect | `app/useRealtimeUpdates` | One bridge for agents+sessions subscriptions keyed on `wsService` identity; kept app-layer while it fuses both domains |
-| Probe results / latencies | `product/agent/state/probe.ts` | Written by `useProbePolling` (mounted once per shell), read by the P2P attach domain for route choice. Keyed by `agent_id`, so it is the Agent's state — moved out of `atoms/` in #801 Phase 5 |
+| Probe results / latencies | `product/agent/state/probe.ts` | Written by `product/agent/hooks/useAgentProbe.ts`, read by the P2P attach domain for route choice. Keyed by `agent_id`, so it is the Agent's state — moved out of `atoms/` in #801 Phase 5. Measured where an attach reply is in hand: since #1013 the agent refuses an uncredentialed upgrade, so an app-level poll could no longer measure anything (#1091) |
 | Wire registration | `AgentsPlugin` instance (module singleton `agentsApi`) | One binding per WebSocketService lifetime; re-install after reconnect with generation-tagged teardown (`AgentsPlugin.ts`) |
 
 ## Cross-feature dependency

@@ -67,8 +67,22 @@ export interface CapsuleCapabilityProjection {
   body: (
     focus: string | undefined,
     setFocus: (id?: string) => void,
-    /** The capsule's own way of reaching the terminal, for a body that acts. */
-    actions: { sendText: (text: string) => void; disabled: boolean },
+    /**
+     * What a body can *do*, as opposed to what it draws.
+     *
+     * `sendText` is the capsule's own way of reaching the terminal. `openWorkspace`
+     * is #1046's inversion: the host used to render this as a footer on every
+     * Peek, and now supplies it and lets the capability decide whether it exists,
+     * where it sits, and what it carries. Omitting the argument deepens at the
+     * item the body last reported through `onFocusChange`, which is what the
+     * footer did — the host still owns that selection, because it is what makes
+     * the transition land on the right thing (#826).
+     */
+    actions: {
+      sendText: (text: string) => void;
+      openWorkspace: (resourceId?: string) => void;
+      disabled: boolean;
+    },
   ) => ReactNode;
   /**
    * Signal → Peek. Absent for a capability with nothing to add at Peek.

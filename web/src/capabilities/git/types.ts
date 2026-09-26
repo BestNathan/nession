@@ -31,6 +31,12 @@ import {
   type FileDiff,
 } from '@/generated/protocol/git/diff/v1';
 import {
+  type CommitRequest,
+  type CommitResponse,
+  type CommitDetail,
+  type ChangedFileEntry,
+} from '@/generated/protocol/git/commit/v1';
+import {
   type Commit,
   type History,
   type LogRequest,
@@ -59,6 +65,7 @@ import {
 export type GitStatusRequest = SessionTargetV1 & { agent_id: string };
 export type GitDiffRequest = DiffRequest & { agent_id: string };
 export type GitLogRequest = LogRequest & { agent_id: string };
+export type GitCommitRequest = CommitRequest & { agent_id: string };
 export type GitBranchesRequest = BranchesRequest & { agent_id: string };
 export type GitWorktreesRequest = WorktreesRequest & { agent_id: string };
 
@@ -66,6 +73,7 @@ export type GitWorktreesRequest = WorktreesRequest & { agent_id: string };
 export type GitStatusResponse = StatusResponse;
 export type GitDiffResponse = DiffResponse;
 export type GitLogResponse = LogResponse;
+export type GitCommitResponse = CommitResponse;
 export type GitBranchesResponse = BranchesResponse;
 export type GitRootResponse = RootResponse;
 export type GitWorktreesResponse = WorktreesResponse;
@@ -77,6 +85,8 @@ export type GitStatus = RepoStatus;
 export type GitFileDiff = FileDiff;
 export type GitCommit = Commit;
 export type GitHistory = History;
+export type GitCommitDetail = CommitDetail;
+export type GitCommitChangedFile = ChangedFileEntry;
 export type GitBranch = Branch;
 export type GitBranches = Branches;
 export type GitWorktree = Worktree;
@@ -101,9 +111,18 @@ export type GitUnavailableState = GitUnavailable['state'];
 export type GitStatusOk = Extract<GitStatusResponse, { state: 'ok' }>;
 export type GitDiffOk = Extract<GitDiffResponse, { state: 'ok' }>;
 export type GitLogOk = Extract<GitLogResponse, { state: 'ok' }>;
+export type GitCommitOk = Extract<GitCommitResponse, { state: 'ok' }>;
 export type GitBranchesOk = Extract<GitBranchesResponse, { state: 'ok' }>;
 export type GitRootOk = Extract<GitRootResponse, { state: 'ok' }>;
 export type GitWorktreesOk = Extract<GitWorktreesResponse, { state: 'ok' }>;
+
+/** `agent.git.invalidated` — repository state may be stale (#1008). */
+export interface GitInvalidatedEvent {
+  agent_id: string;
+  session: string;
+  epoch: number;
+  reason?: string;
+}
 
 export function isOk<T extends { state: string }>(
   response: T | GitUnavailable,

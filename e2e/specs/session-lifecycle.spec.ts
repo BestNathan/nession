@@ -52,7 +52,24 @@ test.describe('Session lifecycle', () => {
     // Wait for the row first — create can succeed server-side while the dialog
     // close animation lags; the row is the authoritative success signal.
     await expect(sessionRow).toBeVisible({ timeout: 15_000 });
-    await expect(dialog).not.toBeVisible({ timeout: 5_000 });
+
+    // The **create** dialog, named rather than `getByRole('dialog')` (#1082).
+    // Creating now makes the new Session current, which runs the ordinary
+    // selection path — attach included — so by the time this line runs the
+    // attach dialog is the only dialog on screen and the bare role locator
+    // asserted against the wrong one.
+    const createDialog = page.getByRole('dialog').filter({ hasText: 'Create Session' });
+    await expect(createDialog).not.toBeVisible({ timeout: 5_000 });
+
+    // Creating enters the work rather than returning the user to the list: the
+    // Session is selected and its attach flow starts. A Session created seconds
+    // ago has no stored profile, so that flow asks rather than attaching
+    // silently. Dismiss it — this spec is about the lifecycle, not the attach
+    // choice — and the row is left selected.
+    const attachDialog = page.getByRole('dialog').filter({ hasText: 'Attach' });
+    await expect(attachDialog).toBeVisible({ timeout: 10_000 });
+    await attachDialog.getByRole('button', { name: 'Cancel' }).click();
+    await expect(attachDialog).not.toBeVisible({ timeout: 5_000 });
 
     // Meta line format: "{workload} · {agentLabel} · {relative time}".
     //

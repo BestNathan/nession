@@ -42,6 +42,7 @@ use serde_json::Value;
 use tracing::debug;
 
 use crate::protocol::branches::{BranchesOkV1, BranchesRequestV1};
+use crate::protocol::commit::{CommitOkV1, CommitRequestV1};
 use crate::protocol::diff::{DiffOkV1, DiffRequestV1};
 use crate::protocol::log::{LogOkV1, LogRequestV1};
 use crate::protocol::root::{RootOkV1, RootRequestV1};
@@ -50,6 +51,7 @@ use crate::protocol::worktrees::{WorktreesOkV1, WorktreesRequestV1};
 use crate::protocol::{self, GitFailure, GitResponseV1};
 use crate::runtime::branches;
 use crate::runtime::cmd::GitCmd;
+use crate::runtime::commit;
 use crate::runtime::diff;
 use crate::runtime::log;
 use crate::runtime::security::MAX_STATUS_BYTES;
@@ -194,7 +196,7 @@ impl GitAgentExtension {
         self.ready(&cmd).await?;
 
         Ok(DiffOkV1 {
-            diff: diff::file_diff(&cmd, &request.path).await?,
+            diff: diff::file_diff(&cmd, &request.path, request.commit.as_deref()).await?,
         })
     }
 
@@ -211,7 +213,17 @@ impl GitAgentExtension {
 
         let limit = request.limit.and_then(|n| usize::try_from(n).ok());
         Ok(LogOkV1 {
-            history: log::history(&cmd, limit).await?,
+            history: log::history(&cmd, limit, request.before.as_deref()).await?,
+        })
+    }
+
+    async fn commit_detail(&self, payload: Value) -> Result<CommitOkV1, GitFailure> {
+        let request: CommitRequestV1 = decode(payload)?;
+        let cmd = self.cmd_for(&request.target.session).await?;
+        self.ready(&cmd).await?;
+
+        Ok(CommitOkV1 {
+            commit: commit::commit_detail(&cmd, &request.oid).await?,
         })
     }
 
@@ -265,6 +277,10 @@ impl GitAgentExtension {
         respond_with(self.history(payload).await)
     }
 
+    async fn handle_commit(&self, payload: Value) -> anyhow::Result<Value> {
+        respond_with(self.commit_detail(payload).await)
+    }
+
     async fn handle_branches(&self, payload: Value) -> anyhow::Result<Value> {
         respond_with(self.local_branches(payload).await)
     }
@@ -301,6 +317,7 @@ impl AgentExtension for GitAgentExtension {
             protocol::diff::ID => self.handle_diff(payload).await,
             protocol::root::ID => self.handle_root(payload).await,
             protocol::log::ID => self.handle_log(payload).await,
+            protocol::commit::ID => self.handle_commit(payload).await,
             protocol::branches::ID => self.handle_branches(payload).await,
             protocol::worktrees::ID => self.handle_worktrees(payload).await,
             other => anyhow::bail!("unknown git command: {other}"),
@@ -319,6 +336,7 @@ mod tests {
             (crate::protocol::diff::v1::WIRE, protocol::diff::ID),
             (crate::protocol::root::v1::WIRE, protocol::root::ID),
             (crate::protocol::log::v1::WIRE, protocol::log::ID),
+            (crate::protocol::commit::v1::WIRE, protocol::commit::ID),
             (crate::protocol::branches::v1::WIRE, protocol::branches::ID),
             (
                 crate::protocol::worktrees::v1::WIRE,
@@ -396,6 +414,7 @@ mod tests {
             protocol::diff::ID,
             protocol::root::ID,
             protocol::log::ID,
+            protocol::commit::ID,
             protocol::branches::ID,
             protocol::worktrees::ID,
         ]

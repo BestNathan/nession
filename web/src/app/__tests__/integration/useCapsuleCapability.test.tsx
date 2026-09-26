@@ -142,15 +142,34 @@ describe('capsule emergence', () => {
     expect(result.current.projection?.ownsInputFocus).toBeFalsy();
   });
 
-  it('leaves a capability with no Terminal depth to the Workspace', () => {
-    // Files has no Signal to emerge; the entry keeps doing what it always did.
+  it('never changes surface when a capability is chosen', () => {
+    // **The inversion (#1046).** This test used to assert the opposite — that
+    // choosing a capability with no Terminal depth fell through to
+    // `onToolChange` + `onSurfaceChange`, i.e. that the capsule entry was a
+    // shortcut into the Workspace. Removing that is the point of the
+    // requirement: selecting a capsule item must leave the user where they are.
+    //
+    // Asserted with a listed capability *and* an unlisted one, because the two
+    // fail independently. The listed one proves the rule on the path the entry
+    // can actually reach; the unlisted one proves the entry cannot reach it —
+    // if `files` ever switches surface again, the capsule has become a launcher
+    // again, whether or not the eligible path still behaves.
     const { result, choose, onToolChange, onSurfaceChange } = setup();
 
+    // An unlisted capability. The entry cannot offer it — that is the previous
+    // test — but choosing it must still not open the Workspace: it has nothing
+    // to emerge, so the honest outcome is that nothing happens at all.
     choose('files');
-
-    expect(onToolChange).toHaveBeenCalledWith('files');
-    expect(onSurfaceChange).toHaveBeenCalledTimes(1);
+    expect(onToolChange).not.toHaveBeenCalled();
+    expect(onSurfaceChange).not.toHaveBeenCalled();
     expect(result.current.projection).toBeUndefined();
+
+    // A listed one, so the assertions above are not passing because `choose`
+    // does nothing at all.
+    choose('git');
+    expect(onToolChange).not.toHaveBeenCalled();
+    expect(onSurfaceChange).not.toHaveBeenCalled();
+    expect(result.current.projection?.id).toBe('git');
   });
 
   it('keeps a dismissed Signal dismissed', () => {

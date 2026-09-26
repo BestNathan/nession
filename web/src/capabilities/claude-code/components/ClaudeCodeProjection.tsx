@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { CapabilityState } from '@/product/capability';
+import { capsulePeekActionClass } from '@/shared/lib/peekActionClass';
 import { claudeCodeApi } from '../ClaudeCodePlugin';
 import type { ClaudeCodeListResponse } from '../types';
 
@@ -20,17 +21,40 @@ export function ClaudeCodeProjection({
   agentId,
   sessionId,
   state,
+  onOpenWorkspace,
 }: {
   agentId: string | undefined;
   sessionId: string | undefined;
   state: CapabilityState;
+  /**
+   * The way in (#1046).
+   *
+   * This capability's richer surface *is* its Workspace view, so the Signal ends
+   * by offering it. Until this requirement the host drew that offer as a generic
+   * footer on every Peek; now the capability draws its own, which is also why
+   * this one has no Peek — the offer is the whole of its deepening, and a Peek
+   * between the Signal and the Workspace would add a step that says nothing.
+   */
+  onOpenWorkspace?: (resourceId?: string) => void;
 }) {
   const { summary } = useProjectConfigCount({ agentId, sessionId });
 
   return (
-    <div data-testid="claude-code-signal-body" className="flex flex-col gap-0.5">
+    <div data-testid="claude-code-signal-body" className="flex flex-col gap-1">
       <p className="truncate text-xs font-medium text-foreground">{stateLine(state)}</p>
       <p className="truncate text-xs text-muted-foreground">{summary}</p>
+      {onOpenWorkspace ? (
+        <div className="flex justify-end">
+          <button
+            type="button"
+            data-testid="capsule-capability-open-workspace"
+            onClick={() => onOpenWorkspace()}
+            className={capsulePeekActionClass}
+          >
+            Open in Workspace →
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

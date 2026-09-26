@@ -31,7 +31,7 @@ vars: Array<[string, string]>,
  * Non-fatal parse warnings surfaced to the UI.
  */
 warnings: Array<string>, };
-export type SessionCreatePayload = { name: string, width: number, height: number, 
+export type SessionCreatePayload = { name: string, width: number, height: number, working_dir?: string | null, 
 /**
  * Resolved env-file snapshots to inject via `tmux new-session -e`.
  *
@@ -51,7 +51,7 @@ export type SessionCreateResponse = { name: string, };
 // ── Operations ──
 
 /** The payload a caller sends. */
-export type SessionCreateCall = { name: string, width: number, height: number, 
+export type SessionCreateCall = { name: string, width: number, height: number, working_dir?: string | null, 
 /**
  * Resolved env-file snapshots to inject via `tmux new-session -e`.
  *

@@ -95,7 +95,7 @@ The resting TerminalCapsule remains minimal.
 
 The resting capsule must not grow one persistent chip per active capability.
 
-The `+` affordance remains the explicit fallback for discovering and invoking Nession capabilities. However, `+` is **not the only place capability state may ever be shown**.
+The `+` affordance is the explicit entry for **peeking** at a capability from the Terminal. It is **not a launcher**: selecting an item never changes surface, and a capability whose only depth is a Workspace view is not listed at all (#1046 — see *What may appear* below). That supersedes the earlier reading of this sentence, which made `+` a fallback for *invoking* capabilities. `+` is still **not the only place capability state may ever be shown**.
 
 Once a capability has been selected, triggered, or has earned contextual presence, Nession may materialize a temporary Signal or Peek adjacent to the capsule while keeping the resting capsule itself unchanged.
 
@@ -114,7 +114,11 @@ The `+` expansion is a Nession capability entry, not an operating-system action 
 
 Platform-native text actions such as copy/paste/selection should remain native platform behavior rather than being duplicated as first-class Nession capabilities.
 
-The capability entry should show only capabilities that Nession owns or integrates, filtered by context and support. Examples may include:
+The capability entry should show only capabilities that Nession owns or integrates, filtered by context, support, **and Terminal depth**.
+
+It must not become a static catalog of everything installed.
+
+Examples may include:
 
 - Claude Code;
 - Workspace context;
@@ -122,7 +126,23 @@ The capability entry should show only capabilities that Nession owns or integrat
 - Terminal Keys;
 - future debugging, database, Kubernetes, preview, process, or environment capabilities.
 
-It must not become a static catalog of everything installed.
+### What may appear, and what may not (#1046)
+
+> **A capability is eligible for the capsule entry only if it contributes a useful Terminal-local Peek. Availability in Workspace is not enough.**
+
+Eligibility is declared by the capability, beside the body that does the peeking, as one of three roles:
+
+| role | listed | why |
+|---|---|---|
+| **Peek** | yes | it can be reached from where the user already is |
+| **Accessory** | yes | a built-in Terminal-local accessory; it has no Workspace view to be confused with, and it keeps the entry from being empty on a node whose only Peek-capable capability is unavailable |
+| **Signal** | no | it emerges by observation when Nession resolves it as relevant, but explicit discovery is not offered for a depth with nothing behind it |
+
+The examples above are therefore a list of **capabilities**, not of entry items: Claude Code is Signal-only and is not listed today, and returns to the entry when it contributes a Peek. Git and Terminal Keys are listed.
+
+There is no path from selecting an entry to changing surface. Not "the control is hidden" — the entry cannot offer a capability that has no Terminal depth, so the branch does not exist.
+
+A capability with a Workspace view and nothing else stays reachable through Workspace navigation, which is where it belongs.
 
 ## Capability projection contract
 

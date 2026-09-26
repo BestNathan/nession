@@ -37,7 +37,7 @@ export type WebSessionInfo = { session_id: string, agent_id: string, session_nam
  * On the wire since the list existed; this type did not name it, so a
  * consumer reading the schema could not know it was there.
  */
-foreground_command?: string | null, last_activity: string, };
+foreground_command?: string | null, working_dir?: string | null, last_activity: string, };
 
 // ── Operations ──
 

@@ -23,6 +23,10 @@ export const VERSION = 1;
 
 export type ClientSessionCreatePayload = { agent_id: string, name: string, 
 /**
+ * Absolute path on the target agent for the session's initial cwd.
+ */
+working_dir?: string | null, 
+/**
  * Env files to source into the session as it is created.
  *
  * The Server has always read this off the payload and the Web has always
@@ -40,6 +44,10 @@ export type EnvSource = "server" | "agent";
 
 /** The payload a caller sends. */
 export type SessionCreateCall = { agent_id: string, name: string, 
+/**
+ * Absolute path on the target agent for the session's initial cwd.
+ */
+working_dir?: string | null, 
 /**
  * Env files to source into the session as it is created.
  *

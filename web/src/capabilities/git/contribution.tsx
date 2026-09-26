@@ -68,13 +68,15 @@ export const gitProjection: CapsuleProjectionBinding = {
   id: GIT_ID,
   // A changed-file summary is what sits between "3 changed" and a full diff,
   // so Git has a Peek of its own.
-  supportsPeek: true,
-  body: ({ agentId, sessionId, depth, onFocusChange }) => (
+  // A Peek, and that is what earns the entry (#1046).
+  entry: 'peek',
+  body: ({ agentId, sessionId, depth, onFocusChange, openWorkspace }) => (
     <GitProjection
       agentId={agentId}
       sessionId={sessionId}
       depth={depth}
       onFocusChange={onFocusChange}
+      onOpenWorkspace={openWorkspace}
     />
   ),
 };

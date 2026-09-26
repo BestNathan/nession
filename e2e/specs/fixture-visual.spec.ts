@@ -126,6 +126,25 @@ test.describe('App 390×844', () => {
     });
   });
 
+  // #1082 criterion 13 names 375/390 for the no-Session home. It is a screen in
+  // its own right — the App's root before any work exists — and until this
+  // route existed no canonical screen could produce it, so the visual gate had
+  // nothing to protect.
+  test('No Session home', async ({ page }) => {
+    await gotoFixtureApp(page, '?selection=none');
+    await expect(page.getByTestId('app-home')).toBeVisible();
+    // The two routes out are the point of the screen, so they are what has to
+    // be in the picture: the primary action, and Sessions.
+    await expect(page.getByTestId('app-home-new-session')).toBeEnabled();
+    await expect(page.getByTestId('app-header-sessions')).toBeVisible();
+    await expect(page.getByTestId('app-header-workspace')).toHaveCount(0);
+
+    await expect(page).toHaveScreenshot('app-home.png', {
+      fullPage: true,
+      ...FIXTURE_SCREENSHOT,
+    });
+  });
+
   // #838: a capability emerging beside the capsule. It had no fixture route
   // until the capsule rendered in one — `terminal ?? <TerminalRegion/>` meant
   // neither fixture drew a composer at all.
@@ -328,6 +347,16 @@ test.describe('App 390×844', () => {
 // produce a second baseline.
 test.describe('App 375×812', () => {
   test.use({ viewport: { width: 375, height: 812 } });
+
+  test('No Session home', async ({ page }) => {
+    await gotoFixtureApp(page, '?selection=none');
+    await expect(page.getByTestId('app-home')).toBeVisible();
+
+    await expect(page).toHaveScreenshot('app-home-375.png', {
+      fullPage: true,
+      ...FIXTURE_SCREENSHOT,
+    });
+  });
 
   test('Sessions layer', async ({ page }) => {
     await gotoFixtureApp(page);

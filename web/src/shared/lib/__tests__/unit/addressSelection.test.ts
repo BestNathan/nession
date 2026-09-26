@@ -22,8 +22,25 @@ interface MockWs {
  */
 let behavior: Record<string, { openDelayMs?: number; fail?: boolean }> = {};
 
+/** Every URL dialled, verbatim and in dial order — including any `?token=`. */
+let dialed: string[] = [];
+
+/**
+ * The behaviour map is keyed by the credential-free URL.
+ *
+ * The credential is a detail of *how* a candidate is dialled and must not change
+ * which behaviour that candidate gets — otherwise every entry would have to be
+ * written twice, once per credential, and a test that forgot would silently
+ * measure the `?? {}` default instead of the case it named.
+ */
+function behaviourKey(dialUrl: string): string {
+  const query = dialUrl.indexOf('?');
+  return query === -1 ? dialUrl : dialUrl.slice(0, query);
+}
+
 function setupMock() {
   behavior = {};
+  dialed = [];
   function MockCtor(this: MockWs, url: string) {
     // eslint-disable-next-line @typescript-eslint/no-this-alias
     const self = this;
@@ -32,8 +49,9 @@ function setupMock() {
     self.onerror = null;
     self.onclose = null;
     self.close = vi.fn();
+    dialed.push(url);
 
-    const cfg = behavior[url] ?? {};
+    const cfg = behavior[behaviourKey(url)] ?? {};
     setTimeout(() => {
       if (cfg.fail) {
         self.onerror?.(new Event('error'));
@@ -79,10 +97,52 @@ describe('measureLatency', () => {
 
   it('resolves with null on timeout', async () => {
     behavior['ws://slow/ws'] = { openDelayMs: 999_999 };
-    const p = measureLatency('ws://slow/ws', 1_000);
+    const p = measureLatency('ws://slow/ws', { timeoutMs: 1_000 });
     await vi.advanceTimersByTimeAsync(1_001);
     const result = await p;
     expect(result.latencyMs).toBeNull();
+  });
+
+  // ── The credential (#1091) ──────────────────────────────────────────────
+  //
+  // Both halves of these matter and they fail differently: a probe that does not
+  // present the credential is refused by the agent since #1013 and reports every
+  // candidate unreachable, and a probe that reports the credentialled URL back
+  // makes the result unusable as an identity — `AttachDialog` keys its latency
+  // column by `url`, and the chosen URL is passed to `buildAgentWsUrl` again.
+
+  it('presents the credential at the upgrade but reports the bare URL', async () => {
+    behavior['ws://a/ws'] = { openDelayMs: 5 };
+    const p = measureLatency('ws://a/ws', { credential: 'tok' });
+    await vi.advanceTimersByTimeAsync(10);
+    const result = await p;
+
+    expect(dialed).toEqual(['ws://a/ws?token=tok']);
+    expect(result.url).toBe('ws://a/ws');
+    expect(result.latencyMs).not.toBeNull();
+  });
+
+  it('dials without a token when there is no credential', async () => {
+    behavior['ws://a/ws'] = { openDelayMs: 5 };
+    const p = measureLatency('ws://a/ws');
+    await vi.advanceTimersByTimeAsync(10);
+    await p;
+
+    expect(dialed).toEqual(['ws://a/ws']);
+  });
+
+  it('carries the credential through the whole fan-out', async () => {
+    behavior['ws://a/ws'] = { openDelayMs: 5 };
+    behavior['ws://b/ws'] = { openDelayMs: 1 };
+    const addrs = [probed('ws://a/ws', 'reachable'), probed('ws://b/ws', 'reachable')];
+
+    const p = orderAddressesByLatency(addrs, { credential: 'tok' });
+    await vi.advanceTimersByTimeAsync(10);
+    const urls = await p;
+
+    expect(dialed).toEqual(['ws://a/ws?token=tok', 'ws://b/ws?token=tok']);
+    // Bare URLs come back, so the ordering is still usable as a plan.
+    expect(urls).toEqual(['ws://b/ws', 'ws://a/ws']);
   });
 });
 

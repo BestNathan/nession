@@ -26,7 +26,15 @@ interface CreateSessionDialogProps {
   onClose: () => void;
   agents: Agent[];
   preselectedAgentId?: string | null;
-  onCreated: () => void;
+  /**
+   * The created Session's id, when the server returned one.
+   *
+   * Handed over rather than dropped because creating is only half of what the
+   * caller needs: the response already carries the identity, and a caller that
+   * has to find the new Session again in a refreshed list is guessing at
+   * something it was told (#1082).
+   */
+  onCreated: (sessionId?: string) => void;
 }
 
 function AgentSelect({
@@ -131,7 +139,7 @@ export function CreateSessionDialog({
     try {
       const result = await sessionsApi.createSession(agentId, sessionName.trim(), selectedEnv);
       if (result.success) {
-        onCreated();
+        onCreated(result.session_id);
         onClose();
       } else {
         setError(result.error ?? 'Failed to create session');

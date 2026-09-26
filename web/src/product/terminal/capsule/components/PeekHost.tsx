@@ -11,13 +11,18 @@ import {
 import type { CapsuleCapabilityProjection } from '@/product/terminal/capsule/types';
 
 /**
- * A capability emerging next to the capsule, at the depth Nession chose.
+ * The surface a capability's Terminal content is drawn on (#1046).
  *
- * This is the frame, and the frame is Nession's: the surface, the title, how to
- * dismiss, how to go one level deeper, and the path into Workspace. The
- * capability supplies only the body. That split is the point — a capability
- * that drew its own frame would be choosing its own placement, which
- * `workspace-navigation.md` puts on Nession's side of the line.
+ * This is the **host**, and it owns only what is Nession's: the surface and its
+ * bounds, the dismissal, the step from Signal to Peek, and the accessibility
+ * baseline. It does not own the path into the Workspace — that was a generic
+ * footer here, and it is now an action supplied to the body
+ * (`actions.openWorkspace`), because whether a capability has somewhere deeper
+ * to go and what that looks like is the capability's answer, not the host's.
+ *
+ * The name says which half it is. It was `CapabilityProjection`, which read as
+ * "the projection of a capability" — the whole thing — while it has only ever
+ * been the frame around one.
  *
  * Nothing here touches the resting capsule: this renders *above* it, as a
  * sibling, so the capsule's own geometry is byte-identical whether a projection
@@ -27,7 +32,7 @@ import type { CapsuleCapabilityProjection } from '@/product/terminal/capsule/typ
  * before this mounted (Q1–Q3), so a component that could also change it would
  * be a second, weaker copy of that decision.
  */
-export function CapabilityProjection({
+export function PeekHost({
   projection,
   sendText,
   disabled,
@@ -41,10 +46,6 @@ export function CapabilityProjection({
   const { depth, title, onDeeper, onDismiss, onOpenWorkspace } = projection;
   const isPeek = depth === 'peek';
   const hasDeeper = Boolean(onDeeper);
-
-  // A Signal with no Peek behind it still has somewhere to go — its Workspace
-  // view — so the path hangs off the Signal rather than behind an empty step.
-  const showWorkspace = Boolean(onOpenWorkspace) && (isPeek || !hasDeeper);
 
   return (
     <div
@@ -90,20 +91,14 @@ export function CapabilityProjection({
         </button>
       </div>
 
-      {projection.body(focus, setFocus, { sendText, disabled })}
-
-      {showWorkspace ? (
-        <div className="flex justify-end">
-          <button
-            type="button"
-            data-testid="capsule-capability-open-workspace"
-            onClick={() => onOpenWorkspace?.(focus)}
-            className="rounded px-[length:var(--terminal-capsule-projection-item-pad-x)] font-medium text-foreground transition-colors hover:text-foreground/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            Open in Workspace →
-          </button>
-        </div>
-      ) : null}
+      {projection.body(focus, setFocus, {
+        sendText,
+        // Bound here rather than in the hook, because `focus` is this
+        // component's state: the deepening a capability offers is *at the item
+        // the user picked*, and only the host knows which that was.
+        openWorkspace: (resourceId) => onOpenWorkspace?.(resourceId ?? focus),
+        disabled,
+      })}
     </div>
   );
 }

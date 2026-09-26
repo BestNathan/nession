@@ -227,6 +227,7 @@ mod tests {
             width: 80,
             height: 24,
             foreground_command: None,
+            working_dir: None,
         }
     }
 

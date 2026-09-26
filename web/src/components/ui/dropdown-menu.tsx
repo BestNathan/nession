@@ -2,7 +2,26 @@ import * as React from "react"
 import { Menu as MenuPrimitive } from "@base-ui/react/menu"
 
 import { cn } from "@/shared/lib/utils"
+import { usePopupPortalContainer } from "@/components/ui/popup-portal"
 import { ChevronRightIcon, CheckIcon } from "lucide-react"
+
+/**
+ * The item band, from the Experience layer rather than from a local metric.
+ *
+ * A menu item is a control, so its hit target is the experience's own control
+ * band — and `control.sm` is the one band that states both densities without
+ * either adopting the other's: 28px on Web, which is what a menu row already
+ * measured (`py-1` under `text-sm`'s 20px line box), and 44px on App, whose
+ * `control.sm` equals `control.md` precisely so that no App hit target sits
+ * under the touch floor (`design/tokens/experience/app.json`). `control.md`
+ * would have resolved to 32px on Web and moved a density issue 1066 requires be
+ * left alone.
+ *
+ * It resolves from the *popup's* container, not from the trigger: see
+ * `usePopupPortalContainer`. A menu opened inside the App experience reads the
+ * App's 44px; the same menu opened from the Web shell reads 28px.
+ */
+const menuItemBandClass = "min-h-[length:var(--control-sm)]"
 
 function DropdownMenu({ ...props }: MenuPrimitive.Root.Props) {
   return <MenuPrimitive.Root data-slot="dropdown-menu" {...props} />
@@ -28,8 +47,12 @@ function DropdownMenuContent({
     MenuPrimitive.Positioner.Props,
     "align" | "alignOffset" | "side" | "sideOffset"
   >) {
+  // `null` → `undefined`: base-ui reads an explicit `null` container as "the
+  // container is not resolved yet" and mounts nothing, while `undefined` is its
+  // documented default (`body`).
+  const container = usePopupPortalContainer() ?? undefined
   return (
-    <MenuPrimitive.Portal>
+    <MenuPrimitive.Portal container={container}>
       <MenuPrimitive.Positioner
         className="isolate z-50 outline-none"
         align={align}
@@ -86,6 +109,7 @@ function DropdownMenuItem({
       data-inset={inset}
       data-variant={variant}
       className={cn(
+        menuItemBandClass,
         "group/dropdown-menu-item relative flex cursor-default items-center gap-1.5 rounded-md px-1.5 py-1 text-sm outline-hidden select-none focus:bg-accent focus:text-accent-foreground not-data-[variant=destructive]:focus:**:text-accent-foreground data-inset:pl-7 data-[variant=destructive]:text-destructive data-[variant=destructive]:focus:bg-destructive/10 data-[variant=destructive]:focus:text-destructive dark:data-[variant=destructive]:focus:bg-destructive/20 data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 data-[variant=destructive]:*:[svg]:text-destructive",
         className
       )}
@@ -111,6 +135,7 @@ function DropdownMenuSubTrigger({
       data-slot="dropdown-menu-sub-trigger"
       data-inset={inset}
       className={cn(
+        menuItemBandClass,
         "flex cursor-default items-center gap-1.5 rounded-md px-1.5 py-1 text-sm outline-hidden select-none focus:bg-accent focus:text-accent-foreground not-data-[variant=destructive]:focus:**:text-accent-foreground data-inset:pl-7 data-popup-open:bg-accent data-popup-open:text-accent-foreground data-open:bg-accent data-open:text-accent-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
         className
       )}
@@ -157,6 +182,7 @@ function DropdownMenuCheckboxItem({
       data-slot="dropdown-menu-checkbox-item"
       data-inset={inset}
       className={cn(
+        menuItemBandClass,
         "relative flex cursor-default items-center gap-1.5 rounded-md py-1 pr-8 pl-1.5 text-sm outline-hidden select-none focus:bg-accent focus:text-accent-foreground focus:**:text-accent-foreground data-inset:pl-7 data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
         className
       )}
@@ -199,6 +225,7 @@ function DropdownMenuRadioItem({
       data-slot="dropdown-menu-radio-item"
       data-inset={inset}
       className={cn(
+        menuItemBandClass,
         "relative flex cursor-default items-center gap-1.5 rounded-md py-1 pr-8 pl-1.5 text-sm outline-hidden select-none focus:bg-accent focus:text-accent-foreground focus:**:text-accent-foreground data-inset:pl-7 data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
         className
       )}
