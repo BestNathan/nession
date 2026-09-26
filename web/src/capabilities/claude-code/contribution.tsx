@@ -102,6 +102,8 @@ export const claudeCodeView: WorkspaceViewBinding = {
  */
 export const claudeCodeProjection: CapsuleProjectionBinding = {
   id: CLAUDE_CODE_ID,
+  // Signal only: emerges when relevant, not offered for selection (#1046).
+  entry: 'signal',
   body: ({ agentId, sessionId, state }) => (
     <ClaudeCodeProjection agentId={agentId} sessionId={sessionId} state={state} />
   ),
