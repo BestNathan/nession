@@ -57,8 +57,12 @@ export function SessionHeader({
   experience = 'app',
 }: SessionHeaderProps) {
   const chrome = resolveSessionChrome(state);
+  // Session identity is product text, and the criterion names "Session name" in
+  // the same breath as the page title (#1050 stage 4). It was monospaced here
+  // while the *same* name is set in the product face on the Sessions row it was
+  // chosen from — one string, two families, decided by which screen it is on.
   const title = (
-    <h1 className="min-w-0 truncate font-mono text-base font-semibold">{sessionName}</h1>
+    <h1 className="min-w-0 truncate text-base font-semibold">{sessionName}</h1>
   );
   if (experience === 'app') {
     return (
@@ -75,7 +79,15 @@ export function SessionHeader({
             })
           : null}
         {title}
-        <div className="flex min-w-0 flex-1 items-center gap-2 font-mono text-xs">
+        {/* The status member: `ConnectionStatus` renders channel words and their
+            copy ("exited", "Agent offline", "Attach failed"). The Metadata role
+            owns "status details", so the wrapper does not set the family — it
+            was the `font-mono` here, not the child, that made this line read as
+            technical (#1050 stage 4). */}
+        <div
+          data-testid="session-header-status"
+          className="flex min-w-0 flex-1 items-center gap-2 text-xs"
+        >
           {chrome.agent !== 'quiet' || chrome.connection !== 'quiet' ? (
             <SessionConnectionStatus state={state} />
           ) : null}

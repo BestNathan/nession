@@ -1,6 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { AppLayout } from '@/app/experiences/app/AppLayout';
 import { useAppLayer } from '@/app/experiences/app/useAppLayer';
+import { filterSessions } from '@/app/useDashboard';
+import { useDashboardFilter } from '@/app/useDashboardFilter';
 import { mapDomainState } from '@/product/session/model/domainState';
 import { FixtureTerminal } from '@/app/fixture/FixtureTerminal';
 import {
@@ -14,6 +17,7 @@ import type { CapabilityId } from '@/product/capability';
 import { gitApi } from '@/capabilities/git';
 import { fixtureFileOps } from './fixtureFileOps';
 import { fixtureGitSurface } from './fixtureGit';
+import { fixtureStaleAgents } from './fixtureStaleAgents';
 
 // Module-stable — the stub is immutable and stateless (same pattern as
 // FixtureWorkspace's fixtureOps).
@@ -30,6 +34,15 @@ const fixtureOps = fixtureFileOps();
  * build its own `AppSpatialShell` with a reversed surface/index derivation,
  * which meant the fixture and the product could disagree about the shell
  * without any test noticing.
+ *
+ * The Session list is the product's, not a snapshot of one (#1050 stage 5):
+ * the filter/sort state is `useDashboardFilter` and the list is
+ * `filterSessions`, which is exactly the pair `useDashboard` composes with its
+ * transport. So the search field filters, the Filters disclosure sorts, and the
+ * route renders an order the app can reach — the three props that used to be
+ * static (`searchQuery: ''`, `setSearchQuery: () => {}` and the unfiltered
+ * list) made the field inert and left the canonical screen showing a Session
+ * order no sort in the product produces.
  */
 export function FixtureApp() {
   // A capability projection has to be reachable from a fixture to be captured,
@@ -42,6 +55,29 @@ export function FixtureApp() {
   const [surface, setSurface] = useState<Surface>('terminal');
   const [tool, setTool] = useState<CapabilityId>('files');
 
+  const {
+    searchQuery, setSearchQuery,
+    statusFilter, setStatusFilter,
+    sortField, sortDirection, toggleSort,
+    isSearchActive,
+  } = useDashboardFilter();
+
+  const filteredSessions = useMemo(
+    () =>
+      filterSessions(FIXTURE_SESSIONS, FIXTURE_AGENTS, {
+        statusFilter,
+        searchQuery,
+        sortField,
+        sortDirection,
+      }),
+    [statusFilter, searchQuery, sortField, sortDirection],
+  );
+
+  // The route's Session-list input. Nothing here can produce staleness (it takes
+  // a refresh getting no answer), so the parameter names the input — see
+  // `fixtureStaleAgents`.
+  const staleAgents = fixtureStaleAgents(useLocation().search);
+
   const selectedId = FIXTURE_SELECTED_ID;
   const selectedSession =
     FIXTURE_SESSIONS.find((s) => s.session_id === selectedId) ?? null;
@@ -52,7 +88,10 @@ export function FixtureApp() {
     ? mapDomainState({
         session: selectedSession,
         agent: selectedAgent,
-        staleAgentIds: [],
+        // The same input the rows are given (`useShellState` hands the product's
+        // footer the whole stale list): a footer that stayed healthy while the
+        // list said otherwise would be a disagreement the product does not have.
+        staleAgentIds: staleAgents,
         clientSessionId: FIXTURE_CLIENT_SESSION_ID,
         attachInFlightId: null,
         attachFailedId: null,
@@ -61,19 +100,19 @@ export function FixtureApp() {
 
   const sidebarProps = {
     agents: FIXTURE_AGENTS,
-    filteredSessions: FIXTURE_SESSIONS,
-    staleAgents: [],
+    filteredSessions,
+    staleAgents,
     selectedId,
     clientSessionId: FIXTURE_CLIENT_SESSION_ID,
     loadingSessions: false,
-    searchQuery: '',
-    setSearchQuery: () => {},
-    statusFilter: 'all' as const,
-    setStatusFilter: () => {},
-    sortField: 'name' as const,
-    sortDirection: 'desc' as const,
-    toggleSort: () => {},
-    isSearchActive: false,
+    searchQuery,
+    setSearchQuery,
+    statusFilter,
+    setStatusFilter,
+    sortField,
+    sortDirection,
+    toggleSort,
+    isSearchActive,
     connectionStatus: 'connected' as const,
     domain,
     onCreate: () => {},
