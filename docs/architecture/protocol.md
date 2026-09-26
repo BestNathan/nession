@@ -1059,9 +1059,112 @@ When principals do exist, this is the seam: step 1 becomes "who is this", and th
 relation belongs between steps 3 and 4, where the target and the unit are both
 already resolved.
 
+## The P2P credential boundary
+
+The agent's peer-to-peer socket is a **second door** into the agent process, and
+it is not only the terminal data plane: it dispatches session management
+(`agent.session.*`) and the file sandbox (`agent.file.*`) too. Until `#1013` the
+Server minted a token for it and the agent validated nothing, so **anything that
+could reach the agent's port had unauthenticated session and file management**,
+over a transport that never asked who was calling.
+
+### Server issues, agent verifies, and the record travels outbound
+
+There is no Server↔agent shared secret to sign with — the only credential the
+two share is the user's `auth_token`, which is legitimately the empty string —
+and `nession-agent` has no production cryptography at all. A signed credential
+would therefore mean a new supply-chain surface in the one crate that listens on
+a port, plus key delivery and rotation, where a rotating key invalidates every
+live terminal on each agent reconnect.
+
+Instead the Server **pushes** each credential it mints over the connection the
+agent itself dialled out — the one channel here that is already authenticated in
+the direction that matters, because the agent is the client on it. Nothing
+inbound can reach it, and it already carries every management command the agent
+obeys, so the socket's authority is no stronger an assumption than the authority
+the agent already acts on. The wire is `agent.p2p.grant`
+(`nession_protocol::contracts::p2p::v1`), and it is **acknowledged before the
+token is returned to the client**: a client that dials the instant it holds a
+token is then correct by construction, because the verifier already has the
+record. A failed push fails the attach, because a credential the verifier never
+received can only produce a confusing failure later.
+
+The token is **opaque to the agent** — it looks one up, never parses one. That is
+what lets the Server change how it generates tokens without the agent changing,
+and it is why the credential does not need to be signed.
+
+### Two questions, two layers, one site each
+
+| | Question | Where |
+|---|---|---|
+| Upgrade | Is there a credential, and is it this agent's? | `accept_hdr_async`'s callback |
+| Per frame | Does *this* credential cover *this* wire? | `Frame::route`, before any lane |
+
+The handshake is `accept_hdr_async` rather than `accept_async` because its
+callback can **refuse**: returning `Err` rejects the upgrade, so a peer with no
+credential never has a WebSocket and there is no connection to leave in a
+half-authenticated state. That is structural rather than a promise every later
+handler has to keep.
+
+The per-frame gate is a **scope column on every arm** of the agent's
+`p2p_routes!` invocation, beside the execution policy and derived from the same
+invocation — so a wire cannot be given a lane without being given a scope, and a
+new arm cannot arrive with an implicit "anything goes". It runs in `Frame::route`
+on the reader task, before any lane handoff, which is the only placement where
+the decision is made once, per frame, in arrival order: in `serve` it would run
+on a lane task concurrently with sibling frames and after a lane had already been
+chosen. A refusal **answers and keeps the connection** — a caller outside its
+scope has made an ordinary mistake, and hanging up turns it into a reattach storm
+that reports nothing.
+
+### What the credential is, and what it deliberately is not
+
+Scope is *what kind of work*, not *which connection*, and it is enforced per wire
+rather than trusted: a credential minted for one session's terminal is refused on
+another session's PTY, on session management, and on the file sandbox, and the
+refusals differ because the rules do. A relay credential is the narrow one — the
+relay leg sends attach, detach and terminal I/O and nothing else, so
+`sessions: false` and `files: false` are a real boundary rather than a
+precaution.
+
+**Replay is time-bounded and repeatable, not single-use.** A browser re-presents
+the same URL on every reconnect, and the relay leg makes two dials on one
+credential (attach and detach, the second reusing whichever address succeeded).
+Spending a token on first use would break both, so single-use is a client rewrite
+rather than a policy choice. Expiry is the real revocation: deterministic, and
+needing no round trip.
+
+The credential travels as a query parameter (`?token=`) because a browser cannot
+set a header on `new WebSocket()`. **That means it reaches every access log on
+the path**, which is a known cost of this design and not an oversight: it is why
+the value is opaque and short-lived rather than a durable secret. The parameter
+name is written by hand in three languages and generated in none, so the two
+Rust sides share one function
+(`nession_protocol::contracts::p2p::agent_url_with_credential`) and its inverse
+for reading it back.
+
+### This is a capability, not a principal
+
+The Server's relay pipeline above has **no** authorization step and no
+`principal`, deliberately. This boundary does not add one, and the difference is
+worth stating so the two do not read as contradicting: a P2P credential is a
+capability scoped to *work on one agent*, presented by whoever holds it. It
+answers "may this connection do this" and not "who is this". A refusal is
+identical for an unknown credential, an expired one, and one issued for a
+different agent — one 401 at the upgrade, and the reason goes to the agent's log,
+because a body that distinguished them would tell a caller which of its guesses
+was closest.
+
+`ConnectionAuthority` (`crates/nession-agent/src/p2p_credentials.rs`) is the
+shape this takes on the connection: a fact established once at the upgrade and
+consulted by every gate, the same shape the Server uses for
+`registered_agent_id`. It is not a session, and nothing carries it between
+connections.
+
 ## Related
 
 - `#678` — the requirement this document implements.
+- `#1013` — the P2P credential this section describes.
 - `#565` — shared `nession-mcp`, which consumes the same contracts rather than
   copying Nession DTOs.
 - [`docs/architecture/web.md`](web.md) — the Web layer model this mirrors on the

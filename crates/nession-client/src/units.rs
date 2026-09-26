@@ -6,11 +6,14 @@
 //! lines per unit building an envelope by hand, sending it, reading one frame,
 //! comparing the `id`, and then walking the reply with `.get(…)` chains.
 
+use std::time::Duration;
+
 use nession_protocol::contracts::agent::v1::{AgentListPayload, AgentListReply};
 use nession_protocol::contracts::client::v1::{AuthResponsePayload, ClientAuthPayload};
 use nession_protocol::contracts::session::v1::{
-    ClientSessionAttachPayload, ClientSessionAttachReply, ServerSessionListPayload,
-    ServerSessionListReply,
+    ClientSessionAttachPayload, ClientSessionAttachReply, ClientSessionCreatePayload,
+    ClientSessionCreateResponsePayload, ClientSessionKillPayload, ClientSessionKillResponsePayload,
+    ServerSessionListPayload, ServerSessionListReply,
 };
 
 use crate::connection::ClientConnection;
@@ -39,6 +42,26 @@ impl UnitRequest for ServerSessionListPayload {
 impl UnitRequest for ClientSessionAttachPayload {
     type Reply = ClientSessionAttachReply;
 }
+
+impl UnitRequest for ClientSessionCreatePayload {
+    type Reply = ClientSessionCreateResponsePayload;
+}
+
+impl UnitRequest for ClientSessionKillPayload {
+    type Reply = ClientSessionKillResponsePayload;
+}
+
+/// How long to wait for a session create.
+///
+/// **Longer than the Server's own bound on purpose.** The Server waits up to 30
+/// seconds for the Agent and then answers *its* refusal; a client bound that
+/// expires first turns "the agent is slow" into a transport timeout reported by
+/// the wrong side, and tells the user nothing the Server was about to tell them.
+/// Five seconds of headroom is for the round trip either side of that wait.
+///
+/// Not a field on `ClientConfig`: this is a property of what the unit does, not
+/// a preference, and the default there is the one for units that answer promptly.
+const SESSION_CREATE_TIMEOUT: Duration = Duration::from_secs(35);
 
 /// Which transport an attach prefers.
 ///
@@ -118,6 +141,68 @@ impl ClientConnection {
                 preferred_mode: mode.as_contract().to_string(),
                 env_snapshots: Vec::new(),
                 relay_url: None,
+            },
+        ))
+        .await
+    }
+
+    /// `server.session.create` — create a session on one agent.
+    ///
+    /// The Server resolves the agent, checks it is online, forwards the create,
+    /// registers the session, and answers. That resolution is the whole reason
+    /// this goes through the Server rather than to the agent: the consumer this
+    /// replaces asked for the agent list on one connection, **closed it**, and
+    /// then dialled the agent directly on another — the authenticate →
+    /// authorize → resolve → route path the Server exists to be, run at home.
+    ///
+    /// No size, and no `env_files`. Neither is an oversight.
+    ///
+    /// **The size is not on this wire.** The Agent creates every session at a
+    /// fixed starting size and lets the first attach resize it
+    /// (`TmuxManager::create_session` takes the parameters and ignores them, by
+    /// the sizing decision of 2026-08-15). A `width` on this payload would
+    /// therefore be a field nothing honours — the same defect stage 4 of #1013
+    /// exists to remove from `ClientAuthPayload`. Measured end to end before
+    /// writing this: a session created at `--width 111` came up at 200, which is
+    /// `SESSION_WIDTH`, on both the direct-agent path this replaced and this one.
+    ///
+    /// `env_files` *is* on the wire and the Server reads it, but nothing on this
+    /// side of the boundary sources env files yet, and a parameter no caller
+    /// passes is a guess about a shape. Adding it later is a signature change
+    /// with exactly one caller to update.
+    pub async fn create_session(
+        &mut self,
+        agent_id: &str,
+        name: &str,
+    ) -> Result<ClientSessionCreateResponsePayload, ClientError> {
+        self.request_within(
+            proto_msg(
+                wire::SERVER_SESSION_CREATE,
+                ClientSessionCreatePayload {
+                    agent_id: agent_id.to_string(),
+                    name: name.to_string(),
+                    env_files: Vec::new(),
+                },
+            ),
+            SESSION_CREATE_TIMEOUT,
+        )
+        .await
+    }
+
+    /// `server.session.kill` — kill one session.
+    ///
+    /// The Server answers `success: false` with its own reason for every case it
+    /// can name — an unknown session, a session on an offline agent — so the
+    /// reply is returned whole rather than mapped into an error here, the same
+    /// way the list and attach replies are.
+    pub async fn kill_session(
+        &mut self,
+        session_id: &str,
+    ) -> Result<ClientSessionKillResponsePayload, ClientError> {
+        self.request(proto_msg(
+            wire::SERVER_SESSION_KILL,
+            ClientSessionKillPayload {
+                session_id: session_id.to_string(),
             },
         ))
         .await

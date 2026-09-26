@@ -72,6 +72,26 @@ export type CredentialScope = {
  */
 terminal?: string | null, 
 /**
+ * The terminal plane for **every** session on this agent.
+ *
+ * A second field rather than a reading of `terminal: None`, because the two
+ * absences mean opposite things and collapsing them is the whole hole:
+ * `None` is *no terminal access*, which is what a credential minted for a
+ * non-terminal purpose gets, and reading it as "any session" would let
+ * every caller reach every session by omitting a field. So the broad grant
+ * is written down explicitly, and it is the only thing that produces it.
+ *
+ * It exists for **standalone agents** — `server_url = ""`, where no Server
+ * is there to mint one credential per session. One shared secret has to
+ * cover the node, and this is that statement. A Server-minted credential
+ * never sets it: there the Server knows which session it is answering for,
+ * and `for_attach` binds to that one.
+ *
+ * Takes precedence over `terminal` when both are set, which a producer has
+ * no reason to do — `for_standalone` sets one and `for_attach` the other.
+ */
+terminal_all_sessions: boolean, 
+/**
  * Session management on this one agent: create, kill, list.
  */
 sessions: boolean, 

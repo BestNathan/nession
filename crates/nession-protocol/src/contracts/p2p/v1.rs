@@ -39,6 +39,25 @@ pub struct CredentialScope {
     /// non-terminal purpose would use.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terminal: Option<String>,
+    /// The terminal plane for **every** session on this agent.
+    ///
+    /// A second field rather than a reading of `terminal: None`, because the two
+    /// absences mean opposite things and collapsing them is the whole hole:
+    /// `None` is *no terminal access*, which is what a credential minted for a
+    /// non-terminal purpose gets, and reading it as "any session" would let
+    /// every caller reach every session by omitting a field. So the broad grant
+    /// is written down explicitly, and it is the only thing that produces it.
+    ///
+    /// It exists for **standalone agents** — `server_url = ""`, where no Server
+    /// is there to mint one credential per session. One shared secret has to
+    /// cover the node, and this is that statement. A Server-minted credential
+    /// never sets it: there the Server knows which session it is answering for,
+    /// and `for_attach` binds to that one.
+    ///
+    /// Takes precedence over `terminal` when both are set, which a producer has
+    /// no reason to do — `for_standalone` sets one and `for_attach` the other.
+    #[serde(default)]
+    pub terminal_all_sessions: bool,
     /// Session management on this one agent: create, kill, list.
     #[serde(default)]
     pub sessions: bool,
@@ -57,6 +76,7 @@ impl CredentialScope {
     pub fn for_attach(session_name: &str) -> Self {
         Self {
             terminal: Some(session_name.to_string()),
+            terminal_all_sessions: false,
             sessions: true,
             files: true,
         }
@@ -71,8 +91,29 @@ impl CredentialScope {
     pub fn for_relay(session_name: &str) -> Self {
         Self {
             terminal: Some(session_name.to_string()),
+            terminal_all_sessions: false,
             sessions: false,
             files: false,
+        }
+    }
+
+    /// What a **standalone** agent honours: everything, for any session.
+    ///
+    /// `server_url = ""` has no Server, so nothing mints a credential per
+    /// session and nothing pushes one to the agent outbound. The operator's own
+    /// token is the only shared secret in the picture, and one token has to
+    /// cover the whole node — hence `terminal_all_sessions` rather than a
+    /// session name.
+    ///
+    /// Everything else is what a browser's attach gets, and deliberately: a
+    /// standalone agent is one a user runs for themselves, so there is no
+    /// narrower thing to grant than they already have over the machine.
+    pub fn for_standalone() -> Self {
+        Self {
+            terminal: None,
+            terminal_all_sessions: true,
+            sessions: true,
+            files: true,
         }
     }
 }
