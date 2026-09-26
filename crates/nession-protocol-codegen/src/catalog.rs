@@ -250,6 +250,29 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
         },
         Unit {
             owner: "git",
+            id: "git.commit",
+            version: 1,
+            wires: &["git.commit"],
+            decls: vec![
+                decl_of::<nession_git::protocol::commit::v1::CommitRequestV1>(cfg),
+                decl_of::<nession_git::protocol::commit::v1::CommitOkV1>(cfg),
+                decl_of::<nession_git::protocol::commit::v1::CommitDetail>(cfg),
+                decl_of::<nession_git::protocol::commit::v1::ChangedFileEntry>(cfg),
+                decl_of::<nession_git::protocol::SessionTargetV1>(cfg),
+            ],
+            request: Some((
+                "CommitRequest",
+                nession_git::protocol::commit::v1::CommitRequestV1::inline,
+                schema_of::<nession_git::protocol::commit::v1::CommitRequestV1>,
+            )),
+            response: Some((
+                "CommitResponse",
+                nession_git::protocol::commit::v1::CommitResponseV1::inline,
+                schema_of::<nession_git::protocol::commit::v1::CommitResponseV1>,
+            )),
+        },
+        Unit {
+            owner: "git",
             id: "git.branches",
             version: 1,
             wires: &["git.branches"],
@@ -435,6 +458,26 @@ wires: &["server.agent.register"],
                 "AgentSessionUpdateCall",
                 nession_protocol::contracts::session::v1::AgentSessionUpdatePayload::inline,
                 schema_of::<nession_protocol::contracts::session::v1::AgentSessionUpdatePayload>,
+            )),
+            response: None,
+        },
+        Unit {
+            owner: "core",
+            id: "server.agent.git-invalidated",
+            version: 1,
+            wires: &["server.agent.git-invalidated"],
+            // One-way (#1008): the agent reports that a Session's git state may
+            // be stale; the server fans out `agent.git.invalidated` and answers
+            // nothing.
+            decls: vec![decl_of::<
+                nession_protocol::contracts::session::v1::AgentGitInvalidatedPayload,
+            >(cfg)],
+            request: Some((
+                "AgentGitInvalidatedCall",
+                nession_protocol::contracts::session::v1::AgentGitInvalidatedPayload::inline,
+                schema_of::<
+                    nession_protocol::contracts::session::v1::AgentGitInvalidatedPayload,
+                >,
             )),
             response: None,
         },

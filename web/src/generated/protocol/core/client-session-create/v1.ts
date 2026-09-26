@@ -21,13 +21,13 @@ export const VERSION = 1;
 
 // ── Shapes ──
 
-export type WebSessionCreatePayload = { agent_id: string, name: string, width: number, height: number, };
+export type WebSessionCreatePayload = { agent_id: string, name: string, width: number, height: number, working_dir?: string | null, };
 export type WebSessionCreateResponse = { success: boolean, session_id: string | null, error: string | null, };
 
 // ── Operations ──
 
 /** The payload a caller sends. */
-export type ClientSessionCreateCall = { agent_id: string, name: string, width: number, height: number, };
+export type ClientSessionCreateCall = { agent_id: string, name: string, width: number, height: number, working_dir?: string | null, };
 
 /** The payload the provider answers with. */
 export type ClientSessionCreateReply = { success: boolean, session_id: string | null, error: string | null, };

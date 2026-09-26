@@ -15,6 +15,9 @@ pub struct ServerSessionCreatePayload {
     pub width: u16,
     #[serde(default = "default_height")]
     pub height: u16,
+    /// Initial working directory for the new session. Validated agent-side.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub working_dir: Option<String>,
     /// Resolved env-file snapshots to inject via `tmux new-session -e`.
     /// Empty (default) preserves the pre-env-feature behaviour exactly.
     #[serde(default)]
@@ -60,6 +63,9 @@ pub struct AgentCommandResponsePayload {
 pub struct ClientSessionCreatePayload {
     pub agent_id: String,
     pub name: String,
+    /// Absolute path on the target agent for the session's initial cwd.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub working_dir: Option<String>,
     /// Env files to source into the session as it is created.
     ///
     /// The Server has always read this off the payload and the Web has always
@@ -383,6 +389,25 @@ pub struct ServerTerminalResizePayload {
 // One-way agent → server reports
 // ============================================================================
 
+/// `server.agent.git-invalidated` — the agent reports that a Session's git
+/// repository may have changed since the last authoritative read (#1008).
+///
+/// One-way, like [`AgentSessionUpdatePayload`]: the server forwards a
+/// notification to web clients and answers nothing. The payload is small and
+/// semantic — it does not carry `RepoStatus`.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentGitInvalidatedPayload {
+    pub agent_id: String,
+    /// Bare tmux session name — the same spelling git operations use.
+    pub session: String,
+    /// Monotonic per (agent, session) invalidation epoch from the provider.
+    pub epoch: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
 /// `server.agent.session-update` — the agent reports one tmux session's state.
 ///
 /// One-way: the server applies it and answers **nothing on every branch**.
@@ -530,6 +555,9 @@ pub struct SessionInfo {
     /// Runtime observation, not durable session metadata: it changes as the user
     /// runs things, and it is absent when tmux reports nothing.
     pub foreground_command: Option<String>,
+    /// Live cwd of the session's active pane when the agent last reported it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub working_dir: Option<String>,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
@@ -541,6 +569,8 @@ pub struct SessionCreatePayload {
     pub width: u16,
     #[serde(default = "default_height")]
     pub height: u16,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub working_dir: Option<String>,
     /// Resolved env-file snapshots to inject via `tmux new-session -e`.
     ///
     /// `ServerSessionCreatePayload` has carried this since the env feature
@@ -642,6 +672,8 @@ pub struct WebSessionInfo {
     /// consumer reading the schema could not know it was there.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub foreground_command: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub working_dir: Option<String>,
     pub last_activity: String,
 }
 
@@ -696,6 +728,8 @@ pub struct WebSessionCreatePayload {
     pub width: u16,
     #[serde(default = "default_height")]
     pub height: u16,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub working_dir: Option<String>,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]

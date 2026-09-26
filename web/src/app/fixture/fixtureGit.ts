@@ -204,7 +204,15 @@ function historyFor(limit: unknown): GitLogResponse {
   const commits = COMMITS.slice(0, Math.min(asked, COMMITS.length));
   return {
     state: 'ok',
-    history: { commits, limit: asked, truncatedBytes: 0, truncated: false },
+    history: {
+      commits,
+      limit: asked,
+      truncatedBytes: 0,
+      truncated: false,
+      endOfHistory: commits.length < asked,
+      nextCursor:
+        commits.length >= asked ? commits[commits.length - 1]?.hash : undefined,
+    },
   };
 }
 

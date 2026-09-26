@@ -7,22 +7,29 @@ import { atom } from 'jotai';
 import type { AddressLatency } from '@/types';
 import { agentIdAtom } from '@/product/session/state';
 
-/** One agent's browser-latency probe result (written by useProbePolling). */
+/**
+ * One agent's browser-latency probe result (written by `useAgentProbe`).
+ *
+ * **An entry with all-null latencies is a measurement, not a transient
+ * failure.** No address answered, and that is a fact about the network which a
+ * reader has to be able to tell from "nobody has looked" — so it is written
+ * rather than left absent. A reader that renders an absent entry and an
+ * all-null one the same way will report untested addresses as unreachable.
+ */
 export interface AgentProbe {
   latencies: AddressLatency[];
   orderedUrls: string[];
   probedAt: number;
 }
 
-/** Per-agent browser-latency probe results, keyed by agent_id. */
-export const probeResultsAtom = atom<Map<string, AgentProbe>>(new Map());
-
 /**
- * One-shot forced re-probe request (AttachDialog "Re-test"). Written with the
- * target agent id; useProbePolling consumes it (probes the agent, resets to null).
- * `nonce` disambiguates repeated clicks on the same agent.
+ * Per-agent browser-latency probe results, keyed by agent_id.
+ *
+ * Written where a credential is available — the attach dialog, holding an
+ * attach reply — because since #1013 the agent refuses an uncredentialed
+ * upgrade and a probe without one measures nothing (#1091).
  */
-export const probeRefreshRequestAtom = atom<{ agentId: string; nonce: number } | null>(null);
+export const probeResultsAtom = atom<Map<string, AgentProbe>>(new Map());
 
 /** Latencies for the currently active agent (empty when none is active/unprobed). */
 export const currentAgentLatenciesAtom = atom<AddressLatency[]>((get) => {

@@ -22,12 +22,33 @@ impl FileDiff {
     }
 }
 
-/// Diff one repository-relative path against HEAD.
-pub async fn file_diff(cmd: &GitCmd, relative_path: &str) -> anyhow::Result<FileDiff> {
+/// Diff one repository-relative path against HEAD, or between parent and `commit`.
+pub async fn file_diff(
+    cmd: &GitCmd,
+    relative_path: &str,
+    commit: Option<&str>,
+) -> anyhow::Result<FileDiff> {
     let path = security::validate_repo_relative_path(relative_path)?;
 
-    let out = cmd
-        .run(
+    let out = if let Some(oid) = commit {
+        let full = crate::runtime::commit::resolve_revision(cmd, oid).await?;
+        let parent = crate::runtime::commit::diff_parent(cmd, &full).await?;
+        cmd.run(
+            &[
+                "diff",
+                "--no-color",
+                "--no-ext-diff",
+                "--no-textconv",
+                &parent,
+                &full,
+                "--",
+                &path,
+            ],
+            MAX_DIFF_BYTES,
+        )
+        .await?
+    } else {
+        cmd.run(
             &[
                 "diff",
                 "--no-color",
@@ -42,7 +63,8 @@ pub async fn file_diff(cmd: &GitCmd, relative_path: &str) -> anyhow::Result<File
             ],
             MAX_DIFF_BYTES,
         )
-        .await?;
+        .await?
+    };
 
     let text = out.stdout_string().into_owned();
     // `git diff` prints this one line for a binary file instead of hunks. It is

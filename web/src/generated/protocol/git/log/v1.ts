@@ -29,7 +29,11 @@ export type LogRequestV1 = {
  * `MAX_LOG_LIMIT` whatever arrives, and an unrepresentable number is
  * treated as absent rather than wrapped by a cast.
  */
-limit?: number | null, session: string, };
+limit?: number | null, 
+/**
+ * Oldest commit OID from the previous page — returns commits strictly older than this.
+ */
+before?: string | null, session: string, };
 export type LogOkV1 = { history: History, };
 export type History = { commits: Array<Commit>, 
 /**
@@ -39,7 +43,15 @@ limit: number,
 /**
  * Bytes the cap dropped. Non-zero means this is a prefix of the answer.
  */
-truncatedBytes: number, truncated: boolean, };
+truncatedBytes: number, truncated: boolean, 
+/**
+ * Pass as `before` on the next page — the oldest commit in this page.
+ */
+nextCursor?: string | null, 
+/**
+ * True when there are no older commits to page to.
+ */
+endOfHistory: boolean, };
 export type Commit = { 
 /**
  * Full object name.
@@ -81,7 +93,11 @@ export type LogRequest = {
  * `MAX_LOG_LIMIT` whatever arrives, and an unrepresentable number is
  * treated as absent rather than wrapped by a cast.
  */
-limit?: number | null, session: string, };
+limit?: number | null, 
+/**
+ * Oldest commit OID from the previous page — returns commits strictly older than this.
+ */
+before?: string | null, session: string, };
 
 /** The payload the provider answers with. */
 export type LogResponse = { "state": "ok", history: History, } | { "state": "unavailable", reason: string, message: string, } | { "state": "not_a_repository", message: string, } | { "state": "error", message: string, };

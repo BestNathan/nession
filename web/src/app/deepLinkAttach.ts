@@ -50,7 +50,10 @@ async function resolveOrdering(
   if (candidates.length === 0) {
     return { orderedUrls: info.agent_address ? [info.agent_address] : [], latencies: cachedLatencies };
   }
-  const measured = await testAddresses(candidates);
+  // With the reply's own credential: since #1013 the agent refuses a bare
+  // upgrade, so a probe without one measures nothing and reports it as
+  // "unreachable" (#1091).
+  const measured = await testAddresses(candidates, { credential: info.connection_token });
   return { orderedUrls: orderByLatency(measured), latencies: measured };
 }
 

@@ -5,6 +5,7 @@ import type { CapsuleExperience } from '@/product/terminal/capsule/types';
 import type { DomainState } from '@/product/session/model/domainState';
 import type { FileOps } from '@/capabilities/files';
 import type { Agent, Session } from '@/types';
+import type { GitWorktree } from '@/capabilities/git';
 
 export type Experience = CapsuleExperience;
 
@@ -47,6 +48,8 @@ export interface WorkspaceContext {
   facts?: CapabilityFacts;
   /** What opened this view, when the entry carried context (`#826`). */
   focus?: CapabilityFocus;
+  /** Nession-owned Session handoff from Git worktrees (#1010). */
+  openWorktreeSession?: (worktree: GitWorktree) => Promise<void>;
 }
 
 /**

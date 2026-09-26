@@ -8,7 +8,6 @@ import {
   type MutableRefObject,
   type SetStateAction,
 } from 'react';
-import { useAtomValue, useSetAtom } from 'jotai';
 import { Wifi, WifiOff, ChevronDown, ChevronRight } from 'lucide-react';
 import { cn } from '@/shared/lib/utils';
 import {
@@ -20,7 +19,8 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
-import type { AttachInfo, AttachMode, AddressLatency, Session, EnvFileInfo, EnvFileRef } from '@/types';
+import type { AttachInfo, AttachMode, AddressLatency, ProbedAddress, Session, EnvFileInfo, EnvFileRef } from '@/types';
+import type { AgentProbe } from '@/product/agent/state';
 import { EnvFileMultiSelect, envApi } from '@/capabilities/env';
 import { sessionsApi } from '@/product/session';
 import { loadAttachPrefs } from '@/platform/attach/attachPrefs';
@@ -30,7 +30,7 @@ import {
   type SessionAttachProfile,
 } from '@/platform/attach/sessionAttachProfile';
 import { detectWebGLSupport } from '@/platform/terminal-runtime/Renderer';
-import { probeResultsAtom, probeRefreshRequestAtom } from '@/product/agent/state';
+import { useAgentProbe } from '@/product/agent/hooks/useAgentProbe';
 
 /** Result handed back to the flow once the user confirms an attach. */
 export interface AttachChoice {
@@ -70,11 +70,60 @@ const MODES: { value: AttachMode; label: string; hint: string }[] = [
 
 const AUTO_URL = '__auto__';
 
+/** What the path list renders, derived from the probe's answer. */
+interface CandidateDisplay {
+  results: AddressLatency[];
+  orderedUrls: string[];
+  latencyByUrl: Map<string, number | null>;
+  /** Best URL measured *reachable*, or null when nothing was. */
+  bestUrl: string | null;
+  /** True once every candidate has a result — a total failure included. */
+  measured: boolean;
+}
+
 /**
- * Attach dialog: pick connection mode and (for P2P) a candidate address. Latency
- * is read from the app-level probe results atom (written by useProbePolling) —
- * not measured live here — so the dialog never blocks on probing. A "Re-test"
- * control requests a fresh probe via probeRefreshRequestAtom.
+ * `bestUrl` is the best URL measured *reachable*, which `orderedUrls[0]` is not:
+ * `orderByLatency` deliberately appends handshake-failed addresses rather than
+ * dropping them, so when every candidate fails, index 0 is a failure. Reading
+ * that as "the best path" is how a total failure came to be labelled "fastest
+ * reachable path". `measured` is what distinguishes it from "nobody has looked".
+ */
+// Shared empty values, so a dialog with no probe hands out the *same* arrays
+// every render. `results` and `orderedUrls` are dependencies of the confirm
+// callback, and a fresh `[]` per render would rebuild that callback per render —
+// which the lint rule catches as a genuine churn source, not a style nit.
+const NO_LATENCIES: AddressLatency[] = [];
+const NO_URLS: string[] = [];
+
+function candidateDisplay(probe: AgentProbe | null, candidates: ProbedAddress[]): CandidateDisplay {
+  const results = probe?.latencies ?? NO_LATENCIES;
+  const orderedUrls = probe?.orderedUrls ?? NO_URLS;
+  const latencyByUrl = new Map(results.map((r) => [r.url, r.latencyMs]));
+  return {
+    results,
+    orderedUrls,
+    latencyByUrl,
+    measured: candidates.some((c) => latencyByUrl.has(c.url)),
+    bestUrl: orderedUrls.find((url) => typeof latencyByUrl.get(url) === 'number') ?? null,
+  };
+}
+
+/**
+ * Attach dialog: pick connection mode and (for P2P) a candidate address.
+ *
+ * ## Why the measurement happens here (#1091)
+ *
+ * It used to be read from an app-level atom filled by a five-minute poll, so the
+ * dialog never blocked on probing. That poll probed the *registry's* URLs, and
+ * since #1013 the agent refuses an uncredentialed upgrade — so it had been
+ * failing for every agent, and every address rendered as unreachable.
+ *
+ * A credential exists only after `requestAttach`, and this component is where
+ * that reply lands. So the measurement moved to the one place that can hold a
+ * credential, which is also the place the measurement is about: the reply's own
+ * `addresses`. "Re-test" re-requests attach info rather than re-probing with the
+ * token in hand — that token expires (`p2p_token_expiry_secs`, 300s by default),
+ * and re-probing with a dead one would report a healthy network as unreachable.
  */
 export function AttachDialog({ isOpen, intent = 'attach', onClose, session, onConfirm }: AttachDialogProps) {
   const [mode, setMode] = useState<AttachMode>('auto');
@@ -84,11 +133,10 @@ export function AttachDialog({ isOpen, intent = 'attach', onClose, session, onCo
   // session and is only written by attachToSessionAtom on confirm. Writing it
   // here would tear down the live terminal the moment the dialog opens.
   const [attachInfo, setAttachInfo] = useState<AttachInfo | null>(null);
-  // Browser-latency probe results for this agent come from the app-level atom
-  // (written by useProbePolling), never probed live here.
-  const probeResults = useAtomValue(probeResultsAtom);
-  const setRefreshRequest = useSetAtom(probeRefreshRequestAtom);
   const [selectedUrl, setSelectedUrl] = useState<string>(AUTO_URL);
+  // Bumped by "Re-test" to re-request attach info, and with it a fresh
+  // credential — which is what makes the probe below measure again.
+  const [refreshNonce, setRefreshNonce] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [renderer, setRenderer] = useState<'webgl' | 'canvas'>('webgl');
   const [envFiles, setEnvFiles] = useState<EnvFileInfo[]>([]);
@@ -157,13 +205,20 @@ export function AttachDialog({ isOpen, intent = 'attach', onClose, session, onCo
       setSelectedUrl,
       setError,
     });
-  }, [isOpen, session, mode, relayUrl, setAttachInfo]);
+  }, [isOpen, session, mode, relayUrl, refreshNonce, setAttachInfo]);
 
-  const cached = agentId ? probeResults.get(agentId) : undefined;
-  const results = useMemo<AddressLatency[]>(() => cached?.latencies ?? [], [cached]);
-  const orderedUrls = useMemo<string[]>(() => cached?.orderedUrls ?? [], [cached]);
-  const bestUrl = orderedUrls[0] ?? null;
-  const latencyByUrl = new Map(results.map((r) => [r.url, r.latencyMs]));
+  const candidates = attachInfo?.addresses ?? [];
+  // P2P only. A relay reply carries no credential, and a probe without one can
+  // only report every address unreachable — a statement about the probe.
+  const isP2p = attachInfo?.mode === 'p2p';
+  const { probe, probing } = useAgentProbe({
+    agentId: isP2p ? agentId : null,
+    addresses: isP2p ? candidates : [],
+    credential: attachInfo?.connection_token,
+    reprobeKey: refreshNonce,
+  });
+
+  const { results, orderedUrls, latencyByUrl, bestUrl, measured } = candidateDisplay(probe, candidates);
 
   const handleConfirm = useCallback(() => {
     if (!session || !attachInfo) {
@@ -173,8 +228,6 @@ export function AttachDialog({ isOpen, intent = 'attach', onClose, session, onCo
     const relayUrl = mode === 'relay' ? manual : null;
     onConfirm(session, { mode, attachInfo, orderedUrls, latencies: results, selectedUrl: manual, relayUrl, renderer, envRefs: selectedEnv });
   }, [session, attachInfo, selectedUrl, orderedUrls, results, mode, renderer, onConfirm, selectedEnv]);
-
-  const candidates = attachInfo?.addresses ?? [];
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
@@ -201,6 +254,8 @@ export function AttachDialog({ isOpen, intent = 'attach', onClose, session, onCo
                 ? new Map(candidates.map(a => [a.url, a.rtt_ms ?? null]))
                 : latencyByUrl}
               bestUrl={bestUrl}
+              measured={isP2p && measured}
+              probing={isP2p && probing}
               selectedUrl={selectedUrl}
               onSelect={(url) => {
                 // Any row click — including the explicit Auto row — is a user
@@ -208,9 +263,9 @@ export function AttachDialog({ isOpen, intent = 'attach', onClose, session, onCo
                 userPickedRef.current = true;
                 setSelectedUrl(url);
               }}
-              onRetest={mode !== 'relay' && agentId
-                ? () => setRefreshRequest({ agentId, nonce: Date.now() })
-                : undefined}
+              // Re-requests attach info for a fresh credential; the probe then
+              // re-measures because the credential it keys on changed.
+              onRetest={isP2p ? () => setRefreshNonce((n) => n + 1) : undefined}
               isRelay={mode === 'relay'}
             />
           ) : null}
@@ -454,23 +509,39 @@ function RendererToggle({
 interface PathListProps {
   candidates: NonNullable<AttachInfo['addresses']>;
   latencyByUrl: Map<string, number | null>;
+  /** Best URL measured *reachable*, or null when nothing was. */
   bestUrl: string | null;
+  /** True once every candidate has a result — a total failure included. */
+  measured: boolean;
+  /** True while a measurement is in flight. */
+  probing: boolean;
   selectedUrl: string;
   onSelect: (url: string) => void;
-  /** Force a fresh probe of the agent's addresses; hidden when unavailable. */
+  /** Re-request attach info so the addresses are measured again. */
   onRetest?: () => void;
   /** When true, use server probe data (rtt_ms, Reachable/Unreachable) labels. */
   isRelay?: boolean;
 }
 
 /** The "Connection Path" section: Auto row + one row per candidate address. */
-function PathList({ candidates, latencyByUrl, bestUrl, selectedUrl, onSelect, onRetest, isRelay }: PathListProps) {
-  const bestLatency = bestUrl ? latencyByUrl.get(bestUrl) : undefined;
+function PathList({ candidates, latencyByUrl, bestUrl, measured, probing, selectedUrl, onSelect, onRetest, isRelay }: PathListProps) {
+  const bestLatency = bestUrl !== null ? latencyByUrl.get(bestUrl) : null;
+  /**
+   * Four states, not two, and the difference is the point: "measuring",
+   * "measured — nothing reachable", "measured — this is the fastest", and
+   * "not measured". Collapsing the last two into "no best URL" is what made a
+   * total failure read as "browser will decide", i.e. as if nothing had been
+   * tried.
+   */
   const autoSublabel = isRelay
     ? 'server auto-selects (Reachable > Unknown > Unreachable)'
-    : bestUrl
-      ? `fastest reachable path${bestLatency !== null && bestLatency !== undefined ? ` · ${bestLatency}ms` : ''}`
-      : 'browser will decide / relay';
+    : probing
+      ? 'measuring from this browser…'
+      : bestUrl !== null
+        ? `fastest reachable path · ${bestLatency}ms`
+        : measured
+          ? 'nothing answered from this browser · relay fallback'
+          : 'not measured yet';
 
   return (
     <div className="flex flex-col gap-2">
@@ -495,11 +566,19 @@ function PathList({ candidates, latencyByUrl, bestUrl, selectedUrl, onSelect, on
         />
         {candidates.map((addr) => {
           const latency = latencyByUrl.get(addr.url);
-          // Relay mode: use server probe status (Reachable/Unreachable/Unknown).
-          // P2P mode: use browser test result (latency != null → reachable).
-          const reachable = isRelay
+          // Three states in both modes, because "we have no verdict" is not the
+          // same claim as "this failed", and only the first is true when nobody
+          // has looked. Relay mode's `unknown` is the server saying it has not
+          // probed this address — it was drawn as a red failure.
+          const reachable: boolean | undefined = isRelay
             ? addr.status === 'reachable'
-            : latency !== null && latency !== undefined;
+              ? true
+              : addr.status === 'unreachable'
+                ? false
+                : undefined
+            : latencyByUrl.has(addr.url)
+              ? latency !== null
+              : undefined;
           const statusLabel = isRelay
             ? (addr.status === 'reachable' ? 'reachable' : addr.status === 'unreachable' ? 'unreachable' : 'unknown')
             : undefined;
@@ -510,6 +589,7 @@ function PathList({ candidates, latencyByUrl, bestUrl, selectedUrl, onSelect, on
               badge={addr.network_type}
               sublabel={addr.url}
               reachable={reachable}
+              isCandidate
               statusLabel={statusLabel}
               latencyMs={latency ?? undefined}
               selected={selectedUrl === addr.url}
@@ -528,14 +608,24 @@ interface AddressRowProps {
   sublabel: string;
   selected: boolean;
   onSelect: () => void;
-  /** undefined = no cached probe; true/false = reachability. */
+  /** undefined = nobody measured this address; true/false = reachability. */
   reachable?: boolean;
+  /**
+   * Whether this row stands for a candidate address.
+   *
+   * The Auto row does not — it names the policy, not a host — so it must not
+   * carry a reachability affordance at all. `reachable === undefined` already
+   * means "not applicable" there, and drawing the unmeasured state for it would
+   * both assert something untrue and put its `sr-only` text into the row's
+   * accessible name (which is matched by name in the tests).
+   */
+  isCandidate?: boolean;
   latencyMs?: number;
   /** Server probe status label (relay mode). */
   statusLabel?: string;
 }
 
-function AddressRow({ label, badge, sublabel, selected, onSelect, reachable, latencyMs, statusLabel }: AddressRowProps) {
+function AddressRow({ label, badge, sublabel, selected, onSelect, reachable, isCandidate, latencyMs, statusLabel }: AddressRowProps) {
   return (
     <button
       type="button"
@@ -546,7 +636,18 @@ function AddressRow({ label, badge, sublabel, selected, onSelect, reachable, lat
       )}
     >
       {reachable === undefined ? (
-        <span className="w-3.5 shrink-0" />
+        // On a candidate, drawn rather than left blank: an empty slot reads as a
+        // rendering gap, while a quiet icon reads as "no verdict", which is what
+        // it is. `aria-hidden` with an `sr-only` twin keeps the state out of the
+        // row's accessible name while still reaching a screen reader.
+        isCandidate ? (
+          <>
+            <WifiOff className="w-3.5 h-3.5 text-muted-foreground/40 shrink-0" aria-hidden />
+            <span className="sr-only">not measured</span>
+          </>
+        ) : (
+          <span className="w-3.5 shrink-0" />
+        )
       ) : reachable ? (
         <Wifi className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
       ) : (
@@ -569,7 +670,10 @@ function AddressRow({ label, badge, sublabel, selected, onSelect, reachable, lat
       {statusLabel ? (
         <span className={cn(
           'text-[10px] shrink-0',
-          statusLabel === 'reachable' ? 'text-muted-foreground' : 'text-destructive',
+          // Only a measured failure is destructive. The server reporting that it
+          // has not probed an address is not a failure, and colouring it like one
+          // is the same defect as drawing it with the offline icon.
+          statusLabel === 'unreachable' ? 'text-destructive' : 'text-muted-foreground',
         )}>{statusLabel}</span>
       ) : null}
     </button>

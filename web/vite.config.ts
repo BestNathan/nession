@@ -100,7 +100,6 @@ export default defineConfig(({ mode }) => {
         // Deep link restoration - requires react-router integration testing
         'src/app/useDeepLinkRestore.ts',
         // ── WebSocket / interval integration (browser-only, covered by E2E) ──
-        'src/app/useProbePolling.ts',
         'src/capabilities/commands/hooks/useQuickCommands.ts',
         'src/app/useVisibilityReconnect.ts',
         'src/capabilities/env/components/EnvUploadDialog.tsx',

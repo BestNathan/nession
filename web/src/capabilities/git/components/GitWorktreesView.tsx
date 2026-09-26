@@ -1,4 +1,7 @@
+import { useState } from 'react';
+import { Button } from '@/components/ui/button';
 import { cn } from '@/shared/lib/utils';
+import { canOpenWorktreeAsSession } from '../worktreeGate';
 import { useGitWorktrees } from '../hooks/useGitWorktrees';
 import { basename, describeUnavailable, formatBytes } from '../state';
 import { GitNotice } from './GitNotice';
@@ -73,7 +76,7 @@ export function GitWorktreesView({ ctx }: { ctx: WorkspaceContext }) {
     <div className="flex min-h-0 flex-1 flex-col">
       <div data-testid="git-worktree-list" className="flex flex-col p-1">
         {rows.map((worktree) => (
-          <WorktreeRow key={worktree.path} worktree={worktree} />
+          <WorktreeRow key={worktree.path} worktree={worktree} ctx={ctx} />
         ))}
         {truncated ? (
           <p
@@ -88,7 +91,11 @@ export function GitWorktreesView({ ctx }: { ctx: WorkspaceContext }) {
   );
 }
 
-function WorktreeRow({ worktree }: { worktree: GitWorktree }) {
+function WorktreeRow({ worktree, ctx }: { worktree: GitWorktree; ctx: WorkspaceContext }) {
+  const [opening, setOpening] = useState(false);
+  const openable = canOpenWorktreeAsSession(worktree);
+  const showOpen = !worktree.current && openable.ok && ctx.openWorktreeSession;
+
   return (
     <div
       data-testid="git-worktree-row"
@@ -122,6 +129,25 @@ function WorktreeRow({ worktree }: { worktree: GitWorktree }) {
         >
           Locked{worktree.locked ? ` — ${worktree.locked}` : ''}
         </span>
+      ) : null}
+      {showOpen ? (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          data-testid="git-worktree-open-session"
+          disabled={opening}
+          className="mt-1 h-7 w-fit text-xs"
+          onClick={() => {
+            setOpening(true);
+            void ctx.openWorktreeSession?.(worktree).finally(() => setOpening(false));
+          }}
+        >
+          {opening ? 'Opening…' : 'Open Session'}
+        </Button>
+      ) : null}
+      {!openable.ok && !worktree.current ? (
+        <span className="text-xs text-muted-foreground">{openable.reason}</span>
       ) : null}
       {worktree.prunable !== undefined ? (
         // Said out loud because the alternative is a row naming a directory

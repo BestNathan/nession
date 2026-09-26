@@ -40,7 +40,11 @@ export type SessionInfo = { name: string, created_at: number, window_count: numb
  * Runtime observation, not durable session metadata: it changes as the user
  * runs things, and it is absent when tmux reports nothing.
  */
-foreground_command: string | null, };
+foreground_command: string | null, 
+/**
+ * Live cwd of the session's active pane when the agent last reported it.
+ */
+working_dir?: string | null, };
 
 // ── Operations ──
 

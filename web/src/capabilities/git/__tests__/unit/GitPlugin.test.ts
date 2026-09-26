@@ -22,6 +22,7 @@ const AGENT_MANIFEST: ProtocolManifest = {
     'git.diff': { versions: [1] },
     'git.root': { versions: [1] },
     'git.log': { versions: [1] },
+    'git.commit': { versions: [1] },
     'git.branches': { versions: [1] },
     'git.worktrees': { versions: [1] },
   },
@@ -227,6 +228,26 @@ describe('GitPlugin', () => {
       expect(surface.requests[0].payload).toMatchObject({ contract_version: 1 });
       surface.resolveNext('git.status', statusResponse);
       await expect(pending).resolves.toEqual(statusResponse);
+    });
+  });
+
+  describe('agent.git.invalidated', () => {
+    it('notifies listeners for matching agent and session', () => {
+      const teardown = plugin.install(surface);
+      const seen: unknown[] = [];
+      const unsub = plugin.onInvalidated((event) => {
+        seen.push(event);
+      });
+
+      surface.pushMessage('agent.git.invalidated', {
+        agent_id: 'a1',
+        session: 'work',
+        epoch: 3,
+      });
+
+      expect(seen).toEqual([{ agent_id: 'a1', session: 'work', epoch: 3 }]);
+      unsub();
+      teardown();
     });
   });
 

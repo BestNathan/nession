@@ -13,6 +13,7 @@ vi.mock('../../../GitPlugin', () => ({
     gitStatus: vi.fn(),
     gitDiff: vi.fn(),
     gitRoot: vi.fn(),
+    onInvalidated: vi.fn(() => () => {}),
   },
 }));
 

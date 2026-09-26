@@ -125,6 +125,7 @@ async fn integration_session_create_and_kill() {
         name: session_name.to_string(),
         width: 80,
         height: 24,
+        working_dir: None,
         env_snapshots: Vec::new(),
     };
     let req = new_message(msg_types::SESSION_CREATE, create);
@@ -454,6 +455,7 @@ async fn integration_web_ui_session_create() {
         name: session.name().to_string(),
         width: 80,
         height: 24,
+        working_dir: None,
     };
     let req = new_message(msg_types::CLIENT_SESSION_CREATE, payload);
     let resp: nession_agent::server::websocket::Message<WebSessionCreateResponse> =
