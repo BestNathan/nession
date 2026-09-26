@@ -212,4 +212,36 @@ describe('capability projection frame', () => {
     // useless read out of context.
     expect(screen.getByLabelText('Dismiss Git')).toBeInTheDocument();
   });
+
+  it('survives switching from a Peek body to Terminal Keys and sending a key', async () => {
+    const { terminalKeysProjection } = await import('@/product/terminal/terminalKeys');
+
+    const gitPeek = projection({
+      depth: 'peek',
+      body: () => <p data-testid="git-peek-body">peek</p>,
+    });
+    const keysPeek: CapsuleCapabilityProjection = {
+      id: 'terminal-keys',
+      title: 'Terminal Keys',
+      depth: 'signal',
+      ownsInputFocus: true,
+      onDismiss: vi.fn(),
+      body: (_focus, setFocus, actions) =>
+        terminalKeysProjection.body({
+          agentId: 'a1',
+          sessionId: 's1',
+          depth: 'signal',
+          state: 'available',
+          onFocusChange: setFocus,
+          ...actions,
+        }),
+    };
+
+    const { rerender } = renderFrame(gitPeek);
+    expect(screen.getByTestId('git-peek-body')).toBeInTheDocument();
+
+    rerender(frame(keysPeek));
+    await userEvent.click(screen.getByTestId('phys-key-Esc'));
+    expect(sendText).toHaveBeenCalledWith('\x1b');
+  });
 });
