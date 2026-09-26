@@ -25,12 +25,13 @@
 //! | agent → client  | `ok`             | Success response (with payload)  |
 
 use crate::config::AttachMode;
+use crate::execution::mutation_scheduler;
 use crate::fs::ops::FileOps;
 use crate::p2p_credentials::{ConnectionAuthority, P2pCredentials, WireScope};
 use crate::protocol::p2p_routes;
 use crate::server::execution::ExecutionPolicy::{Inline, Key, Ordered, Query};
 use crate::server::execution::{
-    mutation_scheduler, ExecutionLanes, ResourceKey, DEFAULT_MUTATIONS_IN_FLIGHT, SHUTDOWN_GRACE,
+    ExecutionLanes, ResourceKey, DEFAULT_MUTATIONS_IN_FLIGHT, SHUTDOWN_GRACE,
 };
 // The lanes' boxed work is the shared type, and the constructors take this
 // socket's own bounds — see `nession_runtime::lane`.
