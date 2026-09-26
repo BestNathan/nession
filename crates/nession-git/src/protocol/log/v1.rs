@@ -44,6 +44,11 @@ pub struct History {
     /// Bytes the cap dropped. Non-zero means this is a prefix of the answer.
     pub truncated_bytes: usize,
     pub truncated: bool,
+    /// Pass as `before` on the next page — the oldest commit in this page.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
+    /// True when there are no older commits to page to.
+    pub end_of_history: bool,
 }
 
 pub const WIRE: &str = "git.log";
@@ -61,6 +66,9 @@ pub struct LogRequestV1 {
     /// treated as absent rather than wrapped by a cast.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub limit: Option<u64>,
+    /// Oldest commit OID from the previous page — returns commits strictly older than this.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub before: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

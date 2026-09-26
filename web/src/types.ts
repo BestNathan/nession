@@ -50,6 +50,8 @@ export interface Session {
    * Absent when the agent does not report one (older agent, or no pane).
    */
   foreground_command?: string | null;
+  /** Live cwd when the agent last reported the session (force refresh). */
+  working_dir?: string | null;
   last_activity: string; // ISO 8601 timestamp
 }
 

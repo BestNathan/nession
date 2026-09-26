@@ -1,4 +1,5 @@
 export { GitPlugin, gitApi } from './GitPlugin';
+export { canOpenWorktreeAsSession, normalizeWorktreePath } from './worktreeGate';
 export { isOk } from './types';
 export type {
   GitBranch,

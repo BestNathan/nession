@@ -4000,6 +4000,7 @@ core_routes!(agent, msg, responses;
                                 "window_count": s.window_count,
                                 "attached_clients": s.attached_clients,
                                 "foreground_command": s.foreground_command,
+                                "working_dir": s.working_dir,
                             })
                         })
                         .collect();

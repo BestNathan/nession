@@ -62,6 +62,9 @@ export interface ShellMainProps {
   terminal?: ReactNode | ((chrome: TerminalChrome) => ReactNode);
   /** App experience: the SessionHeader renders no Terminal|Workspace switcher. */
   experience?: Experience;
+  onOpenWorktreeSession?: (
+    worktree: import('@/capabilities/git/types').GitWorktree,
+  ) => Promise<void>;
 }
 
 /**
@@ -143,6 +146,7 @@ export function ShellMain({
   showWorkspace = true,
   terminal,
   experience = 'web',
+  onOpenWorktreeSession,
 }: ShellMainProps) {
   const hasSession = selectedSession !== null && domain !== null;
   // What opened the Workspace, when the entry carried something with it. Cleared
@@ -249,6 +253,7 @@ export function ShellMain({
                 onToolChange={openTool}
                 onDepthChange={onWorkspaceDepthChange}
                 focus={focus}
+                openWorktreeSession={onOpenWorktreeSession}
               />
             ) : null}
           </>
