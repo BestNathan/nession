@@ -22,6 +22,7 @@
 //! | `server.agent.address-update` | the agent | **replace** — the advertised address list is a level, not a sequence of changes |
 //! | `server.agent.session-update` | the session | **replace** per session; **drop a new session** at the lane's bound, and mark the view for re-derivation |
 //! | `agent.terminal.resize` | the session | **replace** per session; **drop a new session** at the lane's bound |
+//! | `server.agent.git-invalidated` | the session | **replace** per session; **drop a new session** at the lane's bound |
 //!
 //! Nothing on this outbox is a request. Every frame here is answered by no one
 //! and waited on by no one, which is what makes a *level* lane the right shape
@@ -144,6 +145,12 @@ pub const RESIZE_LIMITS: Limits = Limits {
     frames: 256,
 };
 
+/// The bound the git-invalidation class holds to — same shape as resize.
+pub const GIT_INVALIDATION_LIMITS: Limits = Limits {
+    bytes: 64 * 1024,
+    frames: 256,
+};
+
 /// The key the two whole-agent classes publish under.
 ///
 /// There is one agent per connection, so neither a heartbeat nor an address list
@@ -165,15 +172,17 @@ enum Class {
     Addresses,
     SessionState,
     Resize,
+    GitInvalidation,
 }
 
 impl Class {
     /// Every class, in the order the writer drains them.
-    const ALL: [Self; 4] = [
+    const ALL: [Self; 5] = [
         Self::Heartbeat,
         Self::Addresses,
         Self::SessionState,
         Self::Resize,
+        Self::GitInvalidation,
     ];
 
     /// This class's pending frames *and* its counters, together.
@@ -192,6 +201,10 @@ impl Class {
             Self::Addresses => (&mut state.addresses, &mut state.counters.addresses),
             Self::SessionState => (&mut state.session_state, &mut state.counters.session_state),
             Self::Resize => (&mut state.resize, &mut state.counters.resize),
+            Self::GitInvalidation => (
+                &mut state.git_invalidation,
+                &mut state.counters.git_invalidation,
+            ),
         }
     }
 
@@ -202,6 +215,7 @@ impl Class {
             Self::Addresses => (&state.addresses, &state.counters.addresses),
             Self::SessionState => (&state.session_state, &state.counters.session_state),
             Self::Resize => (&state.resize, &state.counters.resize),
+            Self::GitInvalidation => (&state.git_invalidation, &state.counters.git_invalidation),
         };
         let limits = self.limits();
         ClassSnapshot {
@@ -220,6 +234,7 @@ impl Class {
             Self::Addresses => "addresses",
             Self::SessionState => "session-state",
             Self::Resize => "resize",
+            Self::GitInvalidation => "git-invalidation",
         }
     }
 
@@ -230,6 +245,7 @@ impl Class {
             Self::Addresses => ADDRESS_LIMITS,
             Self::SessionState => SESSION_STATE_LIMITS,
             Self::Resize => RESIZE_LIMITS,
+            Self::GitInvalidation => GIT_INVALIDATION_LIMITS,
         }
     }
 
@@ -286,6 +302,7 @@ struct Counters {
     addresses: ClassCounters,
     session_state: ClassCounters,
     resize: ClassCounters,
+    git_invalidation: ClassCounters,
 }
 
 /// What one class of the outbox is holding, and what it has done.
@@ -316,6 +333,7 @@ pub struct OutboxSnapshot {
     pub addresses: ClassSnapshot,
     pub session_state: ClassSnapshot,
     pub resize: ClassSnapshot,
+    pub git_invalidation: ClassSnapshot,
 }
 
 impl OutboxSnapshot {
@@ -332,6 +350,7 @@ impl OutboxSnapshot {
             ("addresses", &self.addresses),
             ("session-state", &self.session_state),
             ("resize", &self.resize),
+            ("git-invalidation", &self.git_invalidation),
         ];
         let rendered: Vec<String> = classes
             .iter()
@@ -357,6 +376,7 @@ struct State {
     addresses: Room,
     session_state: Room,
     resize: Room,
+    git_invalidation: Room,
     counters: Counters,
 }
 
@@ -466,6 +486,11 @@ impl Outbox {
     /// `ServerClientHandle::send_terminal_resize`.
     pub fn send_terminal_resize(&self, session_id: &str, msg: WsMessage) -> Result<()> {
         self.publish(Class::Resize, session_id, msg)
+    }
+
+    /// Publish one session's git invalidation, superseding any still pending.
+    pub fn send_git_invalidated(&self, session: &str, msg: WsMessage) -> Result<()> {
+        self.publish(Class::GitInvalidation, session, msg)
     }
 
     /// Put one frame into one class, superseding what is pending for its key.
@@ -659,6 +684,7 @@ fn snapshot(state: &Arc<StdMutex<State>>) -> OutboxSnapshot {
         addresses: Class::Addresses.snapshot(&state),
         session_state: Class::SessionState.snapshot(&state),
         resize: Class::Resize.snapshot(&state),
+        git_invalidation: Class::GitInvalidation.snapshot(&state),
     }
 }
 
@@ -847,6 +873,7 @@ mod tests {
                 Class::Addresses => snapshot.addresses,
                 Class::SessionState => snapshot.session_state,
                 Class::Resize => snapshot.resize,
+                Class::GitInvalidation => snapshot.git_invalidation,
             };
             assert!(
                 class_snapshot.pending <= class_snapshot.frame_slots,

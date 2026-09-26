@@ -39,6 +39,7 @@ use crate::netdetect::build_advertised_addresses;
 use crate::netwatch;
 use crate::protocol::served_descriptors;
 use crate::server::AgentServer;
+use crate::sync::git_invalidation::GitInvalidationWatcher;
 use crate::sync::heartbeat::HeartbeatLoop;
 use crate::sync::session_watcher::SessionWatcher;
 use crate::tmux::manager::SessionManager;
@@ -373,17 +374,39 @@ pub async fn run(config: AgentConfig, ready: Readiness) -> Result<()> {
         None
     };
 
-    // 8. Start network change detector (sends address updates on interface changes).
+    // 8. Git repository invalidation watcher (#1008).
+    let git_invalidation_shutdown = if let Some(ref handle) = client_handle {
+        let tmux_for_git = Arc::new(SessionManager::new());
+        let resolve = Arc::new(TmuxWorkdirResolver::new(Arc::clone(&tmux_for_git)));
+        let watcher = GitInvalidationWatcher::new(
+            handle.clone(),
+            SessionManager::new(),
+            resolve,
+            config.session_poll_interval_secs,
+        );
+        let shutdown_handle = watcher.shutdown_handle();
+        tokio::spawn(async move {
+            if let Err(e) = watcher.run().await {
+                error!("Git invalidation watcher error: {:#}", e);
+            }
+        });
+        info!("Git invalidation watcher started");
+        Some(shutdown_handle)
+    } else {
+        None
+    };
+
+    // 9. Start network change detector (sends address updates on interface changes).
     if let Some(ref handle) = client_handle {
         netwatch::spawn_watcher(handle.clone(), config.clone(), port);
     }
 
-    // 9. Wait for shutdown signal (Ctrl+C or SIGTERM)
+    // 10. Wait for shutdown signal (Ctrl+C or SIGTERM)
     info!("Agent is running. Press Ctrl+C to stop.");
     wait_for_shutdown().await?;
     info!("Shutdown signal received, stopping components...");
 
-    // 10. Graceful shutdown of all components
+    // 11. Graceful shutdown of all components
     if let Err(e) = server_handle.shutdown().await {
         error!("Error shutting down agent server: {:#}", e);
     }
@@ -395,6 +418,11 @@ pub async fn run(config: AgentConfig, ready: Readiness) -> Result<()> {
     if let Some(ref handle) = watcher_shutdown {
         if let Err(e) = handle.shutdown().await {
             error!("Error shutting down session watcher: {:#}", e);
+        }
+    }
+    if let Some(ref handle) = git_invalidation_shutdown {
+        if let Err(e) = handle.shutdown().await {
+            error!("Error shutting down git invalidation watcher: {:#}", e);
         }
     }
 

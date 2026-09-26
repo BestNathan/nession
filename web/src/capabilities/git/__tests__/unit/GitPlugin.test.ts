@@ -230,6 +230,26 @@ describe('GitPlugin', () => {
     });
   });
 
+  describe('agent.git.invalidated', () => {
+    it('notifies listeners for matching agent and session', () => {
+      const teardown = plugin.install(surface);
+      const seen: unknown[] = [];
+      const unsub = plugin.onInvalidated((event) => {
+        seen.push(event);
+      });
+
+      surface.pushMessage('agent.git.invalidated', {
+        agent_id: 'a1',
+        session: 'work',
+        epoch: 3,
+      });
+
+      expect(seen).toEqual([{ agent_id: 'a1', session: 'work', epoch: 3 }]);
+      unsub();
+      teardown();
+    });
+  });
+
   describe('unbound plugin', () => {
     it('rejects every method with "git capability is not connected" and sends nothing', async () => {
       await expect(plugin.gitStatus(statusReq)).rejects.toThrow(

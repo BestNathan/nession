@@ -12,6 +12,8 @@ async-trait.workspace = true
 tokio.workspace = true
 anyhow.workspace = true
 tracing.workspace = true
+notify = { workspace = true }
+notify-debouncer-mini = { workspace = true }
 # Codegen only — see nession-protocol/Cargo.toml.
 ts-rs = { workspace = true, optional = true }
 schemars = { workspace = true, optional = true, features = ["derive"] }

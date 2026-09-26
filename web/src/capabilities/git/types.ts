@@ -105,6 +105,14 @@ export type GitBranchesOk = Extract<GitBranchesResponse, { state: 'ok' }>;
 export type GitRootOk = Extract<GitRootResponse, { state: 'ok' }>;
 export type GitWorktreesOk = Extract<GitWorktreesResponse, { state: 'ok' }>;
 
+/** `agent.git.invalidated` — repository state may be stale (#1008). */
+export interface GitInvalidatedEvent {
+  agent_id: string;
+  session: string;
+  epoch: number;
+  reason?: string;
+}
+
 export function isOk<T extends { state: string }>(
   response: T | GitUnavailable,
 ): response is T & { state: 'ok' } {

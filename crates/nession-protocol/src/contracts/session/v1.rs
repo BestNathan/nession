@@ -383,6 +383,25 @@ pub struct ServerTerminalResizePayload {
 // One-way agent → server reports
 // ============================================================================
 
+/// `server.agent.git-invalidated` — the agent reports that a Session's git
+/// repository may have changed since the last authoritative read (#1008).
+///
+/// One-way, like [`AgentSessionUpdatePayload`]: the server forwards a
+/// notification to web clients and answers nothing. The payload is small and
+/// semantic — it does not carry `RepoStatus`.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentGitInvalidatedPayload {
+    pub agent_id: String,
+    /// Bare tmux session name — the same spelling git operations use.
+    pub session: String,
+    /// Monotonic per (agent, session) invalidation epoch from the provider.
+    pub epoch: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
 /// `server.agent.session-update` — the agent reports one tmux session's state.
 ///
 /// One-way: the server applies it and answers **nothing on every branch**.

@@ -38,6 +38,7 @@
 //! a tmux server and the agent never spawns git.
 
 pub mod agent;
+pub mod invalidation;
 pub mod protocol;
 pub mod runtime;
 
