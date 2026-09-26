@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import { SidebarAgents } from '@/app/patterns/SidebarAgents';
 import type { Agent } from '@/types';
 
@@ -38,5 +38,20 @@ describe('SidebarAgents', () => {
     // The rows are unaffected either way — the flag moves no node below the head.
     expect(screen.getByTestId('sidebar-agent-devbox-01')).toBeInTheDocument();
     expect(screen.getByTestId('sidebar-agents')).toBeInTheDocument();
+  });
+
+  it('sets the row in the product face, keeping the count tabular', () => {
+    // #1050 stage 4. A node row is infrastructure context — a name and how much
+    // work is on it — and monospace is reserved for technical workload identity.
+    // The digit alignment monospace was contributing is `tabular-nums`, which is
+    // a font feature, so the family change takes nothing with it.
+    render(<SidebarAgents agents={agents} activeAgentId="devbox-01" />);
+
+    const row = screen.getByTestId('sidebar-agent-devbox-01');
+    expect(row.className).not.toMatch(/font-mono/);
+    expect(within(row).getByText('devbox-01').className).not.toMatch(/font-mono/);
+
+    const count = within(row).getByText(String(agents[0].session_count));
+    expect(count.className).toMatch(/tabular-nums/);
   });
 });

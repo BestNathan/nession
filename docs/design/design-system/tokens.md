@@ -100,10 +100,18 @@ derives the size from it:
 ```
 
 **A role owns size only.** Family and weight are cross-cutting — `font-medium`
-appears under every role, and monospace carries both metadata
-(`sessionRowMetaFontSize`) and primary (`nodeFontSize`) — so folding them into a
-role would misstate the evidence. Line-height stays with the block that owns it
-(`workspace.treeLineHeight`), not with the size role.
+appears under every role, and monospace carries the code role
+(`workspace.editorFontSize`), the secondary role's tree (`workspace.treeFontSize`,
+which really is paths), and one slot of the metadata role's session row — so
+folding them into a role would misstate the evidence. Line-height stays with the
+block that owns it (`workspace.treeLineHeight`), not with the size role.
+
+The session-row example is worth spelling out, because it used to be cited here
+the other way. Until #1050 stage 4 the whole meta line was monospace, which made
+"monospace carries metadata" true; it is now per slot — the pane's foreground
+command keeps mono, the node name and the recency are product text — so the
+family follows the *text's* job inside one role, which is the clearest evidence
+available that family is not the role's to own.
 
 Because a role's consumers are reached through the ref graph, the inventory
 reports them (`downstream` + `effectiveConsumers`) rather than anyone grepping
@@ -122,8 +130,8 @@ decision, not a token one, so they were left where they are:
 
 | Token | Value | Role value | Why it is not obviously the role |
 |---|---|---|---|
-| `shell.footFontSize` | 10.5px | 10px | its own description says "matching the session metadata it sits under" — the stated intent and the value already disagree |
-| `shell.nodeFontSize` | 11.5px | 12.5px | monospace; "a node name is infrastructure identity" may earn its own role |
+| `shell.footFontSize` | 10.5px | 10px | it was sized to "match the session metadata it sits under", and #1050 stage 4 settled that it is not session metadata but a service state and a node count — chrome with no role to inherit from |
+| `shell.nodeFontSize` | 11.5px | 12.5px | an agent/node row is a list row, not the region's work item; its old "a node name is infrastructure identity" rationale for monospace was retired by #1050 stage 4 (mono is reserved for technical workload identity) |
 | `workspace.editorHeadFontSize` | 11.5px | 10px | "it names what is open, it is not a title" — reads as metadata |
 
 These three are the evidence that the fragmentation was real. Separately, 20

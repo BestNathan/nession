@@ -157,6 +157,58 @@ export interface SessionItemProps {
   onKill?: (session: Session) => void;
 }
 
+/**
+ * The row's meta line: `{workload} · {agent} · {recency}`, three slots in two
+ * families (#1050 stage 4).
+ *
+ * The workload hint is the pane's `foreground_command` — a command name, which
+ * is squarely what monospace is for ("terminal text, paths, commands, code").
+ * The other two are not: the node's name and the recency are the Metadata role,
+ * which `visual-language.md` names as "Agent/location, recency, status
+ * details". One mono string made a third of the line claim the line was
+ * technical, and it was the third a reader scans for a name.
+ *
+ * The hint keeps its mono when the command is unreported and the slot reads
+ * `unknown`: that is the workload slot's documented value rather than a word
+ * about the row, so the family must not flip with the data — and the least
+ * informative row would be the one that stopped looking like a workload.
+ *
+ * A family change, not a structural one: this is still one element with one
+ * testid, and its `textContent` is unchanged, which is what the row's tests and
+ * `session-lifecycle.spec.ts` assert on.
+ */
+function SessionMetaLine({
+  session,
+  agentLabel,
+}: {
+  session: Session;
+  agentLabel: string;
+}) {
+  return (
+    <span
+      data-testid="session-item-meta"
+      className="truncate text-[length:var(--shell-session-row-meta-font-size)] leading-4 text-muted-foreground"
+    >
+      <span data-testid="session-item-workload" className="font-mono">
+        {workloadHint(session)}
+      </span>
+      {' · '}
+      {agentLabel}
+      {' · '}
+      {formatRelativeTime(session.last_activity)}
+    </span>
+  );
+}
+
+/**
+ * One Session row.
+ *
+ * **Typography (#1050 stage 4).** The title was always product text; the meta
+ * line's families are documented on `SessionMetaLine`; and the conditional agent
+ * copy below is continuity state about infrastructure, so it is product text
+ * too — typography must not be what changes when the state does, colour already
+ * says it.
+ */
 export function SessionItem({
   session,
   domain,
@@ -198,16 +250,13 @@ export function SessionItem({
         >
           {session.session_name}
         </span>
-        <span
-          data-testid="session-item-meta"
-          className="truncate font-mono text-[length:var(--shell-session-row-meta-font-size)] leading-4 text-muted-foreground"
-        >
-          {workloadHint(session)} · {agentLabel} · {formatRelativeTime(session.last_activity)}
-        </span>
+        <SessionMetaLine session={session} agentLabel={agentLabel} />
         {domain.agent.copy !== null && (
+          /* Product text too: continuity state about infrastructure, and the
+             degraded reading of the agent slot two lines up. */
           <span
             className={cn(
-              'truncate font-mono text-[length:var(--shell-session-row-meta-font-size)] leading-4',
+              'truncate text-[length:var(--shell-session-row-meta-font-size)] leading-4',
               agentCopyClass(domain.agent.channel),
             )}
           >
