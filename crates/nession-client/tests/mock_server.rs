@@ -22,9 +22,12 @@ use nession_client::{ClientConfig, ClientConnection, ClientError, P2pConnection}
 use nession_protocol::contracts::agent::v1::AgentListReply;
 use nession_protocol::Message;
 use serde_json::{json, Value};
+use std::sync::{Arc, OnceLock};
 use tokio::net::TcpListener;
+
+use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
 use tokio_tungstenite::tungstenite::Message as WsMessage;
-use tokio_tungstenite::{accept_async, WebSocketStream};
+use tokio_tungstenite::{accept_async, accept_hdr_async, WebSocketStream};
 
 /// What a helper can fail with. `Box<dyn Error>` rather than `anyhow`: this
 /// crate names no error-aggregating library even in dev-dependencies, so the
@@ -46,6 +49,30 @@ async fn bind() -> TestResult<(TcpListener, String)> {
 async fn accept(listener: &TcpListener) -> TestResult<ServerSocket> {
     let (stream, _) = listener.accept().await?;
     Ok(accept_async(stream).await?)
+}
+
+/// Accept a connection, keeping the request URI it arrived with.
+///
+/// A P2P credential travels as a query parameter on the URL (#1013), so the URI
+/// is the only place the far side can see it — and therefore the only place a
+/// test can prove it was sent. `accept` cannot: by the time it returns the
+/// request is gone.
+///
+/// `OnceLock` rather than a `Mutex<Option<…>>`: the callback cannot await and
+/// cannot propagate here, and `set` needs no unwrap, so there is no poisoned
+/// case for a test helper to have to decide about.
+async fn accept_capturing_uri(
+    listener: &TcpListener,
+) -> TestResult<(ServerSocket, Arc<OnceLock<String>>)> {
+    let seen = Arc::new(OnceLock::new());
+    let captured = Arc::clone(&seen);
+    let (stream, _) = listener.accept().await?;
+    let ws = accept_hdr_async(stream, move |request: &Request, response: Response| {
+        let _ = captured.set(request.uri().to_string());
+        Ok(response)
+    })
+    .await?;
+    Ok((ws, seen))
 }
 
 /// The next text frame, decoded.
@@ -432,9 +459,12 @@ async fn the_socket_can_be_handed_over() {
 /// The one agent-socket constructor hands back a socket that works.
 ///
 /// `P2pConnection::connect` wraps one call today, and this is what says so out
-/// loud: it is the seam #1013 changes to carry a server-issued credential, so
+/// loud: it is the seam #1013 changed to carry a server-issued credential, so
 /// the thing worth pinning is that a caller reaching an agent goes through it
 /// and gets a socket it can write an attach on.
+///
+/// The credential is passed as one of the two things a caller now hands it — a
+/// caller with no credential is the deleted direct-dial helper, not this path.
 #[tokio::test]
 async fn the_p2p_constructor_hands_back_a_usable_socket() {
     let (listener, url) = bind().await.unwrap();
@@ -455,7 +485,7 @@ async fn the_p2p_constructor_hands_back_a_usable_socket() {
     };
 
     let (server, ()) = tokio::join!(server, async {
-        let mut socket = P2pConnection::connect(&url)
+        let mut socket = P2pConnection::connect(&url, "credential-abc")
             .await
             .expect("the agent socket opens")
             .into_stream();
@@ -464,6 +494,41 @@ async fn the_p2p_constructor_hands_back_a_usable_socket() {
             .send(WsMessage::Text(serde_json::to_string(&attach).unwrap()))
             .await
             .unwrap();
+        linger().await;
+    });
+
+    server.unwrap();
+}
+
+/// The credential a caller hands the constructor is the one that arrives.
+///
+/// Separate from the test above because it catches a different mistake, and the
+/// one the signature change made possible: `connect` could take a credential,
+/// document it, and never put it on the URL — and every test above would still
+/// pass, because none of them looks at the *request*. The mock can only see it
+/// at the handshake, so the handshake is where this reads it.
+#[tokio::test]
+async fn the_p2p_constructor_puts_the_credential_on_the_url() {
+    let (listener, url) = bind().await.unwrap();
+
+    let server = async {
+        let (_ws, seen) = accept_capturing_uri(&listener).await?;
+        // `unwrap_or_default` rather than an unwrap: an empty string fails the
+        // assertion below with the message saying the request never arrived,
+        // which is more use than a panic from inside the helper.
+        let uri = seen.get().cloned().unwrap_or_default();
+        assert!(
+            uri.contains("token=credential-abc"),
+            "the credential must reach the agent's handshake; the request was {uri:?}"
+        );
+        linger().await;
+        Ok::<_, Box<dyn std::error::Error + Send + Sync>>(())
+    };
+
+    let (server, ()) = tokio::join!(server, async {
+        let _socket = P2pConnection::connect(&url, "credential-abc")
+            .await
+            .expect("the agent socket opens");
         linger().await;
     });
 

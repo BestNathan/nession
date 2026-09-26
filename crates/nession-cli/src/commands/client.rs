@@ -232,11 +232,19 @@ pub async fn attach_session(
         })?;
         println!("Connecting to agent at {agent_address} (P2P mode)...");
 
+        // The credential from the reply we were just given (#1013). Required
+        // rather than defaulted: the Server mints one on this path and hands it
+        // to the Agent before answering, so a p2p reply without one is a
+        // disagreement worth naming rather than a connection to attempt.
+        let credential = attach
+            .connection_token
+            .clone()
+            .with_context(|| "The server's attach reply carried no P2P credential (P2P mode)")?;
+
         // Through the boundary's one agent-socket constructor, not `open_ws`.
-        // That is the seam #1013 needs: an agent connection will have to carry
-        // a server-issued credential, and one constructor is one signature to
-        // change rather than a search for every place a socket was opened.
-        let agent_ws = nession_client::P2pConnection::connect(&agent_address)
+        // That is the seam #1013 exists for: one constructor is one signature to
+        // change, rather than a search for every place a socket was opened.
+        let agent_ws = nession_client::P2pConnection::connect(&agent_address, &credential)
             .await
             .with_context(|| format!("Failed to connect to agent at {agent_address}"))?
             .into_stream();
@@ -496,7 +504,10 @@ async fn ask_agent(
     use futures_util::{SinkExt, StreamExt};
 
     let url = format!("ws://{agent_address}");
-    let mut ws = nession_client::P2pConnection::connect(&url)
+    // No credential: this helper never contacts the Server, so it has none to
+    // present. It is the alternate management path #1013 removes — stage 2's
+    // next step routes create/kill through `server.session.*` and deletes this.
+    let mut ws = nession_client::P2pConnection::connect(&url, "")
         .await
         .with_context(|| format!("Failed to connect to agent at {url}"))?
         .into_stream();

@@ -1,3 +1,4 @@
+use super::agent_url_with_credential;
 use super::v1::*;
 use serde_json::json;
 
@@ -70,6 +71,94 @@ fn a_grant_round_trips() {
     assert_eq!(back.agent_id, "node-1");
     assert_eq!(back.scope, CredentialScope::for_relay("work"));
     assert_eq!(back.expires_at, "2026-09-25T13:00:00Z");
+}
+
+/// The credential goes on as `token=`, spelled against the literal.
+///
+/// The literal, not [`CREDENTIAL_PARAM`], on purpose: the function builds this
+/// URL *from* the constant, so comparing against the constant would pass for
+/// any spelling at all and pin nothing. What is worth pinning is the value,
+/// because `token` is also written by hand in the Web's `buildAgentWsUrl` and
+/// nothing generates either one — a rename here that does not reach there is a
+/// browser whose every agent connection is refused.
+#[test]
+fn a_credential_is_appended_as_the_token_parameter() {
+    assert_eq!(
+        agent_url_with_credential("ws://agent.example.com/ws", "abc"),
+        "ws://agent.example.com/ws?token=abc"
+    );
+}
+
+/// A URL that already carries a query gets `&`, not a second `?`.
+///
+/// `…?x=1?token=abc` parses the credential as part of the *first* parameter's
+/// value, so it never arrives — and the far end sees a well-formed URL with no
+/// credential on it, which is not a shape anything can report as malformed.
+#[test]
+fn a_url_that_already_has_a_query_gets_an_ampersand() {
+    assert_eq!(
+        agent_url_with_credential("ws://a/ws?x=1", "abc"),
+        "ws://a/ws?x=1&token=abc"
+    );
+}
+
+/// No credential means no parameter — not an empty one.
+///
+/// This is the rule the Server's and the client's copies disagreed about: the
+/// Server appended `token=` unconditionally. An empty value makes "no
+/// credential" and "the empty credential" the same bytes, and the Agent's
+/// verifier has to treat one of them as an answer.
+#[test]
+fn no_credential_adds_nothing() {
+    assert_eq!(
+        agent_url_with_credential("ws://agent.example.com/ws", ""),
+        "ws://agent.example.com/ws"
+    );
+}
+
+/// A URL with no path gets one, because a query cannot be appended without it.
+///
+/// `ws://host:port` is a working agent URL — an absolute URI with an empty path
+/// implies `/` — and it stops working the moment a query is put on it: the
+/// request target becomes `?token=abc`, which is not origin-form, so the server
+/// drops the connection during the handshake and the client is left with an
+/// opaque `HandshakeIncomplete`. Measured: this is exactly what a mock listener
+/// that binds `127.0.0.1:0` and publishes `ws://host:port` produced, and it is
+/// the reason this rule exists rather than being an edge case in theory.
+#[test]
+fn a_url_with_no_path_gets_one() {
+    assert_eq!(
+        agent_url_with_credential("ws://127.0.0.1:8080", "abc"),
+        "ws://127.0.0.1:8080/?token=abc"
+    );
+}
+
+/// The path is only inserted where it is missing.
+///
+/// The other half of the rule above, and the one that would be broken by
+/// inserting unconditionally: a URL that already has a path must not get a
+/// second slash, and a relative one has no authority to insert after.
+#[test]
+fn a_url_that_already_has_a_path_is_left_alone() {
+    assert_eq!(
+        agent_url_with_credential("ws://host:8080/ws", "abc"),
+        "ws://host:8080/ws?token=abc"
+    );
+    assert_eq!(agent_url_with_credential("/ws", "abc"), "/ws?token=abc");
+}
+
+/// A credential that needs escaping is escaped.
+///
+/// Base64url never needs this, so the assertion has to use a character the
+/// current generator cannot produce — otherwise it would pass with the encoder
+/// deleted. A `+` left raw arrives at the far side as a space and reads as an
+/// unknown credential, which is a different bug report from a malformed URL.
+#[test]
+fn a_credential_that_needs_escaping_is_escaped() {
+    assert_eq!(
+        agent_url_with_credential("ws://a/ws", "a+b/c"),
+        "ws://a/ws?token=a%2Bb%2Fc"
+    );
 }
 
 /// The acknowledgement names an outcome, and `"accepted"` is one of them.

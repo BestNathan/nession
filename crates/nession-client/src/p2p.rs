@@ -23,6 +23,7 @@
 //! [`P2pConnection::into_stream`], and gives it to its own terminal. Terminal I/O
 //! stays in the CLI — moving it here is a stated non-goal of #1015.
 
+use nession_protocol::contracts::p2p::agent_url_with_credential;
 use nession_protocol::contracts::session::v1::ClientAttachPayload;
 use nession_protocol::Message;
 
@@ -48,10 +49,21 @@ impl P2pConnection {
     /// consumer this replaces ended up unable to reach an agent advertised only
     /// over TLS.
     ///
-    /// **#1013 changes this signature** to take the server-issued credential.
-    pub async fn connect(url: &str) -> Result<Self, ClientError> {
+    /// **`credential` is the server-issued one**, taken from the attach reply's
+    /// `connection_token` (#1013). The Server hands it to the Agent that will
+    /// verify it before it answers the attach, so a caller that dials with the
+    /// token off that reply is correct by construction.
+    ///
+    /// How the credential reaches the URL — the parameter name, the separator
+    /// and the empty case — is
+    /// [`nession_protocol::contracts::p2p::agent_url_with_credential`], which is
+    /// also what the Server's relay dials use. It is not restated here: this
+    /// crate and `nession-server` each had their own copy within days of each
+    /// other and had already disagreed on the empty case.
+    pub async fn connect(url: &str, credential: &str) -> Result<Self, ClientError> {
+        let url = agent_url_with_credential(url, credential);
         Ok(Self {
-            ws: open_ws(url).await?,
+            ws: open_ws(&url).await?,
         })
     }
 

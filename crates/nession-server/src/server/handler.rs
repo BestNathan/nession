@@ -27,6 +27,7 @@ use nession_protocol::contracts::env::v1::{
     ClientEnvGetResponsePayload, ClientEnvListPayload, ClientEnvListResponsePayload,
     ClientEnvWritePayload, ClientEnvWriteResponsePayload, EnvFileRef, EnvSnapshot, EnvSource,
 };
+use nession_protocol::contracts::p2p::agent_url_with_credential;
 use nession_protocol::contracts::p2p::v1::{CredentialScope, P2pGrantPayload};
 use nession_protocol::contracts::session::v1::{
     AgentTerminalResizePayload, ClientRelayBeginPayload, ClientSessionCapturePreviewPayload,
@@ -163,40 +164,6 @@ pub struct ConnectionHandlerDeps {
     /// same reason `command_broker` is: the credentials it holds outlive any one
     /// connection and are visible to every one of them.
     pub p2p_broker: Arc<crate::broker::ConnectionBroker>,
-}
-
-/// Put a P2P credential on an agent URL (#1013).
-///
-/// A query parameter because that is the one mechanism every caller has: a
-/// browser cannot set a header on `new WebSocket()`, and the Web has been
-/// sending exactly this since before the Agent read it. The name is shared with
-/// the Web and the CLI, so a rename here that is not made there produces
-/// connections refused with an opaque 401 — the hardest failure in this design
-/// to diagnose, which is why it is one function rather than three format
-/// strings.
-fn with_credential(url: &str, credential: &str) -> String {
-    let separator = if url.contains('?') { '&' } else { '?' };
-    format!("{url}{separator}token={}", urlencode(credential))
-}
-
-/// Percent-encode the characters a token can contain and a URL cannot.
-///
-/// The token is base64url today, whose alphabet is URL-safe, so this is one
-/// `replace` and not a dependency. It exists because "the alphabet happens to
-/// be safe" is a property of the *current* generator, and the parameter is
-/// parsed on the other side of a `url::Url` — an unencoded `+` or `/` there
-/// would silently truncate the credential and read as "unknown token".
-fn urlencode(value: &str) -> String {
-    let mut encoded = String::with_capacity(value.len());
-    for byte in value.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                encoded.push(byte as char);
-            }
-            other => encoded.push_str(&format!("%{other:02X}")),
-        }
-    }
-    encoded
 }
 
 impl ConnectionHandler {
@@ -1809,7 +1776,7 @@ impl ConnectionHandler {
 
         let relay_urls: Vec<String> = relay_urls
             .into_iter()
-            .map(|url| with_credential(&url, &credential.token))
+            .map(|url| agent_url_with_credential(&url, &credential.token))
             .collect();
 
         let client_id = uuid::Uuid::new_v4().to_string();
