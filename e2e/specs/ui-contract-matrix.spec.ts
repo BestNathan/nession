@@ -352,14 +352,42 @@ for (const row of viewports.filter((v) => v.experience === 'app')) {
         throw new Error('the fixture terminal must lay out a surface, a box and a screen');
       }
 
-      // The grid is sized from the container's *content* box, and xterm draws
-      // its screen at `cols * cell.width`, so a fitted grid cannot leave the box
-      // that box already excludes the inset from. Fitted against the padded box
-      // it did: 373px of screen inside a 362px `.xterm` — 14px of inset on the
-      // left, 3px on the right, in every App baseline. Sub-pixel only, because a
-      // floor-based fit leaves slack *inside* the box, never outside it.
-      expect(boxes.screen.left).toBeGreaterThanOrEqual(boxes.cell.left - 0.5);
-      expect(boxes.screen.right).toBeLessThanOrEqual(boxes.cell.right + 0.5);
+      // The grid is sized from the container's *content* box, so it is fitted to
+      // the box the inset has already been taken out of. Fitted against the
+      // padded box it was not: 373px of screen inside a 362px `.xterm` — 14px of
+      // inset on the left, 3px on the right, in every App baseline.
+      //
+      // The bound is **one column**, not zero, and the reason is a property of
+      // the approach rather than of this fix: xterm re-measures its cell while
+      // applying the resize, and draws `cols * thatCell`. When the settled cell
+      // is a fraction wider than the one the fit divided by, the difference
+      // compounds across the column count — measured on CI, a ~0.1px per-column
+      // difference over 50 columns is ~3px of overhang, where the same build
+      // locally is 2px *inside* the box. The product reads and resizes in the
+      // same order (`ResizeController`), so this is not a fixture-only tolerance.
+      //
+      // One column still separates it from the defect: fitted against the padded
+      // box the overhang was ~1.5 columns, because the inset is 28px and
+      // FitAddon subtracted only its ~17px scrollbar allowance.
+      const advance = await page.evaluate(() => {
+        for (const row of document.querySelectorAll('.xterm-rows > div')) {
+          const span = row.querySelector('span');
+          const length = span?.textContent?.length ?? 0;
+          if (span && length >= 20) {
+            return span.getBoundingClientRect().width / length;
+          }
+        }
+        return null;
+      });
+      if (advance === null) {
+        throw new Error('no rendered text run to measure a column from');
+      }
+      const boxesMessage = `xterm ${boxes.cell.left}..${boxes.cell.right}, screen ${boxes.screen.left}..${boxes.screen.right}, column ${advance}`;
+      expect(boxes.screen.left, boxesMessage).toBeGreaterThanOrEqual(boxes.cell.left - advance);
+      expect(boxes.screen.right, boxesMessage).toBeLessThanOrEqual(boxes.cell.right + advance);
+      // …and the fit is tight: a grid that fitted by a column too few is as
+      // wrong as one that fitted by a column too many.
+      expect(boxes.screen.right, boxesMessage).toBeGreaterThanOrEqual(boxes.cell.right - advance);
 
       // Non-vacuity: a screen that "fits" by collapsing to a couple of columns
       // would satisfy the two lines above. The fixture's longest line renders
