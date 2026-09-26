@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { AppLayers, type AppLayer } from './AppLayers';
 import { AppSessionsSurface } from './AppSessionsSurface';
 import { ShellMain } from '@/app/ShellMain';
@@ -53,6 +54,12 @@ export function AppLayout(props: {
   onLayerSelect: (session: Session) => void;
   mainShared: MainShared;
   /**
+   * Whether a Session exists for Workspace to be the depth *around* (#1082).
+   * False means the layer is not rendered at all — `AppLayers` takes `null` as
+   * "this layer does not exist", not as "render an empty one".
+   */
+  workspaceAvailable: boolean;
+  /**
    * Fixture/testing override for the terminal, same contract as
    * `WorkspaceRegion.terminal`. The canonical App fixtures pass the static
    * `FixtureTerminal` here so a baseline can be captured without a live attach.
@@ -65,14 +72,26 @@ export function AppLayout(props: {
     sidebarProps,
     onLayerSelect,
     mainShared,
+    workspaceAvailable,
     terminal,
   } = props;
+
+  // Whether a Workspace capability has pushed a detail (#1081).
+  //
+  // Held here because this is the nearest ancestor of both readers: the pager
+  // below must stand down, and the Workspace layer above is what knows. The
+  // layer is the only place that knows, so it reports through the same
+  // arrangement it already uses to report a surface change. Reset when the
+  // panel unmounts — the Workspace layer is unmounted whenever it is closed,
+  // and a stale `true` would silence the Terminal's own gesture.
+  const [workspaceDetailPushed, setWorkspaceDetailPushed] = useState(false);
 
   return (
     <div className="flex min-h-0 flex-1">
       <AppLayers
         layer={layer}
         onLayerChange={onLayerChange}
+        workspaceDetailPushed={workspaceDetailPushed}
         sessions={
           <div className="flex h-full min-h-0 flex-col">
             <AppSessionsSurface {...sidebarProps} onSelect={onLayerSelect} />
@@ -91,7 +110,7 @@ export function AppLayout(props: {
             />
           </div>
         }
-        workspace={
+        workspace={!workspaceAvailable ? null : (
           /* Opaque, deliberately (#1051). The layers are stacked at `inset-0`,
              so a transparent Workspace layer showed the Terminal's chrome and
              its scrollback through its own header band: the baseline drew two
@@ -111,9 +130,10 @@ export function AppLayout(props: {
               surface="workspace"
               showTerminal={false}
               experience="app"
+              onWorkspaceDepthChange={setWorkspaceDetailPushed}
             />
           </div>
-        }
+        )}
       />
     </div>
   );

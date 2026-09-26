@@ -59,7 +59,21 @@ async function createSession(page: import('@playwright/test').Page, name: string
   await expect(dialog).toBeVisible();
   await page.locator('#name').fill(name);
   await dialog.getByRole('button', { name: 'Create' }).click();
-  await expect(dialog).not.toBeVisible({ timeout: 10_000 });
+
+  // Named, not the bare role locator (#1082): creating makes the new Session
+  // current, which runs the ordinary selection path — attach included — so a
+  // second dialog is on screen by the time this line runs.
+  const createDialog = page.getByRole('dialog').filter({ hasText: 'Create Session' });
+  await expect(createDialog).not.toBeVisible({ timeout: 10_000 });
+
+  // This helper's contract is "the Session exists in the list". Selecting it is
+  // what #1082 added and the attach flow is a consequence of that selection, so
+  // dismiss it and leave the caller to attach the way it wants to — otherwise
+  // the modal it opened intercepts the row click `attachToSession` makes next.
+  const attachDialog = page.getByRole('dialog').filter({ hasText: 'Attach' });
+  await expect(attachDialog).toBeVisible({ timeout: 10_000 });
+  await attachDialog.getByRole('button', { name: 'Cancel' }).click();
+  await expect(attachDialog).not.toBeVisible({ timeout: 5_000 });
 
   // Wait for session to appear in the shell list
   await expect(page.locator('[data-testid="session-item-row"]', { hasText: name })).toBeVisible({ timeout: 10_000 });

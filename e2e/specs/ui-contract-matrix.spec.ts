@@ -31,6 +31,7 @@ test.skip(!process.env.CI, 'local only — runs in CI workflow only');
 
 const { viewports } = loadContracts();
 
+const PATTERN_SESSION_HEADER = 'pattern.session-header';
 const PATTERN_SESSION_ITEM = 'pattern.session-item';
 const PATTERN_WORKSPACE_NAV = 'pattern.workspace-navigation';
 const PATTERN_TERMINAL_CAPSULE = 'pattern.terminal-capsule';
@@ -323,6 +324,104 @@ for (const row of viewports.filter((v) => v.experience === 'app')) {
       for (let i = 0; i < (await controls.count()); i += 1) {
         await expectTouchTarget(controls.nth(i), optsFor(PATTERN_TERMINAL_CAPSULE, 'app', row.id));
       }
+    });
+
+    test('a pushed Workspace detail keeps its own leave (#1081)', async ({ page }) => {
+      await page.goto('/#/fixture/app');
+      const layerRoot = page.getByTestId('app-layer-root');
+      await expect(layerRoot).toHaveAttribute('data-layer', 'terminal');
+
+      await page.getByTestId('app-header-workspace').first().click();
+      await expect(layerRoot).toHaveAttribute('data-layer', 'workspace');
+
+      // Push a file detail. Files declares the push, so the shell's page header
+      // becomes that depth's bar and Back now names the depth below it.
+      await page.getByTestId('file-row-web').click();
+      await page.getByTestId('file-row-web/src').click();
+      await page.getByTestId('file-row-web/src/App.tsx').click();
+      const back = page.getByTestId('app-page-back');
+      await expect(back).toHaveAttribute('aria-label', 'Back to Files');
+
+      const shell = await layerRoot.boundingBox();
+      const editor = await page.locator('.cm-editor').boundingBox();
+      if (!shell || !editor) {
+        throw new Error('the pushed detail must lay out a shell and an editor');
+      }
+      const y = Math.round(editor.y + editor.height / 2);
+
+      // From inside the editor's own left edge — CodeMirror's line-number
+      // gutter sits at x = 0, so this is the touch the edge band re-admitted,
+      // and before this rule it left the whole depth and discarded whatever
+      // `Back to Files` was guarding.
+      await swipeHorizontally(page, { y, fromX: shell.x + 10, toX: shell.x + 170 });
+      await page.waitForTimeout(300);
+      await expect(layerRoot).toHaveAttribute('data-layer', 'workspace');
+      await expect(back).toHaveAttribute('aria-label', 'Back to Files');
+
+      // …and the depth's own leave still works, one level, as its Back says.
+      await back.click();
+      await expect(page.getByTestId('app-page-back')).toHaveAttribute('aria-label', 'Back to terminal');
+
+      // The pair: at the capability root the shell's gesture is back, because
+      // there Back and the shell both mean the Terminal.
+      await swipeHorizontally(page, { y, fromX: shell.x + 10, toX: shell.x + 170 });
+      await expect(layerRoot).toHaveAttribute('data-layer', 'terminal');
+    });
+
+    test('the no-Session root is a home with an action, not a status line (#1082)', async ({ page }) => {
+      await page.goto('/#/fixture/app?selection=none');
+
+      await expect(page.getByTestId('app-home')).toBeVisible();
+      // The screen it replaced: a status report with nothing to act on, and no
+      // route back to the Sessions list once the drawer was dismissed.
+      await expect(page.getByTestId('session-empty-state')).toHaveCount(0);
+
+      const create = page.getByTestId('app-home-new-session');
+      await expect(create).toBeEnabled();
+      await expect(create).toBeVisible();
+
+      // Both ways out are visible controls — a gesture is an accelerator, and
+      // on this screen the only layer to reach is Sessions.
+      await expect(page.getByTestId('app-home-browse-sessions')).toBeVisible();
+      const sessions = page.getByTestId('app-header-sessions');
+      await expect(sessions).toBeVisible();
+      // Same affordance, same band, same control as on a selected Session, so
+      // it is held to the chrome pattern's App touch floor rather than to a
+      // number written here.
+      await expectTouchTarget(sessions, optsFor(PATTERN_SESSION_HEADER, 'app', row.id));
+
+      // Workspace is the depth *around* work. With none, it is not offered —
+      // and the layer it would open does not exist either.
+      await expect(page.getByTestId('app-header-workspace')).toHaveCount(0);
+      await expect(page.getByTestId('app-layer-workspace')).toHaveCount(0);
+    });
+
+    test('the no-Session root pages to Sessions and to nothing else (#1082)', async ({ page }) => {
+      await page.goto('/#/fixture/app?selection=none');
+      await expect(page.getByTestId('app-home')).toBeVisible();
+
+      const shell = await page.getByTestId('app-layer-root').boundingBox();
+      if (!shell) {
+        throw new Error('the App shell must be laid out');
+      }
+      const y = shell.y + shell.height / 2;
+
+      // Leftward from the right edge band. There is no third position to page
+      // to, so this must be a no-op rather than a slide onto a blank depth.
+      await swipeHorizontally(page, {
+        y,
+        fromX: shell.x + shell.width - 2,
+        toX: shell.x + shell.width - 150,
+      });
+      // A no-op is an absence, so it needs a window in which a wrong commit
+      // could land before the positive case below makes the silence evidence.
+      await page.waitForTimeout(300);
+      await expect(page.getByTestId('app-layer-root')).toHaveAttribute('data-layer', 'terminal');
+      await expect(page.getByTestId('app-layer-workspace')).toHaveCount(0);
+
+      // Rightward from the left edge band: the one layer that does exist.
+      await swipeHorizontally(page, { y, fromX: shell.x + 2, toX: shell.x + 150 });
+      await expect(page.getByTestId('app-layer-sessions')).toBeVisible();
     });
 
     test('the top-level swipe reaches the work surface from the shell edge (#1081)', async ({ page }) => {

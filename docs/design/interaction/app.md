@@ -12,7 +12,8 @@ Navigation             Current Work             Contextual Depth
  Sessions     ←──────    Terminal    ──────→      Workspace
 ```
 
-Default focus is the active Session's Terminal.
+Default focus is the active Session's Terminal. **Before any Session exists there is no
+Terminal**, and the App's root is a home instead — see *The no-Session root* below.
 
 Conceptually:
 
@@ -89,9 +90,44 @@ Signal/Peek is session-scoped and intentionally shallow. Rich state, history, ma
 
 Opening Workspace must preserve the originating Session and capability context. Closing/dismissing returns the user to the same Terminal without rebuilding context.
 
+## The no-Session root
+
+`Sessions ← Terminal → Workspace` describes the model *around work*. Two facts were
+unstated, and both showed up as a dead end on a narrow viewport (#1082):
+
+- the App experience is chosen by **viewport**, not by whether work already exists. A
+  phone gets the App shell before anything is selected — otherwise the model, the
+  Sessions layer, and the top-level gesture are all absent exactly when the user has
+  nothing else to navigate with;
+- **Workspace is Session-scoped.** It is the depth *around* a piece of work, so with no
+  work there is nothing for it to show. It is not hidden or disabled: the layer does not
+  exist, and the gesture that would open it has no third position to page to.
+
+The root in that state is a **home**, and `visual-language.md` §Empty states governs it:
+an invitation to act, in the interface's voice, using the action's own name. It carries
+
+- a primary **New Session** action, opening the same creation flow as everywhere else —
+  and on success the created Session becomes the current work and the App enters its
+  Terminal, rather than creating something and leaving the user where they were;
+- a visible route to Sessions, plus the same Sessions affordance in the bar;
+- no Workspace affordance, and no invented Session identity in the bar.
+
+If creation cannot succeed the action says why, in place. A disabled control with no
+explanation is the same dead end one step earlier.
+
 ## Gestures and visible alternatives
 
 - Swipe right to reveal/open Sessions; swipe left to reveal/open Workspace.
+- **The shell does not claim the gesture on a layer whose depth offers its own
+  leave** (#1081). `Sessions ← Terminal → Workspace` describes the model *around*
+  work; inside the Workspace it is the pushed depth's business, and
+  [one navigation bar per depth](#one-navigation-bar-per-depth) gives that depth
+  exactly one leave — the page header's Back. Two routes out of one depth is the
+  defect #1051 names, and here it is worse than untidy: the Back is **allowed to
+  refuse** (Files' asks before discarding an unsaved editor) and the shell's
+  leave is not, so a shell page from there threw the work away. The gesture
+  returns at the Workspace root, where Back and the shell both mean the
+  Terminal and there is nothing to compete over.
 - The gesture spans the shell chrome. **A work surface owns every touch that
   begins in it, except at the shell's own edges** (#1081). Inside a work surface
   the shell may still claim a horizontal drag that starts within `EDGE_BAND_PX`

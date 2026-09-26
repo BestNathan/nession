@@ -57,10 +57,21 @@ describe('SWIPE_COMMIT_PX', () => {
 describe('useSwipePager', () => {
   const width = 400;
 
-  function setup(index: number, pageCount = 3, bounds: ShellBounds | null = SHELL) {
+  function setup(
+    index: number,
+    pageCount = 3,
+    bounds: ShellBounds | null = SHELL,
+    shellMayPage = true,
+  ) {
     const onIndexChange = vi.fn();
     const { result } = renderHook(() =>
-      useSwipePager({ pageCount, index, onIndexChange, getShellBounds: () => bounds }),
+      useSwipePager({
+        pageCount,
+        index,
+        onIndexChange,
+        getShellBounds: () => bounds,
+        shellMayPage,
+      }),
     );
     return { onIndexChange, result };
   }
@@ -170,10 +181,16 @@ describe('useSwipePager', () => {
 describe('useSwipePager — a work surface owns the touches that begin in it', () => {
   const width = 400;
 
-  function setup(index: number, pageCount = 3) {
+  function setup(index: number, pageCount = 3, shellMayPage = true) {
     const onIndexChange = vi.fn();
     const { result } = renderHook(() =>
-      useSwipePager({ pageCount, index, onIndexChange, getShellBounds: () => SHELL }),
+      useSwipePager({
+        pageCount,
+        index,
+        onIndexChange,
+        getShellBounds: () => SHELL,
+        shellMayPage,
+      }),
     );
     return { onIndexChange, result };
   }
@@ -291,10 +308,17 @@ describe('useSwipePager — the shell edges re-admit the work surface (#1081)', 
     index: number,
     pageCount = 3,
     bounds: ShellBounds | null = SHELL,
+    shellMayPage = true,
   ) {
     const onIndexChange = vi.fn();
     const { result } = renderHook(() =>
-      useSwipePager({ pageCount, index, onIndexChange, getShellBounds: () => bounds }),
+      useSwipePager({
+        pageCount,
+        index,
+        onIndexChange,
+        getShellBounds: () => bounds,
+        shellMayPage,
+      }),
     );
     return { onIndexChange, result };
   }
@@ -431,6 +455,40 @@ describe('useSwipePager — the shell edges re-admit the work surface (#1081)', 
 
     expect(onIndexChange).not.toHaveBeenCalled();
     expect(result.current.isDragging).toBe(false);
+  });
+
+  it('declines every start on a layer whose depth owns its leave (#1081)', () => {
+    // The Workspace layer at a pushed detail. Not even shell chrome is the
+    // shell's to page from there: the depth's page header carries the one leave
+    // (#1051), and unlike the shell's it is allowed to refuse — Files' Back
+    // blocks on an unsaved editor. A shell page from the same depth throws that
+    // guard away, which is what the header swipe and the band both did.
+    const { onIndexChange, result } = setup(2, 3, SHELL, false);
+
+    // Chrome: the page header band, which the gate would otherwise allow.
+    drag(result, [2, 300], [2 + SWIPE_COMMIT_PX + 10, 300], chrome());
+    expect(onIndexChange).not.toHaveBeenCalled();
+    expect(result.current.isDragging).toBe(false);
+
+    // The work surface, from inside the band.
+    drag(result, [2, 300], [2 - (SWIPE_COMMIT_PX + 10), 300], xterm());
+    expect(onIndexChange).not.toHaveBeenCalled();
+    expect(result.current.isDragging).toBe(false);
+  });
+
+  it('still pages the same layer from its root, where nothing competes', () => {
+    // The pair matters: standing down is scoped to a pushed detail, not to the
+    // layer. At the Workspace root the shell's leave and Back go to the same
+    // place — the Terminal — so there is nothing to compete over.
+    const { onIndexChange, result } = setup(2, 3, SHELL, true);
+
+    // Rightward, which from index 2 is the page back to the Terminal. (Leftward
+    // from here runs off the end of the pager, so it is not a page at all —
+    // which is why the suppression above removes the competing route and
+    // nothing else.)
+    drag(result, [2, 300], [2 + SWIPE_COMMIT_PX + 10, 300], chrome());
+
+    expect(onIndexChange).toHaveBeenCalledWith(1);
   });
 
   it('leaves an unconstrained start unconstrained even with bounds set', () => {

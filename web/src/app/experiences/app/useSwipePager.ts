@@ -16,13 +16,74 @@ export interface UseSwipePagerArgs {
    * the touch was at its edge.
    */
   getShellBounds: () => ShellBounds | null;
+  /**
+   * Whether the shell may claim a horizontal drag on this layer at all (#1081).
+   *
+   * False while the layer's own depth is offering a leave. The App has one such
+   * depth: a pushed Workspace detail, whose page header's Back is that depth's
+   * single leave (#1051) and — unlike the shell's leave — is allowed to refuse.
+   * `FilesAppLayout`'s handler is dirty-aware and opens a discard dialog for an
+   * unsaved editor; the shell's leave is not, so the two must not both be
+   * reachable.
+   *
+   * Declining the drag here, rather than suppressing the commit, is what keeps
+   * the two from being reachable at once: nothing follows the finger, so there
+   * is no page to snap back from and no ambiguous half-gesture. Measured on the
+   * fixture, the shell's rightward page is the only one that *can* commit from
+   * the Workspace layer — a leftward drag runs off the end of the pager — so
+   * this removes the competing route and nothing else.
+   */
+  shellMayPage: boolean;
 }
 
+/** What gate 2 makes of a touch, before anything has moved. */
+type StartClaim = { page: true; edge: EdgeSide | null } | { page: false };
+
+/**
+ * Gate 2: where on this layer a page may begin, if at all.
+ *
+ * Two different questions land on `page: false` and both belong here — a touch
+ * inside a work surface is the surface's, and a shell that cannot report its
+ * own edges cannot show the touch was at one, so the surface wins that tie too.
+ * `getBounds` is called only where it is needed, so a touch on shell chrome
+ * costs no layout read.
+ */
+function claimAtStart(
+  target: EventTarget | null,
+  clientX: number,
+  getBounds: () => ShellBounds | null,
+): StartClaim {
+  if (!isWorkSurface(target)) {
+    return { page: true, edge: null };
+  }
+  const bounds = getBounds();
+  const edge = bounds === null ? null : edgeBandSide(clientX, bounds);
+  return edge === null ? { page: false } : { page: true, edge };
+}
+
+/**
+ * The App's top-level pager.
+ *
+ * Three gates decide whether a touch becomes a page, and each answers a
+ * different question. None replaces another:
+ *
+ * 1. **May the shell claim this drag at all?** `shellMayPage` — false on a
+ *    layer whose own depth offers a leave, so the shell does not compete with
+ *    it (#1081, #1051). See that argument's own note.
+ * 2. **Where on this layer may a page begin?** The work-surface exclusion, as
+ *    `workSurface.ts` states it and `edgeBand.ts` bounds it: the surface owns
+ *    the touches that begin in it, except within `EDGE_BAND_PX` of a shell edge
+ *    and only in the direction that edge's layer arrives from (#1049, #1081).
+ * 3. **Is a begun drag a page or a scroll?** The axis lock in `onTouchMove`,
+ *    which decides *after* a touch has been captured and therefore cannot
+ *    answer either question above.
+ */
 export function useSwipePager({
   pageCount,
   index,
   onIndexChange,
   getShellBounds,
+  shellMayPage,
 }: UseSwipePagerArgs): {
   dragOffset: number;
   isDragging: boolean;
@@ -74,36 +135,25 @@ export function useSwipePager({
     setIsDragging(false);
   }, []);
 
-  // A drag may start anywhere on the shell chrome, and at the shell's own edges
-  // even over a work surface: a touch that lands in the terminal viewport, an
-  // editor, a field, or the capsule belongs to that surface *except* within
-  // `EDGE_BAND_PX` of a shell edge, where the shell may still claim a page
-  // (#1049 decision 1, re-admitted and bounded by #1081).
-  //
-  // The axis lock in `onTouchMove` still runs. The two discriminate different
-  // things — the gate says *where navigation may begin*, the lock says whether
-  // a begun drag is a page or a scroll — and neither replaces the other.
   const onTouchStart = useCallback((e: TouchEvent) => {
+    // Gate 1. See the note above the hook.
+    if (!shellMayPage) {
+      return;
+    }
+
     const touch = e.touches[0];
     if (!touch) {
       return;
     }
 
-    // Only computed when the surface would otherwise decline, so the common
-    // case costs no layout read.
-    let edge: EdgeSide | null = null;
-    if (isWorkSurface(e.target)) {
-      const bounds = getShellBoundsRef.current();
-      edge = bounds === null ? null : edgeBandSide(touch.clientX, bounds);
-      if (edge === null) {
-        return;
-      }
+    const claim = claimAtStart(e.target, touch.clientX, getShellBoundsRef.current);
+    if (!claim.page) {
+      return;
     }
 
-    // Written only on the path that actually starts a gesture: a second touch
-    // landing on a work surface mid-drag must not clear the edge that the first
-    // one is still bound by.
-    edgeRef.current = edge;
+    // Written only on a start: a second touch landing mid-drag must not clear
+    // the edge the first one is still bound by.
+    edgeRef.current = claim.edge;
     activeRef.current = true;
     cancelledRef.current = false;
     startXRef.current = touch.clientX;
@@ -111,7 +161,7 @@ export function useSwipePager({
     dragOffsetRef.current = 0;
     setDragOffset(0);
     setIsDragging(true);
-  }, []);
+  }, [shellMayPage]);
 
   const onTouchMove = useCallback(
     (e: TouchEvent) => {
@@ -132,18 +182,11 @@ export function useSwipePager({
         return;
       }
 
-      // #1081. A drag that began in an edge band over a work surface belongs to
-      // the shell only while it moves the way that edge's layer arrives: the
-      // left band pulls Sessions in (rightward), the right band pulls Workspace
-      // in (leftward).
-      //
-      // Tested against the *net* offset on every move rather than locked on the
-      // opening move. A lock reads tidier — it matches the axis lock above — but
-      // it would let a drag that starts at the left edge, turns round, and ends
-      // 200px to the left commit **Workspace**, which is the layer the opposite
-      // edge owns. The offset is what commits, so the offset is what the edge
-      // has to own. Crossing zero is the user reversing, and the shell then
-      // gives the gesture up rather than committing either layer.
+      // Gate 2's direction half. Tested against the *net* offset on every move
+      // rather than locked on the opening move, because the offset is what
+      // commits: a lock would let a drag that starts at the left edge, turns
+      // round and ends 200px to the left commit the layer the opposite edge
+      // owns. See `edgeOwnsDrag`.
       const edge = edgeRef.current;
       if (edge !== null && dx !== 0 && !edgeOwnsDrag(edge, dx)) {
         surrender();

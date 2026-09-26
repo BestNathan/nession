@@ -160,7 +160,13 @@ describe('WorkspaceRegion app layer composition', () => {
     expect(screen.queryByTestId('back-to-list')).not.toBeInTheDocument();
   });
 
-  it('does not mount app-layer-root when mobile and no session selected', () => {
+  it('mounts app-layer-root when mobile and no session is selected (#1082)', () => {
+    // The rule this replaces was `!isWide && selectedId !== null`. It made the
+    // App composition — and with it the Sessions layer and the top-level
+    // gesture — absent until work existed, so the narrow viewport fell back to
+    // the Web frame and left a status line with no action. The experience is
+    // chosen by viewport; what the App *shows* is then a question about the
+    // Session.
     render(
       <WorkspaceRegion
         {...baseProps({
@@ -171,8 +177,21 @@ describe('WorkspaceRegion app layer composition', () => {
         })}
       />,
     );
-    expect(screen.queryByTestId('app-layer-root')).not.toBeInTheDocument();
-    expect(screen.getByText('Fix terminal reconnect')).toBeInTheDocument();
+    expect(screen.getByTestId('app-layer-root')).toBeInTheDocument();
+    expect(screen.getByTestId('app-home')).toBeInTheDocument();
+  });
+
+  it('does not mount the Workspace layer when no session is selected (#1082)', () => {
+    // Workspace is the depth *around* a piece of work. With no work it is not
+    // merely hidden: `AppLayers` is handed no node for it, which is what also
+    // makes the leftward page a no-op rather than a slide onto a blank depth.
+    render(
+      <WorkspaceRegion
+        {...baseProps({ isWide: false, selectedId: null })}
+      />,
+    );
+    expect(screen.getByTestId('app-layer-root')).toHaveAttribute('data-layer', 'terminal');
+    expect(screen.queryByTestId('app-layer-workspace')).not.toBeInTheDocument();
   });
 
   it('does not mount app-layer-root on desktop even with a selection', () => {
