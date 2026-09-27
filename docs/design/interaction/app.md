@@ -201,6 +201,21 @@ Workspace capabilities may use native push/pop navigation internally for deeper 
 
 Files may push an editor; Claude Code may open configuration/history; Git may expose repository state. These are capability-internal flows, not a requirement for one shared master/detail shell.
 
+### App Files navigator (#1140)
+
+Desktop/Web Files stay a tree; App Files are a **navigator** — one directory per screen,
+push/pop for folders, full-screen read-first viewer for files. Shared headless
+filesystem logic; presentation is App-owned (`FilesAppLayout`, not `FileBrowser`).
+
+```text
+Files root  →  tap folder  →  child directory  →  Back restores list + scroll
+                           →  tap file       →  viewer (shell push)
+```
+
+The shell page header names only the current directory or file; the full path is a
+horizontal breadcrumb under it. Search, selection mode, and action sheets extend this
+model in follow-up work; they must not reintroduce an expandable tree on App.
+
 ### One navigation bar per depth
 
 Workspace is a stack of depths, and **at any moment exactly one navigation bar owns the
