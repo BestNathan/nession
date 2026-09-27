@@ -15,8 +15,8 @@ export function FilesAppLayout({ ctx, depth }: WorkspaceAppViewProps) {
   const nav = useAppFilesNavigator(
     depth,
     {
-      sessionName: ctx.session?.name,
-      agentLabel: ctx.agent?.name ?? ctx.agent?.hostname,
+      sessionName: ctx.session?.session_name,
+      agentLabel: ctx.agent?.display_name ?? ctx.agent?.hostname,
     },
     ctx.fileOps,
   );
