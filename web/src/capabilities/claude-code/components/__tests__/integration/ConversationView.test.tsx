@@ -61,6 +61,23 @@ describe('ConversationView', () => {
     expect(screen.getByText('hi there')).toBeInTheDocument();
   });
 
+  it('puts the user on the right and Claude on the left', () => {
+    // #1120's alignment rule, and the assertion that the transcript hands each
+    // record to the right one of `UserMessage` / `AssistantMessage`.
+    //
+    // It needs to be its own test because nothing else here would notice a swap:
+    // `data-kind` comes from the item rather than the component, and the text is
+    // the same either way, so exchanging the two primitives would leave the rest
+    // of this file green. Alignment is also the half of the distinction that
+    // survives not being able to see the colour — `#1120` is explicit that
+    // "alignment also carries identity".
+    renderView(state({ items: turns }));
+
+    const rendered = screen.getAllByTestId('conversation-turn');
+    expect(rendered[0]!.className).toContain('items-end');
+    expect(rendered[1]!.className).toContain('items-start');
+  });
+
   it('collapses tool calls so they do not drown the conversation', () => {
     // #1005 criterion 10. The summary is one line and the body is closed until
     // asked for — a conversation that renders every tool result in full is a

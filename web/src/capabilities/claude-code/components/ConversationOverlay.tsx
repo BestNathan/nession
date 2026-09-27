@@ -1,5 +1,5 @@
 import { useConversation } from '../hooks/useConversation';
-import { ConversationBody } from './ConversationView';
+import { ConversationTranscript } from './ConversationTranscript';
 
 /**
  * The conversation, read from the Peek without leaving the Terminal (#1120).
@@ -10,10 +10,11 @@ import { ConversationBody } from './ConversationView';
  * a second Workspace: read-only, one level, and it closes back to the Peek it
  * came from.
  *
- * **It draws no transcript of its own.** `ConversationBody` is reused from the
- * Workspace view, so the two surfaces cannot drift into two visual languages —
- * the failure mode `#1120` names, and the reason this was built after the
- * export rather than beside it.
+ * **It draws no transcript of its own.** `ConversationTranscript` is the one
+ * conversation renderer, reused here from the Workspace view, so the two
+ * surfaces cannot drift into two visual languages — the failure mode `#1120`
+ * names, and the reason this was built after the shared renderer rather than
+ * beside it.
  *
  * `useConversation` is the capability's own hook and mounts with this
  * component, so its polling costs nothing while the overlay is closed. That is
@@ -31,7 +32,7 @@ export function ConversationOverlay({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="conversation-overlay">
-      <ConversationBody view={view} onLoadOlder={() => void loadOlder()} />
+      <ConversationTranscript view={view} onLoadOlder={() => void loadOlder()} />
     </div>
   );
 }
