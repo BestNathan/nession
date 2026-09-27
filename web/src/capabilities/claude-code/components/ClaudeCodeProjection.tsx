@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import type { CapabilityState } from '@/product/capability';
 import { capsulePeekActionClass } from '@/shared/lib/peekActionClass';
 import { claudeCodeApi } from '../ClaudeCodePlugin';
+import { stateLine } from '../model/stateLine';
 import type { ClaudeCodeConversationResponse, ClaudeCodeListResponse } from '../types';
+import { ClaudeCodePeek } from './ClaudeCodePeek';
 
 /**
  * What Claude Code says in the Terminal.
@@ -29,25 +31,42 @@ import type { ClaudeCodeConversationResponse, ClaudeCodeListResponse } from '../
 export function ClaudeCodeProjection({
   agentId,
   sessionId,
+  depth,
   state,
   onOpenWorkspace,
 }: {
   agentId: string | undefined;
   sessionId: string | undefined;
+  /**
+   * Which depth this body is drawn at.
+   *
+   * The host decided this before mounting — `#1046` was explicit that a body
+   * able to change it would be a second, weaker copy of that decision — so this
+   * reads it and draws, rather than holding a depth of its own.
+   */
+  depth: 'signal' | 'peek';
   state: CapabilityState;
   /**
    * The way in (#1046).
    *
-   * This capability's richer surface *is* its Workspace view, so the Signal ends
-   * by offering it. Until this requirement the host drew that offer as a generic
-   * footer on every Peek; now the capability draws its own, which is also why
-   * this one has no Peek — the offer is the whole of its deepening, and a Peek
-   * between the Signal and the Workspace would add a step that says nothing.
+   * Supplied by the host and drawn by the capability, at both depths: whether
+   * there is somewhere deeper to go, and what that looks like, is this
+   * capability's answer rather than a footer every Peek inherits.
    */
   onOpenWorkspace?: (resourceId?: string) => void;
 }) {
   const { summary } = useProjectConfigCount({ agentId, sessionId });
-  const conversation = useConversationTitle({ agentId, sessionId });
+  const conversation = useConversationSummary({ agentId, sessionId });
+
+  if (depth === 'peek') {
+    return (
+      <ClaudeCodePeek
+        conversation={conversation}
+        state={state}
+        onOpenWorkspace={onOpenWorkspace}
+      />
+    );
+  }
 
   return (
     <div data-testid="claude-code-signal-body" className="flex flex-col gap-1">
@@ -69,14 +88,6 @@ export function ClaudeCodeProjection({
   );
 }
 
-/**
- * `active` is the pane running it right now; `relevant` is that it ran here
- * earlier — the distinction `resolveClaudeCodeState` already draws, said out
- * loud rather than shown as a dot.
- */
-function stateLine(state: CapabilityState): string {
-  return state === 'active' ? 'Running in this Session' : 'Ran in this Session earlier';
-}
 
 /**
  * The line under the state, ordered by how much it says.
@@ -115,24 +126,21 @@ function detailLine(
  * true, and the Workspace is where a conversation that cannot be read gets
  * explained and acted on — the same rule the config summary already follows.
  */
-function useConversationTitle({
+function useConversationSummary({
   agentId,
   sessionId,
 }: {
   agentId: string | undefined;
   sessionId: string | undefined;
-}): { title: string | null; hasConversation: boolean } {
-  const [state, setState] = useState<{ title: string | null; hasConversation: boolean }>({
-    title: null,
-    hasConversation: false,
-  });
+}): ConversationSummary {
+  const [state, setState] = useState<ConversationSummary>(NO_CONVERSATION);
   const generation = useRef(0);
 
   useEffect(() => {
     generation.current += 1;
     const forGeneration = generation.current;
     if (!agentId || !sessionId) {
-      setState({ title: null, hasConversation: false });
+      setState(NO_CONVERSATION);
       return;
     }
 
@@ -142,18 +150,46 @@ function useConversationTitle({
         if (generation.current !== forGeneration) {
           return;
         }
-        setState(boundConversation(response));
+        setState(summarize(response));
       })
       .catch(() => {
         if (generation.current !== forGeneration) {
           return;
         }
-        setState({ title: null, hasConversation: false });
+        setState(NO_CONVERSATION);
       });
   }, [agentId, sessionId]);
 
   return state;
 }
+
+/**
+ * What a response says, in the shape **both** depths read.
+ *
+ * The Signal wants one line and the Peek wants the recency and the directory's
+ * other candidates, so they read one answer rather than making the same request
+ * twice — they are one surface at two depths, and a second fetch would be the
+ * first place they could disagree.
+ */
+export interface ConversationSummary {
+  title: string | null;
+  hasConversation: boolean;
+  /** What the provider offered, in its own order. The Peek lists these. */
+  candidates: Candidate[];
+  /** When the bound conversation last moved, for the Peek's recency line. */
+  updatedAt: string | null;
+}
+
+type Candidate = NonNullable<ClaudeCodeConversationResponse['candidates']>[number];
+
+/** Module-stable, so an absent conversation is one object rather than a new one
+ *  per render — the same reason the empty arrays elsewhere are constants. */
+const NO_CONVERSATION: ConversationSummary = {
+  title: null,
+  hasConversation: false,
+  candidates: [],
+  updatedAt: null,
+};
 
 /**
  * What a response says about the conversation this Session is bound to.
@@ -162,20 +198,25 @@ function useConversationTitle({
  * carries an id and a cwd and no display metadata (#1124), so this matches by
  * id — the same join the Workspace header makes.
  */
-function boundConversation(response: ClaudeCodeConversationResponse): {
-  title: string | null;
-  hasConversation: boolean;
-} {
+function summarize(response: ClaudeCodeConversationResponse): ConversationSummary {
+  const candidates = response.candidates ?? [];
   const id = response.conversation?.claude_session_id;
+
   if (id === undefined) {
     // No binding: `ambiguous` and its neighbours mean a directory full of
     // conversations and no answer about which is this Session's. Saying that
-    // much is the Signal's whole budget — choosing one is what `#1005` forbids.
-    return { title: null, hasConversation: (response.candidates?.length ?? 0) > 0 };
+    // much is all either depth may do — choosing one is what `#1005` forbids.
+    return { ...NO_CONVERSATION, hasConversation: candidates.length > 0, candidates };
   }
-  const candidate = response.candidates?.find((c) => c.claude_session_id === id);
+
+  const candidate = candidates.find((c) => c.claude_session_id === id);
   const title = candidate?.title?.trim();
-  return { title: title ? title : null, hasConversation: true };
+  return {
+    title: title ? title : null,
+    hasConversation: true,
+    candidates,
+    updatedAt: candidate?.updated_at ?? null,
+  };
 }
 
 /**

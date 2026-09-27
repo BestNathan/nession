@@ -89,25 +89,26 @@ export const claudeCodeView: WorkspaceViewBinding = {
 /**
  * How Claude Code says something in the Terminal.
  *
- * **Signal only.** It is the capability whose state comes from observation, so
- * it is the one that emerges on its own — a pane running `claude.exe` gets this
- * without anyone choosing it, which is Q1's second input made real. What it
- * reports is the state the capability layer already resolved plus one fact the
- * pane in front of the user does not show: how much project config this Session
- * is running with.
+ * **Both depths.** It is the capability whose state comes from observation, so
+ * it is the one that emerges on its own — a pane running `claude.exe` gets the
+ * Signal without anyone choosing it, which is Q1's second input made real.
  *
- * It has no Peek. `onDeeper` is left absent on purpose — its richer surface is
- * the Workspace config browser, and a Peek would summarise a list the Workspace
- * already draws better.
+ * It **is** offered for selection, which it was not before `#1120`. The
+ * argument for withholding it was that its richer surface is the Workspace
+ * config browser and a Peek would summarise a list the Workspace already draws
+ * better — true while the Workspace drew configuration and nothing else. Once
+ * the conversation capability landed, what sits behind this capability is the
+ * work itself rather than a manifest of it, and that is exactly what a Peek is
+ * for. `#1046` stated the condition for its return; this is the return.
  */
 export const claudeCodeProjection: CapsuleProjectionBinding = {
   id: CLAUDE_CODE_ID,
-  // Signal only: emerges when relevant, not offered for selection (#1046).
-  entry: 'signal',
-  body: ({ agentId, sessionId, state, openWorkspace }) => (
+  entry: 'peek',
+  body: ({ agentId, sessionId, depth, state, openWorkspace }) => (
     <ClaudeCodeProjection
       agentId={agentId}
       sessionId={sessionId}
+      depth={depth}
       state={state}
       onOpenWorkspace={openWorkspace}
     />
