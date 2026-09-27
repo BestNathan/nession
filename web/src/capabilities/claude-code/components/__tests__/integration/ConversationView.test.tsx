@@ -148,6 +148,41 @@ describe('ConversationView', () => {
     expect(onSelect).toHaveBeenCalledWith('claude-2');
   });
 
+  it('groups the list by date, newest bucket first', () => {
+    // #1120 item 5's optional half. The dates are *relative to the real clock*
+    // here, unlike `dateBucket`'s own tests which inject one — the component
+    // calls it without a `now`, and the alternative would be threading a clock
+    // prop through the view purely for this. That is safe because the buckets
+    // are days apart: 3 days back is inside the previous week whether the suite
+    // runs at 00:01 or 23:59, which is not true of a boundary test but is true
+    // of this one.
+    const daysAgo = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString();
+    const candidates = [
+      { claude_session_id: 'a', cwd: '/work', updated_at: daysAgo(0), title: 'today one' },
+      { claude_session_id: 'b', cwd: '/work', updated_at: daysAgo(3), title: 'recent one' },
+      { claude_session_id: 'c', cwd: '/work', updated_at: daysAgo(40), title: 'old one' },
+      // No timestamp at all — the provider sorts these last, and they must not
+      // be filed under "Older", which would assert a recency nothing knows.
+      { claude_session_id: 'd', cwd: '/work', updated_at: null, title: 'undated one' },
+    ];
+    renderView(state({ state: 'ambiguous', conversation: null, candidates }));
+
+    expect(
+      screen.getAllByTestId('conversation-bucket').map((el) => el.textContent),
+    ).toEqual(['Today', 'Previous 7 days', 'Older']);
+
+    // Every row still renders, including the undated one — a grouping that
+    // dropped it would look tidy and lose a conversation.
+    expect(screen.getAllByTestId('conversation-candidate-title').map((el) => el.textContent)).toEqual(
+      ['today one', 'recent one', 'old one', 'undated one'],
+    );
+
+    // And the undated row is under **no** heading, which the order above cannot
+    // show: filing it under "Older" would leave the titles in exactly the same
+    // sequence, so an order assertion passes on the bug this exists to prevent.
+    expect(screen.getByText('undated one').closest('section')).toBeNull();
+  });
+
   it('shows what was last asked under the title, and degrades when there is none', () => {
     // The row is two lines (#1120 item 5): the title says what a conversation
     // is called, the preview says where it got to. Measured, both halves can be
