@@ -371,6 +371,79 @@ test.describe('App 390×844', () => {
     });
   });
 
+  // The other half of criterion 5, and a state the name `filtered` does not
+  // cover: that one types into the field, which is *search*. This one applies a
+  // status filter, which is the control #1083 moved behind the field's own
+  // trigger — a different control with a different promise, so it earns its own
+  // image rather than sharing one.
+  //
+  // The chip is asserted, not merely photographed. Moving filters behind a
+  // trigger is only safe if an applied filter stays *stated* without reopening
+  // the panel, and a screenshot cannot say which of the two is carrying that.
+  test('Sessions layer, status filter active', async ({ page }) => {
+    await gotoFixtureApp(page);
+    await page.getByTestId('app-header-sessions').first().click();
+    await expect(page.getByTestId('app-layer-sessions')).toBeInViewport();
+    await expect(page.getByTestId('session-item-row')).toHaveCount(6);
+
+    await page.getByTestId('session-list-filters').click();
+    const panel = page.getByTestId('session-list-filters-panel');
+    await expect(panel).toBeVisible();
+    // Scoped to the panel: the chip carries the same word once it exists.
+    await panel.getByRole('button', { name: 'Offline', exact: true }).click();
+
+    // `sg-prod` is the one Agent the fixture marks offline, so one row is the
+    // product's own answer to this filter, not an arbitrary narrowing. The count
+    // is what says the *list* narrowed rather than that a chip appeared.
+    await expect(page.getByTestId('session-item-row')).toHaveCount(1);
+    await expect(page.getByTestId('session-list-filter-chip')).toContainText('Offline');
+
+    // The panel does not close when a status is chosen — `filtersOpen` is state
+    // of its own, and choosing does not touch it. The resting composition is the
+    // chip alone, so this click is what reaches it rather than a dismissal the
+    // product performs. Recorded here because a golden that opens the panel,
+    // picks, and shoots would otherwise pin the panel as part of the state.
+    await page.getByTestId('session-list-filters').click();
+    await expect(page.getByTestId('session-list-filters-panel')).toHaveCount(0);
+
+    await expect(page).toHaveScreenshot('app-sessions-status-filtered.png', {
+      fullPage: true,
+      ...FIXTURE_SCREENSHOT,
+    });
+  });
+
+  // Criterion 7/9's opened form, which #1083's canonical-state list names and
+  // the default golden only shows collapsed: there, `Agents · 2 online` is the
+  // foot of the list, and what it opens into is in no image at all. Asserting
+  // the entry exists is not asserting the destination is reachable, and the
+  // entry is the last thing in a scrolling column — the one place it could be
+  // expanded and still be off screen.
+  test('Sessions layer, Agents expanded', async ({ page }) => {
+    await gotoFixtureApp(page);
+    await page.getByTestId('app-header-sessions').first().click();
+    await expect(page.getByTestId('app-layer-sessions')).toBeInViewport();
+
+    const disclosure = page.getByTestId('app-agents-disclosure');
+    await expect(disclosure).toHaveAttribute('aria-expanded', 'false');
+    await disclosure.click();
+    await expect(disclosure).toHaveAttribute('aria-expanded', 'true');
+
+    const agents = page.getByTestId('sidebar-agents');
+    await agents.scrollIntoViewIfNeeded();
+    await expect(agents).toBeInViewport();
+    // Reachability alone is not enough to assert: `scrollIntoViewIfNeeded`
+    // would bring an *empty* container into view and every check above would
+    // still pass. These rows are what says the expansion produced the
+    // destination rather than merely expanding.
+    await expect(page.locator('[data-testid^="sidebar-agent-"]')).toHaveCount(3);
+    await expect(page.getByTestId('sidebar-agent-sg-prod')).toBeVisible();
+
+    await expect(page).toHaveScreenshot('app-sessions-agents.png', {
+      fullPage: true,
+      ...FIXTURE_SCREENSHOT,
+    });
+  });
+
   // The third state, and the one the fixture cannot produce on its own: an Agent
   // is stale when a *refresh got no answer from it*, so nothing this route does
   // can make one. `?stale=` names that input (`session.stale_agents` in the
