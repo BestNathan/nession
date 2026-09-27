@@ -8,7 +8,6 @@ import { agentsApi } from '@/product/agent';
 import { sessionsApi } from '@/product/session';
 import { serverApi } from '@/platform/server';
 import { envApi } from '@/capabilities/env';
-import { commandsApi } from '@/capabilities/commands';
 import { claudeCodeApi } from '@/capabilities/claude-code';
 import { gitApi } from '@/capabilities/git';
 import { terminalServerApi } from '@/product/terminal';
@@ -31,7 +30,6 @@ const SERVER_PLUGINS = [
   sessionsApi,
   serverApi,
   envApi,
-  commandsApi,
   claudeCodeApi,
   gitApi,
   terminalServerApi,

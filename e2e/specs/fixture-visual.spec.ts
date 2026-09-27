@@ -112,6 +112,54 @@ test.describe('Web 1440×900', () => {
       ...FIXTURE_SCREENSHOT,
     });
   });
+
+  // #1120 item 12's conversation surfaces, and the first images of any of this:
+  // until #1131 served `claude-code.conversation` from the fixture, no route
+  // could render a conversation at all, so #1125's readable title and the
+  // transcript it heads were in no baseline and the visual gate could not see
+  // them. Two states, not one — a list and an open transcript are different
+  // screens, and an image of either is not evidence about the other.
+  test('Claude Code conversation', async ({ page }) => {
+    await page.goto('/#/fixture/workspace?capability=claude-code');
+
+    await expect(page.getByTestId('claude-code-workspace')).toBeVisible();
+    const conversation = page.getByTestId('conversation-open');
+    await expect(conversation).toBeVisible();
+
+    // The two assertions an image cannot make for itself, and the reason the
+    // fixture carries a *titled* conversation: the header names the work rather
+    // than the identity, and the identity has not crept back in as text. The
+    // UUID is still reachable as the element's `title`, which is where #1120
+    // puts it for Web.
+    await expect(conversation).toContainText('Terminal ownership handoff');
+    await expect(conversation).not.toContainText('c0a1b2c3-');
+
+    await expect(page).toHaveScreenshot('web-claude-code-conversation.png', {
+      fullPage: true,
+      ...FIXTURE_SCREENSHOT,
+    });
+  });
+
+  test('Claude Code conversation list', async ({ page }) => {
+    // `ambiguous`: several conversations at this cwd and no answer about which
+    // is the Session's. The fixture names one and leaves another untitled, so
+    // both the title and the client's own fallback are in the picture.
+    await page.goto('/#/fixture/workspace?capability=claude-code&conversation=ambiguous');
+
+    await expect(page.getByTestId('claude-code-workspace')).toBeVisible();
+    const list = page.getByTestId('conversation-list');
+    await expect(list).toBeVisible();
+
+    await expect(list).toContainText('Terminal ownership handoff');
+    await expect(list).toContainText('Capsule radius review');
+    // The untitled candidate falls back to a date said as a date.
+    await expect(list).toContainText('Conversation ·');
+
+    await expect(page).toHaveScreenshot('web-claude-code-conversations.png', {
+      fullPage: true,
+      ...FIXTURE_SCREENSHOT,
+    });
+  });
 });
 
 test.describe('Web compact 1024×768', () => {
@@ -522,6 +570,39 @@ test.describe('App 390×844', () => {
     await expect(page.getByTestId('file-row-web')).toContainText('1 file', { timeout: 10_000 });
 
     await expect(page).toHaveScreenshot('app-files-list.png', {
+      fullPage: true,
+      ...FIXTURE_SCREENSHOT,
+    });
+  });
+
+  // The App's half of the conversation coverage. `#1134` gave the Web
+  // experience both images — the open transcript and the list — so this is one
+  // state in the other experience, which is the half `#1128` means by "in
+  // either experience" and the half still in no baseline.
+  //
+  // Driven through the App's own picker rather than a route parameter: the App
+  // reaches a capability view that way, and giving it a `?capability=` would put
+  // a test concern into the product's layer state. The end of the walk is
+  // asserted rather than assumed, so the shutter cannot catch the Files view the
+  // picker would otherwise leave in place.
+  test('Claude Code conversation', async ({ page }) => {
+    await gotoFixtureApp(page);
+    await page.getByTestId('app-header-workspace').first().click();
+
+    await page.getByTestId('workspace-capability-more').click();
+    await page.getByTestId('workspace-capability-picker-claude-code').click();
+
+    const conversation = page.getByTestId('conversation-open');
+    await expect(conversation).toBeVisible();
+    // The same two claims `#1134` makes on Web, made here because the App draws
+    // this view with its own layout and could regress on its own.
+    await expect(conversation).toContainText('Terminal ownership handoff');
+    await expect(conversation).not.toContainText('c0a1b2c3-');
+    // The tool call is a collapsed row here too (#1005 criterion 10), and the
+    // fixture's second one errors — so the failure treatment is in the picture.
+    await expect(page.getByTestId('conversation-tool').first()).toBeVisible();
+
+    await expect(page).toHaveScreenshot('app-claude-code-conversation.png', {
       fullPage: true,
       ...FIXTURE_SCREENSHOT,
     });

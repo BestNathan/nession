@@ -50,7 +50,7 @@ Do not infer permanent product boundaries from today's component tree or transpo
 
 `WebSocketService` is a browser-session singleton responsible for request/response correlation, event pub/sub, and reconnect behavior.
 
-Prefer an existing capability plugin over adding transport logic inside components. Current capability implementations include Files, Sessions, Agents, Env, Commands, Server, Claude Code, and Terminal-specific server integration.
+Prefer an existing capability plugin over adding transport logic inside components. Current capability implementations include Files, Sessions, Agents, Env, Server, Claude Code, and Terminal-specific server integration.
 
 ---
 

@@ -111,15 +111,18 @@ describe('capsule emergence', () => {
   });
 
   it('gives a capability with nothing to add at Peek no deeper step', () => {
-    // Claude Code's richer surface is its Workspace view, so its Signal is
-    // where the Terminal stops. `onDeeper` absent is how that is said, and the
-    // frame turns it into an inert title rather than an empty Peek.
-    const { result } = setup({ session: session('s1', 'claude.exe') });
+    // `onDeeper` absent is how "the Terminal stops here" is said, and the frame
+    // turns it into an inert title rather than an empty Peek.
+    //
+    // Claude Code was this test's subject until #1120 gave it a Peek, at which
+    // point it was asserting the absence of the feature. What has no deeper
+    // step now is the built-in accessory: it has no Workspace view, so there is
+    // nothing behind it to open.
+    const { result, choose } = setup();
+    choose('terminal-keys');
 
+    expect(result.current.projection?.id).toBe('terminal-keys');
     expect(result.current.projection?.onDeeper).toBeUndefined();
-    // …and the way in is offered from the Signal instead of from behind an
-    // empty step.
-    expect(result.current.projection?.onOpenWorkspace).toBeTypeOf('function');
   });
 
   it('carries the capability’s own answer about the soft keyboard', () => {
