@@ -574,6 +574,39 @@ test.describe('App 390×844', () => {
       ...FIXTURE_SCREENSHOT,
     });
   });
+
+  // The App's half of the conversation coverage. `#1134` gave the Web
+  // experience both images — the open transcript and the list — so this is one
+  // state in the other experience, which is the half `#1128` means by "in
+  // either experience" and the half still in no baseline.
+  //
+  // Driven through the App's own picker rather than a route parameter: the App
+  // reaches a capability view that way, and giving it a `?capability=` would put
+  // a test concern into the product's layer state. The end of the walk is
+  // asserted rather than assumed, so the shutter cannot catch the Files view the
+  // picker would otherwise leave in place.
+  test('Claude Code conversation', async ({ page }) => {
+    await gotoFixtureApp(page);
+    await page.getByTestId('app-header-workspace').first().click();
+
+    await page.getByTestId('workspace-capability-more').click();
+    await page.getByTestId('workspace-capability-picker-claude-code').click();
+
+    const conversation = page.getByTestId('conversation-open');
+    await expect(conversation).toBeVisible();
+    // The same two claims `#1134` makes on Web, made here because the App draws
+    // this view with its own layout and could regress on its own.
+    await expect(conversation).toContainText('Terminal ownership handoff');
+    await expect(conversation).not.toContainText('c0a1b2c3-');
+    // The tool call is a collapsed row here too (#1005 criterion 10), and the
+    // fixture's second one errors — so the failure treatment is in the picture.
+    await expect(page.getByTestId('conversation-tool').first()).toBeVisible();
+
+    await expect(page).toHaveScreenshot('app-claude-code-conversation.png', {
+      fullPage: true,
+      ...FIXTURE_SCREENSHOT,
+    });
+  });
 });
 
 // #1050 criterion 11 names **375/390**, and until now only 390 had goldens:
