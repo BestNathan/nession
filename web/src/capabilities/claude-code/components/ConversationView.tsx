@@ -6,10 +6,80 @@ import type { ClaudeCodeConversationResponse } from '../types';
 import { conversationLabel } from '../model/conversationLabel';
 import { clockTime } from '../model/clockTime';
 import { previewLine } from '../model/previewLine';
+import { dateBucket, type DateBucket } from '../model/dateBucket';
 import { ConversationTranscript } from './ConversationTranscript';
 import { cn } from '@/shared/lib/utils';
 
 type Candidate = NonNullable<ClaudeCodeConversationResponse['candidates']>[number];
+
+/** The headings, and the order they are shown in — newest first. */
+const BUCKET_LABELS: Record<DateBucket, string> = {
+  today: 'Today',
+  'previous-7-days': 'Previous 7 days',
+  older: 'Older',
+};
+const BUCKET_ORDER: DateBucket[] = ['today', 'previous-7-days', 'older'];
+
+/** One conversation, as a row the reader can scan and choose. */
+function CandidateRow({
+  candidate,
+  openId,
+  onSelect,
+}: {
+  candidate: Candidate;
+  openId: string | null;
+  onSelect: (claudeSessionId: string) => void;
+}) {
+  const time = clockTime(candidate.updated_at);
+  const preview = previewLine(candidate.preview);
+  return (
+    <li>
+      <button
+        type="button"
+        aria-current={openId === candidate.claude_session_id ? 'true' : undefined}
+        onClick={() => onSelect(candidate.claude_session_id)}
+        className={cn(
+          'flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left transition-colors',
+          'hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+          openId === candidate.claude_session_id && 'bg-accent text-accent-foreground',
+        )}
+      >
+        <MessageSquare className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        {/* Three ranks, and the row reads in that order (#1120): the title
+            is what a person scans for, the preview says where the
+            conversation got to, and the time is orientation. The title is
+            `font-medium` and the preview is not, so the hierarchy survives
+            without relying on the muted colour alone.
+
+            The identity moves to the tooltip. A row's job is to be
+            recognisable, and a UUID is not: it is the same string for
+            every reader and carries no scent. It stays reachable because
+            selection still speaks it. */}
+        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <span
+            className="truncate text-sm font-medium"
+            title={candidate.claude_session_id}
+            data-testid="conversation-candidate-title"
+          >
+            {conversationLabel(candidate)}
+          </span>
+          {/* Absent for roughly a tenth of real conversations (measured:
+              14 of 120 had no prompt recorded), so the row degrades to
+              title and time rather than reserving a blank second line. */}
+          {preview ? (
+            <span
+              className="truncate text-xs text-muted-foreground"
+              data-testid="conversation-candidate-preview"
+            >
+              {preview}
+            </span>
+          ) : null}
+        </span>
+        {time ? <span className="shrink-0 text-xs text-muted-foreground">{time}</span> : null}
+      </button>
+    </li>
+  );
+}
 
 function CandidateList({
   candidates,
@@ -20,62 +90,59 @@ function CandidateList({
   openId: string | null;
   onSelect: (claudeSessionId: string) => void;
 }) {
-  return (
-    <ul className="space-y-0.5" data-testid="conversation-candidates">
-      {candidates.map((candidate) => {
-        const time = clockTime(candidate.updated_at);
-        const preview = previewLine(candidate.preview);
-        return (
-          <li key={candidate.claude_session_id}>
-            <button
-              type="button"
-              aria-current={openId === candidate.claude_session_id ? 'true' : undefined}
-              onClick={() => onSelect(candidate.claude_session_id)}
-              className={cn(
-                'flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left transition-colors',
-                'hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                openId === candidate.claude_session_id && 'bg-accent text-accent-foreground',
-              )}
-            >
-              <MessageSquare className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-              {/* Three ranks, and the row reads in that order (#1120): the title
-                  is what a person scans for, the preview says where the
-                  conversation got to, and the time is orientation. The title is
-                  `font-medium` and the preview is not, so the hierarchy survives
-                  without relying on the muted colour alone.
+  // Bucketed rather than filtered per bucket, so the heading appears once
+  // whatever order the provider sent: grouping consecutive runs would emit a
+  // second "Older" heading if one arrived out of order, which reads as broken
+  // rather than as a sort problem.
+  const grouped = new Map<DateBucket, Candidate[]>();
+  const undated: Candidate[] = [];
+  for (const candidate of candidates) {
+    const bucket = dateBucket(candidate.updated_at);
+    if (bucket === null) {
+      undated.push(candidate);
+      continue;
+    }
+    const rows = grouped.get(bucket);
+    if (rows) {
+      rows.push(candidate);
+    } else {
+      grouped.set(bucket, [candidate]);
+    }
+  }
 
-                  The identity moves to the tooltip. A row's job is to be
-                  recognisable, and a UUID is not: it is the same string for
-                  every reader and carries no scent. It stays reachable because
-                  selection still speaks it. */}
-              <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                <span
-                  className="truncate text-sm font-medium"
-                  title={candidate.claude_session_id}
-                  data-testid="conversation-candidate-title"
-                >
-                  {conversationLabel(candidate)}
-                </span>
-                {/* Absent for roughly a tenth of real conversations (measured:
-                    14 of 120 had no prompt recorded), so the row degrades to
-                    title and time rather than reserving a blank second line. */}
-                {preview ? (
-                  <span
-                    className="truncate text-xs text-muted-foreground"
-                    data-testid="conversation-candidate-preview"
-                  >
-                    {preview}
-                  </span>
-                ) : null}
-              </span>
-              {time ? (
-                <span className="shrink-0 text-xs text-muted-foreground">{time}</span>
-              ) : null}
-            </button>
-          </li>
+  const row = (candidate: Candidate) => (
+    <CandidateRow
+      key={candidate.claude_session_id}
+      candidate={candidate}
+      openId={openId}
+      onSelect={onSelect}
+    />
+  );
+
+  return (
+    <div className="space-y-4" data-testid="conversation-candidates">
+      {BUCKET_ORDER.map((bucket) => {
+        const rows = grouped.get(bucket);
+        if (!rows || rows.length === 0) {
+          return null;
+        }
+        return (
+          <section key={bucket}>
+            <h3
+              className="px-2 pb-1 text-xs font-semibold text-muted-foreground"
+              data-testid="conversation-bucket"
+            >
+              {BUCKET_LABELS[bucket]}
+            </h3>
+            <ul className="space-y-0.5">{rows.map(row)}</ul>
+          </section>
         );
       })}
-    </ul>
+      {/* Undated rows last and unheaded. Filing them under "Older" would assert
+          a recency nothing knows — the provider sorts them last for the same
+          reason (`None` is not evidence of recency). */}
+      {undated.length > 0 ? <ul className="space-y-0.5">{undated.map(row)}</ul> : null}
+    </div>
   );
 }
 
