@@ -163,6 +163,61 @@ describe('TerminalController', () => {
     expect(transport.send).toHaveBeenCalledWith('\x04');
   });
 
+  it('sends one keystroke exactly once after a detach and re-attach (#1096)', () => {
+    // `detach()` used `setMode({ type: 'terminal' })` to mean "deactivate", but
+    // setMode deactivates and then re-activates the handler for the requested
+    // mode — and the requested mode is the active one. So it deactivated and
+    // immediately re-activated, leaving a live `onData` subscription on a
+    // router that was dropped straight after, with nothing left holding a
+    // reference to release it. Each keystroke then reached the PTY once per
+    // leaked subscription: `x` arrived as `xx`.
+    const transport = makeTransport();
+    const controller = new TerminalController(makeSession(), () => transport);
+    const el = host();
+
+    controller.attach(el);
+    controller.detach();
+    controller.attach(el);
+    controller.terminal!.input('x');
+
+    expect(transport.send).toHaveBeenCalledTimes(1);
+    expect(transport.send).toHaveBeenCalledWith('x');
+    controller.dispose();
+  });
+
+  it('sends one keystroke exactly once after five attach/detach cycles (#1096)', () => {
+    // The leak is cumulative, not capped at 2x.
+    const transport = makeTransport();
+    const controller = new TerminalController(makeSession(), () => transport);
+    const el = host();
+
+    for (let cycle = 0; cycle < 5; cycle += 1) {
+      controller.attach(el);
+      controller.detach();
+    }
+    controller.attach(el);
+    controller.terminal!.input('x');
+
+    expect(transport.send).toHaveBeenCalledTimes(1);
+    controller.dispose();
+  });
+
+  it('sends one keystroke exactly once after a viewport reparent (#1096)', () => {
+    // The reparent branch tore down a different subset than `detach()` — the
+    // transport and the capsule scroll, but not the input handler, the IME,
+    // the resize observer or the title subscription. A React remount therefore
+    // leaked a subscription the next wiring doubled.
+    const transport = makeTransport();
+    const controller = new TerminalController(makeSession(), () => transport);
+
+    controller.attach(host());
+    controller.attach(host());
+    controller.terminal!.input('x');
+
+    expect(transport.send).toHaveBeenCalledTimes(1);
+    controller.dispose();
+  });
+
   it('forwards toolbar Ctrl+D (send("\\x04")) to the PTY (#1096)', () => {
     const transport = makeTransport();
     const controller = new TerminalController(makeSession(), () => transport);
