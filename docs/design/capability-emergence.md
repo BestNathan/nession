@@ -138,7 +138,9 @@ Eligibility is declared by the capability, beside the body that does the peeking
 | **Accessory** | yes | a built-in Terminal-local accessory; it has no Workspace view to be confused with, and it keeps the entry from being empty on a node whose only Peek-capable capability is unavailable |
 | **Signal** | no | it emerges by observation when Nession resolves it as relevant, but explicit discovery is not offered for a depth with nothing behind it |
 
-The examples above are therefore a list of **capabilities**, not of entry items: Claude Code is Signal-only and is not listed today, and returns to the entry when it contributes a Peek. Git and Terminal Keys are listed.
+The examples above are therefore a list of **capabilities**, not of entry items. Git, Terminal Keys and Claude Code are all listed.
+
+**Claude Code is the one that moved, and it is worth keeping the reason.** It was Signal-only and unlisted — not because a Signal is worth less, but because the entry offers what can be *reached* from where the user already is, and at the time there was nothing behind it. `#1046` said what would return it: a real Peek. `#1120` gave it one, once the conversation capability made a second depth worth opening rather than a summary of a list the Workspace already drew better. So the entry did not change its rule; the capability changed its answer to it.
 
 There is no path from selecting an entry to changing surface. Not "the control is hidden" — the entry cannot offer a capability that has no Terminal depth, so the branch does not exist.
 
