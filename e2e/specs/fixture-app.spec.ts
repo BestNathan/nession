@@ -240,9 +240,16 @@ test('the Workspace owns one navigation bar per depth (#1051)', async ({ page })
 
   await page.screenshot({ path: 'test-results/canonical-app-workspace-pushed.png', fullPage: true });
 
-  // …and the one leave goes back one depth, not two.
+  // …and the one leave from the viewer returns to the directory that held the
+  // file, not straight to the capability root (#1140).
   await page.getByTestId('app-page-back').click();
   await expect(page.getByTestId('files-app-list')).toBeVisible();
+  await expect(page.getByTestId('app-page-header')).toContainText('src');
+  await expect.poll(() => paintedCount(page, WORKSPACE_DOCK)).toBe(0);
+
+  await page.getByTestId('app-page-back').click();
+  await expect(page.getByTestId('app-page-header')).toContainText('web');
+  await page.getByTestId('app-page-back').click();
   await expect(page.getByTestId('app-page-header')).toContainText('Files');
   await expect.poll(() => paintedCount(page, WORKSPACE_DOCK)).toBe(1);
 });
