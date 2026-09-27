@@ -2,13 +2,40 @@ import { render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ClaudeCodeProjection } from '../../ClaudeCodeProjection';
 import { claudeCodeApi } from '../../../ClaudeCodePlugin';
-import type { ClaudeCodeListResponse } from '../../../types';
+import type { ClaudeCodeConversationResponse, ClaudeCodeListResponse } from '../../../types';
 
 vi.mock('../../../ClaudeCodePlugin', () => ({
-  claudeCodeApi: { claudeCodeList: vi.fn(), claudeCodeRead: vi.fn() },
+  claudeCodeApi: {
+    claudeCodeList: vi.fn(),
+    claudeCodeRead: vi.fn(),
+    claudeCodeConversation: vi.fn(),
+  },
 }));
 
 const mockedList = vi.mocked(claudeCodeApi.claudeCodeList);
+const mockedConversation = vi.mocked(claudeCodeApi.claudeCodeConversation);
+
+/** A Session with no conversation at this cwd. */
+function noConversation(): ClaudeCodeConversationResponse {
+  return { state: 'not_found', has_more: false, partial_tail: false, skipped: 0 };
+}
+
+/**
+ * A Session bound to a conversation named `title`.
+ *
+ * `title` is nullable because a real transcript may carry none — measured, 3 of
+ * 14 — and the two cases say different things.
+ */
+function boundTo(title: string | null): ClaudeCodeConversationResponse {
+  return {
+    state: 'ready',
+    conversation: { claude_session_id: 'c1', cwd: '/work' },
+    candidates: [{ claude_session_id: 'c1', cwd: '/work', updated_at: null, title }],
+    has_more: false,
+    partial_tail: false,
+    skipped: 0,
+  };
+}
 
 function listResponse(overrides: Partial<ClaudeCodeListResponse> = {}): ClaudeCodeListResponse {
   return {
@@ -37,6 +64,48 @@ describe('Claude Code Signal', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockedList.mockResolvedValue(listResponse());
+    // The default is "no conversation", which is also what makes the config
+    // assertions below meaningful: the count is what the Signal falls back to
+    // when there is nothing readable to name the work.
+    mockedConversation.mockResolvedValue(noConversation());
+  });
+
+  it('names the work when the Session has a titled conversation', async () => {
+    // The change #1120 asks for: the line under the state is about the work,
+    // not about the repository. A pane mid-conversation does not need to be
+    // told how many CLAUDE.md files exist.
+    mockedConversation.mockResolvedValue(boundTo('terminal ownership handoff'));
+
+    renderProjection('active');
+
+    expect(await screen.findByTestId('claude-code-signal-body')).toHaveTextContent(
+      'terminal ownership handoff',
+    );
+    expect(mockedConversation).toHaveBeenCalledWith({
+      agent_id: 'a1',
+      session_id: 'a1:work',
+    });
+  });
+
+  it('says a conversation exists when it is bound but unnamed', async () => {
+    // About a fifth of real transcripts carry no title. Saying "available" is
+    // honest and is not the same as saying nothing: it tells the user there is
+    // something to open, which the config count does not.
+    mockedConversation.mockResolvedValue(boundTo(null));
+
+    renderProjection('active');
+
+    const body = await screen.findByTestId('claude-code-signal-body');
+    expect(body).toHaveTextContent('Conversation available');
+    expect(body).not.toHaveTextContent('project config');
+  });
+
+  it('falls back to the config count when there is no conversation to name', async () => {
+    renderProjection('active');
+
+    expect(await screen.findByTestId('claude-code-signal-body')).toHaveTextContent(
+      '2 project config files',
+    );
   });
 
   it('says the pane is running it, and that it ran earlier, in different words', async () => {
@@ -52,14 +121,13 @@ describe('Claude Code Signal', () => {
     );
   });
 
-  it('reports project config, which is the fact the pane does not show', async () => {
+  it('asks for the project config scope and not the global one', async () => {
+    // The project half belongs to the Session the user is sitting in; the
+    // global half belongs to the machine. Reading both would put a fact about
+    // the computer on a surface that is about the work.
     renderProjection('active');
 
-    expect(await screen.findByTestId('claude-code-signal-body')).toHaveTextContent(
-      '2 project config files',
-    );
-    // The project half only: the global half belongs to the machine, not to the
-    // Session the user is sitting in.
+    await screen.findByTestId('claude-code-signal-body');
     expect(mockedList).toHaveBeenCalledWith({
       agent_id: 'a1',
       scope: 'project',
