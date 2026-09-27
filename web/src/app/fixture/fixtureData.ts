@@ -27,6 +27,7 @@ const FIXTURE_MANIFEST: ProtocolManifest = {
     'git.worktrees': { versions: [1], wire: ['git.worktrees'] },
     'claude-code.list': { versions: [1], wire: ['claude-code.list'] },
     'claude-code.read': { versions: [1], wire: ['claude-code.read'] },
+    'claude-code.conversation': { versions: [1], wire: ['claude-code.conversation'] },
   },
 };
 
