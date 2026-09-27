@@ -567,7 +567,7 @@ test.describe('App 390×844', () => {
     await expect(page.getByTestId('files-app-list')).toBeVisible();
     // The directory counts arrive one `listDir` at a time, so the screenshot
     // waits for the last row's meta rather than racing it.
-    await expect(page.getByTestId('file-row-web')).toContainText('1 file', { timeout: 10_000 });
+    await expect(page.getByTestId('file-row-web')).toContainText('1 item', { timeout: 10_000 });
 
     await expect(page).toHaveScreenshot('app-files-list.png', {
       fullPage: true,
