@@ -20,17 +20,26 @@ function state(overrides: Partial<ConversationViewState> = {}): ConversationView
   };
 }
 
+/**
+ * Renders the view, defaulting to the **push** layout.
+ *
+ * The default is `push` because that is what every test below was written
+ * against before there was a second layout, and keeping it means they go on
+ * asserting the behaviour they were written for rather than quietly being
+ * rewritten to the new one. Master/detail has its own tests further down.
+ */
 function renderView(view: ConversationViewState, handlers: Partial<{
   onSelect: (id: string | null) => void;
   onLoadOlder: () => void;
   onReload: () => void;
-}> = {}) {
+}> = {}, layout: 'master-detail' | 'push' = 'push') {
   const onSelect = handlers.onSelect ?? vi.fn();
   const onLoadOlder = handlers.onLoadOlder ?? vi.fn();
   const onReload = handlers.onReload ?? vi.fn();
   render(
     <ConversationView
       view={view}
+      layout={layout}
       onSelect={onSelect}
       onLoadOlder={onLoadOlder}
       onReload={onReload}
@@ -175,6 +184,86 @@ describe('ConversationView', () => {
     ).toEqual(['terminal ownership handoff', 'capsule radius']);
   });
 
+  it('keeps the list and the open conversation on screen together in master/detail', () => {
+    // #1120 item 8. The two are read against each other — you choose a
+    // conversation *by* comparing it to the one you have open — so the layout
+    // that has the width shows both.
+    const candidates = [
+      {
+        claude_session_id: 'claude-1',
+        cwd: '/work',
+        updated_at: '2026-09-25T10:00:00Z',
+        title: 'terminal ownership handoff',
+      },
+    ];
+    renderView(
+      state({ state: 'ready', conversation: { claude_session_id: 'claude-1', cwd: '/work' }, candidates, items: turns }),
+      {},
+      'master-detail',
+    );
+
+    expect(screen.getByTestId('conversation-master-detail')).toBeInTheDocument();
+    expect(screen.getByTestId('conversation-list')).toBeInTheDocument();
+    expect(screen.getByTestId('conversation-open')).toBeInTheDocument();
+    expect(screen.getByTestId('conversation-candidates')).toBeInTheDocument();
+    expect(screen.getAllByTestId('conversation-turn')).toHaveLength(2);
+  });
+
+  it('drops the controls that only mean something when the list is behind you', () => {
+    // "All conversations" and "Back to conversation" both navigate between two
+    // things that master/detail already shows at once. Leaving them in would be
+    // two buttons that appear to do nothing, which is worse than no button —
+    // and this is the assertion that keeps them from creeping back.
+    const candidates = [
+      {
+        claude_session_id: 'claude-1',
+        cwd: '/work',
+        updated_at: '2026-09-25T10:00:00Z',
+        title: 'terminal ownership handoff',
+      },
+    ];
+    renderView(
+      state({ state: 'ready', conversation: { claude_session_id: 'claude-1', cwd: '/work' }, candidates, items: turns }),
+      {},
+      'master-detail',
+    );
+
+    expect(screen.queryByTestId('conversation-show-list')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('conversation-back')).not.toBeInTheDocument();
+  });
+
+  it('leaves the list usable when nothing is open, rather than covering it', () => {
+    // The empty detail is an empty *pane*. The list beside it is a complete
+    // answer, so replacing the whole capability with a notice would take away
+    // the thing the reader needs in order to act on it.
+    const candidates = [
+      {
+        claude_session_id: 'claude-1',
+        cwd: '/work',
+        updated_at: '2026-09-25T10:00:00Z',
+        title: 'terminal ownership handoff',
+      },
+    ];
+    renderView(
+      state({ state: 'ambiguous', conversation: null, candidates }),
+      {},
+      'master-detail',
+    );
+
+    expect(screen.getByTestId('conversation-nothing-open')).toBeInTheDocument();
+    expect(screen.getByTestId('conversation-candidates')).toBeInTheDocument();
+  });
+
+  it('does not render the master/detail grid in the push layout', () => {
+    // #1120 item 9: App must not get the Web grid shrunk down. Asserted as an
+    // absence, because "App looks fine" is not something a passing render says
+    // — the failure would be a grid that technically fits and reads badly.
+    renderView(state({ state: 'ready', items: turns }));
+
+    expect(screen.queryByTestId('conversation-master-detail')).not.toBeInTheDocument();
+    expect(screen.getByTestId('conversation-open')).toBeInTheDocument();
+  });
+
   it('lets a user go back to the list and return to the conversation', async () => {
     // #1005 decision 3: the list is an entry point the user can always return
     // to, not a fallback shown only when resolution failed.
@@ -218,6 +307,7 @@ describe('ConversationView', () => {
     const { unmount } = render(
       <ConversationView
         view={state({ state: 'not_found', conversation: null })}
+        layout="push"
         onSelect={vi.fn()}
         onLoadOlder={vi.fn()}
         onReload={vi.fn()}
@@ -229,6 +319,7 @@ describe('ConversationView', () => {
     render(
       <ConversationView
         view={state({ state: 'unavailable', conversation: null })}
+        layout="push"
         onSelect={vi.fn()}
         onLoadOlder={vi.fn()}
         onReload={vi.fn()}

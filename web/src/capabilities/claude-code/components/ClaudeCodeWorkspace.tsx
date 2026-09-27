@@ -621,6 +621,12 @@ export function ClaudeCodeWorkspace({ ctx }: { ctx: WorkspaceContext }) {
         <main className="flex min-h-0 flex-1 flex-col">
           <ConversationView
             view={conversation.view}
+            // `#1120` items 8 and 9. The mapping lives here rather than inside
+            // the view because it is the same decision `showHeading` above
+            // already makes from the same field: what the experience has room
+            // for. A viewport, not a mode — and App is the only one that has to
+            // push.
+            layout={ctx.experience === 'app' ? 'push' : 'master-detail'}
             onSelect={conversation.select}
             onLoadOlder={() => void conversation.loadOlder()}
             onReload={conversation.reload}
