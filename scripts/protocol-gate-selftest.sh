@@ -166,6 +166,62 @@ export function go(socket: { request(t: string, p: unknown): void }) {
 TS
 expect_fail "rule 1a — a malformed name" 'contains `_`'
 
+# ── 1b. The listener half: a subscription ───────────────────────────────────
+# `subscribe` names a wire the client is *waiting* for, so the question is not
+# "who answers this" but "who sends it" — and a declared notification is the
+# answer to the second and not the first.
+#
+# The negative case comes first and is not optional. The first attempt at
+# scanning this call site asked the sender's question of a listener and
+# reported three legitimate push subscriptions (`server.agents.changed` and
+# its siblings) as violations. A rule that flags a conforming subscription is
+# worse than no rule at all: it trains people to write exemptions, and once the
+# exemptions are there it catches nothing. So the shape it must *accept* is
+# pinned here, beside the shape it must reject.
+reset_fixture
+write_caller <<'TS'
+export function go(socket: {
+  request(t: string, p: unknown): void;
+  subscribe(t: string, h: () => void): void;
+}) {
+  socket.request('alpha.one', {});
+  socket.request('beta.two', {});
+  socket.subscribe('server.widgets.changed', () => {});
+}
+TS
+expect_pass "rule 1b — a conforming subscription is not flagged"
+
+# …and a misspelling is caught, which is the only reason the call site is read:
+# an unrecognised wire is ignored, so the handler never fires and nothing says
+# so. The typo is a transposition of the real wire above, not some name that
+# happens to be unknown.
+reset_fixture
+write_caller <<'TS'
+export function go(socket: {
+  request(t: string, p: unknown): void;
+  subscribe(t: string, h: () => void): void;
+}) {
+  socket.request('alpha.one', {});
+  socket.request('beta.two', {});
+  socket.subscribe('server.widgets.chagned', () => {});
+}
+TS
+expect_fail "rule 1b — a subscription to a wire nothing sends" 'no runtime answers `server.widgets.chagned`'
+
+# `subscribe` is also the name of every in-process observer in the tree, where
+# the argument is a callback set rather than a wire. Reading those reported
+# seven correct call sites, so the flag that skips them is load-bearing — and
+# this is the case that fails if someone drops it as redundant.
+reset_fixture
+write_caller <<'TS'
+export function go(socket: { request(t: string, p: unknown): void }) {
+  socket.request('alpha.one', {});
+  socket.request('beta.two', {});
+  store.subscribe(listener);
+}
+TS
+expect_pass "a non-wire subscribe is not read as a protocol"
+
 # ── 2. A declared unit nothing calls ────────────────────────────────────────
 reset_fixture
 write_caller <<'TS'

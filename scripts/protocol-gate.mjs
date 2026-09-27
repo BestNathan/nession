@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 //
-// Static check: the protocols a call site names must be the protocols some
-// runtime answers, and every protocol must have a caller.
+// Static check: the protocols a call site names must be protocols some runtime
+// actually carries, and every protocol must have a caller. Which runtime that
+// has to be depends on the half of the wire the call site is on — a sender
+// names a wire something must *answer*, a subscriber names one something must
+// *send*.
 //
 // Why this is a gate rather than a code review habit: an unrecognised wire is
 // *ignored*, not rejected. A sender that misspells one, or names one that was
@@ -11,10 +14,16 @@
 // reported a failure and the session kept the old values" (#913). The failure
 // surfaces a long way from the typo, so the typo has to be caught here.
 //
+// The listener half is silent in the same way and was unscanned until #949: a
+// misspelled `subscribe` wire never fires its handler, and a handler that never
+// fires looks exactly like a push that never came.
+//
 // Rules enforced:
 //
-//   1. Every wire a call site names is well formed, and some runtime answers
-//      it. Two failure modes, reported apart because the fixes differ:
+//   1. Every wire a call site names is well formed, and some runtime carries
+//      it in the direction the call site is on: a `send`/`request` site needs
+//      an answerer, a `subscribe` site needs a sender. Two failure modes,
+//      reported apart because the fixes differ:
 //        a. malformed — it does not satisfy `ProtocolId`'s grammar, so no
 //           spelling of a real wire will match it (`extension.claude_code.read`
 //           is the historical one: `_` is not a segment character).
@@ -38,8 +47,8 @@
 // literal was measured first and is unusable: it returns 378 distinct values,
 // of which the overwhelming majority are filenames (`settings.json`), versions
 // (`0.1.0`), addresses (`127.0.0.1`) and test names. Restricting to the
-// arguments of the four functions that put a message on a wire keeps the check
-// exact and needs no allowlist for ordinary strings.
+// arguments of the functions that put a message on a wire, or listen for one,
+// keeps the check exact and needs no allowlist for ordinary strings.
 //
 // The advertised set is read from two places, and neither of them is a list
 // kept here:
@@ -307,7 +316,8 @@ function grammarError(id) {
 
 // ── Call sites ──────────────────────────────────────────────────────────────
 //
-// Four functions put a protocol on a wire, and where the wire sits among their
+// These functions name a protocol at a call site — most of them put it on a
+// wire, `subscribe` waits on one — and where the wire sits among their
 // arguments differs. Everything else about them differs too, so the position is
 // written out per function rather than inferred.
 const CALLS = [
@@ -323,12 +333,38 @@ const CALLS = [
   // sent, never answered, so they never went through `request` and the first
   // version of this gate called both of them dead.
   //
-  // `sentPositions` marks the one argument here that is *not* a protocol by
+  // `wireOnlyIfDotted` marks the one argument here that is *not* a protocol by
   // position. `send` carries raw frames too — `ConnectionManager.send('hello')`
   // and `send('\x04')` are PTY bytes — so only a dotted literal is read as a
   // protocol name. Everywhere else the argument is a wire whatever it says, and
   // a literal with no dot is a malformed one worth reporting.
   { fn: 'send', arg: 0, lang: 'ts', wireOnlyIfDotted: true },
+  // The listening half. A subscription names a wire the client is *waiting*
+  // for, and a misspelling fails exactly the way this gate exists to catch: an
+  // unrecognised wire is ignored, so the handler never fires and nothing
+  // reports it. The sender waits forever; the listener waits forever too, and
+  // has no reply to time out (#949).
+  //
+  // `wireOnlyIfDotted` for a reason `send` does not have. `subscribe` is also
+  // the name of every in-process observer in this tree, and no shape tells the
+  // two apart — `store.subscribe(listener)`, `rt.subscribe(changes)`, and the
+  // socket layer's own `router.subscribe(type, handler)` forwarder. Measured
+  // with the flag off: seven of those reported as "names no declared wire", all
+  // of them correct code. Only a dotted literal is read as a wire name.
+  //
+  // That leaves the four wire subscriptions written as an imported binding —
+  // `connection.subscribe(SESSION_LIST_WIRE, …)` — unread, and that is
+  // deliberate rather than the gap it looks like. All four import `WIRE as …`
+  // from `@/generated/protocol/…`, so the name *is* the contract's own output
+  // and cannot misspell one; measured with the flag off, all four resolve to
+  // their unit's own `PROTOCOL` and pass. Resolution here is a provable no-op,
+  // so short-circuiting costs no detection.
+  //
+  // The same skip also covers a *hand-written* constant (`const W =
+  // 'server.agents.chagned'`), which the short-circuit cannot tell from the
+  // forwarder. None exists today, and it is the same exposure `send` already
+  // carries for its computed frames — the flag is shared, so the limit is too.
+  { fn: 'subscribe', arg: 0, lang: 'ts', wireOnlyIfDotted: true },
 ];
 
 function sourceFiles(dir, out = []) {
