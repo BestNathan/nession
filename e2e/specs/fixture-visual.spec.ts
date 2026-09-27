@@ -112,6 +112,54 @@ test.describe('Web 1440×900', () => {
       ...FIXTURE_SCREENSHOT,
     });
   });
+
+  // #1120 item 12's conversation surfaces, and the first images of any of this:
+  // until #1131 served `claude-code.conversation` from the fixture, no route
+  // could render a conversation at all, so #1125's readable title and the
+  // transcript it heads were in no baseline and the visual gate could not see
+  // them. Two states, not one — a list and an open transcript are different
+  // screens, and an image of either is not evidence about the other.
+  test('Claude Code conversation', async ({ page }) => {
+    await page.goto('/#/fixture/workspace?capability=claude-code');
+
+    await expect(page.getByTestId('claude-code-workspace')).toBeVisible();
+    const conversation = page.getByTestId('conversation-open');
+    await expect(conversation).toBeVisible();
+
+    // The two assertions an image cannot make for itself, and the reason the
+    // fixture carries a *titled* conversation: the header names the work rather
+    // than the identity, and the identity has not crept back in as text. The
+    // UUID is still reachable as the element's `title`, which is where #1120
+    // puts it for Web.
+    await expect(conversation).toContainText('Terminal ownership handoff');
+    await expect(conversation).not.toContainText('c0a1b2c3-');
+
+    await expect(page).toHaveScreenshot('web-claude-code-conversation.png', {
+      fullPage: true,
+      ...FIXTURE_SCREENSHOT,
+    });
+  });
+
+  test('Claude Code conversation list', async ({ page }) => {
+    // `ambiguous`: several conversations at this cwd and no answer about which
+    // is the Session's. The fixture names one and leaves another untitled, so
+    // both the title and the client's own fallback are in the picture.
+    await page.goto('/#/fixture/workspace?capability=claude-code&conversation=ambiguous');
+
+    await expect(page.getByTestId('claude-code-workspace')).toBeVisible();
+    const list = page.getByTestId('conversation-list');
+    await expect(list).toBeVisible();
+
+    await expect(list).toContainText('Terminal ownership handoff');
+    await expect(list).toContainText('Capsule radius review');
+    // The untitled candidate falls back to a date said as a date.
+    await expect(list).toContainText('Conversation ·');
+
+    await expect(page).toHaveScreenshot('web-claude-code-conversations.png', {
+      fullPage: true,
+      ...FIXTURE_SCREENSHOT,
+    });
+  });
 });
 
 test.describe('Web compact 1024×768', () => {
