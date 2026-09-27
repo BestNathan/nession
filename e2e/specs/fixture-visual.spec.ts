@@ -517,3 +517,37 @@ test.describe('App 375×812', () => {
     });
   });
 });
+
+// #1083 criterion 15 names **844×390 landscape**, and it was the one viewport
+// in that criterion with no picture: the structured assertions run there
+// (`ui-contract-matrix`'s `app.landscape-phone`), but a measurement is not a
+// photograph, and nothing would have failed if the screen stopped *reading*
+// like a navigator while still passing every contract.
+//
+// It is also the viewport where the criterion that removed chrome is most
+// visible: it has the least vertical room, so the Filters row, the Refresh
+// button and the foot were the largest share of it. Measured before and after
+// #1083, the list grew from 193px to 286px here.
+test.describe('App 844×390 landscape', () => {
+  test.use({ viewport: { width: 844, height: 390 } });
+
+  test('Sessions layer', async ({ page }) => {
+    await gotoFixtureApp(page);
+    await page.getByTestId('app-header-sessions').first().click();
+    await expect(page.getByTestId('app-layer-sessions')).toBeInViewport();
+    await expect(page.getByTestId('session-item-row')).toHaveCount(6);
+
+    // The list keeps its floor and stays reachable — the #1057 crisis, which
+    // this viewport is the canonical case for. Asserted as well as
+    // photographed, because a full-page screenshot of a short viewport cannot
+    // show that a scrollable region inside it has height.
+    const list = page.getByTestId('app-sessions-list');
+    await expect(list).toBeVisible();
+    expect((await list.boundingBox())?.height ?? 0).toBeGreaterThan(100);
+
+    await expect(page).toHaveScreenshot('app-sessions-844x390.png', {
+      fullPage: true,
+      ...FIXTURE_SCREENSHOT,
+    });
+  });
+});
