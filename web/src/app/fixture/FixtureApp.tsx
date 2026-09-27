@@ -9,9 +9,11 @@ import { FixtureTerminal } from '@/app/fixture/FixtureTerminal';
 import { FIXTURE_CLIENT_SESSION_ID } from '@/app/fixture/fixtureData';
 import type { Surface } from '@/app/patterns/SessionHeader';
 import type { CapabilityId } from '@/product/capability';
+import { claudeCodeApi } from '@/capabilities/claude-code';
 import { gitApi } from '@/capabilities/git';
 import { fixtureAgents } from './fixtureAgents';
 import { fixtureConnection } from './fixtureConnection';
+import { fixtureConversationSurface } from './fixtureConversation';
 import { fixtureFileOps } from './fixtureFileOps';
 import { fixtureGitSurface } from './fixtureGit';
 import { fixtureSelectedId } from './fixtureSelection';
@@ -44,12 +46,24 @@ const fixtureOps = fixtureFileOps();
  * order no sort in the product produces.
  */
 export function FixtureApp() {
+  // Read before the stubs below, because one of them is parameterised by it.
+  const search = useLocation().search;
+
   // A capability projection has to be reachable from a fixture to be captured,
   // and until #838 the capsule did not render here at all. This stub is what
   // lets a Signal draw real content offline; installed for the route's lifetime
   // and released on unmount. Nothing emerges by default, so the canonical
   // screenshots are unaffected unless a case opens one.
   useEffect(() => gitApi.install(fixtureGitSurface('')), []);
+
+  // The conversation stub, one layer down and for the same reason (#1128).
+  // Claude Code's Workspace draws a conversation, and the fixture advertised no
+  // wire that could serve one — so no conversation surface was reachable from
+  // here, and therefore none could be in a golden. Installed for the route's
+  // lifetime like the git stub above; the scenario is the route's input, so it
+  // is read once at mount rather than tracked, because a fixture route does not
+  // change its query without a reload.
+  useEffect(() => claudeCodeApi.install(fixtureConversationSurface(search)), [search]);
 
   const [surface, setSurface] = useState<Surface>('terminal');
   const [tool, setTool] = useState<CapabilityId>('files');
@@ -60,8 +74,6 @@ export function FixtureApp() {
     sortField, sortDirection, toggleSort,
     isSearchActive,
   } = useDashboardFilter();
-
-  const search = useLocation().search;
 
   // The route's inputs. Each names what the *server* answered rather than a
   // rendering, so the surface below decides what to draw — see

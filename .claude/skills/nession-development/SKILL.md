@@ -602,7 +602,9 @@ cd web && npm run dev
 
 **视觉基线同批更新（intentional UI 变化）**
 
-`FIXTURE_SCREENSHOT.maxDiffPixelRatio = 0.02` 足以吞掉整片 chrome 变化 —— baseline 过期也照样绿，门禁等于失效。原则见 `docs/design/design-system/validation.md` 与 `docs/design/migration.md`；操作是：
+`FIXTURE_SCREENSHOT.maxDiffPixelRatio` 现在是 **`0.002`**，是**推导**出来的而不是挑的（#1038）：旧的 `0.02` 宽到一整页**完全不同的内容**也才差 2.58%，根本分不出「capsule 挪了」和「这是另一个屏幕」—— #708 换了 Workspace 工具条而 baseline 还在显示旧 chrome（#714），就是这么来的。推导过程与实测噪声下限写在 `e2e/helpers/fixtureVisual.ts`。对你的影响：chrome 变化现在会**报红**而不是静默通过，所以要在同一批里更新 baseline（先看 diff 再落），而不是等到以后才发现。
+
+原则见 `docs/design/design-system/validation.md` 与 `docs/design/migration.md`；操作是：
 
 - 只能在 CI 重生成（本地禁止跑 e2e）：`CI=true npx playwright test fixture-visual --update-snapshots=all`，然后提交新的 golden 图。**`=all` 不是可选项**：不带值时模式是 `changed`，仍按 `maxDiffPixelRatio` 比较，只重写超出容差的那几张 —— 小于比率的漂移会被静默跳过，日志里也不会留痕。
 - **不得靠放宽 `maxDiffPixelRatio` 变绿**；解释不了的差异要查原因。

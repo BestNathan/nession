@@ -10,7 +10,9 @@ import {
 } from '@/app/fixture/fixtureData';
 import { mapDomainState } from '@/product/session/model/domainState';
 import type { CapabilityId } from '@/product/capability';
+import { claudeCodeApi } from '@/capabilities/claude-code';
 import { gitApi } from '@/capabilities/git';
+import { fixtureConversationSurface } from './fixtureConversation';
 import { fixtureFileOps } from './fixtureFileOps';
 import { fixtureGitSurface } from './fixtureGit';
 
@@ -28,7 +30,12 @@ export function FixtureWorkspace() {
   const search = useLocation().search;
   const facts = fixtureCapabilityFacts(search);
   const capability = openedCapability(search);
-  const gitReady = useFixtureGit(capability === 'git', search);
+  const gitReady = useFixtureSurface(capability === 'git', search, installGitSurface);
+  const conversationReady = useFixtureSurface(
+    capability === 'claude-code',
+    search,
+    installConversationSurface,
+  );
   const selectedSession =
     FIXTURE_SESSIONS.find((s) => s.session_id === FIXTURE_SELECTED_ID) ?? null;
   const selectedAgent = FIXTURE_AGENTS.find(
@@ -44,8 +51,8 @@ export function FixtureWorkspace() {
         attachFailedId: null,
       })
     : null;
-  if (!gitReady) {
-    // One frame, and only while the Git route's stub is being bound.
+  if (!gitReady || !conversationReady) {
+    // One frame, and only while the asked-for route's stub is being bound.
     return null;
   }
 
@@ -73,12 +80,32 @@ export function FixtureWorkspace() {
 /**
  * Which capability the route opens, defaulting to Files.
  *
- * Only Git has a canned backend installed below; every other capability keeps
- * the canonical route exactly as the golden screenshots capture it.
+ * Git and Claude Code have canned backends installed below; every other
+ * capability keeps the canonical route exactly as the golden screenshots
+ * capture it.
  */
 function openedCapability(search: string): CapabilityId {
   const requested = new URLSearchParams(search).get('capability');
-  return requested === 'git' ? 'git' : 'files';
+  if (requested === 'git') {
+    return 'git';
+  }
+  return requested === 'claude-code' ? 'claude-code' : 'files';
+}
+
+/** Bind the Git stub to the shared singleton. */
+function installGitSurface(search: string): () => void {
+  return gitApi.install(fixtureGitSurface(search));
+}
+
+/**
+ * Bind the Claude Code conversation stub.
+ *
+ * This is the route the conversation is reachable from: the App route can open
+ * the capability, but Claude Code's *Workspace* is what draws a transcript, and
+ * `#/fixture/workspace?capability=claude-code` is how a spec gets there.
+ */
+function installConversationSurface(search: string): () => void {
+  return claudeCodeApi.install(fixtureConversationSurface(search));
 }
 
 
@@ -96,8 +123,18 @@ function openedCapability(search: string): CapabilityId {
  * Released on unmount, because the singleton is shared — in the browser the
  * fixture is one route among several, and in tests a leaked binding would
  * answer for whatever ran next.
+ *
+ * Takes the installer rather than naming a capability, because Git and Claude
+ * Code both need this and the reasoning above is subtle enough that a second
+ * copy of it would be a second chance to get it wrong. The installer must be
+ * stable — module scope, not a closure created per render — or the effect
+ * re-runs and rebinds the singleton every time.
  */
-function useFixtureGit(needed: boolean, search: string): boolean {
+function useFixtureSurface(
+  needed: boolean,
+  search: string,
+  install: (search: string) => () => void,
+): boolean {
   const key = needed ? search : null;
   const [installed, setInstalled] = useState<string | null>(null);
 
@@ -106,13 +143,13 @@ function useFixtureGit(needed: boolean, search: string): boolean {
       setInstalled(null);
       return;
     }
-    const release = gitApi.install(fixtureGitSurface(key));
+    const release = install(key);
     setInstalled(key);
     return () => {
       release();
       setInstalled(null);
     };
-  }, [key]);
+  }, [key, install]);
 
   return !needed || installed === key;
 }
