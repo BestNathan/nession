@@ -208,8 +208,19 @@ export class ConnectionManager implements TerminalTransport {
     if (streamEpoch === undefined) {
       return;
     }
+    // Never move the cursor backwards within one epoch. A live frame can
+    // already have advanced it past the cursor the attach response carries, and
+    // regressing it makes the gap fetch below re-apply output that has already
+    // been written — the duplication measured as `out seq=1` delivered twice
+    // (#1148). Across an epoch change the sequences are not comparable, so the
+    // seed wins there.
+    const sameEpoch = this.streamEpoch === streamEpoch;
     this.streamEpoch = streamEpoch;
-    this.lastStreamSeq = streamCursor ?? null;
+    const seed = streamCursor ?? null;
+    this.lastStreamSeq =
+      sameEpoch && this.lastStreamSeq !== null && seed !== null
+        ? Math.max(this.lastStreamSeq, seed)
+        : seed;
     if (this.mode === 'p2p' && this.agentApi && this.lastStreamSeq !== null) {
       void this.fetchStreamGap(this.lastStreamSeq);
     }
@@ -234,11 +245,22 @@ export class ConnectionManager implements TerminalTransport {
       this.streamEpoch = streamEpoch;
       this.lastStreamSeq = null;
       await this.fetchStreamGap(0);
-      deliver();
-      return;
-    }
-    if (this.lastStreamSeq !== null && streamSeq > this.lastStreamSeq + 1) {
+    } else if (this.lastStreamSeq !== null && streamSeq > this.lastStreamSeq + 1) {
       await this.fetchStreamGap(this.lastStreamSeq);
+    }
+    // A replay walks the agent's log with no upper bound — `events_since`
+    // returns every event after the cursor, INCLUDING the frame arriving right
+    // now. Delivering it again writes the same bytes to the terminal twice,
+    // which is what doubled P2P output: xterm answered each DA/OSC query twice
+    // because it received each query twice (#1148). Relay never hit this,
+    // because `fetchStreamGap` only runs in P2P.
+    //
+    // The cursor the replay left behind is the arbiter, and it suppresses the
+    // frame only when the replay genuinely reached it — if the log was capped
+    // and did not contain this frame, `lastStreamSeq` stays behind it and the
+    // live delivery is the only copy.
+    if (this.lastStreamSeq !== null && streamSeq <= this.lastStreamSeq) {
+      return;
     }
     this.lastStreamSeq = streamSeq;
     deliver();
@@ -265,14 +287,25 @@ export class ConnectionManager implements TerminalTransport {
         this.streamEpoch = result.streamEpoch;
         this.lastStreamSeq = null;
       }
-      applyTerminalStreamEvents(result.events, {
+      // A replay must not re-apply what has already been delivered. This is the
+      // other half of the guard in `handleStreamFrame`: there, a live frame the
+      // replay already carried is dropped; here, a replayed event the live
+      // stream already delivered is dropped. Without this half a replay asked
+      // for from a stale cursor re-applies the stream on top of itself, and the
+      // seed path asks with `after_seq: 0` — measured as `out seq=1` delivered
+      // twice and `out seq=5..8` delivered once live and again from the replay
+      // (#1148). Every duplicated byte reached xterm twice, so xterm answered
+      // each terminal-capability query twice.
+      const deliveredUpTo = this.lastStreamSeq;
+      const fresh =
+        deliveredUpTo === null
+          ? result.events
+          : result.events.filter((event) => event.streamSeq > deliveredUpTo);
+      applyTerminalStreamEvents(fresh, {
         onOutput: (data) => this.onOutput?.(data),
         onResize: (cols, rows) => this.onResize?.(cols, rows),
       });
-      const last =
-        result.events.length > 0
-          ? result.events[result.events.length - 1]
-          : undefined;
+      const last = fresh.length > 0 ? fresh[fresh.length - 1] : undefined;
       if (last) {
         this.lastStreamSeq = last.streamSeq;
       }
