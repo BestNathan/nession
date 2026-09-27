@@ -2,6 +2,7 @@ import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { EditorView } from '@uiw/react-codemirror';
 import { describe, expect, it, vi } from 'vitest';
+import { toast } from 'sonner';
 import { FilesAppLayout } from '@/app/experiences/app/FilesAppLayout';
 import type { FileEntry, FileOps } from '@/capabilities/files';
 import type { WorkspaceContext, WorkspacePush } from '@/app/workspace/workspaceContext';
@@ -238,6 +239,42 @@ describe('FilesAppLayout', () => {
 
     expect(lastPush(setPush)?.title).toBe('visual-language.md');
     expect(screen.queryByTestId('files-app-search')).not.toBeInTheDocument();
+  });
+
+  it('opens the folder sheet and refreshes the list', async () => {
+    const user = userEvent.setup();
+    const fileOps = makeFileOps();
+    renderLayout({ ...baseCtx, fileOps });
+    await screen.findByText('docs');
+    vi.mocked(fileOps.listDir).mockClear();
+
+    await user.click(screen.getByRole('button', { name: 'Folder actions' }));
+    expect(screen.getByTestId('files-app-folder-sheet')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Refresh' }));
+    await waitFor(() => {
+      expect(fileOps.listDir).toHaveBeenCalledWith('');
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+  });
+
+  it('copies the workspace-relative folder path from the sheet', async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText },
+      configurable: true,
+    });
+
+    renderLayout();
+    await user.click(await screen.findByText('docs'));
+    await user.click(screen.getByRole('button', { name: 'Folder actions' }));
+    await user.click(screen.getByRole('button', { name: 'Copy path' }));
+
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith('docs');
+      expect(toast.success).toHaveBeenCalledWith('Path copied');
+    });
   });
 
   it('restores the directory stack after leaving search', async () => {

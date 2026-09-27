@@ -14,6 +14,8 @@ export interface FileListProps {
   restoredScrollTop?: number;
   onScrollSnapshot?: (scrollTop: number) => void;
   workspaceContextLine?: string | null;
+  /** Increment to re-fetch the current directory (#1140 folder sheet). */
+  reloadSignal?: number;
 }
 
 /**
@@ -27,6 +29,7 @@ export function FileList({
   restoredScrollTop,
   onScrollSnapshot,
   workspaceContextLine,
+  reloadSignal = 0,
 }: FileListProps) {
   const [entries, setEntries] = useState<FileEntry[] | null>(null);
   const [counts, setCounts] = useState<Record<string, number>>({});
@@ -69,7 +72,7 @@ export function FileList({
     return () => {
       cancelled = true;
     };
-  }, [fileOps, path, reloadToken]);
+  }, [fileOps, path, reloadToken, reloadSignal]);
 
   useEffect(() => {
     if (restoredScrollTop === undefined || entries === null) {
