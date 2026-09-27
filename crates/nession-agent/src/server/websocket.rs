@@ -1811,6 +1811,17 @@ p2p_routes! { ctx, msg_type, payload_value;
                     Ok(d) => d,
                     Err(e) => return ctx.err("decode_error", &e.to_string()),
                 };
+                // TEMPORARY DIAGNOSTIC (#1148) — remove once located.
+                // One line per received `agent.terminal.input`. The fork being
+                // tested: two 1-byte messages per keystroke means the client
+                // sent twice; one 2-byte message means the client doubled the
+                // payload before sending. Count these per session in a CI run.
+                tracing::info!(
+                    "DIAG1148 input session={} bytes={} text={:?}",
+                    payload.session_name,
+                    data.len(),
+                    String::from_utf8_lossy(&data),
+                );
                 // Find the session under the map's lock, then write with it
                 // released. The lock held across the write is the session's own
                 // — see `AttachedSession::backend` — and the key lane is what
