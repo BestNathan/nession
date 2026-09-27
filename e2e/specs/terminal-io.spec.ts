@@ -126,9 +126,10 @@ async function waitForInteractiveShell(page: import('@playwright/test').Page): P
   await waitForTerminal(page);
   await expect(page.getByTestId('terminal-connecting')).toBeHidden({ timeout: 30_000 });
   await expect(page.getByTestId('terminal-loading')).toBeHidden({ timeout: 30_000 });
+  const shellPrompt = /runner:\S*\$/m;
   await expect(async () => {
     const text = await readTerminalBuffer(page);
-    expect(text).toMatch(/\$\s*$/m);
+    expect(text).toMatch(shellPrompt);
   }).toPass({ timeout: 30_000 });
   await expect
     .poll(
@@ -136,7 +137,7 @@ async function waitForInteractiveShell(page: import('@playwright/test').Page): P
         const first = await readTerminalBuffer(page);
         await page.waitForTimeout(250);
         const second = await readTerminalBuffer(page);
-        return first === second && /\$\s*$/m.test(second);
+        return first === second && shellPrompt.test(second);
       },
       { timeout: 15_000 },
     )
