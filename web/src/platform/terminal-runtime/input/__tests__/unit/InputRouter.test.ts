@@ -28,6 +28,28 @@ describe('InputRouter', () => {
     expect(terminal.handle).toHaveBeenCalledWith('a');
   });
 
+  it('deactivates the handler it replaces, so a re-register cannot leak', () => {
+    // #1148. `TerminalController` re-registers the terminal handler when the
+    // viewport reparents, and it **reuses the same router** — so `setMode`, the
+    // other path that deactivates, never runs. A replaced-but-still-active
+    // handler keeps its `terminal.onData` subscription, and every emission then
+    // reaches the PTY twice: typed characters *and terminal responses*, the
+    // latter being what identified two subscriptions rather than a second
+    // keyboard path, since responses have only `onData` as a source.
+    const router = new InputRouter();
+    const first = makeHandler('terminal');
+    const second = makeHandler('terminal');
+    router.register(first);
+    first.activate();
+
+    router.register(second);
+
+    expect(first.deactivate).toHaveBeenCalledTimes(1);
+    // The replacement is not implicitly activated — its caller does that, as
+    // `wireTerminalUi` does right after registering.
+    expect(second.activate).not.toHaveBeenCalled();
+  });
+
   it('setMode deactivates the current handler and activates the next', () => {
     const router = new InputRouter();
     const terminal = makeHandler('terminal');
