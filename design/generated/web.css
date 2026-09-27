@@ -73,6 +73,13 @@
   --editor-background: var(--background);
   --editor-gutter: var(--muted);
   --editor-active-line: var(--accent);
+  --conversation-user-surface: var(--accent);
+  --conversation-user-foreground: var(--accent-foreground);
+  --conversation-assistant-surface: var(--card);
+  --conversation-assistant-foreground: var(--card-foreground);
+  --conversation-tool-surface: var(--muted);
+  --conversation-tool-foreground: var(--muted-foreground);
+  --conversation-tool-error: var(--danger);
   --typography-primary-size: 12.5px;
   --typography-secondary-size: 11px;
   --typography-metadata-size: 10px;
@@ -264,6 +271,13 @@
   --editor-background: var(--background);
   --editor-gutter: var(--muted);
   --editor-active-line: var(--accent);
+  --conversation-user-surface: var(--accent);
+  --conversation-user-foreground: var(--accent-foreground);
+  --conversation-assistant-surface: var(--card);
+  --conversation-assistant-foreground: var(--card-foreground);
+  --conversation-tool-surface: var(--muted);
+  --conversation-tool-foreground: var(--muted-foreground);
+  --conversation-tool-error: var(--danger);
 }
 
 @theme inline {
@@ -336,6 +350,13 @@
   --color-editor-background: var(--editor-background);
   --color-editor-gutter: var(--editor-gutter);
   --color-editor-active-line: var(--editor-active-line);
+  --color-conversation-user-surface: var(--conversation-user-surface);
+  --color-conversation-user-foreground: var(--conversation-user-foreground);
+  --color-conversation-assistant-surface: var(--conversation-assistant-surface);
+  --color-conversation-assistant-foreground: var(--conversation-assistant-foreground);
+  --color-conversation-tool-surface: var(--conversation-tool-surface);
+  --color-conversation-tool-foreground: var(--conversation-tool-foreground);
+  --color-conversation-tool-error: var(--conversation-tool-error);
   --spacing-control-sm: var(--control-sm);
   --spacing-control-md: var(--control-md);
   --spacing-control-lg: var(--control-lg);

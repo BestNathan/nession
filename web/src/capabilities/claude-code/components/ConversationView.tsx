@@ -30,11 +30,19 @@ function clockTime(timestamp: string | null | undefined): string | null {
 
 function Turn({ item }: { item: Item }) {
   const time = clockTime(item.timestamp);
+  const isUser = item.kind === 'user';
   return (
-    <article data-testid="conversation-turn" data-kind={item.kind} className="space-y-1">
+    <article
+      data-testid="conversation-turn"
+      data-kind={item.kind}
+      // Right for the user, left for Claude (#1120). Alignment carries the
+      // distinction as well as the surface does, which is what makes it hold
+      // for a reader who cannot rely on colour.
+      className={cn('flex flex-col gap-1', isUser ? 'items-end' : 'items-start')}
+    >
       <div className="flex items-baseline gap-2">
         <span className="text-xs font-semibold text-muted-foreground">
-          {item.kind === 'user' ? 'You' : 'Claude'}
+          {isUser ? 'You' : 'Claude'}
         </span>
         {time ? (
           <time dateTime={item.timestamp ?? undefined} className="text-xs text-muted-foreground">
@@ -42,7 +50,21 @@ function Turn({ item }: { item: Item }) {
           </time>
         ) : null}
       </div>
-      <p className="whitespace-pre-wrap text-sm">{item.text ?? ''}</p>
+      {/* The two surfaces are design roles, not colours chosen here — see
+          `design/tokens/domain.json`. `#1120`'s Open Question 1 leaves their
+          values to the visual pass, so this file names which role a turn plays
+          and nothing more. `max-w-prose` rather than a measured width for the
+          same reason: bounding a message is a reading decision, not a metric. */}
+      <p
+        className={cn(
+          'max-w-prose whitespace-pre-wrap rounded-lg px-3 py-2 text-sm',
+          isUser
+            ? 'bg-[var(--conversation-user-surface)] text-[var(--conversation-user-foreground)]'
+            : 'bg-[var(--conversation-assistant-surface)] text-[var(--conversation-assistant-foreground)]',
+        )}
+      >
+        {item.text ?? ''}
+      </p>
     </article>
   );
 }
@@ -61,11 +83,23 @@ function ToolRow({ item }: { item: Item }) {
     return null;
   }
   return (
-    <details data-testid="conversation-tool" className="rounded-md border px-3 py-2">
-      <summary className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+    <details
+      data-testid="conversation-tool"
+      // A tool is not a participant, so it takes the activity role rather than
+      // either speaker's surface. Full width on purpose (#1120): a bubble here
+      // would put it in the conversation instead of beside it.
+      className="rounded-md px-3 py-2 text-[var(--conversation-tool-foreground)] bg-[var(--conversation-tool-surface)]"
+    >
+      <summary className="flex cursor-pointer items-center gap-2 text-xs">
         <Wrench className="h-3.5 w-3.5 shrink-0" />
         <span
-          className={cn('font-medium', tool.is_error && 'text-destructive')}
+          className={cn(
+            'font-medium',
+            // The failure treatment is a conversation role too, so a transcript
+            // can be re-tinted without hunting for the one place that reached
+            // past the domain layer for a semantic name.
+            tool.is_error && 'text-[var(--conversation-tool-error)]',
+          )}
           data-testid="conversation-tool-name"
         >
           {tool.name}
@@ -183,7 +217,16 @@ function ConversationList({
   );
 }
 
-function ConversationBody({
+/**
+ * The transcript, from the newest page backwards.
+ *
+ * Exported so the Peek's overlay reads it rather than drawing its own:
+ * `#1120` forbids "one chat visual system for Peek and another for Workspace",
+ * and a second transcript renderer is exactly how that happens. It also already
+ * owns its own `overflow-y-auto`, which the overlay needs — it must scroll
+ * itself and never the Terminal behind it.
+ */
+export function ConversationBody({
   view,
   onLoadOlder,
 }: {

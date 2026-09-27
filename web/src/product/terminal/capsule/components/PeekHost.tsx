@@ -1,5 +1,11 @@
 import { useState } from 'react';
 import { X } from 'lucide-react';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { cn } from '@/shared/lib/utils';
 import {
   capsuleIconButtonClass,
@@ -8,7 +14,10 @@ import {
   capsuleProjectionScrollClass,
   capsuleProjectionTextClass,
 } from '@/product/terminal/capsule/capsuleStyles';
-import type { CapsuleCapabilityProjection } from '@/product/terminal/capsule/types';
+import type {
+  CapsuleCapabilityProjection,
+  CapsuleDetail,
+} from '@/product/terminal/capsule/types';
 
 /**
  * The surface a capability's Terminal content is drawn on (#1046).
@@ -48,6 +57,11 @@ export function PeekHost({
   disabled: boolean;
 }) {
   const [focus, setFocus] = useState<string | undefined>(undefined);
+  // The approved child overlay (#1120). Held here rather than by the capability
+  // so that placement, dismissal and the accessible name stay the host's — a
+  // capability supplies content and nothing else, exactly as it does for the
+  // body itself.
+  const [detail, setDetail] = useState<CapsuleDetail | null>(null);
   const { depth, title, onDeeper, onDismiss, onOpenWorkspace } = projection;
   const isPeek = depth === 'peek';
   const hasDeeper = Boolean(onDeeper);
@@ -103,8 +117,44 @@ export function PeekHost({
         // component's state: the deepening a capability offers is *at the item
         // the user picked*, and only the host knows which that was.
         openWorkspace: (resourceId) => onOpenWorkspace?.(resourceId ?? focus),
+        openDetail: setDetail,
         disabled,
       })}
+
+      {/*
+        The child overlay, drawn by base-ui's Dialog so that focus trapping,
+        Escape, the scroll lock and returning focus to whatever opened it are
+        the primitive's job rather than this file's — the reason `#1120` asks
+        for an approved primitive instead of each capability portalling for
+        itself.
+
+        Rendered as a sibling of the Peek rather than nested inside it: the
+        Peek keeps its geometry, and the Dialog portals to the body, so the
+        overlay never inherits the capsule's stacking or overflow.
+      */}
+      <Dialog
+        open={detail !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDetail(null);
+          }
+        }}
+      >
+        {/* No sizing of its own. `DialogContent` already bounds itself to the
+            viewport and scrolls, and a height here would be a metric invented
+            in the capsule — which the design gate refuses, and rightly: the
+            overlay's proportions belong to the visual pass (#1120 OQ1), not to
+            the first caller that needed one.
+
+            The content still scrolls itself rather than the Terminal: the
+            dialog is portalled and bounded, so nothing behind it moves. */}
+        <DialogContent data-testid="capsule-capability-detail">
+          <DialogHeader>
+            <DialogTitle>{detail?.title ?? ''}</DialogTitle>
+          </DialogHeader>
+          <div className="min-h-0">{detail?.content}</div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
