@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { CapabilityId, CapabilitySnapshot, CapabilityState } from '@/product/capability';
 import type { Session } from '@/types';
+import { CAPSULE_PROJECTION_IDS, projectionBindingFor } from '../../capsuleProjections';
 import { resolveCapsuleCapabilities, type CapsuleCapabilityInput } from '../../capsulePresence';
 
 function snapshot(id: CapabilityId, state: CapabilityState): CapabilitySnapshot {
@@ -54,15 +55,22 @@ describe('capsule capability presence', () => {
     expect(ids).not.toContain('env');
   });
 
-  it('does not list a Signal-only capability', () => {
-    // Claude Code's Signal emerges by observation when Nession resolves it as
-    // relevant. That is not the same as being offered for explicit selection,
-    // and #1046 says so in as many words: a Signal-only binding is insufficient
-    // for capsule discovery. It returns to the entry when the plugin
-    // contributes a real Peek.
-    expect(entryIds({ facts: { sessionForegroundCommand: 'claude.exe' } })).not.toContain(
+  it('lists Claude Code now that it contributes a real Peek, and still withholds a Signal', () => {
+    // This asserted the opposite until #1120, and said how it would end: "It
+    // returns to the entry when the plugin contributes a real Peek." The plugin
+    // now does, so the instance changed.
+    expect(entryIds({ facts: { sessionForegroundCommand: 'claude.exe' } })).toContain(
       'claude-code',
     );
+
+    // The **rule** is what outlives the instance: a binding that declares
+    // 'signal' is withheld, whatever any particular binding happens to declare
+    // today. Written as a loop over the projections rather than as one more
+    // hard-coded id, because after #1120 no binding declares 'signal' at all —
+    // so a test naming one would have nothing left to name.
+    for (const id of CAPSULE_PROJECTION_IDS) {
+      expect(entryIds().includes(id)).toBe(projectionBindingFor(id)?.entry !== 'signal');
+    }
   });
 
   it('keeps the built-in Terminal-local accessory listed', () => {
@@ -87,17 +95,17 @@ describe('capsule capability presence', () => {
     expect(entryIds({ session: null, fileOps: null })).not.toContain('claude-code');
   });
 
-  it('still resolves the state of a capability it does not list', () => {
+  it('resolves a capability state independently of the entry list', () => {
     // The projection reads lifecycle from `snapshots`, not from the entry list,
-    // and #1046 does not change that: an unlisted capability still has a state,
-    // and it still emerges by observation when that state warrants it. This is
-    // the assertion the four tests above used to make through the entry, and it
-    // belongs on the snapshot because that is what the capsule actually reads.
+    // and #1046 does not change that: it still emerges by observation when its
+    // state warrants it. The entry half of this assertion is gone because its
+    // subject is: after #1120 all three projections are listed, so there is no
+    // unlisted capability left to make the point through. What the capsule
+    // actually reads is the snapshot, which is where it belongs anyway.
     const facts = { sessionForegroundCommand: 'claude.exe' };
     const resolution = resolveCapsuleCapabilities(input({ facts }));
 
     expect(resolution.snapshots.find((s) => s.id === 'claude-code')?.state).toBe('active');
-    expect(entryIds({ facts })).not.toContain('claude-code');
   });
 
   it('names a capability from the registry, never from the view', () => {
