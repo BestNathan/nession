@@ -360,6 +360,7 @@ async fn integration_terminal_io_flow() {
     let payload = nession_agent::server::websocket::TerminalInputPayload {
         session_name: session_name.to_string(),
         data: input,
+        control_generation: None,
     };
     let req = new_message(msg_types::TERMINAL_INPUT, payload);
     let resp: nession_agent::server::websocket::Message<OkPayload> =
@@ -554,6 +555,7 @@ async fn integration_terminal_input_not_attached() {
     let payload = nession_agent::server::websocket::TerminalInputPayload {
         session_name: "ghost".to_string(),
         data: input,
+        control_generation: None,
     };
     let req = new_message(msg_types::TERMINAL_INPUT, payload);
     let resp: nession_agent::server::websocket::Message<serde_json::Value> =

@@ -8,13 +8,13 @@ const attached = { isAttached: () => true };
 
 interface AgentApiHarness {
   api: TerminalAgentApi;
-  outputHandlers: Array<(data: Uint8Array) => void>;
+  outputHandlers: Array<(frame: { data: Uint8Array; streamEpoch?: number; streamSeq?: number }) => void>;
   resizeHandlers: Array<(cols: number, rows: number) => void>;
   errorHandlers: Array<(error: AgentError) => void>;
 }
 
 function makeAgentApi(): AgentApiHarness & { unsubs: { output: ReturnType<typeof vi.fn>; resize: ReturnType<typeof vi.fn>; error: ReturnType<typeof vi.fn> } } {
-  const outputHandlers: Array<(data: Uint8Array) => void> = [];
+  const outputHandlers: Array<(frame: { data: Uint8Array; streamEpoch?: number; streamSeq?: number }) => void> = [];
   const resizeHandlers: Array<(cols: number, rows: number) => void> = [];
   const errorHandlers: Array<(error: AgentError) => void> = [];
   const unsubs = {
@@ -26,7 +26,11 @@ function makeAgentApi(): AgentApiHarness & { unsubs: { output: ReturnType<typeof
     attach: vi.fn(),
     sendInput: vi.fn(),
     sendResize: vi.fn(),
-    onOutput: vi.fn((cb: (data: Uint8Array) => void) => {
+    getControlState: vi.fn(() => ({ role: 'controller' as const })),
+    acquireControl: vi.fn(),
+    onControlChanged: vi.fn(() => () => {}),
+    resumeStream: vi.fn(async () => ({ streamEpoch: 1, epochMatch: true, events: [] })),
+    onOutput: vi.fn((cb: (frame: { data: Uint8Array }) => void) => {
       outputHandlers.push(cb);
       return unsubs.output;
     }),
@@ -143,7 +147,7 @@ describe('ConnectionManager', () => {
       cm.onOutput = onOutput;
 
       const bytes = new Uint8Array([104, 105]);
-      outputHandlers[0]?.(bytes);
+      outputHandlers[0]?.({ data: bytes });
       expect(onOutput).toHaveBeenCalledWith(bytes);
       cm.dispose();
     });
@@ -276,7 +280,7 @@ describe('ConnectionManager', () => {
       cm.onError = onError;
 
       cm.dispose();
-      outputHandlers[0]?.(new Uint8Array([1]));
+      outputHandlers[0]?.({ data: new Uint8Array([1]) });
       resizeHandlers[0]?.(80, 24);
       errorHandlers[0]?.({ message: 'boom', notAttached: false });
       expect(onOutput).not.toHaveBeenCalled();

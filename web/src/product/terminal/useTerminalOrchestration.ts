@@ -30,6 +30,7 @@ import { detectProfile, PROFILES } from '@/platform/terminal-runtime/DeviceProfi
 import type { TerminalTransport } from '@/platform/terminal-runtime/transport/TerminalTransport';
 import type { TerminalStatus } from '@/product/terminal/state/session';
 import { bannerAtomFamily, bannerAttemptAtomFamily, type ReconnectBanner } from '@/product/terminal/state/ui';
+import { useTerminalControlBridge } from '@/product/terminal/hooks/useTerminalControlBridge';
 
 function useSessionEnvSourcing(opts: {
   envRefs: EnvFileRef[];
@@ -166,8 +167,6 @@ function useEndRelayOnDisconnect(opts: {
 export interface UseTerminalOrchestrationOptions {
   onDisconnect: () => void;
   onError: (error: Error) => void;
-  /** UI-specific Ctrl-D behavior; transport disconnect stays shared. */
-  onCtrlD?: () => void;
   rendererType?: 'webgl' | 'canvas';
   scrollbackMode?: 'legacy' | 'local-buffer';
 }
@@ -175,7 +174,6 @@ export interface UseTerminalOrchestrationOptions {
 export function useTerminalOrchestration({
   onDisconnect,
   onError,
-  onCtrlD,
   rendererType = 'canvas',
   scrollbackMode = 'local-buffer',
 }: UseTerminalOrchestrationOptions) {
@@ -200,6 +198,11 @@ export function useTerminalOrchestration({
     manualOverride,
     serverConnection: relayServer,
   });
+
+  const { control: terminalControl, takeControl } = useTerminalControlBridge(
+    sessionName,
+    agentTerminalApi,
+  );
 
   const mirroredAttach = useTerminalAttach({
     sessionId,
@@ -241,7 +244,9 @@ export function useTerminalOrchestration({
   const banner = useReconnectBanner({
     sessionId, terminalState, reconnectCount, effectiveMode, serverConnection: relayServer,
   });
-  const inputDisabled = banner !== 'none' || isSwitching;
+  const observerReadOnly =
+    effectiveMode === 'p2p' && terminalControl.role === 'observer';
+  const inputDisabled = banner !== 'none' || isSwitching || observerReadOnly;
   const modeGateOk = !(effectiveMode === 'p2p' && !agentTerminalApi);
   const viewportReady = modeGateOk && !waitingForAddressPlan;
   // Transport rewire epoch. TerminalViewport rebuilds the ConnectionManager
@@ -265,16 +270,27 @@ export function useTerminalOrchestration({
 
   useEffect(() => {
     if (!controller) { return; }
-    controller.onCtrlD = onCtrlD ?? handleDisconnect;
     controller.onError = onError;
     controller.onDisconnect = handleDisconnect;
-  }, [controller, handleDisconnect, onCtrlD, onError]);
+  }, [controller, handleDisconnect, onError]);
 
   useEffect(() => {
     if (terminalState === 'attached') {
       controller?.flushAllOutbound();
+      const seed = runtime?.getP2pStreamSeed?.();
+      if (seed) {
+        controller?.seedStreamCursor(seed.streamEpoch, seed.streamCursor);
+      }
     }
-  }, [terminalState, controller]);
+  }, [terminalState, controller, runtime]);
+
+  useEffect(() => {
+    if (!controller) {
+      return;
+    }
+    const remoteEnabled = !(effectiveMode === 'p2p' && terminalControl.role === 'observer');
+    controller.setRemoteInputEnabled(remoteEnabled);
+  }, [controller, effectiveMode, terminalControl.role]);
 
   return {
     sessionId,
@@ -287,5 +303,7 @@ export function useTerminalOrchestration({
     reconnectCount,
     transportEpoch,
     fileOps,
+    terminalControl,
+    onTakeControl: takeControl,
   };
 }

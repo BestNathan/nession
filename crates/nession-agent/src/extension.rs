@@ -936,7 +936,7 @@ mod tests {
         // credential the composition cannot be checked against.
         assert_eq!(
             manifest.protocols.len(),
-            29,
+            31,
             "the surface is {:?}",
             manifest.protocols.keys().collect::<Vec<_>>()
         );

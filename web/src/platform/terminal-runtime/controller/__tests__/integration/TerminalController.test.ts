@@ -153,32 +153,24 @@ describe('TerminalController', () => {
     expect(transport.send).toHaveBeenCalledWith('ls -la');
   });
 
-  it('intercepts Ctrl+D from xterm and routes it to onCtrlD', () => {
+  it('forwards Ctrl+D from xterm to the PTY (#1096)', () => {
     const transport = makeTransport();
     const controller = new TerminalController(makeSession(), () => transport);
     controller.attach(host());
-
-    const onCtrlD = vi.fn();
-    controller.onCtrlD = onCtrlD;
 
     controller.terminal!.input('\x04');
 
-    expect(onCtrlD).toHaveBeenCalledTimes(1);
-    expect(transport.send).not.toHaveBeenCalled();
+    expect(transport.send).toHaveBeenCalledWith('\x04');
   });
 
-  it('routes toolbar Ctrl+D input (send("\x04")) to onCtrlD', () => {
+  it('forwards toolbar Ctrl+D (send("\\x04")) to the PTY (#1096)', () => {
     const transport = makeTransport();
     const controller = new TerminalController(makeSession(), () => transport);
     controller.attach(host());
 
-    const onCtrlD = vi.fn();
-    controller.onCtrlD = onCtrlD;
-
     controller.send('\x04');
 
-    expect(onCtrlD).toHaveBeenCalledTimes(1);
-    expect(transport.send).not.toHaveBeenCalled();
+    expect(transport.send).toHaveBeenCalledWith('\x04');
   });
 
   it('flushInputBuffer delegates to the transport', () => {

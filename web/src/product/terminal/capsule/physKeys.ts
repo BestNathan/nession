@@ -1,6 +1,11 @@
+import type { TerminalSemanticKey } from '@/platform/terminal-runtime/interaction/TerminalInteractionController';
+
 export interface PhysKey {
   label: string;
+  /** Raw bytes when no {@link semanticKey} (e.g. Ctrl+C chord chains). */
   seq: string;
+  /** When set, encoding follows xterm terminal mode (#1096). */
+  semanticKey?: TerminalSemanticKey;
 }
 
 export const CHAIN_LONG_PRESS_MS = 400;
@@ -12,18 +17,18 @@ export const LEFT_KEYS: PhysKey[] = [
   { label: 'Shift', seq: '' },
   { label: 'Space', seq: ' ' },
   { label: 'Enter', seq: '\r' },
-  { label: 'Del', seq: '\x1b[3~' },
-  { label: 'Home', seq: '\x1b[H' },
-  { label: 'PgUp', seq: '\x1b[5~' },
-  { label: 'PgDn', seq: '\x1b[6~' },
-  { label: 'End', seq: '\x1b[F' },
+  { label: 'Del', seq: '\x1b[3~', semanticKey: 'Delete' },
+  { label: 'Home', seq: '\x1b[H', semanticKey: 'Home' },
+  { label: 'PgUp', seq: '\x1b[5~', semanticKey: 'PageUp' },
+  { label: 'PgDn', seq: '\x1b[6~', semanticKey: 'PageDown' },
+  { label: 'End', seq: '\x1b[F', semanticKey: 'End' },
 ];
 
 export const ARROW_KEYS: PhysKey[] = [
-  { label: '↑', seq: '\x1b[A' },
-  { label: '←', seq: '\x1b[D' },
-  { label: '↓', seq: '\x1b[B' },
-  { label: '→', seq: '\x1b[C' },
+  { label: '↑', seq: '\x1b[A', semanticKey: 'ArrowUp' },
+  { label: '←', seq: '\x1b[D', semanticKey: 'ArrowLeft' },
+  { label: '↓', seq: '\x1b[B', semanticKey: 'ArrowDown' },
+  { label: '→', seq: '\x1b[C', semanticKey: 'ArrowRight' },
 ];
 
 /** Mobile capsule single-row quick keys. */

@@ -25,7 +25,11 @@ export type TerminalInputPayload = { session_name: string,
 /**
  * Base64-encoded binary data.
  */
-data: string, };
+data: string, 
+/**
+ * Controller generation at send time (#1095). Absent for legacy senders.
+ */
+control_generation?: number | null, };
 
 // ── Operations ──
 
@@ -34,7 +38,11 @@ export type TerminalInputCall = { session_name: string,
 /**
  * Base64-encoded binary data.
  */
-data: string, };
+data: string, 
+/**
+ * Controller generation at send time (#1095). Absent for legacy senders.
+ */
+control_generation?: number | null, };
 
 /**
  * No response alias: the catalog declares no response shape for this unit.

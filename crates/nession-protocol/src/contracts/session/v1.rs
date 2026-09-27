@@ -858,6 +858,16 @@ pub struct SessionKillResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientAttachResponse {
     pub session_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub control_generation: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub control_role: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub controller_client_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stream_epoch: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stream_cursor: Option<u64>,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
