@@ -118,7 +118,15 @@ function ConversationList({
   candidates: Candidate[];
   open: string | null;
   onOpen: (claudeSessionId: string) => void;
-  onBack: () => void;
+  /**
+   * Returns from the pushed conversation to this list.
+   *
+   * Optional because it only means something in the push layout. In
+   * master/detail the list is beside the conversation rather than behind it, so
+   * there is nothing to return *from* and the control would be a button that
+   * does nothing — which is worse than no button.
+   */
+  onBack?: () => void;
 }) {
   return (
     <div className="space-y-3 p-4" data-testid="conversation-list">
@@ -126,7 +134,7 @@ function ConversationList({
         <h2 className="text-xs font-semibold text-muted-foreground">
           Conversations in this directory
         </h2>
-        {open ? (
+        {open && onBack ? (
           <Button variant="outline" size="sm" data-testid="conversation-back" onClick={onBack}>
             Back to conversation
           </Button>
@@ -146,7 +154,10 @@ function ConversationHeader({
   onShowList,
 }: {
   view: ConversationViewState;
-  onShowList: () => void;
+  /** Optional for the same reason `ConversationList.onBack` is: in
+   *  master/detail the list is already on screen, so "All conversations"
+   *  would be a control that reveals something the reader can see. */
+  onShowList?: () => void;
 }) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 border-b p-4">
@@ -169,7 +180,7 @@ function ConversationHeader({
           ) : null}
         </p>
       </div>
-      {view.candidates.length > 0 ? (
+      {view.candidates.length > 0 && onShowList ? (
         <Button
           variant="outline"
           size="sm"
@@ -184,6 +195,22 @@ function ConversationHeader({
 }
 
 /**
+ * How this section lays out, which is a width decision before it is anything
+ * else.
+ *
+ * `master-detail` keeps the list and the conversation on screen together, which
+ * is what a Web viewport has the room for and what `#1120` item 8 asks for: the
+ * two are read against each other — you pick a conversation *by* comparing it to
+ * the one you have open.
+ *
+ * `push` shows one at a time, and is what App uses. `#1120` item 9 is explicit
+ * that App must **not** get the master/detail grid shrunk down; the correct App
+ * behaviour is the one this component already had before there was a second
+ * layout, so `push` is the old path rather than a new one.
+ */
+type ConversationLayout = 'master-detail' | 'push';
+
+/**
  * The Session's Claude conversation, or the list to choose one from.
  *
  * Every state the provider can answer with has its own rendering, and none of
@@ -192,11 +219,13 @@ function ConversationHeader({
  */
 export function ConversationView({
   view,
+  layout,
   onSelect,
   onLoadOlder,
   onReload,
 }: {
   view: ConversationViewState;
+  layout: ConversationLayout;
   onSelect: (claudeSessionId: string | null) => void;
   onLoadOlder: () => void;
   onReload: () => void;
@@ -237,6 +266,49 @@ export function ConversationView({
       </StateNotice>
     );
   }
+  if (layout === 'master-detail') {
+    return (
+      <div
+        className="grid min-h-0 flex-1 grid-cols-[minmax(12rem,18rem)_minmax(0,1fr)]"
+        data-testid="conversation-master-detail"
+      >
+        {/* The list scrolls itself and nothing else does, so opening a
+            conversation never moves the list under the reader's cursor —
+            `#1120` asks for exactly that ("changes detail without losing list
+            position"), and it is a property of which element owns the scroll
+            rather than of anything this component tracks. */}
+        <aside className="min-h-0 overflow-y-auto border-r">
+          <ConversationList
+            candidates={view.candidates}
+            open={open}
+            onOpen={(id) => onSelect(id)}
+          />
+        </aside>
+        <main className="flex min-h-0 flex-col">
+          {open === null ? (
+            // The detail pane is empty, not the capability: the list beside it
+            // is a complete answer, and covering it to say "nothing is open"
+            // would take away the thing the reader needs to act on that.
+            //
+            // **Deliberately no `conversation-open` here.** That testid means "a
+            // conversation is open", and putting it on an empty pane would make
+            // it assert something false — which is exactly what a fixture test
+            // caught when this branch was first written. It stays on the
+            // content, below, so it keeps meaning what it says in both layouts.
+            <StateNotice testId="conversation-nothing-open">
+              Choose a conversation to read it here.
+            </StateNotice>
+          ) : (
+            <div className="flex min-h-0 flex-1 flex-col" data-testid="conversation-open">
+              <ConversationHeader view={view} />
+              <ConversationTranscript view={view} onLoadOlder={onLoadOlder} />
+            </div>
+          )}
+        </main>
+      </div>
+    );
+  }
+
   if (showList || open === null) {
     return (
       <ConversationList
