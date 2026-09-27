@@ -431,6 +431,12 @@ test.describe('App 390×844', () => {
     const agents = page.getByTestId('sidebar-agents');
     await agents.scrollIntoViewIfNeeded();
     await expect(agents).toBeInViewport();
+    // Reachability alone is not enough to assert: `scrollIntoViewIfNeeded`
+    // would bring an *empty* container into view and every check above would
+    // still pass. These rows are what says the expansion produced the
+    // destination rather than merely expanding.
+    await expect(page.locator('[data-testid^="sidebar-agent-"]')).toHaveCount(3);
+    await expect(page.getByTestId('sidebar-agent-sg-prod')).toBeVisible();
 
     await expect(page).toHaveScreenshot('app-sessions-agents.png', {
       fullPage: true,
