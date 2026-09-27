@@ -119,9 +119,18 @@ describe('FixtureApp', () => {
     // The dock is the capability root's switcher, so it is not here.
     expect(screen.queryByTestId('workspace-tool-bar')).not.toBeInTheDocument();
 
-    // And the one leave returns to the list, not to the Terminal.
+    // Back from the viewer returns to the directory that held the file (#1140),
+    // not straight to the capability root.
     await user.click(screen.getByTestId('app-page-back'));
     expect(screen.getByTestId('files-app-layout')).toBeInTheDocument();
+    expect(screen.getByTestId('app-page-header')).toHaveTextContent('src');
+    expect(screen.queryByTestId('workspace-tool-bar')).not.toBeInTheDocument();
+
+    await user.click(screen.getByTestId('app-page-back'));
+    expect(screen.getByTestId('app-page-header')).toHaveTextContent('web');
+
+    // At the capability root the shell names Files again and the dock returns.
+    await user.click(screen.getByTestId('app-page-back'));
     expect(screen.getByTestId('app-page-header')).toHaveTextContent('Files');
     expect(screen.getByTestId('workspace-tool-bar')).toBeInTheDocument();
   });
