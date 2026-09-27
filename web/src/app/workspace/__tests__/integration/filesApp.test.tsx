@@ -226,6 +226,34 @@ describe('FilesAppLayout', () => {
     expect(lastPush(setPush)?.title).toBe('docs');
   });
 
+  it('opens search, declares Search depth, and opens a result in the viewer', async () => {
+    const user = userEvent.setup();
+    const { setPush } = renderLayout();
+    await user.click(screen.getByRole('button', { name: 'Search files' }));
+    expect(screen.getByTestId('files-app-search')).toBeInTheDocument();
+    expect(lastPush(setPush)?.title).toBe('Search');
+
+    await user.type(screen.getByLabelText('Search files'), 'visual');
+    await user.click(await screen.findByTestId('files-search-result-docs/visual-language.md'));
+
+    expect(lastPush(setPush)?.title).toBe('visual-language.md');
+    expect(screen.queryByTestId('files-app-search')).not.toBeInTheDocument();
+  });
+
+  it('restores the directory stack after leaving search', async () => {
+    const user = userEvent.setup();
+    const { setPush } = renderLayout();
+    await user.click(await screen.findByText('docs'));
+    await user.click(screen.getByRole('button', { name: 'Search files' }));
+
+    act(() => {
+      lastPush(setPush)?.onLeave();
+    });
+
+    expect(screen.getByTestId('files-app-layout')).toBeInTheDocument();
+    expect(lastPush(setPush)?.title).toBe('docs');
+  });
+
   it('clears the pushed depth when fileOps detaches then reattaches', async () => {
     const user = userEvent.setup();
     const setPush = vi.fn<(push: WorkspacePush | null) => void>();
