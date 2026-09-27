@@ -3,6 +3,23 @@ import type { CapabilityDisclosureEntry, CapabilityId } from '@/product/capabili
 
 export type CapsuleExperience = 'web' | 'app';
 
+/**
+ * What a body hands the host to open its overlay (#1120).
+ *
+ * Defined here, beside the host that renders it, rather than in the app layer
+ * that wires capabilities together: the overlay is the capsule's primitive, and
+ * a capability reaching for its content type through the surface that owns it
+ * is the same direction every other contribution already takes.
+ *
+ * `title` is required rather than optional because it is the overlay's
+ * accessible name, and a dialog without one is a trap for anyone not reading
+ * the screen. Browsers warn about it and nothing enforces it, so the type does.
+ */
+export interface CapsuleDetail {
+  content: ReactNode;
+  title: string;
+}
+
 /** The composer's one anchored popover. `commands` was retired with the App
  *  `input | commands` mode (#1034): the capability entry and the Terminal Keys
  *  projection are secondary *surfaces* now, not a second popover. */
@@ -77,10 +94,16 @@ export interface CapsuleCapabilityProjection {
      * item the body last reported through `onFocusChange`, which is what the
      * footer did — the host still owns that selection, because it is what makes
      * the transition land on the right thing (#826).
+     *
+     * `openDetail` is the same inversion one level down (#1120): a body that
+     * needs to show something *beside* the Terminal hands the host content and
+     * gets the approved overlay, rather than portalling for itself. The content
+     * type is the host's, so a capability cannot invent a placement.
      */
     actions: {
       sendText: (text: string) => void;
       openWorkspace: (resourceId?: string) => void;
+      openDetail: (detail: CapsuleDetail) => void;
       disabled: boolean;
     },
   ) => ReactNode;

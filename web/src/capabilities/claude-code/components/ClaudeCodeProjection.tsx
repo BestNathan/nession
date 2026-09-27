@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { CapabilityState } from '@/product/capability';
+import type { CapsuleDetail } from '@/product/terminal/capsule/types';
 import { capsulePeekActionClass } from '@/shared/lib/peekActionClass';
 import { claudeCodeApi } from '../ClaudeCodePlugin';
 import { stateLine } from '../model/stateLine';
@@ -34,6 +35,7 @@ export function ClaudeCodeProjection({
   depth,
   state,
   onOpenWorkspace,
+  openDetail,
 }: {
   agentId: string | undefined;
   sessionId: string | undefined;
@@ -54,6 +56,8 @@ export function ClaudeCodeProjection({
    * capability's answer rather than a footer every Peek inherits.
    */
   onOpenWorkspace?: (resourceId?: string) => void;
+  /** The host's approved child overlay. Required: the host always offers it. */
+  openDetail: (detail: CapsuleDetail) => void;
 }) {
   const { summary } = useProjectConfigCount({ agentId, sessionId });
   const conversation = useConversationSummary({ agentId, sessionId });
@@ -61,9 +65,12 @@ export function ClaudeCodeProjection({
   if (depth === 'peek') {
     return (
       <ClaudeCodePeek
+        agentId={agentId}
+        sessionId={sessionId}
         conversation={conversation}
         state={state}
         onOpenWorkspace={onOpenWorkspace}
+        openDetail={openDetail}
       />
     );
   }
@@ -173,6 +180,16 @@ function useConversationSummary({
  */
 export interface ConversationSummary {
   title: string | null;
+  /**
+   * The provider resolved **one** conversation for this Session, as opposed to
+   * there merely being conversations at this cwd.
+   *
+   * The two are different offers: a bound conversation can be read, while
+   * candidates can only be chosen from — and a Peek that said "View
+   * conversation" over a directory listing would be promising a transcript it
+   * does not have.
+   */
+  bound: boolean;
   hasConversation: boolean;
   /** What the provider offered, in its own order. The Peek lists these. */
   candidates: Candidate[];
@@ -186,6 +203,7 @@ type Candidate = NonNullable<ClaudeCodeConversationResponse['candidates']>[numbe
  *  per render — the same reason the empty arrays elsewhere are constants. */
 const NO_CONVERSATION: ConversationSummary = {
   title: null,
+  bound: false,
   hasConversation: false,
   candidates: [],
   updatedAt: null,
@@ -213,6 +231,7 @@ function summarize(response: ClaudeCodeConversationResponse): ConversationSummar
   const title = candidate?.title?.trim();
   return {
     title: title ? title : null,
+    bound: true,
     hasConversation: true,
     candidates,
     updatedAt: candidate?.updated_at ?? null,

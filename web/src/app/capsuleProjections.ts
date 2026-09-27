@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import type { CapabilityId, CapabilityState } from '@/product/capability';
+import type { CapsuleDetail } from '@/product/terminal/capsule/types';
 import { CLAUDE_CODE_ID, claudeCodeProjection } from '@/capabilities/claude-code';
 import { GIT_ID, gitProjection } from '@/capabilities/git';
 import {
@@ -107,9 +108,24 @@ export interface CapsuleProjectionBinding {
      * it carries are the capability's answers.
      */
     openWorkspace: (resourceId?: string) => void;
+    /**
+     * Open the host's approved child overlay with this content (#1120).
+     *
+     * The same split as `openWorkspace`, one level down: the capability says
+     * *what* to show and the host owns *how* — the surface, its placement, its
+     * dismissal and its accessible name. `#1120` requires that a capability
+     * cannot portal for itself, and this is how it gets an overlay without one:
+     * a body free to place its own `position: fixed` would be a second layout
+     * system running beside the shell's.
+     *
+     * **One level only.** The overlay has no way to open another, which is how
+     * "not a second Workspace" is enforced rather than merely intended.
+     */
+    openDetail: (detail: CapsuleDetail) => void;
     disabled: boolean;
   }) => ReactNode;
 }
+
 
 /**
  * Capabilities that can say anything in the Terminal, in registration order.

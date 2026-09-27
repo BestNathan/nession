@@ -183,7 +183,16 @@ function ConversationList({
   );
 }
 
-function ConversationBody({
+/**
+ * The transcript, from the newest page backwards.
+ *
+ * Exported so the Peek's overlay reads it rather than drawing its own:
+ * `#1120` forbids "one chat visual system for Peek and another for Workspace",
+ * and a second transcript renderer is exactly how that happens. It also already
+ * owns its own `overflow-y-auto`, which the overlay needs — it must scroll
+ * itself and never the Terminal behind it.
+ */
+export function ConversationBody({
   view,
   onLoadOlder,
 }: {
