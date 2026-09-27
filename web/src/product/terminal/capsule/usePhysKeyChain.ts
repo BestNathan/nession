@@ -1,4 +1,5 @@
 import { useCallback, useState } from 'react';
+import type { PhysKey } from '@/product/terminal/capsule/physKeys';
 
 /**
  * Sending physical keys to the terminal, including the long-press chord.
@@ -17,24 +18,31 @@ export interface PhysKeyChain {
   chainBuffer: readonly string[];
   isChaining: boolean;
   /** One key, sent immediately. Also ends any chain. */
-  handlePhysKey: (seq: string) => void;
+  handlePhysKey: (key: PhysKey) => void;
   handleChainStart: (seq: string) => void;
   handleChainAdd: (seq: string) => void;
   cancelChain: () => void;
   sendChain: () => void;
 }
 
-export function usePhysKeyChain(sendText: (text: string) => void): PhysKeyChain {
+export function usePhysKeyChain(
+  sendSeq: (seq: string) => void,
+  sendPhysKey: (key: PhysKey) => void,
+): PhysKeyChain {
   const [chainBuffer, setChainBuffer] = useState<string[]>([]);
   const [isChaining, setIsChaining] = useState(false);
 
   const handlePhysKey = useCallback(
-    (seq: string) => {
-      sendText(seq);
+    (key: PhysKey) => {
+      if (key.semanticKey) {
+        sendPhysKey(key);
+      } else {
+        sendSeq(key.seq);
+      }
       setIsChaining(false);
       setChainBuffer([]);
     },
-    [sendText],
+    [sendPhysKey, sendSeq],
   );
 
   const handleChainStart = useCallback((seq: string) => {
@@ -52,10 +60,10 @@ export function usePhysKeyChain(sendText: (text: string) => void): PhysKeyChain 
   }, []);
 
   const sendChain = useCallback(() => {
-    sendText(chainBuffer.join(''));
+    sendSeq(chainBuffer.join(''));
     setIsChaining(false);
     setChainBuffer([]);
-  }, [sendText, chainBuffer]);
+  }, [sendSeq, chainBuffer]);
 
   return {
     chainBuffer,

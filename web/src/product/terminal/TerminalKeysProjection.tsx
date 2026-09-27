@@ -1,4 +1,5 @@
 import { PhysKeyRow } from '@/product/terminal/capsule/PhysKeyRow';
+import type { PhysKey } from '@/product/terminal/capsule/physKeys';
 import { CapsuleChainBar } from '@/product/terminal/capsule/CapsuleChainBar';
 import { usePhysKeyChain } from '@/product/terminal/capsule/usePhysKeyChain';
 
@@ -17,10 +18,12 @@ import { usePhysKeyChain } from '@/product/terminal/capsule/usePhysKeyChain';
  * them".
  */
 export function TerminalKeysProjection({
-  sendText,
+  sendSeq,
+  sendPhysKey,
   disabled,
 }: {
-  sendText: (text: string) => void;
+  sendSeq: (seq: string) => void;
+  sendPhysKey: (key: PhysKey) => void;
   disabled: boolean;
 }) {
   const {
@@ -31,7 +34,7 @@ export function TerminalKeysProjection({
     handleChainAdd,
     cancelChain,
     sendChain,
-  } = usePhysKeyChain(sendText);
+  } = usePhysKeyChain(sendSeq, sendPhysKey);
 
   return (
     <div

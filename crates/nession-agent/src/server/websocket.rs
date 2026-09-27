@@ -32,6 +32,7 @@ use crate::server::execution::ExecutionPolicy::{Inline, Key, Ordered, Query};
 use crate::server::execution::{
     ExecutionLanes, ResourceKey, DEFAULT_MUTATIONS_IN_FLIGHT, SHUTDOWN_GRACE,
 };
+use crate::server::session_terminal;
 // The lanes' boxed work is the shared type, and the constructors take this
 // socket's own bounds — see `nession_runtime::lane`.
 use crate::server::outbound::{self, OutboundError, P2pOutbound};
@@ -68,6 +69,16 @@ use tracing::{debug, error, info, warn};
 /// behind [`TmuxSession`] so callers dispatch input/resize/close uniformly.
 /// `subscribers` fans terminal output out to every attached client; the
 /// control-mode path forwards output directly and leaves this empty.
+type OutputChunk = (Vec<u8>, u64, u64);
+
+#[derive(Clone)]
+struct SessionPeer {
+    client_id: String,
+    outbound: P2pOutbound,
+    /// PTY multi-client fan-out; `None` for control-mode (direct outbound).
+    output_tx: Option<mpsc::Sender<OutputChunk>>,
+}
+
 struct AttachedSession {
     /// The backend, behind its *own* lock (`#961-D`).
     ///
@@ -82,10 +93,10 @@ struct AttachedSession {
     /// and `terminal.resize` all carry the same resource key, so the key lane
     /// runs at most one of them at a time for a given session name.
     backend: Arc<Mutex<Box<dyn TmuxSession>>>,
-    /// Bounded senders — one per subscribed client. The broadcast task clones
-    /// output to all of them; see [`SUBSCRIBER_QUEUE_SLOTS`] for what happens to
-    /// one that stops draining.
-    subscribers: Vec<mpsc::Sender<Vec<u8>>>,
+    /// Live connections for this session (output fan-out + control notifications).
+    peers: Vec<SessionPeer>,
+    control: session_terminal::SessionControlState,
+    stream: session_terminal::SessionStreamState,
 }
 
 /// How much terminal output one attached client may have waiting (#961).
@@ -118,9 +129,10 @@ const SUBSCRIBER_QUEUE_SLOTS: usize = 64;
 /// [`SUBSCRIBER_QUEUE_SLOTS`]. A free function so the policy can be tested
 /// without a socket, a PTY, or a session: the three cases (room, full, closed)
 /// are the whole of it.
-fn fan_out(subscribers: &mut Vec<mpsc::Sender<Vec<u8>>>, chunk: &[u8]) -> usize {
+#[cfg(test)]
+fn fan_out(subscribers: &mut Vec<mpsc::Sender<OutputChunk>>, chunk: OutputChunk) -> usize {
     let mut detached = 0usize;
-    subscribers.retain(|tx| match tx.try_send(chunk.to_vec()) {
+    subscribers.retain(|tx| match tx.try_send(chunk.clone()) {
         Ok(()) => true,
         Err(mpsc::error::TrySendError::Full(_)) => {
             detached += 1;
@@ -129,6 +141,68 @@ fn fan_out(subscribers: &mut Vec<mpsc::Sender<Vec<u8>>>, chunk: &[u8]) -> usize 
         Err(mpsc::error::TrySendError::Closed(_)) => false,
     });
     detached
+}
+
+fn fan_out_peers(peers: &mut Vec<SessionPeer>, chunk: OutputChunk) -> usize {
+    let mut detached = 0usize;
+    peers.retain(|peer| {
+        let Some(tx) = &peer.output_tx else {
+            return true;
+        };
+        match tx.try_send(chunk.clone()) {
+            Ok(()) => true,
+            Err(mpsc::error::TrySendError::Full(_)) => {
+                detached += 1;
+                false
+            }
+            Err(mpsc::error::TrySendError::Closed(_)) => false,
+        }
+    });
+    detached
+}
+
+async fn connection_client_id(client_id: &Arc<Mutex<Option<String>>>) -> String {
+    client_id
+        .lock()
+        .await
+        .clone()
+        .unwrap_or_else(|| "unknown-client".to_string())
+}
+
+fn client_attach_response(
+    session_name: String,
+    session: &AttachedSession,
+    client_id: &str,
+) -> ClientAttachResponse {
+    let role = session.control.role_of(client_id);
+    ClientAttachResponse {
+        session_name,
+        control_generation: Some(session.control.generation),
+        control_role: Some(
+            if role == session_terminal::TerminalRole::Controller {
+                "controller"
+            } else {
+                "observer"
+            }
+            .to_string(),
+        ),
+        controller_client_id: session.control.controller_client_id.clone(),
+        stream_epoch: Some(session.stream.epoch),
+        stream_cursor: Some(session.stream.cursor()),
+    }
+}
+
+async fn notify_control_changed(peers: &[SessionPeer], payload: TerminalControlChangedPayload) {
+    let msg = new_message(msg_types::TERMINAL_CONTROL_CHANGED, payload);
+    let Ok(json) = serde_json::to_string(&msg) else {
+        return;
+    };
+    for peer in peers {
+        let _ = peer
+            .outbound
+            .send_terminal(WsMessage::Text(json.clone()))
+            .await;
+    }
 }
 
 /// Forward one subscriber's terminal output to this connection's sink, and —
@@ -150,18 +224,20 @@ fn fan_out(subscribers: &mut Vec<mpsc::Sender<Vec<u8>>>, chunk: &[u8]) -> usize 
 /// It used to be one task per subscriber inline in the attach arms, twice, and
 /// the only difference between the two was which names the locals had.
 fn spawn_output_forwarder(
-    mut rx: mpsc::Receiver<Vec<u8>>,
+    mut rx: mpsc::Receiver<OutputChunk>,
     outbound: P2pOutbound,
     sessions: Arc<SessionMapLock>,
     session_name: String,
 ) {
     tokio::spawn(async move {
-        while let Some(bytes) = rx.recv().await {
+        while let Some((bytes, stream_epoch, stream_seq)) = rx.recv().await {
             use base64::Engine;
             let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
             let output = TerminalOutputPayload {
                 session_name: session_name.clone(),
                 data: encoded,
+                stream_epoch: Some(stream_epoch),
+                stream_seq: Some(stream_seq),
             };
             let msg = new_message(msg_types::TERMINAL_OUTPUT, output);
             if let Ok(json) = serde_json::to_string(&msg) {
@@ -300,6 +376,8 @@ pub mod msg_types {
     pub const CLIENT_DETACH: &str = "agent.detach";
     pub const TERMINAL_INPUT: &str = "agent.terminal.input";
     pub const TERMINAL_RESIZE: &str = "agent.terminal.resize";
+    pub const TERMINAL_CONTROL_ACQUIRE: &str = "agent.terminal.control.acquire";
+    pub const TERMINAL_STREAM_RESUME: &str = "agent.terminal.stream.resume";
 
     // Web UI → Agent (compatibility layer)
     pub const CLIENT_AUTH: &str = "client.auth";
@@ -337,6 +415,7 @@ pub mod msg_types {
 
     // Agent → Client
     pub const TERMINAL_OUTPUT: &str = "agent.terminal.output";
+    pub const TERMINAL_CONTROL_CHANGED: &str = "agent.terminal.control.changed";
     pub const OK: &str = "ok";
     pub const ERROR: &str = "error";
 }
@@ -397,7 +476,9 @@ pub use nession_protocol::contracts::file::v1::{
     FileWritePayload, FileWriteResponse,
 };
 pub use nession_protocol::contracts::terminal::v1::{
+    TerminalControlAcquirePayload, TerminalControlAcquireResponse, TerminalControlChangedPayload,
     TerminalInputPayload, TerminalOutputPayload, TerminalResizePayload,
+    TerminalStreamResumePayload, TerminalStreamResumeResponse,
 };
 
 // --- Protocol helpers ---
@@ -434,6 +515,7 @@ async fn send_terminal_resize_msg(
         session_name: session_name.to_string(),
         cols,
         rows,
+        control_generation: None,
     };
     let msg = new_message(msg_types::TERMINAL_RESIZE, payload);
     let Ok(json) = serde_json::to_string(&msg) else {
@@ -1185,18 +1267,21 @@ p2p_routes! { ctx, msg_type, payload_value;
 
                     if already_attached {
                         // Session already exists: add a new subscriber.
+                        let client_id = connection_client_id(ctx.client_id).await;
                         let (tx, rx) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
-                        {
-                            if let Some(shared) = sessions_lock(ctx.sessions).get_mut(&session_name)
-                            {
-                                shared.subscribers.push(tx);
-                            }
-                            // A session removed between the two locks has no
-                            // subscribers left and the forwarder below sees a
-                            // channel with no sender: it ends on its first
-                            // `recv` rather than writing to a session that is
-                            // gone.
-                        }
+                        let resp = {
+                            let mut guard = sessions_lock(ctx.sessions);
+                            let Some(shared) = guard.get_mut(&session_name) else {
+                                return ctx.err("not_attached", "session ended during attach");
+                            };
+                            shared.peers.retain(|p| p.client_id != client_id);
+                            shared.peers.push(SessionPeer {
+                                client_id: client_id.clone(),
+                                outbound: ctx.outbound.clone(),
+                                output_tx: Some(tx),
+                            });
+                            client_attach_response(payload.session_name.clone(), shared, &client_id)
+                        };
 
                         spawn_output_forwarder(
                             rx,
@@ -1205,9 +1290,6 @@ p2p_routes! { ctx, msg_type, payload_value;
                             session_name.clone(),
                         );
 
-                        let resp = ClientAttachResponse {
-                            session_name: payload.session_name,
-                        };
                         return serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
                             .unwrap_or_default();
                     }
@@ -1223,11 +1305,26 @@ p2p_routes! { ctx, msg_type, payload_value;
                         payload.height,
                     ) {
                         Ok((pty_session, mut output_rx)) => {
+                            let client_id = connection_client_id(ctx.client_id).await;
                             let (tx, rx) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
+                            let mut control = session_terminal::SessionControlState::new();
+                            control.ensure_controller(&client_id);
+                            let stream = session_terminal::SessionStreamState::new();
                             let attached = AttachedSession {
                                 backend: Arc::new(Mutex::new(Box::new(pty_session))),
-                                subscribers: vec![tx],
+                                peers: vec![SessionPeer {
+                                    client_id: client_id.clone(),
+                                    outbound: ctx.outbound.clone(),
+                                    output_tx: Some(tx),
+                                }],
+                                control,
+                                stream,
                             };
+                            let resp = client_attach_response(
+                                payload.session_name.clone(),
+                                &attached,
+                                &client_id,
+                            );
                             sessions_lock(ctx.sessions).insert(session_name.clone(), attached);
 
                             // Spawn forwarding task for the first subscriber.
@@ -1246,6 +1343,13 @@ p2p_routes! { ctx, msg_type, payload_value;
                                 while let Some(bytes) = output_rx.recv().await {
                                     let mut guard = sessions_lock(&sessions_clone);
                                     if let Some(s) = guard.get_mut(&session_name_clone) {
+                                        use base64::Engine;
+                                        let encoded = base64::engine::general_purpose::STANDARD
+                                            .encode(&bytes);
+                                        let (epoch, seq) = s.stream.record_output(
+                                            &session_name_clone,
+                                            encoded,
+                                        );
                                         // Fan out to every subscriber, pruning the
                                         // ones that are gone — closed because
                                         // their connection ended, or full because
@@ -1253,14 +1357,19 @@ p2p_routes! { ctx, msg_type, payload_value;
                                         // are not attached in any useful sense,
                                         // and the fan-out must not wait for them;
                                         // see `SUBSCRIBER_QUEUE_SLOTS`.
-                                        let detached = fan_out(&mut s.subscribers, &bytes);
+                                        let detached =
+                                            fan_out_peers(&mut s.peers, (bytes, epoch, seq));
                                         if detached > 0 {
                                             warn!(
                                                 "session {session_name_clone}: detached {detached} \
                                                  subscriber(s) that stopped draining their terminal"
                                             );
                                         }
-                                        if s.subscribers.is_empty() {
+                                        if !s
+                                            .peers
+                                            .iter()
+                                            .any(|p| p.output_tx.is_some())
+                                        {
                                             break;
                                         }
                                     } else {
@@ -1269,9 +1378,6 @@ p2p_routes! { ctx, msg_type, payload_value;
                                 }
                             });
 
-                            let resp = ClientAttachResponse {
-                                session_name: payload.session_name,
-                            };
                             serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
                                 .unwrap_or_default()
                         }
@@ -1306,17 +1412,30 @@ p2p_routes! { ctx, msg_type, payload_value;
                     {
                         Ok((session, mut output_rx, mut resize_rx)) => {
                             let session_name = payload.session_name.clone();
+                            let client_id = connection_client_id(ctx.client_id).await;
+                            let mut control = session_terminal::SessionControlState::new();
+                            control.ensure_controller(&client_id);
+                            let stream = session_terminal::SessionStreamState::new();
+                            let attached = AttachedSession {
+                                backend: Arc::new(Mutex::new(Box::new(session))),
+                                peers: vec![SessionPeer {
+                                    client_id: client_id.clone(),
+                                    outbound: ctx.outbound.clone(),
+                                    output_tx: None,
+                                }],
+                                control,
+                                stream,
+                            };
+                            let resp = client_attach_response(
+                                payload.session_name.clone(),
+                                &attached,
+                                &client_id,
+                            );
                             // The insert is its own statement, so the map's
                             // guard is released before the scrollback capture
                             // below rather than living until the end of the
                             // block that holds this arm's locals.
-                            sessions_lock(ctx.sessions).insert(
-                                session_name.clone(),
-                                AttachedSession {
-                                    backend: Arc::new(Mutex::new(Box::new(session))),
-                                    subscribers: Vec::new(),
-                                },
-                            );
+                            sessions_lock(ctx.sessions).insert(session_name.clone(), attached);
 
                             // Capture scrollback BEFORE starting the live output stream.
                             // Done synchronously (not spawned) to guarantee it arrives
@@ -1334,9 +1453,20 @@ p2p_routes! { ctx, msg_type, payload_value;
                                 use base64::Engine;
                                 let encoded = base64::engine::general_purpose::STANDARD
                                     .encode(&scrollback_bytes);
+                                let (stream_epoch, stream_seq) = {
+                                    let mut guard = sessions_lock(ctx.sessions);
+                                    guard
+                                        .get_mut(&session_name)
+                                        .map(|s| {
+                                            s.stream.record_output(&session_name, encoded.clone())
+                                        })
+                                        .unwrap_or((1, 0))
+                                };
                                 let output = TerminalOutputPayload {
                                     session_name: session_name.clone(),
                                     data: encoded,
+                                    stream_epoch: Some(stream_epoch),
+                                    stream_seq: Some(stream_seq),
                                 };
                                 let msg = new_message(msg_types::TERMINAL_OUTPUT, output);
                                 if let Ok(json) = serde_json::to_string(&msg) {
@@ -1353,14 +1483,29 @@ p2p_routes! { ctx, msg_type, payload_value;
                             // messages.
                             let outbound_clone = ctx.outbound.clone();
                             let session_name_clone = session_name.clone();
+                            let sessions_for_output = Arc::clone(ctx.sessions);
                             tokio::spawn(async move {
                                 while let Some(bytes) = output_rx.recv().await {
                                     use base64::Engine;
                                     let encoded =
                                         base64::engine::general_purpose::STANDARD.encode(&bytes);
+                                    let (stream_epoch, stream_seq) = {
+                                        let mut guard = sessions_lock(&sessions_for_output);
+                                        guard
+                                            .get_mut(&session_name_clone)
+                                            .map(|s| {
+                                                s.stream.record_output(
+                                                    &session_name_clone,
+                                                    encoded.clone(),
+                                                )
+                                            })
+                                            .unwrap_or((1, 0))
+                                    };
                                     let output = TerminalOutputPayload {
                                         session_name: session_name_clone.clone(),
                                         data: encoded,
+                                        stream_epoch: Some(stream_epoch),
+                                        stream_seq: Some(stream_seq),
                                     };
                                     let msg = new_message(msg_types::TERMINAL_OUTPUT, output);
                                     if let Ok(json) = serde_json::to_string(&msg) {
@@ -1465,9 +1610,6 @@ p2p_routes! { ctx, msg_type, payload_value;
                                 }
                             });
 
-                            let resp = ClientAttachResponse {
-                                session_name: payload.session_name,
-                            };
                             serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
                                 .unwrap_or_default()
                         }
@@ -1485,21 +1627,53 @@ p2p_routes! { ctx, msg_type, payload_value;
                 // I/O — for control mode it terminates a tmux child — and
                 // holding the connection's index of sessions across it is the
                 // lock-across-await `#961-D` exists to remove.
-                let removed = {
+                let client_id = connection_client_id(ctx.client_id).await;
+                let (removed, control_notify) = {
                     let mut sessions_guard = sessions_lock(ctx.sessions);
                     match sessions_guard.get_mut(&payload.session_name) {
                         Some(session) => {
-                            // Drop this client's dead subscriber senders. When
-                            // no live subscribers remain (always true for
-                            // control mode, which keeps none), the session is
-                            // taken out of the map so its tmux child can be
-                            // terminated.
-                            session.subscribers.retain(|tx| !tx.is_closed());
-                            if session.subscribers.is_empty() {
+                            if !session
+                                .peers
+                                .iter()
+                                .any(|p| p.client_id == client_id)
+                            {
+                                return ctx.err(
+                                    "not_attached",
+                                    &format!(
+                                        "not attached to session: {}",
+                                        payload.session_name
+                                    ),
+                                );
+                            }
+                            let before_controller =
+                                session.control.controller_client_id.clone();
+                            session
+                                .peers
+                                .retain(|p| p.client_id != client_id);
+                            session.control.release_if_holder(&client_id);
+                            let notify = if before_controller
+                                != session.control.controller_client_id
+                            {
+                                Some((
+                                    session.peers.clone(),
+                                    TerminalControlChangedPayload {
+                                        session_name: payload.session_name.clone(),
+                                        generation: session.control.generation,
+                                        controller_client_id: session
+                                            .control
+                                            .controller_client_id
+                                            .clone(),
+                                    },
+                                ))
+                            } else {
+                                None
+                            };
+                            let removed = if session.peers.is_empty() {
                                 sessions_guard.remove(&payload.session_name)
                             } else {
                                 None
-                            }
+                            };
+                            (removed, notify)
                         }
                         None => {
                             return ctx.err(
@@ -1509,6 +1683,10 @@ p2p_routes! { ctx, msg_type, payload_value;
                         }
                     }
                 };
+
+                if let Some((peers, changed)) = control_notify {
+                    notify_control_changed(&peers, changed).await;
+                }
 
                 if let Some(removed) = removed {
                     if let Err(e) = removed.backend.lock().await.close().await {
@@ -1522,11 +1700,112 @@ p2p_routes! { ctx, msg_type, payload_value;
                 serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
                     .unwrap_or_default()
             }
+            "agent.terminal.control.acquire" => "agent.terminal.control.acquire" => 1 => terminal_scope(payload_value) => Key(session_named(payload_value)) => {
+                let payload: TerminalControlAcquirePayload =
+                    match serde_json::from_value(payload_value) {
+                        Ok(p) => p,
+                        Err(e) => return ctx.err("parse_error", &e.to_string()),
+                    };
+                let client_id = connection_client_id(ctx.client_id).await;
+                let (resp, peers, changed) = {
+                    let mut guard = sessions_lock(ctx.sessions);
+                    let Some(session) = guard.get_mut(&payload.session_name) else {
+                        return ctx.err(
+                            "not_attached",
+                            &format!("not attached to session: {}", payload.session_name),
+                        );
+                    };
+                    if !session.peers.iter().any(|p| p.client_id == client_id) {
+                        return ctx.err(
+                            "not_attached",
+                            &format!("client not attached to session: {}", payload.session_name),
+                        );
+                    }
+                    let generation = session.control.acquire(&client_id);
+                    let role = session.control.role_of(&client_id);
+                    let resp = TerminalControlAcquireResponse {
+                        session_name: payload.session_name.clone(),
+                        generation,
+                        role: if role == session_terminal::TerminalRole::Controller {
+                            "controller"
+                        } else {
+                            "observer"
+                        }
+                        .to_string(),
+                        controller_client_id: session.control.controller_client_id.clone(),
+                    };
+                    let changed = TerminalControlChangedPayload {
+                        session_name: payload.session_name.clone(),
+                        generation,
+                        controller_client_id: session.control.controller_client_id.clone(),
+                    };
+                    (resp, session.peers.clone(), changed)
+                };
+                notify_control_changed(&peers, changed).await;
+                serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
+                    .unwrap_or_default()
+            }
+            "agent.terminal.stream.resume" => "agent.terminal.stream.resume" => 1 => terminal_scope(payload_value) => Key(session_named(payload_value)) => {
+                let payload: TerminalStreamResumePayload =
+                    match serde_json::from_value(payload_value) {
+                        Ok(p) => p,
+                        Err(e) => return ctx.err("parse_error", &e.to_string()),
+                    };
+                let resp = {
+                    let guard = sessions_lock(ctx.sessions);
+                    let Some(session) = guard.get(&payload.session_name) else {
+                        return ctx.err(
+                            "not_attached",
+                            &format!("not attached to session: {}", payload.session_name),
+                        );
+                    };
+                    let epoch_match = session.stream.epoch == payload.stream_epoch;
+                    let events = if epoch_match {
+                        session
+                            .stream
+                            .events_since(payload.stream_epoch, payload.after_seq)
+                            .unwrap_or_default()
+                    } else {
+                        Vec::new()
+                    };
+                    TerminalStreamResumeResponse {
+                        session_name: payload.session_name.clone(),
+                        stream_epoch: session.stream.epoch,
+                        epoch_match,
+                        events,
+                    }
+                };
+                serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
+                    .unwrap_or_default()
+            }
             "agent.terminal.input" => "agent.terminal.input" => 1 => terminal_scope(payload_value) => Key(session_named(payload_value)) => {
                 let payload: TerminalInputPayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
                 };
+                let client_id = connection_client_id(ctx.client_id).await;
+                let authorized = sessions_lock(ctx.sessions)
+                    .get(&payload.session_name)
+                    .map(|session| {
+                        session
+                            .control
+                            .authorize_mutation(&client_id, payload.control_generation)
+                    });
+                match authorized {
+                    Some(true) => {}
+                    Some(false) => {
+                        return ctx.err(
+                            "not_controller",
+                            "terminal input requires an active controller lease",
+                        );
+                    }
+                    None => {
+                        return ctx.err(
+                            "not_attached",
+                            &format!("not attached to session: {}", payload.session_name),
+                        );
+                    }
+                }
                 use base64::Engine;
                 let data = match base64::engine::general_purpose::STANDARD.decode(&payload.data) {
                     Ok(d) => d,
@@ -1555,13 +1834,32 @@ p2p_routes! { ctx, msg_type, payload_value;
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
                 };
-                // As `terminal.input`: the map is consulted, released, and only
-                // then does the backend do anything.
-                let backend = sessions_lock(ctx.sessions)
+                let client_id = connection_client_id(ctx.client_id).await;
+                let role_and_backend = sessions_lock(ctx.sessions)
                     .get(&payload.session_name)
-                    .map(|session| Arc::clone(&session.backend));
-                match backend {
-                    Some(backend) => {
+                    .map(|session| {
+                        (
+                            session.control.role_of(&client_id),
+                            session
+                                .control
+                                .authorize_mutation(&client_id, payload.control_generation),
+                            Arc::clone(&session.backend),
+                        )
+                    });
+                match role_and_backend {
+                    Some((session_terminal::TerminalRole::Observer, _, _)) => {
+                        return ctx.err(
+                            "observer_resize",
+                            "observers must not resize the live session",
+                        );
+                    }
+                    Some((_, false, _)) => {
+                        return ctx.err(
+                            "not_controller",
+                            "terminal resize requires an active controller lease",
+                        );
+                    }
+                    Some((_, true, backend)) => {
                         match backend
                             .lock()
                             .await
@@ -1569,7 +1867,17 @@ p2p_routes! { ctx, msg_type, payload_value;
                             .await
                         {
                             Ok(_) => {
-                                serde_json::to_string(&make_ok(ctx.id, "ok")).unwrap_or_default()
+                                if let Some(session) =
+                                    sessions_lock(ctx.sessions).get_mut(&payload.session_name)
+                                {
+                                    session.stream.record_resize(
+                                        &payload.session_name,
+                                        payload.cols,
+                                        payload.rows,
+                                    );
+                                }
+                                serde_json::to_string(&make_ok(ctx.id, "ok"))
+                                    .unwrap_or_default()
                             }
                             Err(e) => ctx.err("resize_error", &e.to_string()),
                         }
@@ -2660,13 +2968,14 @@ mod tests {
         // The slow one is filled to its bound, and its receiver is held but
         // never polled — a client that has stopped reading.
         for n in 0..SUBSCRIBER_QUEUE_SLOTS {
-            slow.try_send(vec![0u8])
+            slow.try_send((vec![0u8], 1, n as u64))
                 .unwrap_or_else(|_| panic!("the queue must have room for chunk {n}"));
         }
 
         let mut subscribers = vec![healthy, slow, gone];
+        let chunk = (b"output".to_vec(), 1_u64, 1_u64);
         assert_eq!(
-            fan_out(&mut subscribers, b"output"),
+            fan_out(&mut subscribers, chunk),
             1,
             "exactly the subscriber with no room is detached"
         );
@@ -2681,16 +2990,18 @@ mod tests {
         assert_eq!(
             healthy_rx
                 .try_recv()
-                .expect("the subscriber with room got the chunk"),
+                .expect("the subscriber with room got the chunk")
+                .0,
             b"output".to_vec()
         );
         subscribers[0]
-            .try_send(b"more".to_vec())
+            .try_send((b"more".to_vec(), 1, 2))
             .expect("the remaining subscriber still has room");
         assert_eq!(
             healthy_rx
                 .try_recv()
-                .expect("the same subscriber got this one"),
+                .expect("the same subscriber got this one")
+                .0,
             b"more".to_vec()
         );
         drop(slow_rx);
@@ -2705,12 +3016,12 @@ mod tests {
 
         for n in 0..(SUBSCRIBER_QUEUE_SLOTS * 4) {
             assert_eq!(
-                fan_out(&mut subscribers, b"chunk"),
+                fan_out(&mut subscribers, (b"chunk".to_vec(), 1, n as u64)),
                 0,
                 "detached at chunk {n}"
             );
             assert_eq!(
-                rx.try_recv().expect("the subscriber is draining"),
+                rx.try_recv().expect("the subscriber is draining").0,
                 b"chunk".to_vec()
             );
         }
@@ -2732,7 +3043,8 @@ mod tests {
     #[tokio::test]
     async fn a_detached_subscriber_closes_the_connection() {
         let (outbound, _rx) = P2pOutbound::new();
-        let (tx, rx) = mpsc::channel::<Vec<u8>>(SUBSCRIBER_QUEUE_SLOTS);
+        let (tx, rx) = mpsc::channel::<OutputChunk>(SUBSCRIBER_QUEUE_SLOTS);
+        let (outbound_peer, _) = P2pOutbound::new();
         let sessions: Arc<SessionMapLock> =
             Arc::new(SessionMapLock::new(std::collections::HashMap::from([(
                 "s1".to_string(),
@@ -2747,7 +3059,13 @@ mod tests {
                         .expect("a PTY for the session under test")
                         .0,
                     ))),
-                    subscribers: Vec::new(),
+                    peers: vec![SessionPeer {
+                        client_id: "test-client".to_string(),
+                        outbound: outbound_peer,
+                        output_tx: None,
+                    }],
+                    control: session_terminal::SessionControlState::new(),
+                    stream: session_terminal::SessionStreamState::new(),
                 },
             )])));
 
@@ -2776,7 +3094,7 @@ mod tests {
         sessions_lock(&sessions)
             .get_mut("s1")
             .expect("the session under test")
-            .subscribers
+            .peers
             .clear();
     }
 
@@ -2807,7 +3125,7 @@ mod tests {
             "the whole byte budget is one frame's worth"
         );
 
-        let (tx, rx) = mpsc::channel::<Vec<u8>>(SUBSCRIBER_QUEUE_SLOTS);
+        let (tx, rx) = mpsc::channel::<OutputChunk>(SUBSCRIBER_QUEUE_SLOTS);
         let sessions: Arc<SessionMapLock> =
             Arc::new(SessionMapLock::new(std::collections::HashMap::new()));
         spawn_output_forwarder(
@@ -2817,7 +3135,9 @@ mod tests {
             "s1".to_string(),
         );
 
-        tx.send(b"chunk".to_vec()).await.expect("the chunk is sent");
+        tx.send((b"chunk".to_vec(), 1, 1))
+            .await
+            .expect("the chunk is sent");
         let closed = tokio::time::timeout(Duration::from_secs(5), async {
             while !outbound.is_closed() {
                 tokio::time::sleep(Duration::from_millis(10)).await;
@@ -2978,6 +3298,7 @@ mod tests {
         let input_payload = TerminalInputPayload {
             session_name: session_name.to_string(),
             data: input_data,
+            control_generation: None,
         };
         let input_req = new_message(msg_types::TERMINAL_INPUT, input_payload);
         let input_resp: Message<OkPayload> =
@@ -3617,6 +3938,7 @@ mod tests {
         let input_payload = TerminalInputPayload {
             session_name: session_name.to_string(),
             data: "!!!not-valid-base64!!!".to_string(),
+            control_generation: None,
         };
         let input_req = new_message(msg_types::TERMINAL_INPUT, input_payload);
         let input_resp: Message<ErrorPayload> =
@@ -3940,6 +4262,7 @@ mod tests {
         let input_payload = TerminalInputPayload {
             session_name: "no-such-session".to_string(),
             data: base64::engine::general_purpose::STANDARD.encode(b"hello"),
+            control_generation: None,
         };
         let req = new_message(msg_types::TERMINAL_INPUT, input_payload);
         let resp: Message<ErrorPayload> = send_and_receive(&mut sink, &mut stream, &req).await;
@@ -3960,6 +4283,7 @@ mod tests {
             session_name: "no-such-session".to_string(),
             cols: 120,
             rows: 40,
+            control_generation: None,
         };
         let req = new_message(msg_types::TERMINAL_RESIZE, resize_payload);
         let resp: Message<ErrorPayload> = send_and_receive(&mut sink, &mut stream, &req).await;
@@ -4010,6 +4334,8 @@ mod tests {
         msg_types::CLIENT_DETACH,
         msg_types::TERMINAL_INPUT,
         msg_types::TERMINAL_RESIZE,
+        msg_types::TERMINAL_CONTROL_ACQUIRE,
+        msg_types::TERMINAL_STREAM_RESUME,
         msg_types::CLIENT_AUTH,
         msg_types::CLIENT_SESSIONS_LIST,
         msg_types::CLIENT_SESSION_ATTACH,

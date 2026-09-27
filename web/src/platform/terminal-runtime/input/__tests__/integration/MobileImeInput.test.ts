@@ -69,12 +69,16 @@ function touchEvent(type: 'touchstart' | 'touchend', x: number, y: number): Even
 
 describe('MobileImeInput', () => {
   let host: HTMLElement;
-  let onSend: ReturnType<typeof vi.fn<(text: string) => void>>;
+  let onCommitText: ReturnType<typeof vi.fn<(text: string) => void>>;
+  let onPaste: ReturnType<typeof vi.fn<(text: string) => void>>;
+  let onSemanticKey: ReturnType<typeof vi.fn<(key: string) => void>>;
 
   beforeEach(() => {
     host = document.createElement('div');
     document.body.appendChild(host);
-    onSend = vi.fn<(text: string) => void>();
+    onCommitText = vi.fn<(text: string) => void>();
+    onPaste = vi.fn<(text: string) => void>();
+    onSemanticKey = vi.fn<(key: string) => void>();
   });
 
   afterEach(() => {
@@ -84,7 +88,7 @@ describe('MobileImeInput', () => {
 
   function mount(cell = { width: 10, height: 20 }) {
     const fake = makeTerminal(host, cell);
-    const ime = new MobileImeInput(fake.terminal, host, { onSend });
+    const ime = new MobileImeInput(fake.terminal, host, { onCommitText, onPaste, onSemanticKey });
     return { fake, ime };
   }
 
@@ -107,7 +111,7 @@ describe('MobileImeInput', () => {
     Object.defineProperty(ev, 'isComposing', { value: false });
     ime.element.dispatchEvent(ev);
 
-    expect(onSend).toHaveBeenCalledWith('a');
+    expect(onCommitText).toHaveBeenCalledWith('a');
     expect(ime.element.value).toBe('');
   });
 
@@ -119,7 +123,7 @@ describe('MobileImeInput', () => {
     Object.defineProperty(ev, 'isComposing', { value: true });
     ime.element.dispatchEvent(ev);
 
-    expect(onSend).not.toHaveBeenCalled();
+    expect(onCommitText).not.toHaveBeenCalled();
   });
 
   describe('IME composition', () => {
@@ -148,14 +152,14 @@ describe('MobileImeInput', () => {
       const { ime } = mount();
       composeAndCommit(ime, 'nihao', '你好');
 
-      expect(onSend).toHaveBeenCalledTimes(1);
-      expect(onSend).toHaveBeenCalledWith('你好');
+      expect(onCommitText).toHaveBeenCalledTimes(1);
+      expect(onCommitText).toHaveBeenCalledWith('你好');
     });
 
     it('does not send the pre-edit text', () => {
       const { ime } = mount();
       composeAndCommit(ime, 'nihao', '你好');
-      expect(onSend).not.toHaveBeenCalledWith('nihao');
+      expect(onCommitText).not.toHaveBeenCalledWith('nihao');
     });
 
     it('clears the textarea after the commit', () => {
@@ -174,7 +178,7 @@ describe('MobileImeInput', () => {
       ime.element.dispatchEvent(new Event('compositionstart'));
       ime.element.dispatchEvent(new CompositionEvent('compositionend', { data: '' }));
 
-      expect(onSend).not.toHaveBeenCalled();
+      expect(onCommitText).not.toHaveBeenCalled();
     });
 
     it('drops a duplicate insertText that repeats the commit', () => {
@@ -188,7 +192,7 @@ describe('MobileImeInput', () => {
       Object.defineProperty(dup, 'isComposing', { value: false });
       ime.element.dispatchEvent(dup);
 
-      expect(onSend).toHaveBeenCalledTimes(1);
+      expect(onCommitText).toHaveBeenCalledTimes(1);
     });
 
     it('still accepts normal typing after a commit', () => {
@@ -203,8 +207,8 @@ describe('MobileImeInput', () => {
       Object.defineProperty(ev, 'isComposing', { value: false });
       ime.element.dispatchEvent(ev);
 
-      expect(onSend).toHaveBeenNthCalledWith(1, '你好');
-      expect(onSend).toHaveBeenNthCalledWith(2, 'x');
+      expect(onCommitText).toHaveBeenNthCalledWith(1, '你好');
+      expect(onCommitText).toHaveBeenNthCalledWith(2, 'x');
     });
 
     it('allows sending the same text twice when genuinely retyped', () => {
@@ -215,29 +219,30 @@ describe('MobileImeInput', () => {
       vi.runAllTimers();
       composeAndCommit(ime, 'nihao', '你好');
 
-      expect(onSend).toHaveBeenCalledTimes(2);
+      expect(onCommitText).toHaveBeenCalledTimes(2);
     });
   });
 
   it.each([
-    ['Enter', '\r'],
-    ['Backspace', '\x7f'],
-    ['Escape', '\x1b'],
-    ['Tab', '\t'],
-    ['ArrowUp', '\x1b[A'],
-    ['ArrowDown', '\x1b[B'],
-    ['ArrowLeft', '\x1b[D'],
-    ['ArrowRight', '\x1b[C'],
-  ])('maps %s to its control sequence', (key, expected) => {
+    'Enter',
+    'Backspace',
+    'Escape',
+    'Tab',
+    'ArrowUp',
+    'ArrowDown',
+    'ArrowLeft',
+    'ArrowRight',
+  ])('routes %s as a semantic key (#1096)', (key) => {
     const { ime } = mount();
     ime.element.dispatchEvent(new KeyboardEvent('keydown', { key, cancelable: true }));
-    expect(onSend).toHaveBeenCalledWith(expected);
+    expect(onSemanticKey).toHaveBeenCalledWith(key);
+    expect(onCommitText).not.toHaveBeenCalled();
   });
 
   it('leaves printable keys to the input event', () => {
     const { ime } = mount();
     ime.element.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', cancelable: true }));
-    expect(onSend).not.toHaveBeenCalled();
+    expect(onCommitText).not.toHaveBeenCalled();
   });
 
   it('drops keydown while composing and for the Android 229 placeholder', () => {
@@ -245,11 +250,11 @@ describe('MobileImeInput', () => {
 
     ime.element.dispatchEvent(new Event('compositionstart'));
     ime.element.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', cancelable: true }));
-    expect(onSend).not.toHaveBeenCalled();
+    expect(onCommitText).not.toHaveBeenCalled();
 
     ime.element.dispatchEvent(new CompositionEvent('compositionend', { data: '' }));
     ime.element.dispatchEvent(new KeyboardEvent('keydown', { key: 'keyCode229', keyCode: 229, cancelable: true }));
-    expect(onSend).not.toHaveBeenCalled();
+    expect(onCommitText).not.toHaveBeenCalled();
   });
 
   it('clears the textarea after compositionend on the next tick', () => {
@@ -272,14 +277,19 @@ describe('MobileImeInput', () => {
     });
     ime.element.dispatchEvent(ev);
 
-    expect(onSend).toHaveBeenCalledWith('pasted');
+    expect(onPaste).toHaveBeenCalledWith('pasted');
     expect(ev.defaultPrevented).toBe(true);
   });
 
   it('reports focus and blur through onFocusChange', () => {
     const onFocusChange = vi.fn<(focused: boolean) => void>();
     const fake = makeTerminal(host, { width: 10, height: 20 });
-    const ime = new MobileImeInput(fake.terminal, host, { onSend, onFocusChange });
+    const ime = new MobileImeInput(fake.terminal, host, {
+      onCommitText,
+      onPaste,
+      onSemanticKey,
+      onFocusChange,
+    });
 
     ime.element.dispatchEvent(new Event('focus'));
     expect(onFocusChange).toHaveBeenCalledWith(true);
@@ -317,7 +327,7 @@ describe('MobileImeInput', () => {
 
     it('falls back to 8x16 when the render service has not measured', () => {
       const fake = makeTerminal(host, undefined);
-      const ime = new MobileImeInput(fake.terminal, host, { onSend });
+      const ime = new MobileImeInput(fake.terminal, host, { onCommitText, onPaste, onSemanticKey });
       fake.setCursor(1, 1);
       fake.fireRender();
       expect(ime.element.style.left).toBe('8px');
@@ -369,10 +379,10 @@ describe('MobileImeInput', () => {
     expect(spy).toHaveBeenCalled();
   });
 
-  it('sendText forwards straight to onSend', () => {
+  it('sendText forwards straight to onCommitText', () => {
     const { ime } = mount();
     ime.sendText('ls\r');
-    expect(onSend).toHaveBeenCalledWith('ls\r');
+    expect(onCommitText).toHaveBeenCalledWith('ls\r');
   });
 
   describe('dispose', () => {
@@ -391,7 +401,7 @@ describe('MobileImeInput', () => {
 
       ime.element.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', cancelable: true }));
       ime.sendText('x');
-      expect(onSend).not.toHaveBeenCalled();
+      expect(onCommitText).not.toHaveBeenCalled();
     });
 
     it('is idempotent', () => {

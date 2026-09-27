@@ -97,6 +97,10 @@ export interface CapsuleProjectionBinding {
      * which is also what keeps the registry free of transport.
      */
     sendText: (text: string) => void;
+    sendPhysKey?: (key: {
+      seq: string;
+      semanticKey?: import('@/platform/terminal-runtime/interaction/TerminalInteractionController').TerminalSemanticKey;
+    }) => void;
     /**
      * Deepen into the Workspace, at the item the body last reported or at one
      * it names (#1046).

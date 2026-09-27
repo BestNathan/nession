@@ -18,6 +18,7 @@ import { useCapsuleDockClearance } from '@/product/terminal/capsule/hooks/useCap
 
 export interface TerminalCapsuleProps {
   sendText: (text: string) => void;
+  sendPhysKey?: (key: { seq: string; semanticKey?: import('@/platform/terminal-runtime/interaction/TerminalInteractionController').TerminalSemanticKey }) => void;
   disabled?: boolean;
   experience?: CapsuleExperience;
   /** Capabilities that earned no chip, reachable through the disclosure entry. */
@@ -33,6 +34,7 @@ export interface TerminalCapsuleProps {
 
 export function TerminalCapsule({
   sendText,
+  sendPhysKey,
   disabled = false,
   experience = 'web',
   capabilityDisclosure,
@@ -159,6 +161,7 @@ export function TerminalCapsule({
             <PeekHost
               projection={capabilityProjection}
               sendText={sendText}
+              sendPhysKey={sendPhysKey}
               disabled={disabled}
             />
           ) : null

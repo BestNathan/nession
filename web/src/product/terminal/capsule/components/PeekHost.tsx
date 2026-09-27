@@ -35,11 +35,16 @@ import type { CapsuleCapabilityProjection } from '@/product/terminal/capsule/typ
 export function PeekHost({
   projection,
   sendText,
+  sendPhysKey,
   disabled,
 }: {
   projection: CapsuleCapabilityProjection;
   /** How a capability's body reaches the terminal — the capsule owns this. */
   sendText: (text: string) => void;
+  sendPhysKey?: (key: {
+    seq: string;
+    semanticKey?: import('@/platform/terminal-runtime/interaction/TerminalInteractionController').TerminalSemanticKey;
+  }) => void;
   disabled: boolean;
 }) {
   const [focus, setFocus] = useState<string | undefined>(undefined);
@@ -93,6 +98,7 @@ export function PeekHost({
 
       {projection.body(focus, setFocus, {
         sendText,
+        sendPhysKey,
         // Bound here rather than in the hook, because `focus` is this
         // component's state: the deepening a capability offers is *at the item
         // the user picked*, and only the host knows which that was.

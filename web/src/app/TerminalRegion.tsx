@@ -39,6 +39,8 @@ export function TerminalRegion({
     viewportReady,
     terminalState,
     transportEpoch,
+    terminalControl,
+    onTakeControl,
   } = useTerminalOrchestration({ onDisconnect, onError });
 
   return (
@@ -58,6 +60,10 @@ export function TerminalRegion({
           isSwitching={isSwitching}
           capsuleCapabilities={capsuleCapabilities}
           capsuleProjection={capsuleProjection}
+          terminalControl={terminalControl}
+          onTakeControl={() => {
+            void onTakeControl();
+          }}
         >
           <TerminalPane
             sessionId={sessionId}
