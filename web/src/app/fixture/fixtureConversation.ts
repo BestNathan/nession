@@ -32,9 +32,20 @@ const BOUND_ID = 'c0a1b2c3-1111-4222-8333-444455556666';
 /**
  * The candidates, deliberately not all the same shape.
  *
- * One carries a title (the common case), one carries none (measured: 3 of 14
- * real transcripts) so the client's own fallback is reachable, and one is older
- * so the list has an order to show rather than a single row.
+ * Pairing has to be exercised, not just presence: a row is title + preview, and
+ * each half can be absent on its own. So the three rows are the three
+ * combinations a real list actually contains —
+ *
+ * 1. **title + preview**, the common case;
+ * 2. **no title, with a preview** — measured, 3 of 14 real transcripts carry no
+ *    `ai-title`, so the client's own fallback is a real path and not a defensive
+ *    one. Its prompt is a slash command, which is what a measured `lastPrompt`
+ *    frequently is;
+ * 3. **title, no preview** — measured, 14 of 120 carried no prompt, and the row
+ *    must then degrade to title and time rather than reserve a blank line.
+ *
+ * The third is also the oldest, so the list has an order to show rather than a
+ * single row.
  */
 const CANDIDATES = [
   {
@@ -42,18 +53,21 @@ const CANDIDATES = [
     cwd: '/Users/dev/code/nession-capsule',
     updated_at: '2026-09-01T11:40:00Z',
     title: 'Terminal ownership handoff',
+    preview: 'Review the controller/observer handoff before the capsule moves again',
   },
   {
     claude_session_id: 'd4e5f6a7-2222-4333-8444-555566667777',
     cwd: '/Users/dev/code/nession-capsule',
     updated_at: '2026-09-01T09:05:00Z',
     // No title on purpose — the fallback is a real path, not a defensive one.
+    preview: '/nession-web-design 收敛 radius 层级',
   },
   {
     claude_session_id: 'e8f9a0b1-3333-4444-8555-666677778888',
     cwd: '/Users/dev/code/nession-capsule',
     updated_at: '2026-08-29T08:15:00Z',
     title: 'Capsule radius review',
+    // No preview on purpose — the row degrades rather than reserving a blank line.
   },
 ];
 

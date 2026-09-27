@@ -5,6 +5,7 @@ import type { ConversationViewState } from '../hooks/useConversation';
 import type { ClaudeCodeConversationResponse } from '../types';
 import { conversationLabel } from '../model/conversationLabel';
 import { clockTime } from '../model/clockTime';
+import { previewLine } from '../model/previewLine';
 import { ConversationTranscript } from './ConversationTranscript';
 import { cn } from '@/shared/lib/utils';
 
@@ -21,34 +22,59 @@ function CandidateList({
 }) {
   return (
     <ul className="space-y-0.5" data-testid="conversation-candidates">
-      {candidates.map((candidate) => (
-        <li key={candidate.claude_session_id}>
-          <button
-            type="button"
-            aria-current={openId === candidate.claude_session_id ? 'true' : undefined}
-            onClick={() => onSelect(candidate.claude_session_id)}
-            className={cn(
-              'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors',
-              'hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-              openId === candidate.claude_session_id && 'bg-accent text-accent-foreground',
-            )}
-          >
-            <MessageSquare className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-            {/* The title leads and the identity moves to the tooltip (#1120).
-                A row's job is to be recognisable, and a UUID is not: it is the
-                same string for every reader and carries no scent. It stays
-                reachable here because selection still speaks it. */}
-            <span className="truncate" title={candidate.claude_session_id}>
-              {conversationLabel(candidate)}
-            </span>
-            {clockTime(candidate.updated_at) ? (
-              <span className="ml-auto shrink-0 text-xs text-muted-foreground">
-                {clockTime(candidate.updated_at)}
+      {candidates.map((candidate) => {
+        const time = clockTime(candidate.updated_at);
+        const preview = previewLine(candidate.preview);
+        return (
+          <li key={candidate.claude_session_id}>
+            <button
+              type="button"
+              aria-current={openId === candidate.claude_session_id ? 'true' : undefined}
+              onClick={() => onSelect(candidate.claude_session_id)}
+              className={cn(
+                'flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left transition-colors',
+                'hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                openId === candidate.claude_session_id && 'bg-accent text-accent-foreground',
+              )}
+            >
+              <MessageSquare className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              {/* Three ranks, and the row reads in that order (#1120): the title
+                  is what a person scans for, the preview says where the
+                  conversation got to, and the time is orientation. The title is
+                  `font-medium` and the preview is not, so the hierarchy survives
+                  without relying on the muted colour alone.
+
+                  The identity moves to the tooltip. A row's job is to be
+                  recognisable, and a UUID is not: it is the same string for
+                  every reader and carries no scent. It stays reachable because
+                  selection still speaks it. */}
+              <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                <span
+                  className="truncate text-sm font-medium"
+                  title={candidate.claude_session_id}
+                  data-testid="conversation-candidate-title"
+                >
+                  {conversationLabel(candidate)}
+                </span>
+                {/* Absent for roughly a tenth of real conversations (measured:
+                    14 of 120 had no prompt recorded), so the row degrades to
+                    title and time rather than reserving a blank second line. */}
+                {preview ? (
+                  <span
+                    className="truncate text-xs text-muted-foreground"
+                    data-testid="conversation-candidate-preview"
+                  >
+                    {preview}
+                  </span>
+                ) : null}
               </span>
-            ) : null}
-          </button>
-        </li>
-      ))}
+              {time ? (
+                <span className="shrink-0 text-xs text-muted-foreground">{time}</span>
+              ) : null}
+            </button>
+          </li>
+        );
+      })}
     </ul>
   );
 }
