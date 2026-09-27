@@ -1,6 +1,7 @@
 import { defineConfig } from '@playwright/test';
 
 import { E2E_ISOLATION_ENV } from './runtime';
+import { FIXTURE_SCREENSHOT } from './helpers/fixtureVisual';
 
 /**
  * E2E test configuration.
@@ -60,12 +61,14 @@ export default defineConfig({
   reporter: 'html',
   snapshotPathTemplate: '{testDir}/__snapshots__/{testFilePath}/{arg}-{platform}{ext}',
 
+  // Spread from the canonical helper rather than restated. These three keys used
+  // to be written twice — here and in `helpers/fixtureVisual.ts` — and the two
+  // copies had silently drifted apart in meaning: every `fixture-visual` case
+  // spreads the helper, so this block was fully shadowed for all 28 of them, and
+  // a second, unreviewed tolerance sat here waiting for the first spec that
+  // called `toHaveScreenshot` without it (#1038).
   expect: {
-    toHaveScreenshot: {
-      maxDiffPixelRatio: 0.02,
-      animations: 'disabled',
-      caret: 'hide',
-    },
+    toHaveScreenshot: { ...FIXTURE_SCREENSHOT },
   },
 
   globalSetup: require.resolve('./globalSetup'),

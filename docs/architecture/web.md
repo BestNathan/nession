@@ -78,7 +78,7 @@ the honest answer to "where does this go today" until the row moves.
 | `product/agent/` — the Agent concept | **done** | 3 |
 | `product/terminal/` — the Terminal concept, incl. the capsule subsystem | **done** | 3 |
 | `product/capability/` — the generic capability lifecycle (discovery, presence, registry, model, facts) | **done** | 4 |
-| `capabilities/{files,env,commands,claude-code}/` — the four contributable capabilities | **done** | 4 |
+| `capabilities/{files,env,claude-code}/` — the three contributable capabilities | **done** | 4 |
 | `platform/server/` — the Server transport plugin + its menu | **done** | 3 |
 | `platform/explorer/` — the file-tree framework | **done** | 5 |
 | `app/workspace/views/claudeCodeView.tsx` — the Claude Code view binding | **done** | 4 |
@@ -284,7 +284,6 @@ src/
 ├── capabilities/            # discoverable / activatable capabilities, vertical slices
 │   ├── files/               # file RPC + browser/viewer UI (+ adapters/)
 │   ├── env/                 # env capability + manager UI/dialogs
-│   ├── commands/            # quick-command capability + presets
 │   └── claude-code/         # transport, UI, and contribution.tsx (presence + view)
 ├── platform/                # transport, runtime, attach — and framework-level code
 │   ├── socket/              # WebSocketService, MessageRouter, clientId, wire types
@@ -352,9 +351,8 @@ contribution imports the component, and the component needs the singleton.
 Declaring it in the barrel would close that into a cycle.
 
 Cross-capability imports go through the peer's public surface and are recorded
-in each README — e.g. `files → explorer` (the file-tree framework),
-`env → session` (`EnvFileMultiSelect`), `terminal → commands`
-(presets/`useQuickCommands`).
+in each README — e.g. `files → explorer` (the file-tree framework) and
+`env → session` (`EnvFileMultiSelect`).
 
 ### State ownership
 
