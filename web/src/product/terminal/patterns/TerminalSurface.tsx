@@ -7,6 +7,7 @@ import type {
 } from '@/product/terminal/capsule/types';
 import type { CapsuleCapabilityContribution } from '@/app/capsulePresence';
 import type { TerminalController } from '@/platform/terminal-runtime/controller/TerminalController';
+import type { TerminalSemanticKey } from '@/platform/terminal-runtime/interaction/TerminalInteractionController';
 
 export interface TerminalSurfaceProps {
   /** xterm mount tree (TerminalPane). */
@@ -61,6 +62,13 @@ export function TerminalSurface({
     });
   };
 
+  const capsuleSendPhysKey = (key: { seq: string; semanticKey?: TerminalSemanticKey }) => {
+    if (inputDisabled) {
+      return;
+    }
+    controller?.sendPhysKey(key);
+  };
+
   return (
     <div
       data-testid="terminal-surface"
@@ -79,6 +87,7 @@ export function TerminalSurface({
       <TerminalCapsule
         experience={experience}
         sendText={capsuleSendText}
+        sendPhysKey={capsuleSendPhysKey}
         disabled={inputDisabled}
         capabilityDisclosure={capsuleCapabilities?.disclosure}
         capabilityProjection={capsuleProjection}

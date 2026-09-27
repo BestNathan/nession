@@ -166,8 +166,6 @@ function useEndRelayOnDisconnect(opts: {
 export interface UseTerminalOrchestrationOptions {
   onDisconnect: () => void;
   onError: (error: Error) => void;
-  /** UI-specific Ctrl-D behavior; transport disconnect stays shared. */
-  onCtrlD?: () => void;
   rendererType?: 'webgl' | 'canvas';
   scrollbackMode?: 'legacy' | 'local-buffer';
 }
@@ -175,7 +173,6 @@ export interface UseTerminalOrchestrationOptions {
 export function useTerminalOrchestration({
   onDisconnect,
   onError,
-  onCtrlD,
   rendererType = 'canvas',
   scrollbackMode = 'local-buffer',
 }: UseTerminalOrchestrationOptions) {
@@ -265,10 +262,9 @@ export function useTerminalOrchestration({
 
   useEffect(() => {
     if (!controller) { return; }
-    controller.onCtrlD = onCtrlD ?? handleDisconnect;
     controller.onError = onError;
     controller.onDisconnect = handleDisconnect;
-  }, [controller, handleDisconnect, onCtrlD, onError]);
+  }, [controller, handleDisconnect, onError]);
 
   useEffect(() => {
     if (terminalState === 'attached') {

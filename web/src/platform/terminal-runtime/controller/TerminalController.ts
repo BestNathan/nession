@@ -19,6 +19,10 @@ import { CustomInputHandler } from '../input/CustomInputHandler';
 import { CapsuleOcclusionScroll } from '../capsule/occlusionScroll';
 import { TerminalInstance } from '../instance/TerminalInstance';
 import { MobileImeInput } from '../input/MobileImeInput';
+import {
+  TerminalInteractionController,
+  type TerminalSemanticKey,
+} from '../interaction/TerminalInteractionController';
 import { gridFor } from '../grid';
 import type { FontSizeManager } from '../FontSizeManager';
 
@@ -88,6 +92,7 @@ export class TerminalController {
   private inputRouter: InputRouter | null = null;
   private inputSourceManager: InputSourceManager;
   private mobileIme: MobileImeInput | null = null;
+  private interaction: TerminalInteractionController | null = null;
   private capsuleOcclusionScroll: CapsuleOcclusionScroll | null = null;
   private useMobileIme: boolean;
   private readonly scrollbackMode: TerminalScrollbackMode;
@@ -97,7 +102,6 @@ export class TerminalController {
   /** Callbacks → Jotai */
   onStateChange: ((status: TerminalStatus) => void) | null = null;
   onTitleChange: ((title: string) => void) | null = null;
-  onCtrlD: (() => void) | null = null;
   onError: ((err: Error) => void) | null = null;
   onDisconnect: (() => void) | null = null;
 
@@ -243,21 +247,20 @@ export class TerminalController {
     if (!transport) { return; }
 
     const router = this.inputRouter ?? this.initInputRouter();
-    const terminalHandler = new TerminalInputHandler(
-      transport,
-      (cb) => {
-        const disposable = terminal.onData(cb);
-        return () => disposable.dispose();
-      },
-    );
-    terminalHandler.onCtrlD = () => this.onCtrlD?.();
+    this.interaction = new TerminalInteractionController(terminal, (data) => {
+      this.inputSourceManager.setActiveSource('keyboard');
+      this.transport?.send(data);
+    });
+    const terminalHandler = new TerminalInputHandler(this.interaction);
     router.register(terminalHandler);
     terminalHandler.activate();
 
     if (this.useMobileIme && terminal.element) {
       this.mobileIme = new MobileImeInput(terminal, terminal.element, {
-        onSend: (text) => {
-          this.handleInput({ source: 'touch', data: text, timestamp: Date.now() });
+        onCommitText: (text) => this.interaction?.sendText(text),
+        onPaste: (text) => this.interaction?.paste(text),
+        onSemanticKey: (key) => {
+          this.interaction?.trySendSemanticKey(key);
         },
       });
     }
@@ -280,6 +283,7 @@ export class TerminalController {
 
     this.mobileIme?.dispose();
     this.mobileIme = null;
+    this.interaction = null;
 
     this.capsuleOcclusionScroll?.dispose();
     this.capsuleOcclusionScroll = null;
@@ -326,10 +330,16 @@ export class TerminalController {
 
   /** Send user input to the transport (→ PTY). */
   send(data: string, source: import('../types').InputSource = 'component-input'): void {
-    // Toolbar quick-command Ctrl+D ("\x04") routes to the disconnect flow, the
-    // same as keyboard Ctrl+D (handled by TerminalInputHandler → onCtrlD).
-    if (data === '\x04') { this.onCtrlD?.(); return; }
     this.handleInput({ source, data, timestamp: Date.now() });
+  }
+
+  /** Terminal Keys / capsule — semantic keys when available (#1096). */
+  sendPhysKey(key: { seq: string; semanticKey?: TerminalSemanticKey }): void {
+    if (key.semanticKey && this.interaction) {
+      this.interaction.sendSemanticKey(key.semanticKey);
+      return;
+    }
+    this.send(key.seq, 'component-input');
   }
 
   /** Get the currently active input source. */

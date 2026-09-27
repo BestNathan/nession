@@ -56,6 +56,16 @@ export const terminalKeysProjection: CapsuleProjectionBinding = {
   // Nothing to add at Peek and no Workspace view to open: the accessory is the
   // capability in full, which is the lower bound `capability-emergence.md`
   // allows a Terminal-local capability to stop at.
-  body: ({ sendText, disabled }) =>
-    createElement(TerminalKeysProjection, { sendText, disabled }),
+  body: ({ sendText, sendPhysKey, disabled }) =>
+    createElement(TerminalKeysProjection, {
+      sendSeq: sendText,
+      sendPhysKey: (key) => {
+        if (key.semanticKey && sendPhysKey) {
+          sendPhysKey(key);
+        } else {
+          sendText(key.seq);
+        }
+      },
+      disabled,
+    }),
 };

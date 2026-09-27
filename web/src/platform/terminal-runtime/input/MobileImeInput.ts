@@ -5,21 +5,23 @@ import { cellDimensionsOf } from '../grid';
 const TAP_MOVE_THRESHOLD = 10;
 
 export interface MobileImeInputCallbacks {
-  onSend: (text: string) => void;
+  onCommitText: (text: string) => void;
+  onPaste: (text: string) => void;
+  onSemanticKey: (key: string) => void;
   onFocusChange?: (focused: boolean) => void;
 }
 
-/** Special keys that mobile soft keyboards emit as real keydown events. */
-const KEY_MAP: Record<string, string> = {
-  Enter: '\r',
-  Backspace: '\x7f',
-  Escape: '\x1b',
-  Tab: '\t',
-  ArrowUp: '\x1b[A',
-  ArrowDown: '\x1b[B',
-  ArrowLeft: '\x1b[D',
-  ArrowRight: '\x1b[C',
-};
+/** Special keys from mobile soft keyboards — semantic names only (#1096). */
+const SEMANTIC_KEYS = new Set([
+  'Enter',
+  'Backspace',
+  'Escape',
+  'Tab',
+  'ArrowUp',
+  'ArrowDown',
+  'ArrowLeft',
+  'ArrowRight',
+]);
 
 /**
  * MobileImeInput — a real, focusable textarea that replaces xterm's hidden one
@@ -118,10 +120,9 @@ export class MobileImeInput {
       // keyCode 229 is the Android "processing key" placeholder emitted while
       // an IME is mid-composition; treating it as a real key would double-send.
       if (this.isComposing || ke.isComposing || ke.keyCode === 229) { return; }
-      const data = KEY_MAP[ke.key];
-      if (!data) { return; }
+      if (!SEMANTIC_KEYS.has(ke.key)) { return; }
       ke.preventDefault();
-      this.callbacks.onSend(data);
+      this.callbacks.onSemanticKey(ke.key);
       if (ke.key === 'Enter') { ta.value = ''; }
     });
 
@@ -134,7 +135,7 @@ export class MobileImeInput {
       const text = (ev as ClipboardEvent).clipboardData?.getData('text/plain');
       if (text) {
         ev.preventDefault();
-        this.callbacks.onSend(text);
+        this.callbacks.onPaste(text);
       }
     });
 
@@ -160,7 +161,7 @@ export class MobileImeInput {
       return;
     }
 
-    this.callbacks.onSend(ev.data);
+    this.callbacks.onCommitText(ev.data);
     this.element.value = '';
   }
 
@@ -173,7 +174,7 @@ export class MobileImeInput {
     this.isComposing = false;
 
     if (ev.data) {
-      this.callbacks.onSend(ev.data);
+      this.callbacks.onCommitText(ev.data);
       this.justCommitted = ev.data;
     }
 
@@ -282,7 +283,7 @@ export class MobileImeInput {
   /** Send text as if typed here (toolbar / quick-command path). */
   sendText(text: string): void {
     if (this.disposed) { return; }
-    this.callbacks.onSend(text);
+    this.callbacks.onCommitText(text);
   }
 
   dispose(): void {

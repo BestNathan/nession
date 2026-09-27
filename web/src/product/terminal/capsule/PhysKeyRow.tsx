@@ -17,7 +17,7 @@ import {
 import { cn } from '@/shared/lib/utils';
 
 interface PhysKeyRowProps {
-  onKey: (seq: string) => void;
+  onKey: (key: PhysKey) => void;
   disabled: boolean;
   chainBuffer: readonly string[];
   isChaining: boolean;
@@ -50,7 +50,7 @@ export function PhysKeyRow({
       }
       pressTimerRef.current = setTimeout(() => {
         if (isChaining) {
-          onKey([...chainBuffer, keyDef.seq].join(''));
+          onKey({ label: 'chain', seq: [...chainBuffer, keyDef.seq].join('') });
         } else {
           onChainStart(keyDef.seq);
         }
@@ -69,7 +69,7 @@ export function PhysKeyRow({
       if (isChaining) {
         onChainAdd(keyDef.seq);
       } else {
-        onKey(keyDef.seq);
+        onKey(keyDef);
       }
     };
 
@@ -84,7 +84,7 @@ export function PhysKeyRow({
       if (isChaining) {
         onChainAdd(keyDef.seq);
       } else {
-        onKey(keyDef.seq);
+        onKey(keyDef);
       }
     };
 
