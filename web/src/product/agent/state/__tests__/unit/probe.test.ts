@@ -1,31 +1,21 @@
-// web/src/atoms/__tests__/probe.test.ts
 import { describe, it, expect } from 'vitest';
 import { createStore } from 'jotai';
-import { probeResultsAtom, currentAgentLatenciesAtom, type AgentProbe } from '@/product/agent/state';
-import { sessionIdAtom } from '@/product/session/state';
+import { probeResultsAtom, type AgentProbe } from '@/product/agent/state';
 
-describe('currentAgentLatenciesAtom', () => {
-  it('returns empty when no session is active', () => {
+describe('probeResultsAtom', () => {
+  it('starts empty', () => {
     const store = createStore();
-    store.set(sessionIdAtom, '');
-    expect(store.get(currentAgentLatenciesAtom)).toEqual([]);
+    expect(store.get(probeResultsAtom).size).toBe(0);
   });
 
-  it('returns the probed latencies for the active agent', () => {
+  it('stores per-agent probe results', () => {
     const store = createStore();
-    store.set(sessionIdAtom, 'agent-1:dev');
     const probe: AgentProbe = {
       latencies: [{ url: 'ws://a/ws', latencyMs: 10 }],
       orderedUrls: ['ws://a/ws'],
       probedAt: 0,
     };
     store.set(probeResultsAtom, new Map([['agent-1', probe]]));
-    expect(store.get(currentAgentLatenciesAtom)).toEqual(probe.latencies);
-  });
-
-  it('returns empty when the active agent has no probe yet', () => {
-    const store = createStore();
-    store.set(sessionIdAtom, 'agent-1:dev');
-    expect(store.get(currentAgentLatenciesAtom)).toEqual([]);
+    expect(store.get(probeResultsAtom).get('agent-1')).toEqual(probe);
   });
 });

@@ -1,7 +1,7 @@
 // web/src/product/session/state/route.ts
 //
-// Which route this attachment is using, derived from the attach choice and the
-// probe results. These read Session identity (`agentIdAtom`), so they cannot
+// Route mode and manual P2P switching for the active attachment. These read
+// Session identity (`agentIdAtom`), so they cannot
 // live in `platform` — a platform module may not reach up into `product`. That
 // constraint, not taste, is what keeps them here (#801 Phase 5).
 import { atom } from 'jotai';
@@ -19,24 +19,6 @@ import {
   manualOverrideAtom,
   orderedUrlsAtom,
 } from './session';
-
-/** Currently active P2P URL.
- *  1. manualOverride (user explicitly picked a route)
- *  2. orderedUrls from attach choice (dialog / deep-link restore)
- *  3. fastest reachable from probe results
- *  4. legacy agent_address or first candidate from attachInfo
- */
-export const activeUrlAtom = atom<string | null>((get) => {
-  if (get(forcedRelayAtom)) { return null; }
-  const manual = get(manualOverrideAtom);
-  if (manual) { return manual; }
-  const probe = get(probeResultsAtom).get(get(agentIdAtom) ?? '');
-  return resolveAutoP2pUrl(
-    get(orderedUrlsAtom),
-    probe?.orderedUrls ?? [],
-    get(attachInfoAtom),
-  );
-});
 
 export const effectiveModeAtom = atom<'p2p' | 'relay'>((get) => {
   if (get(forcedRelayAtom)) { return 'relay'; }
