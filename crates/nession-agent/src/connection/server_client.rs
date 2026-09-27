@@ -50,7 +50,7 @@ use nession_protocol::{Message, ProtocolMessage};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio_tungstenite::{
@@ -194,6 +194,11 @@ pub struct ServerClient {
     /// sessions and the same file sandbox, and a lane per path orders each
     /// path and not the two between them.
     mutations: Arc<KeyedLane<ResourceKey>>,
+    /// Outbox for the live central-server connection, when connected.
+    ///
+    /// Set for the lifetime of [`Self::supervise`] so session mutations can
+    /// push a snapshot without waiting for [`SessionWatcher`]'s poll interval.
+    session_publish: Arc<Mutex<Option<ServerClientHandle>>>,
 }
 
 /// Handle to a running [`ServerClient`] for sending messages and shutdown.
@@ -414,6 +419,7 @@ impl ServerClient {
             mutations,
             env_store: EnvStore::new(env_root),
             sourced_envs: std::sync::Mutex::new(HashMap::new()),
+            session_publish: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -457,9 +463,17 @@ impl ServerClient {
 
         // Spawn the supervisor; it owns the reconnect loop and never returns
         // until shutdown.
+        let publish_handle = handle.clone();
         tokio::spawn(async move {
-            self.supervise(outbox_rx, shutdown_rx, interval_tx, sync_needed, connected)
-                .await;
+            self.supervise(
+                outbox_rx,
+                shutdown_rx,
+                interval_tx,
+                sync_needed,
+                connected,
+                publish_handle,
+            )
+            .await;
         });
 
         // Wait (briefly) for the first attempt to report its outcome. A refusal
@@ -484,16 +498,19 @@ impl ServerClient {
         interval_tx: mpsc::Sender<Result<Option<u64>, String>>,
         sync_needed: Arc<AtomicBool>,
         connected: Arc<AtomicBool>,
+        session_publish_handle: ServerClientHandle,
     ) {
         let mut reconnect_delay = INITIAL_RECONNECT_DELAY;
         let mut reported_interval = false;
 
         let this = Arc::new(self);
+        this.set_session_publish_handle(Some(session_publish_handle));
 
         loop {
             // Bail out immediately if shutdown was requested between attempts.
             if shutdown_rx.try_recv().is_ok() {
                 info!("Server client shutting down before reconnect");
+                this.set_session_publish_handle(None);
                 return;
             }
 
@@ -525,6 +542,7 @@ impl ServerClient {
                     match outcome {
                         ConnectionOutcome::Shutdown => {
                             info!("Server client shut down");
+                            this.set_session_publish_handle(None);
                             return;
                         }
                         ConnectionOutcome::Disconnected => {
@@ -543,6 +561,7 @@ impl ServerClient {
                             let _ = interval_tx.try_send(Err(rejected.0.clone()));
                         }
                         warn!("{e}. Not reconnecting — this agent must be upgraded.");
+                        this.set_session_publish_handle(None);
                         return;
                     }
 
@@ -562,6 +581,7 @@ impl ServerClient {
                         _ = tokio::time::sleep(reconnect_delay) => {}
                         _ = shutdown_rx.recv() => {
                             info!("Server client shutting down during backoff");
+                            this.set_session_publish_handle(None);
                             return;
                         }
                     }
@@ -1074,6 +1094,19 @@ impl ServerClient {
             vec![]
         }
     }
+
+    fn session_publish_handle(&self) -> Option<ServerClientHandle> {
+        self.session_publish
+            .lock()
+            .ok()
+            .and_then(|guard| guard.clone())
+    }
+
+    fn set_session_publish_handle(&self, handle: Option<ServerClientHandle>) {
+        if let Ok(mut guard) = self.session_publish.lock() {
+            *guard = handle;
+        }
+    }
 }
 
 /// Flatten multiple env-file snapshots into a single ordered variable list.
@@ -1582,14 +1615,18 @@ mod tests {
 
         let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
 
-        // Wait for the command response.
-        let msg = tokio::time::timeout(Duration::from_secs(5), msg_rx.recv())
-            .await
-            .expect("timeout waiting for command response")
-            .expect("no message received");
-
-        let parsed: serde_json::Value = serde_json::from_str(&msg).unwrap();
-        assert_eq!(parsed["msg_type"], "server.agent.command-response");
+        // Wait for the command response (create now publishes a session-update first).
+        let parsed = tokio::time::timeout(Duration::from_secs(5), async {
+            while let Some(msg) = msg_rx.recv().await {
+                let parsed: serde_json::Value = serde_json::from_str(&msg).unwrap();
+                if parsed["msg_type"] == "server.agent.command-response" {
+                    return parsed;
+                }
+            }
+            panic!("channel closed before command response")
+        })
+        .await
+        .expect("timeout waiting for command response");
         assert_eq!(parsed["payload"]["request_id"], "req-123");
         assert_eq!(parsed["payload"]["command"], "session.create");
         assert_eq!(parsed["payload"]["success"], true);
@@ -3651,7 +3688,22 @@ core_routes!(agent, msg, responses;
                         )
                         .await
                     {
-                        Ok(()) => (true, None, Some(name.clone())),
+                        Ok(()) => {
+                            if let Some(publish) = agent.session_publish_handle() {
+                                if let Err(e) = crate::sync::session_watcher::publish_session_snapshot(
+                                    &publish,
+                                    agent.tmux.as_ref(),
+                                    &name,
+                                )
+                                .await
+                                {
+                                    warn!(
+                                        "Could not publish workload hint for new session {name}: {e:#}"
+                                    );
+                                }
+                            }
+                            (true, None, Some(name.clone()))
+                        }
                         Err(e) => (false, Some(e.to_string()), None),
                     };
 

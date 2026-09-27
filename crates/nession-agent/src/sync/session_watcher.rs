@@ -5,6 +5,72 @@ use crate::tmux::manager::{SessionInfo, SessionManager};
 use anyhow::Result;
 use std::collections::HashMap;
 use std::time::Duration;
+use tracing::warn;
+
+/// Status string sent with [`ServerClientHandle::send_session_update`].
+fn session_status(session: &SessionInfo) -> &'static str {
+    if session.attached_clients > 0 {
+        "active"
+    } else {
+        "detached"
+    }
+}
+
+/// Push one session's tmux snapshot to the server immediately.
+///
+/// After `server.session.create` the registry is seeded without a workload hint;
+/// the periodic [`SessionWatcher`] may not run for several seconds. This closes
+/// that gap and retries briefly while tmux populates `#{pane_current_command}`.
+pub async fn publish_session_snapshot(
+    handle: &ServerClientHandle,
+    tmux: &SessionManager,
+    session_name: &str,
+) -> Result<()> {
+    const ATTEMPTS: u32 = 15;
+    const RETRY_DELAY: Duration = Duration::from_millis(200);
+
+    let mut last: Option<SessionInfo> = None;
+    for attempt in 0..ATTEMPTS {
+        let sessions = tmux.list_sessions().await?;
+        let Some(session) = sessions.into_iter().find(|s| s.name == session_name) else {
+            if attempt + 1 < ATTEMPTS {
+                tokio::time::sleep(RETRY_DELAY).await;
+                continue;
+            }
+            anyhow::bail!("session {session_name} not found in tmux after create");
+        };
+
+        let has_command = session
+            .foreground_command
+            .as_ref()
+            .is_some_and(|command| !command.is_empty());
+        last = Some(session.clone());
+        handle.send_session_update(
+            &session.name,
+            session_status(&session),
+            session.window_count,
+            session.attached_clients,
+            session.foreground_command.as_deref(),
+        )?;
+
+        if has_command {
+            return Ok(());
+        }
+        if attempt + 1 < ATTEMPTS {
+            tokio::time::sleep(RETRY_DELAY).await;
+        }
+    }
+
+    if last.is_some() {
+        warn!(
+            session = session_name,
+            "foreground command still empty after create retries; server got last snapshot"
+        );
+        Ok(())
+    } else {
+        anyhow::bail!("session {session_name} not found in tmux after create")
+    }
+}
 use tokio::sync::mpsc;
 use tracing::{debug, error};
 
@@ -177,16 +243,9 @@ impl SessionWatcher {
 
     /// Send a session update to the server.
     async fn send_update(&self, session: &SessionInfo) -> Result<()> {
-        // Determine status based on attached clients.
-        let status = if session.attached_clients > 0 {
-            "active"
-        } else {
-            "detached"
-        };
-
         self.handle.send_session_update(
             &session.name,
-            status,
+            session_status(session),
             session.window_count,
             session.attached_clients,
             session.foreground_command.as_deref(),
