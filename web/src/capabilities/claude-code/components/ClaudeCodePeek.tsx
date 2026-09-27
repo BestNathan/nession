@@ -1,8 +1,10 @@
 import { capsulePeekActionClass } from '@/shared/lib/peekActionClass';
 import type { CapabilityState } from '@/product/capability';
+import type { CapsuleDetail } from '@/product/terminal/capsule/types';
 import { conversationLabel } from '../model/conversationLabel';
 import { stateLine } from '../model/stateLine';
 import type { ConversationSummary } from './ClaudeCodeProjection';
+import { ConversationOverlay } from './ConversationOverlay';
 import { cn } from '@/shared/lib/utils';
 
 /**
@@ -36,13 +38,20 @@ const RECENT_LIMIT = 3;
  * - **none** — said plainly, rather than an empty frame that reads as a bug.
  */
 export function ClaudeCodePeek({
+  agentId,
+  sessionId,
   conversation,
   state,
   onOpenWorkspace,
+  openDetail,
 }: {
+  agentId: string | undefined;
+  sessionId: string | undefined;
   conversation: ConversationSummary;
   state: CapabilityState;
   onOpenWorkspace?: (resourceId?: string) => void;
+  /** The host's approved overlay (#1120) — this capability never portals. */
+  openDetail: (detail: CapsuleDetail) => void;
 }) {
   const recent = conversation.candidates.slice(0, RECENT_LIMIT);
 
@@ -89,8 +98,31 @@ export function ClaudeCodePeek({
         </p>
       )}
 
-      {onOpenWorkspace ? (
-        <div className="flex justify-end">
+      {/* Local action on the left, deepening on the right, because they are
+          different kinds of thing: one keeps you in the Terminal and the other
+          leaves it. `#1120` asks for exactly that distinction, and putting them
+          in one row is what makes it visible rather than documented. */}
+      <div className="flex items-center justify-between gap-2">
+        {conversation.bound ? (
+          <button
+            type="button"
+            data-testid="claude-code-peek-view-conversation"
+            onClick={() =>
+              openDetail({
+                title: conversation.title ?? 'Conversation',
+                content: <ConversationOverlay agentId={agentId} sessionId={sessionId} />,
+              })
+            }
+            className={capsulePeekActionClass}
+          >
+            View conversation
+          </button>
+        ) : (
+          // Keeps the Workspace action on the right whether or not there is a
+          // local one — a row that reflows by state reads as two layouts.
+          <span />
+        )}
+        {onOpenWorkspace ? (
           <button
             type="button"
             data-testid="capsule-capability-open-workspace"
@@ -99,8 +131,8 @@ export function ClaudeCodePeek({
           >
             Open in Workspace →
           </button>
-        </div>
-      ) : null}
+        ) : null}
+      </div>
     </div>
   );
 }
