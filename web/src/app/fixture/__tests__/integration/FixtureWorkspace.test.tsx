@@ -130,6 +130,25 @@ describe('FixtureWorkspace', () => {
     expect(screen.queryByTestId('conversation-open')).not.toBeInTheDocument();
   });
 
+  it('answers the config list, so Configuration is a reachable state', async () => {
+    // `#1120`'s success criteria include "baselines include … Configuration",
+    // and that could not be met: this surface answered `claude-code.conversation`
+    // and rejected every other wire, so the Configuration section rendered a
+    // transport error in every fixture route. Nothing asserted it either way,
+    // which is how it stayed unnoticed — so this is the assertion that keeps it
+    // reachable, and the reason it is worth having even though it looks trivial.
+    const user = userEvent.setup();
+    renderFixture('/fixture/workspace?capability=claude-code');
+
+    await user.click(await screen.findByRole('tab', { name: 'Configuration' }));
+
+    // Project is the default scope, and it is the one with the Commands
+    // category — so this also pins that the default reaches project data rather
+    // than showing whichever scope happened to load first.
+    expect(await screen.findByText('.claude/CLAUDE.md')).toBeInTheDocument();
+    expect(screen.getByText('.claude/commands/review.md')).toBeInTheDocument();
+  });
+
   it('reads a finished conversation, and says so', async () => {
     renderFixture('/fixture/workspace?capability=claude-code&conversation=inactive');
 

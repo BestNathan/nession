@@ -1,6 +1,12 @@
 import { manifestsOf, ProtocolDirectory } from '@/platform/protocol';
 import type { PluginSurface } from '@/platform/socket/types';
 import { PROTOCOL, type ConversationResponse } from '@/generated/protocol/claude-code/conversation/v1';
+import {
+  PROTOCOL as LIST_PROTOCOL,
+  type ConfigCategory,
+  type ListResponse,
+  type Scope as ConfigScope,
+} from '@/generated/protocol/claude-code/list/v1';
 import { FIXTURE_AGENTS } from './fixtureData';
 
 /**
@@ -188,6 +194,61 @@ function responseFor(scenario: string): ConversationResponse | undefined {
 }
 
 /**
+ * What the Configuration section browses, per scope.
+ *
+ * The two scopes are deliberately **different shapes**, because the section's
+ * whole job is to say which one you are looking at: a fixture where they held
+ * the same files would let a rendering bug that showed `global` under the
+ * `project` tab pass every assertion. Project carries an extra category and
+ * global an extra file, so a swap is visible rather than coincidentally right.
+ *
+ * Read-only and static: this is a *listing*, and the fixture has no answering
+ * state to model here — unlike the conversation surface, which has several. What
+ * matters is that the paths resolve to something the reader can recognise, not
+ * that the bytes are real.
+ */
+const CONFIG_FILES: Record<ConfigScope, ConfigCategory[]> = {
+  global: [
+    {
+      name: 'Instructions',
+      icon: 'file-text',
+      files: [{ path: '~/.claude/CLAUDE.md', size: 1284, content_type: 'text/markdown' }],
+    },
+    {
+      name: 'Settings',
+      icon: 'settings',
+      files: [
+        { path: '~/.claude/settings.json', size: 412, content_type: 'application/json' },
+        { path: '~/.claude/settings.local.json', size: 96, content_type: 'application/json' },
+      ],
+    },
+  ],
+  project: [
+    {
+      name: 'Instructions',
+      icon: 'file-text',
+      files: [{ path: '.claude/CLAUDE.md', size: 2640, content_type: 'text/markdown' }],
+    },
+    {
+      name: 'Settings',
+      icon: 'settings',
+      files: [{ path: '.claude/settings.json', size: 388, content_type: 'application/json' }],
+    },
+    {
+      // Project-only, on purpose — see above.
+      name: 'Commands',
+      icon: 'terminal',
+      files: [{ path: '.claude/commands/review.md', size: 730, content_type: 'text/markdown' }],
+    },
+  ],
+};
+
+/** The list answer for a scope. */
+function listFor(scope: ConfigScope): ListResponse {
+  return { available: true, categories: CONFIG_FILES[scope] };
+}
+
+/**
  * The fixture's Claude Code conversation surface.
  *
  * `search` is the route's query string, so a route parameter names the input the
@@ -217,6 +278,15 @@ export function fixtureConversationSurface(search: string): PluginSurface {
         }
         void payload;
         return Promise.resolve(response as T);
+      }
+      // The capability's other wire. It used to be rejected outright, which
+      // meant the Configuration section rendered a transport error and could
+      // not be photographed at all — so `#1120`'s "baselines include …
+      // Configuration" had no way to be met. Answering it is what makes that
+      // section a reachable state rather than a dead route.
+      if (type === LIST_PROTOCOL) {
+        const scope = payload.scope === 'global' ? 'global' : 'project';
+        return Promise.resolve(listFor(scope) as T);
       }
       return Promise.reject(new Error(`fixture conversation surface does not answer ${type}`));
     },
