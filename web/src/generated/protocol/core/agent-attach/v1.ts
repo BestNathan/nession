@@ -27,7 +27,7 @@ export type ClientAttachPayload = { session_name: string, width: number, height:
  * before PTY creation. Empty (default) preserves pre-env behaviour.
  */
 env_snapshots: Array<EnvSnapshot>, };
-export type ClientAttachResponse = { session_name: string, };
+export type ClientAttachResponse = { session_name: string, control_generation?: number | null, control_role?: string | null, controller_client_id?: string | null, stream_epoch?: number | null, stream_cursor?: number | null, };
 export type EnvSnapshot = { name: string, source: EnvSource, agent_id?: string | null, 
 /**
  * Ordered KEY/VALUE pairs (already deduplicated, last-wins).
@@ -50,5 +50,5 @@ export type ClientAttachCall = { session_name: string, width: number, height: nu
 env_snapshots: Array<EnvSnapshot>, };
 
 /** The payload the provider answers with. */
-export type ClientAttachReply = { session_name: string, };
+export type ClientAttachReply = { session_name: string, control_generation?: number | null, control_role?: string | null, controller_client_id?: string | null, stream_epoch?: number | null, stream_cursor?: number | null, };
 

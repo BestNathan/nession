@@ -1640,6 +1640,57 @@ wires: &["server.commands.update"],
         },
         Unit {
             owner: "core",
+            id: "agent.terminal.stream.resume",
+            version: 1,
+            wires: &["agent.terminal.stream.resume"],
+            decls: vec![
+                decl_of::<nession_protocol::contracts::terminal::v1::TerminalStreamResumePayload>(
+                    cfg,
+                ),
+                decl_of::<nession_protocol::contracts::terminal::v1::TerminalStreamResumeResponse>(
+                    cfg,
+                ),
+                decl_of::<nession_protocol::contracts::terminal::v1::TerminalStreamEventPayload>(
+                    cfg,
+                ),
+            ],
+            request: Some((
+                "TerminalStreamResumeCall",
+                nession_protocol::contracts::terminal::v1::TerminalStreamResumePayload::inline,
+                schema_of::<nession_protocol::contracts::terminal::v1::TerminalStreamResumePayload>,
+            )),
+            response: Some((
+                "TerminalStreamResumeReply",
+                nession_protocol::contracts::terminal::v1::TerminalStreamResumeResponse::inline,
+                schema_of::<nession_protocol::contracts::terminal::v1::TerminalStreamResumeResponse>,
+            )),
+        },
+        Unit {
+            owner: "core",
+            id: "agent.terminal.control.acquire",
+            version: 1,
+            wires: &["agent.terminal.control.acquire"],
+            decls: vec![
+                decl_of::<nession_protocol::contracts::terminal::v1::TerminalControlAcquirePayload>(
+                    cfg,
+                ),
+                decl_of::<nession_protocol::contracts::terminal::v1::TerminalControlAcquireResponse>(
+                    cfg,
+                ),
+            ],
+            request: Some((
+                "TerminalControlAcquireCall",
+                nession_protocol::contracts::terminal::v1::TerminalControlAcquirePayload::inline,
+                schema_of::<nession_protocol::contracts::terminal::v1::TerminalControlAcquirePayload>,
+            )),
+            response: Some((
+                "TerminalControlAcquireReply",
+                nession_protocol::contracts::terminal::v1::TerminalControlAcquireResponse::inline,
+                schema_of::<nession_protocol::contracts::terminal::v1::TerminalControlAcquireResponse>,
+            )),
+        },
+        Unit {
+            owner: "core",
             id: "agent.file.list",
             version: 1,
 wires: &["agent.file.list"],
