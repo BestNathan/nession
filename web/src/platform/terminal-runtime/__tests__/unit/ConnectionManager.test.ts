@@ -124,6 +124,42 @@ describe('ConnectionManager', () => {
       expect(api.sendInput).not.toHaveBeenCalled();
     });
 
+    it('does not re-apply replayed events the live stream already delivered (#1148)', async () => {
+      // The seed path hands the gap fetch the cursor from the attach response.
+      // When that cursor is behind what the live stream has already written,
+      // the replay re-applies the whole stream on top of itself — every byte
+      // reaching xterm twice, so xterm answers each capability query twice.
+      const { api, outputHandlers } = makeAgentApi();
+      const received: string[] = [];
+      const cm = new ConnectionManager({
+        mode: 'p2p', sessionName: 'test', sessionId: 'a:test', agentApi: api, ...attached,
+      });
+      cm.onOutput = (data) => received.push(new TextDecoder().decode(data));
+
+      outputHandlers[0]({ data: new TextEncoder().encode('one'), streamEpoch: 1, streamSeq: 1 });
+      outputHandlers[0]({ data: new TextEncoder().encode('two'), streamEpoch: 1, streamSeq: 2 });
+      expect(received).toEqual(['one', 'two']);
+
+      (api.resumeStream as ReturnType<typeof vi.fn>).mockResolvedValue({
+        streamEpoch: 1,
+        epochMatch: true,
+        events: [1, 2, 3].map((seq) => ({
+          kind: 'output' as const,
+          streamEpoch: 1,
+          streamSeq: seq,
+          data: btoa(['one', 'two', 'three'][seq - 1]),
+        })),
+      });
+
+      // A stale cursor for the same epoch — the replay answers 1 and 2 as well.
+      cm.seedStreamCursor(1, 0);
+      await flushMicrotasks();
+
+      // `three` is the only thing that was actually missing.
+      expect(received).toEqual(['one', 'two', 'three']);
+      cm.dispose();
+    });
+
     it('does not deliver a live frame the gap replay already carried (#1148)', async () => {
       // The replay answers "every event after the cursor" with no upper bound,
       // so it already contains the frame that is about to arrive live.
