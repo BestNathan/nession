@@ -45,5 +45,20 @@
     "background": { "ref": "semantic.background" },
     "gutter": { "ref": "semantic.muted" },
     "activeLine": { "ref": "semantic.accent" }
+  },
+  "conversation": {
+    "user": {
+      "surface": { "ref": "semantic.accent" },
+      "foreground": { "ref": "semantic.accent-foreground" }
+    },
+    "assistant": {
+      "surface": { "ref": "semantic.card" },
+      "foreground": { "ref": "semantic.card-foreground" }
+    },
+    "tool": {
+      "surface": { "ref": "semantic.muted" },
+      "foreground": { "ref": "semantic.muted-foreground" },
+      "error": { "ref": "semantic.danger" }
+    }
   }
 }
