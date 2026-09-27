@@ -1,4 +1,4 @@
-import { Search } from 'lucide-react';
+import { MoreHorizontal, Search } from 'lucide-react';
 import { cn } from '@/shared/lib/utils';
 import { Button } from '@/components/ui/button';
 
@@ -6,6 +6,7 @@ export interface AppFilesBreadcrumbProps {
   segments: { path: string; label: string }[];
   onSelect: (path: string) => void;
   onOpenSearch: () => void;
+  onOpenMore: () => void;
 }
 
 /**
@@ -14,7 +15,12 @@ export interface AppFilesBreadcrumbProps {
  * The shell page header names only the current directory; the full path lives
  * here as tappable segments so deep trees stay reachable without indentation.
  */
-export function AppFilesBreadcrumb({ segments, onSelect, onOpenSearch }: AppFilesBreadcrumbProps) {
+export function AppFilesBreadcrumb({
+  segments,
+  onSelect,
+  onOpenSearch,
+  onOpenMore,
+}: AppFilesBreadcrumbProps) {
   return (
     <div
       className="flex shrink-0 items-center gap-1 px-[var(--shell-space-3)] pb-[var(--shell-space-1)]"
@@ -55,6 +61,16 @@ export function AppFilesBreadcrumb({ segments, onSelect, onOpenSearch }: AppFile
         onClick={() => onOpenSearch()}
       >
         <Search className="size-4" aria-hidden />
+      </Button>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="size-9 shrink-0"
+        aria-label="Folder actions"
+        onClick={() => onOpenMore()}
+      >
+        <MoreHorizontal className="size-4" aria-hidden />
       </Button>
     </div>
   );

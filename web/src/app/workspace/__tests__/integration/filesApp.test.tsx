@@ -240,6 +240,23 @@ describe('FilesAppLayout', () => {
     expect(screen.queryByTestId('files-app-search')).not.toBeInTheDocument();
   });
 
+  it('opens the folder sheet and refreshes the list', async () => {
+    const user = userEvent.setup();
+    const fileOps = makeFileOps();
+    renderLayout({ ...baseCtx, fileOps });
+    await screen.findByText('docs');
+    vi.mocked(fileOps.listDir).mockClear();
+
+    await user.click(screen.getByRole('button', { name: 'Folder actions' }));
+    expect(screen.getByTestId('files-app-folder-sheet')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Refresh' }));
+    await waitFor(() => {
+      expect(fileOps.listDir).toHaveBeenCalledWith('');
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+  });
+
   it('restores the directory stack after leaving search', async () => {
     const user = userEvent.setup();
     const { setPush } = renderLayout();

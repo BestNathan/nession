@@ -1,6 +1,9 @@
+import { useEffect, useState } from 'react';
 import { FileList, type FileEntry } from '@/capabilities/files';
 import type { WorkspaceAppViewProps } from '@/app/workspace/workspaceContext';
+import { directoryPageTitle } from './appFilesNavigation';
 import { AppFilesBreadcrumb } from './AppFilesBreadcrumb';
+import { AppFilesFolderSheet } from './AppFilesFolderSheet';
 import { AppFilesSearchPanel } from './AppFilesSearchPanel';
 import { AppFilesViewerLayer } from './AppFilesViewerLayer';
 import { useAppFilesNavigator } from './useAppFilesNavigator';
@@ -14,6 +17,9 @@ import { useAppFilesSearch } from './useAppFilesSearch';
  * The file viewer remains a second push depth declared the same way as `#1051`.
  */
 export function FilesAppLayout({ ctx, depth }: WorkspaceAppViewProps) {
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [listReloadSignal, setListReloadSignal] = useState(0);
+
   const nav = useAppFilesNavigator(
     depth,
     {
@@ -24,6 +30,10 @@ export function FilesAppLayout({ ctx, depth }: WorkspaceAppViewProps) {
   );
 
   const search = useAppFilesSearch(ctx.fileOps, nav.searchOpen);
+
+  useEffect(() => {
+    setMoreOpen(false);
+  }, [nav.currentDir, nav.searchOpen, nav.selected]);
 
   if (!ctx.fileOps) {
     return null;
@@ -68,6 +78,7 @@ export function FilesAppLayout({ ctx, depth }: WorkspaceAppViewProps) {
         segments={nav.breadcrumbSegments}
         onSelect={nav.navigateToPath}
         onOpenSearch={nav.openSearch}
+        onOpenMore={() => setMoreOpen(true)}
       />
       <div className="min-h-0 flex-1">
         <FileList
@@ -78,8 +89,18 @@ export function FilesAppLayout({ ctx, depth }: WorkspaceAppViewProps) {
           restoredScrollTop={nav.restoredScrollTop}
           onScrollSnapshot={nav.snapshotScroll}
           workspaceContextLine={nav.workspaceContextLine}
+          reloadSignal={listReloadSignal}
         />
       </div>
+      <AppFilesFolderSheet
+        open={moreOpen}
+        onOpenChange={setMoreOpen}
+        folderTitle={directoryPageTitle(nav.currentDir)}
+        relativeDir={nav.currentDir}
+        sessionId={ctx.session?.session_id ?? ''}
+        fileOps={ctx.fileOps}
+        onRefresh={() => setListReloadSignal((n) => n + 1)}
+      />
     </div>
   );
 }
