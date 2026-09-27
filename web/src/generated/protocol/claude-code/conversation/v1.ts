@@ -144,7 +144,27 @@ cwd: string,
 /**
  * The newest timestamp in the transcript, when it had one.
  */
-updated_at?: string | null, };
+updated_at?: string | null, 
+/**
+ * A human-readable title for this conversation, when Claude recorded one.
+ *
+ * **Additive and optional, so this stays `v1`.** The evolution rule
+ * (`docs/architecture/protocol.md`) reserves a new version for a renamed
+ * field, a changed unit, a new *required* field, or changed error
+ * semantics. This is none of those: a consumer that ignores it behaves
+ * exactly as it did, and one that reads it does not have to handle its
+ * absence differently from a transcript that never carried a title.
+ *
+ * Absent for roughly a fifth of real transcripts (measured: 3 of 14 in a
+ * sample carried none), which is why it is optional rather than defaulted
+ * to something the provider invented. A client that needs a label for
+ * those must derive its own fallback and say that it is a fallback.
+ *
+ * **Never identity.** Selection uses `claude_session_id`; two
+ * conversations may carry the same title, and none of them may be chosen
+ * by one.
+ */
+title?: string | null, };
 
 // ── Operations ──
 

@@ -60,6 +60,18 @@ pub struct Discovered {
     pub cwd: String,
     /// Newest timestamp seen, when the transcript carried timestamps.
     pub updated_at: Option<String>,
+    /// Claude's own title for this conversation, when it wrote one.
+    ///
+    /// Read from the transcript's **last** `ai-title` record rather than its
+    /// first, because the title is rewritten as the conversation evolves:
+    /// measured, one transcript held 1337 of them and started at `"Stage 1b"`
+    /// while ending at `"app-sessions-redesign"`. The last one is the current
+    /// one.
+    ///
+    /// **Display metadata, never identity.** Two conversations may carry the
+    /// same title, and none of the selection paths read this — they all use
+    /// `claude_session_id`, as they did before this field existed.
+    pub title: Option<String>,
     path: PathBuf,
 }
 
@@ -213,30 +225,73 @@ fn inspect(path: &Path, cwd: &str) -> Option<Discovered> {
     // identity the transcript never claimed.
     let claude_session_id = claude_session_id?;
 
+    let tail = tail_facts(path);
+
     Some(Discovered {
         claude_session_id,
         cwd: recorded_cwd,
-        updated_at: newest_timestamp(path),
+        updated_at: tail.updated_at,
+        title: tail.title,
         path: path.to_path_buf(),
     })
 }
 
-/// The newest `timestamp` in the transcript's last chunk.
-fn newest_timestamp(path: &Path) -> Option<String> {
-    let mut file = File::open(path).ok()?;
-    let len = file.metadata().ok()?.len();
-    let start = len.saturating_sub(READ_CHUNK);
-    file.seek(SeekFrom::Start(start)).ok()?;
-    let mut tail = String::new();
-    file.read_to_string(&mut tail).ok()?;
+/// What a transcript's last chunk says about it.
+///
+/// Both questions are *last-record* questions — the newest timestamp and the
+/// current title are at the end of a transcript, not the start — so one read
+/// answers both. Measured over 14 real transcripts: the last 64 KiB yields a
+/// title for exactly the 11 that carry one anywhere, so the bound that already
+/// existed for `updated_at` is sufficient for the title too and costs **no
+/// extra I/O**. Widening it would not find more titles; it would only read
+/// more.
+#[derive(Default)]
+struct TailFacts {
+    updated_at: Option<String>,
+    title: Option<String>,
+}
 
-    tail.lines()
-        .filter_map(|line| {
-            serde_json::from_str::<Value>(line)
-                .ok()
-                .and_then(|r| string_field(&r, "timestamp"))
-        })
-        .next_back()
+fn tail_facts(path: &Path) -> TailFacts {
+    let Ok(mut file) = File::open(path) else {
+        return TailFacts::default();
+    };
+    let Ok(len) = file.metadata().map(|m| m.len()) else {
+        return TailFacts::default();
+    };
+    if file
+        .seek(SeekFrom::Start(len.saturating_sub(READ_CHUNK)))
+        .is_err()
+    {
+        return TailFacts::default();
+    }
+    let mut tail = String::new();
+    if file.read_to_string(&mut tail).is_err() {
+        return TailFacts::default();
+    }
+
+    let mut facts = TailFacts::default();
+    for line in tail.lines() {
+        let Ok(record) = serde_json::from_str::<Value>(line) else {
+            // The window starts mid-record, and a transcript being appended to
+            // ends mid-record. Both are expected.
+            continue;
+        };
+        // Last wins for both, which is the whole reason this reads the tail.
+        if let Some(timestamp) = string_field(&record, "timestamp") {
+            facts.updated_at = Some(timestamp);
+        }
+        if record.get("type").and_then(Value::as_str) == Some("ai-title") {
+            // The measured shape is `{"type":"ai-title","aiTitle":"…"}`. An
+            // empty title is treated as absent: it says nothing a row can show,
+            // and letting it through would replace a usable fallback with a
+            // blank.
+            match string_field(&record, "aiTitle") {
+                Some(title) if !title.trim().is_empty() => facts.title = Some(title),
+                _ => {}
+            }
+        }
+    }
+    facts
 }
 
 /// A page of `conversation`, ending at `end_offset` (or at the end of the file).
@@ -730,6 +785,117 @@ mod tests {
         assert!(conversations_at("/w").is_empty());
     }
 
+    // ---- titles ---------------------------------------------------------
+
+    /// A transcript carrying `ai-title` records, in the order given.
+    fn transcript_with_titles(dir: &Path, name: &str, cwd: &str, titles: &[&str]) -> PathBuf {
+        let mut body = format!(
+            r#"{{"type":"user","uuid":"u","timestamp":"2026-09-25T00:00:09Z","cwd":"{cwd}","sessionId":"{name}","message":{{"role":"user","content":"hi"}}}}"#
+        );
+        for title in titles {
+            body.push('\n');
+            body.push_str(&format!(
+                r#"{{"type":"ai-title","aiTitle":"{title}","sessionId":"{name}"}}"#
+            ));
+        }
+        body.push('\n');
+        let path = dir.join(name);
+        std::fs::write(&path, body).expect("write the transcript");
+        path
+    }
+
+    #[test]
+    fn the_title_is_the_last_ai_title_record_not_the_first() {
+        // Measured against a real transcript: it held 1337 of them, opening at
+        // "Stage 1b" and ending at "app-sessions-redesign". The title is
+        // rewritten as the conversation evolves, so the first record is what
+        // Claude called the conversation in its opening seconds — reading it
+        // would label every row by a name the work has since outgrown.
+        let root = tempfile::tempdir().unwrap();
+        let project = root.path().join("-w");
+        std::fs::create_dir_all(&project).unwrap();
+        transcript_with_titles(
+            &project,
+            "mine.jsonl",
+            "/w",
+            &["Stage 1b", "app-sessions-redesign"],
+        );
+
+        let _root = ProjectsRootForTest::set(root.path().to_path_buf());
+        let found = conversations_at("/w");
+
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].title.as_deref(), Some("app-sessions-redesign"));
+    }
+
+    #[test]
+    fn a_transcript_with_no_title_reports_none_rather_than_inventing_one() {
+        // Measured: 3 of 14 sampled transcripts carry no `ai-title` at all, so
+        // absence is an ordinary state and not a failure. Substituting anything
+        // here would make "no title" indistinguishable from a title, and would
+        // take the choice of fallback away from the client that has to draw it.
+        let root = tempfile::tempdir().unwrap();
+        let project = root.path().join("-w");
+        std::fs::create_dir_all(&project).unwrap();
+        transcript_at(&project, "mine.jsonl", "/w", "2026-09-25T00:00:09Z");
+
+        let _root = ProjectsRootForTest::set(root.path().to_path_buf());
+        let found = conversations_at("/w");
+
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].title, None);
+    }
+
+    #[test]
+    fn an_empty_title_is_treated_as_absent() {
+        // An empty string is not a title a row can show. Letting it through
+        // would replace whatever the client would otherwise draw with a blank
+        // line, which reads as a bug rather than as "Claude named nothing".
+        let root = tempfile::tempdir().unwrap();
+        let project = root.path().join("-w");
+        std::fs::create_dir_all(&project).unwrap();
+        transcript_with_titles(&project, "mine.jsonl", "/w", &[""]);
+
+        let _root = ProjectsRootForTest::set(root.path().to_path_buf());
+        let found = conversations_at("/w");
+
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].title, None);
+    }
+
+    #[test]
+    fn the_title_is_found_when_the_transcript_is_larger_than_the_read_window() {
+        // The title is read from a bounded tail window, so the case that would
+        // break it is a transcript whose `ai-title` sits behind that window.
+        // Measured over real transcripts the window was always enough (the last
+        // 64 KiB yielded a title for exactly the transcripts that have one) —
+        // this pins the behaviour so a later change to the window has to
+        // confront it rather than silently report absence.
+        let root = tempfile::tempdir().unwrap();
+        let project = root.path().join("-w");
+        std::fs::create_dir_all(&project).unwrap();
+
+        let mut body = String::from(
+            r#"{"type":"user","uuid":"u","timestamp":"2026-09-25T00:00:09Z","cwd":"/w","sessionId":"mine.jsonl","message":{"role":"user","content":"hi"}}"#,
+        );
+        for n in 0..2_000 {
+            body.push('\n');
+            body.push_str(&format!(
+                r#"{{"type":"user","uuid":"f{n}","timestamp":"2026-09-25T00:01:00Z","cwd":"/w","sessionId":"mine.jsonl","message":{{"role":"user","content":"filler {n}"}}}}"#
+            ));
+        }
+        body.push('\n');
+        body.push_str(r#"{"type":"ai-title","aiTitle":"at the tail","sessionId":"mine.jsonl"}"#);
+        body.push('\n');
+        std::fs::write(project.join("mine.jsonl"), body).expect("write the transcript");
+
+        let _root = ProjectsRootForTest::set(root.path().to_path_buf());
+        let found = conversations_at("/w");
+
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].title.as_deref(), Some("at the tail"));
+    }
+
     // ---- paging ---------------------------------------------------------
 
     /// A user turn, as one transcript line.
@@ -746,6 +912,9 @@ mod tests {
             claude_session_id: "s".to_string(),
             cwd: "/w".to_string(),
             updated_at: None,
+            // Built directly rather than through `inspect`, so there is no tail
+            // to read a title from. The title paths have their own tests.
+            title: None,
             path,
         }
     }

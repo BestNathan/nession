@@ -187,6 +187,25 @@ pub struct ConversationCandidateV1 {
     /// The newest timestamp in the transcript, when it had one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<String>,
+    /// A human-readable title for this conversation, when Claude recorded one.
+    ///
+    /// **Additive and optional, so this stays `v1`.** The evolution rule
+    /// (`docs/architecture/protocol.md`) reserves a new version for a renamed
+    /// field, a changed unit, a new *required* field, or changed error
+    /// semantics. This is none of those: a consumer that ignores it behaves
+    /// exactly as it did, and one that reads it does not have to handle its
+    /// absence differently from a transcript that never carried a title.
+    ///
+    /// Absent for roughly a fifth of real transcripts (measured: 3 of 14 in a
+    /// sample carried none), which is why it is optional rather than defaulted
+    /// to something the provider invented. A client that needs a label for
+    /// those must derive its own fallback and say that it is a fallback.
+    ///
+    /// **Never identity.** Selection uses `claude_session_id`; two
+    /// conversations may carry the same title, and none of them may be chosen
+    /// by one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
 }
 
 /// The conversation the response is about.
@@ -339,11 +358,56 @@ mod tests {
             claude_session_id: "abc".to_string(),
             cwd: "/work".to_string(),
             updated_at: None,
+            title: Some("a readable title".to_string()),
         };
         let json = serde_json::to_string(&candidate).unwrap();
         assert!(
             !json.contains("transcript") && !json.contains(".jsonl"),
             "the candidate leaks where the transcript is: {json}"
+        );
+    }
+
+    #[test]
+    fn a_candidate_with_no_title_omits_the_field_rather_than_sending_null() {
+        // `skip_serializing_if`, rather than a plain `Option`, because the two
+        // are told apart on the wire: a client deciding whether to draw its own
+        // fallback should be able to read absence directly instead of guessing
+        // what a null means. This is also what keeps the field additive — a
+        // consumer written before it existed sees byte-for-byte the payload it
+        // saw before, for every transcript whose title is unknown.
+        let candidate = ConversationCandidateV1 {
+            claude_session_id: "abc".to_string(),
+            cwd: "/work".to_string(),
+            updated_at: None,
+            title: None,
+        };
+
+        let json = serde_json::to_string(&candidate).unwrap();
+        assert!(
+            !json.contains("title"),
+            "an absent title was still serialized: {json}"
+        );
+    }
+
+    #[test]
+    fn a_candidate_with_a_title_carries_it() {
+        // The other half. Without this, the test above would pass on a payload
+        // that never carried a title at all.
+        let candidate = ConversationCandidateV1 {
+            claude_session_id: "abc".to_string(),
+            cwd: "/work".to_string(),
+            updated_at: None,
+            title: Some("app-sessions-redesign".to_string()),
+        };
+
+        // Asserted on the payload rather than round-tripped through a
+        // `Deserialize`: this contract is provider-to-consumer and only ever
+        // implements `Serialize`, and adding the other half to make one test
+        // read better would widen the contract for the test's sake.
+        let json = serde_json::to_string(&candidate).unwrap();
+        assert!(
+            json.contains(r#""title":"app-sessions-redesign""#),
+            "a recorded title was dropped from the payload: {json}"
         );
     }
 }

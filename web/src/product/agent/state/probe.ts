@@ -5,7 +5,6 @@
 // an Agent's addresses, so they belong to the Agent concept (#801 Phase 5).
 import { atom } from 'jotai';
 import type { AddressLatency } from '@/types';
-import { agentIdAtom } from '@/product/session/state';
 
 /**
  * One agent's browser-latency probe result (written by `useAgentProbe`).
@@ -30,10 +29,3 @@ export interface AgentProbe {
  * upgrade and a probe without one measures nothing (#1091).
  */
 export const probeResultsAtom = atom<Map<string, AgentProbe>>(new Map());
-
-/** Latencies for the currently active agent (empty when none is active/unprobed). */
-export const currentAgentLatenciesAtom = atom<AddressLatency[]>((get) => {
-  const agentId = get(agentIdAtom);
-  if (!agentId) { return []; }
-  return get(probeResultsAtom).get(agentId)?.latencies ?? [];
-});
