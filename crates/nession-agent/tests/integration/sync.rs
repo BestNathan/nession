@@ -4,7 +4,7 @@ use super::TestSession;
 use futures_util::{SinkExt, StreamExt};
 use nession_agent::connection::{ServerClient, ServerClientHandle};
 use nession_agent::sync::heartbeat::HeartbeatLoop;
-use nession_agent::sync::session_watcher::SessionWatcher;
+use nession_agent::sync::session_watcher::{publish_session_snapshot, SessionWatcher};
 use nession_agent::tmux::manager::SessionManager;
 use nession_protocol::contracts::agent::v1::AgentMetadata;
 use std::sync::Arc;
@@ -340,4 +340,51 @@ async fn test_session_watcher_detects_removed_session() {
     assert_eq!(update["payload"]["status"], "gone");
     assert_eq!(update["payload"]["window_count"], 0);
     assert_eq!(update["payload"]["attached_clients"], 0);
+}
+
+#[tokio::test]
+async fn test_publish_session_snapshot_includes_foreground_command() {
+    let (addr, server_handle, mut msg_rx) = start_mock_server().await.unwrap();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let handle = get_handle(addr).await.unwrap();
+    let _ = tokio::time::timeout(Duration::from_secs(2), msg_rx.recv()).await;
+
+    let tmux = SessionManager::new();
+    let session = TestSession::new("publish-foreground");
+    let session_name = session.name().to_string();
+
+    tmux.create_session(&session_name, 80, 24, "/tmp", &[])
+        .await
+        .expect("failed to create tmux session");
+
+    publish_session_snapshot(&handle, &tmux, &session_name)
+        .await
+        .expect("publish after create");
+
+    let update = tokio::time::timeout(Duration::from_secs(5), async {
+        while let Some(msg) = msg_rx.recv().await {
+            let parsed: serde_json::Value = serde_json::from_str(&msg).unwrap();
+            if parsed["msg_type"] == "server.agent.session-update"
+                && parsed["payload"]["session_name"] == session_name
+            {
+                return parsed;
+            }
+        }
+        unreachable!("channel closed before session update received")
+    })
+    .await
+    .expect("session update not received");
+
+    tmux.kill_session(&session_name).await.ok();
+    handle.shutdown().await.ok();
+    server_handle.abort();
+
+    let command = update["payload"]["foreground_command"]
+        .as_str()
+        .unwrap_or("");
+    assert!(
+        !command.is_empty(),
+        "expected a workload hint, got {command:?}"
+    );
 }
