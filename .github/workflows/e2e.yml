@@ -91,9 +91,11 @@ jobs:
             # `=all` is required, not optional. A bare `--update-snapshots` means
             # mode "changed", which still compares through maxDiffPixelRatio and
             # only rewrites snapshots that FAIL tolerance — a chrome change small
-            # enough to sit inside the 2% ratio is silently left alone, and the
-            # run logs nothing to say so. That is how the Workspace baselines
-            # stayed stale through the contextual-bar change (#714).
+            # enough to sit inside the ratio is silently left alone, and the run
+            # logs nothing to say so. That is how the Workspace baselines stayed
+            # stale through the contextual-bar change (#714). The ratio is far
+            # tighter since #1038, which narrows this window but does not close
+            # it: any drift under the current value is still skipped in silence.
             npx playwright test fixture-visual --update-snapshots=all
           else
             npx playwright test
