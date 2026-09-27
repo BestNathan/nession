@@ -7,11 +7,38 @@ import { expect, type Page } from '@playwright/test';
  */
 export const FIXTURE_FROZEN_TIME = new Date('2026-09-01T12:00:00.000Z');
 
-/** Shared screenshot options for canonical visual regression (#548 / #561 Phase 8). */
+/**
+ * Shared screenshot options for canonical visual regression (#548 / #561 Phase 8).
+ *
+ * **`maxDiffPixelRatio` is derived, not picked** (#1038). It was `0.02` from
+ * `e838d9dd` until 2026-09-27 with no recorded reason, and every measurement
+ * taken since says the same thing: it was far too wide. Two of them:
+ *
+ * - a *wholly different page* swapped in for a baseline differed by **2.58%**,
+ *   so 0.02 sat just under "this is a different screen" (#1038's probe);
+ * - replacing the Workspace tool strip with the contextual bar — a real chrome
+ *   change that shipped — was **~0.55%** of a 1440x900 frame, well inside it.
+ *   That is how the workspace baseline kept showing chrome the app no longer
+ *   had through #708, and it cost a wrong issue closure in #714.
+ *
+ * `0.002` is 10x tighter and sits ~2.7x below the smallest change known to have
+ * slipped through. The other half of the derivation is the noise floor, measured
+ * rather than assumed: two independent CI regenerations of the same commit
+ * produced **byte-identical** baselines for every shared image, so there is no
+ * rendering jitter for this budget to absorb. Playwright's own per-pixel
+ * `threshold` (YIQ, default 0.2) already covers antialiasing colour noise, so
+ * what this ratio governs is geometry and content.
+ *
+ * One knob, not two: the ratio scales per frame, so a companion `maxDiffPixels`
+ * cap would add config surface without adding protection.
+ *
+ * Do not widen this to get green — find the cause, or replace the baseline
+ * deliberately (`docs/design/design-system/validation.md`).
+ */
 export const FIXTURE_SCREENSHOT = {
   animations: 'disabled' as const,
   caret: 'hide' as const,
-  maxDiffPixelRatio: 0.02,
+  maxDiffPixelRatio: 0.002,
 };
 
 /** Install a fixed clock before navigation so formatRelativeTime is stable. */

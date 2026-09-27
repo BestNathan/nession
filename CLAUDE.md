@@ -602,7 +602,9 @@ Mechanics and rationale: `nession-cicd` skill.
 
 **After any functional UI change, collect screenshots via Playwright MCP** to prove the feature works visually. This is mandatory before creating a PR.
 
-**⚠ If the change alters chrome that a golden screenshot captures, the visual baseline moves in the same change set.** `e2e/specs/__snapshots__/fixture-visual.spec.ts/` holds the canonical baselines (`web-workspace`, `app-terminal`, …), and `FIXTURE_SCREENSHOT.maxDiffPixelRatio = 0.02` is wide enough to swallow a whole chrome change — so a stale baseline keeps passing and the gate silently stops protecting the current UI. Measured: PR #708 replaced the Workspace tool strip with the contextual bar, and the workspace baselines (last regenerated 2026-09-02) still passed.
+**⚠ If the change alters chrome that a golden screenshot captures, the visual baseline moves in the same change set.** `e2e/specs/__snapshots__/fixture-visual.spec.ts/` holds the canonical baselines (`web-workspace`, `app-terminal`, …).
+
+`FIXTURE_SCREENSHOT.maxDiffPixelRatio` is **`0.002`**, derived rather than picked (#1038): the previous `0.02` was wide enough that a *wholly different page* differed by only 2.58%, so it could not distinguish "the capsule moved" from "this is a different screen". That is how the workspace baselines kept showing the pre-#708 tool strip through the contextual-bar change (#714). The derivation, and the measured noise floor behind it, are in `e2e/helpers/fixtureVisual.ts`. Consequence for you: a chrome change now **fails** CI instead of passing quietly — so move the baseline in the same change set, having reviewed the diff, rather than discovering it later.
 
 The principle and the replace-don't-preserve rule live in `docs/design/design-system/validation.md` and `docs/design/migration.md`; this is the operational half:
 
