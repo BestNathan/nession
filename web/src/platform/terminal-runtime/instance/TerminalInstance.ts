@@ -77,6 +77,36 @@ export class TerminalInstance {
       minimumContrastRatio: TERMINAL_MINIMUM_CONTRAST_RATIO,
     });
 
+    // TEMPORARY DIAGNOSTIC (#1148) — remove once located. Counts every write
+    // into this xterm, from ANY controller, and keeps the recent payloads on
+    // the element so a deliberately-failing Playwright assertion can carry them
+    // into the CI log (browser console output never reaches it). Deliberately
+    // at the terminal rather than at one controller: a per-controller counter
+    // cannot see duplication caused by two controllers writing to one terminal,
+    // and cannot tell "written twice" from "written once, processed twice".
+    const originalWrite = this.terminal.write.bind(this.terminal);
+    let writeSeq = 0;
+    const recentWrites: string[] = [];
+    this.terminal.write = (data: string | Uint8Array, callback?: () => void) => {
+      writeSeq += 1;
+      const text =
+        typeof data === 'string' ? data : new TextDecoder().decode(data);
+      // Keep the FIRST writes, not a sliding tail: the tmux startup burst —
+      // where the terminal-capability queries live — is what doubles, and a
+      // tail buffer fills up with later echo traffic and loses it.
+      if (recentWrites.length < 30) {
+        recentWrites.push(
+          `#${writeSeq} len=${text.length} ${JSON.stringify(text.slice(0, 30))}`,
+        );
+      }
+      const el = this.terminal.element;
+      if (el) {
+        el.dataset.nessionTuiWrites = String(writeSeq);
+        el.dataset.nessionTuiRecentWrites = recentWrites.join('\n');
+      }
+      originalWrite(data, callback);
+    };
+
     new Renderer(this.terminal, options.rendererType);
     new ThemeManager(this.terminal);
 

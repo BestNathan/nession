@@ -197,26 +197,25 @@ test.describe('Terminal I/O', () => {
 
     await waitForInteractiveShell(page);
 
-    // TEMPORARY DIAGNOSTIC (#1148) — remove once located. Surfaces the number of
-    // **live** `onData` subscriptions recorded by `TerminalInteractionController`
-    // into the CI log, because browser console output never reaches it. More
-    // than one live subscription is the bug: every emission then reaches the PTY
-    // once per subscription, which is why typed input arrives interleaved and
-    // DA/OSC responses are doubled too.
+    // TEMPORARY DIAGNOSTIC (#1148) — remove once located. Deliberately FAILS,
+    // carrying what was written into xterm (and how many times) into
+    // `error-context.md`, which the workflow uploads. A passing assertion
+    // uploads no payload, so a probe that cannot fail cannot report either.
+    // Counted at the terminal, so it sees two controllers writing to one
+    // terminal as well as one controller writing twice.
     const diag = await page
       .locator('.xterm')
       .first()
       .evaluate((el) => {
         const host = el as HTMLElement;
         return {
-          live: host.dataset.nessionOnDataLive ?? '(none recorded)',
-          sites: host.dataset.nessionOnDataBindings ?? '(none recorded)',
+          writes: host.dataset.nessionTuiWrites ?? '(none recorded)',
+          recent: host.dataset.nessionTuiRecentWrites ?? '(none recorded)',
+          liveOnData: host.dataset.nessionOnDataLive ?? '(none recorded)',
         };
       });
     expect(
-      diag.live === '1'
-        ? 'single'
-        : `LIVE onData subscriptions = ${diag.live}:\n${diag.sites}`,
+      `PROBE1148 xterm writes=${diag.writes} liveOnData=${diag.liveOnData}\n${diag.recent}`,
     ).toBe('single');
 
     await submitTerminalCommand(page, 'echo nession-e2e-ok');
