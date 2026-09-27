@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { PeekHost } from '../../PeekHost';
@@ -211,6 +211,73 @@ describe('capability projection frame', () => {
     // An icon-only control still needs a name, and "Dismiss" alone would be
     // useless read out of context.
     expect(screen.getByLabelText('Dismiss Git')).toBeInTheDocument();
+  });
+
+  it('opens a body’s detail in the host overlay, and closes it again', async () => {
+    // #1120's child overlay: a capability supplies *content*, the host owns the
+    // surface. What is asserted here is the split rather than the styling — the
+    // body never places anything, and the title it hands over is the overlay's
+    // accessible name.
+    const user = userEvent.setup();
+    const peek = projection({
+      depth: 'peek',
+      body: (_focus, _setFocus, actions) => (
+        <button
+          type="button"
+          data-testid="open-detail"
+          onClick={() =>
+            actions.openDetail({ title: 'A conversation', content: <p>the transcript</p> })
+          }
+        >
+          open
+        </button>
+      ),
+    });
+    renderFrame(peek);
+
+    // Nothing is mounted until it is asked for: the overlay is not a panel that
+    // happens to be hidden.
+    expect(screen.queryByTestId('capsule-capability-detail')).not.toBeInTheDocument();
+
+    await user.click(screen.getByTestId('open-detail'));
+
+    const overlay = await screen.findByTestId('capsule-capability-detail');
+    expect(overlay).toHaveTextContent('A conversation');
+    expect(overlay).toHaveTextContent('the transcript');
+    // The Peek it came from is still there — the overlay is temporary and does
+    // not replace the surface under it.
+    expect(screen.getByTestId('capsule-capability-projection')).toBeInTheDocument();
+  });
+
+  it('closes the overlay on Escape and gives focus back to what opened it', async () => {
+    // #1120: "dismiss returns focus to the action that opened it". Keyboard
+    // users otherwise land back at the top of the document with no way to tell
+    // where they were.
+    const user = userEvent.setup();
+    const peek = projection({
+      depth: 'peek',
+      body: (_focus, _setFocus, actions) => (
+        <button
+          type="button"
+          data-testid="open-detail"
+          onClick={() => actions.openDetail({ title: 'A conversation', content: <p>x</p> })}
+        >
+          open
+        </button>
+      ),
+    });
+    renderFrame(peek);
+
+    const opener = screen.getByTestId('open-detail');
+    await user.click(opener);
+    await screen.findByTestId('capsule-capability-detail');
+
+    await user.keyboard('{Escape}');
+
+    await waitFor(() =>
+      expect(screen.queryByTestId('capsule-capability-detail')).not.toBeInTheDocument(),
+    );
+    expect(document.activeElement).toBe(opener);
   });
 
   it('survives switching from a Peek body to Terminal Keys and sending a key', async () => {

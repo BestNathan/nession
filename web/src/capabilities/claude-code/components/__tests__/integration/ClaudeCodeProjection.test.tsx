@@ -58,7 +58,13 @@ function listResponse(overrides: Partial<ClaudeCodeListResponse> = {}): ClaudeCo
 
 function renderProjection(state: 'active' | 'relevant', depth: 'signal' | 'peek' = 'signal') {
   render(
-    <ClaudeCodeProjection agentId="a1" sessionId="a1:work" depth={depth} state={state} />,
+    <ClaudeCodeProjection
+      agentId="a1"
+      sessionId="a1:work"
+      depth={depth}
+      state={state}
+      openDetail={vi.fn()}
+    />,
   );
 }
 
@@ -112,7 +118,7 @@ describe('Claude Code Signal', () => {
 
   it('says the pane is running it, and that it ran earlier, in different words', async () => {
     const { unmount } = render(
-      <ClaudeCodeProjection agentId="a1" sessionId="a1:work" depth="signal" state="active" />,
+      <ClaudeCodeProjection agentId="a1" sessionId="a1:work" depth="signal" state="active" openDetail={vi.fn()} />,
     );
     expect(await screen.findByTestId('claude-code-signal-body')).toHaveTextContent('Running');
     unmount();
@@ -141,7 +147,7 @@ describe('Claude Code Signal', () => {
     // A Signal reports state, not absence-for-two-different-reasons.
     mockedList.mockResolvedValue(listResponse({ categories: [] }));
     const { unmount } = render(
-      <ClaudeCodeProjection agentId="a1" sessionId="a1:work" depth="signal" state="active" />,
+      <ClaudeCodeProjection agentId="a1" sessionId="a1:work" depth="signal" state="active" openDetail={vi.fn()} />,
     );
     expect(await screen.findByTestId('claude-code-signal-body')).toHaveTextContent(
       'No project config',
@@ -259,6 +265,7 @@ describe('Claude Code Peek', () => {
         depth="peek"
         state="active"
         onOpenWorkspace={onOpenWorkspace}
+        openDetail={vi.fn()}
       />,
     );
 
