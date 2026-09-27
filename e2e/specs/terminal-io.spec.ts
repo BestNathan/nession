@@ -114,13 +114,48 @@ async function attachToSession(
   await expect(dialog).not.toBeVisible({ timeout: 5_000 });
 }
 
-/** Type a command into the xterm terminal. */
-async function typeInTerminal(page: import('@playwright/test').Page, text: string): Promise<void> {
-  // xterm captures input via the hidden helper textarea
-  const helper = page.locator('.xterm-helper-textarea');
-  await helper.waitFor({ state: 'attached', timeout: 5_000 });
-  await helper.focus();
-  await page.keyboard.type(text, { delay: 20 });
+/**
+ * Wait until the session is attached and the shell prompt is stable.
+ *
+ * P2P attach can rewire the transport once the live agent-terminal API swaps
+ * (#668). Playwright keyboard events during that window produce duplicated
+ * bytes and stray CSI in the PTY — wait for `terminal-connecting` to clear and
+ * for the scrollback to stop changing before sending input.
+ */
+async function waitForInteractiveShell(page: import('@playwright/test').Page): Promise<void> {
+  await waitForTerminal(page);
+  await expect(page.getByTestId('terminal-connecting')).toBeHidden({ timeout: 30_000 });
+  await expect(page.getByTestId('terminal-loading')).toBeHidden({ timeout: 30_000 });
+  await expect(async () => {
+    const text = await readTerminalBuffer(page);
+    expect(text).toMatch(/\$\s*$/m);
+  }).toPass({ timeout: 30_000 });
+  await expect
+    .poll(
+      async () => {
+        const first = await readTerminalBuffer(page);
+        await page.waitForTimeout(250);
+        const second = await readTerminalBuffer(page);
+        return first === second && /\$\s*$/m.test(second);
+      },
+      { timeout: 15_000 },
+    )
+    .toBe(true);
+}
+
+/** Commit a shell command through xterm's input API (same path as keyboard). */
+async function submitTerminalCommand(page: import('@playwright/test').Page, command: string): Promise<void> {
+  await page.evaluate((cmd) => {
+    const xtermEl = document.querySelector('.xterm');
+    const container = xtermEl?.parentElement as
+      | ({ xtermInstance?: { input(data: string, wasUserInput: boolean): void } } & Record<string, unknown>)
+      | null;
+    const term = container?.xtermInstance;
+    if (!term) {
+      throw new Error('xtermInstance not mounted');
+    }
+    term.input(`${cmd}\n`, true);
+  }, command);
 }
 
 // NOTE: these tests are CI-gated per repo convention (the fixture specs use
@@ -143,11 +178,8 @@ test.describe('Terminal I/O', () => {
     await createSession(page, SESSION_NAME);
     await attachToSession(page, SESSION_NAME, 'Relay');
 
-    // Wait for the terminal to mount
-    await waitForTerminal(page);
-
-    // Type a command
-    await typeInTerminal(page, 'echo nession-e2e-ok\n');
+    await waitForInteractiveShell(page);
+    await submitTerminalCommand(page, 'echo nession-e2e-ok');
 
     // Wait for the output to appear in the buffer
     await expect(async () => {
@@ -162,11 +194,8 @@ test.describe('Terminal I/O', () => {
     await createSession(page, SESSION_NAME);
     await attachToSession(page, SESSION_NAME, 'P2P');
 
-    // Wait for the terminal to mount
-    await waitForTerminal(page);
-
-    // Type a command
-    await typeInTerminal(page, 'echo nession-e2e-ok\n');
+    await waitForInteractiveShell(page);
+    await submitTerminalCommand(page, 'echo nession-e2e-ok');
 
     // Wait for the output to appear in the buffer
     await expect(async () => {
