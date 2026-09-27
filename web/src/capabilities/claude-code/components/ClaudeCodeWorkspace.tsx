@@ -16,14 +16,21 @@ import { useConversation } from '../hooks/useConversation';
 type Scope = 'global' | 'project';
 
 /**
- * What the Workspace is showing.
+ * What the Workspace is showing — and, deliberately, **not** which config scope.
  *
- * `conversation` is first and is where a Session change lands, because `#1005`
- * decision 3 makes the current work the entry point and the config browser the
- * thing you go looking for. Both remain reachable; neither is a fallback for
- * the other.
+ * `#1120` item 7: `Conversation | Global | Project` flattened two different
+ * axes into one row. A conversation is a resource a person works in;
+ * `Project` and `Global` are scopes *of configuration*. The top level now names
+ * the two sections, and the scope lives inside the section that has scopes —
+ * so this type does not contain `Scope` at all any more, which is what makes
+ * the flattening unrepresentable rather than merely fixed.
+ *
+ * `conversations` is first and is where a Session change lands, because `#1005`
+ * decision 3 makes the current work the entry point and configuration the thing
+ * you go looking for. Both remain reachable; neither is a fallback for the
+ * other.
  */
-type View = 'conversation' | Scope;
+type View = 'conversations' | 'configuration';
 type ConfigCategory = ClaudeCodeListResponse['categories'][number];
 type ConfigFile = ConfigCategory['files'][number];
 
@@ -515,11 +522,20 @@ function useClaudeCodeWorkspace(ctx: WorkspaceContext) {
   // work is the entry point). Not re-forced on a Session change, though — the
   // hook drops the old Session's answers on its own, and throwing someone out of
   // the config browser mid-read would be a view decision they did not make.
-  const [activeView, setActiveView] = useState<View>('conversation');
-  // Derived, not a second piece of state: the tab already says which scope is
-  // showing, and two sources for that is how the Project tab came to render the
-  // Global panel.
-  const activeScope: Scope = activeView === 'project' ? 'project' : 'global';
+  const [activeView, setActiveView] = useState<View>('conversations');
+  // Its own state now that the top-level tabs no longer name a scope (#1120
+  // item 7). It used to be *derived* from the tab, with a comment warning that
+  // two sources for the scope is how the Project tab came to render the Global
+  // panel — so the hazard is worth answering rather than ignoring.
+  //
+  // It does not come back: this is now the only source. It drives both the
+  // scope selector's value and the panel that renders, so the two cannot
+  // disagree, which is a stronger guarantee than the derivation gave — that one
+  // was correct but only because the tab and the scope were the same value.
+  //
+  // `project` by default: the more specific scope is the more likely one to
+  // want, and it is the order `#1120` writes the pair in.
+  const [activeScope, setActiveScope] = useState<Scope>('project');
   const conversation = useConversation({ agentId, sessionId });
 
   const { contextGeneration, currentRequestKey, loadScope } = useScopeLoader({
@@ -549,6 +565,7 @@ function useClaudeCodeWorkspace(ctx: WorkspaceContext) {
     agentId,
     sessionId,
     activeScope,
+    setActiveScope,
     activeView,
     setActiveView,
     scopeStates,
@@ -564,6 +581,7 @@ export function ClaudeCodeWorkspace({ ctx }: { ctx: WorkspaceContext }) {
     agentId,
     sessionId,
     activeScope,
+    setActiveScope,
     activeView,
     setActiveView,
     scopeStates,
@@ -594,13 +612,12 @@ export function ClaudeCodeWorkspace({ ctx }: { ctx: WorkspaceContext }) {
         ) : null}
         <Tabs value={activeView} onValueChange={(value) => setActiveView(value as View)}>
           <TabsList>
-            <TabsTrigger value="conversation">Conversation</TabsTrigger>
-            <TabsTrigger value="global">Global</TabsTrigger>
-            <TabsTrigger value="project">Project</TabsTrigger>
+            <TabsTrigger value="conversations">Conversations</TabsTrigger>
+            <TabsTrigger value="configuration">Configuration</TabsTrigger>
           </TabsList>
         </Tabs>
       </header>
-      {activeView === 'conversation' ? (
+      {activeView === 'conversations' ? (
         <main className="flex min-h-0 flex-1 flex-col">
           <ConversationView
             view={conversation.view}
@@ -610,23 +627,36 @@ export function ClaudeCodeWorkspace({ ctx }: { ctx: WorkspaceContext }) {
           />
         </main>
       ) : (
-        <div className="grid min-h-0 flex-1 grid-cols-[minmax(12rem,18rem)_minmax(0,1fr)]">
-          <aside className="min-h-0 border-r">
-            {SCOPES.map((scope) => (
-              <div key={scope} className={activeScope === scope ? 'flex h-full min-h-0' : 'hidden'}>
-                <ScopePanel
-                  state={scopeStates[scope]}
-                  scope={scope}
-                  onFileClick={handleFileClick}
-                  onRetry={handleRetry}
-                  active={activeScope === scope}
-                />
-              </div>
-            ))}
-          </aside>
-          <main className="flex min-h-0 flex-col">
-            <ContentPanel state={activeState} scope={activeScope} onLoadMore={handleLoadMore} />
-          </main>
+        <div className="flex min-h-0 flex-1 flex-col">
+          {/* Configuration's own sub-axis (#1120 item 7). It sits here, under
+              the section that has scopes, rather than beside `Conversations` —
+              which is the whole of the flattening this change undoes. */}
+          <div className="flex shrink-0 items-center border-b px-4 py-2">
+            <Tabs value={activeScope} onValueChange={(value) => setActiveScope(value as Scope)}>
+              <TabsList>
+                <TabsTrigger value="project">Project</TabsTrigger>
+                <TabsTrigger value="global">Global</TabsTrigger>
+              </TabsList>
+            </Tabs>
+          </div>
+          <div className="grid min-h-0 flex-1 grid-cols-[minmax(12rem,18rem)_minmax(0,1fr)]">
+            <aside className="min-h-0 border-r">
+              {SCOPES.map((scope) => (
+                <div key={scope} className={activeScope === scope ? 'flex h-full min-h-0' : 'hidden'}>
+                  <ScopePanel
+                    state={scopeStates[scope]}
+                    scope={scope}
+                    onFileClick={handleFileClick}
+                    onRetry={handleRetry}
+                    active={activeScope === scope}
+                  />
+                </div>
+              ))}
+            </aside>
+            <main className="flex min-h-0 flex-col">
+              <ContentPanel state={activeState} scope={activeScope} onLoadMore={handleLoadMore} />
+            </main>
+          </div>
         </div>
       )}
     </div>
