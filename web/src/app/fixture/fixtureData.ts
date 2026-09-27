@@ -27,6 +27,13 @@ const FIXTURE_MANIFEST: ProtocolManifest = {
     'git.worktrees': { versions: [1], wire: ['git.worktrees'] },
     'claude-code.list': { versions: [1], wire: ['claude-code.list'] },
     'claude-code.read': { versions: [1], wire: ['claude-code.read'] },
+    // A wire lives in two places: what the agents advertise, and the surface
+    // that answers it. #1108 cost two commits to updating only one of them, so
+    // `fixtureSurfaces.test.ts` now asserts the pairing rather than trusting it.
+    'claude-code.conversation': {
+      versions: [1],
+      wire: ['claude-code.conversation'],
+    },
   },
 };
 

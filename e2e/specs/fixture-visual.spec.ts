@@ -112,6 +112,34 @@ test.describe('Web 1440×900', () => {
       ...FIXTURE_SCREENSHOT,
     });
   });
+
+  // The conversation view #1005 stage D built, which was in no image at all
+  // (#1029, #1128). Nothing here looked at it, so `e2e` was green on the change
+  // that added it for the reason that nothing checks a surface, not because the
+  // surface was checked.
+  //
+  // One image per experience, of the state a user lands on. That bound is
+  // deliberate rather than a gap: the provider's other answers are asserted in
+  // `FixtureWorkspace.test.tsx` (ambiguous shows the candidates rather than
+  // choosing, not_found shows the notice, inactive reads as finished), and
+  // `validation.md` asks the baseline set to stay "intentionally small and
+  // representative". What a golden adds is the appearance those assertions
+  // cannot describe — hierarchy and rhythm, whether the transcript reads as a
+  // conversation — which is one image, not one per state.
+  test('Claude Code conversation', async ({ page }) => {
+    await page.goto('/#/fixture/workspace?capability=claude-code');
+
+    // Awaited so this photographs a resolved conversation rather than a pending
+    // one, and so the tool call — the row that distinguishes a transcript from a
+    // chat log — is present before the shutter.
+    await expect(page.getByTestId('conversation-open')).toBeVisible();
+    await expect(page.getByTestId('conversation-tool')).toBeVisible();
+
+    await expect(page).toHaveScreenshot('web-claude-code-conversation.png', {
+      fullPage: true,
+      ...FIXTURE_SCREENSHOT,
+    });
+  });
 });
 
 test.describe('Web compact 1024×768', () => {
@@ -522,6 +550,32 @@ test.describe('App 390×844', () => {
     await expect(page.getByTestId('file-row-web')).toContainText('1 file', { timeout: 10_000 });
 
     await expect(page).toHaveScreenshot('app-files-list.png', {
+      fullPage: true,
+      ...FIXTURE_SCREENSHOT,
+    });
+  });
+
+  // The App's half of the same gap (#1128: "in either experience"). Driven
+  // through the picker rather than a route parameter, because that is how the
+  // App reaches a capability view at all — it has no `?capability=` and to add
+  // one would put a test concern into the product's own layer state.
+  //
+  // The end of the walk is asserted, not just clicked: `conversation-open` is
+  // what says the surface answered, so a screenshot cannot silently capture the
+  // Files view the picker would otherwise leave in place.
+  test('Claude Code conversation', async ({ page }) => {
+    await gotoFixtureApp(page);
+    await page.getByTestId('app-header-workspace').first().click();
+
+    await page.getByTestId('workspace-capability-more').click();
+    await page.getByTestId('workspace-capability-picker-claude-code').click();
+
+    await expect(page.getByTestId('conversation-open')).toBeVisible();
+    // Tool calls are collapsed here too, and a closed `<details>` is the row
+    // this view is judged on (#1005 criterion 10).
+    await expect(page.getByTestId('conversation-tool')).toBeVisible();
+
+    await expect(page).toHaveScreenshot('app-claude-code-conversation.png', {
       fullPage: true,
       ...FIXTURE_SCREENSHOT,
     });

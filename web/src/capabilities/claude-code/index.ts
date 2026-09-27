@@ -1,5 +1,8 @@
 export { ClaudeCodePlugin, claudeCodeApi } from './ClaudeCodePlugin';
 export type {
+  ClaudeCodeConversationRequest,
+  ClaudeCodeConversationResponse,
+  ClaudeCodeConversationState,
   ClaudeCodeListRequest,
   ClaudeCodeListResponse,
   ClaudeCodeReadRequest,

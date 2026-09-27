@@ -87,4 +87,68 @@ describe('FixtureWorkspace', () => {
     expect(screen.getByTestId('git-branch')).toHaveTextContent('feat/repo-status');
     expect(screen.getByTestId('git-summary')).toHaveTextContent('2 ahead, 1 behind');
   });
+
+  /**
+   * The surface #1005 stage D built, reachable for the first time.
+   *
+   * Before this, `openedCapability` could not open the capability and the
+   * manifest advertised no conversation wire, so every state below rendered
+   * nowhere — which is why #1125 and #1127 shipped with a "not visually
+   * verified" caveat (#1029, #1128).
+   *
+   * These sit at the jsdom layer rather than in `fixture-visual.spec.ts` for the
+   * cheap reason: the decidable properties are what matter, and asserting them
+   * here costs milliseconds where a golden costs a CI round.
+   */
+  it('renders the Claude Code conversation when the route opens it', async () => {
+    renderFixture('/fixture/workspace?capability=claude-code');
+
+    expect(await screen.findByTestId('conversation-open')).toBeInTheDocument();
+
+    // Both message kinds render as turns — the rule `fixtureGit` follows for
+    // its repository statuses, applied to the transcript.
+    const kinds = (await screen.findAllByTestId('conversation-turn')).map((turn) =>
+      turn.getAttribute('data-kind'),
+    );
+    expect(kinds).toContain('user');
+    expect(kinds).toContain('assistant');
+
+    // A tool call is its **own** rendering rather than a turn — a collapsed
+    // `<details>`, because `#1005` criterion 10 says tool use must not drown the
+    // conversation. So the third item kind is asserted where it actually lands;
+    // looking for `data-kind="tool"` on a turn would assert a shape this view
+    // does not have.
+    const tool = screen.getByTestId('conversation-tool');
+    expect(tool.tagName).toBe('DETAILS');
+    expect(tool).not.toHaveAttribute('open');
+
+    // `ready` is a running conversation, so the header says so rather than
+    // leaving the state implicit.
+    expect(screen.getByTestId('conversation-state')).toHaveTextContent('Running now');
+  });
+
+  it('offers the candidates instead of choosing a conversation for the user', async () => {
+    renderFixture('/fixture/workspace?capability=claude-code&conversation=ambiguous');
+
+    // #1005 decision 3: the list is the stable entry point, not a fallback. A
+    // fixture that resolved a conversation here would assert a rendering the
+    // app never decided on.
+    expect(await screen.findByTestId('conversation-candidates')).toBeInTheDocument();
+    expect(screen.queryByTestId('conversation-open')).not.toBeInTheDocument();
+  });
+
+  it('reads a finished conversation, and says so', async () => {
+    renderFixture('/fixture/workspace?capability=claude-code&conversation=inactive');
+
+    // `inactive` is a real, readable conversation whose Claude has finished
+    // (#1005 criterion 4) — the same transcript, a different header.
+    expect(await screen.findByTestId('conversation-open')).toBeInTheDocument();
+    expect(screen.getByTestId('conversation-state')).toHaveTextContent('Finished');
+  });
+
+  it('reports an empty directory as a state the user acts on', async () => {
+    renderFixture('/fixture/workspace?capability=claude-code&conversation=not_found');
+
+    expect(await screen.findByTestId('conversation-not-found')).toBeInTheDocument();
+  });
 });

@@ -10,7 +10,9 @@ import { FIXTURE_CLIENT_SESSION_ID } from '@/app/fixture/fixtureData';
 import type { Surface } from '@/app/patterns/SessionHeader';
 import type { CapabilityId } from '@/product/capability';
 import { gitApi } from '@/capabilities/git';
+import { claudeCodeApi } from '@/capabilities/claude-code';
 import { fixtureAgents } from './fixtureAgents';
+import { fixtureConversationSurface } from './fixtureConversation';
 import { fixtureConnection } from './fixtureConnection';
 import { fixtureFileOps } from './fixtureFileOps';
 import { fixtureGitSurface } from './fixtureGit';
@@ -50,6 +52,13 @@ export function FixtureApp() {
   // and released on unmount. Nothing emerges by default, so the canonical
   // screenshots are unaffected unless a case opens one.
   useEffect(() => gitApi.install(fixtureGitSurface('')), []);
+  // The App reaches a capability view through its own picker rather than a
+  // route parameter, so this surface is installed for the route's lifetime
+  // instead of gated on `?capability=` the way `FixtureWorkspace` gates it.
+  // Ungated is safe here for the same reason the git stub is: nothing emerges
+  // by default, so the canonical screenshots are unaffected unless a case
+  // actually opens the capability (#1029, #1128).
+  useEffect(() => claudeCodeApi.install(fixtureConversationSurface('')), []);
 
   const [surface, setSurface] = useState<Surface>('terminal');
   const [tool, setTool] = useState<CapabilityId>('files');

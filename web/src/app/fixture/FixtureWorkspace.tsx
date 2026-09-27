@@ -11,8 +11,11 @@ import {
 import { mapDomainState } from '@/product/session/model/domainState';
 import type { CapabilityId } from '@/product/capability';
 import { gitApi } from '@/capabilities/git';
+import { claudeCodeApi } from '@/capabilities/claude-code';
+import type { PluginSurface } from '@/platform/socket/types';
 import { fixtureFileOps } from './fixtureFileOps';
 import { fixtureGitSurface } from './fixtureGit';
+import { fixtureConversationSurface } from './fixtureConversation';
 
 // Module-stable — the stub is immutable and stateless, so a single instance
 // is safe to share across renders (same pattern as fixtureRoute).
@@ -28,7 +31,7 @@ export function FixtureWorkspace() {
   const search = useLocation().search;
   const facts = fixtureCapabilityFacts(search);
   const capability = openedCapability(search);
-  const gitReady = useFixtureGit(capability === 'git', search);
+  const surfaceReady = useFixtureSurface(capability, search);
   const selectedSession =
     FIXTURE_SESSIONS.find((s) => s.session_id === FIXTURE_SELECTED_ID) ?? null;
   const selectedAgent = FIXTURE_AGENTS.find(
@@ -44,8 +47,8 @@ export function FixtureWorkspace() {
         attachFailedId: null,
       })
     : null;
-  if (!gitReady) {
-    // One frame, and only while the Git route's stub is being bound.
+  if (!surfaceReady) {
+    // One frame, and only while the opened capability's stub is being bound.
     return null;
   }
 
@@ -70,49 +73,79 @@ export function FixtureWorkspace() {
   );
 }
 
+/** A canned backend, and the singleton it binds to. */
+interface FixtureSurface {
+  install: (surface: PluginSurface) => () => void;
+  surface: (search: string) => PluginSurface;
+}
+
+/**
+ * The canned backends this route can install, keyed by capability.
+ *
+ * One table, because the two halves have to agree: `openedCapability` decides
+ * what opens, and this decides what can answer for it. A capability in one and
+ * not the other is either a view that cannot render or a stub nothing reaches,
+ * so there is deliberately no second list to keep in step.
+ *
+ * A `Map` rather than an object literal: `'toString' in {}` is true, so an
+ * object would let `?capability=toString` past the membership test and into a
+ * binding that is not there.
+ */
+const FIXTURE_SURFACES = new Map<string, FixtureSurface>([
+  ['git', { install: (s) => gitApi.install(s), surface: fixtureGitSurface }],
+  [
+    'claude-code',
+    {
+      install: (s) => claudeCodeApi.install(s),
+      surface: fixtureConversationSurface,
+    },
+  ],
+]);
+
 /**
  * Which capability the route opens, defaulting to Files.
  *
- * Only Git has a canned backend installed below; every other capability keeps
- * the canonical route exactly as the golden screenshots capture it.
+ * Derived from `FIXTURE_SURFACES` rather than restated: every other capability
+ * keeps the canonical route exactly as the golden screenshots capture it, and
+ * opening one with nothing behind it would render a view whose first request
+ * fails — a state the product does not have.
  */
 function openedCapability(search: string): CapabilityId {
-  const requested = new URLSearchParams(search).get('capability');
-  return requested === 'git' ? 'git' : 'files';
+  const requested = new URLSearchParams(search).get('capability') ?? '';
+  return FIXTURE_SURFACES.has(requested) ? requested : 'files';
 }
-
 
 /**
  * Stand in for the agent while the route asks for a capability the fixture
  * cannot otherwise reach, and report whether it is in place yet.
  *
  * The gate is not decoration. Effects run bottom-up, so an install in this
- * component's effect would land *after* `GitWorkspace`'s own effect had already
- * asked into an unbound plugin — the first request would fail and the view
- * would settle on a transport error. Holding the subtree back until the stub is
- * bound closes that window. It costs one frame, and only on the route that
- * asked for Git: every other route renders immediately.
+ * component's effect would land *after* the view's own effect had already asked
+ * into an unbound plugin — the first request would fail and the view would
+ * settle on a transport error. Holding the subtree back until the stub is bound
+ * closes that window. It costs one frame, and only on a route that asked for a
+ * capability in `FIXTURE_SURFACES`: every other route renders immediately.
  *
  * Released on unmount, because the singleton is shared — in the browser the
  * fixture is one route among several, and in tests a leaked binding would
  * answer for whatever ran next.
  */
-function useFixtureGit(needed: boolean, search: string): boolean {
-  const key = needed ? search : null;
+function useFixtureSurface(capability: CapabilityId, search: string): boolean {
+  const binding = FIXTURE_SURFACES.get(capability);
   const [installed, setInstalled] = useState<string | null>(null);
 
   useEffect(() => {
-    if (key === null) {
+    if (binding === undefined) {
       setInstalled(null);
       return;
     }
-    const release = gitApi.install(fixtureGitSurface(key));
-    setInstalled(key);
+    const release = binding.install(binding.surface(search));
+    setInstalled(search);
     return () => {
       release();
       setInstalled(null);
     };
-  }, [key]);
+  }, [binding, search]);
 
-  return !needed || installed === key;
+  return binding === undefined || installed === search;
 }
