@@ -101,6 +101,17 @@ export class TerminalInteractionController {
 
   /** Wire xterm onData → PTY once; idempotent per controller instance. */
   bindXtermOnData(): () => void {
+    // TEMPORARY DIAGNOSTIC (#1148) — remove once located. Records how many
+    // onData bindings are live on this element and where each came from, on the
+    // element's dataset so a Playwright assertion can surface it into the CI
+    // log (browser console output does not reach CI, which is why this bug
+    // resisted measurement).
+    const el = this.terminal.element;
+    if (el) {
+      const stack = (new Error().stack ?? '').split('\n').slice(1, 4).join(' | ');
+      const prior = el.dataset.nessionOnDataBindings ?? '';
+      el.dataset.nessionOnDataBindings = prior === '' ? stack : `${prior}\n@@@\n${stack}`;
+    }
     const disposable = this.terminal.onData((data) => {
       this.sendToPty(data);
     });

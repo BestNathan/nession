@@ -196,6 +196,22 @@ test.describe('Terminal I/O', () => {
     await attachToSession(page, SESSION_NAME, 'P2P');
 
     await waitForInteractiveShell(page);
+
+    // TEMPORARY DIAGNOSTIC (#1148) — remove once located. Surfaces the live
+    // `onData` binding sites recorded by `TerminalInteractionController` into
+    // the CI log, because browser console output never reaches it. Two bindings
+    // is the bug: every emission then reaches the PTY twice, which is why the
+    // command arrives interleaved and DA/OSC responses are doubled too.
+    const bindings = await page
+      .locator('.xterm')
+      .first()
+      .evaluate(
+        (el) => (el as HTMLElement).dataset.nessionOnDataBindings ?? '(none recorded)',
+      );
+    expect(
+      bindings.includes('@@@') ? `MULTIPLE onData bindings:\n${bindings}` : 'single',
+    ).toBe('single');
+
     await submitTerminalCommand(page, 'echo nession-e2e-ok');
 
     // Wait for the output to appear in the buffer
