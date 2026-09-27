@@ -1,6 +1,6 @@
 import type { AttachInfo } from '@/types';
 
-/** First P2P URL Auto mode would pick — mirrors activeUrlAtom / useAddressPlan sync path. */
+/** First P2P URL Auto mode would pick — same precedence as `useAddressPlan` / `switchAddressAtom`. */
 export function resolveAutoP2pUrl(
   orderedUrls: string[],
   probeOrderedUrls: string[],
