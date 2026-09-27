@@ -139,6 +139,34 @@ function responseFor(scenario: string): ConversationResponse | undefined {
         partial_tail: false,
         skipped: 0,
       };
+    case 'inactive':
+      // The same transcript as `ready`, and that is the point: `#1005`
+      // criterion 4 makes `inactive` a real, readable conversation whose Claude
+      // has finished, not an empty one. The only difference the UI draws is the
+      // header — `Finished` rather than `Running now` — so a fixture that gave
+      // this state no items would leave the reader unable to tell the two apart.
+      return {
+        state: 'inactive',
+        conversation: { claude_session_id: BOUND_ID, cwd: '/Users/dev/code/nession-capsule' },
+        candidates: CANDIDATES,
+        items: ITEMS,
+        has_more: false,
+        partial_tail: false,
+        skipped: 0,
+      };
+    case 'unavailable':
+      // A different answer from `none`, and a different screen: the directory
+      // could not be read at all, against a directory that was read and held no
+      // conversations. `#1128` names both, and the view renders them apart.
+      return {
+        state: 'unavailable',
+        conversation: null,
+        candidates: [],
+        items: [],
+        has_more: false,
+        partial_tail: false,
+        skipped: 0,
+      };
     default:
       return undefined;
   }

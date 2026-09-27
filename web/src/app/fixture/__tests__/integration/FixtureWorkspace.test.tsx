@@ -87,4 +87,80 @@ describe('FixtureWorkspace', () => {
     expect(screen.getByTestId('git-branch')).toHaveTextContent('feat/repo-status');
     expect(screen.getByTestId('git-summary')).toHaveTextContent('2 ahead, 1 behind');
   });
+
+  /**
+   * The conversation view `#1005` stage D built, finally reachable.
+   *
+   * The fixture could not open the capability and the manifest advertised no
+   * conversation wire, so every state below rendered nowhere — which is how
+   * `#1125` and `#1127` shipped UI that no image could capture (`#1029`,
+   * `#1128`). The fixture half landed in `#1131`; these are the assertions that
+   * were the reason for it.
+   *
+   * They live at the jsdom layer rather than in `fixture-visual.spec.ts` because
+   * the properties below are *decidable*: a golden would cost a CI round to say
+   * what a DOM query says in milliseconds, and `validation.md` asks that pixels
+   * cover only the remainder no assertion can express.
+   */
+  it('renders the Claude Code conversation when the route opens it', async () => {
+    renderFixture('/fixture/workspace?capability=claude-code');
+
+    expect(await screen.findByTestId('conversation-open')).toBeInTheDocument();
+
+    // Both message kinds render as turns — the rule the git surface follows for
+    // its repository statuses, applied to the transcript.
+    const kinds = (await screen.findAllByTestId('conversation-turn')).map((turn) =>
+      turn.getAttribute('data-kind'),
+    );
+    expect(kinds).toContain('user');
+    expect(kinds).toContain('assistant');
+
+    // A tool call is its **own** rendering rather than a turn — a collapsed
+    // `<details>`, because `#1005` criterion 10 says tool use must not drown the
+    // conversation. Asserting `data-kind="tool"` on a turn would assert a shape
+    // this view does not have.
+    const tool = screen.getAllByTestId('conversation-tool')[0]!;
+    expect(tool.tagName).toBe('DETAILS');
+    expect(tool).not.toHaveAttribute('open');
+
+    // `ready` is a running conversation, so the header says so rather than
+    // leaving the state implicit.
+    expect(screen.getByTestId('conversation-state')).toHaveTextContent('Running now');
+  });
+
+  it('offers the candidates instead of choosing a conversation for the user', async () => {
+    renderFixture('/fixture/workspace?capability=claude-code&conversation=ambiguous');
+
+    // `#1005` decision 3: the list is the stable entry point, not a fallback. A
+    // fixture that resolved a conversation here would let a case assert a
+    // rendering the app never decided on.
+    expect(await screen.findByTestId('conversation-candidates')).toBeInTheDocument();
+    expect(screen.queryByTestId('conversation-open')).not.toBeInTheDocument();
+  });
+
+  it('reads a finished conversation, and says so', async () => {
+    renderFixture('/fixture/workspace?capability=claude-code&conversation=inactive');
+
+    // The same transcript as `ready` with a different header — which is the
+    // whole of the difference, and the reason the fixture gives this state
+    // items rather than leaving it empty.
+    expect(await screen.findByTestId('conversation-open')).toBeInTheDocument();
+    expect(screen.getByTestId('conversation-state')).toHaveTextContent('Finished');
+  });
+
+  it('tells the two empty answers apart', async () => {
+    // `not_found` is a directory that was read and held nothing; `unavailable`
+    // is one that could not be read. Different causes, different notices — and
+    // a fixture that answered one for the other would make the distinction
+    // unassertable everywhere downstream.
+    renderFixture('/fixture/workspace?capability=claude-code&conversation=none');
+    expect(await screen.findByTestId('conversation-not-found')).toBeInTheDocument();
+  });
+
+  it('reports an unreadable directory rather than an empty one', async () => {
+    renderFixture('/fixture/workspace?capability=claude-code&conversation=unavailable');
+
+    expect(await screen.findByTestId('conversation-unavailable')).toBeInTheDocument();
+    expect(screen.queryByTestId('conversation-not-found')).not.toBeInTheDocument();
+  });
 });
