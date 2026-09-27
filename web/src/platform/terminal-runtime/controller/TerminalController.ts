@@ -290,7 +290,10 @@ export class TerminalController {
 
     this.teardownTransport();
 
-    this.inputRouter?.setMode({ type: 'terminal' });
+    // `deactivateCurrent`, not `setMode`: setMode would deactivate and then
+    // re-activate the terminal handler, leaving its `onData` subscription live
+    // on a router that is about to be dropped (#1148).
+    this.inputRouter?.deactivateCurrent();
     this.inputRouter = null;
 
     this.instance.detach();

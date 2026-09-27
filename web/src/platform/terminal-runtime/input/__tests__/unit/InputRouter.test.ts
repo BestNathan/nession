@@ -28,6 +28,52 @@ describe('InputRouter', () => {
     expect(terminal.handle).toHaveBeenCalledWith('a');
   });
 
+  it('deactivates the handler it replaces, so a re-register cannot leak', () => {
+    // #1148. `TerminalController.wireTerminalUi` re-registers the terminal
+    // handler when the viewport reparents and **reuses the same router**, so
+    // nothing else deactivates the previous one. A replaced-but-still-active
+    // handler keeps its `terminal.onData` subscription, and every emission then
+    // reaches the PTY twice.
+    const router = new InputRouter();
+    const first = makeHandler('terminal');
+    const second = makeHandler('terminal');
+    router.register(first);
+    first.activate();
+
+    router.register(second);
+
+    expect(first.deactivate).toHaveBeenCalledTimes(1);
+    // The replacement is not implicitly activated — its caller does that.
+    expect(second.activate).not.toHaveBeenCalled();
+  });
+
+  it('setMode re-activates a handler when the mode does not change', () => {
+    // The trap behind #1148, pinned so `detach()` can never go back to it.
+    // `setMode({ type: 'terminal' })` reads as "deactivate the terminal
+    // handler", but it deactivates and then **re-activates** because the
+    // requested mode is the active one — leaving the subscription live on a
+    // router that is about to be dropped.
+    const router = new InputRouter();
+    const handler = makeHandler('terminal');
+    router.register(handler);
+
+    router.setMode({ type: 'terminal' });
+
+    expect(handler.deactivate).toHaveBeenCalledTimes(1);
+    expect(handler.activate).toHaveBeenCalledTimes(1);
+  });
+
+  it('deactivateCurrent leaves nothing subscribed', () => {
+    const router = new InputRouter();
+    const handler = makeHandler('terminal');
+    router.register(handler);
+
+    router.deactivateCurrent();
+
+    expect(handler.deactivate).toHaveBeenCalledTimes(1);
+    expect(handler.activate).not.toHaveBeenCalled();
+  });
+
   it('setMode deactivates the current handler and activates the next', () => {
     const router = new InputRouter();
     const terminal = makeHandler('terminal');
