@@ -197,19 +197,26 @@ test.describe('Terminal I/O', () => {
 
     await waitForInteractiveShell(page);
 
-    // TEMPORARY DIAGNOSTIC (#1148) — remove once located. Surfaces the live
-    // `onData` binding sites recorded by `TerminalInteractionController` into
-    // the CI log, because browser console output never reaches it. Two bindings
-    // is the bug: every emission then reaches the PTY twice, which is why the
-    // command arrives interleaved and DA/OSC responses are doubled too.
-    const bindings = await page
+    // TEMPORARY DIAGNOSTIC (#1148) — remove once located. Surfaces the number of
+    // **live** `onData` subscriptions recorded by `TerminalInteractionController`
+    // into the CI log, because browser console output never reaches it. More
+    // than one live subscription is the bug: every emission then reaches the PTY
+    // once per subscription, which is why typed input arrives interleaved and
+    // DA/OSC responses are doubled too.
+    const diag = await page
       .locator('.xterm')
       .first()
-      .evaluate(
-        (el) => (el as HTMLElement).dataset.nessionOnDataBindings ?? '(none recorded)',
-      );
+      .evaluate((el) => {
+        const host = el as HTMLElement;
+        return {
+          live: host.dataset.nessionOnDataLive ?? '(none recorded)',
+          sites: host.dataset.nessionOnDataBindings ?? '(none recorded)',
+        };
+      });
     expect(
-      bindings.includes('@@@') ? `MULTIPLE onData bindings:\n${bindings}` : 'single',
+      diag.live === '1'
+        ? 'single'
+        : `LIVE onData subscriptions = ${diag.live}:\n${diag.sites}`,
     ).toBe('single');
 
     await submitTerminalCommand(page, 'echo nession-e2e-ok');

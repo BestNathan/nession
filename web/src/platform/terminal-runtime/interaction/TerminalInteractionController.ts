@@ -101,26 +101,58 @@ export class TerminalInteractionController {
 
   /** Wire xterm onData → PTY once; idempotent per controller instance. */
   bindXtermOnData(): () => void {
-    // TEMPORARY DIAGNOSTIC (#1148) — remove once located. Records how many
-    // onData bindings are live on this element and where each came from, on the
-    // element's dataset so a Playwright assertion can surface it into the CI
-    // log (browser console output does not reach CI, which is why this bug
-    // resisted measurement).
+    // TEMPORARY DIAGNOSTIC (#1148) — remove once located, along with the module
+    // state and `publishDiag` below. Counts **live** subscriptions rather than
+    // bind calls: the first version recorded every bind and never removed one
+    // on dispose, so a correctly disposed binding still read as present and
+    // "2" could not be told apart from "1 live + 1 already closed". That is the
+    // difference the fix turns on, so measuring it wrongly was measuring
+    // nothing. The dataset is how the number reaches the CI log, because
+    // browser console output never does.
     const el = this.terminal.element;
-    if (el) {
-      const stack = (new Error().stack ?? '').split('\n').slice(1, 4).join(' | ');
-      const prior = el.dataset.nessionOnDataBindings ?? '';
-      el.dataset.nessionOnDataBindings = prior === '' ? stack : `${prior}\n@@@\n${stack}`;
-    }
+    const stack = (new Error().stack ?? '').split('\n').slice(1, 4).join(' | ');
+    diagBindSeq += 1;
+    const token = `${diagBindSeq} ${stack}`;
+    trackDiag(el, token, true);
     const disposable = this.terminal.onData((data) => {
       this.sendToPty(data);
     });
-    return () => disposable.dispose();
+    return () => {
+      trackDiag(el, token, false);
+      disposable.dispose();
+    };
   }
 
   private helperTextarea(): HTMLTextAreaElement | null {
     return this.terminal.element?.querySelector<HTMLTextAreaElement>('.xterm-helper-textarea') ?? null;
   }
+}
+
+// TEMPORARY DIAGNOSTIC (#1148) — remove once located, with the block that uses
+// it. Keyed by element, not module-global: the count has to describe the one
+// terminal the assertion reads, and a single global set would also count
+// bindings belonging to any other xterm on the page. The count survives across
+// controller instances for the same element, which is the case being measured —
+// two bindings on one element may come from two different
+// `TerminalInteractionController`s.
+let diagBindSeq = 0;
+const diagLive = new Map<HTMLElement, Set<string>>();
+function trackDiag(el: HTMLElement | null | undefined, token: string, add: boolean): void {
+  if (!el) {
+    return;
+  }
+  let tokens = diagLive.get(el);
+  if (!tokens) {
+    tokens = new Set<string>();
+    diagLive.set(el, tokens);
+  }
+  if (add) {
+    tokens.add(token);
+  } else {
+    tokens.delete(token);
+  }
+  el.dataset.nessionOnDataLive = String(tokens.size);
+  el.dataset.nessionOnDataBindings = [...tokens].join('\n@@@\n');
 }
 
 function semanticKeyToCode(key: TerminalSemanticKey): string {
