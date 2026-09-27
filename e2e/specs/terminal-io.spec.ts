@@ -210,12 +210,15 @@ test.describe('Terminal I/O', () => {
         const host = el as HTMLElement;
         return {
           writes: host.dataset.nessionTuiWrites ?? '(none recorded)',
+          queries: host.dataset.nessionTuiQueries ?? '(none recorded)',
           recent: host.dataset.nessionTuiRecentWrites ?? '(none recorded)',
+          queryWrites: host.dataset.nessionTuiQueryWrites ?? '(none recorded)',
           liveOnData: host.dataset.nessionOnDataLive ?? '(none recorded)',
         };
       });
     expect(
-      `PROBE1148 xterm writes=${diag.writes} liveOnData=${diag.liveOnData}\n${diag.recent}`,
+      `PROBE1148 writes=${diag.writes} queries=${diag.queries} liveOnData=${diag.liveOnData}\n` +
+        `--- query-bearing writes ---\n${diag.queryWrites}\n--- first writes ---\n${diag.recent}`,
     ).toBe('single');
 
     await submitTerminalCommand(page, 'echo nession-e2e-ok');

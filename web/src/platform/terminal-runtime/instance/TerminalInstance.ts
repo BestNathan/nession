@@ -87,22 +87,56 @@ export class TerminalInstance {
     const originalWrite = this.terminal.write.bind(this.terminal);
     let writeSeq = 0;
     const recentWrites: string[] = [];
+    // A terminal QUERY is what provokes a response, so counting these is the
+    // measurement that matters: if the same query is written twice, xterm
+    // answers twice, and the agent sees two responses. Truncated previews could
+    // not tell "same payload" from "two payloads of equal length", so each
+    // write carries a hash of its full text instead.
+    // Built from `fromCharCode` rather than a literal so the source carries no
+    // raw control character — a regex containing ESC trips `no-control-regex`,
+    // and neither disabling it nor loosening the rule is an option.
+    const esc = String.fromCharCode(27);
+    const QUERY_MARKERS = [
+      `${esc}[c`, // DA1
+      `${esc}[0c`,
+      `${esc}[>c`, // DA2
+      `${esc}[>0c`,
+      `${esc}]10;?`, // OSC 10 query
+      `${esc}]11;?`, // OSC 11 query
+      `${esc}[>q`, // XTVERSION
+    ];
+    const isQuery = (text: string): boolean =>
+      QUERY_MARKERS.some((marker) => text.includes(marker));
+    let querySeq = 0;
+    const queryWrites: string[] = [];
+    const hash = (text: string): string => {
+      let h = 2166136261;
+      for (let i = 0; i < text.length; i += 1) {
+        h ^= text.charCodeAt(i);
+        h = Math.imul(h, 16777619);
+      }
+      return (h >>> 0).toString(16);
+    };
     this.terminal.write = (data: string | Uint8Array, callback?: () => void) => {
       writeSeq += 1;
       const text =
         typeof data === 'string' ? data : new TextDecoder().decode(data);
-      // Keep the FIRST writes, not a sliding tail: the tmux startup burst —
-      // where the terminal-capability queries live — is what doubles, and a
-      // tail buffer fills up with later echo traffic and loses it.
+      // Keep the FIRST writes, not a sliding tail: the tmux startup burst is
+      // where the queries live, and a tail buffer fills with later echo traffic
+      // before the probe is read.
       if (recentWrites.length < 30) {
-        recentWrites.push(
-          `#${writeSeq} len=${text.length} ${JSON.stringify(text.slice(0, 30))}`,
-        );
+        recentWrites.push(`#${writeSeq} h=${hash(text)} len=${text.length}`);
+      }
+      if (isQuery(text)) {
+        querySeq += 1;
+        queryWrites.push(`q${querySeq} at#${writeSeq} h=${hash(text)} len=${text.length}`);
       }
       const el = this.terminal.element;
       if (el) {
         el.dataset.nessionTuiWrites = String(writeSeq);
+        el.dataset.nessionTuiQueries = String(querySeq);
         el.dataset.nessionTuiRecentWrites = recentWrites.join('\n');
+        el.dataset.nessionTuiQueryWrites = queryWrites.join('\n');
       }
       originalWrite(data, callback);
     };
