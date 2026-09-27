@@ -2,6 +2,8 @@ import type { ConnectionOptions } from './types';
 import type { ConnectionState } from '@/platform/socket/types';
 import type { TerminalTransport } from './transport/TerminalTransport';
 import { applyTerminalStreamEvents } from './streamApply';
+// TEMPORARY DIAGNOSTIC (#1148) — remove with diag1148.ts.
+import { diagHashBase64, diagHashBytes, diagPush } from './diag1148';
 
 export class ConnectionManager implements TerminalTransport {
   readonly mode: 'p2p' | 'relay';
@@ -168,6 +170,13 @@ export class ConnectionManager implements TerminalTransport {
         return;
       }
       void this.handleStreamFrame(frame.streamEpoch, frame.streamSeq, () => {
+        // TEMPORARY DIAGNOSTIC (#1148) — remove with diag1148.ts.
+        diagPush({
+          kind: 'out',
+          hash: diagHashBytes(frame.data),
+          streamSeq: frame.streamSeq,
+          streamEpoch: frame.streamEpoch,
+        });
         this.onOutput?.(frame.data);
       });
     });
@@ -275,6 +284,19 @@ export class ConnectionManager implements TerminalTransport {
       if (!result.epochMatch) {
         this.streamEpoch = result.streamEpoch;
         this.lastStreamSeq = null;
+      }
+      // TEMPORARY DIAGNOSTIC (#1148) — remove with diag1148.ts. Recorded from
+      // the events rather than inside `onOutput`, because the apply handler is
+      // not given the event and the sequence number is the whole point.
+      for (const event of result.events) {
+        if (event.kind === 'output') {
+          diagPush({
+            kind: 'out',
+            hash: diagHashBase64(event.data),
+            streamSeq: event.streamSeq,
+            streamEpoch: event.streamEpoch,
+          });
+        }
       }
       applyTerminalStreamEvents(result.events, {
         onOutput: (data) => this.onOutput?.(data),

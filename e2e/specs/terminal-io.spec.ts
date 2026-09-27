@@ -213,12 +213,15 @@ test.describe('Terminal I/O', () => {
           queries: host.dataset.nessionTuiQueries ?? '(none recorded)',
           recent: host.dataset.nessionTuiRecentWrites ?? '(none recorded)',
           queryWrites: host.dataset.nessionTuiQueryWrites ?? '(none recorded)',
+          correlated: host.dataset.nessionTuiDiag ?? '(none recorded)',
           liveOnData: host.dataset.nessionOnDataLive ?? '(none recorded)',
         };
       });
     expect(
       `PROBE1148 writes=${diag.writes} queries=${diag.queries} liveOnData=${diag.liveOnData}\n` +
-        `--- query-bearing writes ---\n${diag.queryWrites}\n--- first writes ---\n${diag.recent}`,
+        `--- query-bearing writes ---\n${diag.queryWrites}\n` +
+        `--- delivered vs rendered ---\n${diag.correlated}\n` +
+        `--- first writes ---\n${diag.recent}`,
     ).toBe('single');
 
     await submitTerminalCommand(page, 'echo nession-e2e-ok');

@@ -6,6 +6,8 @@ import { ThemeManager, TERMINAL_MINIMUM_CONTRAST_RATIO } from '../ThemeManager';
 import { FontSizeManager } from '../FontSizeManager';
 import { cellDimensionsOf } from '../grid';
 import type { TerminalInstanceOptions } from '../types';
+// TEMPORARY DIAGNOSTIC (#1148) — remove with diag1148.ts.
+import { diagHashBytes, diagPush, diagSnapshot } from '../diag1148';
 
 /**
  * HTMLElement augmented with `xtermInstance` — a reference to the Terminal
@@ -109,34 +111,36 @@ export class TerminalInstance {
       QUERY_MARKERS.some((marker) => text.includes(marker));
     let querySeq = 0;
     const queryWrites: string[] = [];
-    const hash = (text: string): string => {
-      let h = 2166136261;
-      for (let i = 0; i < text.length; i += 1) {
-        h ^= text.charCodeAt(i);
-        h = Math.imul(h, 16777619);
-      }
-      return (h >>> 0).toString(16);
-    };
     this.terminal.write = (data: string | Uint8Array, callback?: () => void) => {
       writeSeq += 1;
+      const bytes =
+        typeof data === 'string' ? new TextEncoder().encode(data) : data;
       const text =
         typeof data === 'string' ? data : new TextDecoder().decode(data);
+      const h = diagHashBytes(bytes);
       // Keep the FIRST writes, not a sliding tail: the tmux startup burst is
       // where the queries live, and a tail buffer fills with later echo traffic
       // before the probe is read.
       if (recentWrites.length < 30) {
-        recentWrites.push(`#${writeSeq} h=${hash(text)} len=${text.length}`);
+        recentWrites.push(`#${writeSeq} h=${h} len=${text.length}`);
       }
       if (isQuery(text)) {
         querySeq += 1;
-        queryWrites.push(`q${querySeq} at#${writeSeq} h=${hash(text)} len=${text.length}`);
+        queryWrites.push(`q${querySeq} at#${writeSeq} h=${h} len=${text.length}`);
       }
+      diagPush({ kind: 'write', hash: h });
       const el = this.terminal.element;
       if (el) {
         el.dataset.nessionTuiWrites = String(writeSeq);
         el.dataset.nessionTuiQueries = String(querySeq);
         el.dataset.nessionTuiRecentWrites = recentWrites.join('\n');
         el.dataset.nessionTuiQueryWrites = queryWrites.join('\n');
+        // The correlated log: what ConnectionManager delivered, beside what
+        // xterm was asked to render. `seq=-` marks a write with no stream
+        // frame behind it.
+        el.dataset.nessionTuiDiag = diagSnapshot()
+          .map((e) => `${e.kind} seq=${e.streamSeq ?? '-'} h=${e.hash}`)
+          .join('\n');
       }
       originalWrite(data, callback);
     };
