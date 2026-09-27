@@ -1,5 +1,13 @@
-import { useState } from 'react';
-import { ArrowDown, ArrowUp, ChevronDown, Filter, Plus } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import {
+  ArrowDown,
+  ArrowUp,
+  ChevronDown,
+  Filter,
+  Plus,
+  SearchX,
+  X,
+} from 'lucide-react';
 import { cn } from '@/shared/lib/utils';
 import { Button } from '@/components/ui/button';
 import { RefreshButton } from '@/components/ui/RefreshButton';
@@ -11,10 +19,16 @@ import {
 import { SearchBar } from '@/product/session/components/SearchBar';
 import { SessionList } from '@/product/session/patterns/SessionList';
 import { SidebarAgents } from '@/app/patterns/SidebarAgents';
-import { SidebarSectionHead } from '@/app/patterns/SidebarSectionHead';
 import { SidebarFooter } from '@/app/SidebarFooter';
-import { shellMotionClass, shellRowControlMinClass } from '@/app/shellStyles';
-import { bodyAppClass } from './appTypography';
+import { appHeaderBandClass } from '@/app/patterns/SessionHeader';
+import {
+  shellIconButtonClass,
+  shellMotionClass,
+  shellRowControlMinClass,
+} from '@/app/shellStyles';
+import { bodyAppClass, secondaryAppClass, titleAppClass } from './appTypography';
+import { APP_START_SESSION_COPY } from './AppHome';
+import { bucketSessions, type SessionBucket } from './sessionHistory';
 import type { SidebarProps } from '@/app/Sidebar';
 import type { SortDirection, SortField, StatusFilter } from '@/app/useDashboard';
 
@@ -89,20 +103,36 @@ function SortButton({
 }
 
 /**
- * The Agents section, demoted to a disclosure that starts closed.
+ * The Agents entry: infrastructure demoted to one row *below* history.
  *
  * The rows themselves are `SidebarAgents` unchanged — still inert, still flat,
  * still not a navigation parent for Sessions (`session-list.md`, anti-pattern
- * 1). What changes is only their cost: one muted row until asked for. The
- * caller owns the head so the head can *be* the trigger instead of a second
- * "Agents" label appearing above the rows when it opens.
+ * 1). What changed in #1083 is the entry, and it changed twice over:
+ *
+ * - **It sits below the list**, not above it. The screen is a navigator, and a
+ *   navigator's first row is history; infrastructure that leads the page is the
+ *   management console the issue is about. It renders through `SessionList`'s
+ *   `footer` slot, so "below" is the scroll area's own order and an expanded
+ *   disclosure is the container's problem rather than a second flex region
+ *   competing with the list's floor (#1057).
+ * - **It counts what it names.** The old head showed `agents.length` under the
+ *   label "Agents", which is a total and reads as a count of the things you can
+ *   reach. The entry says `3 online` because that is the set it is about, and
+ *   it is the same number `createDisabled` is derived from below.
+ *
+ * The load-bearing invariant from #1050 survives: there is exactly **one**
+ * Agents entry, not a label plus a separate trigger. It is re-expressed against
+ * `app-agents-disclosure` rather than against the bare text "Agents", which is
+ * no longer a whole label.
  */
 function AgentsDisclosure({
   agents,
   activeAgentId,
+  onlineCount,
 }: {
   agents: AppSessionsSurfaceProps['agents'];
   activeAgentId: string | null;
+  onlineCount: number;
 }) {
   const [agentsOpen, setAgentsOpen] = useState(false);
 
@@ -118,24 +148,30 @@ function AgentsDisclosure({
     >
       <CollapsibleTrigger
         data-testid="app-agents-disclosure"
-        render={<button type="button" className="w-full text-left" />}
+        aria-expanded={agentsOpen}
+        render={
+          <button
+            type="button"
+            className={cn(
+              shellRowControlMinClass,
+              shellMotionClass,
+              'flex w-full items-center gap-[var(--shell-space-1)] rounded-[var(--shell-session-row-radius)] px-[var(--shell-space-2)] text-left text-muted-foreground hover:text-foreground',
+              bodyAppClass,
+            )}
+          />
+        }
       >
-        <SidebarSectionHead
-          label="Agents"
-          action={
-            <span className="flex items-center gap-[var(--shell-space-1)]">
-              <span data-testid="app-agents-count" className="tabular-nums">
-                {agents.length}
-              </span>
-              <ChevronDown
-                aria-hidden
-                className={cn(
-                  'size-3 transition-transform',
-                  agentsOpen && 'rotate-180',
-                )}
-              />
-            </span>
-          }
+        <span>Agents</span>
+        <span aria-hidden>·</span>
+        <span data-testid="app-agents-count" className="tabular-nums">
+          {onlineCount} online
+        </span>
+        <ChevronDown
+          aria-hidden
+          className={cn(
+            'ml-auto size-4 transition-transform',
+            agentsOpen && 'rotate-180',
+          )}
         />
       </CollapsibleTrigger>
       <CollapsibleContent>
@@ -169,99 +205,392 @@ function AgentsDisclosure({
  * untouched: its chips are `SearchBar`'s own, and this surface renders none of
  * them (`showStatusFilters={false}`).
  */
-function SessionsFilters({
+function SessionsFilterTrigger({
+  open,
+  onToggle,
+}: {
+  open: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon"
+      className={cn(
+        shellIconButtonClass,
+        'text-muted-foreground hover:text-foreground',
+        shellMotionClass,
+      )}
+      aria-label="Filters"
+      aria-expanded={open}
+      data-testid="session-list-filters"
+      onClick={() => onToggle()}
+    >
+      <Filter className="size-4" />
+    </Button>
+  );
+}
+
+/**
+ * The status filter, once chosen, as one removable indicator under the field.
+ *
+ * This is the half of #1083's progressive disclosure that keeps the state
+ * *visible*: a filter that has been applied must not be something the user has
+ * to open a panel to rediscover, and `session-list.md` asks for exactly this
+ * ("search result/state chip only while a filter is active"). The panel holds
+ * the choice; the chip holds the fact.
+ *
+ * It carries no count, for the reason the panel does not — see `SessionsFilterPanel`.
+ */
+function SessionsActiveFilter({
+  label,
+  onClear,
+}: {
+  label: string;
+  onClear: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      data-testid="session-list-filter-chip"
+      onClick={() => onClear()}
+      className={cn(
+        shellRowControlMinClass,
+        shellMotionClass,
+        'flex w-fit items-center gap-[var(--shell-space-1)] rounded-full bg-muted px-[var(--shell-space-2)] text-muted-foreground',
+        bodyAppClass,
+      )}
+    >
+      {label}
+      <X aria-hidden className="size-3" />
+      <span className="sr-only">Clear filter</span>
+    </button>
+  );
+}
+
+function SessionsFilterPanel({
   statusFilter,
   setStatusFilter,
   sortField,
   sortDirection,
   toggleSort,
-  onRefresh,
-  loadingSessions,
 }: {
   statusFilter: StatusFilter;
   setStatusFilter: (f: StatusFilter) => void;
   sortField: SortField;
   sortDirection: SortDirection;
   toggleSort: (field: SortField) => void;
-  onRefresh: () => void;
-  loadingSessions: boolean;
 }) {
-  const [filtersOpen, setFiltersOpen] = useState(false);
-
   return (
-    <div className="flex items-center justify-between gap-2">
-      <Collapsible open={filtersOpen} onOpenChange={setFiltersOpen}>
-        <CollapsibleTrigger
-          data-testid="session-list-filters"
-          render={
+    <div
+      data-testid="session-list-filters-panel"
+      className="flex flex-col gap-2"
+    >
+      <div className="flex flex-wrap items-center gap-1">
+        {STATUS_FILTERS.map((filter) => {
+          const isActive = statusFilter === filter.key;
+          return (
             <Button
-              type="button"
-              variant="ghost"
+              key={filter.key}
+              variant={isActive ? 'default' : 'outline'}
               size="sm"
-              className={cn(
-                shellRowControlMinClass,
-                'max-lg:min-h-11 text-muted-foreground hover:text-foreground',
-                shellMotionClass,
-                bodyAppClass,
-              )}
+              onClick={() => setStatusFilter(filter.key)}
+              aria-pressed={isActive}
+              className={cn(shellRowControlMinClass, 'flex-shrink-0', bodyAppClass)}
             >
-              <Filter className="size-4" />
-              Filters
+              {filter.label}
             </Button>
-          }
+          );
+        })}
+      </div>
+      <div className={cn('flex items-center gap-2 font-medium text-muted-foreground', bodyAppClass)}>
+        <SortButton
+          label="Name"
+          field="name"
+          activeField={sortField}
+          direction={sortDirection}
+          onToggle={toggleSort}
         />
-        <CollapsibleContent
-          data-testid="session-list-filters-panel"
-          className="mt-2 flex flex-col gap-2"
-        >
-          <div className="flex flex-wrap items-center gap-1">
-            {STATUS_FILTERS.map((filter) => {
-              const isActive = statusFilter === filter.key;
-              return (
-                <Button
-                  key={filter.key}
-                  variant={isActive ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => setStatusFilter(filter.key)}
-                  aria-pressed={isActive}
-                  className={cn(shellRowControlMinClass, 'flex-shrink-0', bodyAppClass)}
-                >
-                  {filter.label}
-                </Button>
-              );
-            })}
-          </div>
-          <div className={cn('flex items-center gap-2 font-medium text-muted-foreground', bodyAppClass)}>
-            <SortButton
-              label="Name"
-              field="name"
-              activeField={sortField}
-              direction={sortDirection}
-              onToggle={toggleSort}
-            />
-            <SortButton
-              label="Activity"
-              field="activity"
-              activeField={sortField}
-              direction={sortDirection}
-              onToggle={toggleSort}
-            />
-          </div>
-        </CollapsibleContent>
-      </Collapsible>
-      <RefreshButton
-        onClick={() => onRefresh()}
+        <SortButton
+          label="Activity"
+          field="activity"
+          activeField={sortField}
+          direction={sortDirection}
+          onToggle={toggleSort}
+        />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The list region: the rows, and everything the shared pattern is handed to
+ * render *around* them.
+ *
+ * Extracted rather than inlined for the reason `SessionsChrome` is: the surface
+ * reads as the order of its regions — header, chrome, list, foot — and the list
+ * is where the App's decisions about the shared pattern accumulate. Four of
+ * them live here and each is the App's to make, not `SessionList`'s:
+ *
+ * - **`groups`**, with the label's element and type class, so the shared pattern
+ *   stays free of type decisions (`secondary` outranks the `metadata` its rows
+ *   use, and `--typography-metadata-size` resolves to Web's value at `:root`).
+ * - **`showRowRecency={!grouped}`**, which is the "never both" rule as one
+ *   expression.
+ * - **`emptyState` / `searchMissState`**, which the App words because it owns
+ *   the creation action the empty state offers.
+ * - **`footer`**, the Agents entry, which belongs below history rather than in
+ *   the chrome.
+ */
+function SessionsListRegion({
+  buckets,
+  grouped,
+  filteredSessions,
+  agents,
+  staleAgents,
+  selectedId,
+  clientSessionId,
+  loadingSessions,
+  isSearchActive,
+  onSelect,
+  onConfigure,
+  onKill,
+  createDisabled,
+  onCreate,
+  searchQuery,
+  setSearchQuery,
+  activeAgentId,
+  onlineCount,
+}: {
+  buckets: SessionBucket[];
+  grouped: boolean;
+  filteredSessions: AppSessionsSurfaceProps['filteredSessions'];
+  agents: AppSessionsSurfaceProps['agents'];
+  staleAgents: AppSessionsSurfaceProps['staleAgents'];
+  selectedId: AppSessionsSurfaceProps['selectedId'];
+  clientSessionId: AppSessionsSurfaceProps['clientSessionId'];
+  loadingSessions: boolean;
+  isSearchActive: boolean;
+  onSelect: AppSessionsSurfaceProps['onSelect'];
+  onConfigure: AppSessionsSurfaceProps['onConfigure'];
+  onKill: AppSessionsSurfaceProps['onKill'];
+  createDisabled: boolean;
+  onCreate: () => void;
+  searchQuery: string;
+  setSearchQuery: (q: string) => void;
+  activeAgentId: string | null;
+  onlineCount: number;
+}) {
+  return (
+    <div
+      data-testid="app-sessions-list"
+      className={cn(
+        'flex flex-1 flex-col overflow-hidden',
+        sessionsListFloorAppClass,
+      )}
+    >
+      <SessionList
+        sessions={filteredSessions}
+        agents={agents}
+        staleAgentIds={staleAgents}
+        selectedId={selectedId}
+        clientSessionId={clientSessionId}
         loading={loadingSessions}
-        variant="ghost"
-        ariaLabel="Refresh sessions"
+        isSearchActive={isSearchActive}
+        onSelect={onSelect}
+        onConfigure={onConfigure}
+        onKill={onKill}
+        groups={
+          grouped
+            ? buckets.map((bucket) => ({
+                key: bucket.key,
+                header: (
+                  <h2
+                    data-testid="session-group-label"
+                    className={cn(
+                      'px-[var(--shell-space-2)] pt-[var(--shell-space-3)] pb-[var(--shell-space-1)] text-muted-foreground',
+                      secondaryAppClass,
+                    )}
+                  >
+                    {bucket.label}
+                  </h2>
+                ),
+                sessions: bucket.sessions,
+              }))
+            : undefined
+        }
+        showRowRecency={!grouped}
+        emptyState={
+          <SessionsEmptyState
+            createDisabled={createDisabled}
+            onCreate={onCreate}
+          />
+        }
+        searchMissState={
+          <SessionsSearchMiss
+            searchQuery={searchQuery}
+            onClearSearch={() => setSearchQuery('')}
+          />
+        }
+        footer={
+          <AgentsDisclosure
+            agents={agents}
+            activeAgentId={activeAgentId}
+            onlineCount={onlineCount}
+          />
+        }
       />
     </div>
   );
 }
 
 /**
- * The App's Session-navigation chrome: Agents (demoted), the Sessions head, the
- * search field, New Session, and the Filters disclosure.
+ * The Sessions layer with no Sessions at all (#1083 §9).
+ *
+ * Not the same screen as `AppHome`, and deliberately the same words: the root
+ * exists before any Session does, this exists when the list is empty, and
+ * #1083's requirement is that "create new work" means one thing on both. The
+ * copy is imported from `AppHome` rather than repeated, so the two cannot drift.
+ *
+ * The heading is an `h2` where `AppHome`'s is an `h1` — this one sits under the
+ * surface's own `Sessions` title, so it heads a section rather than the page.
+ * The words are shared; the depth is not.
+ *
+ * A disabled control that does not say why is a dead end one click earlier, so
+ * the explanation travels with the button, not with the heading.
+ */
+function SessionsEmptyState({
+  createDisabled,
+  onCreate,
+}: {
+  createDisabled: boolean;
+  onCreate: () => void;
+}) {
+  return (
+    <div
+      data-testid="app-sessions-empty"
+      className="flex h-full flex-col items-center justify-center gap-[var(--shell-space-2)] px-[var(--shell-space-4)] text-center"
+    >
+      <div className="flex flex-col gap-[var(--shell-space-1)]">
+        <h2 className={cn('font-semibold', titleAppClass)}>
+          {APP_START_SESSION_COPY.heading}
+        </h2>
+        <p className={secondaryAppClass}>{APP_START_SESSION_COPY.supporting}</p>
+      </div>
+      <Button
+        type="button"
+        onClick={() => onCreate()}
+        disabled={createDisabled}
+        data-testid="app-sessions-empty-new-session"
+      >
+        <Plus />
+        {APP_START_SESSION_COPY.create}
+      </Button>
+      {createDisabled ? (
+        <p className={secondaryAppClass} data-testid="app-sessions-empty-no-agent">
+          {APP_START_SESSION_COPY.noAgent}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * The Sessions layer when a search matched nothing (#1083 §9).
+ *
+ * `visual-language.md` has a rule for this case — a search that found nothing
+ * "reports what happened rather than inviting an action" — and **Clear search**
+ * is an action, so the distinction it draws has to be stated rather than
+ * assumed. The rule is about not answering a failed search with *new work*,
+ * which would silently change the subject: the user asked to narrow a list, and
+ * being offered a different task reads as "your list is gone". Clearing the
+ * query returns them to the list they were searching — the same subject, wider.
+ *
+ * The query is quoted because "no sessions match" without saying what was
+ * searched is a status report the user cannot act on.
+ */
+function SessionsSearchMiss({
+  searchQuery,
+  onClearSearch,
+}: {
+  searchQuery: string;
+  onClearSearch: () => void;
+}) {
+  return (
+    <div
+      data-testid="app-sessions-search-miss"
+      className="flex h-full flex-col items-center justify-center gap-[var(--shell-space-2)] px-[var(--shell-space-4)] text-center text-muted-foreground"
+    >
+      <SearchX aria-hidden className="size-8" />
+      <p className={secondaryAppClass}>No sessions match "{searchQuery}"</p>
+      <Button
+        type="button"
+        variant="ghost"
+        onClick={() => onClearSearch()}
+        data-testid="app-sessions-clear-search"
+      >
+        Clear search
+      </Button>
+    </div>
+  );
+}
+
+/**
+ * The Sessions page header (#1083): the title, and the one creation action.
+ *
+ * The App has no bar above this layer — `AppLayers` stacks the Sessions layer
+ * over the whole root — so the surface draws its own. It draws it from the same
+ * band `SessionHeader` and `AppHomeHeader` use, so moving between a Session and
+ * this list does not move the chrome; the three bars replace one another at one
+ * position, which is what `appHeaderBandClass` is exported for.
+ *
+ * `Sessions` is an `h1` in the App's title role — a page title, not the muted
+ * section label this screen used to open with. The action is a `+` in the
+ * header rather than a row in the list: "start new work" is a page action, and
+ * as a list row it sat between search and filters, reading as another item in a
+ * catalogue rather than the one thing you can always do.
+ *
+ * `aria-label="New Session"` is spelled out because the control is an icon. The
+ * `create-session` testid is reused from `SessionListHeader` rather than
+ * renamed: the ids name the controls, not the layout, and this is the same
+ * control — the two experiences are exclusive branches of `WorkspaceRegion`, so
+ * the ids never meet in one document.
+ */
+function SessionsHeader({
+  createDisabled,
+  onCreate,
+}: {
+  createDisabled: boolean;
+  onCreate: () => void;
+}) {
+  return (
+    <header
+      data-testid="app-sessions-header"
+      className={cn(appHeaderBandClass, 'justify-between')}
+    >
+      <h1 className={cn('min-w-0 truncate font-semibold', titleAppClass)}>
+        Sessions
+      </h1>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className={shellIconButtonClass}
+        aria-label="New Session"
+        data-testid="create-session"
+        disabled={createDisabled}
+        onClick={() => onCreate()}
+      >
+        <Plus className="size-5" />
+      </Button>
+    </header>
+  );
+}
+
+/**
+ * The App's Session-navigation chrome: the search field and the Filters
+ * disclosure.
  *
  * Split out of `AppSessionsSurface` rather than inlined so the surface reads as
  * what it is — chrome that yields, a list that does not, a foot that stays put.
@@ -269,38 +598,33 @@ function SessionsFilters({
  * arrangement is App-specific and neither of those files moved for it.
  */
 function SessionsChrome({
-  agents,
-  activeAgentId,
   searchQuery,
   setSearchQuery,
   statusFilter,
   setStatusFilter,
   onlineCount,
   offlineCount,
-  createDisabled,
   sortField,
   sortDirection,
   toggleSort,
-  onCreate,
-  onRefresh,
-  loadingSessions,
 }: {
-  agents: AppSessionsSurfaceProps['agents'];
-  activeAgentId: string | null;
   searchQuery: string;
   setSearchQuery: (q: string) => void;
   statusFilter: StatusFilter;
   setStatusFilter: (f: StatusFilter) => void;
   onlineCount: number;
   offlineCount: number;
-  createDisabled: boolean;
   sortField: SortField;
   sortDirection: SortDirection;
   toggleSort: (field: SortField) => void;
-  onCreate: () => void;
-  onRefresh: () => void;
-  loadingSessions: boolean;
 }) {
+  const [filtersOpen, setFiltersOpen] = useState(false);
+
+  // Named once, so the chip and the panel cannot disagree about what is active.
+  const activeFilter = STATUS_FILTERS.find(
+    (filter) => filter.key === statusFilter && filter.key !== 'all',
+  );
+
   return (
     /* The yielding region. `min-h-0` lets it shrink below its content and
        `overflow-y-auto` keeps what no longer fits reachable rather than
@@ -310,9 +634,7 @@ function SessionsChrome({
       data-testid="app-sessions-chrome"
       className="flex min-h-0 shrink flex-col overflow-y-auto"
     >
-      <AgentsDisclosure agents={agents} activeAgentId={activeAgentId} />
       <div className="flex flex-col gap-[var(--shell-space-2)] px-[var(--shell-space-2)] pb-[var(--shell-space-2)] max-lg:gap-[var(--shell-space-3)]">
-        <SidebarSectionHead label="Sessions" />
         <SearchBar
           searchQuery={searchQuery}
           setSearchQuery={setSearchQuery}
@@ -332,33 +654,32 @@ function SessionsChrome({
              this field promises, so neither is the other's default (#1050
              stage 3). */
           placeholder="Search sessions..."
+          /* #1083 §5: the filter entry lives in the field rather than in a row
+             of its own, which is what makes search the only persistent control
+             above history. The testid is the one the standing row had — the ids
+             name the controls, not the layout, and this is the same control. */
+          fieldAction={
+            <SessionsFilterTrigger
+              open={filtersOpen}
+              onToggle={() => setFiltersOpen((open) => !open)}
+            />
+          }
         />
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className={cn(
-            'justify-start rounded-none px-1 text-muted-foreground hover:text-foreground max-lg:min-h-11',
-            shellMotionClass,
-            bodyAppClass,
-          )}
-          data-testid="create-session"
-          aria-label="Create session"
-          disabled={createDisabled}
-          onClick={() => onCreate()}
-        >
-          <Plus className="size-4" />
-          New Session
-        </Button>
-        <SessionsFilters
-          statusFilter={statusFilter}
-          setStatusFilter={setStatusFilter}
-          sortField={sortField}
-          sortDirection={sortDirection}
-          toggleSort={toggleSort}
-          onRefresh={onRefresh}
-          loadingSessions={loadingSessions}
-        />
+        {activeFilter ? (
+          <SessionsActiveFilter
+            label={activeFilter.label}
+            onClear={() => setStatusFilter('all')}
+          />
+        ) : null}
+        {filtersOpen ? (
+          <SessionsFilterPanel
+            statusFilter={statusFilter}
+            setStatusFilter={setStatusFilter}
+            sortField={sortField}
+            sortDirection={sortDirection}
+            toggleSort={toggleSort}
+          />
+        ) : null}
       </div>
     </div>
   );
@@ -373,7 +694,7 @@ function SessionsChrome({
  * arrangement of the same primitives. This is that arrangement; `Sidebar` is
  * untouched and `SidebarSections.test.tsx` still covers the Web column.
  *
- * It differs from the Web column in four ways, each a consequence of where it
+ * It differs from the Web column in these ways, each a consequence of where it
  * renders — a full-width overlay on a phone, not a 246px column beside a work
  * surface:
  *
@@ -383,20 +704,23 @@ function SessionsChrome({
  *    chrome was absorbed entirely by the list — at 844×390 it measured 0px and
  *    no Session row could be reached (#1057). Here the chrome shrinks and
  *    scrolls, and the list keeps `sessionsListFloorAppClass`.
- * 3. **Agents are a collapsed disclosure.** Infrastructure identity is not what
- *    this surface is for; the list is. They stay reachable — opening the
- *    disclosure renders the same inert `SidebarAgents` rows, unchanged — but
- *    cost one muted row until asked for.
- * 4. **Filters sit behind one trigger**, as on Web, instead of a chip row
- *    competing with the list for what is left of a short surface.
- * 5. **Its copy describes what it does.** The search field says "Search
+ * 3. **It opens with a page header, not a section label** (#1083). `Sessions`
+ *    is an `h1` in the title role and New Session is its action; the Web column
+ *    keeps its section head and its `SessionListHeader`.
+ * 4. **History is grouped by time**, and rows then drop their recency slot —
+ *    never both, and the two are driven from one boolean below. Web stays flat
+ *    and keeps the third slot, which is what `session-lifecycle.spec.ts` pins.
+ * 5. **Agents are one collapsed entry below the list**, not a section above it:
+ *    infrastructure that leads the page is the management console #1083 is
+ *    about. See `AgentsDisclosure`.
+ * 6. **Its copy describes what it does.** The search field says "Search
  *    sessions..." rather than inheriting Web's "Search agents and sessions...",
  *    and the filter chips carry no counts. Both used to name a set they did not
  *    act on — Agents are neither searched nor filtered here — and neither had a
  *    true replacement available to this composition (`SessionsFilters` records
  *    what one would cost). The copy each experience shows is its own, so the
  *    shared default does not move: Web's field, Web's string and Web's
- *    baselines are untouched by this stage.
+ *    baselines are untouched.
  *
  * `data-testid="create-session"` and the filter testids are reused from
  * `SessionListHeader` rather than renamed: they name the controls, not the
@@ -433,58 +757,94 @@ export function AppSessionsSurface({
     filteredSessions.find((s) => s.session_id === selectedId) ?? null;
   const activeAgentId = selectedSession?.agent_id ?? null;
 
+  // `Date.now()` is read when the *list* changes, not on every render: the
+  // buckets are derived from it, and re-reading it per render would re-bucket
+  // mid-scroll for no reason. `filteredSessions` is memoised by both callers
+  // (`useDashboard`, `FixtureApp`), so this recomputes exactly when the data or
+  // the filters do — which is also the only time the buckets could move.
+  const buckets = useMemo(
+    () => bucketSessions(filteredSessions, Date.now()),
+    [filteredSessions],
+  );
+  // One bucket means grouping has nothing to say — one label over the whole
+  // list is noise, and the issue allows the flat fallback. Derived once, then
+  // driving both the labels *and* the per-row recency, so "never both" is a
+  // property of this line rather than of two props agreeing.
+  const grouped = buckets.length > 1;
+
   return (
     <div
       data-testid="app-sessions-surface"
       className="bg-sidebar flex h-full min-h-0 w-full flex-col"
     >
+      <SessionsHeader createDisabled={createDisabled} onCreate={onCreate} />
       <SessionsChrome
-        agents={agents}
-        activeAgentId={activeAgentId}
         searchQuery={searchQuery}
         setSearchQuery={setSearchQuery}
         statusFilter={statusFilter}
         setStatusFilter={setStatusFilter}
         onlineCount={onlineCount}
         offlineCount={agents.length - onlineCount}
-        createDisabled={createDisabled}
         sortField={sortField}
         sortDirection={sortDirection}
         toggleSort={toggleSort}
-        onCreate={onCreate}
-        onRefresh={onRefresh}
-        loadingSessions={loadingSessions}
       />
-      <div
-        data-testid="app-sessions-list"
-        className={cn(
-          'flex flex-1 flex-col overflow-hidden',
-          sessionsListFloorAppClass,
-        )}
-      >
-        <SessionList
-          sessions={filteredSessions}
-          agents={agents}
-          staleAgentIds={staleAgents}
-          selectedId={selectedId}
-          clientSessionId={clientSessionId}
-          loading={loadingSessions}
-          isSearchActive={isSearchActive}
-          onSelect={onSelect}
-          onConfigure={onConfigure}
-          onKill={onKill}
-        />
-      </div>
-      <div
-        data-testid="sidebar-footer"
-        className="flex shrink-0 items-center gap-[var(--shell-foot-gap)] border-t px-[var(--shell-space-3)] py-[var(--shell-foot-pad-y)] pb-[max(var(--shell-foot-pad-y),env(safe-area-inset-bottom))]"
-      >
-        <SidebarFooter
-          domain={domain}
-          connectionStatus={connectionStatus}
-          nodeCount={agents.length}
-        />
-      </div>
+      <SessionsListRegion
+        buckets={buckets}
+        grouped={grouped}
+        filteredSessions={filteredSessions}
+        agents={agents}
+        staleAgents={staleAgents}
+        selectedId={selectedId}
+        clientSessionId={clientSessionId}
+        loadingSessions={loadingSessions}
+        isSearchActive={isSearchActive}
+        onSelect={onSelect}
+        onConfigure={onConfigure}
+        onKill={onKill}
+        createDisabled={createDisabled}
+        onCreate={onCreate}
+        searchQuery={searchQuery}
+        setSearchQuery={setSearchQuery}
+        activeAgentId={activeAgentId}
+        onlineCount={onlineCount}
+      />
+      {/* Healthy infrastructure is invisible; degraded infrastructure is
+          contextual (#1083 §8, `information-architecture.md`: "infrastructure
+          context stays quiet when healthy and gains prominence when it affects
+          the work"). The region is not hidden when healthy — it is not rendered,
+          because an empty one leaves the strip the last attempt at this left
+          behind.
+
+          The retry lives here rather than in the resting chrome, which is where
+          #1083 §6 puts it: Sessions already arrive over a live connection, and a
+          permanent refresh gives an implementation concern the same weight as
+          navigation. What is left is the only case a manual refresh helps.
+
+          `SidebarFooter` is unchanged and is still what the Web column renders
+          when healthy — the owner's ruling that the *sidebar's* foot stays
+          visible is about that column, and the mockup draws it there with the
+          rail the App does not have. Its App overlay draws no foot at all. */}
+      {connectionStatus === 'connected' ? null : (
+        <div
+          data-testid="app-sessions-problem"
+          className="flex shrink-0 items-center gap-[var(--shell-space-2)] border-t px-[var(--shell-space-3)] py-[var(--shell-foot-pad-y)] pb-[max(var(--shell-foot-pad-y),env(safe-area-inset-bottom))]"
+        >
+          <div className="min-w-0 flex-1">
+            <SidebarFooter
+              domain={domain}
+              connectionStatus={connectionStatus}
+              nodeCount={agents.length}
+            />
+          </div>
+          <RefreshButton
+            onClick={() => onRefresh()}
+            loading={loadingSessions}
+            variant="ghost"
+            ariaLabel="Refresh sessions"
+          />
+        </div>
+      )}
     </div>
   );
 }

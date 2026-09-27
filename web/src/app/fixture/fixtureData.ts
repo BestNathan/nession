@@ -22,6 +22,7 @@ const FIXTURE_MANIFEST: ProtocolManifest = {
     'git.diff': { versions: [1], wire: ['git.diff'] },
     'git.root': { versions: [1], wire: ['git.root'] },
     'git.log': { versions: [1], wire: ['git.log'] },
+    'git.commit': { versions: [1], wire: ['git.commit'] },
     'git.branches': { versions: [1], wire: ['git.branches'] },
     'git.worktrees': { versions: [1], wire: ['git.worktrees'] },
     'claude-code.list': { versions: [1], wire: ['claude-code.list'] },
@@ -98,6 +99,24 @@ export const FIXTURE_AGENTS: Agent[] = [
  * that is what the wire carries; naming the product here would put capability
  * knowledge in the fixture that the product reads from the capability layer.
  */
+/**
+ * `last_activity` is spread across three calendar days **on purpose** (#1083).
+ *
+ * The App groups history into Today / Previous 7 days / Older, and a group with
+ * nothing in it is not rendered — so six Sessions on one day would put the whole
+ * fixture in one bucket and the canonical screen would show no grouping at all.
+ * These three days are what make the grouping visible.
+ *
+ * Every value sits in the 06:00–09:00 UTC band, which is deliberate rather than
+ * tidy: bucket boundaries are *local* midnights, CI runs in UTC and a developer
+ * machine may not, and a timestamp near midnight would move between buckets
+ * depending on where the test ran. The band leaves both zones on the same
+ * calendar day.
+ *
+ * The frozen clock the canonical routes run under is `2026-09-01T12:00:00Z`
+ * (`e2e/helpers/fixtureVisual.ts`), so these are relative to *that*, not to the
+ * day you read this. Moving the clock means moving these.
+ */
 export const FIXTURE_SESSIONS: Session[] = [
   {
     session_id: 'devbox-01:fix-terminal-reconnect',
@@ -142,7 +161,7 @@ export const FIXTURE_SESSIONS: Session[] = [
     window_count: 0,
     attached_clients: 0,
     foreground_command: 'bash',
-    last_activity: '2026-09-01T03:30:00Z',
+    last_activity: '2026-08-12T08:00:00Z',
   },
   {
     session_id: 'macbook:review-pr-561',
@@ -152,7 +171,7 @@ export const FIXTURE_SESSIONS: Session[] = [
     window_count: 2,
     attached_clients: 1,
     foreground_command: 'claude',
-    last_activity: '2026-09-01T07:20:00Z',
+    last_activity: '2026-08-29T09:00:00Z',
   },
   {
     session_id: 'macbook:dotfiles',
@@ -171,7 +190,7 @@ export const FIXTURE_SESSIONS: Session[] = [
     status: 'active',
     window_count: 1,
     attached_clients: 0,
-    last_activity: '2026-09-01T05:00:00Z',
+    last_activity: '2026-08-27T07:30:00Z',
   },
 ];
 

@@ -45,6 +45,41 @@ only by keeping every page mounted at all times — which worked, but also meant
 rendered two page headers and two sets of navigation controls at all times, and gave the
 shell no way to say which page was current.
 
+## The Sessions layer at rest
+
+The Sessions layer is a **navigator**, and its resting composition is one screen with
+one job: pick or start work (#1083).
+
+```text
+Sessions                         ＋        ← the page's name and its one action
+[ search ]                          ⚙︎     ← the only persistent control row
+Today · Previous 7 days · Older           ← history, grouped by when it happened
+  session name
+  workload · agent
+Agents · N online                 ⌄       ← secondary, below history
+```
+
+What that rules out, each because it made the screen read as a management console
+rather than a history list:
+
+- **No infrastructure leading the page.** Agents sit below history, not above it —
+  the App's dominant object is the Session, not the Agent
+  (`information-architecture.md`: "infrastructure context stays quiet when healthy").
+- **No permanent filter or refresh row.** Filters are behind the field's own control,
+  with a removable chip while one is active; a manual refresh belongs to the failure
+  that makes it useful, not to the resting screen.
+- **No service footer while healthy.** A live connection is not news. When it is
+  degraded the layer grows a compact problem row carrying the state and the retry, and
+  that row is *absent* rather than empty when healthy.
+- **Two metadata fragments per row, not three.** Time is stated by the group label, so
+  a row repeating it would state it twice; a row shows `workload · agent`, and only a
+  continuity problem earns a third line.
+- **Empty states are invitations.** No Sessions offers the creation action by name;
+  a search that found nothing names the query and offers to clear it.
+
+The layer's header is the App's title band, and it is a *page* title: the muted section
+label the screen used to open with described the list rather than naming the screen.
+
 ## Contextual interaction capsule
 
 A lightweight floating capsule is the primary high-level interaction surface over the Terminal.

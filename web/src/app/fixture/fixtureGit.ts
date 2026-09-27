@@ -2,6 +2,7 @@ import { manifestsOf, ProtocolDirectory } from '@/platform/protocol';
 import type { PluginSurface } from '@/platform/socket/types';
 import type {
   GitBranchesResponse,
+  GitCommitResponse,
   GitDiffResponse,
   GitLogResponse,
   GitStatusResponse,
@@ -54,6 +55,9 @@ export function fixtureGitSurface(search: string): PluginSurface {
       }
       if (type === 'git.log') {
         return Promise.resolve(historyFor(payload.limit) as T);
+      }
+      if (type === 'git.commit') {
+        return Promise.resolve(commitDetailFor(String(payload.oid)) as T);
       }
       if (type === 'git.branches') {
         return Promise.resolve(branchesFor(payload.limit) as T);
@@ -185,6 +189,71 @@ const COMMITS = [
     refs: 'tag: v0.35.0',
   },
 ];
+
+/**
+ * What each commit touched, by short hash.
+ *
+ * Separate from `COMMITS` rather than a field on it: the log this fixture serves
+ * is `git log` without `--name-status`, so a commit row has no files and putting
+ * them there would put a field on the wire the agent does not send. The detail
+ * asks a second question (`git.commit`) and this is that question's answer.
+ */
+const COMMIT_FILES: Record<string, { path: string; status: string }[]> = {
+  '4f2a1c9': [
+    { path: 'web/src/product/terminal/capsule/PeekHost.tsx', status: 'A' },
+    { path: 'web/src/app/capsuleProjections.ts', status: 'M' },
+    { path: 'docs/design/capability-emergence.md', status: 'M' },
+  ],
+  '9b8c7d6': [{ path: 'web/src/capabilities/git/components/GitHistoryView.tsx', status: 'M' }],
+  '1a2b3c4': [{ path: 'docs/design/design-system/patterns/terminal-capsule.md', status: 'M' }],
+};
+
+/**
+ * The commit behind a History row, when the view opens one.
+ *
+ * **Derived from the same `COMMITS` the log is.** The row and the detail are one
+ * commit, and a second literal would be a second answer to what it says — which
+ * nothing would catch, because both views would render their own copy
+ * confidently. This is the fixture's whole rule applied to a second question
+ * about the same object.
+ *
+ * The message is **not** truncated: `Message truncated — N not read` is a state
+ * the view has to have, and a fixture that always produced it would make every
+ * picture of this panel a picture of that state. No route asks for the truncated
+ * one yet, so this answers the state every repository is in.
+ */
+function commitDetailFor(oid: string): GitCommitResponse {
+  const commit = COMMITS.find((c) => c.hash === oid || c.shortHash === oid);
+  if (!commit) {
+    // The agent validates the object name and answers an error for one it cannot
+    // resolve. A fixture that invented a commit for an unknown revision would let
+    // the view render a state the product cannot produce for that request.
+    return { state: 'error', message: `unknown revision: ${oid}` };
+  }
+  return {
+    state: 'ok',
+    commit: {
+      oid: commit.hash,
+      shortOid: commit.shortHash,
+      // The oldest commit in the fixture is the root, so it has no parent; the
+      // others chain onto the one below them in `COMMITS`.
+      parents: COMMITS[COMMITS.indexOf(commit) + 1] ? [COMMITS[COMMITS.indexOf(commit) + 1].hash] : [],
+      author: commit.author,
+      authorDate: commit.date,
+      committer: commit.author,
+      commitDate: commit.date,
+      subject: commit.subject,
+      body: '',
+      decorations: commit.refs,
+      files: (COMMIT_FILES[commit.shortHash] ?? []).map((f) => ({ ...f, binary: false })),
+      filesTruncated: false,
+      filesTruncatedBytes: 0,
+      messageTruncated: false,
+      messageTruncatedBytes: 0,
+      mergeDiffParent: '',
+    },
+  };
+}
 
 /**
  * What the agent uses when the caller asks for no particular count — the

@@ -106,15 +106,26 @@ export function FixtureTerminal({
     let disposed = false;
     let teardown: (() => void) | undefined;
 
-    // Opened only once the font has settled. xterm measures one cell when it
-    // opens and every glyph afterwards is laid out from it, so a terminal
-    // opened against a not-yet-loaded face is fitted to the substitute's
-    // advance — measured on CI at 844×390, fitted at 7.5px per column and
-    // redrawn at 8px, 864px of terminal in an 816px well. `document.fonts.ready`
-    // is the product's own signal for this (`TerminalInstance.warmTerminalFont`
-    // and `remeasureOnFontLoad`); it resolves immediately when nothing is
-    // pending, which is the common case. The face is self-hosted rather than a
-    // CDN, so in CI it is a real fetch that the local cache hides.
+    const metrics = PROFILES[detectProfile(window.innerWidth)];
+
+    // Opened only once the face this terminal renders with is loaded. xterm
+    // measures one cell when it opens and every glyph afterwards is laid out
+    // from it, so a terminal opened against a substitute is fitted to the
+    // substitute's advance — measured on CI at 844×390, fitted at 7.5px per
+    // column and redrawn at 8px, 864px of terminal in an 816px well.
+    //
+    // **The request has to be made here, not merely awaited.** `fonts.ready`
+    // resolves when *pending* loads settle, and at this moment nothing has
+    // asked for this face: the terminal has not opened, and
+    // `TerminalInstance.warmTerminalFont` — the product's own warm-up, which
+    // runs at module load — asks at **Web's** size while this renders at the App
+    // profile's. So `ready` could resolve with no request outstanding, the
+    // terminal would open against a substitute, and whether the real face
+    // arrived inside the settle window below decided the grid. That is why the
+    // same commit rendered `app-terminal` one column apart on two CI runs
+    // (#1104). `fonts.load` names the family *and* the size, starts the fetch if
+    // it has not started, and its promise settles when the face can be measured
+    // with; awaiting it makes the measurement correct by construction.
     //
     // Guarded because the CSS Font Loading API is not implemented everywhere
     // (jsdom has no `document.fonts`) and there is nothing to wait for where it
@@ -122,12 +133,16 @@ export function FixtureTerminal({
     // same way. No test reaches this line today — both fixture mount tests
     // replace the whole component with a stub — so the guard is for the
     // environment, not for coverage.
-    const fontsReady = document.fonts?.ready ?? Promise.resolve();
+    const fonts = document.fonts;
+    const fontsReady: Promise<unknown> = fonts
+      ? Promise.all([fonts.load(`${metrics.fontSize}px ${DEFAULT_FONT}`), fonts.ready])
+      : Promise.resolve();
+
     void fontsReady.then(() => {
       if (disposed) {
         return;
       }
-      teardown = startFixtureTerminal(host);
+      teardown = startFixtureTerminal(host, metrics);
     });
 
     return () => {
@@ -161,8 +176,10 @@ export function FixtureTerminal({
 }
 
 /** Open, size and fill the fixture terminal. Returns its teardown. */
-function startFixtureTerminal(host: HTMLDivElement): () => void {
-  const metrics = PROFILES[detectProfile(window.innerWidth)];
+function startFixtureTerminal(
+  host: HTMLDivElement,
+  metrics: (typeof PROFILES)[keyof typeof PROFILES],
+): () => void {
   const term = new Terminal({
     theme: NESSION_TERMINAL_THEME,
     fontFamily: DEFAULT_FONT,
@@ -250,8 +267,28 @@ function startFixtureTerminal(host: HTMLDivElement): () => void {
   });
   observer.observe(host);
 
+  // Any face that finishes loading after this point re-fits the grid.
+  //
+  // The await in the effect covers the face *this terminal* is measured
+  // against; this covers everything else, and it does it on the browser's own
+  // signal rather than on a guessed frame budget. That distinction is the point:
+  // a fixed window is a bet that the change lands inside it, and #1104 is what
+  // losing that bet looks like. `loadingdone` fires when the browser finishes a
+  // batch of font loads, whenever that is.
+  const fonts = document.fonts;
+  const onFontsDone = () => {
+    if (size === null) {
+      return;
+    }
+    cancelAnimationFrame(frame);
+    remaining = SETTLE_FRAMES;
+    frame = requestAnimationFrame(applyGrid);
+  };
+  fonts?.addEventListener('loadingdone', onFontsDone);
+
   return () => {
     cancelAnimationFrame(frame);
+    fonts?.removeEventListener('loadingdone', onFontsDone);
     observer.disconnect();
     term.dispose();
   };

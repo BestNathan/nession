@@ -5,6 +5,7 @@ import {
   AppSessionsSurface,
   type AppSessionsSurfaceProps,
 } from '@/app/experiences/app/AppSessionsSurface';
+import { APP_START_SESSION_COPY } from '@/app/experiences/app/AppHome';
 import type { Agent, Session } from '@/types';
 
 const agents: Agent[] = [
@@ -67,6 +68,19 @@ const sessions: Session[] = [
 const AppSessionsListFloorClass =
   'min-h-[length:var(--shell-sessions-list-min-height)]';
 
+/**
+ * A local time `minutes` from today's midnight — negative for earlier days.
+ *
+ * The bucket boundaries are local midnights, so a test that wants "today" must
+ * say *when in today* rather than "an hour ago": at 00:30, an hour ago is
+ * yesterday, and the assertion would fail for one hour of every day.
+ */
+function todayAt(minutes: number): Date {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return new Date(d.getTime() + minutes * 60_000);
+}
+
 function props(
   overrides: Partial<AppSessionsSurfaceProps> = {},
 ): AppSessionsSurfaceProps {  return {
@@ -96,13 +110,72 @@ function props(
 }
 
 describe('App Sessions surface (#1050 stage 1)', () => {
-  it('renders the Session list and the service foot', () => {
+  it('renders the Session list, and no service foot while connected', () => {
+    // #1083 §8 / criterion 10. The foot is not hidden — it is not rendered, so
+    // there is no empty strip where it was (which is what the last attempt at
+    // this left behind). Criterion 15's counterpart is the degraded case below.
     render(<AppSessionsSurface {...props()} />);
 
     expect(screen.getByTestId('app-sessions-surface')).toBeInTheDocument();
     expect(screen.getAllByTestId('session-item-row')).toHaveLength(2);
-    expect(screen.getByTestId('sidebar-footer')).toBeInTheDocument();
+    expect(screen.queryByTestId('app-sessions-problem')).not.toBeInTheDocument();
     expect(screen.getByTestId('create-session')).toBeEnabled();
+  });
+
+  it('shows the service state and a retry only when the link is degraded', async () => {
+    // Criterion 11: degraded state stays visible where it affects action. The
+    // retry is the action, and it is here rather than in the resting chrome
+    // because a live connection makes a permanent one noise (#1083 §6).
+    const onRefresh = vi.fn();
+    render(
+      <AppSessionsSurface
+        {...props({ connectionStatus: 'reconnecting', onRefresh })}
+      />,
+    );
+
+    const problem = screen.getByTestId('app-sessions-problem');
+    expect(problem).toHaveTextContent('Reconnecting');
+    // The healthy case renders nothing here at all — asserted above; this is
+    // the same region, so the two tests cannot both pass on a region that is
+    // always present.
+    await userEvent.click(screen.getByLabelText('Refresh sessions'));
+    expect(onRefresh).toHaveBeenCalled();
+  });
+
+  it('keeps the filter entry in the field, and the panel closed until asked', async () => {
+    // Criterion 4: search is the only persistent control row above history. The
+    // trigger rides in the field's own box; the chips and sort are behind it,
+    // and the testid is the one the standing row had — ids name controls.
+    render(<AppSessionsSurface {...props()} />);
+
+    const trigger = screen.getByTestId('session-list-filters');
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByTestId('session-list-filters-panel')).not.toBeInTheDocument();
+
+    await userEvent.click(trigger);
+    expect(screen.getByTestId('session-list-filters-panel')).toBeInTheDocument();
+  });
+
+  it('states an active filter outside the panel, and clears it in one tap', async () => {
+    // The panel holds the choice; the chip holds the fact. A filter that has
+    // been applied must not be something the user has to open a panel to
+    // rediscover (`session-list.md`: "search result/state chip only while a
+    // filter is active").
+    const setStatusFilter = vi.fn();
+    render(
+      <AppSessionsSurface
+        {...props({ statusFilter: 'offline', setStatusFilter })}
+      />,
+    );
+
+    const chip = screen.getByTestId('session-list-filter-chip');
+    expect(chip).toHaveTextContent('Offline');
+    // The panel is closed, so the chip is not a restatement of something else
+    // already on screen.
+    expect(screen.queryByTestId('session-list-filters-panel')).not.toBeInTheDocument();
+
+    await userEvent.click(chip);
+    expect(setStatusFilter).toHaveBeenCalledWith('all');
   });
 
   it('offers no way to collapse itself into a rail', () => {
@@ -125,7 +198,25 @@ describe('App Sessions surface (#1050 stage 1)', () => {
       'aria-expanded',
       'false',
     );
-    expect(screen.getByTestId('app-agents-count')).toHaveTextContent('2');
+    // #1083: the count is what the entry *names* — `1 online`, not the 2 Agents
+    // that exist. The fixture carries one online and one offline, so the two
+    // readings differ and `toHaveTextContent('2')` could not tell them apart.
+    expect(screen.getByTestId('app-agents-count')).toHaveTextContent('1 online');
+  });
+
+  it('puts the Agents entry below the Session rows, not above them', () => {
+    // The whole point of #1083's criterion 9: infrastructure that leads the
+    // page is the management console the issue is about. Position is asserted
+    // as DOM order rather than as a style, because the move is the requirement.
+    render(<AppSessionsSurface {...props()} />);
+
+    const rows = screen.getAllByTestId('session-item-row');
+    const entry = screen.getByTestId('app-agents-disclosure');
+    const lastRow = rows[rows.length - 1];
+    expect(lastRow).toBeDefined();
+    expect(
+      lastRow.compareDocumentPosition(entry) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
   it('keeps the Agents rows reachable behind the disclosure', async () => {
@@ -215,11 +306,10 @@ describe('App Sessions surface (#1050 stage 1)', () => {
   it('moves filters and sort behind a single trigger', async () => {
     const setStatusFilter = vi.fn();
     const toggleSort = vi.fn();
-    const onRefresh = vi.fn();
     const onCreate = vi.fn();
     render(
       <AppSessionsSurface
-        {...props({ setStatusFilter, toggleSort, onRefresh, onCreate })}
+        {...props({ setStatusFilter, toggleSort, onCreate })}
       />,
     );
 
@@ -239,23 +329,159 @@ describe('App Sessions surface (#1050 stage 1)', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Activity' }));
     expect(toggleSort).toHaveBeenCalledWith('activity');
 
-    await userEvent.click(screen.getByRole('button', { name: 'Refresh sessions' }));
-    expect(onRefresh).toHaveBeenCalledTimes(1);
+    // Refresh is no longer reachable from here: it belongs to the degraded
+    // region, and its own test drives it there.
+    expect(screen.queryByLabelText('Refresh sessions')).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByTestId('create-session'));
     expect(onCreate).toHaveBeenCalledTimes(1);
   });
 
-  it('sizes its controls by role, not by the Button size they happen to use', () => {
+  it('leads an empty list straight to New Session (#1083 §9)', () => {
+    // Criterion 12. The empty state is an invitation, not a report — and the
+    // words are `AppHome`'s, imported rather than repeated, because #1083
+    // requires creation to mean one thing on both screens.
+    render(<AppSessionsSurface {...props({ filteredSessions: [] })} />);
+
+    expect(screen.getByTestId('app-sessions-empty')).toBeInTheDocument();
+    expect(screen.getByText(APP_START_SESSION_COPY.heading)).toBeInTheDocument();
+    expect(screen.getByText(APP_START_SESSION_COPY.supporting)).toBeInTheDocument();
+
+    const create = screen.getByTestId('app-sessions-empty-new-session');
+    expect(create).toBeEnabled();
+    expect(create).toHaveTextContent(APP_START_SESSION_COPY.create);
+
+    // Online Agents exist, so creation is possible and there is nothing to
+    // explain.
+    expect(screen.queryByTestId('app-sessions-empty-no-agent')).not.toBeInTheDocument();
+  });
+
+  it('keeps New Session visible but disabled when no Agent is online', () => {
+    // The issue is explicit that the affordance must not be hidden: a user who
+    // cannot see the control cannot tell whether it is missing or unavailable.
+    // The explanation travels with the button, not with the heading.
+    const offlineOnly = agents.filter((agent) => agent.status !== 'online');
+    render(
+      <AppSessionsSurface
+        {...props({ filteredSessions: [], agents: offlineOnly })}
+      />,
+    );
+
+    const create = screen.getByTestId('app-sessions-empty-new-session');
+    expect(create).toBeVisible();
+    expect(create).toBeDisabled();
+    expect(screen.getByTestId('app-sessions-empty-no-agent')).toHaveTextContent(
+      APP_START_SESSION_COPY.noAgent,
+    );
+  });
+
+  it('reports a search miss and offers to clear it (#1083 §9)', async () => {
+    // The query is quoted: "no sessions match" without saying what was searched
+    // is a status report the reader cannot act on.
+    const setSearchQuery = vi.fn();
+    render(
+      <AppSessionsSurface
+        {...props({
+          filteredSessions: [],
+          isSearchActive: true,
+          searchQuery: 'nothing',
+          setSearchQuery,
+        })}
+      />,
+    );
+
+    expect(screen.getByTestId('app-sessions-search-miss')).toHaveTextContent(
+      'No sessions match "nothing"',
+    );
+
+    await userEvent.click(screen.getByTestId('app-sessions-clear-search'));
+    expect(setSearchQuery).toHaveBeenCalledWith('');
+  });
+
+  it('sizes its text controls by role, and its icon control by the icon token', () => {
     // #1073: the surface's own controls answer "what is this text's job", not
     // "which primitive rendered it". Every one of them was `text-xs` (12px)
     // from `Button size="sm"` — smaller than the search placeholder above them
     // and smaller than the metadata under the rows they act on.
+    //
+    // The header's `+` is not an exception to that rule but outside it: it has
+    // no text, so there is no type role for it to take. #1083 moved creation
+    // into the header as an icon (it was a labelled `+ New Session` row), and
+    // it is sized by the icon-button token, which is where the 44px floor the
+    // App contract measures actually comes from.
     const AppBodyRoleClass = 'text-[length:var(--typography-body-size)]';
+    const AppIconButtonSizeClass = 'size-[length:var(--shell-icon-button-size)]';
     render(<AppSessionsSurface {...props()} />);
 
-    expect(screen.getByTestId('create-session').className).toContain(AppBodyRoleClass);
-    expect(screen.getByTestId('session-list-filters').className).toContain(AppBodyRoleClass);
+    // Both resting controls are icons now — creation in the header, the filter
+    // entry in the field (#1083 §3, §5). Neither has text, so neither takes a
+    // type role; both take the icon token, which is where the 44px floor the
+    // App contract measures actually comes from. The text-bearing controls
+    // (the chips and the sort row) are asserted in the test below.
+    for (const id of ['create-session', 'session-list-filters']) {
+      const control = screen.getByTestId(id);
+      expect(control.className).not.toContain(AppBodyRoleClass);
+      expect(control.className).toContain(AppIconButtonSizeClass);
+    }
+  });
+
+  it('states the page title in the App title role (#1073)', () => {
+    // Criterion 2: `Sessions` is a page title, not the muted section label this
+    // screen used to open with. The role class is asserted rather than the size
+    // because a literal px would be the local type decision #1073 forbids.
+    //
+    // `AppTitleRoleClass` is named, and named for the experience, because
+    // `--typography-title-size` is emitted only under `[data-experience="app"]`
+    // — an unnamed literal here is what `nession/no-cross-experience-token`
+    // reports, and it is right to: the same string outside the App resolves to
+    // nothing and the declaration is dropped silently.
+    const AppTitleRoleClass = 'text-[length:var(--typography-title-size)]';
+    render(<AppSessionsSurface {...props()} />);
+
+    expect(screen.getByRole('heading', { name: 'Sessions' }).className).toContain(
+      AppTitleRoleClass,
+    );
+  });
+
+  it('groups history by time, and then drops the per-row recency (#1083)', () => {
+    // The "never both" rule, and the only place it can be checked cheaply: with
+    // two buckets the labels appear *and* the rows lose their third slot. Built
+    // against the real clock rather than a faked one, so the buckets are the
+    // ones a user would see — an hour ago is today, ten days ago is not.
+    // Anchored to local midnight, not to `now - 1h`: an hour before 00:30 is
+    // *yesterday*, so a relative offset puts this session in the wrong bucket
+    // for the first hour of every day. 00:30 today is always today.
+    const spread: Session[] = [
+      { ...sessions[0]!, session_id: 'a:today', last_activity: todayAt(30).toISOString() },
+      { ...sessions[1]!, session_id: 'a:older', last_activity: todayAt(-10 * 1440).toISOString() },
+    ];
+    render(<AppSessionsSurface {...props({ filteredSessions: spread })} />);
+
+    // Today and Older, and no `Previous 7 days` between them: the empty bucket
+    // is dropped rather than labelled.
+    expect(
+      screen.getAllByTestId('session-group-label').map((el) => el.textContent),
+    ).toEqual(['Today', 'Older']);
+
+    for (const meta of screen.getAllByTestId('session-item-meta')) {
+      expect(meta.textContent).not.toMatch(/ago|刚刚/);
+    }
+  });
+
+  it('leaves the list flat, and the recency in place, when one bucket holds it', () => {
+    // The other half of "never both": grouping that has nothing to say must not
+    // put a label over the whole list. Both fixtures here are an hour old.
+    const oneBucket: Session[] = sessions.map((s, i) => ({
+      ...s,
+      session_id: `a:${i}`,
+      last_activity: todayAt(30 + i).toISOString(),
+    }));
+    render(<AppSessionsSurface {...props({ filteredSessions: oneBucket })} />);
+
+    expect(screen.queryAllByTestId('session-group-label')).toHaveLength(0);
+    for (const meta of screen.getAllByTestId('session-item-meta')) {
+      expect(meta.textContent).toMatch(/ago|刚刚/);
+    }
   });
 
   it('sizes the chips and the sort row by the same control role', async () => {

@@ -1,5 +1,6 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { Search } from 'lucide-react';
+import { cn } from '@/shared/lib/utils';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { useDebouncedInput } from '@/product/session/hooks/useDebouncedInput';
@@ -18,6 +19,19 @@ interface SearchBarProps {
    * `DEFAULT_PLACEHOLDER`.
    */
   placeholder?: string;
+  /**
+   * A control rendered opposite the field, inside its row.
+   *
+   * For a caller that wants its filters a tap away from what they filter rather
+   * than in a row of their own (#1083). It sits *inside* the field's box, where
+   * the search icon already is, rather than beside it: the App is always below
+   * `md`, where this component's root stacks, so a sibling would fall under the
+   * field instead of sharing its row.
+   *
+   * Absent, nothing is rendered and the field's own classes are unchanged — Web
+   * passes nothing, so its DOM is what it was.
+   */
+  fieldAction?: ReactNode;
 }
 
 /**
@@ -47,6 +61,7 @@ export function SearchBar({
   offlineCount,
   showStatusFilters = true,
   placeholder = DEFAULT_PLACEHOLDER,
+  fieldAction,
 }: SearchBarProps) {
   const { value: localValue, setValue: setLocalValue, debouncedValue, syncValue } = useDebouncedInput(searchQuery, 200);
   const isFirstRender = useRef(true);
@@ -90,8 +105,16 @@ export function SearchBar({
           placeholder={placeholder}
           value={localValue}
           onChange={(e) => setLocalValue(e.target.value)}
-          className="pl-8"
+          // The right inset only exists when something occupies it. Written as a
+          // conditional rather than as a second class so that with no
+          // `fieldAction` the string is exactly what it was.
+          className={cn('pl-8', fieldAction !== undefined && 'pr-11')}
         />
+        {fieldAction !== undefined ? (
+          <div className="absolute right-0.5 top-1/2 -translate-y-1/2">
+            {fieldAction}
+          </div>
+        ) : null}
       </div>
       {showStatusFilters ? (
         <div

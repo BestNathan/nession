@@ -15,9 +15,12 @@
  *
  * No JSX here on purpose — `react-refresh/only-export-components` wants a file
  * to export either components or things, and this one is things. The accessory
- * is `TerminalKeysProjection`, and since its props are a subset of what a
- * projection body receives, it *is* the body rather than a wrapper around it.
+ * is `TerminalKeysProjection`. The body must still mount it with
+ * `createElement` — calling the component function directly would run its hooks
+ * on the Peek host's fiber, and switching from a real Peek (Git) to Terminal
+ * Keys would change that host's hook count and crash on the next interaction.
  */
+import { createElement } from 'react';
 import type { CapabilityState } from '@/product/capability';
 import type { CapsuleProjectionBinding } from '@/app/capsuleProjections';
 import { TerminalKeysProjection } from '@/product/terminal/TerminalKeysProjection';
@@ -53,5 +56,6 @@ export const terminalKeysProjection: CapsuleProjectionBinding = {
   // Nothing to add at Peek and no Workspace view to open: the accessory is the
   // capability in full, which is the lower bound `capability-emergence.md`
   // allows a Terminal-local capability to stop at.
-  body: TerminalKeysProjection,
+  body: ({ sendText, disabled }) =>
+    createElement(TerminalKeysProjection, { sendText, disabled }),
 };

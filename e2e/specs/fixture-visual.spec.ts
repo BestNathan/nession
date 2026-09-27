@@ -85,6 +85,33 @@ test.describe('Web 1440×900', () => {
       ...FIXTURE_SCREENSHOT,
     });
   });
+
+  // #1102's second item — `#1046`'s second depth on the Web experience — and
+  // with its App counterpart above, criterion 13's "Web/App share capability
+  // semantics while geometry differs". That claim is a pair of images: the
+  // sequence is identical, the surfaces they land in are not.
+  test('Git Peek on the Terminal', async ({ page }) => {
+    await gotoFixtureShell(page);
+    await waitForFixtureTerminal(page);
+
+    await page.getByTestId('capsule-capability-more').click();
+    await page.getByTestId('capsule-capability-picker-git').click();
+    // The title is the step from Signal to Peek, and it goes inert once there —
+    // so `git-peek-body` below is what says this is a Peek rather than a Signal
+    // whose title happened to be tapped.
+    await page.getByTestId('capsule-capability-title').click();
+
+    await expect(page.getByTestId('git-peek-body')).toBeVisible();
+    // The capability's own Workspace action, which the Host no longer draws
+    // (#1046) — the same assertion the App case makes, because it is the same
+    // plugin rendering it.
+    await expect(page.getByTestId('capsule-capability-open-workspace')).toBeVisible();
+
+    await expect(page).toHaveScreenshot('web-git-peek.png', {
+      fullPage: true,
+      ...FIXTURE_SCREENSHOT,
+    });
+  });
 });
 
 test.describe('Web compact 1024×768', () => {
@@ -145,6 +172,46 @@ test.describe('App 390×844', () => {
     });
   });
 
+  // #1083 §9's two empty states. Neither was reachable before this change:
+  // `?selection=none` only deselects and the list still held six rows, and the
+  // fixture advertised one online Agent unconditionally — so the screens the
+  // issue specifies existed only in the issue. Same reasoning as the no-Session
+  // home above: a rendering no route can produce is a rendering nobody checked.
+  test('Sessions with no Sessions at all', async ({ page }) => {
+    await gotoFixtureApp(page, '?sessions=none');
+    await page.getByTestId('app-header-sessions').first().click();
+    await expect(page.getByTestId('app-layer-sessions')).toBeInViewport();
+
+    // The empty state is an invitation, and the assertion that it is one is
+    // that its action is live — an empty list with a dead button is the status
+    // report `visual-language.md` §Empty states replaces.
+    await expect(page.getByTestId('app-sessions-empty')).toBeVisible();
+    await expect(page.getByTestId('app-sessions-empty-new-session')).toBeEnabled();
+    await expect(page.getByTestId('app-sessions-empty-no-agent')).toHaveCount(0);
+
+    await expect(page).toHaveScreenshot('app-sessions-empty.png', {
+      fullPage: true,
+      ...FIXTURE_SCREENSHOT,
+    });
+  });
+
+  test('Sessions with no online Agent', async ({ page }) => {
+    await gotoFixtureApp(page, '?sessions=none&agents=offline');
+    await page.getByTestId('app-header-sessions').first().click();
+    await expect(page.getByTestId('app-layer-sessions')).toBeInViewport();
+
+    // Creation cannot succeed, so the control stays visible and says why. Both
+    // halves are asserted: the disabled button alone would photograph the same
+    // whether or not the explanation rendered.
+    await expect(page.getByTestId('app-sessions-empty-new-session')).toBeDisabled();
+    await expect(page.getByTestId('app-sessions-empty-no-agent')).toBeVisible();
+
+    await expect(page).toHaveScreenshot('app-sessions-empty-no-agent.png', {
+      fullPage: true,
+      ...FIXTURE_SCREENSHOT,
+    });
+  });
+
   // #838: a capability emerging beside the capsule. It had no fixture route
   // until the capsule rendered in one — `terminal ?? <TerminalRegion/>` meant
   // neither fixture drew a composer at all.
@@ -159,6 +226,34 @@ test.describe('App 390×844', () => {
     await expect(page.getByTestId('git-signal-body')).toContainText('worktree: nession-capsule');
 
     await expect(page).toHaveScreenshot('app-capability-signal.png', {
+      fullPage: true,
+      ...FIXTURE_SCREENSHOT,
+    });
+  });
+
+  // #1102: the Peek is the surface #1046 creates — the Signal's second depth —
+  // and until this test it was in no image at all. Every capsule state *around*
+  // it was captured (the Signal above, the entry and the accessory below) and
+  // the one the requirement is about was not, so a regression inside the Peek
+  // had nothing that could fail.
+  test('Git Peek on the Terminal', async ({ page }) => {
+    await gotoFixtureApp(page);
+    await waitForFixtureTerminal(page);
+
+    await page.getByTestId('capsule-capability-more').click();
+    await page.getByTestId('capsule-capability-picker-git').click();
+    // The title is the step from Signal to Peek, and it goes inert once there —
+    // so `git-peek-body` below is what says this is a Peek rather than a Signal
+    // whose title happened to be tapped.
+    await page.getByTestId('capsule-capability-title').click();
+
+    await expect(page.getByTestId('git-peek-body')).toBeVisible();
+    // The capability's own Workspace action, which the Host no longer draws
+    // (#1046). An image can show that something is there; this is the assertion
+    // that the something is the plugin's, not the frame's.
+    await expect(page.getByTestId('capsule-capability-open-workspace')).toBeVisible();
+
+    await expect(page).toHaveScreenshot('app-git-peek.png', {
       fullPage: true,
       ...FIXTURE_SCREENSHOT,
     });
@@ -299,6 +394,30 @@ test.describe('App 390×844', () => {
     await expect(page.getByText('Agent offline')).toHaveCount(1);
 
     await expect(page).toHaveScreenshot('app-sessions-degraded.png', {
+      fullPage: true,
+      ...FIXTURE_SCREENSHOT,
+    });
+  });
+
+  // #1083 §8's other half. "Healthy infrastructure is invisible" was checkable —
+  // the resting baselines have no foot — but the half that *renders* something
+  // had no route, because both fixture frames hardcoded a connected socket. A
+  // region nobody can produce is a region nobody has looked at, which is how
+  // the last attempt at this shipped an empty strip.
+  test('Sessions layer, link degraded', async ({ page }) => {
+    await gotoFixtureApp(page, '?connection=reconnecting');
+    await page.getByTestId('app-header-sessions').first().click();
+    await expect(page.getByTestId('app-layer-sessions')).toBeInViewport();
+
+    // Asserted, not just photographed: a banner and the state it announces are
+    // two different things to get wrong, and the retry is the action the state
+    // exists to offer.
+    const problem = page.getByTestId('app-sessions-problem');
+    await expect(problem).toBeVisible();
+    await expect(problem).toContainText('Reconnecting');
+    await expect(page.getByLabel('Refresh sessions')).toBeVisible();
+
+    await expect(page).toHaveScreenshot('app-sessions-degraded-link.png', {
       fullPage: true,
       ...FIXTURE_SCREENSHOT,
     });
