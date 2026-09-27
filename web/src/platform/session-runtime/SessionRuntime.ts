@@ -109,6 +109,8 @@ export class SessionRuntime {
   private transportReady = false;
   /** Transport generation for which client.attach succeeded. */
   private attachedTransportGeneration: number | null = null;
+  /** Latest P2P attach stream cursor from agent.attach (#1094). */
+  private p2pStreamSeed: { streamEpoch?: number; streamCursor?: number } | null = null;
   private connectionUnsub: (() => void) | null = null;
   private readonly connectionStateListeners = new Set<(state: ConnectionState) => void>();
   private readonly runtimeEventListeners = new Set<(event: SessionRuntimeEvent) => void>();
@@ -234,6 +236,10 @@ export class SessionRuntime {
     return this.agentTerminalApi;
   }
 
+  getP2pStreamSeed(): { streamEpoch?: number; streamCursor?: number } | null {
+    return this.p2pStreamSeed;
+  }
+
   /** Live agent-transport connection state ('disconnected' outside the P2P transport). */
   get connectionState(): ConnectionState {
     return this.agentWs?.connectionState ?? 'disconnected';
@@ -338,6 +344,12 @@ export class SessionRuntime {
       manualRoute: this.config.manualOverride !== null,
       lastResize: this.lastResize,
       transportGeneration: this.transportGeneration,
+      onAttachOk: (result) => {
+        this.p2pStreamSeed = {
+          streamEpoch: result.streamEpoch,
+          streamCursor: result.streamCursor,
+        };
+      },
     });
   }
 

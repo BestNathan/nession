@@ -212,6 +212,7 @@ pub fn build_terminal_input_message(session_name: &str, data: &[u8]) -> String {
     let payload = TerminalInputPayload {
         session_name: session_name.to_string(),
         data: base64::engine::general_purpose::STANDARD.encode(data),
+        control_generation: None,
     };
     // Through `proto_msg`, so the wire name is a call site the gate reads.
     // The envelope's `id` and `timestamp` come from there too — the hand-built
@@ -228,6 +229,7 @@ pub fn build_terminal_resize_message(session_name: &str, cols: u16, rows: u16) -
         session_name: session_name.to_string(),
         cols,
         rows,
+        control_generation: None,
     };
     let msg = proto_msg(wire::AGENT_TERMINAL_RESIZE, payload);
     serde_json::to_string(&msg).unwrap_or_else(|_| String::new())
@@ -640,6 +642,8 @@ mod tests {
         let payload = TerminalOutputPayload {
             session_name: "s".into(),
             data: base64::engine::general_purpose::STANDARD.encode(b"hi"),
+            stream_epoch: None,
+            stream_seq: None,
         };
         let msg = proto_msg(wire::AGENT_TERMINAL_OUTPUT, payload);
         let s = serde_json::to_string(&msg).unwrap();

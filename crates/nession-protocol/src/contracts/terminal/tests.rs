@@ -9,6 +9,7 @@ fn terminal_input_round_trips() {
     let msg = TerminalInputPayload {
         session_name: "work".to_string(),
         data: "aGVsbG8=".to_string(),
+        control_generation: None,
     };
     let json = serde_json::to_string(&msg).unwrap();
     assert!(json.contains("\"aGVsbG8=\""));
@@ -46,6 +47,8 @@ fn terminal_output_mirrors_input() {
     let msg = TerminalOutputPayload {
         session_name: "work".to_string(),
         data: "d29ybGQ=".to_string(),
+        stream_epoch: None,
+        stream_seq: None,
     };
     let back: TerminalOutputPayload =
         serde_json::from_str(&serde_json::to_string(&msg).unwrap()).unwrap();

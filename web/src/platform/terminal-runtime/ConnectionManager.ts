@@ -1,6 +1,7 @@
 import type { ConnectionOptions } from './types';
 import type { ConnectionState } from '@/platform/socket/types';
 import type { TerminalTransport } from './transport/TerminalTransport';
+import { applyTerminalStreamEvents } from './streamApply';
 
 export class ConnectionManager implements TerminalTransport {
   readonly mode: 'p2p' | 'relay';
@@ -24,6 +25,9 @@ export class ConnectionManager implements TerminalTransport {
    * flushAllOutbound once the agent acks client.attach.
    */
   private pendingResize: { cols: number; rows: number } | null = null;
+  private streamEpoch: number | null = null;
+  private lastStreamSeq: number | null = null;
+  private streamResumeInFlight = false;
   private isAttached: () => boolean;
 
   onStateChange: ((state: ConnectionState) => void) | null = null;
@@ -159,10 +163,13 @@ export class ConnectionManager implements TerminalTransport {
   private setupP2P(): void {
     const api = this.agentApi!;
 
-    this.p2pUnsubOutput = api.onOutput((data: Uint8Array) => {
-      if (!this.disposed) {
-        this.onOutput?.(data);
+    this.p2pUnsubOutput = api.onOutput((frame) => {
+      if (this.disposed) {
+        return;
       }
+      void this.handleStreamFrame(frame.streamEpoch, frame.streamSeq, () => {
+        this.onOutput?.(frame.data);
+      });
     });
 
     this.p2pUnsubResize = api.onResize((cols: number, rows: number) => {
@@ -194,6 +201,86 @@ export class ConnectionManager implements TerminalTransport {
         api.ping();
       } catch { /* transport reconnecting — the runtime reconnect budget owns recovery */ }
     }, 30_000);
+  }
+
+  /** Seed stream cursor after attach (late joiner / reconnect #1094). */
+  seedStreamCursor(streamEpoch: number | undefined, streamCursor: number | undefined): void {
+    if (streamEpoch === undefined) {
+      return;
+    }
+    this.streamEpoch = streamEpoch;
+    this.lastStreamSeq = streamCursor ?? null;
+    if (this.mode === 'p2p' && this.agentApi && this.lastStreamSeq !== null) {
+      void this.fetchStreamGap(this.lastStreamSeq);
+    }
+  }
+
+  private async handleStreamFrame(
+    streamEpoch: number | undefined,
+    streamSeq: number | undefined,
+    deliver: () => void,
+  ): Promise<void> {
+    if (streamEpoch === undefined || streamSeq === undefined) {
+      deliver();
+      return;
+    }
+    if (this.streamEpoch === null) {
+      this.streamEpoch = streamEpoch;
+      this.lastStreamSeq = streamSeq;
+      deliver();
+      return;
+    }
+    if (streamEpoch !== this.streamEpoch) {
+      this.streamEpoch = streamEpoch;
+      this.lastStreamSeq = null;
+      await this.fetchStreamGap(0);
+      deliver();
+      return;
+    }
+    if (this.lastStreamSeq !== null && streamSeq > this.lastStreamSeq + 1) {
+      await this.fetchStreamGap(this.lastStreamSeq);
+    }
+    this.lastStreamSeq = streamSeq;
+    deliver();
+  }
+
+  private async fetchStreamGap(afterSeq: number): Promise<void> {
+    if (
+      this.disposed ||
+      this.streamResumeInFlight ||
+      this.mode !== 'p2p' ||
+      !this.agentApi ||
+      this.streamEpoch === null
+    ) {
+      return;
+    }
+    this.streamResumeInFlight = true;
+    try {
+      const result = await this.agentApi.resumeStream(
+        this.sessionName,
+        this.streamEpoch,
+        afterSeq,
+      );
+      if (!result.epochMatch) {
+        this.streamEpoch = result.streamEpoch;
+        this.lastStreamSeq = null;
+      }
+      applyTerminalStreamEvents(result.events, {
+        onOutput: (data) => this.onOutput?.(data),
+        onResize: (cols, rows) => this.onResize?.(cols, rows),
+      });
+      const last =
+        result.events.length > 0
+          ? result.events[result.events.length - 1]
+          : undefined;
+      if (last) {
+        this.lastStreamSeq = last.streamSeq;
+      }
+    } catch {
+      /* gap recovery is best-effort; live stream continues */
+    } finally {
+      this.streamResumeInFlight = false;
+    }
   }
 
   private setupRelay(): void {

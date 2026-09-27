@@ -5,7 +5,7 @@ import {
   type AttachEvent,
   type AttachTransitionResult,
 } from '@/platform/attach/AttachStateMachine';
-import type { TerminalAgentApi } from '@/product/terminal';
+import type { AttachResult, TerminalAgentApi } from '@/product/terminal';
 
 /** Listeners receive every attach outcome the state machine produces. */
 export type AttachOutcomeListener = (result: AttachTransitionResult) => void;
@@ -17,6 +17,7 @@ export interface StartP2PAttachParams {
   manualRoute: boolean;
   lastResize: { cols: number; rows: number } | null;
   transportGeneration: number;
+  onAttachOk?: (result: Extract<AttachResult, { ok: true }>) => void;
 }
 
 /**
@@ -109,6 +110,7 @@ export class SessionAttachController {
           }
           this.inFlightTransportGen = null;
           if (result.ok) {
+            params.onAttachOk?.(result);
             this.dispatch({ type: 'ATTACH_OK' });
             this.cancelActiveAttach();
             return;

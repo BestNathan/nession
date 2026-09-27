@@ -5,7 +5,19 @@ import { TerminalKeysProjection } from '@/product/terminal/TerminalKeysProjectio
 
 function renderKeys(disabled = false) {
   const sendText = vi.fn();
-  render(<TerminalKeysProjection sendText={sendText} disabled={disabled} />);
+  render(
+    <TerminalKeysProjection
+      sendSeq={sendText}
+      sendPhysKey={(key) => {
+        if (key.semanticKey) {
+          sendText(`semantic:${key.semanticKey}`);
+        } else {
+          sendText(key.seq);
+        }
+      }}
+      disabled={disabled}
+    />,
+  );
   return { sendText };
 }
 
@@ -84,7 +96,7 @@ describe('Terminal Keys accessory', () => {
     expect(screen.getByTestId('terminal-keys-body')).toBe(body);
 
     await userEvent.click(screen.getByTestId('phys-key-↑'));
-    expect(sendText).toHaveBeenNthCalledWith(3, '\x1b[A');
+    expect(sendText).toHaveBeenNthCalledWith(3, 'semantic:ArrowUp');
 
     // Three taps, three sends — so the presence above cannot be passing because
     // the taps did nothing at all — over one accessory that never re-mounted.

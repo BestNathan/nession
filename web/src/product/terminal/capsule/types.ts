@@ -80,6 +80,10 @@ export interface CapsuleCapabilityProjection {
      */
     actions: {
       sendText: (text: string) => void;
+      sendPhysKey?: (key: {
+        seq: string;
+        semanticKey?: import('@/platform/terminal-runtime/interaction/TerminalInteractionController').TerminalSemanticKey;
+      }) => void;
       openWorkspace: (resourceId?: string) => void;
       disabled: boolean;
     },

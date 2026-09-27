@@ -21,12 +21,12 @@ export const VERSION = 1;
 
 // ── Shapes ──
 
-export type TerminalResizePayload = { session_name: string, cols: number, rows: number, };
+export type TerminalResizePayload = { session_name: string, cols: number, rows: number, control_generation?: number | null, };
 
 // ── Operations ──
 
 /** The payload a caller sends. */
-export type TerminalResizeCall = { session_name: string, cols: number, rows: number, };
+export type TerminalResizeCall = { session_name: string, cols: number, rows: number, control_generation?: number | null, };
 
 /**
  * No response alias: the catalog declares no response shape for this unit.

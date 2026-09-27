@@ -14,6 +14,7 @@ export * from './ui';
 export * from './layout';
 export * from './capability';
 export * from './transport';
+export * from './terminalControl';
 
 /** Aggregated view of terminal state for React components to consume. */
 export interface TerminalViewModel {

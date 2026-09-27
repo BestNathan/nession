@@ -369,6 +369,7 @@ async fn test_terminal_io_through_full_chain() {
     let payload = nession_agent::server::websocket::TerminalInputPayload {
         session_name: session_name.to_string(),
         data: input,
+        control_generation: None,
     };
     let req = new_message(agent_msg_types::TERMINAL_INPUT, payload);
     let json = serde_json::to_string(&req).unwrap();

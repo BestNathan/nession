@@ -6,6 +6,8 @@ export interface TerminalTransport {
 
   send(data: string): void;
   sendResize(cols: number, rows: number): void;
+  /** Seed stream timeline after P2P attach (#1094). Optional on transports without seq. */
+  seedStreamCursor?(streamEpoch: number | undefined, streamCursor: number | undefined): void;
   /** Flush any input buffered before the session was attached. */
   flushInputBuffer(): void;
   /** Flush the coalesced resize buffered before the session was attached. */

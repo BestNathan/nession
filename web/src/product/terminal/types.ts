@@ -12,7 +12,16 @@ export interface TerminalSize {
  * resolution or a rejection, and the typed API converges both into this
  * union so callers never handle a thrown attach.
  */
-export type AttachResult = { ok: true } | { ok: false; error: string };
+export type AttachResult =
+  | {
+      ok: true;
+      controlGeneration?: number;
+      controlRole?: 'controller' | 'observer';
+      controllerClientId?: string;
+      streamEpoch?: number;
+      streamCursor?: number;
+    }
+  | { ok: false; error: string };
 
 /**
  * Shell attach descriptor for deep-link restoration. The app shell derives
