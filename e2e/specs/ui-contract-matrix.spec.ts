@@ -468,9 +468,16 @@ for (const row of viewports.filter((v) => v.experience === 'app')) {
       await expect(layerRoot).toHaveAttribute('data-layer', 'workspace');
       await expect(back).toHaveAttribute('aria-label', 'Back to Files');
 
-      // …and the depth's own leave still works, one level, as its Back says.
+      // …and the depth's own leave walks the directory stack (#1140) before the
+      // capability root, where Back and the shell both mean the Terminal.
       await back.click();
-      await expect(page.getByTestId('app-page-back')).toHaveAttribute('aria-label', 'Back to terminal');
+      await expect(page.getByTestId('app-page-header')).toContainText('src');
+      await expect(back).toHaveAttribute('aria-label', 'Back to Files');
+      await back.click();
+      await expect(page.getByTestId('app-page-header')).toContainText('web');
+      await back.click();
+      await expect(page.getByTestId('app-page-header')).toContainText('Files');
+      await expect(back).toHaveAttribute('aria-label', 'Back to terminal');
 
       // The pair: at the capability root the shell's gesture is back, because
       // there Back and the shell both mean the Terminal.
