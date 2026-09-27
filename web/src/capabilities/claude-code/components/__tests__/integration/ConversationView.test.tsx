@@ -91,16 +91,34 @@ describe('ConversationView', () => {
     // The whole point of `ambiguous`: the client must not pick. Nothing is
     // opened, and the list is what is shown.
     const candidates = [
-      { claude_session_id: 'claude-1', cwd: '/work', updated_at: '2026-09-25T10:00:00Z' },
-      { claude_session_id: 'claude-2', cwd: '/work', updated_at: '2026-09-25T09:00:00Z' },
+      {
+        claude_session_id: 'claude-1',
+        cwd: '/work',
+        updated_at: '2026-09-25T10:00:00Z',
+        title: 'terminal ownership handoff',
+      },
+      {
+        claude_session_id: 'claude-2',
+        cwd: '/work',
+        updated_at: '2026-09-25T09:00:00Z',
+        title: 'capsule radius',
+      },
     ];
     const { onSelect } = renderView(state({ state: 'ambiguous', conversation: null, candidates }));
 
     expect(screen.queryByTestId('conversation-open')).not.toBeInTheDocument();
-    expect(screen.getAllByRole('button', { name: /claude-[12]/ })).toHaveLength(2);
+    // Found by its **title**, which is the behaviour this covers: a row used to
+    // be named by its UUID, and a UUID is not a name (#1120).
+    expect(
+      screen.getAllByRole('button', { name: /terminal ownership handoff|capsule radius/ }),
+    ).toHaveLength(2);
+    // The other half of that claim, and the assertion that can fail if the
+    // identity leaks back into the name — the UUID is still an `@title`, so
+    // this distinguishes "reachable" from "what the row is called".
+    expect(screen.queryByRole('button', { name: /claude-[12]/ })).not.toBeInTheDocument();
 
     // And choosing is what opens one — the id the provider will resolve.
-    screen.getByRole('button', { name: /claude-2/ }).click();
+    screen.getByRole('button', { name: /capsule radius/ }).click();
     expect(onSelect).toHaveBeenCalledWith('claude-2');
   });
 

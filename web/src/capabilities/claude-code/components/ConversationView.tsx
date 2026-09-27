@@ -3,6 +3,7 @@ import { AlertCircle, MessageSquare, Wrench } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { ConversationViewState } from '../hooks/useConversation';
 import type { ClaudeCodeConversationResponse } from '../types';
+import { conversationLabel } from '../model/conversationLabel';
 import { cn } from '@/shared/lib/utils';
 
 type Item = NonNullable<ClaudeCodeConversationResponse['items']>[number];
@@ -101,8 +102,12 @@ function CandidateList({
             )}
           >
             <MessageSquare className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            {/* The title leads and the identity moves to the tooltip (#1120).
+                A row's job is to be recognisable, and a UUID is not: it is the
+                same string for every reader and carries no scent. It stays
+                reachable here because selection still speaks it. */}
             <span className="truncate" title={candidate.claude_session_id}>
-              {candidate.claude_session_id}
+              {conversationLabel(candidate)}
             </span>
             {clockTime(candidate.updated_at) ? (
               <span className="ml-auto shrink-0 text-xs text-muted-foreground">
@@ -114,6 +119,21 @@ function CandidateList({
       ))}
     </ul>
   );
+}
+
+/**
+ * The candidate the open conversation refers to, for labelling it.
+ *
+ * The response carries both — `candidates` is populated even when one was
+ * resolved (`#1005` decision 3, so a client can offer the list without a second
+ * round trip) — but the *identity* shape has no display metadata, so the title
+ * lives on the candidate and this is how the header reaches it. A conversation
+ * whose candidate is absent still renders: `conversationLabel` has a fallback,
+ * and a header is not the place to fail.
+ */
+function boundCandidate(view: ConversationViewState): Candidate | undefined {
+  const id = view.conversation?.claude_session_id;
+  return id === undefined ? undefined : view.candidates.find((c) => c.claude_session_id === id);
 }
 
 /** A state the provider answered with that is a message, not a conversation. */
@@ -212,7 +232,7 @@ function ConversationHeader({
     <div className="flex flex-wrap items-center justify-between gap-3 border-b p-4">
       <div className="min-w-0">
         <p className="truncate text-sm font-medium" title={view.conversation?.claude_session_id}>
-          {view.conversation?.claude_session_id}
+          {conversationLabel(boundCandidate(view))}
         </p>
         <p className="flex items-center gap-2 text-xs text-muted-foreground">
           {/* The provider's own word. `inactive` is a real, readable
