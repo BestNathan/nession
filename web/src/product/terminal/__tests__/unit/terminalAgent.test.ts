@@ -21,7 +21,7 @@ describe('createTerminalAgentApi', () => {
       });
 
       surface.resolveNext('agent.attach', {});
-      await expect(pending).resolves.toEqual({ ok: true });
+      await expect(pending).resolves.toMatchObject({ ok: true, controlRole: 'controller' });
     });
 
     it('honors a custom timeout', async () => {
@@ -30,7 +30,7 @@ describe('createTerminalAgentApi', () => {
       expect(surface.requests[0]?.options).toEqual({ timeoutMs: 500 });
 
       surface.resolveNext('agent.attach', {});
-      await expect(pending).resolves.toEqual({ ok: true });
+      await expect(pending).resolves.toMatchObject({ ok: true, controlRole: 'controller' });
     });
 
     it('omits width/height when no viewport size is given', async () => {
@@ -39,7 +39,7 @@ describe('createTerminalAgentApi', () => {
       expect(surface.requests[0]?.options).toEqual({ timeoutMs: ATTACH_TIMEOUT_MS });
 
       surface.resolveNext('agent.attach', {});
-      await expect(pending).resolves.toEqual({ ok: true });
+      await expect(pending).resolves.toMatchObject({ ok: true, controlRole: 'controller' });
     });
 
     it('maps a remote error ack to { ok: false, error } instead of throwing', async () => {
@@ -102,7 +102,7 @@ describe('createTerminalAgentApi', () => {
       surface.pushMessage('agent.terminal.output', { session_name: 'work', data: 'aGVsbG8=' });
 
       expect(cb).toHaveBeenCalledTimes(1);
-      expect(cb.mock.calls[0]?.[0]).toEqual(new Uint8Array([104, 101, 108, 108, 111]));
+      expect(cb.mock.calls[0]?.[0].data).toEqual(new Uint8Array([104, 101, 108, 108, 111]));
     });
 
     it('skips frames without data (no decode, no callback)', () => {

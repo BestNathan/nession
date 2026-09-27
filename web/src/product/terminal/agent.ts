@@ -1,9 +1,19 @@
 import { decodeBase64Bytes, encodeBase64 } from './base64';
+import {
+  readAttachControlFields,
+  readControlAcquireReply,
+} from './controlPayload';
+import { parseStreamEvents } from '@/platform/terminal-runtime/streamApply';
 import { WIRE as ATTACH_WIRE } from '@/generated/protocol/core/agent-attach/v1';
 import { WIRE as TERMINAL_INPUT_WIRE } from '@/generated/protocol/core/agent-terminal-input/v1';
 import { WIRE as TERMINAL_RESIZE_WIRE } from '@/generated/protocol/core/agent-terminal-resize/v1';
+import { WIRE as TERMINAL_CONTROL_ACQUIRE_WIRE } from '@/generated/protocol/core/agent-terminal-control-acquire/v1';
+import { WIRE as TERMINAL_STREAM_RESUME_WIRE } from '@/generated/protocol/core/agent-terminal-stream-resume/v1';
+import { getOrCreateClientId } from '@/platform/socket/clientId';
 import type { PluginSurface } from '@/platform/socket/types';
 import type { AttachResult, TerminalSize } from './types';
+import type { TerminalControlState } from './state/terminalControl';
+import { createAgentControlLease } from './agentControlLease';
 
 /**
  * Default attach timeout — must mirror `platform/attach/AttachStateMachine.ts`
@@ -21,6 +31,18 @@ export const ATTACH_TIMEOUT_MS = 10_000;
 export interface AgentError {
   message: string;
   notAttached: boolean;
+}
+
+export interface TerminalOutputFrame {
+  data: Uint8Array;
+  streamEpoch?: number;
+  streamSeq?: number;
+}
+
+export interface TerminalStreamResumeResult {
+  streamEpoch: number;
+  epochMatch: boolean;
+  events: import('@/platform/terminal-runtime/streamApply').TerminalStreamEvent[];
 }
 
 /**
@@ -53,10 +75,22 @@ export interface TerminalAgentApi {
   ): Promise<AttachResult>;
   /** Send terminal input (keystrokes) to the session — base64-encoded. */
   sendInput(sessionName: string, data: string): void;
-  /** Resize the remote PTY. */
+  /** Resize the remote PTY (controller only). */
   sendResize(sessionName: string, cols: number, rows: number): void;
-  /** Subscribe to decoded terminal output bytes (base64 frames → Uint8Array). */
-  onOutput(cb: (data: Uint8Array) => void): () => void;
+  /** Current control lease for a session (#1095). */
+  getControlState(sessionName: string): TerminalControlState;
+  /** Request controller role; broadcasts `agent.terminal.control.changed`. */
+  acquireControl(sessionName: string): Promise<{ ok: true; generation: number } | { ok: false; error: string }>;
+  /** Session-scoped control lease updates. */
+  onControlChanged(cb: (sessionName: string, state: TerminalControlState) => void): () => void;
+  /** Subscribe to terminal output frames (includes optional stream seq #1094). */
+  onOutput(cb: (frame: TerminalOutputFrame) => void): () => void;
+  /** Fetch ordered events after a cursor for gap recovery / late attach (#1094). */
+  resumeStream(
+    sessionName: string,
+    streamEpoch: number,
+    afterSeq: number,
+  ): Promise<TerminalStreamResumeResult>;
   /** Subscribe to terminal resize frames from the agent. */
   onResize(cb: (cols: number, rows: number) => void): () => void;
   /**
@@ -70,46 +104,151 @@ export interface TerminalAgentApi {
   ping(): void;
 }
 
+type ControlLease = ReturnType<typeof createAgentControlLease>;
+
+async function attachToSession(
+  surface: PluginSurface,
+  lease: ControlLease,
+  sessionName: string,
+  attachOpts?: { size?: TerminalSize; timeoutMs?: number },
+): Promise<AttachResult> {
+  try {
+    const size = attachOpts?.size;
+    const reply = await surface.request(ATTACH_WIRE, {
+      session_name: sessionName,
+      ...(size ? { width: size.cols, height: size.rows } : {}),
+    }, { timeoutMs: attachOpts?.timeoutMs ?? ATTACH_TIMEOUT_MS });
+    const fields = readAttachControlFields(reply);
+    const role =
+      fields.controlRole ??
+      (fields.controllerClientId === undefined
+        ? 'controller'
+        : lease.roleForClient(fields.controllerClientId));
+    lease.setControl(sessionName, {
+      role,
+      generation: fields.controlGeneration,
+      controllerClientId: fields.controllerClientId,
+    });
+    return {
+      ok: true,
+      controlGeneration: fields.controlGeneration,
+      controlRole: role,
+      controllerClientId: fields.controllerClientId,
+      streamEpoch: fields.streamEpoch,
+      streamCursor: fields.streamCursor,
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    // Router timeouts reject with "Request timeout: <type>" — that exact
+    // prefix is the only timeout signal; an agent error ack that merely
+    // mentions "timeout" in prose is passed through verbatim.
+    const error = message.startsWith('Request timeout: ') ? 'timeout' : message;
+    return { ok: false, error };
+  }
+}
+
+async function acquireSessionControl(
+  surface: PluginSurface,
+  lease: ControlLease,
+  sessionName: string,
+): Promise<{ ok: true; generation: number } | { ok: false; error: string }> {
+  try {
+    const reply = await surface.request(TERMINAL_CONTROL_ACQUIRE_WIRE, {
+      session_name: sessionName,
+    });
+    const fields = readControlAcquireReply(reply);
+    const generation = fields.generation;
+    if (generation === undefined) {
+      return { ok: false, error: 'missing control generation in acquire response' };
+    }
+    lease.setControl(sessionName, {
+      role: fields.role ?? 'controller',
+      generation,
+      controllerClientId: fields.controllerClientId ?? getOrCreateClientId(),
+    });
+    return { ok: true, generation };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: message };
+  }
+}
+
 export function createTerminalAgentApi(surface: PluginSurface): TerminalAgentApi {
+  const lease = createAgentControlLease(surface);
+
   return {
-    attach: async (
-      sessionName: string,
-      size?: TerminalSize,
-      opts?: { timeoutMs?: number },
-    ): Promise<AttachResult> => {
-      try {
-        await surface.request(ATTACH_WIRE, {
-          session_name: sessionName,
-          ...(size ? { width: size.cols, height: size.rows } : {}),
-        }, { timeoutMs: opts?.timeoutMs ?? ATTACH_TIMEOUT_MS });
-        return { ok: true };
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        // Router timeouts reject with "Request timeout: <type>" — that exact
-        // prefix is the only timeout signal; an agent error ack that merely
-        // mentions "timeout" in prose is passed through verbatim.
-        const error = message.startsWith('Request timeout: ') ? 'timeout' : message;
-        return { ok: false, error };
-      }
-    },
+    attach: (sessionName, size, opts) =>
+      attachToSession(surface, lease, sessionName, {
+        size,
+        timeoutMs: opts?.timeoutMs,
+      }),
 
     sendInput: (sessionName: string, data: string): void => {
-      surface.send(TERMINAL_INPUT_WIRE, { session_name: sessionName, data: encodeBase64(data) });
+      if (lease.getControlState(sessionName).role === 'observer') {
+        return;
+      }
+      const generation = lease.generationFor(sessionName);
+      surface.send(TERMINAL_INPUT_WIRE, {
+        session_name: sessionName,
+        data: encodeBase64(data),
+        ...(generation !== undefined ? { control_generation: generation } : {}),
+      });
     },
 
     sendResize: (sessionName: string, cols: number, rows: number): void => {
-      surface.send(TERMINAL_RESIZE_WIRE, { session_name: sessionName, cols, rows });
+      const state = lease.getControlState(sessionName);
+      if (state.role === 'observer') {
+        return;
+      }
+      const generation = lease.generationFor(sessionName);
+      surface.send(TERMINAL_RESIZE_WIRE, {
+        session_name: sessionName,
+        cols,
+        rows,
+        ...(generation !== undefined ? { control_generation: generation } : {}),
+      });
     },
 
-    onOutput: (cb: (data: Uint8Array) => void): (() => void) => {
+    getControlState: (sessionName: string): TerminalControlState =>
+      lease.getControlState(sessionName),
+
+    acquireControl: (sessionName) =>
+      acquireSessionControl(surface, lease, sessionName),
+
+    onControlChanged: (cb) => lease.onControlChanged(cb),
+
+    onOutput: (cb: (frame: TerminalOutputFrame) => void): (() => void) => {
       return surface.subscribe('agent.terminal.output', (payload) => {
-        const data = (payload as { data?: unknown })?.data as string | undefined;
+        const p = payload as {
+          data?: unknown;
+          stream_epoch?: unknown;
+          stream_seq?: unknown;
+        };
+        const data = p.data as string | undefined;
         if (data) {
-          // Strict decode (throws on invalid base64) — see './base64' for why
-          // this side is strict while server.ts (relay) is tolerant.
-          cb(decodeBase64Bytes(data));
+          cb({
+            data: decodeBase64Bytes(data),
+            streamEpoch:
+              typeof p.stream_epoch === 'number' ? p.stream_epoch : undefined,
+            streamSeq: typeof p.stream_seq === 'number' ? p.stream_seq : undefined,
+          });
         }
       });
+    },
+
+    resumeStream: async (sessionName, streamEpoch, afterSeq) => {
+      const reply = await surface.request(TERMINAL_STREAM_RESUME_WIRE, {
+        session_name: sessionName,
+        stream_epoch: streamEpoch,
+        after_seq: afterSeq,
+      });
+      const r = reply as Record<string, unknown>;
+      return {
+        streamEpoch:
+          typeof r.stream_epoch === 'number' ? r.stream_epoch : streamEpoch,
+        epochMatch: r.epoch_match === true,
+        events: parseStreamEvents(r.events),
+      };
     },
 
     onResize: (cb: (cols: number, rows: number) => void): (() => void) => {

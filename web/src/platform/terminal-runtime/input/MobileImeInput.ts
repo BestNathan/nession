@@ -286,6 +286,14 @@ export class MobileImeInput {
     this.callbacks.onCommitText(text);
   }
 
+  setEnabled(enabled: boolean): void {
+    if (this.disposed) {
+      return;
+    }
+    this.element.readOnly = !enabled;
+    this.element.tabIndex = enabled ? 0 : -1;
+  }
+
   dispose(): void {
     if (this.disposed) { return; }
     this.disposed = true;

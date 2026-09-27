@@ -347,6 +347,19 @@ export class TerminalController {
     return this.inputSourceManager.getActiveSource();
   }
 
+  /** Apply attach-time stream cursor for gap catch-up (#1094). */
+  seedStreamCursor(streamEpoch: number | undefined, streamCursor: number | undefined): void {
+    this.transport?.seedStreamCursor?.(streamEpoch, streamCursor);
+  }
+
+  /** Gate keyboard / IME → PTY when this client is an observer (#1095). */
+  setRemoteInputEnabled(enabled: boolean): void {
+    if (this._terminal) {
+      this._terminal.options.disableStdin = !enabled;
+    }
+    this.mobileIme?.setEnabled(enabled);
+  }
+
   /**
    * Register a callback for input source changes.
    * Returns an unsubscribe function.

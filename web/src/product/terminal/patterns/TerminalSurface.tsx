@@ -8,6 +8,8 @@ import type {
 import type { CapsuleCapabilityContribution } from '@/app/capsulePresence';
 import type { TerminalController } from '@/platform/terminal-runtime/controller/TerminalController';
 import type { TerminalSemanticKey } from '@/platform/terminal-runtime/interaction/TerminalInteractionController';
+import type { TerminalControlState } from '@/product/terminal/state/terminalControl';
+import { Button } from '@/components/ui/button';
 
 export interface TerminalSurfaceProps {
   /** xterm mount tree (TerminalPane). */
@@ -35,6 +37,9 @@ export interface TerminalSurfaceProps {
    * is the only way the two can be guaranteed to agree.
    */
   experience: CapsuleExperience;
+  /** P2P control lease (#1095). Omit in relay until server forwards attach metadata. */
+  terminalControl?: TerminalControlState;
+  onTakeControl?: () => void;
 }
 
 /**
@@ -49,6 +54,8 @@ export function TerminalSurface({
   capsuleCapabilities,
   capsuleProjection,
   experience,
+  terminalControl,
+  onTakeControl,
 }: TerminalSurfaceProps) {
 
   const capsuleSendText = (text: string) => {
@@ -84,6 +91,22 @@ export function TerminalSurface({
         )}
         {children}
       </div>
+      {terminalControl?.role === 'observer' ? (
+        <div
+          className="flex shrink-0 items-center justify-between gap-3 border-t border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground"
+          data-testid="terminal-observer-bar"
+        >
+          <span>View only — another client is controlling this session.</span>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={() => onTakeControl?.()}
+          >
+            Take control
+          </Button>
+        </div>
+      ) : null}
       <TerminalCapsule
         experience={experience}
         sendText={capsuleSendText}
