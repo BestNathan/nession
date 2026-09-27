@@ -1,114 +1,83 @@
 import { useState, type ReactNode } from 'react';
-import { AlertCircle, MessageSquare, Wrench } from 'lucide-react';
+import { MessageSquare } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { ConversationViewState } from '../hooks/useConversation';
 import type { ClaudeCodeConversationResponse } from '../types';
 import { conversationLabel } from '../model/conversationLabel';
+import { clockTime } from '../model/clockTime';
+import { previewLine } from '../model/previewLine';
+import { dateBucket, type DateBucket } from '../model/dateBucket';
+import { ConversationTranscript } from './ConversationTranscript';
 import { cn } from '@/shared/lib/utils';
 
-type Item = NonNullable<ClaudeCodeConversationResponse['items']>[number];
 type Candidate = NonNullable<ClaudeCodeConversationResponse['candidates']>[number];
 
-/**
- * A record's own timestamp, as a clock time.
- *
- * Short on purpose: the reading order is the transcript's order, so the
- * timestamp is orientation rather than information. Anything unparseable is
- * dropped rather than shown raw — an RFC 3339 string in the middle of a
- * sentence is worse than no time at all.
- */
-function clockTime(timestamp: string | null | undefined): string | null {
-  if (!timestamp) {
-    return null;
-  }
-  const at = new Date(timestamp);
-  if (Number.isNaN(at.getTime())) {
-    return null;
-  }
-  return at.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-}
+/** The headings, and the order they are shown in — newest first. */
+const BUCKET_LABELS: Record<DateBucket, string> = {
+  today: 'Today',
+  'previous-7-days': 'Previous 7 days',
+  older: 'Older',
+};
+const BUCKET_ORDER: DateBucket[] = ['today', 'previous-7-days', 'older'];
 
-function Turn({ item }: { item: Item }) {
-  const time = clockTime(item.timestamp);
-  const isUser = item.kind === 'user';
+/** One conversation, as a row the reader can scan and choose. */
+function CandidateRow({
+  candidate,
+  openId,
+  onSelect,
+}: {
+  candidate: Candidate;
+  openId: string | null;
+  onSelect: (claudeSessionId: string) => void;
+}) {
+  const time = clockTime(candidate.updated_at);
+  const preview = previewLine(candidate.preview);
   return (
-    <article
-      data-testid="conversation-turn"
-      data-kind={item.kind}
-      // Right for the user, left for Claude (#1120). Alignment carries the
-      // distinction as well as the surface does, which is what makes it hold
-      // for a reader who cannot rely on colour.
-      className={cn('flex flex-col gap-1', isUser ? 'items-end' : 'items-start')}
-    >
-      <div className="flex items-baseline gap-2">
-        <span className="text-xs font-semibold text-muted-foreground">
-          {isUser ? 'You' : 'Claude'}
-        </span>
-        {time ? (
-          <time dateTime={item.timestamp ?? undefined} className="text-xs text-muted-foreground">
-            {time}
-          </time>
-        ) : null}
-      </div>
-      {/* The two surfaces are design roles, not colours chosen here — see
-          `design/tokens/domain.json`. `#1120`'s Open Question 1 leaves their
-          values to the visual pass, so this file names which role a turn plays
-          and nothing more. `max-w-prose` rather than a measured width for the
-          same reason: bounding a message is a reading decision, not a metric. */}
-      <p
+    <li>
+      <button
+        type="button"
+        aria-current={openId === candidate.claude_session_id ? 'true' : undefined}
+        onClick={() => onSelect(candidate.claude_session_id)}
         className={cn(
-          'max-w-prose whitespace-pre-wrap rounded-lg px-3 py-2 text-sm',
-          isUser
-            ? 'bg-[var(--conversation-user-surface)] text-[var(--conversation-user-foreground)]'
-            : 'bg-[var(--conversation-assistant-surface)] text-[var(--conversation-assistant-foreground)]',
+          'flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left transition-colors',
+          'hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+          openId === candidate.claude_session_id && 'bg-accent text-accent-foreground',
         )}
       >
-        {item.text ?? ''}
-      </p>
-    </article>
-  );
-}
+        <MessageSquare className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        {/* Three ranks, and the row reads in that order (#1120): the title
+            is what a person scans for, the preview says where the
+            conversation got to, and the time is orientation. The title is
+            `font-medium` and the preview is not, so the hierarchy survives
+            without relying on the muted colour alone.
 
-/**
- * A tool call, one collapsed line by default.
- *
- * `#1005` criterion 10: tool use must not drown the conversation. Native
- * `<details>` rather than a new primitive — it is already keyboard-accessible
- * and needs no state of its own, and the summary is the line worth reading
- * whether or not the rest is open.
- */
-function ToolRow({ item }: { item: Item }) {
-  const tool = item.tool;
-  if (!tool) {
-    return null;
-  }
-  return (
-    <details
-      data-testid="conversation-tool"
-      // A tool is not a participant, so it takes the activity role rather than
-      // either speaker's surface. Full width on purpose (#1120): a bubble here
-      // would put it in the conversation instead of beside it.
-      className="rounded-md px-3 py-2 text-[var(--conversation-tool-foreground)] bg-[var(--conversation-tool-surface)]"
-    >
-      <summary className="flex cursor-pointer items-center gap-2 text-xs">
-        <Wrench className="h-3.5 w-3.5 shrink-0" />
-        <span
-          className={cn(
-            'font-medium',
-            // The failure treatment is a conversation role too, so a transcript
-            // can be re-tinted without hunting for the one place that reached
-            // past the domain layer for a semantic name.
-            tool.is_error && 'text-[var(--conversation-tool-error)]',
-          )}
-          data-testid="conversation-tool-name"
-        >
-          {tool.name}
+            The identity moves to the tooltip. A row's job is to be
+            recognisable, and a UUID is not: it is the same string for
+            every reader and carries no scent. It stays reachable because
+            selection still speaks it. */}
+        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <span
+            className="truncate text-sm font-medium"
+            title={candidate.claude_session_id}
+            data-testid="conversation-candidate-title"
+          >
+            {conversationLabel(candidate)}
+          </span>
+          {/* Absent for roughly a tenth of real conversations (measured:
+              14 of 120 had no prompt recorded), so the row degrades to
+              title and time rather than reserving a blank second line. */}
+          {preview ? (
+            <span
+              className="truncate text-xs text-muted-foreground"
+              data-testid="conversation-candidate-preview"
+            >
+              {preview}
+            </span>
+          ) : null}
         </span>
-        <span className="truncate">{tool.summary}</span>
-        {tool.truncated ? <span className="shrink-0">(truncated)</span> : null}
-      </summary>
-      {item.text ? <p className="whitespace-pre-wrap pt-2 text-xs">{item.text}</p> : null}
-    </details>
+        {time ? <span className="shrink-0 text-xs text-muted-foreground">{time}</span> : null}
+      </button>
+    </li>
   );
 }
 
@@ -121,37 +90,59 @@ function CandidateList({
   openId: string | null;
   onSelect: (claudeSessionId: string) => void;
 }) {
+  // Bucketed rather than filtered per bucket, so the heading appears once
+  // whatever order the provider sent: grouping consecutive runs would emit a
+  // second "Older" heading if one arrived out of order, which reads as broken
+  // rather than as a sort problem.
+  const grouped = new Map<DateBucket, Candidate[]>();
+  const undated: Candidate[] = [];
+  for (const candidate of candidates) {
+    const bucket = dateBucket(candidate.updated_at);
+    if (bucket === null) {
+      undated.push(candidate);
+      continue;
+    }
+    const rows = grouped.get(bucket);
+    if (rows) {
+      rows.push(candidate);
+    } else {
+      grouped.set(bucket, [candidate]);
+    }
+  }
+
+  const row = (candidate: Candidate) => (
+    <CandidateRow
+      key={candidate.claude_session_id}
+      candidate={candidate}
+      openId={openId}
+      onSelect={onSelect}
+    />
+  );
+
   return (
-    <ul className="space-y-0.5" data-testid="conversation-candidates">
-      {candidates.map((candidate) => (
-        <li key={candidate.claude_session_id}>
-          <button
-            type="button"
-            aria-current={openId === candidate.claude_session_id ? 'true' : undefined}
-            onClick={() => onSelect(candidate.claude_session_id)}
-            className={cn(
-              'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors',
-              'hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-              openId === candidate.claude_session_id && 'bg-accent text-accent-foreground',
-            )}
-          >
-            <MessageSquare className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-            {/* The title leads and the identity moves to the tooltip (#1120).
-                A row's job is to be recognisable, and a UUID is not: it is the
-                same string for every reader and carries no scent. It stays
-                reachable here because selection still speaks it. */}
-            <span className="truncate" title={candidate.claude_session_id}>
-              {conversationLabel(candidate)}
-            </span>
-            {clockTime(candidate.updated_at) ? (
-              <span className="ml-auto shrink-0 text-xs text-muted-foreground">
-                {clockTime(candidate.updated_at)}
-              </span>
-            ) : null}
-          </button>
-        </li>
-      ))}
-    </ul>
+    <div className="space-y-4" data-testid="conversation-candidates">
+      {BUCKET_ORDER.map((bucket) => {
+        const rows = grouped.get(bucket);
+        if (!rows || rows.length === 0) {
+          return null;
+        }
+        return (
+          <section key={bucket}>
+            <h3
+              className="px-2 pb-1 text-xs font-semibold text-muted-foreground"
+              data-testid="conversation-bucket"
+            >
+              {BUCKET_LABELS[bucket]}
+            </h3>
+            <ul className="space-y-0.5">{rows.map(row)}</ul>
+          </section>
+        );
+      })}
+      {/* Undated rows last and unheaded. Filing them under "Older" would assert
+          a recency nothing knows — the provider sorts them last for the same
+          reason (`None` is not evidence of recency). */}
+      {undated.length > 0 ? <ul className="space-y-0.5">{undated.map(row)}</ul> : null}
+    </div>
   );
 }
 
@@ -194,7 +185,15 @@ function ConversationList({
   candidates: Candidate[];
   open: string | null;
   onOpen: (claudeSessionId: string) => void;
-  onBack: () => void;
+  /**
+   * Returns from the pushed conversation to this list.
+   *
+   * Optional because it only means something in the push layout. In
+   * master/detail the list is beside the conversation rather than behind it, so
+   * there is nothing to return *from* and the control would be a button that
+   * does nothing — which is worse than no button.
+   */
+  onBack?: () => void;
 }) {
   return (
     <div className="space-y-3 p-4" data-testid="conversation-list">
@@ -202,7 +201,7 @@ function ConversationList({
         <h2 className="text-xs font-semibold text-muted-foreground">
           Conversations in this directory
         </h2>
-        {open ? (
+        {open && onBack ? (
           <Button variant="outline" size="sm" data-testid="conversation-back" onClick={onBack}>
             Back to conversation
           </Button>
@@ -217,59 +216,15 @@ function ConversationList({
   );
 }
 
-/**
- * The transcript, from the newest page backwards.
- *
- * Exported so the Peek's overlay reads it rather than drawing its own:
- * `#1120` forbids "one chat visual system for Peek and another for Workspace",
- * and a second transcript renderer is exactly how that happens. It also already
- * owns its own `overflow-y-auto`, which the overlay needs — it must scroll
- * itself and never the Terminal behind it.
- */
-export function ConversationBody({
-  view,
-  onLoadOlder,
-}: {
-  view: ConversationViewState;
-  onLoadOlder: () => void;
-}) {
-  return (
-    <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
-      {view.hasMore ? (
-        <Button
-          variant="outline"
-          size="sm"
-          data-testid="conversation-load-older"
-          disabled={view.loadingOlder}
-          onClick={() => onLoadOlder()}
-        >
-          {view.loadingOlder ? 'Loading...' : 'Load older'}
-        </Button>
-      ) : null}
-      {view.items.length === 0 ? (
-        <p className="flex items-center gap-2 text-sm text-muted-foreground">
-          <AlertCircle className="h-4 w-4" />
-          This conversation has no messages yet.
-        </p>
-      ) : (
-        view.items.map((item) =>
-          item.kind === 'tool' ? (
-            <ToolRow key={item.id} item={item} />
-          ) : (
-            <Turn key={item.id} item={item} />
-          ),
-        )
-      )}
-    </div>
-  );
-}
-
 function ConversationHeader({
   view,
   onShowList,
 }: {
   view: ConversationViewState;
-  onShowList: () => void;
+  /** Optional for the same reason `ConversationList.onBack` is: in
+   *  master/detail the list is already on screen, so "All conversations"
+   *  would be a control that reveals something the reader can see. */
+  onShowList?: () => void;
 }) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 border-b p-4">
@@ -292,7 +247,7 @@ function ConversationHeader({
           ) : null}
         </p>
       </div>
-      {view.candidates.length > 0 ? (
+      {view.candidates.length > 0 && onShowList ? (
         <Button
           variant="outline"
           size="sm"
@@ -307,6 +262,22 @@ function ConversationHeader({
 }
 
 /**
+ * How this section lays out, which is a width decision before it is anything
+ * else.
+ *
+ * `master-detail` keeps the list and the conversation on screen together, which
+ * is what a Web viewport has the room for and what `#1120` item 8 asks for: the
+ * two are read against each other — you pick a conversation *by* comparing it to
+ * the one you have open.
+ *
+ * `push` shows one at a time, and is what App uses. `#1120` item 9 is explicit
+ * that App must **not** get the master/detail grid shrunk down; the correct App
+ * behaviour is the one this component already had before there was a second
+ * layout, so `push` is the old path rather than a new one.
+ */
+type ConversationLayout = 'master-detail' | 'push';
+
+/**
  * The Session's Claude conversation, or the list to choose one from.
  *
  * Every state the provider can answer with has its own rendering, and none of
@@ -315,11 +286,13 @@ function ConversationHeader({
  */
 export function ConversationView({
   view,
+  layout,
   onSelect,
   onLoadOlder,
   onReload,
 }: {
   view: ConversationViewState;
+  layout: ConversationLayout;
   onSelect: (claudeSessionId: string | null) => void;
   onLoadOlder: () => void;
   onReload: () => void;
@@ -360,6 +333,49 @@ export function ConversationView({
       </StateNotice>
     );
   }
+  if (layout === 'master-detail') {
+    return (
+      <div
+        className="grid min-h-0 flex-1 grid-cols-[minmax(12rem,18rem)_minmax(0,1fr)]"
+        data-testid="conversation-master-detail"
+      >
+        {/* The list scrolls itself and nothing else does, so opening a
+            conversation never moves the list under the reader's cursor —
+            `#1120` asks for exactly that ("changes detail without losing list
+            position"), and it is a property of which element owns the scroll
+            rather than of anything this component tracks. */}
+        <aside className="min-h-0 overflow-y-auto border-r">
+          <ConversationList
+            candidates={view.candidates}
+            open={open}
+            onOpen={(id) => onSelect(id)}
+          />
+        </aside>
+        <main className="flex min-h-0 flex-col">
+          {open === null ? (
+            // The detail pane is empty, not the capability: the list beside it
+            // is a complete answer, and covering it to say "nothing is open"
+            // would take away the thing the reader needs to act on that.
+            //
+            // **Deliberately no `conversation-open` here.** That testid means "a
+            // conversation is open", and putting it on an empty pane would make
+            // it assert something false — which is exactly what a fixture test
+            // caught when this branch was first written. It stays on the
+            // content, below, so it keeps meaning what it says in both layouts.
+            <StateNotice testId="conversation-nothing-open">
+              Choose a conversation to read it here.
+            </StateNotice>
+          ) : (
+            <div className="flex min-h-0 flex-1 flex-col" data-testid="conversation-open">
+              <ConversationHeader view={view} />
+              <ConversationTranscript view={view} onLoadOlder={onLoadOlder} />
+            </div>
+          )}
+        </main>
+      </div>
+    );
+  }
+
   if (showList || open === null) {
     return (
       <ConversationList
@@ -377,7 +393,7 @@ export function ConversationView({
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="conversation-open">
       <ConversationHeader view={view} onShowList={() => setShowList(true)} />
-      <ConversationBody view={view} onLoadOlder={onLoadOlder} />
+      <ConversationTranscript view={view} onLoadOlder={onLoadOlder} />
     </div>
   );
 }

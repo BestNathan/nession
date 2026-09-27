@@ -104,7 +104,16 @@ describe('fixture conversation surface', () => {
   });
 
   it('refuses a wire it does not answer', async () => {
-    await expect(surface.request<ConversationResponse>('claude-code.list', {})).rejects.toThrow(
+    // `claude-code.read` — the capability's third wire, and the one this surface
+    // genuinely does not implement.
+    //
+    // This named `claude-code.list` until the surface started answering it (for
+    // `#1120`'s Configuration baseline), at which point the test failed. That
+    // was the test working: it is asserting a real property — a fixture that
+    // quietly answers a wire it does not model would let a case assert on a
+    // state the product cannot produce — so the example moved rather than the
+    // assertion.
+    await expect(surface.request<ConversationResponse>('claude-code.read', {})).rejects.toThrow(
       /does not answer/,
     );
   });

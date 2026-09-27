@@ -206,6 +206,28 @@ pub struct ConversationCandidateV1 {
     /// by one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
+    /// What the user last asked in this conversation, when Claude recorded it.
+    ///
+    /// The second line of a list row (#1120 item 5): a title says what a
+    /// conversation is *called*, and this says where it got to.
+    ///
+    /// **Additive and optional, so this stays `v1`**, on the same reasoning as
+    /// `title` — a consumer that ignores it behaves exactly as it did.
+    ///
+    /// Absent for conversations that never had the record written (measured: 14
+    /// of 120 in a sample), which is why it is optional rather than defaulted to
+    /// something the provider invented. A row with no preview must degrade to
+    /// title and time rather than reserve a blank line.
+    ///
+    /// Not necessarily prose — measured, it is frequently a slash-command
+    /// invocation, which is passed through rather than filtered because it is
+    /// still the truth about the conversation. Unbounded in principle (measured
+    /// max 201 characters, min 1), so a caller rendering one line must collapse
+    /// whitespace and bound it at the point of display.
+    ///
+    /// **Never identity**, as `title` is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preview: Option<String>,
 }
 
 /// The conversation the response is about.
@@ -359,6 +381,7 @@ mod tests {
             cwd: "/work".to_string(),
             updated_at: None,
             title: Some("a readable title".to_string()),
+            preview: Some("carry on with the terminal work".to_string()),
         };
         let json = serde_json::to_string(&candidate).unwrap();
         assert!(
@@ -368,24 +391,33 @@ mod tests {
     }
 
     #[test]
-    fn a_candidate_with_no_title_omits_the_field_rather_than_sending_null() {
+    fn a_candidate_with_no_display_metadata_omits_the_fields_rather_than_sending_null() {
         // `skip_serializing_if`, rather than a plain `Option`, because the two
         // are told apart on the wire: a client deciding whether to draw its own
         // fallback should be able to read absence directly instead of guessing
-        // what a null means. This is also what keeps the field additive — a
-        // consumer written before it existed sees byte-for-byte the payload it
-        // saw before, for every transcript whose title is unknown.
+        // what a null means. This is also what keeps the fields additive — a
+        // consumer written before one existed sees byte-for-byte the payload it
+        // saw before, for every transcript where it is unknown.
+        //
+        // Both display fields are asserted together because that is the claim
+        // `preview` makes for staying in `v1`: it is only additive if its
+        // absence is *invisible* on the wire, not merely ignorable.
         let candidate = ConversationCandidateV1 {
             claude_session_id: "abc".to_string(),
             cwd: "/work".to_string(),
             updated_at: None,
             title: None,
+            preview: None,
         };
 
         let json = serde_json::to_string(&candidate).unwrap();
         assert!(
             !json.contains("title"),
             "an absent title was still serialized: {json}"
+        );
+        assert!(
+            !json.contains("preview"),
+            "an absent preview was still serialized: {json}"
         );
     }
 
@@ -398,6 +430,7 @@ mod tests {
             cwd: "/work".to_string(),
             updated_at: None,
             title: Some("app-sessions-redesign".to_string()),
+            preview: None,
         };
 
         // Asserted on the payload rather than round-tripped through a
@@ -409,5 +442,38 @@ mod tests {
             json.contains(r#""title":"app-sessions-redesign""#),
             "a recorded title was dropped from the payload: {json}"
         );
+    }
+
+    #[test]
+    fn a_candidate_with_a_preview_carries_it_verbatim() {
+        // The positive half for `preview`, and the same shape as the title's.
+        //
+        // **Verbatim** is the part worth pinning: measured, this field is
+        // frequently a slash-command invocation, and a provider that "helpfully"
+        // stripped or reformatted it would be editing what the user typed. Two
+        // things the consumer must cope with and this test records rather than
+        // smooths over: the value can contain characters that need JSON escaping,
+        // and it can be a single character (measured minimum).
+        for prompt in [
+            "/nession-writing-requirements 使用 skills",
+            "a",
+            "\"quoted\"",
+        ] {
+            let candidate = ConversationCandidateV1 {
+                claude_session_id: "abc".to_string(),
+                cwd: "/work".to_string(),
+                updated_at: None,
+                title: None,
+                preview: Some(prompt.to_string()),
+            };
+
+            let json = serde_json::to_string(&candidate).unwrap();
+            let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+            assert_eq!(
+                parsed.get("preview").and_then(serde_json::Value::as_str),
+                Some(prompt),
+                "the preview was not carried through verbatim: {json}"
+            );
+        }
     }
 }

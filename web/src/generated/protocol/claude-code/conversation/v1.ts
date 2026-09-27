@@ -164,7 +164,30 @@ updated_at?: string | null,
  * conversations may carry the same title, and none of them may be chosen
  * by one.
  */
-title?: string | null, };
+title?: string | null, 
+/**
+ * What the user last asked in this conversation, when Claude recorded it.
+ *
+ * The second line of a list row (#1120 item 5): a title says what a
+ * conversation is *called*, and this says where it got to.
+ *
+ * **Additive and optional, so this stays `v1`**, on the same reasoning as
+ * `title` — a consumer that ignores it behaves exactly as it did.
+ *
+ * Absent for conversations that never had the record written (measured: 14
+ * of 120 in a sample), which is why it is optional rather than defaulted to
+ * something the provider invented. A row with no preview must degrade to
+ * title and time rather than reserve a blank line.
+ *
+ * Not necessarily prose — measured, it is frequently a slash-command
+ * invocation, which is passed through rather than filtered because it is
+ * still the truth about the conversation. Unbounded in principle (measured
+ * max 201 characters, min 1), so a caller rendering one line must collapse
+ * whitespace and bound it at the point of display.
+ *
+ * **Never identity**, as `title` is.
+ */
+preview?: string | null, };
 
 // ── Operations ──
 

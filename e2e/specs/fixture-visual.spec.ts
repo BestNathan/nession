@@ -160,6 +160,29 @@ test.describe('Web 1440×900', () => {
       ...FIXTURE_SCREENSHOT,
     });
   });
+
+  // `#1120`'s last unmet success criterion: "baselines include … and
+  // Configuration". It had none because the fixture's Claude Code surface
+  // rejected every wire but the conversation one, so this section rendered a
+  // transport error on every route and could not be photographed at all.
+  //
+  // Project is the default scope, so the assertion names a project-only path —
+  // a case that only checked "some file is listed" would pass on a section that
+  // showed the wrong scope's files.
+  test('Claude Code configuration', async ({ page }) => {
+    await page.goto('/#/fixture/workspace?capability=claude-code');
+
+    await expect(page.getByTestId('claude-code-workspace')).toBeVisible();
+    await page.getByRole('tab', { name: 'Configuration' }).click();
+
+    await expect(page.getByText('.claude/commands/review.md')).toBeVisible();
+    await expect(page.getByText('~/.claude/settings.local.json')).toBeHidden();
+
+    await expect(page).toHaveScreenshot('web-claude-code-configuration.png', {
+      fullPage: true,
+      ...FIXTURE_SCREENSHOT,
+    });
+  });
 });
 
 test.describe('Web compact 1024×768', () => {
@@ -567,7 +590,7 @@ test.describe('App 390×844', () => {
     await expect(page.getByTestId('files-app-list')).toBeVisible();
     // The directory counts arrive one `listDir` at a time, so the screenshot
     // waits for the last row's meta rather than racing it.
-    await expect(page.getByTestId('file-row-web')).toContainText('1 file', { timeout: 10_000 });
+    await expect(page.getByTestId('file-row-web')).toContainText('1 item', { timeout: 10_000 });
 
     await expect(page).toHaveScreenshot('app-files-list.png', {
       fullPage: true,

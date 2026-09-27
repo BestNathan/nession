@@ -146,8 +146,19 @@ function deferred<T>() {
  * behaviour through a view that is not showing it. A context with no agent or
  * session renders no tabs at all, so the click is conditional.
  */
+/**
+ * Opens the Workspace on Configuration, showing the Global scope.
+ *
+ * Two clicks rather than one, and the extra one is the point of `#1120` item 7:
+ * the config browser is no longer a peer of the conversation, so reaching a
+ * scope means going through the section that owns scopes.
+ */
 function renderConfig(ui: ReactElement) {
   const view = render(ui);
+  const configuration = screen.queryByRole('tab', { name: 'Configuration' });
+  if (configuration) {
+    fireEvent.click(configuration);
+  }
   const global = screen.queryByRole('tab', { name: 'Global' });
   if (global) {
     fireEvent.click(global);
@@ -164,17 +175,25 @@ describe('ClaudeCodeWorkspace', () => {
     vi.mocked(claudeCodeApi.claudeCodeConversation).mockResolvedValue(noConversations);
   });
 
-  it('opens on the conversation, and keeps the config browser one tab away', async () => {
+  it('opens on the conversation, and keeps configuration one section away', async () => {
     // #1005 decision 3: the Session's current work is the entry point, not the
-    // config browser. A default, not a removal — all three tabs are here.
+    // config browser. A default, not a removal — configuration is one section
+    // away, and #1120 item 7 is the shape of that distance.
     mockLists();
     render(<ClaudeCodeWorkspace ctx={makeContext()} />);
 
     expect(await screen.findByTestId('conversation-not-found')).toBeInTheDocument();
     expect(screen.queryByTestId('claude-code-scope-global')).not.toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Conversation' })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Global' })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Project' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Conversations' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Configuration' })).toBeInTheDocument();
+
+    // The assertion that would fail if the flattening came back. `Project` and
+    // `Global` are scopes *of configuration*, so they must not be reachable
+    // while configuration is closed — a top level of
+    // `Conversations | Global | Project` is exactly what #1120 names as the
+    // problem, and asserting only the two new names would pass on that.
+    expect(screen.queryByRole('tab', { name: 'Global' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'Project' })).not.toBeInTheDocument();
   });
 
   it('asks the provider which conversation this Session is in, without naming one', async () => {

@@ -206,9 +206,20 @@ export const capsuleInlineFieldRowClass =
  * geometry would have made the two move together for no reason. The typography
  * is a step below the capsule's own scale, because a Signal that arrived at the
  * composer's text size would read as a second composer.
+ *
+ * **The radius is part of that group now (#1110).** It was the one value here
+ * still borrowed — `var(--radius-lg)`, which resolves to `var(--radius)`, a
+ * generic shadcn-scale value that everything from a menu to a card also uses.
+ * So the corner was the only part of the surface not owned by the surface, and
+ * `terminalCapsule.projectionRadius` — declared in both experience token files
+ * for exactly this frame — was read by nothing.
+ *
+ * This moves the frame from 10px to 12px. That is the point rather than a side
+ * effect: the declaration and the rendering disagreed, and the declaration is
+ * the one that was written down on purpose.
  */
 export const capsuleProjectionClass =
-  'pointer-events-auto flex flex-col gap-[length:var(--terminal-capsule-projection-gap)] rounded-[var(--radius-lg)] border border-border/60 bg-background/95 p-[length:var(--terminal-capsule-projection-pad)] shadow-[var(--elevation-floating)] backdrop-blur';
+  'pointer-events-auto flex flex-col gap-[length:var(--terminal-capsule-projection-gap)] rounded-[var(--terminal-capsule-projection-radius)] border border-border/60 bg-background/95 p-[length:var(--terminal-capsule-projection-pad)] shadow-[var(--elevation-floating)] backdrop-blur';
 
 /** Above the capsule, never over it: the resting capsule's box does not move. */
 export const capsuleProjectionDockClass =

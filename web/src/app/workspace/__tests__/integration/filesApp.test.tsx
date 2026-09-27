@@ -10,8 +10,11 @@ vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }));
 
-const ENTRIES: FileEntry[] = [
+const ROOT_ENTRIES: FileEntry[] = [
   { name: 'docs', path: 'docs', full_path: '/root/docs', is_dir: true, size: 0, modified: 0 },
+];
+
+const DOCS_ENTRIES: FileEntry[] = [
   {
     name: 'visual-language.md',
     path: 'docs/visual-language.md',
@@ -24,7 +27,12 @@ const ENTRIES: FileEntry[] = [
 
 function makeFileOps(): FileOps {
   return {
-    listDir: vi.fn().mockResolvedValue({ entries: ENTRIES }),
+    listDir: vi.fn((path: string) => {
+      if (path === 'docs') {
+        return Promise.resolve({ entries: DOCS_ENTRIES });
+      }
+      return Promise.resolve({ entries: ROOT_ENTRIES });
+    }),
     readFile: vi.fn().mockResolvedValue({ path: '/f.txt', content: btoa('hello'), mime_type: 'text/plain' }),
     writeFile: vi.fn().mockResolvedValue({ path: '/f.txt', written: 5 }),
     deleteFile: vi.fn().mockResolvedValue({ path: '/f.txt', success: true }),
@@ -99,7 +107,9 @@ describe('FilesAppLayout', () => {
     // Tailwind default per list. The token is shared, so the assertion is on the
     // var rather than on a number: Web's desktop value lives at `:root` and the
     // App's replaces it under `[data-experience="app"]`.
+    const user = userEvent.setup();
     renderLayout();
+    await user.click(await screen.findByText('docs'));
     const name = (await screen.findByText('visual-language.md')).closest('span');
     expect(name?.className).toContain(
       'text-[length:var(--workspace-list-row-title-font-size)]',
@@ -112,6 +122,7 @@ describe('FilesAppLayout', () => {
     // target is `< Files   App.tsx`: the shell draws that bar from this.
     const user = userEvent.setup();
     const { setPush } = renderLayout();
+    await user.click(await screen.findByText('docs'));
     await user.click(await screen.findByText('visual-language.md'));
 
     const push = lastPush(setPush);
@@ -126,6 +137,7 @@ describe('FilesAppLayout', () => {
     // one leave, and it reaches this layout's guard through `onLeave`.
     const user = userEvent.setup();
     renderLayout();
+    await user.click(await screen.findByText('docs'));
     await user.click(await screen.findByText('visual-language.md'));
     expect(screen.queryByLabelText('Close file')).not.toBeInTheDocument();
   });
@@ -133,6 +145,7 @@ describe('FilesAppLayout', () => {
   it('returns to the list when the shell calls the declared leave', async () => {
     const user = userEvent.setup();
     const { setPush } = renderLayout();
+    await user.click(await screen.findByText('docs'));
     await user.click(await screen.findByText('visual-language.md'));
     expect(screen.queryByTestId('files-app-layout')).not.toBeInTheDocument();
 
@@ -141,12 +154,26 @@ describe('FilesAppLayout', () => {
     });
 
     expect(screen.getByTestId('files-app-layout')).toBeInTheDocument();
+    expect(lastPush(setPush)?.title).toBe('docs');
+  });
+
+  it('declares a pushed depth when entering a subdirectory', async () => {
+    const user = userEvent.setup();
+    const { setPush } = renderLayout();
+    await user.click(await screen.findByText('docs'));
+
+    const push = lastPush(setPush);
+    expect(push?.title).toBe('docs');
+    act(() => {
+      push?.onLeave();
+    });
     expect(lastPush(setPush)).toBeNull();
   });
 
   it('asks before leaving an unsaved editor, through the declared leave', async () => {
     const user = userEvent.setup();
     const { setPush } = renderLayout();
+    await user.click(await screen.findByText('docs'));
     await user.click(await screen.findByText('visual-language.md'));
     // Markdown opens in preview; raw view exposes the editor and the Edit toggle.
     await user.click(screen.getByText('Raw'));
@@ -173,12 +200,13 @@ describe('FilesAppLayout', () => {
     });
     await user.click(screen.getByRole('button', { name: 'Leave without saving' }));
     expect(screen.getByTestId('files-app-layout')).toBeInTheDocument();
-    expect(lastPush(setPush)).toBeNull();
+    expect(lastPush(setPush)?.title).toBe('docs');
   });
 
   it('pops directly when the editor is clean even after a saved edit', async () => {
     const user = userEvent.setup();
     const { setPush } = renderLayout();
+    await user.click(await screen.findByText('docs'));
     await user.click(await screen.findByText('visual-language.md'));
     await user.click(screen.getByText('Raw'));
     await user.click(await screen.findByText('Edit'));
@@ -195,7 +223,52 @@ describe('FilesAppLayout', () => {
       lastPush(setPush)?.onLeave();
     });
     expect(screen.getByTestId('files-app-layout')).toBeInTheDocument();
-    expect(lastPush(setPush)).toBeNull();
+    expect(lastPush(setPush)?.title).toBe('docs');
+  });
+
+  it('opens search, declares Search depth, and opens a result in the viewer', async () => {
+    const user = userEvent.setup();
+    const { setPush } = renderLayout();
+    await user.click(screen.getByRole('button', { name: 'Search files' }));
+    expect(screen.getByTestId('files-app-search')).toBeInTheDocument();
+    expect(lastPush(setPush)?.title).toBe('Search');
+
+    await user.type(screen.getByLabelText('Search files'), 'visual');
+    await user.click(await screen.findByTestId('files-search-result-docs/visual-language.md'));
+
+    expect(lastPush(setPush)?.title).toBe('visual-language.md');
+    expect(screen.queryByTestId('files-app-search')).not.toBeInTheDocument();
+  });
+
+  it('opens the folder sheet and refreshes the list', async () => {
+    const user = userEvent.setup();
+    const fileOps = makeFileOps();
+    renderLayout({ ...baseCtx, fileOps });
+    await screen.findByText('docs');
+    vi.mocked(fileOps.listDir).mockClear();
+
+    await user.click(screen.getByRole('button', { name: 'Folder actions' }));
+    expect(screen.getByTestId('files-app-folder-sheet')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Refresh' }));
+    await waitFor(() => {
+      expect(fileOps.listDir).toHaveBeenCalledWith('');
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+  });
+
+  it('restores the directory stack after leaving search', async () => {
+    const user = userEvent.setup();
+    const { setPush } = renderLayout();
+    await user.click(await screen.findByText('docs'));
+    await user.click(screen.getByRole('button', { name: 'Search files' }));
+
+    act(() => {
+      lastPush(setPush)?.onLeave();
+    });
+
+    expect(screen.getByTestId('files-app-layout')).toBeInTheDocument();
+    expect(lastPush(setPush)?.title).toBe('docs');
   });
 
   it('clears the pushed depth when fileOps detaches then reattaches', async () => {
@@ -203,6 +276,7 @@ describe('FilesAppLayout', () => {
     const setPush = vi.fn<(push: WorkspacePush | null) => void>();
     const depth = { setPush };
     const { rerender } = render(<FilesAppLayout ctx={baseCtx} depth={depth} />);
+    await user.click(await screen.findByText('docs'));
     await user.click(await screen.findByText('visual-language.md'));
     expect(screen.queryByTestId('files-app-layout')).not.toBeInTheDocument();
 
