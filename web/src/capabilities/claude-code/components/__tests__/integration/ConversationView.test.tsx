@@ -139,6 +139,42 @@ describe('ConversationView', () => {
     expect(onSelect).toHaveBeenCalledWith('claude-2');
   });
 
+  it('shows what was last asked under the title, and degrades when there is none', () => {
+    // The row is two lines (#1120 item 5): the title says what a conversation
+    // is called, the preview says where it got to. Measured, both halves can be
+    // missing independently, so this asserts the *pair* rather than the
+    // presence of either — one candidate has both, the other has a title only.
+    const candidates = [
+      {
+        claude_session_id: 'claude-1',
+        cwd: '/work',
+        updated_at: '2026-09-25T10:00:00Z',
+        title: 'terminal ownership handoff',
+        preview: 'review the controller/observer handoff',
+      },
+      {
+        claude_session_id: 'claude-2',
+        cwd: '/work',
+        updated_at: '2026-09-25T09:00:00Z',
+        title: 'capsule radius',
+      },
+    ];
+    renderView(state({ state: 'ambiguous', conversation: null, candidates }));
+
+    const previews = screen.getAllByTestId('conversation-candidate-preview');
+    expect(previews).toHaveLength(1);
+    expect(previews[0]).toHaveTextContent('review the controller/observer handoff');
+
+    // Both titles still carry their own text, which is what makes the preview a
+    // second line rather than a replacement for the first. Asserted on the
+    // *content* and not just on the element count: a row that drew the preview
+    // where the title belongs would still have two title elements, so counting
+    // them would pass on exactly the failure this is here to catch.
+    expect(
+      screen.getAllByTestId('conversation-candidate-title').map((el) => el.textContent),
+    ).toEqual(['terminal ownership handoff', 'capsule radius']);
+  });
+
   it('lets a user go back to the list and return to the conversation', async () => {
     // #1005 decision 3: the list is an entry point the user can always return
     // to, not a fallback shown only when resolution failed.
