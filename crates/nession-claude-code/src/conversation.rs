@@ -72,6 +72,23 @@ pub struct Discovered {
     /// same title, and none of the selection paths read this — they all use
     /// `claude_session_id`, as they did before this field existed.
     pub title: Option<String>,
+    /// The last thing the user asked, when Claude recorded it (#1120 item 5).
+    ///
+    /// A list row needs a second line — a title alone says what a conversation
+    /// is *called*, not where it got to — and the honest answer is the prompt
+    /// the user last typed. Read from the transcript's **last** `last-prompt`
+    /// record for the same reason the title is: measured, it is rewritten as
+    /// the conversation evolves.
+    ///
+    /// Not necessarily prose. Measured over real transcripts it is often a
+    /// slash command invocation (`/nession-writing-requirements …`), which is
+    /// still the truth about the conversation and is passed through rather than
+    /// filtered. Measured length: min 1, median 25, p90 143, max 201 characters,
+    /// so a caller rendering a single line must collapse whitespace and bound
+    /// it — and must survive a one-character value without looking broken.
+    ///
+    /// **Display metadata, never identity**, exactly as `title` is.
+    pub preview: Option<String>,
     path: PathBuf,
 }
 
@@ -232,23 +249,29 @@ fn inspect(path: &Path, cwd: &str) -> Option<Discovered> {
         cwd: recorded_cwd,
         updated_at: tail.updated_at,
         title: tail.title,
+        preview: tail.preview,
         path: path.to_path_buf(),
     })
 }
 
 /// What a transcript's last chunk says about it.
 ///
-/// Both questions are *last-record* questions — the newest timestamp and the
-/// current title are at the end of a transcript, not the start — so one read
-/// answers both. Measured over 14 real transcripts: the last 64 KiB yields a
-/// title for exactly the 11 that carry one anywhere, so the bound that already
-/// existed for `updated_at` is sufficient for the title too and costs **no
-/// extra I/O**. Widening it would not find more titles; it would only read
-/// more.
+/// All three questions are *last-record* questions — the newest timestamp, the
+/// current title and the last prompt are at the end of a transcript, not the
+/// start — so one read answers all three. Measured over 14 real transcripts:
+/// the last 64 KiB yields a title for exactly the 11 that carry one anywhere.
+/// Measured again over 120 for the prompt (#1120 item 5): it yields one for 106,
+/// and **all 14 of the rest have no `last-prompt` anywhere in the file** —
+/// checked by scanning each whole, not inferred — and they are uniformly small
+/// (2.3 KB–66 KB, mostly ≈20 KB), short conversations that never had the record
+/// written. So the bound that already existed for `updated_at` is sufficient
+/// for all three and costs **no extra I/O**. Widening it would not find more; it
+/// would only read more.
 #[derive(Default)]
 struct TailFacts {
     updated_at: Option<String>,
     title: Option<String>,
+    preview: Option<String>,
 }
 
 fn tail_facts(path: &Path) -> TailFacts {
@@ -276,7 +299,7 @@ fn tail_facts(path: &Path) -> TailFacts {
             // ends mid-record. Both are expected.
             continue;
         };
-        // Last wins for both, which is the whole reason this reads the tail.
+        // Last wins for all three, which is the whole reason this reads the tail.
         if let Some(timestamp) = string_field(&record, "timestamp") {
             facts.updated_at = Some(timestamp);
         }
@@ -287,6 +310,22 @@ fn tail_facts(path: &Path) -> TailFacts {
             // blank.
             match string_field(&record, "aiTitle") {
                 Some(title) if !title.trim().is_empty() => facts.title = Some(title),
+                _ => {}
+            }
+        }
+        if record.get("type").and_then(Value::as_str) == Some("last-prompt") {
+            // The measured shape is
+            // `{"type":"last-prompt","lastPrompt":"…","leafUuid":"…"}`.
+            //
+            // The field is **optional on its own record** — measured, 139 of
+            // 7501 `last-prompt` records carried no `lastPrompt` at all, and the
+            // samples without one sit at the start of a session. So a record
+            // missing the field is skipped rather than treated as clearing it:
+            // absence here means "not written yet", not "the user said nothing",
+            // and a blank preview would replace a usable one for no reason. Same
+            // rule as the title's, and the same reason.
+            match string_field(&record, "lastPrompt") {
+                Some(prompt) if !prompt.trim().is_empty() => facts.preview = Some(prompt),
                 _ => {}
             }
         }
@@ -863,6 +902,148 @@ mod tests {
         assert_eq!(found[0].title, None);
     }
 
+    // ---- previews -------------------------------------------------------
+
+    /// A transcript carrying `last-prompt` records, in the order given.
+    fn transcript_with_prompts(dir: &Path, name: &str, cwd: &str, prompts: &[&str]) -> PathBuf {
+        let mut body = format!(
+            r#"{{"type":"user","uuid":"u","timestamp":"2026-09-25T00:00:09Z","cwd":"{cwd}","sessionId":"{name}","message":{{"role":"user","content":"hi"}}}}"#
+        );
+        for prompt in prompts {
+            body.push('\n');
+            body.push_str(&format!(
+                r#"{{"type":"last-prompt","lastPrompt":"{prompt}","leafUuid":"l","sessionId":"{name}"}}"#
+            ));
+        }
+        body.push('\n');
+        let path = dir.join(name);
+        std::fs::write(&path, body).expect("write the transcript");
+        path
+    }
+
+    #[test]
+    fn the_preview_is_the_last_last_prompt_record_not_the_first() {
+        // Same shape as the title, and for the same measured reason: the record
+        // is rewritten as the conversation evolves (7501 of them across a
+        // 30-transcript sample). A row showing the *first* prompt would describe
+        // where every conversation started rather than where it got to, which is
+        // the one thing the second line of the row exists to say.
+        let root = tempfile::tempdir().unwrap();
+        let project = root.path().join("-w");
+        std::fs::create_dir_all(&project).unwrap();
+        transcript_with_prompts(
+            &project,
+            "mine.jsonl",
+            "/w",
+            &["start on the capsule", "now do the transcript"],
+        );
+
+        let _root = ProjectsRootForTest::set(root.path().to_path_buf());
+        let found = conversations_at("/w");
+
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].preview.as_deref(), Some("now do the transcript"));
+    }
+
+    #[test]
+    fn a_transcript_with_no_last_prompt_reports_none_rather_than_inventing_one() {
+        // Measured: 14 of 120 transcripts carry no `last-prompt` anywhere, and
+        // all 14 are small ones (2.3 KB–66 KB) that never had the record
+        // written. Absence is an ordinary state, so the row must degrade to
+        // title and time — substituting the first user message here would put
+        // text in the list that the transcript never offered as a summary.
+        let root = tempfile::tempdir().unwrap();
+        let project = root.path().join("-w");
+        std::fs::create_dir_all(&project).unwrap();
+        transcript_at(&project, "mine.jsonl", "/w", "2026-09-25T00:00:09Z");
+
+        let _root = ProjectsRootForTest::set(root.path().to_path_buf());
+        let found = conversations_at("/w");
+
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].preview, None);
+    }
+
+    #[test]
+    fn a_last_prompt_record_without_the_field_does_not_clear_an_earlier_preview() {
+        // The measured quirk this rule exists for: **139 of 7501** `last-prompt`
+        // records carried no `lastPrompt` at all, so the field is optional on its
+        // own record and can be missing from the newest one.
+        //
+        // Absence there means "not written", not "the user said nothing", so it
+        // is skipped rather than treated as clearing — the last record **that
+        // carries a value** wins. Clearing would trade a true, useful line for a
+        // blank one on the strength of a field the provider never had. This is
+        // the same rule the title uses, and the assertion that can fail if the
+        // implementation ever starts reading "the last record" instead of "the
+        // last value".
+        let root = tempfile::tempdir().unwrap();
+        let project = root.path().join("-w");
+        std::fs::create_dir_all(&project).unwrap();
+
+        let body = concat!(
+            r#"{"type":"user","uuid":"u","timestamp":"2026-09-25T00:00:09Z","cwd":"/w","sessionId":"mine.jsonl","message":{"role":"user","content":"hi"}}"#,
+            "\n",
+            r#"{"type":"last-prompt","lastPrompt":"the real last thing","leafUuid":"a","sessionId":"mine.jsonl"}"#,
+            "\n",
+            r#"{"type":"last-prompt","leafUuid":"b","sessionId":"mine.jsonl"}"#,
+            "\n",
+        );
+        std::fs::write(project.join("mine.jsonl"), body).expect("write the transcript");
+
+        let _root = ProjectsRootForTest::set(root.path().to_path_buf());
+        let found = conversations_at("/w");
+
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].preview.as_deref(), Some("the real last thing"));
+    }
+
+    #[test]
+    fn an_empty_prompt_is_treated_as_absent() {
+        // An empty string is not a preview a row can show, and letting it
+        // through would replace a usable line with a blank one. Same rule as the
+        // empty title, for the same reason.
+        let root = tempfile::tempdir().unwrap();
+        let project = root.path().join("-w");
+        std::fs::create_dir_all(&project).unwrap();
+        transcript_with_prompts(&project, "mine.jsonl", "/w", &[""]);
+
+        let _root = ProjectsRootForTest::set(root.path().to_path_buf());
+        let found = conversations_at("/w");
+
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].preview, None);
+    }
+
+    #[test]
+    fn the_preview_is_the_users_own_text_and_is_not_reformatted() {
+        // Measured, the prompt is frequently a slash-command invocation, and it
+        // can be one character long. Both are passed through rather than
+        // filtered or reshaped: this field reports what the user typed, and a
+        // provider that decided which prompts were "real" would be making a
+        // product judgement the contract has no business making. Bounding it for
+        // display belongs to the caller, which is the only layer that knows the
+        // row's width.
+        let root = tempfile::tempdir().unwrap();
+        let project = root.path().join("-w");
+        std::fs::create_dir_all(&project).unwrap();
+        transcript_with_prompts(
+            &project,
+            "mine.jsonl",
+            "/w",
+            &["/nession-web-design 收敛设计"],
+        );
+
+        let _root = ProjectsRootForTest::set(root.path().to_path_buf());
+        let found = conversations_at("/w");
+
+        assert_eq!(found.len(), 1);
+        assert_eq!(
+            found[0].preview.as_deref(),
+            Some("/nession-web-design 收敛设计")
+        );
+    }
+
     #[test]
     fn the_title_is_found_when_the_transcript_is_larger_than_the_read_window() {
         // The title is read from a bounded tail window, so the case that would
@@ -913,8 +1094,10 @@ mod tests {
             cwd: "/w".to_string(),
             updated_at: None,
             // Built directly rather than through `inspect`, so there is no tail
-            // to read a title from. The title paths have their own tests.
+            // to read display metadata from. The title and preview paths have
+            // their own tests.
             title: None,
+            preview: None,
             path,
         }
     }

@@ -257,6 +257,7 @@ impl ClaudeCodeAgentExtension {
                 cwd: c.cwd.clone(),
                 updated_at: c.updated_at.clone(),
                 title: c.title.clone(),
+                preview: c.preview.clone(),
             })
             .collect();
 
