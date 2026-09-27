@@ -1,8 +1,10 @@
 import { FileList, type FileEntry } from '@/capabilities/files';
 import type { WorkspaceAppViewProps } from '@/app/workspace/workspaceContext';
 import { AppFilesBreadcrumb } from './AppFilesBreadcrumb';
+import { AppFilesSearchPanel } from './AppFilesSearchPanel';
 import { AppFilesViewerLayer } from './AppFilesViewerLayer';
 import { useAppFilesNavigator } from './useAppFilesNavigator';
+import { useAppFilesSearch } from './useAppFilesSearch';
 
 /**
  * App layout: directory navigator at the capability root, file viewer pushed over it.
@@ -20,6 +22,8 @@ export function FilesAppLayout({ ctx, depth }: WorkspaceAppViewProps) {
     },
     ctx.fileOps,
   );
+
+  const search = useAppFilesSearch(ctx.fileOps, nav.searchOpen);
 
   if (!ctx.fileOps) {
     return null;
@@ -44,9 +48,27 @@ export function FilesAppLayout({ ctx, depth }: WorkspaceAppViewProps) {
     );
   }
 
+  if (nav.searchOpen) {
+    return (
+      <AppFilesSearchPanel
+        query={search.query}
+        onQueryChange={search.setQuery}
+        status={search.status}
+        error={search.error}
+        results={search.results}
+        onSelectFile={handleFileClick}
+        onRetry={search.retry}
+      />
+    );
+  }
+
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden" data-testid="files-app-layout">
-      <AppFilesBreadcrumb segments={nav.breadcrumbSegments} onSelect={nav.navigateToPath} />
+      <AppFilesBreadcrumb
+        segments={nav.breadcrumbSegments}
+        onSelect={nav.navigateToPath}
+        onOpenSearch={nav.openSearch}
+      />
       <div className="min-h-0 flex-1">
         <FileList
           fileOps={ctx.fileOps}

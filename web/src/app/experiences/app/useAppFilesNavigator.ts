@@ -5,6 +5,8 @@ import {
   directoryPageTitle,
   directoryPathToStack,
 } from './appFilesNavigation';
+import { useAppFilesSearchDepth } from './useAppFilesSearchDepth';
+import { useAppFilesShellPush } from './useAppFilesShellPush';
 
 export interface AppFilesNavigatorSession {
   sessionName?: string | null;
@@ -26,6 +28,13 @@ export function useAppFilesNavigator(
   const [showDiscardDialog, setShowDiscardDialog] = useState(false);
   const scrollByPath = useRef(new Map<string, number>());
   const [restoredScrollTop, setRestoredScrollTop] = useState<number | undefined>(undefined);
+  const { searchOpen, openSearch, closeSearch } = useAppFilesSearchDepth({
+    dirStack,
+    setDirStack,
+    restoredScrollTop,
+    setRestoredScrollTop,
+    resetKey,
+  });
 
   const currentDir = dirStack[dirStack.length - 1] ?? '';
 
@@ -75,22 +84,18 @@ export function useAppFilesNavigator(
 
   const pushedTitle = selected
     ? selected.filename
-    : dirStack.length > 1
-      ? directoryPageTitle(currentDir)
-      : null;
-  const pushedLeave = selected ? handleFileLeave : handleDirectoryLeave;
+    : searchOpen
+      ? 'Search'
+      : dirStack.length > 1
+        ? directoryPageTitle(currentDir)
+        : null;
+  const pushedLeave = selected
+    ? handleFileLeave
+    : searchOpen
+      ? closeSearch
+      : handleDirectoryLeave;
 
-  const setPush = depth.setPush;
-  useEffect(() => {
-    setPush(
-      pushedTitle === null
-        ? null
-        : {
-            title: pushedTitle,
-            onLeave: pushedLeave,
-          },
-    );
-  }, [setPush, pushedTitle, pushedLeave]);
+  useAppFilesShellPush(depth, pushedTitle, pushedLeave);
 
   const workspaceContextLine = useMemo(() => {
     const { sessionName, agentLabel } = session;
@@ -105,11 +110,17 @@ export function useAppFilesNavigator(
     [dirStack],
   );
 
-  const openFile = useCallback((entry: { path: string; name: string; size: number }) => {
-    setDirty(false);
-    setShowDiscardDialog(false);
-    setSelected({ path: entry.path, filename: entry.name, size: entry.size });
-  }, []);
+  const openFile = useCallback(
+    (entry: { path: string; name: string; size: number }) => {
+      setDirty(false);
+      setShowDiscardDialog(false);
+      if (searchOpen) {
+        closeSearch();
+      }
+      setSelected({ path: entry.path, filename: entry.name, size: entry.size });
+    },
+    [closeSearch, searchOpen],
+  );
 
   const confirmDiscard = useCallback(() => {
     setShowDiscardDialog(false);
@@ -130,5 +141,8 @@ export function useAppFilesNavigator(
     breadcrumbSegments,
     openFile,
     confirmDiscard,
+    searchOpen,
+    openSearch,
+    closeSearch,
   };
 }

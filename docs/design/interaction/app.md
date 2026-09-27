@@ -213,7 +213,9 @@ Files root  →  tap folder  →  child directory  →  Back restores list + scr
 ```
 
 The shell page header names only the current directory or file; the full path is a
-horizontal breadcrumb under it. Search, selection mode, and action sheets extend this
+horizontal breadcrumb under it with a search entry. **Search** is a pushed depth: fuzzy
+filename/path match over a bounded `listDir` walk, results open the same viewer, and
+Back restores the saved directory stack. Selection mode and action sheets extend this
 model in follow-up work; they must not reintroduce an expandable tree on App.
 
 ### One navigation bar per depth
