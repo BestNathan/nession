@@ -1,8 +1,11 @@
+import { Search } from 'lucide-react';
 import { cn } from '@/shared/lib/utils';
+import { Button } from '@/components/ui/button';
 
 export interface AppFilesBreadcrumbProps {
   segments: { path: string; label: string }[];
   onSelect: (path: string) => void;
+  onOpenSearch: () => void;
 }
 
 /**
@@ -11,13 +14,16 @@ export interface AppFilesBreadcrumbProps {
  * The shell page header names only the current directory; the full path lives
  * here as tappable segments so deep trees stay reachable without indentation.
  */
-export function AppFilesBreadcrumb({ segments, onSelect }: AppFilesBreadcrumbProps) {
+export function AppFilesBreadcrumb({ segments, onSelect, onOpenSearch }: AppFilesBreadcrumbProps) {
   return (
-    <nav
-      aria-label="Directory path"
+    <div
+      className="flex shrink-0 items-center gap-1 px-[var(--shell-space-3)] pb-[var(--shell-space-1)]"
       data-testid="files-app-breadcrumb"
-      className="flex shrink-0 gap-1 overflow-x-auto px-[var(--shell-space-3)] pb-[var(--shell-space-1)] text-[length:var(--workspace-tree-font-size)] text-muted-foreground"
     >
+      <nav
+        aria-label="Directory path"
+        className="flex min-w-0 flex-1 gap-1 overflow-x-auto text-[length:var(--workspace-tree-font-size)] text-muted-foreground"
+      >
       {segments.map((segment, index) => {
         const isLast = index === segments.length - 1;
         return (
@@ -39,6 +45,17 @@ export function AppFilesBreadcrumb({ segments, onSelect }: AppFilesBreadcrumbPro
           </span>
         );
       })}
-    </nav>
+      </nav>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="size-9 shrink-0"
+        aria-label="Search files"
+        onClick={() => onOpenSearch()}
+      >
+        <Search className="size-4" aria-hidden />
+      </Button>
+    </div>
   );
 }
