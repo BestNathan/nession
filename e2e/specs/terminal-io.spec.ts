@@ -216,6 +216,41 @@ async function submitTerminalCommand(page: import('@playwright/test').Page, comm
   await sendRawToTerminal(page, `${command}\n`);
 }
 
+/**
+ * Ask the Session for its tty size, re-asking until it reports `cols`×`rows`.
+ *
+ * Re-asking is the whole point, and #1187 is what it cost to learn. The Web
+ * resizes the local xterm grid in the same frame as the container change but
+ * *debounces* the PTY notification by 200 ms (`ResizeController`, so a drag
+ * sends one final size) — so for a moment after a viewport change the grid is
+ * new and the PTY is still old. `stty size` is a one-shot observation: a single
+ * submission taken inside that window prints the old size and never prints
+ * anything else, so polling the scrollback afterwards waits out the full
+ * timeout for a number that will not be re-emitted. That is exactly how #1187
+ * was first read as "the resize never reaches the PTY" on CI while the same
+ * probe passed locally, where it happened to be taken after the debounce.
+ *
+ * Re-submitting makes the assertion a question about the Session rather than
+ * about when the question was asked. A PTY that genuinely never follows still
+ * fails: the answer never changes, however often it is asked.
+ */
+async function expectPtySize(
+  page: import('@playwright/test').Page,
+  cols: number,
+  rows: number,
+  timeout = 15_000,
+): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        await submitTerminalCommand(page, 'stty size');
+        return readTerminalBuffer(page);
+      },
+      { timeout, intervals: [1_000] },
+    )
+    .toContain(`${rows} ${cols}`);
+}
+
 /** How many times `needle` occurs in the scrollback. */
 async function countInBuffer(page: import('@playwright/test').Page, needle: string): Promise<number> {
   const text = await readTerminalBuffer(page);
@@ -343,12 +378,17 @@ test.describe('Terminal I/O', () => {
   });
 
   test('a viewport resize reaches the PTY (#1187)', async ({ page }, testInfo) => {
-    // #1187. The browser's grid and the application's tty size are two
-    // different facts, and only the second one means the resize arrived — the
-    // bug is precisely that the first moves and the second does not. So both
-    // are asserted: the grid changes, and then the Session reports the new
-    // size. The first is also the guard — without it the second could pass on
-    // a terminal that never noticed anything.
+    // The browser's grid and the application's tty size are two different
+    // facts, and only the second one means the resize arrived. Both are
+    // asserted: the grid changes, and then the Session reports the new size.
+    // The first is also the guard — without it the second could pass on a
+    // terminal that never noticed anything.
+    //
+    // What #1187 first recorded as "the PTY never follows on CI" was an
+    // artifact of asking the question once, inside the 200 ms window where the
+    // grid has already moved and the debounced PTY notification has not
+    // (`expectPtySize` above carries the measurement). The assertion below is
+    // therefore the same question asked until it is answered.
     test.skip(!process.env.CI, 'local only — runs in CI workflow only');
     await page.setViewportSize({ width: 1280, height: 600 });
     const SESSION_NAME = `e2e-resize-${testInfo.retry}`;
@@ -358,12 +398,7 @@ test.describe('Terminal I/O', () => {
     await waitForStableGrid(page);
 
     const before = await readGrid(page);
-    // `stty size` prints "<rows> <cols>" for the Session's own tty: the size
-    // the *application* believes it has, not the one we sent.
-    await submitTerminalCommand(page, 'stty size');
-    await expect
-      .poll(async () => readTerminalBuffer(page), { timeout: 15_000 })
-      .toContain(`${before.rows} ${before.cols}`);
+    await expectPtySize(page, before.cols, before.rows);
 
     // Grow, holding the width. Below roughly 1280 the Web layout stops giving
     // the terminal fewer columns — the sidebar and the well's minimum hold the
@@ -376,10 +411,7 @@ test.describe('Terminal I/O', () => {
       .toBeGreaterThan(before.rows);
 
     const after = await readGrid(page);
-    await submitTerminalCommand(page, 'stty size');
-    await expect
-      .poll(async () => readTerminalBuffer(page), { timeout: 15_000 })
-      .toContain(`${after.rows} ${after.cols}`);
+    await expectPtySize(page, after.cols, after.rows);
   });
 
   test('capsule arrow follows the cursor mode the PTY asked for (#1096)', async ({ page }, testInfo) => {
