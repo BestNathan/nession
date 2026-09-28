@@ -23,6 +23,11 @@ function response(overrides: Partial<ClaudeCodeConversationResponse> = {}): Clau
   };
 }
 
+/** One message item, which is all these tests care about the shape of. */
+function message(id: string): NonNullable<ClaudeCodeConversationResponse['items']>[number] {
+  return { id, kind: 'message', role: 'user', content: [{ type: 'text', text: id }] };
+}
+
 function deferred<T>() {
   let resolve: (value: T) => void = () => undefined;
   const promise = new Promise<T>((resolvePromise) => {
@@ -97,13 +102,13 @@ describe('useConversation', () => {
     vi.mocked(claudeCodeApi.claudeCodeConversation)
       .mockResolvedValueOnce(
         response({
-          items: [{ id: 'c', kind: 'user', text: 'c' }],
+          items: [message('c')],
           next_cursor: '1',
           has_more: true,
         }),
       )
       .mockResolvedValueOnce(
-        response({ items: [{ id: 'a', kind: 'user', text: 'a' }], next_cursor: null }),
+        response({ items: [message('a')], next_cursor: null }),
       );
 
     const { result } = renderHook(() => useConversation({ agentId: 'a', sessionId: 'a:s' }));

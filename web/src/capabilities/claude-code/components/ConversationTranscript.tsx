@@ -1,138 +1,27 @@
-import { AlertCircle, Wrench } from 'lucide-react';
+import {
+  AlertCircle,
+  Check,
+  ChevronRight,
+  HelpCircle,
+  Loader,
+  Wrench,
+  X,
+} from 'lucide-react';
+import { memo, type ReactNode } from 'react';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
+import { copyToClipboard } from '@/shared/lib/clipboard';
+import { cn } from '@/shared/lib/utils';
+import { Markdown } from '@/shared/markdown';
 import type { ConversationViewState } from '../hooks/useConversation';
 import type { ClaudeCodeConversationResponse } from '../types';
 import { clockTime } from '../model/clockTime';
-import { cn } from '@/shared/lib/utils';
 
 type Item = NonNullable<ClaudeCodeConversationResponse['items']>[number];
-
-/**
- * How a message is presented, which is not quite the item's own `kind`.
- *
- * `kind` is the provider's reading of a record and can be `unknown`; a speaker
- * is what the transcript decided to present it as. Keeping the two separate is
- * what lets the three primitives below be named for what they render, and it
- * leaves the transcript as the single place that maps one to the other.
- */
-type Speaker = 'user' | 'assistant';
-
-/**
- * The frame the two speakers share — identity line, then a bounded bubble.
- *
- * Private: the transcript names `UserMessage` / `AssistantMessage`, and this is
- * the part they have in common. The two differ only in alignment and surface,
- * so a second copy of the frame would be two places for the meta line's
- * typography to drift.
- */
-function Message({ item, speaker }: { item: Item; speaker: Speaker }) {
-  const time = clockTime(item.timestamp);
-  const isUser = speaker === 'user';
-  return (
-    <article
-      data-testid="conversation-turn"
-      // The item's own kind, not the speaker: this is the attribute the tests
-      // and `#1120`'s fixtures read, and it must keep reporting what the
-      // provider said even where the presentation normalises it.
-      data-kind={item.kind}
-      // Right for the user, left for Claude (#1120). Alignment carries the
-      // distinction as well as the surface does, which is what makes it hold
-      // for a reader who cannot rely on colour.
-      className={cn('flex flex-col gap-1', isUser ? 'items-end' : 'items-start')}
-    >
-      <div className="flex items-baseline gap-2">
-        <span className="text-xs font-semibold text-muted-foreground">
-          {isUser ? 'You' : 'Claude'}
-        </span>
-        {time ? (
-          <time dateTime={item.timestamp ?? undefined} className="text-xs text-muted-foreground">
-            {time}
-          </time>
-        ) : null}
-      </div>
-      {/* The two surfaces are design roles, not colours chosen here — see
-          `design/tokens/domain.json`. `#1120`'s Open Question 1 leaves their
-          values to the visual pass, so this file names which role a turn plays
-          and nothing more. `max-w-prose` rather than a measured width for the
-          same reason: bounding a message is a reading decision, not a metric. */}
-      <p
-        className={cn(
-          'max-w-prose whitespace-pre-wrap rounded-lg px-3 py-2 text-sm',
-          isUser
-            ? 'bg-[var(--conversation-user-surface)] text-[var(--conversation-user-foreground)]'
-            : 'bg-[var(--conversation-assistant-surface)] text-[var(--conversation-assistant-foreground)]',
-        )}
-      >
-        {item.text ?? ''}
-      </p>
-    </article>
-  );
-}
-
-/**
- * What the user said (#1120).
- *
- * Named rather than a `speaker` prop at the call site so the transcript reads
- * as the conversation does, and so the two speakers can grow apart the way
- * `#1120` says they will: Claude's message is specified to render Markdown and
- * code blocks, the user's to stay plain text. That difference has no home in a
- * single branching component.
- */
-export function UserMessage({ item }: { item: Item }) {
-  return <Message item={item} speaker="user" />;
-}
-
-/** What Claude said (#1120). */
-export function AssistantMessage({ item }: { item: Item }) {
-  return <Message item={item} speaker="assistant" />;
-}
-
-/**
- * A tool call, one collapsed line by default.
- *
- * `#1005` criterion 10: tool use must not drown the conversation. Native
- * `<details>` rather than a new primitive — it is already keyboard-accessible
- * and needs no state of its own, and the summary is the line worth reading
- * whether or not the rest is open.
- *
- * Named `ToolActivity` rather than `ToolRow` because that is what it is: a tool
- * is not a participant, and the name matches the design role it consumes
- * (`conversation.tool.*`) — see `#1120`'s "Tool activity" section.
- */
-export function ToolActivity({ item }: { item: Item }) {
-  const tool = item.tool;
-  if (!tool) {
-    return null;
-  }
-  return (
-    <details
-      data-testid="conversation-tool"
-      // A tool is not a participant, so it takes the activity role rather than
-      // either speaker's surface. Full width on purpose (#1120): a bubble here
-      // would put it in the conversation instead of beside it.
-      className="rounded-md px-3 py-2 text-[var(--conversation-tool-foreground)] bg-[var(--conversation-tool-surface)]"
-    >
-      <summary className="flex cursor-pointer items-center gap-2 text-xs">
-        <Wrench className="h-3.5 w-3.5 shrink-0" />
-        <span
-          className={cn(
-            'font-medium',
-            // The failure treatment is a conversation role too, so a transcript
-            // can be re-tinted without hunting for the one place that reached
-            // past the domain layer for a semantic name.
-            tool.is_error && 'text-[var(--conversation-tool-error)]',
-          )}
-          data-testid="conversation-tool-name"
-        >
-          {tool.name}
-        </span>
-        <span className="truncate">{tool.summary}</span>
-        {tool.truncated ? <span className="shrink-0">(truncated)</span> : null}
-      </summary>
-      {item.text ? <p className="whitespace-pre-wrap pt-2 text-xs">{item.text}</p> : null}
-    </details>
-  );
-}
+type MessageItem = Extract<Item, { kind: 'message' }>;
+type ToolItem = Extract<Item, { kind: 'tool' }>;
+type Tool = ToolItem['tool'];
+type Payload = NonNullable<Tool['input']>;
 
 /**
  * The transcript, from the newest page backwards.
@@ -144,11 +33,10 @@ export function ToolActivity({ item }: { item: Item }) {
  * which the overlay needs — it must scroll itself and never the Terminal behind
  * it.
  *
- * The kind dispatch lives here and nowhere else: `tool` is activity beside the
- * conversation, the two speakers are messages in it, and anything the provider
- * could not classify is presented as Claude's rather than dropped, because a
- * transcript that silently omits records is worse than one that shows an
- * unlabelled line.
+ * The kind dispatch lives here and nowhere else. Since `#1167` the wire is a
+ * tagged union, so the arm a client switches on is the arm it deserialized —
+ * v1's flat `text` + `optional tool` allowed an item that was both and an item
+ * that was neither, and the renderer had to guess which.
  */
 export function ConversationTranscript({
   view,
@@ -176,16 +64,314 @@ export function ConversationTranscript({
           This conversation has no messages yet.
         </p>
       ) : (
-        view.items.map((item) =>
-          item.kind === 'tool' ? (
-            <ToolActivity key={item.id} item={item} />
-          ) : item.kind === 'user' ? (
-            <UserMessage key={item.id} item={item} />
-          ) : (
-            <AssistantMessage key={item.id} item={item} />
-          ),
-        )
+        view.items.map((item) => <ItemView key={item.id} item={item} />)
       )}
     </div>
+  );
+}
+
+function ItemView({ item }: { item: Item }) {
+  switch (item.kind) {
+    case 'message':
+      return item.role === 'user' ? <UserMessage item={item} /> : <AssistantMessage item={item} />;
+    case 'tool':
+      return <ToolActivity item={item} />;
+    case 'unknown':
+      // Stated, not dropped and not dressed up: a transcript that silently
+      // omits records reads as a conversation that was shorter than it was.
+      return <UnknownActivity />;
+  }
+}
+
+/**
+ * The frame both speakers share: identity line, then whichever body.
+ *
+ * Private, because the two speakers now differ by more than alignment. `#1167`
+ * makes Claude's turn a reading column whose Markdown *is* the content, and the
+ * user's a bounded surface that stays visually simpler — a difference with no
+ * home in one branching component. The frame is what they still have in common,
+ * and a second copy of it would be two places for the meta line to drift.
+ */
+function MessageFrame({
+  item,
+  speaker,
+  children,
+}: {
+  item: MessageItem;
+  speaker: 'user' | 'assistant';
+  children: ReactNode;
+}) {
+  const time = clockTime(item.timestamp);
+  const isUser = speaker === 'user';
+  return (
+    <article
+      data-testid="conversation-turn"
+      // The item's own kind, not the speaker. `#1120`'s tests and fixtures read
+      // this attribute, and the speaker is now a separate fact the wire carries
+      // on `role` — one this frame must not flatten into the other.
+      data-kind={item.kind}
+      data-role={item.role}
+      // Claude's turn **stretches** and the user's does not, and that is a
+      // correctness difference rather than an alignment preference.
+      //
+      // In a column flex container, `align-items: flex-start` sizes each item
+      // to its *fit-content* width — which is its min-content width when that
+      // is larger. A code fence's min-content width is its longest unwrapped
+      // line, so `items-start` let a single long line push the whole reading
+      // column 46px past its container and out of the pane. Stretching gives
+      // the column a definite width, so the fence scrolls inside itself the way
+      // it is supposed to. The user's bubble stays content-sized: a short
+      // prompt should be a short bubble, not a full-width block.
+      className={cn('flex flex-col gap-1', isUser ? 'items-end' : 'items-stretch')}
+    >
+      <div className="flex items-baseline gap-2">
+        <span className="text-xs font-semibold text-muted-foreground">
+          {isUser ? 'You' : 'Claude'}
+        </span>
+        {time ? (
+          <time dateTime={item.timestamp ?? undefined} className="text-xs text-muted-foreground">
+            {time}
+          </time>
+        ) : null}
+      </div>
+      {children}
+    </article>
+  );
+}
+
+/**
+ * What the user said — a bounded surface, right-aligned (#1120).
+ *
+ * Memoized so the three-second poll costs only what changed: the page is
+ * re-read wholesale, and [`withNewest`](../model/conversationPositions.ts) hands
+ * back the *same object* for an item whose content is unchanged. Without this
+ * the stable object would buy nothing, and every poll would re-parse every
+ * message's Markdown.
+ */
+export const UserMessage = memo(function UserMessage({ item }: { item: MessageItem }) {
+  return (
+    <MessageFrame item={item} speaker="user">
+      <div
+        data-testid="conversation-user-body"
+        // Markdown rather than `whitespace-pre-wrap`: a pasted fence or a
+        // backticked path is ordinary in a prompt, and `#1167` requires both to
+        // survive. The surface stays the simpler of the two — the typography
+        // below is narrower than Claude's, which is what makes it so.
+        className={cn(
+          'max-w-prose min-w-0 rounded-lg px-3 py-2 text-sm',
+          'bg-[var(--conversation-user-surface)] text-[var(--conversation-user-foreground)]',
+          'prose-p:my-0 prose-pre:my-1 prose-headings:text-inherit',
+        )}
+      >
+        <Markdown className="text-sm">{contentOf(item)}</Markdown>
+      </div>
+    </MessageFrame>
+  );
+});
+
+/**
+ * What Claude said — a reading column, not a card.
+ *
+ * `#1167` asks for the `rounded-lg px-3 py-2` bubble to be reviewed rather than
+ * assumed to stay, and `PRINCIPLE.md` §6 ("precision, not decoration") answers
+ * it: the Markdown *is* the content, and a surface drawn around prose that
+ * already carries its own typography is chrome that says nothing. So there is
+ * no bubble — the reading column is the message.
+ */
+export const AssistantMessage = memo(function AssistantMessage({ item }: { item: MessageItem }) {
+  return (
+    <MessageFrame item={item} speaker="assistant">
+      <div
+        data-testid="conversation-assistant-body"
+        className={cn(
+          'max-w-prose min-w-0 text-sm text-[var(--conversation-assistant-foreground)]',
+          'prose-headings:mt-4 prose-headings:mb-2 prose-headings:first:mt-0',
+        )}
+      >
+        <Markdown>{contentOf(item)}</Markdown>
+      </div>
+    </MessageFrame>
+  );
+});
+
+/**
+ * A message's blocks as Markdown source.
+ *
+ * A block this version does not model becomes a marker rather than vanishing:
+ * its *position* is the information, and dropping it would render the message
+ * as though it had said less than it did.
+ */
+function contentOf(item: MessageItem): string {
+  return item.content
+    .map((block) => (block.type === 'text' ? block.text : '_An unreadable block was here._'))
+    .join('\n\n');
+}
+
+function UnknownActivity() {
+  return (
+    <p
+      data-testid="conversation-unknown"
+      className="flex items-center gap-2 text-xs text-[var(--conversation-tool-foreground)]"
+    >
+      <HelpCircle aria-hidden className="h-3.5 w-3.5 shrink-0" />
+      An event this version does not show.
+    </p>
+  );
+}
+
+/**
+ * A tool call, one collapsed line by default.
+ *
+ * `#1005` criterion 10: tool use must not drown the conversation. Native
+ * `<details>` rather than a new primitive — it is already keyboard-accessible
+ * and needs no state of its own, and the summary is the line worth reading
+ * whether or not the rest is open.
+ *
+ * `PRINCIPLE.md` §4 (progressive disclosure) is the product rule: the call is
+ * present as one line, and its arguments and result are there for the asking.
+ */
+export const ToolActivity = memo(function ToolActivity({ item }: { item: ToolItem }) {
+  const { tool } = item;
+  return (
+    <details
+      data-testid="conversation-tool"
+      data-status={tool.status}
+      // A tool is not a participant, so it takes the activity role rather than
+      // either speaker's surface. Full width on purpose (#1120): a bubble here
+      // would put it in the conversation instead of beside it.
+      className="group rounded-md bg-[var(--conversation-tool-surface)] px-3 py-2 text-[var(--conversation-tool-foreground)]"
+    >
+      <summary className="flex cursor-pointer items-center gap-2 text-xs">
+        {/* Turns as the disclosure opens. Decorative: `<details>` announces its
+            own expanded state, so a second announcement would be noise. */}
+        <ChevronRight
+          aria-hidden
+          className="h-3.5 w-3.5 shrink-0 transition-transform group-open:rotate-90"
+        />
+        <Wrench aria-hidden className="h-3.5 w-3.5 shrink-0" />
+        <span className="font-medium" data-testid="conversation-tool-name">
+          {tool.name}
+        </span>
+        <span className="truncate">{tool.summary}</span>
+        <ToolStatus status={tool.status} />
+      </summary>
+      <ToolDetails tool={tool} />
+    </details>
+  );
+});
+
+/**
+ * How a call ended, said in words as well as in colour.
+ *
+ * The label is visually hidden rather than drawn: a collapsed row is read at a
+ * glance and the glyph carries it there. But colour alone is not a status —
+ * `#1167` requires success and failure to be told apart without it — so a
+ * screen reader and a monochrome display both get the word.
+ */
+function ToolStatus({ status }: { status: Tool['status'] }) {
+  const { Icon, label, className } = STATUS[status];
+  return (
+    <span
+      className={cn('ml-auto flex shrink-0 items-center', className)}
+      data-testid="conversation-tool-status"
+    >
+      <Icon aria-hidden className="h-3.5 w-3.5" />
+      <span className="sr-only">{label}</span>
+    </span>
+  );
+}
+
+const STATUS = {
+  success: {
+    Icon: Check,
+    label: 'succeeded',
+    className: 'text-[var(--conversation-tool-success)]',
+  },
+  error: { Icon: X, label: 'failed', className: 'text-[var(--conversation-tool-error)]' },
+  running: { Icon: Loader, label: 'still running', className: '' },
+  // Deliberately not "running": the provider could not tell whether a result
+  // exists, and saying the call is still going would be a claim it never made.
+  unknown: { Icon: HelpCircle, label: 'outcome not loaded', className: '' },
+} as const;
+
+/**
+ * What the call was given, and what it produced.
+ *
+ * Rendered only once the disclosure is open, so a conversation full of
+ * collapsed calls pays nothing for their bodies — which is the point of
+ * collapsing them.
+ */
+export function ToolDetails({ tool }: { tool: Tool }) {
+  if (!tool.input && !tool.output) {
+    return (
+      <p className="pt-2 text-xs opacity-80">
+        {tool.status === 'running' ? 'Still running.' : 'No arguments or output were recorded.'}
+      </p>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-2 pt-2">
+      {tool.input ? <ToolBody label="Input" payload={tool.input} /> : null}
+      {tool.output ? <ToolBody label="Output" payload={tool.output} /> : null}
+    </div>
+  );
+}
+
+function ToolBody({ label, payload }: { label: string; payload: Payload }) {
+  return (
+    <section>
+      <div className="flex items-center gap-2">
+        <h4 className="text-[10px] font-semibold tracking-wide uppercase">{label}</h4>
+        {payload.truncated ? (
+          // Said explicitly, because a cut body is indistinguishable from a
+          // short one — and the reader deciding whether they have the whole
+          // answer is exactly who needs to know that they do not.
+          <span className="text-[10px] opacity-80" data-testid="conversation-tool-truncated">
+            truncated
+          </span>
+        ) : null}
+        <CopyBody text={payload.text} label={label} />
+      </div>
+      {/* A border rather than a second surface: this body sits *inside* the
+          tool's own panel, and both roles resolve to the same muted fill — so a
+          fill here would be invisible. A rule is what actually says "this is a
+          bounded excerpt" instead of leaving the text floating on the panel. */}
+      <pre className="mt-1 max-h-64 overflow-auto rounded border border-[var(--conversation-code-border)] p-2 font-mono text-[length:var(--typography-code-size)] whitespace-pre-wrap">
+        {payload.text}
+      </pre>
+    </section>
+  );
+}
+
+/**
+ * Copy one body.
+ *
+ * The toast is the feedback — the same house pattern `CodeBlock` uses, and the
+ * only one this app has (the `<Toaster>` in `main.tsx`). A button that swapped
+ * its icon to a tick for two seconds would be a second answer to the same
+ * question, that no other copy control in the product gives.
+ */
+function CopyBody({ text, label }: { text: string; label: string }) {
+  const copy = () => {
+    copyToClipboard(text).then(
+      () => {
+        toast.success(`${label} copied`);
+      },
+      () => {
+        toast.error(`Failed to copy ${label.toLowerCase()}`);
+      },
+    );
+  };
+  return (
+    <Button
+      variant="ghost"
+      size="xs"
+      type="button"
+      className="ml-auto"
+      aria-label={`Copy ${label.toLowerCase()}`}
+      onClick={copy}
+    >
+      Copy
+    </Button>
   );
 }

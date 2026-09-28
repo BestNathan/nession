@@ -49,11 +49,53 @@ export function emptyPositions(): Positions {
  */
 export function withNewest(current: Positions, page: Page): Positions {
   return {
-    newest: page.items ?? [],
+    newest: reusing(current.newest, page.items ?? []),
     older: current.older,
     cursor: current.paged ? current.cursor : (page.next_cursor ?? null),
     paged: current.paged,
   };
+}
+
+/**
+ * Give back the previous objects for the items that did not change.
+ *
+ * ## Why identity, when the ids were already stable
+ *
+ * `#1167` renders Markdown, and parsing it is the expensive part of drawing a
+ * message. The poll replaces the whole newest page every three seconds, so a
+ * fresh object per item means React sees a new element, re-renders the message,
+ * and re-parses every document in the page — for a response that, most of the
+ * time, says exactly what the last one said. Keying by `id` prevents a *remount*
+ * and the flicker that comes with it; it does not prevent that re-render.
+ *
+ * Reusing the object when the content is equal, paired with `memo` on the item
+ * components, is what makes the poll cost only the messages that actually
+ * changed — which is what "App/Web remain responsive for long transcripts"
+ * means in practice.
+ *
+ * ## Why comparing by serialization is acceptable here
+ *
+ * The items came off the wire as JSON and have no cycles, no dates and no
+ * identity beyond their values, so a structural comparison is a value
+ * comparison. And the cost is the right way round: stringifying a page is
+ * microseconds, while the thing it avoids — re-parsing that page's Markdown —
+ * is milliseconds. Order of keys is whatever `JSON.parse` produced for both
+ * sides, so equal items compare equal; if that ever stopped holding, the
+ * consequence is a missed reuse, not a wrong render.
+ */
+function reusing(previous: ConversationItems, next: ConversationItems): ConversationItems {
+  if (previous.length === 0) {
+    return next;
+  }
+  const before = new Map(previous.map((item) => [item.id, item]));
+  return next.map((item) => {
+    const held = before.get(item.id);
+    return held !== undefined && sameItem(held, item) ? held : item;
+  });
+}
+
+function sameItem(a: ConversationItems[number], b: ConversationItems[number]): boolean {
+  return a === b || JSON.stringify(a) === JSON.stringify(b);
 }
 
 /**

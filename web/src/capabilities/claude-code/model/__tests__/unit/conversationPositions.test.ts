@@ -9,7 +9,12 @@ import {
 } from '../../conversationPositions';
 
 function items(...ids: string[]): ConversationItems {
-  return ids.map((id) => ({ id, kind: 'user' as const, text: id }));
+  return ids.map((id) => ({
+    id,
+    kind: 'message' as const,
+    role: 'user' as const,
+    content: [{ type: 'text' as const, text: id }],
+  }));
 }
 
 const ids = (list: ConversationItems) => list.map((item) => item.id);
@@ -63,6 +68,65 @@ describe('conversationPositions', () => {
     const positions = withNewest(emptyPositions(), { items: items('a') });
     expect(hasOlder(positions)).toBe(false);
     expect(hasOlder(withNewest(positions, { items: items('a'), next_cursor: '1' }))).toBe(true);
+  });
+
+  it('hands back the same object for an item the poll did not change', () => {
+    // The poll replaces the whole page. Keeping the object identity for items
+    // whose content is unchanged is what stops every message's Markdown being
+    // re-parsed every three seconds — `memo` on the message components only
+    // helps if the prop it compares is the *same object*.
+    const first = withNewest(emptyPositions(), { items: items('a', 'b') });
+    const second = withNewest(first, { items: items('a', 'b') });
+
+    expect(itemsOf(second)[0]).toBe(itemsOf(first)[0]);
+    expect(itemsOf(second)[1]).toBe(itemsOf(first)[1]);
+  });
+
+  it('gives a changed item a new object', () => {
+    // The other half, and the one that would be a *regression* rather than a
+    // missed optimisation: reusing an object whose content changed would freeze
+    // the message on screen, and the transcript would stop updating.
+    const first = withNewest(emptyPositions(), { items: items('a') });
+    const changed: ConversationItems = [
+      { id: 'a', kind: 'message', role: 'user', content: [{ type: 'text', text: 'longer' }] },
+    ];
+
+    const second = withNewest(first, { items: changed });
+
+    expect(itemsOf(second)[0]).not.toBe(itemsOf(first)[0]);
+    expect(itemsOf(second)[0]).toEqual(changed[0]);
+  });
+
+  it('re-reads a tool whose outcome changed between polls', () => {
+    // The live case this exists for: a call is running when the page is first
+    // read and has succeeded by the next poll. Its `id` is unchanged, so an
+    // identity check keyed on the id alone would pin it at "running" forever.
+    const running: ConversationItems = [
+      {
+        id: 't1',
+        kind: 'tool',
+        tool: { call_id: 'c1', name: 'Bash', status: 'running', summary: 'cargo test' },
+      },
+    ];
+    const done: ConversationItems = [
+      {
+        id: 't1',
+        kind: 'tool',
+        tool: {
+          call_id: 'c1',
+          name: 'Bash',
+          status: 'success',
+          summary: 'cargo test',
+          output: { text: 'ok', kind: 'text', truncated: false },
+        },
+      },
+    ];
+
+    const first = withNewest(emptyPositions(), { items: running });
+    const second = withNewest(first, { items: done });
+
+    expect(itemsOf(second)[0]).not.toBe(itemsOf(first)[0]);
+    expect(itemsOf(second)[0]).toEqual(done[0]);
   });
 
   it('treats a page with no items as a page, not as the end of paging', () => {
