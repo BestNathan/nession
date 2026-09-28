@@ -1,7 +1,7 @@
 import { render, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { CodeMirrorEditor } from '@/capabilities/files/components/CodeMirrorEditor';
+import { CodeMirrorEditor } from '@/platform/editor';
 
 describe('CodeMirror design-system boundary', () => {
   it('injects Nession workspace metrics into the renderer-owned stylesheet', async () => {

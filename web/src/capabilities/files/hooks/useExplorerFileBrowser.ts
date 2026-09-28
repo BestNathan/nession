@@ -6,7 +6,7 @@ import { ExplorerStore, ROOT_ID } from '@/platform/explorer/ExplorerStore';
 import { createNessionFileSystemProvider } from '@/capabilities/files/adapters/NessionFileSystemProvider';
 import type { ExplorerDataProvider } from '@/platform/explorer/providers/types';
 import type { ExplorerNode } from '@/platform/explorer/types';
-import { registerSeenLangKeys, scanLangKeysFromPaths } from '../model/codeMirrorLangs';
+import { registerSeenLanguageIds, scanLanguageIdsFromPaths } from '@/platform/editor';
 import { toastError } from '@/shared/lib/errorHelpers';
 
 import { useFileBrowserDialogs } from './useFileBrowserDialogs';
@@ -33,9 +33,9 @@ export function createLangAwareFileSystemProvider(fileOps: FileOps): ExplorerDat
     ...base,
     async loadChildren(node) {
       const children = await base.loadChildren(node);
-      const langKeys = scanLangKeysFromPaths(children.map((child) => child.uri));
-      if (langKeys.length > 0) {
-        registerSeenLangKeys(langKeys);
+      const languageIds = scanLanguageIdsFromPaths(children.map((child) => child.uri));
+      if (languageIds.length > 0) {
+        registerSeenLanguageIds(languageIds);
       }
       return children;
     },
