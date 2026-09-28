@@ -2,6 +2,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { WorkspaceShell } from '@/app/workspace/WorkspaceShell';
+import { SurfaceDestinationAction } from '@/product/workspace/patterns/SurfaceDestinationAction';
 import type { WorkspaceContext } from '@/app/workspace/workspaceContext';
 
 // The Web experience's Files layout is stubbed rather than the whole binding:
@@ -9,6 +10,13 @@ import type { WorkspaceContext } from '@/app/workspace/workspaceContext';
 // two experiences' layouts, so there is no single object left to swap out.
 vi.mock('@/app/experiences/web/FilesWebLayout', () => ({
   FilesWebLayout: () => <div data-testid="mock-files-web" />,
+}));
+
+// The App half is stubbed for the same reason: the surface-navigation tests
+// below render the App experience, and the real App Files layout opens a
+// directory listing against the stub `fileOps` on mount.
+vi.mock('@/app/experiences/app/FilesAppLayout', () => ({
+  FilesAppLayout: () => <div data-testid="mock-files-app" />,
 }));
 
 function workspaceContext(overrides: Partial<WorkspaceContext> = {}): WorkspaceContext {
@@ -95,5 +103,58 @@ describe('WorkspaceShell contextual capability presentation', () => {
     await user.click(await screen.findByRole('menuitem', { name: 'Claude Code' }));
 
     expect(onToolChange).toHaveBeenCalledWith('claude-code');
+  });
+});
+
+describe('WorkspaceShell surface navigation (#1204)', () => {
+  const openTerminal = (
+    <SurfaceDestinationAction destination="terminal" onOpen={() => {}} />
+  );
+
+  it('renders the surface action beside — not inside — the capability dock', () => {
+    const ctx = workspaceContext();
+    render(
+      <WorkspaceShell ctx={ctx} activeCapabilityId="files" surfaceAction={openTerminal} />,
+    );
+
+    const surfaceNav = screen.getByTestId('workspace-surface-navigation');
+    expect(surfaceNav).toContainElement(screen.getByTestId('surface-action-open-terminal'));
+    // Surface navigation and capability navigation are separate axes: the
+    // circle is adjacent to the dock, never an entry in it.
+    expect(
+      screen.getByRole('navigation', { name: 'Workspace capabilities' }),
+    ).not.toContainElement(screen.getByTestId('surface-action-open-terminal'));
+    // …and it precedes the dock, so the group reads [Terminal ○] [dock].
+    expect(
+      surfaceNav.compareDocumentPosition(
+        screen.getByRole('navigation', { name: 'Workspace capabilities' }),
+      ) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it('keeps the surface action when a pushed depth hides the capability dock', () => {
+    const ctx = workspaceContext();
+    render(
+      <WorkspaceShell
+        ctx={ctx}
+        activeCapabilityId="files"
+        pushed
+        surfaceAction={openTerminal}
+      />,
+    );
+
+    expect(screen.queryByRole('navigation', { name: 'Workspace capabilities' })).not.toBeInTheDocument();
+    expect(screen.getByTestId('surface-action-open-terminal')).toBeInTheDocument();
+  });
+
+  it('renders no surface navigation for the App experience', () => {
+    const ctx = workspaceContext({ experience: 'app' });
+    render(
+      <WorkspaceShell ctx={ctx} activeCapabilityId="files" surfaceAction={openTerminal} />,
+    );
+
+    expect(screen.queryByTestId('workspace-surface-navigation')).not.toBeInTheDocument();
+    // The dock itself is unaffected.
+    expect(screen.getByTestId('workspace-tool-files')).toBeInTheDocument();
   });
 });

@@ -30,6 +30,10 @@ test('canonical App fixture renders the Terminal root', async ({ page }) => {
   await expect(page.getByTestId('app-header-sessions')).toBeVisible();
   await expect(page.getByTestId('app-header-workspace')).toBeVisible();
   await expect(page.getByTestId('surface-switcher')).toHaveCount(0);
+  // …and the Web's circular destination actions (#1204) are just as absent:
+  // the App leaves a layer through its own spatial affordances.
+  await expect(page.getByTestId('surface-action-open-workspace')).toHaveCount(0);
+  await expect(page.getByTestId('surface-action-open-terminal')).toHaveCount(0);
   await expect(page.getByTestId('app-spatial-open-sessions')).toHaveCount(0);
 
   // the Terminal layer is the root and fills the viewport

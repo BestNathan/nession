@@ -33,6 +33,18 @@ interface CapsuleShellProps {
    * there.
    */
   projection?: React.ReactNode;
+  /**
+   * A control belonging to the capsule's dock region but not to the composer —
+   * on Web, the "Open Workspace" destination action (#1204).
+   *
+   * A slot for the same reason `projection` is: the capsule renders what it is
+   * given and learns no navigation concepts. It sits in the shell's row,
+   * bottom-aligned, so its top can never rise above the shell's top edge —
+   * which means `useCapsuleDockClearance` (measuring the shell alone) already
+   * covers it, and an action no taller than the shell adds no terminal row
+   * loss. App passes nothing and its layout is untouched.
+   */
+  adjacentAction?: React.ReactNode;
   children: React.ReactNode;
 }
 
@@ -45,10 +57,38 @@ export function CapsuleShell({
   contentRef,
   measureMirror,
   projection,
+  adjacentAction,
   children,
 }: CapsuleShellProps) {
   const isApp = experience === 'app';
   const usePillShape = !isApp && layout === 'flat';
+
+  const shell = (
+    <div
+      ref={shellRef}
+      data-testid="capsule-shell"
+      className={cn(
+        'flex min-h-[length:var(--control-md)] items-center',
+        capsuleShellInnerClass,
+        // In the adjacent row the shell shares the dock's width with the
+        // action: `flex-1` (basis 0%) supersedes the `w-full` inside
+        // `capsuleShellInnerClass` for a flex item, so the capsule yields the
+        // action's width rather than overflowing the group (#1204 §8).
+        adjacentAction && 'min-w-0 flex-1',
+        capsuleShellSurfaceClass,
+        usePillShape ? capsuleShellPillRadiusClass : capsuleShellCapsuleRadiusClass,
+        capsuleShellInnerPadClass,
+      )}
+    >
+      <div
+        ref={contentRef}
+        data-testid="capsule-shell-content"
+        className="flex min-w-0 flex-1 items-center overflow-hidden"
+      >
+        {children}
+      </div>
+    </div>
+  );
 
   return (
     <div
@@ -66,25 +106,17 @@ export function CapsuleShell({
       )}
     >
       {projection}
-      <div
-        ref={shellRef}
-        data-testid="capsule-shell"
-        className={cn(
-          'flex min-h-[length:var(--control-md)] items-center',
-          capsuleShellInnerClass,
-          capsuleShellSurfaceClass,
-          usePillShape ? capsuleShellPillRadiusClass : capsuleShellCapsuleRadiusClass,
-          capsuleShellInnerPadClass,
-        )}
-      >
-        <div
-          ref={contentRef}
-          data-testid="capsule-shell-content"
-          className="flex min-w-0 flex-1 items-center overflow-hidden"
-        >
-          {children}
+      {adjacentAction ? (
+        /* `items-end` pins the action to the shell's bottom edge, so a composer
+           growing upward never lifts the action above the shell's top — the
+           shell-only occlusion measurement stays exact (#1204 §1). */
+        <div className="flex items-end gap-[length:var(--shell-space-2)]">
+          {shell}
+          {adjacentAction}
         </div>
-      </div>
+      ) : (
+        shell
+      )}
       {measureMirror}
     </div>
   );

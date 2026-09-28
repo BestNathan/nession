@@ -148,8 +148,7 @@ function probeCache(): Map<string, AgentProbe> {
 const STORAGE_KEY = 'nession_session_attach_profiles';
 
 /** Seed a profile for the fixture session, matching the mocked attach-info
- *  fingerprint unless overridden. jsdom has no WebGL, so renderer is 'canvas'
- *  (a 'webgl' profile would fail validation on the renderer check). */
+ *  fingerprint unless overridden. jsdom has no WebGL, so renderer is 'canvas'. */
 function seedProfile(overrides: {
   mode?: AttachMode;
   fingerprint?: string;
@@ -277,14 +276,22 @@ describe('session attach flow (real shell + real AttachDialog)', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
-  it('opens the dialog for a stale profile and never auto-attaches', async () => {
+  it('fast-paths attach when fingerprint is stale but auto intent still applies (#1186)', async () => {
     seedProfile({ fingerprint: 'stale-fp' });
+    const { store } = renderShell('/', { seedProbeCache: true });
+    await userEvent.click(screen.getByTestId(`session-item-${sess.session_id}`));
+    await waitFor(() => {
+      expect(store.get(sessionIdAtom)).toBe(sess.session_id);
+    });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('opens the dialog when a saved manual URL is no longer offered', async () => {
+    seedProfile({ mode: 'relay', selectedUrl: 'ws://gone/ws' });
     const { store } = renderShell();
     await userEvent.click(screen.getByTestId(`session-item-${sess.session_id}`));
-    // Profile failed validation (fingerprint mismatch) → the dialog reopens.
     expect(await screen.findByRole('dialog')).toBeInTheDocument();
     expect(store.get(sessionIdAtom)).toBe('');
-    // Cancelling must not attach either.
     await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     await waitFor(() => {
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
@@ -352,11 +359,9 @@ describe('session attach flow (real shell + real AttachDialog)', () => {
     expect(store.get(sessionIdAtom)).toBe('');
   });
 
-  it('restores into the dialog for a stale profile; Cancel leaves the terminal route', async () => {
-    seedProfile({ fingerprint: 'stale-fp' });
+  it('restores into the dialog when a saved manual URL is gone; Cancel leaves the terminal route', async () => {
+    seedProfile({ mode: 'relay', selectedUrl: 'ws://gone/ws' });
     const { store } = renderShell('/terminal/a1:fix');
-    // The stale profile opens the dialog instead of attaching; the restore
-    // spinner is gone once the dialog owns the screen.
     expect(await screen.findByRole('dialog')).toBeInTheDocument();
     expect(store.get(sessionIdAtom)).toBe('');
     expect(screen.queryByText(/Restoring terminal session/i)).not.toBeInTheDocument();

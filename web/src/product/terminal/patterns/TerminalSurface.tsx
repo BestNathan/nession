@@ -40,6 +40,12 @@ export interface TerminalSurfaceProps {
   /** P2P control lease (#1095). Omit in relay until server forwards attach metadata. */
   terminalControl?: TerminalControlState;
   onTakeControl?: () => void;
+  /**
+   * The shell's surface-navigation action beside the capsule — on Web, "Open
+   * Workspace" (#1204). The surface owns no navigation; it hands the node to
+   * the capsule's dock region, which owns the geometry.
+   */
+  surfaceAction?: ReactNode;
 }
 
 /**
@@ -56,6 +62,7 @@ export function TerminalSurface({
   experience,
   terminalControl,
   onTakeControl,
+  surfaceAction,
 }: TerminalSurfaceProps) {
 
   const capsuleSendText = (text: string) => {
@@ -114,6 +121,7 @@ export function TerminalSurface({
         disabled={inputDisabled}
         capabilityDisclosure={capsuleCapabilities?.disclosure}
         capabilityProjection={capsuleProjection}
+        adjacentAction={surfaceAction}
       />
     </div>
   );

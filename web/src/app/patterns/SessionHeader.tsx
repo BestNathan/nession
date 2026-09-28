@@ -9,7 +9,7 @@ import type { DomainState } from '@/product/session/model/domainState';
 import { resolveSessionChrome } from '@/product/session/model/sessionChrome';
 
 // Re-exported for the six modules that import the surface type from here.
-import type { Surface } from '@/product/workspace/patterns/SurfaceSwitcher';
+import type { Surface } from '@/product/workspace/patterns/SurfaceDestinationAction';
 export type { Surface };
 
 /**
@@ -123,7 +123,8 @@ export function SessionHeader({
   // selected row in the sidebar, agent reachability to that row's own metadata
   // (which already carried it, making the header's AgentContext a duplicate),
   // service and attachment state to the sidebar footer, and Workspace reach to
-  // the floating surface capsule. `surface-switcher.md`'s ordering rule is
+  // the surface navigation beside the bottom controls (#1204 — the floating
+  // top-right capsule before it). `surface-switcher.md`'s ordering rule is
   // respected: the replacement shipped before this control was removed.
   return null;
 }
