@@ -32,6 +32,45 @@ test('canonical Workspace fixture renders the plugin shell', async ({ page }) =>
   await expect(page.getByTestId('workspace-capability-picker-session')).toBeVisible();
 });
 
+test('the Terminal destination action sits left of the capability dock (#1204)', async ({ page }) => {
+  await page.goto('/#/fixture/workspace');
+
+  const action = page.getByTestId('surface-action-open-terminal');
+  await expect(action).toBeVisible();
+  await expect(action).toHaveAttribute('aria-label', 'Open Terminal');
+
+  // Two adjacent but separate navigations: the circle lives in surface
+  // navigation, not in the capability dock.
+  await expect(
+    page.getByTestId('workspace-surface-navigation').getByTestId('surface-action-open-terminal'),
+  ).toHaveCount(1);
+  await expect(
+    page
+      .getByRole('navigation', { name: 'Workspace capabilities' })
+      .getByTestId('surface-action-open-terminal'),
+  ).toHaveCount(0);
+
+  // The retired top-right switcher is gone from this surface too.
+  await expect(page.getByTestId('surface-switcher')).toHaveCount(0);
+
+  const actionBox = await action.boundingBox();
+  const dockBox = await page
+    .getByRole('navigation', { name: 'Workspace capabilities' })
+    .boundingBox();
+  expect(actionBox).not.toBeNull();
+  expect(dockBox).not.toBeNull();
+  if (!actionBox || !dockBox) {
+    return;
+  }
+
+  // Immediately left of the dock, vertically centered against it.
+  const gap = dockBox.x - (actionBox.x + actionBox.width);
+  expect(gap).toBeGreaterThan(0);
+  expect(gap).toBeLessThanOrEqual(16);
+  const actionCenter = actionBox.y + actionBox.height / 2;
+  expect(Math.abs(actionCenter - (dockBox.y + dockBox.height / 2))).toBeLessThanOrEqual(8);
+});
+
 test('the sessions sidebar is present in the resting shell', async ({ page }) => {
   await page.goto('/#/fixture');
   // Above `lg` the sidebar is a column, not an overlay drawer (#748): there is

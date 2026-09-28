@@ -59,12 +59,10 @@ export function useDeepLinkRestore(opts: {
     }
 
     let cancelled = false;
-    // A saved per-session profile changes the restore semantics: a VALID
-    // profile re-applies its choice (default persist refreshes the profile,
-    // keeping the fingerprint in sync with the fresh attach info). A STALE
-    // profile (fingerprint / manual url / renderer mismatch) cannot attach
-    // silently — its saved options no longer apply, so the dialog opens for
-    // re-confirmation. No profile keeps the legacy no-profile restore below.
+    // A saved per-session profile re-applies user intent on restore. Only when
+    // that intent cannot be honored (e.g. manual URL gone) does the dialog
+    // open. Transient resolve failures are not treated as stale configuration
+    // (#1186). No profile keeps the legacy no-profile restore below.
     const profile = loadSessionProfile(session);
     if (profile === null) {
       void resolveDeepLinkAttachChoice(session, probeResultsRef.current)
@@ -89,6 +87,10 @@ export function useDeepLinkRestore(opts: {
             confirmedRef.current = pendingSessionId;
             return;
           }
+          if (resolution.kind === 'failed') {
+            navigate('/', { replace: true });
+            return;
+          }
           // Mark the session so the effect does not re-fire on every poll
           // while the dialog is open. Confirm does not clear the mark — the
           // attachedSession guard makes it moot; the mark clears when
@@ -98,8 +100,8 @@ export function useDeepLinkRestore(opts: {
           requestConfigForRestore(session);
         })
         .catch(() => {
-          // resolveProfileAttach never rejects — failures surface as the
-          // dialog verdict; this catch is defensive.
+          // resolveProfileAttach never rejects — transient failures are
+          // 'failed'; this catch is defensive.
           if (!cancelled) {
             navigate('/', { replace: true });
           }

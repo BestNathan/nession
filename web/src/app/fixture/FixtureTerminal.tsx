@@ -161,6 +161,7 @@ export function FixtureTerminal({
       controller={null}
       capsuleCapabilities={chrome?.capsuleCapabilities}
       capsuleProjection={chrome?.capsuleProjection}
+      surfaceAction={chrome?.surfaceAction}
     >
       {/* Same box and inset as the product's viewport, from the product's own
           class exports — the canonical screens have to draw the well the user

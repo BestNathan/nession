@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { WorkspaceShell } from '@/app/workspace/WorkspaceShell';
+import { SurfaceDestinationAction } from '@/product/workspace/patterns/SurfaceDestinationAction';
 import { fixtureCapabilityFacts } from '@/app/fixture/fixtureCapabilityFacts';
 import type { WorkspaceContext } from '@/app/workspace/workspaceContext';
 import {
@@ -72,7 +73,16 @@ export function FixtureWorkspace() {
       data-sf-design="polish"
       className="shell flex h-[100dvh] flex-col bg-background"
     >
-      <WorkspaceShell ctx={ctx} activeCapabilityId={capability} />
+      <WorkspaceShell
+        ctx={ctx}
+        activeCapabilityId={capability}
+        /* The same surface-leave action `WorkspacePanel` composes on Web
+           (#1204) — inert here, but the canonical Workspace screen is not the
+           shipped one without it. */
+        surfaceAction={
+          <SurfaceDestinationAction destination="terminal" onOpen={() => {}} />
+        }
+      />
     </div>
   );
 }

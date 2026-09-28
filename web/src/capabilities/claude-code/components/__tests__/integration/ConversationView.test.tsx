@@ -16,6 +16,7 @@ function state(overrides: Partial<ConversationViewState> = {}): ConversationView
     skipped: 0,
     loading: false,
     loadingOlder: false,
+    olderError: null,
     error: null,
     ...overrides,
   };
@@ -341,17 +342,20 @@ describe('ConversationView', () => {
     expect(screen.getByTestId('conversation-open')).toBeInTheDocument();
   });
 
-  it('offers an older page when the provider says there is one', async () => {
-    const user = userEvent.setup();
-    const { onLoadOlder } = renderView(state({ items: turns, hasMore: true }));
-
-    await user.click(screen.getByTestId('conversation-load-older'));
-    expect(onLoadOlder).toHaveBeenCalled();
+  it('does not render a Load older button; transcript scroll owns pagination (#1190)', () => {
+    renderView(state({ items: turns, hasMore: true }));
+    expect(screen.queryByTestId('conversation-load-older')).not.toBeInTheDocument();
+    expect(screen.getByTestId('conversation-transcript-scroll')).toBeInTheDocument();
   });
 
-  it('offers no older page when there is nothing earlier', () => {
-    renderView(state({ items: turns, hasMore: false }));
-    expect(screen.queryByTestId('conversation-load-older')).not.toBeInTheDocument();
+  it('gives push-layout conversation history a bounded scroll owner (#1189)', () => {
+    renderView(state({ state: 'ambiguous', conversation: null, candidates: [
+      { claude_session_id: 'a', cwd: '/work', updated_at: null, title: 'one' },
+    ] }));
+
+    const scroll = screen.getByTestId('conversation-list-scroll');
+    expect(scroll.className).toMatch(/overflow-y-auto/);
+    expect(scroll.className).toMatch(/min-h-0/);
   });
 
   it('reports a partial tail and skipped records rather than hiding them', () => {

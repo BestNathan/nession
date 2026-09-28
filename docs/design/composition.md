@@ -29,7 +29,7 @@ The default active Session should read approximately as:
 
 The drawing intentionally does not prescribe a permanent Session sidebar, permanent `Terminal | Workspace` switcher, or permanent Workspace tool bar. Those may be current implementation mechanisms, but they are not composition invariants.
 
-**Current implementation (2026-09-16, #748).** The shell is two columns — a sidebar and the work surface — with **no permanent top band**. Session navigation, infrastructure identity and service status live in the sidebar; the surface switcher floats at the work surface's top-right. The `[context]` slot the earlier drawing showed at top-right is gone with the header: the same information is reachable in the sidebar, which is where the composition invariant puts it (chrome stays close to the edges and does not consume a band the work surface could use).
+**Current implementation (2026-09-28, #1204).** The shell is two columns — a sidebar and the work surface — with **no permanent top band**. Session navigation, infrastructure identity and service status live in the sidebar; Terminal ↔ Workspace switching is a pair of reciprocal circular destination actions beside the local bottom controls — "Open Workspace" right of the TerminalCapsule, "Open Terminal" left of the capability dock (superseding the floating top-right switcher of #748, which could cover live surface content). The `[context]` slot the earlier drawing showed at top-right is gone with the header: the same information is reachable in the sidebar, which is where the composition invariant puts it (chrome stays close to the edges and does not consume a band the work surface could use).
 
 Relationships:
 

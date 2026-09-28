@@ -92,10 +92,15 @@ export async function resolveTargetChoice(
   return buildChoice(choice, info, orderedUrls, latencies);
 }
 
-/** Attach resolution for a saved profile: valid → immediate attach choice, else dialog. */
+/** Attach resolution for a saved profile on restore / row fast-path. */
 export type ProfileAttachResolution =
   | { kind: 'choice'; choice: AttachChoice }
-  | { kind: 'dialog' };
+  | { kind: 'dialog' }
+  | { kind: 'failed'; error: string };
+
+function attachResolutionError(error: unknown): string {
+  return error instanceof Error ? error.message : 'Unable to resolve attach';
+}
 
 export async function resolveProfileAttach(
   session: Session,
@@ -104,13 +109,13 @@ export async function resolveProfileAttach(
 ): Promise<ProfileAttachResolution> {
   try {
     const info = await fetchAttachInfo(session, profile.choice);
-    if (!validateProfile(profile, info, detectWebGLSupport()).ok) {
+    if (!validateProfile(profile, info).ok) {
       return { kind: 'dialog' };
     }
     const choice = await resolveTargetChoice(session, profile.choice, probeResults, info);
     return { kind: 'choice', choice };
-  } catch {
-    return { kind: 'dialog' };
+  } catch (error) {
+    return { kind: 'failed', error: attachResolutionError(error) };
   }
 }
 

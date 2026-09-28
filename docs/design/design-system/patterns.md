@@ -30,7 +30,7 @@ Patterns that display capabilities must respect that lifecycle and progressive d
 | [SessionItem](patterns/session-item.md) | row | Session identity, compact workload/location metadata, recency, reachability |
 | [SessionHeader](patterns/session-header.md) | chrome | Quiet context for the active Session |
 | [AgentContext](patterns/agent-context.md) | context | Infrastructure identity/state; quiet when healthy |
-| [SurfaceSwitcher](patterns/surface-switcher.md) | optional Web affordance | One possible explicit Terminal ↔ Workspace control; not a product invariant |
+| [SurfaceSwitcher](patterns/surface-switcher.md) | optional Web affordance | One possible explicit Terminal ↔ Workspace control — currently reciprocal destination actions beside the bottom controls; not a product invariant |
 | [WorkspaceNavigation](patterns/workspace-navigation.md) | contextual navigation | Reach resources/capabilities relevant to the current Workspace; not a permanent tool catalog |
 | [ConnectionStatus](patterns/connection-status.md) | state | Independent infrastructure / Session / attachment presentation |
 | [FileWorkspace](patterns/file-workspace.md) | capability view | Files-specific master/detail composition |
@@ -87,7 +87,7 @@ Active Session / current work
                └── capability-specific deeper views
 ```
 
-A current Web implementation may use SessionHeader + SurfaceSwitcher + WorkspaceNavigation. Those are valid patterns and this diagram does not fix their presence in general — with one recorded exception: on Web the SurfaceSwitcher is permanent while it is the only visible route to Workspace.
+A current Web implementation may use SessionHeader + SurfaceSwitcher + WorkspaceNavigation. Those are valid patterns and this diagram does not fix their presence in general — with one recorded exception: on Web the surface affordance is permanent while it is the only visible route to Workspace (since #1204 as reciprocal destination actions beside the bottom controls).
 
 App realizes the same semantics through its spatial `Sessions ← Terminal → Workspace` model and native deeper navigation.
 
