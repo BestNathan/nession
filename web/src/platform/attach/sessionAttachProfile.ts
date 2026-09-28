@@ -174,9 +174,9 @@ export function candidateUrlsOf(info: AttachInfo): string[] {
 }
 
 /**
- * Fingerprint of the STABLE attach options of a fresh requestAttach response.
- * Excludes probe-volatile fields (status/rtt_ms), the connection token, and
- * ordering. Any change here means the saved choice must be re-confirmed.
+ * Snapshot fingerprint written at confirm time for diagnostics and future
+ * migration. Restore validation uses persisted intent, not equality of this
+ * snapshot (#1186).
  */
 export function buildOptionsFingerprint(info: AttachInfo): string {
   const candidates = (info.addresses ?? [])
@@ -188,27 +188,25 @@ export function buildOptionsFingerprint(info: AttachInfo): string {
   return JSON.stringify([info.mode, candidates]);
 }
 
-export type ProfileInvalidReason = 'fingerprint' | 'manual-url' | 'renderer';
+export type ProfileInvalidReason = 'manual-url';
 
 export type ProfileVerdict = { ok: true } | { ok: false; reason: ProfileInvalidReason };
 
-/** Validate a saved profile against a FRESH attach-info response. */
+/**
+ * Whether persisted user intent still applies against fresh attach-info.
+ *
+ * Auto / implicit URL selection ignores candidate churn. Only an explicit
+ * selectedUrl that no longer exists requires re-confirmation (#1186).
+ */
 export function validateProfile(
   profile: SessionAttachProfile,
   info: AttachInfo,
-  webglSupported: boolean,
 ): ProfileVerdict {
-  if (buildOptionsFingerprint(info) !== profile.optionsFingerprint) {
-    return { ok: false, reason: 'fingerprint' };
-  }
   if (
     profile.choice.selectedUrl !== null &&
     !candidateUrlsOf(info).includes(profile.choice.selectedUrl)
   ) {
     return { ok: false, reason: 'manual-url' };
-  }
-  if (profile.choice.renderer === 'webgl' && !webglSupported) {
-    return { ok: false, reason: 'renderer' };
   }
   return { ok: true };
 }

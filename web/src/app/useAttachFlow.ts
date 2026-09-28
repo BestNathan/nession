@@ -11,6 +11,7 @@ import {
 import { terminalSessionStateAtom } from '@/product/terminal/state/session';
 import { saveAttachPrefs } from '../platform/attach/attachPrefs';
 import { probeResultsAtom } from '@/product/agent/state';
+import { toast } from 'sonner';
 import { resolveProfileAttach } from './deepLinkAttach';
 import { loadSessionProfile, persistConfirmedChoice } from '../platform/attach/sessionAttachProfile';
 import type { Session } from '../types';
@@ -85,8 +86,10 @@ export function useAttachFlow() {
         const resolution = await resolveProfileAttach(session, profile, probeResults);
         if (resolution.kind === 'choice') {
           confirmAttach(session, resolution.choice);
-        } else {
+        } else if (resolution.kind === 'dialog') {
           openAttachDialog(session, 'attach');
+        } else {
+          toast.error(resolution.error);
         }
       } finally {
         // Only the owning flight clears the slot: a later start for the same
