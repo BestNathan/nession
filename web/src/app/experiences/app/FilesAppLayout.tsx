@@ -1,24 +1,24 @@
-import { useEffect, useState } from 'react';
-import { FileList, type FileEntry } from '@/capabilities/files';
+import { useEffect, useRef, useState, type RefObject } from 'react';
+import type { FileEntry } from '@/capabilities/files';
 import type { WorkspaceAppViewProps } from '@/app/workspace/workspaceContext';
-import { directoryPageTitle } from './appFilesNavigation';
-import { AppFilesBreadcrumb } from './AppFilesBreadcrumb';
-import { AppFilesFolderSheet } from './AppFilesFolderSheet';
+import { AppFilesDirectoryPane } from './AppFilesDirectoryPane';
 import { AppFilesSearchPanel } from './AppFilesSearchPanel';
 import { AppFilesViewerLayer } from './AppFilesViewerLayer';
+import { useAppFilesBulkActions } from './useAppFilesBulkActions';
+import { useAppFilesFocusHandoff } from './useAppFilesFocusHandoff';
 import { useAppFilesNavigator } from './useAppFilesNavigator';
 import { useAppFilesSearch } from './useAppFilesSearch';
+import { useAppFilesSelection } from './useAppFilesSelection';
 
 /**
  * App layout: directory navigator at the capability root, file viewer pushed over it.
- *
- * `#1140` replaces in-place path swaps with a stack the shell can Back out of:
- * one directory per screen, scroll positions preserved, breadcrumb for jumps.
- * The file viewer remains a second push depth declared the same way as `#1051`.
  */
 export function FilesAppLayout({ ctx, depth }: WorkspaceAppViewProps) {
   const [moreOpen, setMoreOpen] = useState(false);
   const [listReloadSignal, setListReloadSignal] = useState(0);
+  const listEntriesRef = useRef<FileEntry[]>([]);
+
+  const selection = useAppFilesSelection();
 
   const nav = useAppFilesNavigator(
     depth,
@@ -30,6 +30,14 @@ export function FilesAppLayout({ ctx, depth }: WorkspaceAppViewProps) {
   );
 
   const search = useAppFilesSearch(ctx.fileOps, nav.searchOpen);
+  const handoffError = useAppFilesFocusHandoff(ctx.focus, ctx.fileOps, ctx.onFocusConsumed, nav);
+
+  const bulk = useAppFilesBulkActions(
+    ctx.fileOps,
+    selection,
+    listEntriesRef as RefObject<FileEntry[]>,
+    () => setListReloadSignal((n) => n + 1),
+  );
 
   useEffect(() => {
     setMoreOpen(false);
@@ -39,10 +47,6 @@ export function FilesAppLayout({ ctx, depth }: WorkspaceAppViewProps) {
     return null;
   }
 
-  const handleFileClick = (entry: FileEntry) => {
-    nav.openFile(entry);
-  };
-
   if (nav.selected) {
     return (
       <AppFilesViewerLayer
@@ -50,6 +54,7 @@ export function FilesAppLayout({ ctx, depth }: WorkspaceAppViewProps) {
         path={nav.selected.path}
         filename={nav.selected.filename}
         size={nav.selected.size}
+        initialLine={nav.selected.initialLine}
         onDirtyChange={nav.setDirty}
         showDiscardDialog={nav.showDiscardDialog}
         onDiscardDialogChange={nav.setShowDiscardDialog}
@@ -66,41 +71,28 @@ export function FilesAppLayout({ ctx, depth }: WorkspaceAppViewProps) {
         status={search.status}
         error={search.error}
         results={search.results}
-        onSelectFile={handleFileClick}
+        onSelectFile={(entry) => nav.openFile(entry)}
         onRetry={search.retry}
       />
     );
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden" data-testid="files-app-layout">
-      <AppFilesBreadcrumb
-        segments={nav.breadcrumbSegments}
-        onSelect={nav.navigateToPath}
-        onOpenSearch={nav.openSearch}
-        onOpenMore={() => setMoreOpen(true)}
-      />
-      <div className="min-h-0 flex-1">
-        <FileList
-          fileOps={ctx.fileOps}
-          path={nav.currentDir}
-          onEnterDirectory={nav.enterDirectory}
-          onFileClick={handleFileClick}
-          restoredScrollTop={nav.restoredScrollTop}
-          onScrollSnapshot={nav.snapshotScroll}
-          workspaceContextLine={nav.workspaceContextLine}
-          reloadSignal={listReloadSignal}
-        />
-      </div>
-      <AppFilesFolderSheet
-        open={moreOpen}
-        onOpenChange={setMoreOpen}
-        folderTitle={directoryPageTitle(nav.currentDir)}
-        relativeDir={nav.currentDir}
-        sessionId={ctx.session?.session_id ?? ''}
-        fileOps={ctx.fileOps}
-        onRefresh={() => setListReloadSignal((n) => n + 1)}
-      />
-    </div>
+    <AppFilesDirectoryPane
+      fileOps={ctx.fileOps}
+      nav={nav}
+      selection={selection}
+      bulk={bulk}
+      handoffError={handoffError}
+      listEntriesRef={listEntriesRef as RefObject<FileEntry[]>}
+      listReloadSignal={listReloadSignal}
+      moreOpen={moreOpen}
+      setMoreOpen={setMoreOpen}
+      sessionId={ctx.session?.session_id ?? ''}
+      onListReload={() => setListReloadSignal((n) => n + 1)}
+      onEntriesChange={(entries) => {
+        listEntriesRef.current = entries;
+      }}
+    />
   );
 }

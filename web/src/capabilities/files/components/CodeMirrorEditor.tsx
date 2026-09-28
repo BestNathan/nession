@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
-import type { Extension } from '@codemirror/state';
+import { useEffect, useRef, useState } from 'react';
+import { EditorSelection, type Extension } from '@codemirror/state';
+import { EditorView } from '@codemirror/view';
 import CodeMirror from '@uiw/react-codemirror';
 import { EDITOR_METRICS, EDITOR_THEME } from '../model/editorTheme';
 import {
@@ -13,6 +14,8 @@ export interface CodeMirrorEditorProps {
   readOnly?: boolean;
   language?: string;
   filename?: string;
+  /** 1-based line to scroll to after content loads (#1175). */
+  initialLine?: number;
 }
 
 /**
@@ -31,9 +34,25 @@ export function CodeMirrorEditor({
   readOnly = false,
   language,
   filename,
+  initialLine,
 }: CodeMirrorEditorProps) {
   const [langExtensions, setLangExtensions] = useState<Extension[]>([]);
   const path = filename ?? '';
+  const viewRef = useRef<EditorView | null>(null);
+  const scrolledToLine = useRef<number | null>(null);
+
+  const scrollToInitialLine = (view: EditorView, lineNumber: number) => {
+    if (view.state.doc.length === 0) {
+      return;
+    }
+    const line = Math.min(Math.max(1, lineNumber), view.state.doc.lines);
+    const lineObj = view.state.doc.line(line);
+    view.dispatch({
+      selection: EditorSelection.cursor(lineObj.from),
+      effects: EditorView.scrollIntoView(lineObj.from, { y: 'center' }),
+    });
+    scrolledToLine.current = lineNumber;
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -47,6 +66,16 @@ export function CodeMirrorEditor({
       cancelled = true;
     };
   }, [path, language]);
+
+  useEffect(() => {
+    if (!initialLine || !value || !viewRef.current) {
+      return;
+    }
+    if (scrolledToLine.current === initialLine) {
+      return;
+    }
+    scrollToInitialLine(viewRef.current, initialLine);
+  }, [initialLine, value]);
 
   return (
     <div
@@ -63,6 +92,12 @@ export function CodeMirrorEditor({
         indentWithTab
         extensions={langExtensions}
         onChange={(next) => onChange(next)}
+        onCreateEditor={(view) => {
+          viewRef.current = view;
+          if (initialLine && value) {
+            scrollToInitialLine(view, initialLine);
+          }
+        }}
         className="h-full"
       />
     </div>

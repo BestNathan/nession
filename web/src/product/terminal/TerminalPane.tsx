@@ -15,6 +15,7 @@ interface TerminalPaneProps {
    * construction) — rewires the ConnectionManager to the new socket (#668).
    */
   transportEpoch: number;
+  onOpenWorkspaceFile?: (path: string, line?: number) => void;
 }
 
 /**
@@ -27,6 +28,7 @@ export function TerminalPane({
   terminalState,
   viewportReady,
   transportEpoch,
+  onOpenWorkspaceFile,
 }: TerminalPaneProps) {
   const showViewport = Boolean(controller) && viewportReady;
   const showBlockingLoader = !controller || !viewportReady;
@@ -35,7 +37,11 @@ export function TerminalPane({
     <div className="relative flex min-h-0 min-w-0 flex-1 flex-col" data-testid="terminal-pane">
       <div className="relative min-h-0 flex-1">
         {showViewport ? (
-          <TerminalViewport controller={controller} transportEpoch={transportEpoch} />
+          <TerminalViewport
+            controller={controller}
+            transportEpoch={transportEpoch}
+            onOpenWorkspaceFile={onOpenWorkspaceFile}
+          />
         ) : null}
         {showBlockingLoader ? (
           <div

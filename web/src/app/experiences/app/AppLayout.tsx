@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { AppLayers, type AppLayer } from './AppLayers';
 import { AppSessionsSurface } from './AppSessionsSurface';
 import { ShellMain } from '@/app/ShellMain';
@@ -9,6 +9,7 @@ import type { Surface } from '@/app/patterns/SessionHeader';
 import type { CapabilityId } from '@/product/capability';
 import type { FileOps } from '@/capabilities/files';
 import type { Agent, Session } from '@/types';
+import type { CapabilityFocus } from '@/app/workspace/workspaceContext';
 
 /**
  * `collapsible` is dropped here rather than passed through as `false`: the App
@@ -85,6 +86,16 @@ export function AppLayout(props: {
   // panel unmounts — the Workspace layer is unmounted whenever it is closed,
   // and a stale `true` would silence the Terminal's own gesture.
   const [workspaceDetailPushed, setWorkspaceDetailPushed] = useState(false);
+  const [incomingFileFocus, setIncomingFileFocus] = useState<CapabilityFocus | undefined>();
+
+  const handleOpenFileFromTerminal = useCallback(
+    (path: string, line?: number) => {
+      setIncomingFileFocus({ capabilityId: 'files', resourceId: path, line });
+      mainShared.onToolChange('files');
+      onLayerChange('workspace');
+    },
+    [mainShared, onLayerChange],
+  );
 
   return (
     <div className="flex min-h-0 flex-1">
@@ -106,6 +117,7 @@ export function AppLayout(props: {
               experience="app"
               onOpenDrawer={() => onLayerChange('sessions')}
               onOpenWorkspace={() => onLayerChange('workspace')}
+              onOpenWorkspaceFile={handleOpenFileFromTerminal}
               terminal={terminal}
             />
           </div>
@@ -131,6 +143,8 @@ export function AppLayout(props: {
               showTerminal={false}
               experience="app"
               onWorkspaceDepthChange={setWorkspaceDetailPushed}
+              incomingFocus={incomingFileFocus}
+              onIncomingFocusApplied={() => setIncomingFileFocus(undefined)}
             />
           </div>
         )}

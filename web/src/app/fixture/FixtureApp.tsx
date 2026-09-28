@@ -6,6 +6,7 @@ import { filterSessions } from '@/app/useDashboard';
 import { useDashboardFilter } from '@/app/useDashboardFilter';
 import { mapDomainState } from '@/product/session/model/domainState';
 import { FixtureTerminal } from '@/app/fixture/FixtureTerminal';
+import type { TerminalChrome } from '@/app/ShellMain';
 import { FIXTURE_CLIENT_SESSION_ID } from '@/app/fixture/fixtureData';
 import type { Surface } from '@/app/patterns/SessionHeader';
 import type { CapabilityId } from '@/product/capability';
@@ -176,7 +177,7 @@ export function FixtureApp() {
         onLayerSelect={onLayerSelect}
         mainShared={mainShared}
         workspaceAvailable={workspaceAvailable}
-        terminal={(chrome) => (
+        terminal={(chrome: TerminalChrome) => (
           <FixtureTerminal chrome={chrome} experience="app" />
         )}
       />

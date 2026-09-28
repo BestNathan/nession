@@ -102,7 +102,7 @@ describe('ShellMain', () => {
         fileOps={null}
         onSurfaceChange={vi.fn()}
         onToolChange={vi.fn()}
-        terminal={(chrome) => {
+        terminal={(chrome: TerminalChrome) => {
           latest = chrome;
           return <div data-testid="fixture-terminal" />;
         }}
