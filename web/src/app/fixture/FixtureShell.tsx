@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { FixtureTerminal } from '@/app/fixture/FixtureTerminal';
+import type { TerminalChrome } from '@/app/ShellMain';
 import {
   FIXTURE_AGENTS,
   FIXTURE_CLIENT_SESSION_ID,
@@ -93,7 +94,7 @@ export function FixtureShell() {
           showDetail
           onBackToSessions={() => {}}
           connectionStatus="connected"
-          terminal={(chrome) => (
+          terminal={(chrome: TerminalChrome) => (
             <FixtureTerminal chrome={chrome} experience="web" />
           )}
         />

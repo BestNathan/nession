@@ -206,6 +206,16 @@ async function stopPtyProbe(page: import('@playwright/test').Page): Promise<void
     .toBe(true);
 }
 
+/** The last line with anything on it — where a terminal's cursor actually is. */
+async function lastNonEmptyLine(page: import('@playwright/test').Page): Promise<string> {
+  const text = await readTerminalBuffer(page);
+  const lines = text
+    .split('\n')
+    .map((line) => line.trimEnd())
+    .filter((line) => line.length > 0);
+  return lines[lines.length - 1] ?? '';
+}
+
 /** Tap the capsule's ↑ — the App/mobile key path, not a keyboard event. */
 async function tapCapsuleArrowUp(page: import('@playwright/test').Page): Promise<void> {
   await page.getByTestId('capsule-capability-more').click();
@@ -257,6 +267,34 @@ test.describe('Terminal I/O', () => {
       const text = await readTerminalBuffer(page);
       expect(text).toContain('nession-e2e-ok');
     }).toPass({ timeout: 15_000 });
+  });
+
+  test('a curses TUI renders and gives the shell back (#1096)', async ({ page }, testInfo) => {
+    // Criterion 15's curses smoke. Nothing here is Nession-specific, and that
+    // is the point: `less` reads keys in raw mode, paints its own screen from
+    // terminfo, and exits on a keystroke. The fixtures in this file drive the
+    // PTY with escapes the test itself wrote; this drives it with a program
+    // that was written without Nession in mind.
+    //
+    // It deliberately does not assert on the alternate screen. That is not
+    // observable from the browser: tmux owns its client's screen and mouse
+    // mode — `pty.rs` sets only `status off`, and tmux turns both on itself —
+    // so `buffer.active.type` reads `'alternate'` for a plain shell too.
+    test.skip(!process.env.CI, 'local only — runs in CI workflow only');
+    const SESSION_NAME = `e2e-curses-${testInfo.retry}`;
+    await createSession(page, SESSION_NAME);
+    await attachToSession(page, SESSION_NAME, 'Relay');
+    await waitForInteractiveShell(page);
+
+    await submitTerminalCommand(page, 'less /etc/hosts');
+    // It painted. `localhost` is in /etc/hosts on every runner.
+    await expect
+      .poll(async () => readTerminalBuffer(page), { timeout: 15_000 })
+      .toContain('localhost');
+
+    // `q` reaches it in raw mode, and only then does tmux repaint the prompt.
+    await sendRawToTerminal(page, 'q');
+    await expect.poll(async () => lastNonEmptyLine(page), { timeout: 15_000 }).toMatch(/runner:\S*\$/);
   });
 
   test('capsule arrow follows the cursor mode the PTY asked for (#1096)', async ({ page }, testInfo) => {

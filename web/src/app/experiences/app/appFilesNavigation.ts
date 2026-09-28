@@ -22,6 +22,18 @@ export function directoryPageTitle(path: string): string {
   return parts[parts.length - 1] ?? path;
 }
 
+/** Session/agent line under the Files root title. */
+export function filesWorkspaceContextLine(session: {
+  sessionName?: string | null;
+  agentLabel?: string | null;
+}): string | null {
+  const { sessionName, agentLabel } = session;
+  if (sessionName && agentLabel) {
+    return `${sessionName} · ${agentLabel}`;
+  }
+  return sessionName ?? agentLabel ?? null;
+}
+
 /** Breadcrumb segments: cumulative paths with display labels. */
 export function directoryBreadcrumbSegments(
   stack: string[],

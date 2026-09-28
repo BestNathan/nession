@@ -38,6 +38,7 @@ export interface FileViewerProps {
    */
   onClose?: () => void;
   onDirtyChange?: (dirty: boolean) => void;
+  initialLine?: number;
 }
 
 interface FileViewerToolbarProps {
@@ -151,13 +152,14 @@ interface FileViewerContentProps {
   onSuggestionPreview: () => void;
   onSuggestionDismiss: () => void;
   onCancelLoad: () => void;
+  initialLine?: number;
 }
 
 function FileViewerContent({
   loading, error, viewerType, mediaBlobUrl, filename, originalContent, content,
   isReadOnly, isDirty, isMarkdown, viewMode, showSuggestion,
   isChunkedLoading, loadedBytes, totalBytes,
-  onRetry, onChange, onSuggestionPreview, onSuggestionDismiss, onCancelLoad,
+  onRetry, onChange, onSuggestionPreview, onSuggestionDismiss, onCancelLoad, initialLine,
 }: FileViewerContentProps) {
   // Chunked progress view — shown while a large file is being downloaded in chunks.
   const chunkedProgressView = (
@@ -270,6 +272,7 @@ function FileViewerContent({
             onChange={onChange}
             readOnly={isReadOnly}
             filename={filename}
+            initialLine={initialLine}
           />
         )}
       </div>
@@ -277,7 +280,15 @@ function FileViewerContent({
   );
 }
 
-export function FileViewer({ fileOps, path, filename, fileSize, onClose, onDirtyChange }: FileViewerProps) {
+export function FileViewer({
+  fileOps,
+  path,
+  filename,
+  fileSize,
+  onClose,
+  onDirtyChange,
+  initialLine,
+}: FileViewerProps) {
   const {
     viewerType,
     isMarkdown,
@@ -348,6 +359,7 @@ export function FileViewer({ fileOps, path, filename, fileSize, onClose, onDirty
         onSuggestionPreview={handleSuggestionPreview}
         onSuggestionDismiss={handleSuggestionDismiss}
         onCancelLoad={handleCancelLoad}
+        initialLine={initialLine}
       />
       {/* The viewer's own unsaved dialog exists only for its own close
           affordance. Without one the caller owns leaving, and the caller's

@@ -37,6 +37,7 @@ export interface WorkspacePanelProps {
   onDepthChange?: (pushed: boolean) => void;
   /** What opened this view, when the entry carried context (`#826`). */
   focus?: CapabilityFocus;
+  onFocusConsumed?: () => void;
   openWorktreeSession?: (worktree: import('@/capabilities/git/types').GitWorktree) => Promise<void>;
 }
 
@@ -73,6 +74,7 @@ export function WorkspacePanel({
   onToolChange,
   onDepthChange,
   focus,
+  onFocusConsumed,
   openWorktreeSession,
 }: WorkspacePanelProps) {
   const [pushed, setPushed] = useState<PushedDepth | null>(null);
@@ -102,6 +104,7 @@ export function WorkspacePanel({
       onToolChange,
       facts,
       focus,
+      onFocusConsumed,
       openWorktreeSession,
     }),
     [
@@ -114,6 +117,7 @@ export function WorkspacePanel({
       onToolChange,
       facts,
       focus,
+      onFocusConsumed,
       openWorktreeSession,
     ],
   );

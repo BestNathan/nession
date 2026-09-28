@@ -3,6 +3,7 @@ import {
   directoryBreadcrumbSegments,
   directoryPageTitle,
   directoryPathToStack,
+  filesWorkspaceContextLine,
 } from '../../appFilesNavigation';
 
 describe('appFilesNavigation', () => {
@@ -21,5 +22,12 @@ describe('appFilesNavigation', () => {
       { path: 'docs', label: 'docs' },
       { path: 'docs/design', label: 'design' },
     ]);
+  });
+
+  it('formats workspace context line', () => {
+    expect(filesWorkspaceContextLine({ sessionName: 'dev', agentLabel: 'mac' })).toBe(
+      'dev · mac',
+    );
+    expect(filesWorkspaceContextLine({ sessionName: 'dev' })).toBe('dev');
   });
 });

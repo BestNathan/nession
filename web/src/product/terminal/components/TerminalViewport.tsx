@@ -1,6 +1,7 @@
 import { useRef, useLayoutEffect } from 'react';
 import { cn } from '@/shared/lib/utils';
 import type { TerminalController } from '@/platform/terminal-runtime/controller/TerminalController';
+import { registerWorkspaceFileLinkProvider } from '@/product/terminal/workspaceFileLinks';
 
 /**
  * The terminal well's box and inset, exported so a second xterm mount cannot
@@ -46,18 +47,30 @@ export const terminalViewportInsetClass =
 export function TerminalViewport({
   controller,
   transportEpoch = 0,
+  onOpenWorkspaceFile,
 }: {
   controller: TerminalController | null;
   /** Bump when the P2P socket identity changes so ConnectionManager rebinds. */
   transportEpoch?: string | number;
+  onOpenWorkspaceFile?: (path: string, line?: number) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const linkHandlerRef = useRef(onOpenWorkspaceFile);
+  linkHandlerRef.current = onOpenWorkspaceFile;
 
   useLayoutEffect(() => {
     const container = containerRef.current;
     if (!container || !controller) { return; }
     controller.attach(container);
+    const term = controller.terminal;
+    const linkDisposable =
+      term && linkHandlerRef.current
+        ? registerWorkspaceFileLinkProvider(term, (path, line) => {
+            linkHandlerRef.current?.(path, line);
+          })
+        : undefined;
     return () => {
+      linkDisposable?.dispose();
       controller.detach();
     };
   }, [controller, transportEpoch]);
