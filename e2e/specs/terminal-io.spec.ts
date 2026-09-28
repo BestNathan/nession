@@ -157,7 +157,7 @@ async function waitForInteractiveShell(page: import('@playwright/test').Page): P
  */
 async function readTerminalFacts(
   page: import('@playwright/test').Page,
-): Promise<{ cols: number; rows: number; bufferType: string; width: number }> {
+): Promise<{ cols: number; rows: number; width: number }> {
   return page.evaluate(() => {
     const xtermEl = document.querySelector('.xterm');
     const container = xtermEl?.parentElement as
@@ -176,11 +176,26 @@ async function readTerminalFacts(
     return {
       cols: term.cols,
       rows: term.rows,
-      bufferType: term.buffer.active.type,
       width: xtermEl ? Math.round(xtermEl.getBoundingClientRect().width) : 0,
     };
   });
 }
+
+/*
+ * Deliberately not read here: `buffer.active.type` and `modes.mouseTrackingMode`.
+ *
+ * Both describe the terminal tmux is attached to, not the application inside
+ * it. `tmux attach`'s client puts its own outer terminal into the alternate
+ * screen and turns mouse reporting on — measured on a server started with
+ * `-f /dev/null`, so it is tmux's behaviour and not a config's — and the agent
+ * never overrides it (`pty.rs` sets only `status off`). So they read
+ * `'alternate'` and `'drag'` for a plain shell, before any application asks for
+ * anything, and they do not move when a pane does ask.
+ *
+ * A test that asserts an alternate-screen app from the browser side therefore
+ * cannot pass, and one that branches on the mouse mode is reading tmux's answer
+ * rather than the application's. Assert on what the application renders.
+ */
 
 /**
  * Wait until xterm's grid has stopped moving.
@@ -322,7 +337,19 @@ test.describe('Terminal I/O', () => {
     // A SIGWINCH test in jsdom could not see that, and a TUI that lays out on a
     // stale size is the failure this guards.
     test.skip(!process.env.CI, 'local only — runs in CI workflow only');
-    await page.setViewportSize({ width: 1280, height: 800 });
+    // Grow, starting small. Width is held constant and height is the dimension
+    // used, because below roughly 1280 the Web layout stops handing the
+    // terminal fewer columns — the sidebar and the well's minimum hold the
+    // grid's width and the page scrolls instead (measured: 1280×800 →
+    // 1060×660 left `cols` at 142 and took `rows` from 36 to 29).
+    //
+    // And it grows rather than shrinks because a shrink is not the same claim:
+    // whether one reaches the window depends on tmux's own `window-size`
+    // policy, and CI's tmux differs from a developer's there. Measured on CI,
+    // shrinking took the browser grid from 36 rows to 26 while the session went
+    // on reporting `36 124`. A grow is not subject to that, and it exercises
+    // the same chain end to end.
+    await page.setViewportSize({ width: 1280, height: 600 });
     const SESSION_NAME = `e2e-resize-${testInfo.retry}`;
     await createSession(page, SESSION_NAME);
     await attachToSession(page, SESSION_NAME, 'Relay');
@@ -337,19 +364,13 @@ test.describe('Terminal I/O', () => {
       .poll(async () => readTerminalBuffer(page), { timeout: 15_000 })
       .toContain(`${before.rows} ${before.cols}`);
 
-    // Shrink vertically, and keep the width. Below roughly 1280 the Web layout
-    // stops handing the terminal fewer columns — the sidebar and the well's
-    // minimum hold the grid's width, and the page scrolls instead — so height
-    // is the dimension a smaller window actually moves. Measured: 1280×800 →
-    // 1060×660 left `cols` at 142 and took `rows` from 36 to 29. Asserting on
-    // columns here would fail a terminal that resized perfectly well.
-    await page.setViewportSize({ width: 1280, height: 600 });
+    await page.setViewportSize({ width: 1280, height: 900 });
 
     // The grid must actually change first — otherwise the assertion below could
     // pass on a terminal that never noticed, which is not the case under test.
     await expect
       .poll(async () => (await readTerminalFacts(page)).rows, { timeout: 15_000 })
-      .toBeLessThan(before.rows);
+      .toBeGreaterThan(before.rows);
 
     const after = await readTerminalFacts(page);
     await submitTerminalCommand(page, 'stty size');
