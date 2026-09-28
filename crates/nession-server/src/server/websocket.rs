@@ -1195,6 +1195,14 @@ where
                 return ClientToAgent::ClientRequested;
             }
             ClientFrame::Other => {
+                // DIAGNOSTIC (#1187) — remove before merge.
+                if msg
+                    .to_text()
+                    .map(|t| t.contains("agent.terminal.resize"))
+                    .unwrap_or(false)
+                {
+                    info!("DIAG forwarding terminal.resize to agent for '{session_name}'");
+                }
                 if let Err(e) = agent_write.send(msg).await {
                     error!("Failed to forward client message to agent: {}", e);
                     break;

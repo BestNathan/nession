@@ -1835,6 +1835,11 @@ p2p_routes! { ctx, msg_type, payload_value;
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
                 };
                 let client_id = connection_client_id(ctx.client_id).await;
+                // DIAGNOSTIC (#1187) — remove before merge.
+                info!(
+                    "DIAG terminal.resize arrived: session={} {}x{} client={}",
+                    payload.session_name, payload.cols, payload.rows, client_id
+                );
                 let role_and_backend = sessions_lock(ctx.sessions)
                     .get(&payload.session_name)
                     .map(|session| {

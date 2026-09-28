@@ -216,6 +216,17 @@ async function lastNonEmptyLine(page: import('@playwright/test').Page): Promise<
   return lines[lines.length - 1] ?? '';
 }
 
+/** DIAGNOSTIC (#1187) — remove before merge. */
+async function diagFacts(
+  page: import('@playwright/test').Page,
+): Promise<{ cols: number; rows: number }> {
+  return page.evaluate(() => {
+    const el = document.querySelector('.xterm');
+    const term = el?.parentElement?.xtermInstance;
+    return { cols: term?.cols ?? 0, rows: term?.rows ?? 0 };
+  });
+}
+
 /** Tap the capsule's ↑ — the App/mobile key path, not a keyboard event. */
 async function tapCapsuleArrowUp(page: import('@playwright/test').Page): Promise<void> {
   await page.getByTestId('capsule-capability-more').click();
@@ -295,6 +306,27 @@ test.describe('Terminal I/O', () => {
     // `q` reaches it in raw mode, and only then does tmux repaint the prompt.
     await sendRawToTerminal(page, 'q');
     await expect.poll(async () => lastNonEmptyLine(page), { timeout: 15_000 }).toMatch(/runner:\S*\$/);
+  });
+
+  test('DIAGNOSTIC: resize over Relay (#1187)', async ({ page }, testInfo) => {
+    // Temporary. Exists only so a CI run produces the two DIAG log lines that
+    // say whether the resize reached the server, the agent, or neither.
+    test.skip(!process.env.CI, 'local only — runs in CI workflow only');
+    await page.setViewportSize({ width: 1280, height: 600 });
+    const SESSION_NAME = `e2e-resizediag-${testInfo.retry}`;
+    await createSession(page, SESSION_NAME);
+    await attachToSession(page, SESSION_NAME, 'Relay');
+    await waitForInteractiveShell(page);
+    await page.waitForTimeout(3000);
+
+    const before = await diagFacts(page);
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.waitForTimeout(5000);
+    const after = await diagFacts(page);
+
+    // The real property, so a red run says whether the fix landed. The log is
+    // the diagnostic either way.
+    expect(after.rows).toBeGreaterThan(before.rows);
   });
 
   test('capsule arrow follows the cursor mode the PTY asked for (#1096)', async ({ page }, testInfo) => {
