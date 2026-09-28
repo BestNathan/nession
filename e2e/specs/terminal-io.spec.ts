@@ -414,6 +414,105 @@ test.describe('Terminal I/O', () => {
     await expectPtySize(page, after.cols, after.rows);
   });
 
+  test('Ctrl+D reaches the PTY instead of disconnecting (#1096 criterion 1)', async ({ page }, testInfo) => {
+    // The byte the product used to steal: Nession read `0x04` as its own
+    // disconnect. Criterion 1 says the byte must reach the application and
+    // disconnect must be an explicit action.
+    //
+    // The observation is EOF. `cat -v` reading a tty exits when it sees `^D`
+    // with nothing pending — so if the byte arrives, the probe ends and the
+    // shell prints a fresh prompt. A Nession that still hijacked it would
+    // leave `cat` running and print no new prompt.
+    //
+    // Asserted on the LAST non-empty line, not on a regex over the whole
+    // buffer: the scrollback already holds prompts from before the probe was
+    // started, so `toMatch(/…$/)` would pass without anything happening. The
+    // prompt after the exit is the one the cursor sits on.
+    test.skip(!process.env.CI, 'local only — runs in CI workflow only');
+    const SESSION_NAME = `e2e-ctrld-${testInfo.retry}`;
+    await createSession(page, SESSION_NAME);
+    await attachToSession(page, SESSION_NAME, 'Relay');
+    await waitForInteractiveShell(page);
+    await submitTerminalCommand(page, ptyProbeInstaller());
+
+    await startPtyProbe(page, 'normal');
+    await sendRawToTerminal(page, '\x04');
+    await expect
+      .poll(async () => lastNonEmptyLine(page), { timeout: 15_000 })
+      .toMatch(/runner:\S*\$/);
+  });
+
+  test('committed non-ASCII text reaches the PTY (#1096 criterion 11)', async ({ page }, testInfo) => {
+    // Criterion 11's second half. The first half — that composition sends only
+    // *committed* text — is covered where composition happens
+    // (`MobileImeInput`), which needs `ontouchstart` and so is not reachable
+    // from here. What this proves is the other end: the bytes a commit produces
+    // survive the whole path.
+    //
+    // `sendRawToTerminal` is not a stand-in for the encoder — it *is* it. IME
+    // commit and this helper both end at `terminal.input(text, true)`, so the
+    // string below travels the same wire the composer would. Everything after
+    // it is real: relay, tmux, and the tty line discipline, none of which this
+    // test stubs, and none of which is where a multi-byte character is
+    // supposed to be lost.
+    test.skip(!process.env.CI, 'local only — runs in CI workflow only');
+    const SESSION_NAME = `e2e-cjk-${testInfo.retry}`;
+    await createSession(page, SESSION_NAME);
+    await attachToSession(page, SESSION_NAME, 'Relay');
+    await waitForInteractiveShell(page);
+    await submitTerminalCommand(page, ptyProbeInstaller());
+
+    // `cat -v` escapes control characters, not non-ASCII, so what comes back in
+    // the buffer is what the application received.
+    await startPtyProbe(page, 'normal');
+    await sendRawToTerminal(page, '中文输入\n');
+    await expect
+      .poll(async () => readTerminalBuffer(page), { timeout: 15_000 })
+      .toContain('中文输入');
+  });
+
+  test('a reattached client still asks in the mode the PTY is in (#1096 criterion 13, case 10)', async ({ page }, testInfo) => {
+    // "reconnect/reattach without losing the expected mode after
+    // redraw/bootstrap." The mode belongs to the *application*: the pane stays
+    // in application-cursor mode across the browser going away and coming back,
+    // and the question is whether a freshly built xterm is told so. A client
+    // that reattached with its own default would ask for `^[[A` while the
+    // application waits for `^[OA` — the failure this case exists for.
+    test.skip(!process.env.CI, 'local only — runs in CI workflow only');
+    const SESSION_NAME = `e2e-reattach-${testInfo.retry}`;
+    await createSession(page, SESSION_NAME);
+    await attachToSession(page, SESSION_NAME, 'Relay');
+    await waitForInteractiveShell(page);
+    await submitTerminalCommand(page, ptyProbeInstaller());
+
+    await startPtyProbe(page, 'appcursor');
+    await tapCapsuleArrowUp(page);
+    await expect(async () => {
+      expect(await countInBuffer(page, '^[OA')).toBeGreaterThan(0);
+    }).toPass({ timeout: 15_000 });
+
+    // A genuinely fresh client: the document reloads and xterm is built from
+    // nothing, while the probe keeps running in the pane.
+    //
+    // No `attachToSession` here, and that is the point rather than a shortcut.
+    // The route still names the Session and the attach profile is persisted
+    // (#1186), so a reload reattaches on the ordinary path — there is no second
+    // confirmation to click, and waiting for one is what this test did first
+    // and failed on. Waiting for the shell is waiting for the reattach.
+    //
+    // Counting `^[OA` before and after rather than asserting presence, because
+    // the reattach re-bootstraps the scrollback and the earlier one comes back
+    // with it.
+    await page.reload();
+    await waitForInteractiveShell(page);
+
+    const before = await countInBuffer(page, '^[OA');
+    await tapCapsuleArrowUp(page);
+    await expect(async () => {
+      expect(await countInBuffer(page, '^[OA')).toBeGreaterThan(before);
+    }).toPass({ timeout: 15_000 });
+  });
+
   test('capsule arrow follows the cursor mode the PTY asked for (#1096)', async ({ page }, testInfo) => {
     // The requirement's end-to-end claim, and the one thing every gate above
     // this line can only approximate: the same tap produces different bytes
