@@ -66,4 +66,25 @@ describe('ConversationTranscript scroll (#1190)', () => {
     expect(screen.queryByTestId('conversation-load-older')).not.toBeInTheDocument();
     expect(screen.getByTestId('conversation-loading-older')).toBeInTheDocument();
   });
+
+  it('requests older messages when the first page does not fill the viewport', async () => {
+    const onLoadOlder = vi.fn();
+    render(
+      <div style={{ display: 'flex', flexDirection: 'column', height: 400 }}>
+        <ConversationTranscript
+          view={viewState({
+            hasMore: true,
+            items: [
+              { id: '1', kind: 'message', role: 'user', content: [{ type: 'text', text: 'short' }] },
+            ],
+          })}
+          onLoadOlder={onLoadOlder}
+        />
+      </div>,
+    );
+
+    await waitFor(() => {
+      expect(onLoadOlder).toHaveBeenCalled();
+    });
+  });
 });
