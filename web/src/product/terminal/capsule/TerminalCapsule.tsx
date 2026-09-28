@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, type ReactNode } from 'react';
 import { CAPSULE_EXPERIENCE } from '@/product/terminal/capsule/config/experience';
 import { CapsuleShell } from '@/product/terminal/capsule/components/CapsuleShell';
 import { InputComposer } from '@/product/terminal/capsule/components/InputComposer';
@@ -30,6 +30,12 @@ export interface TerminalCapsuleProps {
    * around, and the one the golden screenshots capture.
    */
   capabilityProjection?: CapsuleCapabilityProjection;
+  /**
+   * A control composed beside the capsule shell by the shell layer — on Web,
+   * the "Open Workspace" destination action (#1204). Opaque to the capsule:
+   * it owns a slot in the dock region, never what fills it.
+   */
+  adjacentAction?: ReactNode;
 }
 
 export function TerminalCapsule({
@@ -39,6 +45,7 @@ export function TerminalCapsule({
   experience = 'web',
   capabilityDisclosure,
   capabilityProjection,
+  adjacentAction,
 }: TerminalCapsuleProps) {
   const resolvedExperience = experience;
   const experienceConfig = CAPSULE_EXPERIENCE[resolvedExperience];
@@ -156,6 +163,7 @@ export function TerminalCapsule({
         shellRef={shellRef}
         contentRef={contentRef}
         measureMirror={<ComposerMeasureMirror mirrorRef={measureMirrorRef} />}
+        adjacentAction={adjacentAction}
         projection={
           capabilityProjection ? (
             <PeekHost

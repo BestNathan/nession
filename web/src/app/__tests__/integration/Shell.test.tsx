@@ -62,7 +62,11 @@ vi.mock('@/app/useDashboard', () => ({
   useDashboard: () => dashboard.current,
 }));
 vi.mock('@/app/TerminalRegion', () => ({
-  TerminalRegion: () => <div data-testid="terminal" />,
+  // The mock draws the slot the real region is handed, so the surface
+  // navigation the shell composes stays reachable in these tests (#1204).
+  TerminalRegion: ({ surfaceAction }: { surfaceAction?: React.ReactNode }) => (
+    <div data-testid="terminal">{surfaceAction}</div>
+  ),
 }));
 vi.mock('@/app/experiences/web/FilesWebLayout', () => ({
   FilesWebLayout: () => <div data-testid="file-workspace" />,
@@ -293,8 +297,15 @@ describe('Shell', () => {
     await userEvent.click(screen.getByTestId('session-item-a1:fix'));
     // No header heading any more — Session identity is the selected row.
     expect(screen.getByTestId('session-item-a1:fix')).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Terminal' })).toHaveAttribute('aria-selected', 'true');
-    await userEvent.click(screen.getByRole('tab', { name: 'Workspace' }));
+    // Terminal is the default surface, so the only destination action on it is
+    // the one that leaves it (#1204). Its reciprocal exists only inside the
+    // Workspace panel, which is mounted hidden — never as a second visible
+    // control on the Terminal surface.
+    expect(screen.getByTestId('surface-action-open-workspace')).toBeInTheDocument();
+    expect(
+      screen.getByTestId('surface-action-open-terminal').closest('[role="region"]'),
+    ).toHaveClass('hidden');
+    await userEvent.click(screen.getByRole('button', { name: 'Open Workspace' }));
 
     // Files is the default opened capability, but this shell has no file ops
     // (relay-only), so it holds a stable explanatory state rather than a dead
@@ -494,7 +505,7 @@ describe('Shell', () => {
     deepLink.sessionIdFromUrl = sess.session_id;
     renderShell();
     await userEvent.click(screen.getByTestId('session-item-a1:fix'));
-    await userEvent.click(screen.getByRole('tab', { name: 'Workspace' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Open Workspace' }));
     await clickDisclosedCapability('Env');
     expect(screen.getByTestId('env-manager')).toBeInTheDocument();
   });
