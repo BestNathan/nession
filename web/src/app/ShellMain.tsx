@@ -1,4 +1,6 @@
-import { useCallback, useState, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
+import { useIncomingCapabilityFocus } from '@/app/useIncomingCapabilityFocus';
+import { useShellMainFocusTooling } from '@/app/useShellMainFocusTooling';
 import { cn } from '@/shared/lib/utils';
 import type { FileOps } from '@/capabilities/files';
 import type { DomainState } from '@/product/session/model/domainState';
@@ -65,6 +67,11 @@ export interface ShellMainProps {
   onOpenWorktreeSession?: (
     worktree: import('@/capabilities/git/types').GitWorktree,
   ) => Promise<void>;
+  /** App: focus handed from the Terminal layer (#1175). */
+  incomingFocus?: CapabilityFocus;
+  onIncomingFocusApplied?: () => void;
+  /** App Terminal: open a workspace-relative file in Files. */
+  onOpenWorkspaceFile?: (path: string, line?: number) => void;
 }
 
 /**
@@ -128,6 +135,20 @@ function NoSessionSurface({
   );
 }
 
+function WebSurfaceSwitcherFloating({
+  surface,
+  onSurfaceChange,
+}: {
+  surface: Surface;
+  onSurfaceChange: (surface: Surface) => void;
+}) {
+  return (
+    <div className="pointer-events-none absolute right-[var(--shell-space-3)] top-[var(--shell-space-3)] z-20">
+      <SurfaceSwitcher surface={surface} onSurfaceChange={onSurfaceChange} />
+    </div>
+  );
+}
+
 export function ShellMain({
   selectedSession,
   selectedAgent,
@@ -147,18 +168,19 @@ export function ShellMain({
   terminal,
   experience = 'web',
   onOpenWorktreeSession,
+  incomingFocus,
+  onIncomingFocusApplied,
+  onOpenWorkspaceFile,
 }: ShellMainProps) {
   const hasSession = selectedSession !== null && domain !== null;
-  // What opened the Workspace, when the entry carried something with it. Cleared
-  // when the user opens a capability by any other route — a stale focus would
-  // silently redirect a later visit to whatever they happened to look at before.
-  const [focus, setFocus] = useState<CapabilityFocus | undefined>(undefined);
-  const openTool = useCallback(
-    (id: CapabilityId) => {
-      setFocus(undefined);
-      onToolChange(id);
-    },
-    [onToolChange],
+  const { focus, setFocus, consumeFocus } = useIncomingCapabilityFocus(
+    incomingFocus,
+    onIncomingFocusApplied,
+  );
+  const { openTool, openWorkspaceFromCapsule } = useShellMainFocusTooling(
+    setFocus,
+    onToolChange,
+    onSurfaceChange,
   );
   const { facts, capabilities: capsuleCapabilities, projection } = useCapsuleCapability({
     session: selectedSession,
@@ -169,13 +191,7 @@ export function ShellMain({
     experience,
     onToolChange: openTool,
     onSurfaceChange: () => onSurfaceChange('workspace'),
-    onOpenWorkspace: (id, resourceId) => {
-      // `#826`: the context that caused the emergence travels with it, so the
-      // Workspace opens on the item rather than on a landing page.
-      setFocus({ capabilityId: id, resourceId });
-      onToolChange(id);
-      onSurfaceChange('workspace');
-    },
+    onOpenWorkspace: openWorkspaceFromCapsule,
   });
 
   return (
@@ -206,9 +222,7 @@ export function ShellMain({
             asserts the absence of this control. Floats, so it costs the work
             surface no layout space. */}
         {hasSession && experience === 'web' ? (
-          <div className="pointer-events-none absolute right-[var(--shell-space-3)] top-[var(--shell-space-3)] z-20">
-            <SurfaceSwitcher surface={surface} onSurfaceChange={onSurfaceChange} />
-          </div>
+          <WebSurfaceSwitcherFloating surface={surface} onSurfaceChange={onSurfaceChange} />
         ) : null}
         {!hasSession ? (
           <NoSessionSurface
@@ -234,6 +248,7 @@ export function ShellMain({
                     experience={experience}
                     capsuleCapabilities={capsuleCapabilities}
                     capsuleProjection={projection}
+                    onOpenWorkspaceFile={onOpenWorkspaceFile}
                   />
                 )}
               </TerminalWell>
@@ -253,6 +268,7 @@ export function ShellMain({
                 onToolChange={openTool}
                 onDepthChange={onWorkspaceDepthChange}
                 focus={focus}
+                onFocusConsumed={consumeFocus}
                 openWorktreeSession={onOpenWorktreeSession}
               />
             ) : null}

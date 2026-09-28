@@ -16,6 +16,11 @@ export interface FileListProps {
   workspaceContextLine?: string | null;
   /** Increment to re-fetch the current directory (#1140 folder sheet). */
   reloadSignal?: number;
+  onEntriesChange?: (entries: FileEntry[]) => void;
+  selectionMode?: boolean;
+  isSelected?: (path: string) => boolean;
+  onLongPress?: (entry: FileEntry) => void;
+  onToggleSelect?: (entry: FileEntry) => void;
 }
 
 /**
@@ -30,6 +35,11 @@ export function FileList({
   onScrollSnapshot,
   workspaceContextLine,
   reloadSignal = 0,
+  onEntriesChange,
+  selectionMode,
+  isSelected,
+  onLongPress,
+  onToggleSelect,
 }: FileListProps) {
   const [entries, setEntries] = useState<FileEntry[] | null>(null);
   const [counts, setCounts] = useState<Record<string, number>>({});
@@ -48,6 +58,7 @@ export function FileList({
           return;
         }
         setEntries(listed);
+        onEntriesChange?.(listed);
         for (const entry of listed) {
           if (!entry.is_dir) {
             continue;
@@ -72,7 +83,7 @@ export function FileList({
     return () => {
       cancelled = true;
     };
-  }, [fileOps, path, reloadToken, reloadSignal]);
+  }, [fileOps, path, reloadToken, reloadSignal, onEntriesChange]);
 
   useEffect(() => {
     if (restoredScrollTop === undefined || entries === null) {
@@ -121,6 +132,10 @@ export function FileList({
           onEnterDirectory={onEnterDirectory}
           onFileClick={onFileClick}
           captureScroll={() => onScrollSnapshot?.(listRef.current?.scrollTop ?? 0)}
+          selectionMode={selectionMode}
+          isSelected={isSelected}
+          onLongPress={onLongPress}
+          onToggleSelect={onToggleSelect}
         />
       )}
     </div>

@@ -33,6 +33,8 @@ export interface CapabilityFocus {
   capabilityId: CapabilityId;
   /** The item within the capability, if the user had picked one. */
   resourceId?: string;
+  /** 1-based line when opening a file from the Terminal (#1175). */
+  line?: number;
 }
 
 /** Everything a Workspace view layout needs from the workspace framework. */
@@ -48,6 +50,8 @@ export interface WorkspaceContext {
   facts?: CapabilityFacts;
   /** What opened this view, when the entry carried context (`#826`). */
   focus?: CapabilityFocus;
+  /** Called after a capability has applied `focus` so it is not replayed. */
+  onFocusConsumed?: () => void;
   /** Nession-owned Session handoff from Git worktrees (#1010). */
   openWorktreeSession?: (worktree: GitWorktree) => Promise<void>;
 }

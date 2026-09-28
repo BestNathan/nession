@@ -17,6 +17,7 @@ export interface TerminalRegionProps {
   /** What the capsule may show: the chip that earned presence, plus the rest on demand. */
   capsuleCapabilities?: CapsuleCapabilityContribution;
   capsuleProjection?: CapsuleCapabilityProjection;
+  onOpenWorkspaceFile?: (path: string, line?: number) => void;
 }
 
 /**
@@ -30,6 +31,7 @@ export function TerminalRegion({
   experience,
   capsuleCapabilities,
   capsuleProjection,
+  onOpenWorkspaceFile,
 }: TerminalRegionProps) {
   const {
     sessionId,
@@ -71,6 +73,7 @@ export function TerminalRegion({
             terminalState={terminalState}
             viewportReady={viewportReady}
             transportEpoch={transportEpoch}
+            onOpenWorkspaceFile={onOpenWorkspaceFile}
           />
         </TerminalSurface>
       )}

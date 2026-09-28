@@ -220,9 +220,9 @@ bottom sheet over the current list — refresh, copy workspace-relative path, co
 path — without a shell push.
 
 **v1 shipped** with navigator, search, folder sheet, viewer push, scroll restoration,
-and App interaction docs/e2e for directory Back semantics. **Follow-up** (must not
-reintroduce an expandable tree on App): selection mode (#1174), Terminal /
-`path:line` deep-link (#1175), richer viewer and sheet actions as separate issues.
+terminal `path:line` deep-link (#1175), and long-press selection mode (#1174).
+Richer viewer/sheet actions may still extend this model without reintroducing an
+expandable tree on App.
 
 ### One navigation bar per depth
 
