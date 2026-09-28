@@ -11,6 +11,17 @@ Product direction and design decisions are governed by two repository-level docu
 
 In short: Nession should absorb infrastructure complexity instead of exposing it, organize the experience around the work rather than a feature catalog, let relevant capabilities emerge from context, and reveal deeper complexity progressively. The two documents above are the canonical source when this summary and lower-level design documents diverge.
 
+## Engineering Pulse
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/BestNathan/nession/metrics/project-pulse-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/BestNathan/nession/metrics/project-pulse-light.svg">
+  <img alt="Nession Engineering Pulse — repository scale and rolling seven-day activity" src="https://raw.githubusercontent.com/BestNathan/nession/metrics/project-pulse-light.svg">
+</picture>
+
+<sub>Generated daily from <code>main</code>. Source LOC and churn use the same tracked-source filter; 7d metrics are rolling seven-day windows. <a href="https://raw.githubusercontent.com/BestNathan/nession/metrics/metrics.json">Raw metrics</a>.</sub>
+
+
 Today, Nession provides distributed `tmux` session management across many machines. A central **server** tracks every **agent** (one per node), and clients attach to live sessions from the **Web UI** or **CLI** — over a relay through the server, or peer-to-peer directly to an agent for lower latency.
 
 ```
