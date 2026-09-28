@@ -88,6 +88,26 @@ describe('ConversationTranscript scroll (#1190)', () => {
     });
   });
 
+  it('shows a pull hint when older pages are available at the top edge', () => {
+    render(
+      <ConversationTranscript
+        view={viewState({
+          hasMore: true,
+          items: [
+            { id: '1', kind: 'message', role: 'user', content: [{ type: 'text', text: 'hello' }] },
+          ],
+        })}
+        onLoadOlder={vi.fn()}
+      />,
+    );
+
+    const scroll = screen.getByTestId('conversation-transcript-scroll');
+    scroll.scrollTop = 0;
+    fireEvent.scroll(scroll);
+
+    expect(screen.getByTestId('conversation-pull-hint')).toHaveTextContent('Pull down for earlier messages');
+  });
+
   it('reveals pull progress while dragging down at the top edge', () => {
     render(
       <ConversationTranscript
