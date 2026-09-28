@@ -99,7 +99,8 @@ export interface CapsuleProjectionBinding {
      */
     sendText: (text: string) => void;
     sendPhysKey?: (key: {
-      seq: string;
+      /** Raw bytes; absent on a key the runtime encodes from terminal state. */
+      seq?: string;
       semanticKey?: import('@/platform/terminal-runtime/interaction/TerminalInteractionController').TerminalSemanticKey;
     }) => void;
     /**

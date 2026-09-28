@@ -364,13 +364,21 @@ export class TerminalController {
     this.handleInput({ source, data, timestamp: Date.now() });
   }
 
-  /** Terminal Keys / capsule — semantic keys when available (#1096). */
-  sendPhysKey(key: { seq: string; semanticKey?: TerminalSemanticKey }): void {
+  /**
+   * Terminal Keys / capsule — a semantic key when there is one (#1096).
+   *
+   * `seq` is optional because a semantic key has no bytes of its own: encoding
+   * it is the interaction layer's job, and it depends on the terminal's mode.
+   * The caller supplies one or the other, never both.
+   */
+  sendPhysKey(key: { seq?: string; semanticKey?: TerminalSemanticKey }): void {
     if (key.semanticKey && this.interaction) {
       this.interaction.sendSemanticKey(key.semanticKey);
       return;
     }
-    this.send(key.seq, 'component-input');
+    if (key.seq) {
+      this.send(key.seq, 'component-input');
+    }
   }
 
   /** Get the currently active input source. */
