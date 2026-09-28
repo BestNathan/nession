@@ -11,7 +11,16 @@ export class TerminalInputHandler implements InputHandler {
 
   constructor(private interaction: TerminalInteractionController) {}
 
+  /**
+   * Idempotent: a second activate releases the previous subscription first.
+   *
+   * Without this, `activate()` overwrote `unsub` and the earlier subscription
+   * became unreachable — nothing held a reference to dispose it, so it stayed
+   * live for the life of the terminal and every `onData` emission reached the
+   * PTY once per leaked subscription (#1096).
+   */
   activate(): void {
+    this.unsub?.();
     this.unsub = this.interaction.bindXtermOnData();
   }
 

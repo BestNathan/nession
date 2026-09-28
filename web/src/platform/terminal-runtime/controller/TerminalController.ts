@@ -94,6 +94,7 @@ export class TerminalController {
   private mobileIme: MobileImeInput | null = null;
   private interaction: TerminalInteractionController | null = null;
   private capsuleOcclusionScroll: CapsuleOcclusionScroll | null = null;
+  private titleUnsub: (() => void) | null = null;
   private useMobileIme: boolean;
   private readonly scrollbackMode: TerminalScrollbackMode;
   private attached = false;
@@ -166,11 +167,11 @@ export class TerminalController {
       return;
     }
 
-    // Reparent to a new viewport container (React remount).
+    // Reparent to a new viewport container (React remount). Same teardown as a
+    // full detach, minus dropping the instance — see `teardownTerminalUi`.
     if (this.attached && terminal.element?.parentElement !== element) {
+      this.teardownTerminalUi();
       this.teardownTransport();
-      this.capsuleOcclusionScroll?.dispose();
-      this.capsuleOcclusionScroll = null;
       this.instance.detach();
       this.attached = false;
     }
@@ -241,7 +242,13 @@ export class TerminalController {
       });
     }
 
-    terminal.onTitleChange((title: string) => { this.onTitleChange?.(title); });
+    // Retained, not fire-and-forget: a persistent TerminalInstance survives
+    // every attach, so an un-disposed title listener accumulates one per
+    // attach and is never released (#1096).
+    const titleSub = terminal.onTitleChange((title: string) => {
+      this.onTitleChange?.(title);
+    });
+    this.titleUnsub = () => titleSub.dispose();
 
     const transport = this.transport;
     if (!transport) { return; }
@@ -273,25 +280,49 @@ export class TerminalController {
     });
   }
 
-  /** Dispose xterm, transport, and the resize observer. */
-  detach(): void {
-    if (!this.attached) { return; }
-    this.attached = false;
-
+  /**
+   * Release everything `wireTerminalUi` bound to the mounted terminal, leaving
+   * the xterm instance itself alive.
+   *
+   * One method, called by both `detach()` and the reparent branch of
+   * `attach()`. Those two used to tear down different subsets — reparent
+   * released the transport and the capsule scroll but left the input handler,
+   * the IME, the resize observer and the title subscription wired — so a
+   * viewport remount leaked a subscription that the next attach then doubled
+   * (#1096). Converging them is the point, not a tidy-up.
+   */
+  private teardownTerminalUi(): void {
     this.resizeController?.dispose();
     this.resizeController = null;
 
     this.mobileIme?.dispose();
     this.mobileIme = null;
-    this.interaction = null;
+
+    this.titleUnsub?.();
+    this.titleUnsub = null;
 
     this.capsuleOcclusionScroll?.dispose();
     this.capsuleOcclusionScroll = null;
 
-    this.teardownTransport();
-
-    this.inputRouter?.setMode({ type: 'terminal' });
+    // `dispose`, not `setMode`: setMode deactivates the current handler and
+    // then activates the one for the requested mode — and the requested mode
+    // is the active one — so it left a live `terminal.onData` subscription on
+    // a router that was dropped immediately after, with nothing left holding a
+    // reference to dispose it. Every keystroke was then sent once per leaked
+    // subscription, which is `x` arriving as `xx` (#1096).
+    this.inputRouter?.dispose();
     this.inputRouter = null;
+
+    this.interaction = null;
+  }
+
+  /** Dispose xterm, transport, and the resize observer. */
+  detach(): void {
+    if (!this.attached) { return; }
+    this.attached = false;
+
+    this.teardownTerminalUi();
+    this.teardownTransport();
 
     this.instance.detach();
     this._terminal = null;
