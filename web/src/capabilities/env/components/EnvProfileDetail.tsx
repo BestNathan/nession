@@ -32,6 +32,13 @@ export interface EnvProfileDetailProps {
   agents: Agent[];
   /** Sourced into the current Session. */
   active: boolean;
+  /**
+   * The Session was *created* with this profile. Create-phase usage is
+   * tracked for the Session's lifetime and the unset wire spares it, so
+   * Remove is not offered — only an explanation (#1202: Apply/Remove only
+   * "when runtime semantics safely permit it").
+   */
+  sourcedAtCreate: boolean;
   /** Apply/Remove exist only against a current Session. */
   hasSession: boolean;
   sessionActionPending: boolean;
@@ -59,15 +66,24 @@ function UsageLine({ inUseBy, active }: { inUseBy: string[]; active: boolean }) 
 
 function SessionAction({
   active,
+  sourcedAtCreate,
   pending,
   onApply,
   onRemove,
 }: {
   active: boolean;
+  sourcedAtCreate: boolean;
   pending: boolean;
   onApply: () => void;
   onRemove: () => void;
 }) {
+  if (active && sourcedAtCreate) {
+    return (
+      <span data-testid="env-sourced-at-create" className="text-xs text-muted-foreground">
+        Sourced at session creation
+      </span>
+    );
+  }
   if (active) {
     return (
       <Button
@@ -98,6 +114,7 @@ function DetailHeader({
   profile,
   agents,
   active,
+  sourcedAtCreate,
   hasSession,
   sessionActionPending,
   inUseBy,
@@ -133,6 +150,7 @@ function DetailHeader({
         {hasSession ? (
           <SessionAction
             active={active}
+            sourcedAtCreate={sourcedAtCreate}
             pending={sessionActionPending}
             onApply={onApply}
             onRemove={onRemove}

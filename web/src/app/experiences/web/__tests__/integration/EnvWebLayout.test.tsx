@@ -115,12 +115,31 @@ describe('EnvWebLayout', () => {
 
   it('the Session summary appears when the workspace names a Session', async () => {
     const session = { session_id: 's1', session_name: 'api' } as Session;
-    stub.setActiveSessionFiles([{ name: 'staging.env', source: 'server', phase: 'apply' }]);
+    stub.setActiveSessionFiles([{ name: 'staging.env', source: 'server', phase: 'attach' }]);
     render(<EnvWebLayout ctx={ctx({ session })} />);
     await waitFor(() =>
       expect(screen.getByTestId('env-session-summary')).toHaveTextContent(
         'Current Session · staging.env',
       ),
     );
+  });
+
+  it('a profile the Session was created with hides Remove behind an explanation', async () => {
+    // The unset wire spares create-phase usage, so Remove cannot complete
+    // there; the detail says so instead of offering an action that half-works.
+    const user = userEvent.setup();
+    const session = { session_id: 's1', session_name: 'api' } as Session;
+    stub.setActiveSessionFiles([{ name: 'staging.env', source: 'server', phase: 'create' }]);
+    render(<EnvWebLayout ctx={ctx({ session })} />);
+    await waitFor(() => expect(screen.getByTestId('env-session-summary')).toBeInTheDocument());
+
+    await user.click(screen.getByTestId('env-profile-row-server::staging.env'));
+    await waitFor(() =>
+      expect(screen.getByTestId('env-sourced-at-create')).toHaveTextContent(
+        'Sourced at session creation',
+      ),
+    );
+    expect(screen.queryByTestId('env-remove-from-session')).not.toBeInTheDocument();
+    expect(screen.getByTestId('env-profile-active')).toBeInTheDocument();
   });
 });

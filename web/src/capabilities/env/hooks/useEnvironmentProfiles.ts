@@ -15,6 +15,16 @@ export interface EnvironmentProfiles {
    * resolved; a usage failure never takes the list down with it.
    */
   activeKeys: ReadonlySet<string>;
+  /**
+   * The subset of `activeKeys` the Session was *created* with. The backend
+   * tracks create-phase usage for the Session's lifetime and
+   * `server.session.env.unset` deliberately spares it, so Remove cannot
+   * complete there — it would unset the variables while the "Active" marker
+   * stays. The detail hides Remove for these (#1202: Apply/Remove only "when
+   * runtime semantics safely permit it") instead of redefining backend
+   * injection semantics.
+   */
+  createKeys: ReadonlySet<string>;
   /** Apply/remove run against this Session; null hides those actions. */
   sessionId: string | null;
   applyToSession: (profile: EnvFileInfo) => Promise<boolean>;
@@ -33,6 +43,7 @@ export function useEnvironmentProfiles(sessionId: string | null): EnvironmentPro
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeKeys, setActiveKeys] = useState<ReadonlySet<string>>(new Set());
+  const [createKeys, setCreateKeys] = useState<ReadonlySet<string>>(new Set());
   const [sessionActionPending, setSessionActionPending] = useState(false);
 
   const refresh = useCallback(async () => {
@@ -54,13 +65,18 @@ export function useEnvironmentProfiles(sessionId: string | null): EnvironmentPro
   const refreshActive = useCallback(async () => {
     if (!sessionId) {
       setActiveKeys(new Set());
+      setCreateKeys(new Set());
       return;
     }
     try {
       const resp = await envApi.getSessionEnvActive(sessionId);
       setActiveKeys(new Set(resp.active.map((a) => refKey(a))));
+      setCreateKeys(
+        new Set(resp.active.filter((a) => a.phase === 'create').map((a) => refKey(a))),
+      );
     } catch {
       setActiveKeys(new Set());
+      setCreateKeys(new Set());
     }
   }, [sessionId]);
 
@@ -114,6 +130,7 @@ export function useEnvironmentProfiles(sessionId: string | null): EnvironmentPro
     error,
     refresh,
     activeKeys,
+    createKeys,
     sessionId,
     applyToSession,
     removeFromSession,

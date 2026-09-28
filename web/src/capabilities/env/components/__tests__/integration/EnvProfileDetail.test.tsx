@@ -53,6 +53,7 @@ function renderDetail(overrides: Partial<Parameters<typeof EnvProfileDetail>[0]>
     profile: info('staging.env'),
     agents: [] as Agent[],
     active: false,
+    sourcedAtCreate: false,
     hasSession: true,
     sessionActionPending: false,
     ...overrides,
@@ -114,6 +115,21 @@ describe('EnvProfileDetail', () => {
     renderDetail({ hasSession: false });
     expect(screen.queryByTestId('env-apply-to-session')).not.toBeInTheDocument();
     expect(screen.queryByTestId('env-remove-from-session')).not.toBeInTheDocument();
+  });
+
+  it('a profile the Session was created with explains itself instead of offering Remove', () => {
+    // The backend spares create-phase usage from `server.session.env.unset`,
+    // so Remove there would unset the variables while the Active marker
+    // stays — #1202 offers Apply/Remove only "when runtime semantics safely
+    // permit it".
+    renderDetail({ active: true, sourcedAtCreate: true });
+    expect(screen.getByTestId('env-sourced-at-create')).toHaveTextContent(
+      'Sourced at session creation',
+    );
+    expect(screen.queryByTestId('env-remove-from-session')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('env-apply-to-session')).not.toBeInTheDocument();
+    // The Active recognition itself is unaffected.
+    expect(screen.getByTestId('env-profile-active')).toBeInTheDocument();
   });
 
   it('Variables is the primary tab; Raw is one tab away and read-only', async () => {

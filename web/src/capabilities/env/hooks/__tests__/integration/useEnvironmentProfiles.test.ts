@@ -30,7 +30,7 @@ describe('useEnvironmentProfiles', () => {
     vi.clearAllMocks();
     envApi.listEnvFiles.mockResolvedValue({ files: [info('a.env'), info('b.env')] });
     envApi.getSessionEnvActive.mockResolvedValue({
-      active: [{ name: 'a.env', source: 'server' }],
+      active: [{ name: 'a.env', source: 'server', phase: 'attach' }],
     });
     envApi.applySessionEnv.mockResolvedValue({ success: true });
     envApi.unsetSessionEnv.mockResolvedValue({ success: true });
@@ -56,6 +56,24 @@ describe('useEnvironmentProfiles', () => {
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(envApi.getSessionEnvActive).not.toHaveBeenCalled();
     expect(result.current.activeKeys.size).toBe(0);
+  });
+
+  it('separates create-phase usage from attach-phase into createKeys', async () => {
+    envApi.getSessionEnvActive.mockResolvedValue({
+      active: [
+        { name: 'a.env', source: 'server', phase: 'create' },
+        { name: 'b.env', source: 'server', phase: 'attach' },
+      ],
+    });
+    const { result } = renderHook(() => useEnvironmentProfiles('s1'));
+    await waitFor(() => expect(result.current.activeKeys.size).toBe(2));
+    // Both read as "Active"…
+    expect(result.current.activeKeys.has('server::a.env')).toBe(true);
+    expect(result.current.activeKeys.has('server::b.env')).toBe(true);
+    // …but only the create-phase one lands in createKeys — the detail hides
+    // Remove for it, because the unset wire spares create-phase usage.
+    expect(result.current.createKeys.has('server::a.env')).toBe(true);
+    expect(result.current.createKeys.has('server::b.env')).toBe(false);
   });
 
   it('a usage-lookup failure never takes the list down with it', async () => {

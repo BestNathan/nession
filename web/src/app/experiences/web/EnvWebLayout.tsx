@@ -40,6 +40,7 @@ export function EnvWebLayout({ ctx }: { ctx: WorkspaceContext }) {
           profile={selectedProfile}
           agents={ctx.agents}
           active={profiles.activeKeys.has(refKey(selectedProfile))}
+          sourcedAtCreate={profiles.createKeys.has(refKey(selectedProfile))}
           hasSession={profiles.sessionId !== null}
           sessionActionPending={profiles.sessionActionPending}
           onApply={() => void profiles.applyToSession(selectedProfile)}
