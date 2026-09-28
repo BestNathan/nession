@@ -32,7 +32,11 @@ const domain: DomainState = {
 };
 
 vi.mock('@/app/TerminalRegion', () => ({
-  TerminalRegion: () => <div data-testid="terminal" />,
+  // The mock draws the slot the real region is handed, so the surface
+  // navigation the shell composes stays assertable here (#1204).
+  TerminalRegion: ({ surfaceAction }: { surfaceAction?: React.ReactNode }) => (
+    <div data-testid="terminal">{surfaceAction}</div>
+  ),
 }));
 
 vi.mock('@/app/experiences/web/FilesWebLayout', () => ({
@@ -114,6 +118,8 @@ describe('ShellMain', () => {
     expect(latest?.capsuleCapabilities?.disclosure?.entries.length).toBeGreaterThan(0);
     // Nothing has emerged, so there is no projection to hand over yet.
     expect(latest?.capsuleProjection).toBeUndefined();
+    // Web with a Session gets the "Open Workspace" destination action (#1204).
+    expect(latest?.surfaceAction).toBeDefined();
   });
 
   it('still accepts a plain node, which gets no chrome', () => {
@@ -157,21 +163,26 @@ describe('ShellMain', () => {
     expect(screen.getByTestId('terminal')).toBeInTheDocument();
   });
 
-  it('threads experience to the header: switcher shows in web, hidden in app', () => {
+  it('threads experience to surface navigation: destination action on web, none on app (#1204)', () => {
     const view = render(
       <ShellMain
         selectedSession={sess}
         selectedAgent={agent}
         agents={[agent]}
         domain={domain}
-        surface="terminal"
+        surface="workspace"
         tool="files"
         fileOps={null}
         onSurfaceChange={vi.fn()}
         onToolChange={vi.fn()}
       />,
     );
-    expect(screen.getByTestId('surface-switcher')).toBeInTheDocument();
+    // Workspace renders "Open Terminal"; the Terminal half renders through the
+    // mocked region's slot.
+    expect(screen.getByTestId('surface-action-open-terminal')).toBeInTheDocument();
+    expect(screen.getByTestId('surface-action-open-workspace')).toBeInTheDocument();
+    // The retired top-right two-state switcher is gone from every surface.
+    expect(screen.queryByTestId('surface-switcher')).not.toBeInTheDocument();
 
     view.rerender(
       <ShellMain
@@ -179,7 +190,7 @@ describe('ShellMain', () => {
         selectedAgent={agent}
         agents={[agent]}
         domain={domain}
-        surface="terminal"
+        surface="workspace"
         tool="files"
         fileOps={null}
         onSurfaceChange={vi.fn()}
@@ -187,7 +198,8 @@ describe('ShellMain', () => {
         experience="app"
       />,
     );
-    expect(screen.queryByTestId('surface-switcher')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('surface-action-open-terminal')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('surface-action-open-workspace')).not.toBeInTheDocument();
   });
 
   it('shows the empty state when no session is selected', () => {
@@ -216,6 +228,9 @@ describe('ShellMain', () => {
       'Select a session to start working',
     );
     expect(screen.queryByTestId('terminal')).not.toBeInTheDocument();
+    // No Session means nothing to switch between — no destination action (#1204).
+    expect(screen.queryByTestId('surface-action-open-workspace')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('surface-action-open-terminal')).not.toBeInTheDocument();
   });
 
 });

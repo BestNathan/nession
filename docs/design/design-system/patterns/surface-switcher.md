@@ -6,25 +6,40 @@ SurfaceSwitcher is one possible **Web affordance** for moving between the active
 
 It is a compact interaction pattern and not a feature-navigation model.
 
-**Decision (2026-09-16, #748) — supersedes the #727 decision below.** On Web the
-switcher is a **floating capsule at the workspace's top-right** (active Surface
-icon+label, inactive icon-only), not a
-segmented control inside the SessionHeader. Web ships no permanent Session
-header at all: the shell is a sidebar plus the work surface, and navigation,
-infrastructure identity and service status live in the sidebar.
+**Decision (2026-09-28, #1204) — supersedes the #748 form below.** On Web the
+affordance is a pair of **reciprocal circular destination actions beside the
+local bottom controls**, not a standalone two-state capsule floating at the
+work surface's top-right:
 
-The #727 constraint that governed the old form was an *ordering* rule — ship the
-replacement, make Workspace reachable through it, then remove the header control —
-and that order was followed: the floating capsule ships in the same change that
-removes the header control, and `composition.md` §12, `session-header.md`, the
-executable contracts and the canonical screenshots all move with it. What #727
-protected is intact: Workspace still has a visible non-gesture route.
+- Terminal renders one **"Open Workspace"** circle immediately **right of the
+  TerminalCapsule**;
+- Workspace renders one **"Open Terminal"** circle immediately **left of the
+  capability dock** — and keeps it when a pushed detail depth hides the dock,
+  because surface navigation and capability navigation are different axes.
+
+A persistent independent floating switcher can cover live Terminal or Workspace
+content, which is especially incorrect for Terminal/TUI surfaces where every
+cell may be meaningful. Adjacency to the surface's own bottom control removes
+the overlay instead of moving it. The core rule:
+
+> The current surface does not need a permanent control telling the user where
+> they already are. The affordance only says where the adjacent action takes
+> them.
+
+What survives every revision: **Workspace always has a visible non-gesture
+route, and returning to Terminal is equally explicit.**
+
+**Decision (2026-09-16, #748) — superseded, recorded for provenance.** The
+switcher was a floating capsule at the workspace's top-right (active Surface
+icon+label, inactive icon-only), replacing the SessionHeader segmented control
+when the permanent Web header was removed. Its presentation is superseded by
+#1204; the invariant it protected — a visible non-gesture route — is not.
 
 **Decision (2026-09-14, #727) — superseded, recorded for provenance:** the
 switcher shipped permanently in the SessionHeader, as the only visible
 non-gesture route to Workspace, because the alternatives that existed then (the
 capsule's capability entry, a deep link) did not replace it. Its rule that
-survives this revision is not "hide it when possible" but **"never render it
+survives both revisions is not "hide it when possible" but **"never render it
 without something to switch to"** (see States).
 
 ## Purpose
@@ -36,57 +51,68 @@ Terminal is the default current-work surface. Opening Workspace preserves Sessio
 Must not:
 
 - show Terminal and Workspace side-by-side as the default layout;
-- merge Workspace capabilities into the same segmented control;
+- merge Workspace capabilities into the same navigation;
 - grow into `Terminal | Files | Env | Git | Claude | ...`;
 - remain visible without a Session to switch between (see States: absence, not dead chrome);
-- grow into the only way to reach Workspace **without** a shipped replacement — see the decision above.
+- grow into the only way to reach Workspace **without** a shipped replacement — see the decision above;
+- pin a surface action independently to viewport or work-surface corners — it belongs to its local control group.
 
 ## Anatomy
 
-The shipped Web form is a floating capsule at the work surface's top-right.
-The **active** Surface segment shows **icon + short label** so current depth is
-readable without hover. The **inactive** Surface stays **icon-only**; its name
-lives in tooltip and accessible name.
+Each surface renders **one** circular action naming the *destination*, placed
+by the local control composition rather than by the work surface:
 
 Terminal active:
 
 ```text
-                                    ┌──────────────────┐
-                                    │  >_  Terminal  ▦ │   ← floating, top-right
-                                    └──────────────────┘
+            ┌────────────────────┐
+            │  TerminalCapsule   │ ( ○ Workspace )
+            └────────────────────┘
 ```
 
-Workspace active (mirrored):
+Workspace active:
 
 ```text
-                                    ┌──────────────────┐
-                                    │  >_  ▦ Workspace │
-                                    └──────────────────┘
+   ( ○ Terminal ) ┌──────────────────────────┐
+                  │ Files  Git  Claude   +   │
+                  └──────────────────────────┘
 ```
 
-It floats over the work surface rather than occupying a chrome band, so it costs
-the work surface no layout space. Pointer ownership matches other floating chrome:
-the placement wrapper is `pointer-events-none`; the capsule root is
-`pointer-events-auto` (#1168).
+The action is a plain button — not a `Tabs` pattern. There is exactly one
+action and it navigates on activation; no selected state exists for tab
+semantics to model, and the old "click the active segment = no-op" interaction
+is gone with the segment.
 
-The earlier `[ Terminal | Workspace ]` segmented control lived inside the header
-because the header existed; with the header gone, a full two-label control
-floating over the terminal would be the loudest thing on a quiet surface — hence
-icon-only for the inactive entry (#1169).
+Geometry rules (#1204 §1, §3):
+
+- **Terminal:** the circle joins the capsule's dock region, bottom-aligned with
+  the shell. Its vertical extent is covered by the same terminal clearance the
+  capsule already publishes (`useCapsuleDockClearance` →
+  `--terminal-capsule-occlusion`); an action no taller than the capsule shell
+  adds no terminal row loss, and no second hook may shrink the terminal for it.
+- **Workspace:** the circle shares the dock's bottom-center floating group as a
+  separate `nav` (surface navigation) adjacent to — never merged into — the
+  capability `nav`. When a pushed detail depth hides the capability dock, the
+  circle stays at the same bottom position; it never moves to a top-right
+  overlay, and a full-surface modal/sheet may still capture it.
+- **Pointer ownership:** no transparent full-surface wrapper. Only the button's
+  own hit target consumes pointer events; everything outside the real bottom
+  controls stays interactive.
 
 ## States
 
 | State | Meaning |
 |-------|---------|
-| `terminal` | Current Session work surface is visible. Default after selecting/attaching to a Session. |
-| `workspace` | Workspace contextual layer/surface is visible. |
-| No Session | Control is absent; do not render dead chrome. |
+| `terminal` | Current Session work surface is visible; the "Open Workspace" action sits beside the capsule. Default after selecting/attaching to a Session. |
+| `workspace` | Workspace contextual layer/surface is visible; the "Open Terminal" action sits beside the capability dock. |
+| No Session | Both actions are absent; do not render dead chrome. |
 
-The switcher does not encode Agent connectivity, Session lifecycle, attachment state, or capability state.
+The affordance does not encode Agent connectivity, Session lifecycle, attachment state, or capability state.
 
 ## Relationship to contextual capabilities
 
-Capabilities do not become switcher segments.
+Capabilities do not become surface-navigation entries, and surface actions do
+not become capabilities.
 
 A capability may be discovered through the Session capsule's `+` expansion and may expose a temporary Signal/Peek near the Terminal before deepening into Workspace. The surface affordance remains about **work versus contextual depth**, not about choosing tools. See [../../capability-emergence.md](../../capability-emergence.md).
 
@@ -96,23 +122,23 @@ See [workspace-navigation.md](workspace-navigation.md) and [terminal-capsule.md]
 
 | | Web | App |
 |--|-----|-----|
-| Pattern | Floating capsule (active icon+label, inactive icon), top-right | Not used as the shell |
+| Pattern | Circular destination action beside the local bottom control (#1204) | Not used as the shell |
 | Terminal default | Yes | Yes |
-| Workspace access | SurfaceSwitcher or another explicit Web affordance | Visible Workspace control + swipe-left |
+| Workspace access | "Open Workspace" beside the TerminalCapsule | Visible Workspace control + swipe-left |
+| Terminal access (from Workspace) | "Open Terminal" beside the capability dock | Page-header Back + swipe-right |
 | Session access | Separate Session navigation | Visible Sessions control + swipe-right |
 
-App uses the spatial `Sessions ← Terminal → Workspace` model rather than a shrunken segmented control.
+App uses the spatial `Sessions ← Terminal → Workspace` model rather than a shrunken segmented control, and does not adopt the Web circles merely because they are compact.
 
 ## Visual contract
 
-- Secondary control; never louder than the work surface.
+- Secondary control; never louder than the local primary control (Capsule/Dock).
 - **Floating, so it carries the shared floating-surface treatment** (one 1px shadow ring plus two shadow
-  layers, no decorative border) rather than the "no elevation" rule that governed it while it was inline
-  header chrome. `visual-language.md` P7 licenses elevation for a control whose spatial role requires it,
-  and this one floats over the work surface by design. See
+  layers, no decorative border). `visual-language.md` P7 licenses elevation for a control whose spatial role requires it. See
   [terminal-capsule.md](terminal-capsule.md) § Surface treatment.
-- One selected state with visible Surface name; one quiet icon-only unselected state.
-- No per-surface decorative color.
+- One compact circular button: canonical control target, canonical icon size, capsule-compatible radius producing a circle.
+- The button represents the destination: muted icon at rest, foreground on hover/focus, accessible name "Open Workspace" / "Open Terminal".
+- No selected fill, no active dot, no resting text label, no badge, no per-surface decorative color, no animation louder than the Capsule/Dock.
 - Without a Session there is nothing to switch between, so the control is absent rather than inert.
 
 ## Anti-patterns
@@ -120,17 +146,20 @@ App uses the spatial `Sessions ← Terminal → Workspace` model rather than a s
 - `Terminal | Workspace | Files | Agent | Claude` in one control.
 - Side-by-side Terminal and Workspace as the default state.
 - A large segmented control that steals work-surface space.
+- A persistent independent overlay floating over live Terminal/Workspace content.
+- A destination action pinned to viewport corners instead of its local control group.
 - Treating this widget as required architecture rather than one interaction implementation.
 - Reusing it as the App spatial shell.
 
 ## Replacing it
 
 This section recorded the order for replacing the header control, and that order
-has now been followed (#748). It is kept as the rule for any future move:
+has now been followed twice (#748, and again for the floating capsule in #1204).
+It is kept as the rule for any future move:
 
 > Ship the affordance, make Workspace reachable through it, **then** remove the old
 > control — updating executable contracts and canonical screenshots in the same
 > change. Dropping the old control first is what leaves Workspace unreachable.
 
-Any future revision of the capsule form follows the same order. The affordance may
+Any future revision of the destination-action form follows the same order. The affordance may
 change; "Workspace always has a visible non-gesture route" does not.

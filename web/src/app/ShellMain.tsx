@@ -13,7 +13,7 @@ import type { CapabilityId } from '@/product/capability';
 import type { CapabilityFocus, Experience } from '@/app/workspace/workspaceContext';
 import type { Surface } from '@/app/patterns/SessionHeader';
 import { SessionMainHeader } from '@/app/SessionMainHeader';
-import { SurfaceSwitcher } from '@/product/workspace/patterns/SurfaceSwitcher';
+import { SurfaceDestinationAction } from '@/product/workspace/patterns/SurfaceDestinationAction';
 import { WorkspacePanel } from '@/app/WorkspacePanel';
 import { useCapsuleCapability } from '@/app/useCapsuleCapability';
 import type { Agent, Session } from '@/types';
@@ -84,6 +84,12 @@ export interface ShellMainProps {
 export interface TerminalChrome {
   capsuleCapabilities?: CapsuleCapabilityContribution;
   capsuleProjection?: CapsuleCapabilityProjection;
+  /**
+   * The Web's "Open Workspace" destination action beside the capsule (#1204) —
+   * resolved here because the action is the shell's navigation, and a supplied
+   * terminal draws the same surface the product does only if it is handed it.
+   */
+  surfaceAction?: ReactNode;
 }
 
 function renderTerminal(
@@ -135,17 +141,21 @@ function NoSessionSurface({
   );
 }
 
-function WebSurfaceSwitcherFloating({
-  surface,
+/**
+ * The Web's Terminal → Workspace route (#1204): one circular destination
+ * action beside the capsule, replacing the floating top-right switcher. The
+ * shell owns the navigation; the capsule owns only the slot's geometry.
+ */
+function WebOpenWorkspaceAction({
   onSurfaceChange,
 }: {
-  surface: Surface;
   onSurfaceChange: (surface: Surface) => void;
 }) {
   return (
-    <div className="pointer-events-none absolute right-[var(--shell-space-3)] top-[var(--shell-space-3)] z-20">
-      <SurfaceSwitcher surface={surface} onSurfaceChange={onSurfaceChange} />
-    </div>
+    <SurfaceDestinationAction
+      destination="workspace"
+      onOpen={() => onSurfaceChange('workspace')}
+    />
   );
 }
 
@@ -194,6 +204,12 @@ export function ShellMain({
     onOpenWorkspace: openWorkspaceFromCapsule,
   });
 
+  // App reaches Workspace through its spatial model, so it is handed nothing.
+  const surfaceAction =
+    hasSession && experience === 'web' ? (
+      <WebOpenWorkspaceAction onSurfaceChange={onSurfaceChange} />
+    ) : undefined;
+
   return (
     <>
       {/* Session identity is the **Terminal surface's** navigation bar (#1051).
@@ -218,12 +234,6 @@ export function ShellMain({
       <div
         data-testid="main-content"
         className="relative flex min-h-0 flex-1 flex-col gap-0">
-        {/* Web only: App reaches Workspace through its own spatial model and
-            asserts the absence of this control. Floats, so it costs the work
-            surface no layout space. */}
-        {hasSession && experience === 'web' ? (
-          <WebSurfaceSwitcherFloating surface={surface} onSurfaceChange={onSurfaceChange} />
-        ) : null}
         {!hasSession ? (
           <NoSessionSurface
             experience={experience}
@@ -240,6 +250,7 @@ export function ShellMain({
                 {renderTerminal(terminal, {
                   capsuleCapabilities,
                   capsuleProjection: projection,
+                  surfaceAction,
                 }) ?? (
                   <TerminalRegion
                     hidden={surface !== 'terminal' || !selectedSession}
@@ -248,6 +259,7 @@ export function ShellMain({
                     experience={experience}
                     capsuleCapabilities={capsuleCapabilities}
                     capsuleProjection={projection}
+                    surfaceAction={surfaceAction}
                     onOpenWorkspaceFile={onOpenWorkspaceFile}
                   />
                 )}
