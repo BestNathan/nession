@@ -35,6 +35,12 @@ export {
   markdownSanitizeSchema,
 } from './previewPlugins';
 
+// The rendering primitive, as opposed to the document surface `MarkdownPreview`
+// provides. Exported from here so a capability can reach it without importing
+// another capability — `no-reverse-imports` allows `shared` and not a sibling.
+export { Markdown } from './Markdown';
+export { CodeBlock } from './CodeBlock';
+
 export {
   frontmatterToHast,
   parseFrontmatterEntries,

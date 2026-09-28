@@ -1,6 +1,6 @@
 import { manifestsOf, ProtocolDirectory } from '@/platform/protocol';
 import type { PluginSurface } from '@/platform/socket/types';
-import { PROTOCOL, type ConversationResponse } from '@/generated/protocol/claude-code/conversation/v1';
+import { PROTOCOL, type ConversationResponse } from '@/generated/protocol/claude-code/conversation/v2';
 import {
   PROTOCOL as LIST_PROTOCOL,
   type ConfigCategory,
@@ -78,43 +78,196 @@ const CANDIDATES = [
 ];
 
 /**
- * One page of transcript, covering the three kinds it has to be able to draw.
+ * One page of transcript, covering every shape the renderer has to draw.
  *
- * `tool` appears twice with opposite `is_error`, because the transcript renders
- * those differently and a fixture that only ever produced successes would make
- * the failure treatment unreachable from every golden — the same argument the
- * git fixture makes for its statuses.
+ * ## Why this fixture is long
+ *
+ * `#1167` replaced a `whitespace-pre-wrap` paragraph with a Markdown renderer,
+ * a code block and an expandable tool activity. A fixture of plain prose and
+ * one-line tool summaries — which is what this used to be — cannot reach any of
+ * that, so every new branch would be invisible to the visual gate: the goldens
+ * would keep passing while showing a product that no longer exists. That is the
+ * failure `#714` recorded for the workspace baselines, and the reason this is
+ * now built from the acceptance list rather than from what was easy to write.
+ *
+ * ## What each item is here to keep reachable
+ *
+ * - **Markdown**: headings, a list, a table, a link, inline code and a rule, so
+ *   a regression in the prose treatment shows up as a diff rather than as
+ *   nothing.
+ * - **Two code fences**, in different languages, so the label and the highlight
+ *   are both exercised — one fence alone would not show a wrong language.
+ * - **Four tool states**: succeeded, failed, truncated and still running. A
+ *   fixture that only produced successes would make the failure and truncation
+ *   treatments unreachable from every golden — the same argument the git
+ *   fixture makes for its statuses.
+ * - **One `unknown`**, because it is a kind the wire can carry and nothing else
+ *   in the app can produce it.
  */
-const ITEMS = [
+type ConversationItems = NonNullable<ConversationResponse['items']>;
+
+const ITEMS: ConversationItems = [
   {
     id: 'i1',
-    kind: 'user' as const,
+    kind: 'message',
+    role: 'user',
     timestamp: '2026-09-01T11:30:00Z',
-    text: 'Where is the ownership handoff today, and what breaks when two clients attach?',
+    content: [
+      {
+        type: 'text',
+        text: 'Where is the ownership handoff today, and what breaks when two clients attach? I looked at `PeekHost.tsx` and could not tell.',
+      },
+    ],
   },
   {
     id: 'i2',
-    kind: 'tool' as const,
+    kind: 'tool',
     timestamp: '2026-09-01T11:31:00Z',
-    tool: { name: 'Read', summary: 'web/src/product/terminal/capsule/PeekHost.tsx', is_error: false, truncated: false },
+    tool: {
+      call_id: 'call-read-1',
+      name: 'Read',
+      status: 'success',
+      summary: 'web/src/product/terminal/capsule/PeekHost.tsx',
+      input: {
+        text: '{\n  "file_path": "web/src/product/terminal/capsule/PeekHost.tsx"\n}',
+        kind: 'json',
+        truncated: false,
+      },
+      output: { text: 'export function PeekHost({ sessionId }: PeekHostProps) {', kind: 'text', truncated: false },
+    },
   },
   {
     id: 'i3',
-    kind: 'assistant' as const,
+    kind: 'message',
+    role: 'assistant',
     timestamp: '2026-09-01T11:32:00Z',
-    text: 'The controller is whoever attached last, and nothing arbitrates it. Two clients attaching to the same Session therefore both believe they own the keyboard, and the pane receives whichever keystroke arrives first.',
+    content: [
+      {
+        type: 'text',
+        text: [
+          '## What actually decides ownership',
+          '',
+          'The controller is **whoever attached last**, and nothing arbitrates it. Two clients',
+          'attaching to the same Session therefore both believe they own the keyboard, and the',
+          'pane receives whichever keystroke arrives first.',
+          '',
+          'The three consumers of that fact are:',
+          '',
+          '- `ConnectionManager`, which holds the socket',
+          '- the input router, which decides what a keystroke means',
+          '- the capsule, which draws the caret',
+          '',
+          '| Path | Arbitrated? | Tested? |',
+          '| --- | --- | --- |',
+          '| attach | yes | yes |',
+          '| observer | no | **no** |',
+          '',
+          '---',
+          '',
+          'The observer path is the one with no test — that is where the regression would sit.',
+          'You can see the same shape in the [stream replay notes](https://example.com/nession).',
+        ].join('\n'),
+      },
+    ],
   },
   {
     id: 'i4',
-    kind: 'tool' as const,
+    kind: 'tool',
     timestamp: '2026-09-01T11:33:00Z',
-    tool: { name: 'Bash', summary: 'cargo test -p nession-agent -- ownership', is_error: true, truncated: false },
+    tool: {
+      call_id: 'call-bash-1',
+      name: 'Bash',
+      status: 'error',
+      summary: 'cargo test -p nession-agent -- ownership',
+      input: {
+        text: '{\n  "command": "cargo test -p nession-agent -- ownership"\n}',
+        kind: 'json',
+        truncated: false,
+      },
+      output: {
+        text: 'running 3 tests\ntest ownership::observer_keeps_the_keyboard ... FAILED\n\nfailures:\n    ownership::observer_keeps_the_keyboard\n\ntest result: FAILED. 2 passed; 1 failed',
+        kind: 'text',
+        truncated: false,
+      },
+    },
   },
   {
     id: 'i5',
-    kind: 'assistant' as const,
+    kind: 'message',
+    role: 'assistant',
     timestamp: '2026-09-01T11:34:00Z',
-    text: 'The observer path is the one with no test — that is where the regression would sit.',
+    content: [
+      {
+        type: 'text',
+        text: [
+          'That failure is the bug. The fix belongs where the epoch is bumped, not in the router:',
+          '',
+          '```rust',
+          'impl ConnectionManager {',
+          '    fn attach(&mut self, client: ClientId) -> Epoch {',
+          '        self.epoch.bump();',
+          '        self.owner = Some(client);',
+          '        self.epoch',
+          '    }',
+          '}',
+          '```',
+          '',
+          'and the client side has to stop assuming its own epoch is current:',
+          '',
+          '```ts',
+          'const stillMine = (epoch: number) => epoch === api.identityEpoch;',
+          '```',
+        ].join('\n'),
+      },
+    ],
+  },
+  {
+    id: 'i6',
+    kind: 'tool',
+    timestamp: '2026-09-01T11:35:00Z',
+    tool: {
+      call_id: 'call-bash-2',
+      name: 'Bash',
+      status: 'success',
+      summary: 'cargo test -p nession-agent -- ownership',
+      output: {
+        text: 'running 3 tests\ntest ownership::observer_keeps_the_keyboard ... ok\ntest result: ok. 3 passed; 0 failed',
+        kind: 'text',
+        truncated: true,
+      },
+    },
+  },
+  {
+    id: 'i7',
+    kind: 'tool',
+    timestamp: '2026-09-01T11:36:00Z',
+    tool: {
+      call_id: 'call-bash-3',
+      name: 'Bash',
+      status: 'running',
+      summary: 'cargo test --workspace',
+      input: {
+        text: '{\n  "command": "cargo test --workspace"\n}',
+        kind: 'json',
+        truncated: false,
+      },
+    },
+  },
+  {
+    id: 'i8',
+    kind: 'tool',
+    timestamp: '2026-09-01T11:36:15Z',
+    tool: {
+      call_id: 'call-read-2',
+      name: 'Read',
+      status: 'unknown',
+      summary: 'crates/nession-agent/src/tmux/cmd.rs',
+    },
+  },
+  {
+    id: 'i9',
+    kind: 'unknown',
+    timestamp: '2026-09-01T11:36:30Z',
   },
 ];
 

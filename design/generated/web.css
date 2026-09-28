@@ -80,6 +80,10 @@
   --conversation-tool-surface: var(--muted);
   --conversation-tool-foreground: var(--muted-foreground);
   --conversation-tool-error: var(--danger);
+  --conversation-tool-success: var(--action);
+  --conversation-code-surface: var(--muted);
+  --conversation-code-foreground: var(--muted-foreground);
+  --conversation-code-border: var(--border);
   --typography-primary-size: 12.5px;
   --typography-secondary-size: 11px;
   --typography-metadata-size: 10px;
@@ -278,6 +282,10 @@
   --conversation-tool-surface: var(--muted);
   --conversation-tool-foreground: var(--muted-foreground);
   --conversation-tool-error: var(--danger);
+  --conversation-tool-success: var(--action);
+  --conversation-code-surface: var(--muted);
+  --conversation-code-foreground: var(--muted-foreground);
+  --conversation-code-border: var(--border);
 }
 
 @theme inline {
@@ -357,6 +365,10 @@
   --color-conversation-tool-surface: var(--conversation-tool-surface);
   --color-conversation-tool-foreground: var(--conversation-tool-foreground);
   --color-conversation-tool-error: var(--conversation-tool-error);
+  --color-conversation-tool-success: var(--conversation-tool-success);
+  --color-conversation-code-surface: var(--conversation-code-surface);
+  --color-conversation-code-foreground: var(--conversation-code-foreground);
+  --color-conversation-code-border: var(--conversation-code-border);
   --spacing-control-sm: var(--control-sm);
   --spacing-control-md: var(--control-md);
   --spacing-control-lg: var(--control-lg);
