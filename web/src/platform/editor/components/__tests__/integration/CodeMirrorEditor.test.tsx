@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, waitFor } from '@testing-library/react';
 import { EditorView } from '@uiw/react-codemirror';
-import { CodeMirrorEditor, type CodeMirrorEditorProps } from '@/capabilities/files/components/CodeMirrorEditor';
+import { CodeMirrorEditor, type CodeMirrorEditorProps } from '@/platform/editor';
 
 function renderEditor(props: Partial<CodeMirrorEditorProps> = {}) {
   const onChange = vi.fn();
