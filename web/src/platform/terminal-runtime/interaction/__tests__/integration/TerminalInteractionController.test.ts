@@ -153,3 +153,122 @@ describe('TerminalInteractionController — semantic keys', () => {
     unbind();
   });
 });
+
+/** The mode a TUI just asked for, read the way production reads it. */
+function mouseTrackingMode(terminal: Terminal): string {
+  // Read `modes` fresh every time. It is a new object per access, and
+  // `mouseTrackingMode` is computed as the object is built — so a captured
+  // reference answers `none` for ever, however many DECSETs arrive afterwards.
+  // The fields that read through to `decPrivateModes` (application cursor keys,
+  // bracketed paste) survive capture; this one does not. Production reads it
+  // fresh (`occlusionScroll`), and so must a test.
+  return (terminal.modes as unknown as { mouseTrackingMode: string }).mouseTrackingMode;
+}
+
+/**
+ * Mode transitions, driven the way an application drives them — by writing the
+ * DECSET/DECRST the TUI would emit, into the same xterm the bytes come back
+ * from (#1096 criterion 13).
+ *
+ * This is the encoder-and-decision half of the mode matrix. It is deterministic
+ * and needs no shell, no TUI and no account: the terminal state is established
+ * by the escape sequence itself rather than by a stub, which is what makes the
+ * assertions about *reachability* and not only about branch selection.
+ */
+describe('TerminalInteractionController — terminal mode transitions', () => {
+  it('wraps a paste only while the application has asked for bracketed paste (#1096)', async () => {
+    // Criterion 6. Previously asserted as "terminal.paste was called with the
+    // text", which is not the property: the property is what the PTY receives,
+    // and it is xterm's mode — not our call — that decides.
+    const { terminal, controller, sent, unbind } = setup();
+
+    controller.paste('a\nb');
+    expect(sent).toEqual(['a\rb']);
+
+    await write(terminal, '\x1b[?2004h'); // DECSET 2004 — bracketed paste
+    sent.length = 0;
+    controller.paste('a\nb');
+    expect(sent).toEqual(['\x1b[200~a\rb\x1b[201~']);
+
+    await write(terminal, '\x1b[?2004l');
+    sent.length = 0;
+    controller.paste('a\nb');
+    expect(sent).toEqual(['a\rb']);
+
+    unbind();
+  });
+
+  it('reaches the mouse-tracking mode the scroll policy branches on (#1096)', async () => {
+    // `occlusionScroll` decides whether a wheel event belongs to the TUI or to
+    // local scrollback by reading exactly this. Its unit test hands the branch a
+    // hand-written `modes` literal, so nothing until now established that the
+    // mode a real TUI asks for is reachable at all.
+    const { terminal, unbind } = setup();
+
+    expect(mouseTrackingMode(terminal)).toBe('none');
+
+    await write(terminal, '\x1b[?1000h'); // VT200 — click reporting
+    expect(mouseTrackingMode(terminal)).toBe('vt200');
+
+    await write(terminal, '\x1b[?1002h'); // DRAG — button-event tracking
+    expect(mouseTrackingMode(terminal)).toBe('drag');
+
+    // SGR is an encoding of the reports, not a different tracking mode, so the
+    // protocol must not move when only the encoding does.
+    await write(terminal, '\x1b[?1006h');
+    expect(mouseTrackingMode(terminal)).toBe('drag');
+
+    await write(terminal, '\x1b[?1000l\x1b[?1002l\x1b[?1006l');
+    expect(mouseTrackingMode(terminal)).toBe('none');
+
+    unbind();
+  });
+
+  it('keeps cursor-key encoding tied to the cursor mode, not to the screen buffer (#1096)', async () => {
+    // Two different modes that a TUI flips at nearly the same moment, and the
+    // requirement warns against treating either as a proxy for the other. An
+    // alternate screen on its own changes nothing about how a key is encoded.
+    const { terminal, controller, sent, unbind } = setup();
+
+    await write(terminal, '\x1b[?1049h'); // DECSET 1049 — alternate screen
+    expect(terminal.buffer.active.type).toBe('alternate');
+
+    controller.sendSemanticKey('ArrowUp');
+    expect(sent).toEqual(['\x1b[A']);
+
+    await write(terminal, '\x1b[?1049l');
+    expect(terminal.buffer.active.type).toBe('normal');
+
+    sent.length = 0;
+    await write(terminal, '\x1b[?1h'); // the mode that *does* decide
+    controller.sendSemanticKey('ArrowUp');
+    expect(sent).toEqual(['\x1bOA']);
+
+    unbind();
+  });
+
+  it('passes committed CJK text through unchanged and in one piece (#1096)', () => {
+    // What the IME hands over once composition commits. Byte-for-byte, and not
+    // split per code point — the PTY is UTF-8 and the application decides how to
+    // measure it.
+    const { controller, sent, unbind } = setup();
+
+    controller.sendText('日本語');
+
+    expect(sent).toEqual(['日本語']);
+    unbind();
+  });
+
+  it('passes raw control bytes to the PTY without interpreting them (#1096)', () => {
+    // Criterion 1's other half: Nession does not read meaning into a byte the
+    // terminal produced. Ctrl+D in particular used to be intercepted as a
+    // Nession disconnect.
+    const { controller, sent, unbind } = setup();
+
+    controller.sendPtyBytes('\x03');
+    controller.sendPtyBytes('\x04');
+
+    expect(sent).toEqual(['\x03', '\x04']);
+    unbind();
+  });
+});
