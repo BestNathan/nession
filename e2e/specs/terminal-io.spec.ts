@@ -395,10 +395,16 @@ test.describe('Terminal I/O', () => {
     // PTY with escapes the test itself wrote; this drives it with a program
     // that was written without Nession in mind.
     //
-    // It deliberately does not assert on the alternate screen. That is not
+    // It deliberately does not assert on the alternate screen — `less` opens
+    // one, and that it did so is the transport's business, not this test's.
+    //
+    // The reason this used to give was that the alternate screen "is not
     // observable from the browser: tmux owns its client's screen and mouse
-    // mode — `pty.rs` sets only `status off`, and tmux turns both on itself —
-    // so `buffer.active.type` reads `'alternate'` for a plain shell too.
+    // mode, so `buffer.active.type` reads `'alternate'` for a plain shell too".
+    // That was true under `AttachMode::plain` and stopped being true in #321
+    // S3, which is exactly what the transport test above now asserts. (The
+    // parenthetical naming `pty.rs` as the only option it sets was wrong even
+    // then — `manager.rs` sets `mouse on` at session creation.)
     test.skip(!process.env.CI, 'local only — runs in CI workflow only');
     const SESSION_NAME = `e2e-curses-${testInfo.retry}`;
     await createSession(page, SESSION_NAME);
