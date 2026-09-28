@@ -414,6 +414,34 @@ test.describe('Terminal I/O', () => {
     await expectPtySize(page, after.cols, after.rows);
   });
 
+  test('Ctrl+D reaches the PTY instead of disconnecting (#1096 criterion 1)', async ({ page }, testInfo) => {
+    // The byte the product used to steal: Nession read `0x04` as its own
+    // disconnect. Criterion 1 says the byte must reach the application and
+    // disconnect must be an explicit action.
+    //
+    // The observation is EOF. `cat -v` reading a tty exits when it sees `^D`
+    // with nothing pending — so if the byte arrives, the probe ends and the
+    // shell prints a fresh prompt. A Nession that still hijacked it would
+    // leave `cat` running and print no new prompt.
+    //
+    // Asserted on the LAST non-empty line, not on a regex over the whole
+    // buffer: the scrollback already holds prompts from before the probe was
+    // started, so `toMatch(/…$/)` would pass without anything happening. The
+    // prompt after the exit is the one the cursor sits on.
+    test.skip(!process.env.CI, 'local only — runs in CI workflow only');
+    const SESSION_NAME = `e2e-ctrld-${testInfo.retry}`;
+    await createSession(page, SESSION_NAME);
+    await attachToSession(page, SESSION_NAME, 'Relay');
+    await waitForInteractiveShell(page);
+    await submitTerminalCommand(page, ptyProbeInstaller());
+
+    await startPtyProbe(page, 'normal');
+    await sendRawToTerminal(page, '\x04');
+    await expect
+      .poll(async () => lastNonEmptyLine(page), { timeout: 15_000 })
+      .toMatch(/runner:\S*\$/);
+  });
+
   test('capsule arrow follows the cursor mode the PTY asked for (#1096)', async ({ page }, testInfo) => {
     // The requirement's end-to-end claim, and the one thing every gate above
     // this line can only approximate: the same tap produces different bytes
