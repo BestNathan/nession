@@ -7,7 +7,8 @@ SurfaceSwitcher is one possible **Web affordance** for moving between the active
 It is a compact interaction pattern and not a feature-navigation model.
 
 **Decision (2026-09-16, #748) — supersedes the #727 decision below.** On Web the
-switcher is a **floating icon capsule at the workspace's top-right**, not a
+switcher is a **floating capsule at the workspace's top-right** (active Surface
+icon+label, inactive icon-only), not a
 segmented control inside the SessionHeader. Web ships no permanent Session
 header at all: the shell is a sidebar plus the work surface, and navigation,
 infrastructure identity and service status live in the sidebar.
@@ -42,22 +43,36 @@ Must not:
 
 ## Anatomy
 
-The shipped Web form is a floating icon capsule:
+The shipped Web form is a floating capsule at the work surface's top-right.
+The **active** Surface segment shows **icon + short label** so current depth is
+readable without hover. The **inactive** Surface stays **icon-only**; its name
+lives in tooltip and accessible name.
+
+Terminal active:
 
 ```text
-                                    ┌───────────┐
-                                    │ [▤] [⊞]   │   ← floating, top-right of the work surface
-                                    └───────────┘
+                                    ┌──────────────────┐
+                                    │  >_  Terminal  ▦ │   ← floating, top-right
+                                    └──────────────────┘
 ```
 
-Two icon segments, one per surface. It floats over the work surface rather than
-occupying a chrome band, so it costs the work surface no layout space and the
-work surface keeps the full frame. Labels are carried by the icons' accessible
-names and tooltips, not by permanent text.
+Workspace active (mirrored):
+
+```text
+                                    ┌──────────────────┐
+                                    │  >_  ▦ Workspace │
+                                    └──────────────────┘
+```
+
+It floats over the work surface rather than occupying a chrome band, so it costs
+the work surface no layout space. Pointer ownership matches other floating chrome:
+the placement wrapper is `pointer-events-none`; the capsule root is
+`pointer-events-auto` (#1168).
 
 The earlier `[ Terminal | Workspace ]` segmented control lived inside the header
-because the header existed; with the header gone, a text control floating over
-the terminal would be the loudest thing on a quiet surface.
+because the header existed; with the header gone, a full two-label control
+floating over the terminal would be the loudest thing on a quiet surface — hence
+icon-only for the inactive entry (#1169).
 
 ## States
 
@@ -81,7 +96,7 @@ See [workspace-navigation.md](workspace-navigation.md) and [terminal-capsule.md]
 
 | | Web | App |
 |--|-----|-----|
-| Pattern | Floating icon capsule, top-right of the work surface | Not used as the shell |
+| Pattern | Floating capsule (active icon+label, inactive icon), top-right | Not used as the shell |
 | Terminal default | Yes | Yes |
 | Workspace access | SurfaceSwitcher or another explicit Web affordance | Visible Workspace control + swipe-left |
 | Session access | Separate Session navigation | Visible Sessions control + swipe-right |
@@ -96,7 +111,7 @@ App uses the spatial `Sessions ← Terminal → Workspace` model rather than a s
   header chrome. `visual-language.md` P7 licenses elevation for a control whose spatial role requires it,
   and this one floats over the work surface by design. See
   [terminal-capsule.md](terminal-capsule.md) § Surface treatment.
-- One selected state, one quiet unselected state.
+- One selected state with visible Surface name; one quiet icon-only unselected state.
 - No per-surface decorative color.
 - Without a Session there is nothing to switch between, so the control is absent rather than inert.
 
