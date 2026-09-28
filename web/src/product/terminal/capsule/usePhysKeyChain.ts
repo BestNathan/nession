@@ -15,43 +15,75 @@ import type { PhysKey } from '@/product/terminal/capsule/physKeys';
  * like "the keys behave differently depending on where you opened them".
  */
 export interface PhysKeyChain {
-  chainBuffer: readonly string[];
+  /** The keys accumulating into the chain, in the order they were added. */
+  chainBuffer: readonly PhysKey[];
   isChaining: boolean;
   /** One key, sent immediately. Also ends any chain. */
   handlePhysKey: (key: PhysKey) => void;
-  handleChainStart: (seq: string) => void;
-  handleChainAdd: (seq: string) => void;
+  handleChainStart: (key: PhysKey) => void;
+  handleChainAdd: (key: PhysKey) => void;
   cancelChain: () => void;
+  /** Send every key in the chain, then clear it. */
   sendChain: () => void;
+  /**
+   * Send every key in the chain **plus** `key`, then clear it: what holding a
+   * key while the chain is open means. Composed here rather than by the caller
+   * so "send and close" has one implementation — it used to be the row joining
+   * the chain's bytes itself, which is how a chained cursor key ended up frozen
+   * at the wrong mode's sequence.
+   */
+  completeChain: (key: PhysKey) => void;
+}
+
+/**
+ * Send one key the way a tap would: through the semantic layer when it has one.
+ *
+ * A module function because both the tap path and the chain path must do
+ * *exactly* this, and the whole defect this fixes was the chain doing something
+ * else — joining raw bytes it had been handed, which froze a cursor key at the
+ * sequence for the mode that happened to be current when the table was written.
+ */
+function sendKey(
+  key: PhysKey,
+  sendSeq: (seq: string) => void,
+  sendPhysKey: (key: PhysKey) => void,
+): void {
+  if (key.semanticKey) {
+    sendPhysKey(key);
+    return;
+  }
+  // A key with no bytes sends nothing. `Shift` is the one that matters: it
+  // exists to *start* a chord and the key it modifies carries the bytes, so
+  // emitting an empty write for it would put a no-op frame on the wire for
+  // every modifier the user holds.
+  if (key.seq) {
+    sendSeq(key.seq);
+  }
 }
 
 export function usePhysKeyChain(
   sendSeq: (seq: string) => void,
   sendPhysKey: (key: PhysKey) => void,
 ): PhysKeyChain {
-  const [chainBuffer, setChainBuffer] = useState<string[]>([]);
+  const [chainBuffer, setChainBuffer] = useState<PhysKey[]>([]);
   const [isChaining, setIsChaining] = useState(false);
 
   const handlePhysKey = useCallback(
     (key: PhysKey) => {
-      if (key.semanticKey) {
-        sendPhysKey(key);
-      } else {
-        sendSeq(key.seq);
-      }
+      sendKey(key, sendSeq, sendPhysKey);
       setIsChaining(false);
       setChainBuffer([]);
     },
     [sendPhysKey, sendSeq],
   );
 
-  const handleChainStart = useCallback((seq: string) => {
+  const handleChainStart = useCallback((key: PhysKey) => {
     setIsChaining(true);
-    setChainBuffer([seq]);
+    setChainBuffer([key]);
   }, []);
 
-  const handleChainAdd = useCallback((seq: string) => {
-    setChainBuffer((prev) => [...prev, seq]);
+  const handleChainAdd = useCallback((key: PhysKey) => {
+    setChainBuffer((prev) => [...prev, key]);
   }, []);
 
   const cancelChain = useCallback(() => {
@@ -59,11 +91,32 @@ export function usePhysKeyChain(
     setChainBuffer([]);
   }, []);
 
+  const sendKeys = useCallback(
+    (keys: readonly PhysKey[]) => {
+      // Each key is encoded on its own, at send time — so a chained cursor key
+      // follows the terminal's mode as it is *now*, which is what the tap path
+      // has always done and what this path used to skip.
+      for (const key of keys) {
+        sendKey(key, sendSeq, sendPhysKey);
+      }
+    },
+    [sendPhysKey, sendSeq],
+  );
+
   const sendChain = useCallback(() => {
-    sendSeq(chainBuffer.join(''));
+    sendKeys(chainBuffer);
     setIsChaining(false);
     setChainBuffer([]);
-  }, [sendSeq, chainBuffer]);
+  }, [chainBuffer, sendKeys]);
+
+  const completeChain = useCallback(
+    (key: PhysKey) => {
+      sendKeys([...chainBuffer, key]);
+      setIsChaining(false);
+      setChainBuffer([]);
+    },
+    [chainBuffer, sendKeys],
+  );
 
   return {
     chainBuffer,
@@ -73,5 +126,6 @@ export function usePhysKeyChain(
     handleChainAdd,
     cancelChain,
     sendChain,
+    completeChain,
   };
 }
