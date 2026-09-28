@@ -442,6 +442,35 @@ test.describe('Terminal I/O', () => {
       .toMatch(/runner:\S*\$/);
   });
 
+  test('committed non-ASCII text reaches the PTY (#1096 criterion 11)', async ({ page }, testInfo) => {
+    // Criterion 11's second half. The first half — that composition sends only
+    // *committed* text — is covered where composition happens
+    // (`MobileImeInput`), which needs `ontouchstart` and so is not reachable
+    // from here. What this proves is the other end: the bytes a commit produces
+    // survive the whole path.
+    //
+    // `sendRawToTerminal` is not a stand-in for the encoder — it *is* it. IME
+    // commit and this helper both end at `terminal.input(text, true)`, so the
+    // string below travels the same wire the composer would. Everything after
+    // it is real: relay, tmux, and the tty line discipline, none of which this
+    // test stubs, and none of which is where a multi-byte character is
+    // supposed to be lost.
+    test.skip(!process.env.CI, 'local only — runs in CI workflow only');
+    const SESSION_NAME = `e2e-cjk-${testInfo.retry}`;
+    await createSession(page, SESSION_NAME);
+    await attachToSession(page, SESSION_NAME, 'Relay');
+    await waitForInteractiveShell(page);
+    await submitTerminalCommand(page, ptyProbeInstaller());
+
+    // `cat -v` escapes control characters, not non-ASCII, so what comes back in
+    // the buffer is what the application received.
+    await startPtyProbe(page, 'normal');
+    await sendRawToTerminal(page, '中文输入\n');
+    await expect
+      .poll(async () => readTerminalBuffer(page), { timeout: 15_000 })
+      .toContain('中文输入');
+  });
+
   test('capsule arrow follows the cursor mode the PTY asked for (#1096)', async ({ page }, testInfo) => {
     // The requirement's end-to-end claim, and the one thing every gate above
     // this line can only approximate: the same tap produces different bytes
