@@ -157,7 +157,7 @@ async function waitForInteractiveShell(page: import('@playwright/test').Page): P
  */
 async function readTerminalFacts(
   page: import('@playwright/test').Page,
-): Promise<{ cols: number; rows: number; bufferType: string }> {
+): Promise<{ cols: number; rows: number; bufferType: string; width: number }> {
   return page.evaluate(() => {
     const xtermEl = document.querySelector('.xterm');
     const container = xtermEl?.parentElement as
@@ -173,8 +173,37 @@ async function readTerminalFacts(
     if (!term) {
       throw new Error('xtermInstance not mounted');
     }
-    return { cols: term.cols, rows: term.rows, bufferType: term.buffer.active.type };
+    return {
+      cols: term.cols,
+      rows: term.rows,
+      bufferType: term.buffer.active.type,
+      width: xtermEl ? Math.round(xtermEl.getBoundingClientRect().width) : 0,
+    };
   });
+}
+
+/**
+ * Wait until xterm's grid has stopped moving.
+ *
+ * xterm opens at its own default and is resized afterwards by a ResizeObserver,
+ * so the size read straight after attach describes the layout only once that
+ * has settled. Two consecutive reads that agree is the condition; nothing here
+ * assumes what the answer should be.
+ */
+async function waitForStableGrid(page: import('@playwright/test').Page): Promise<void> {
+  let previous = '';
+  await expect
+    .poll(
+      async () => {
+        const { cols, rows, width } = await readTerminalFacts(page);
+        const current = `${cols}x${rows}`;
+        const settled = width > 0 && current === previous;
+        previous = current;
+        return settled;
+      },
+      { timeout: 20_000, intervals: [500] },
+    )
+    .toBe(true);
 }
 
 /** Send raw bytes through xterm's input API — the same path as the keyboard. */
@@ -293,30 +322,34 @@ test.describe('Terminal I/O', () => {
     // A SIGWINCH test in jsdom could not see that, and a TUI that lays out on a
     // stale size is the failure this guards.
     test.skip(!process.env.CI, 'local only — runs in CI workflow only');
+    await page.setViewportSize({ width: 1280, height: 800 });
     const SESSION_NAME = `e2e-resize-${testInfo.retry}`;
     await createSession(page, SESSION_NAME);
     await attachToSession(page, SESSION_NAME, 'Relay');
     await waitForInteractiveShell(page);
+    await waitForStableGrid(page);
 
     const before = await readTerminalFacts(page);
-    // `stty size` prints "<rows> <cols>" for the session's own tty.
+    // `stty size` prints "<rows> <cols>" for the session's own tty, so this is
+    // the size the *application* believes it has — not the one we sent.
     await submitTerminalCommand(page, 'stty size');
     await expect
       .poll(async () => readTerminalBuffer(page), { timeout: 15_000 })
       .toContain(`${before.rows} ${before.cols}`);
 
-    const viewport = page.viewportSize();
-    expect(viewport).not.toBeNull();
-    await page.setViewportSize({
-      width: Math.max(400, viewport!.width - 220),
-      height: Math.max(300, viewport!.height - 140),
-    });
+    // Shrink vertically, and keep the width. Below roughly 1280 the Web layout
+    // stops handing the terminal fewer columns — the sidebar and the well's
+    // minimum hold the grid's width, and the page scrolls instead — so height
+    // is the dimension a smaller window actually moves. Measured: 1280×800 →
+    // 1060×660 left `cols` at 142 and took `rows` from 36 to 29. Asserting on
+    // columns here would fail a terminal that resized perfectly well.
+    await page.setViewportSize({ width: 1280, height: 600 });
 
-    // The grid must actually shrink first — otherwise the assertion below could
+    // The grid must actually change first — otherwise the assertion below could
     // pass on a terminal that never noticed, which is not the case under test.
     await expect
-      .poll(async () => (await readTerminalFacts(page)).cols, { timeout: 15_000 })
-      .toBeLessThan(before.cols);
+      .poll(async () => (await readTerminalFacts(page)).rows, { timeout: 15_000 })
+      .toBeLessThan(before.rows);
 
     const after = await readTerminalFacts(page);
     await submitTerminalCommand(page, 'stty size');
