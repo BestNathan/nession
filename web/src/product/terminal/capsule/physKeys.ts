@@ -6,9 +6,9 @@ import type { TerminalSemanticKey } from '@/platform/terminal-runtime/interactio
  * **Exactly one of `semanticKey` / `seq`, and the type says which** (#1096
  * criterion 4). A key the runtime can encode from terminal state carries *no*
  * sequence here, so this module — a UI module — cannot own an escape that
- * depends on a mode it cannot see. `seq` remains only for the two keys that
- * have no semantic form at all: a bare modifier, which sends nothing, and
- * Ctrl+C, which is a control byte rather than a named key.
+ * depends on a mode it cannot see. `seq` remains only for the one key that has
+ * no semantic form at all: a bare modifier, which sends no bytes of its own and
+ * exists only to start a chord.
  *
  * The `?: undefined` members are what make the union assignable to the
  * structural `{ seq?: string; semanticKey?: … }` the runtime accepts, without
@@ -40,15 +40,6 @@ export const ARROW_KEYS: PhysKey[] = [
   { label: '←', semanticKey: 'ArrowLeft' },
   { label: '↓', semanticKey: 'ArrowDown' },
   { label: '→', semanticKey: 'ArrowRight' },
-];
-
-/** Mobile capsule single-row quick keys. */
-export const QUICK_MOBILE_KEYS: PhysKey[] = [
-  { label: 'Esc', seq: '\x1b' },
-  { label: 'Tab', seq: '\t' },
-  { label: 'Space', seq: ' ' },
-  { label: 'Enter', seq: '\r' },
-  { label: 'Ctrl+C', seq: '\x03' },
 ];
 
 /**
