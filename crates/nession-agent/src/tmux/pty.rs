@@ -240,55 +240,41 @@ impl super::session::TmuxSession for PtySession {
     }
 
     async fn resize(&mut self, cols: u16, rows: u16) -> Result<()> {
-        // Move the shared window explicitly, the way `ControlModeSession::resize`
-        // does — the two backends move the same resource by different routes,
-        // and only the explicit one states the size rather than deriving it.
-        //
-        // Resizing this client's PTY alone leaves the window to tmux's
-        // `window-size` policy, and that policy does not always follow the
-        // client. Measured on CI: the browser grid resized and this route ran
-        // with the right numbers (`124x26`, then `124x41`), while the session
-        // went on reporting its old size — so a viewport change never reached
-        // the application, growing or shrinking.
-        //
-        // Both halves are kept. The PTY resize makes the *client* the right
-        // size; the explicit one makes the *window* the right size, and it goes
-        // last so that a policy which would recompute the window from the
-        // client cannot undo it.
+        // The pty this client runs on, so the *client* is the right size.
         PtySession::resize(self, cols, rows)?;
+
+        // Then say so to tmux, because SIGWINCH alone is not delivering it.
+        //
+        // `window-size latest` derives the window from the most recently used
+        // client, so the client's size is the input that decides the window —
+        // and this client is not being seen at its new size. Measured on CI
+        // (#1187): the browser grid resized, this route ran with the right
+        // numbers, `resize-window` succeeded and tmux even confirmed the new
+        // window size — and the pane went on reporting the old one, because the
+        // policy derived the window straight back from a client that had not
+        // moved. `refresh-client -C` is the other way to state a client's size,
+        // and the one a client without a terminal of its own has to use.
+        //
+        // Setting the *window* instead would fight the policy; `window-size` is
+        // deliberately left unset so that clients size the window
+        // (`manager.rs`'s `window_size_lock_tests`), and a stated window is
+        // undone by the next derivation.
+        let Some(pid) = self.child.process_id() else {
+            return Ok(());
+        };
+        let ops = self.tmux.ops();
+        let Some(client) = ops.client_name_for_pid(pid).await? else {
+            // The attach client is gone; there is nothing left to size.
+            return Ok(());
+        };
         // DIAGNOSTIC (#1187) — remove before merge.
-        match self
-            .tmux
-            .ops()
-            .resize_window(&self.session_name, cols, rows)
-            .await
-        {
-            Ok(()) => {
-                // DIAGNOSTIC (#1187) — remove before merge. `resize-window`
-                // reports success and the pane goes on reporting the old size,
-                // so ask tmux what it thinks the window is now: that
-                // distinguishes "the size did not stick" from "the window moved
-                // and the pane did not".
-                let after = self.tmux.ops().window_size(&self.session_name).await;
-                tracing::info!(
-                    "DIAG resize_window ok: {} {}x{} -> tmux says {:?}",
-                    self.session_name,
-                    cols,
-                    rows,
-                    after.map_err(|e| e.to_string())
-                );
-                Ok(())
-            }
-            Err(e) => {
-                tracing::error!(
-                    "DIAG resize_window failed: {} {}x{}: {e:#}",
-                    self.session_name,
-                    cols,
-                    rows
-                );
-                Err(e)
-            }
-        }
+        tracing::info!(
+            "DIAG set_client_size: {} client={client} {}x{}",
+            self.session_name,
+            cols,
+            rows
+        );
+        ops.set_client_size(&client, cols, rows).await
     }
 
     fn viewport(&self) -> (u16, u16) {

@@ -191,6 +191,12 @@ fn resize_window_args<'a>(session: &'a str, cols: &'a str, rows: &'a str) -> [&'
     ["resize-window", "-t", session, "-x", cols, "-y", rows]
 }
 
+/// The argument vector for one client-size statement:
+/// `refresh-client -t <client> -C <cols>x<rows>`.
+fn set_client_size_args<'a>(client: &'a str, size: &'a str) -> [&'a str; 5] {
+    ["refresh-client", "-t", client, "-C", size]
+}
+
 /// The argument vector for one line typed into a session:
 /// `send-keys -t <session> <keys> Enter`.
 ///
@@ -392,6 +398,39 @@ impl TmuxOps {
     /// [`ControlModeSession::resize`](super::control::ControlModeSession::resize)
     /// uses. Same subcommand, same target, two routes — the split is the
     /// transport, not the grammar.
+    /// State `client`'s size to tmux: `refresh-client -t <client> -C <cols>x<rows>`.
+    ///
+    /// A client that owns a terminal is supposed to get this from SIGWINCH when
+    /// its pty is resized, and that is the only route `PtySession` has ever
+    /// used. This is the same statement by the other route — the one a
+    /// `tmux -C attach` client needs, having no terminal of its own to derive a
+    /// size from.
+    ///
+    /// It works *with* `window-size latest` rather than around it. That policy
+    /// derives the window from the most recently used client, so the way to
+    /// move the window is to make the client's size true; setting the window
+    /// directly is undone by the next derivation, which is what
+    /// [`resize_window`](Self::resize_window) measures on CI (#1187).
+    pub async fn set_client_size(&self, client: &str, cols: u16, rows: u16) -> Result<()> {
+        let size = format!("{cols}x{rows}");
+        let output = self
+            .cmd
+            .tokio()
+            .args(set_client_size_args(client, &size))
+            .stderr(std::process::Stdio::piped())
+            .output()
+            .await
+            .with_context(|| format!("failed to spawn tmux refresh-client for {client}"))?;
+        if output.status.success() {
+            return Ok(());
+        }
+        anyhow::bail!(
+            "tmux refresh-client -t {client} -C {size} failed: {} ({})",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        )
+    }
+
     pub async fn resize_window(&self, session: &str, cols: u16, rows: u16) -> Result<()> {
         let cols = cols.to_string();
         let rows = rows.to_string();
@@ -518,7 +557,11 @@ impl TmuxOps {
 
     /// The name of the client whose process is `pid`; `None` when no client
     /// carries it.
-    async fn client_name_for_pid(&self, pid: u32) -> Result<Option<String>> {
+    ///
+    /// `pub(crate)` because `PtySession::resize` needs it too: a PTY client is
+    /// identified to tmux by the process it spawned, and a statement about that
+    /// client's size has to name it (#1187).
+    pub(crate) async fn client_name_for_pid(&self, pid: u32) -> Result<Option<String>> {
         let output = self
             .cmd
             .tokio()
