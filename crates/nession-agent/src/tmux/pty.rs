@@ -240,41 +240,12 @@ impl super::session::TmuxSession for PtySession {
     }
 
     async fn resize(&mut self, cols: u16, rows: u16) -> Result<()> {
-        // The pty this client runs on, so the *client* is the right size.
-        PtySession::resize(self, cols, rows)?;
-
-        // Then say so to tmux, because SIGWINCH alone is not delivering it.
-        //
-        // `window-size latest` derives the window from the most recently used
-        // client, so the client's size is the input that decides the window —
-        // and this client is not being seen at its new size. Measured on CI
-        // (#1187): the browser grid resized, this route ran with the right
-        // numbers, `resize-window` succeeded and tmux even confirmed the new
-        // window size — and the pane went on reporting the old one, because the
-        // policy derived the window straight back from a client that had not
-        // moved. `refresh-client -C` is the other way to state a client's size,
-        // and the one a client without a terminal of its own has to use.
-        //
-        // Setting the *window* instead would fight the policy; `window-size` is
-        // deliberately left unset so that clients size the window
-        // (`manager.rs`'s `window_size_lock_tests`), and a stated window is
-        // undone by the next derivation.
-        let Some(pid) = self.child.process_id() else {
-            return Ok(());
-        };
-        let ops = self.tmux.ops();
-        let Some(client) = ops.client_name_for_pid(pid).await? else {
-            // The attach client is gone; there is nothing left to size.
-            return Ok(());
-        };
-        // DIAGNOSTIC (#1187) — remove before merge.
-        tracing::info!(
-            "DIAG set_client_size: {} client={client} {}x{}",
-            self.session_name,
-            cols,
-            rows
-        );
-        ops.set_client_size(&client, cols, rows).await
+        // DIAGNOSTIC (#1187) — remove before merge. Two fixes have been tried
+        // above this line and both were refuted by CI; see the issue. What is
+        // established is that the *client* is the thing that has to become
+        // true, and this is the call that is supposed to make it so.
+        tracing::info!("DIAG pty resize: {} {}x{}", self.session_name, cols, rows);
+        PtySession::resize(self, cols, rows)
     }
 
     fn viewport(&self) -> (u16, u16) {
