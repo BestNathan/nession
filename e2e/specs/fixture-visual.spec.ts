@@ -214,6 +214,11 @@ test.describe('Web 1440×900', () => {
     await page.getByTestId('env-edit').click();
 
     await page.locator('.cm-content').click();
+    // New line at the doc end — typing straight after the click glues the
+    // text onto the last content line.
+    await page.keyboard.press('ControlOrMeta+ArrowDown');
+    await page.keyboard.press('End');
+    await page.keyboard.press('Enter');
     await page.keyboard.type('EXTRA=1');
     // The dirty marker is the claim, so it is what the screenshot waits for.
     await expect(page.getByTestId('env-editor-dirty')).toBeVisible();
@@ -233,6 +238,9 @@ test.describe('Web 1440×900', () => {
 
     await page.getByTestId('env-edit').click();
     await page.locator('.cm-content').click();
+    await page.keyboard.press('ControlOrMeta+ArrowDown');
+    await page.keyboard.press('End');
+    await page.keyboard.press('Enter');
     await page.keyboard.type('EXTRA=1');
     await page.getByTestId('env-editor-save').click();
 

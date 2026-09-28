@@ -33,6 +33,11 @@ async function gotoEnvWorkspace(page: Page): Promise<void> {
 /** Type into the CodeMirror editor that is showing, so the draft goes dirty. */
 async function dirtyTheEditor(page: Page): Promise<void> {
   await page.locator('.cm-content').click();
+  // New line at the doc end — typing straight after the click glues the text
+  // onto the last content line.
+  await page.keyboard.press('ControlOrMeta+ArrowDown');
+  await page.keyboard.press('End');
+  await page.keyboard.press('Enter');
   await page.keyboard.type('EXTRA=1');
   await expect(page.getByTestId('env-editor-dirty')).toBeVisible();
 }
