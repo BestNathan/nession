@@ -471,6 +471,42 @@ test.describe('Terminal I/O', () => {
       .toContain('中文输入');
   });
 
+  test('a reattached client still asks in the mode the PTY is in (#1096 criterion 13, case 10)', async ({ page }, testInfo) => {
+    // "reconnect/reattach without losing the expected mode after
+    // redraw/bootstrap." The mode belongs to the *application*: the pane stays
+    // in application-cursor mode across the browser going away and coming back,
+    // and the question is whether a freshly built xterm is told so. A client
+    // that reattached with its own default would ask for `^[[A` while the
+    // application waits for `^[OA` — the failure this case exists for.
+    test.skip(!process.env.CI, 'local only — runs in CI workflow only');
+    const SESSION_NAME = `e2e-reattach-${testInfo.retry}`;
+    await createSession(page, SESSION_NAME);
+    await attachToSession(page, SESSION_NAME, 'Relay');
+    await waitForInteractiveShell(page);
+    await submitTerminalCommand(page, ptyProbeInstaller());
+
+    await startPtyProbe(page, 'appcursor');
+    await tapCapsuleArrowUp(page);
+    await expect(async () => {
+      expect(await countInBuffer(page, '^[OA')).toBeGreaterThan(0);
+    }).toPass({ timeout: 15_000 });
+
+    // A genuinely fresh client: the document reloads and xterm is built from
+    // nothing, while the probe keeps running in the pane. Counting before and
+    // after rather than asserting presence, because the reattach re-bootstraps
+    // the scrollback and the earlier `^[OA` comes back with it.
+    await page.reload();
+    await waitForTerminal(page);
+    await attachToSession(page, SESSION_NAME, 'Relay');
+    await waitForInteractiveShell(page);
+
+    const before = await countInBuffer(page, '^[OA');
+    await tapCapsuleArrowUp(page);
+    await expect(async () => {
+      expect(await countInBuffer(page, '^[OA')).toBeGreaterThan(before);
+    }).toPass({ timeout: 15_000 });
+  });
+
   test('capsule arrow follows the cursor mode the PTY asked for (#1096)', async ({ page }, testInfo) => {
     // The requirement's end-to-end claim, and the one thing every gate above
     // this line can only approximate: the same tap produces different bytes
