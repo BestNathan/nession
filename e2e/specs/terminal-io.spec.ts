@@ -151,6 +151,32 @@ async function waitForInteractiveShell(page: import('@playwright/test').Page): P
     .toBe(true);
 }
 
+/**
+ * xterm's own grid and buffer — the terminal state the PTY is being told about,
+ * as opposed to the text that has arrived.
+ */
+async function readTerminalFacts(
+  page: import('@playwright/test').Page,
+): Promise<{ cols: number; rows: number; bufferType: string }> {
+  return page.evaluate(() => {
+    const xtermEl = document.querySelector('.xterm');
+    const container = xtermEl?.parentElement as
+      | ({
+          xtermInstance?: {
+            cols: number;
+            rows: number;
+            buffer: { active: { type: string } };
+          };
+        } & Record<string, unknown>)
+      | null;
+    const term = container?.xtermInstance;
+    if (!term) {
+      throw new Error('xtermInstance not mounted');
+    }
+    return { cols: term.cols, rows: term.rows, bufferType: term.buffer.active.type };
+  });
+}
+
 /** Send raw bytes through xterm's input API — the same path as the keyboard. */
 async function sendRawToTerminal(page: import('@playwright/test').Page, data: string): Promise<void> {
   await page.evaluate((bytes) => {
@@ -257,6 +283,46 @@ test.describe('Terminal I/O', () => {
       const text = await readTerminalBuffer(page);
       expect(text).toContain('nession-e2e-ok');
     }).toPass({ timeout: 15_000 });
+  });
+
+  test('a viewport resize reaches the PTY (#1096)', async ({ page }, testInfo) => {
+    // Criterion 12's authoritative half. The controller's own resize paths are
+    // unit-tested (`resize`, `resizeLocal`, the remote mapping, the first
+    // observer fire); what no test covered is the chain those sit at the end
+    // of — a window change becoming the size the *application* is told it has.
+    // A SIGWINCH test in jsdom could not see that, and a TUI that lays out on a
+    // stale size is the failure this guards.
+    test.skip(!process.env.CI, 'local only — runs in CI workflow only');
+    const SESSION_NAME = `e2e-resize-${testInfo.retry}`;
+    await createSession(page, SESSION_NAME);
+    await attachToSession(page, SESSION_NAME, 'Relay');
+    await waitForInteractiveShell(page);
+
+    const before = await readTerminalFacts(page);
+    // `stty size` prints "<rows> <cols>" for the session's own tty.
+    await submitTerminalCommand(page, 'stty size');
+    await expect
+      .poll(async () => readTerminalBuffer(page), { timeout: 15_000 })
+      .toContain(`${before.rows} ${before.cols}`);
+
+    const viewport = page.viewportSize();
+    expect(viewport).not.toBeNull();
+    await page.setViewportSize({
+      width: Math.max(400, viewport!.width - 220),
+      height: Math.max(300, viewport!.height - 140),
+    });
+
+    // The grid must actually shrink first — otherwise the assertion below could
+    // pass on a terminal that never noticed, which is not the case under test.
+    await expect
+      .poll(async () => (await readTerminalFacts(page)).cols, { timeout: 15_000 })
+      .toBeLessThan(before.cols);
+
+    const after = await readTerminalFacts(page);
+    await submitTerminalCommand(page, 'stty size');
+    await expect
+      .poll(async () => readTerminalBuffer(page), { timeout: 15_000 })
+      .toContain(`${after.rows} ${after.cols}`);
   });
 
   test('capsule arrow follows the cursor mode the PTY asked for (#1096)', async ({ page }, testInfo) => {
