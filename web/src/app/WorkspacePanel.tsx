@@ -6,6 +6,7 @@ import type { DomainState } from '@/product/session/model/domainState';
 import type { Agent, Session } from '@/types';
 import { AppPageHeader } from '@/app/patterns/AppPageHeader';
 import type { Surface } from '@/app/patterns/SessionHeader';
+import { SurfaceDestinationAction } from '@/product/workspace/patterns/SurfaceDestinationAction';
 import { WorkspaceShell } from '@/app/workspace/WorkspaceShell';
 import { resolveWorkspaceCapabilities } from '@/app/workspace/capabilities';
 import type {
@@ -142,6 +143,18 @@ export function WorkspacePanel({
 
   const push = pushed && pushed.capabilityId === tool ? pushed.push : null;
 
+  // The Web's Workspace → Terminal route (#1204): one circular destination
+  // action beside the capability dock — surface navigation, not a capability,
+  // so it stays when a pushed detail depth hides the dock. The App leaves
+  // through `AppPageHeader`'s Back and gets no second leave affordance.
+  const surfaceAction =
+    experience === 'web' ? (
+      <SurfaceDestinationAction
+        destination="terminal"
+        onOpen={() => onSurfaceChange('terminal')}
+      />
+    ) : undefined;
+
   return (
     <div
       role="region"
@@ -161,7 +174,13 @@ export function WorkspacePanel({
           technical={push !== null}
         />
       ) : null}
-      <WorkspaceShell ctx={ctx} activeCapabilityId={tool} depth={depth} pushed={push !== null} />
+      <WorkspaceShell
+        ctx={ctx}
+        activeCapabilityId={tool}
+        depth={depth}
+        pushed={push !== null}
+        surfaceAction={surfaceAction}
+      />
     </div>
   );
 }

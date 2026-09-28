@@ -39,3 +39,40 @@ test('canonical Active Terminal fixture renders the terminal-native shell', asyn
     path: 'test-results/canonical-active-terminal.png',
   });
 });
+
+test('the Workspace destination action sits beside the capsule and covers no terminal content (#1204)', async ({
+  page,
+}) => {
+  await page.goto('/#/fixture');
+
+  const action = page.getByTestId('surface-action-open-workspace');
+  await expect(action).toBeVisible();
+  await expect(action).toHaveAttribute('aria-label', 'Open Workspace');
+
+  // The retired two-state control left nothing behind — least of all an
+  // overlay pinned to the work surface's top-right corner.
+  await expect(page.getByTestId('surface-switcher')).toHaveCount(0);
+
+  const shellBox = await page.getByTestId('capsule-shell').boundingBox();
+  const actionBox = await action.boundingBox();
+  expect(shellBox).not.toBeNull();
+  expect(actionBox).not.toBeNull();
+  if (!shellBox || !actionBox) {
+    return;
+  }
+
+  // Adjacent to the capsule's right edge, separated only by the group gap.
+  const gap = actionBox.x - (shellBox.x + shellBox.width);
+  expect(gap).toBeGreaterThan(0);
+  expect(gap).toBeLessThanOrEqual(16);
+
+  // Bottom-aligned with the shell and no taller than it, so its top can never
+  // rise above the shell's — the shell-only occlusion measurement covers it,
+  // and the terminal loses no row to it.
+  expect(actionBox.y).toBeGreaterThanOrEqual(shellBox.y - 1);
+  expect(Math.abs(actionBox.y + actionBox.height - (shellBox.y + shellBox.height))).toBeLessThanOrEqual(1);
+
+  // Canonical control target, and circular.
+  expect(actionBox.width).toBe(actionBox.height);
+  expect(actionBox.height).toBeGreaterThanOrEqual(32);
+});

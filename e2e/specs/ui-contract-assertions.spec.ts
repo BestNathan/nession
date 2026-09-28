@@ -225,9 +225,10 @@ test.describe('real fixture surfaces satisfy their contracts', () => {
     await expect(page.getByTestId('connection-status')).toHaveCount(0);
     await expect(page.getByTestId('server-connection')).toHaveCount(0);
 
-    // Workspace stays reachable without gestures: the floating capsule is the
-    // only visible route now, so its presence is what the contract protects.
-    await expect(page.getByRole('tab', { name: 'Workspace' })).toBeVisible();
+    // Workspace stays reachable without gestures: the circular destination
+    // action beside the capsule is the visible route (#1204), so its presence
+    // is what the contract protects.
+    await expect(page.getByRole('button', { name: 'Open Workspace' })).toBeVisible();
   });
 
   test('web: workspace direct chrome is bounded and inside the tool bar', async ({ page }) => {

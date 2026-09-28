@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { cn } from '@/shared/lib/utils';
 import { TerminalPane } from '@/product/terminal/TerminalPane';
 import { TerminalSurface } from '@/product/terminal/patterns/TerminalSurface';
@@ -18,6 +19,8 @@ export interface TerminalRegionProps {
   capsuleCapabilities?: CapsuleCapabilityContribution;
   capsuleProjection?: CapsuleCapabilityProjection;
   onOpenWorkspaceFile?: (path: string, line?: number) => void;
+  /** The shell's surface-navigation action beside the capsule (#1204). */
+  surfaceAction?: ReactNode;
 }
 
 /**
@@ -32,6 +35,7 @@ export function TerminalRegion({
   capsuleCapabilities,
   capsuleProjection,
   onOpenWorkspaceFile,
+  surfaceAction,
 }: TerminalRegionProps) {
   const {
     sessionId,
@@ -62,6 +66,7 @@ export function TerminalRegion({
           isSwitching={isSwitching}
           capsuleCapabilities={capsuleCapabilities}
           capsuleProjection={capsuleProjection}
+          surfaceAction={surfaceAction}
           terminalControl={terminalControl}
           onTakeControl={() => {
             void onTakeControl();

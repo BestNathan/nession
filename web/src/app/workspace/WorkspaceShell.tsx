@@ -39,6 +39,14 @@ export interface WorkspaceShellProps {
    * the dock, which belongs to the root — see `showDock` below.
    */
   pushed?: boolean;
+  /**
+   * The Web's "Open Terminal" destination action (#1204), composed beside the
+   * capability dock. It is *surface* navigation, not a capability: it stays
+   * when `pushed` hides the dock, and it never becomes a dock entry. Rendered
+   * for the Web experience only — the App leaves a Workspace depth through its
+   * page header's Back.
+   */
+  surfaceAction?: React.ReactNode;
 }
 
 /**
@@ -52,6 +60,22 @@ const NO_DEPTH_CONTROL: WorkspaceDepthControl = { setPush: () => undefined };
 
 function bindingFor(item: WorkspacePresentationItem): WorkspaceViewBinding | undefined {
   return workspaceViewBindings.get(item.snapshot.id);
+}
+
+/**
+ * Surface navigation (#1204): the destination action's own `nav`, adjacent to
+ * — never merged into — the capability dock's.
+ */
+function SurfaceNavigation({ children }: { children: React.ReactNode }) {
+  return (
+    <nav
+      aria-label="Surface navigation"
+      data-testid="workspace-surface-navigation"
+      className="pointer-events-auto"
+    >
+      {children}
+    </nav>
+  );
 }
 
 function disclosureEntries(items: WorkspacePresentationItem[]): CapabilityDisclosureMenuEntry[] {
@@ -90,6 +114,93 @@ function UnavailableCapability({ title }: { title: string }) {
 }
 
 /**
+ * The capability dock (`#1051`): direct entries for what earned presence, More
+ * for the rest. Rendered only at the capability root — a pushed detail has its
+ * own page and its own Back, so a global capability switcher over it would be
+ * a second navigation owner answering to a depth it does not belong to.
+ */
+function CapabilityDock({
+  directItems,
+  discoverableItems,
+  activeCapabilityId,
+  onToolChange,
+}: {
+  directItems: WorkspacePresentationItem[];
+  discoverableItems: WorkspacePresentationItem[];
+  activeCapabilityId: CapabilityId;
+  onToolChange: (tool: CapabilityId) => void;
+}) {
+  return (
+    <nav
+      aria-label="Workspace capabilities"
+      className="pointer-events-auto flex items-center gap-1 rounded-full bg-background px-1.5 py-1.5 shadow-[var(--elevation-floating)]"
+    >
+      {directItems.map((item) => {
+        const binding = bindingFor(item)!;
+        const Icon = binding.icon;
+        const isActive = item.snapshot.id === activeCapabilityId;
+        return (
+          <button
+            key={item.snapshot.id}
+            id={`workspace-capability-${item.snapshot.id}`}
+            type="button"
+            aria-pressed={isActive}
+            aria-label={item.snapshot.title}
+            title={item.snapshot.title}
+            data-testid={`workspace-tool-${item.snapshot.id}`}
+            data-capability-state={item.snapshot.state}
+            data-capability-presence={item.presence.level}
+            onClick={() => onToolChange(item.snapshot.id)}
+            className={cn(
+              'relative flex size-[length:var(--dock-target)] shrink-0 items-center justify-center rounded-[var(--radius-md)] transition-colors duration-[var(--motion-shell-duration)] ease-[var(--motion-shell-ease)]',
+              isActive ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
+            )}
+          >
+            <Icon className="size-[length:var(--icon-md)]" aria-hidden />
+            {/* The open capability is marked by a dot, not by filling the
+                target. It is always rendered so the row's geometry does
+                not shift between states. */}
+            <span
+              aria-hidden
+              className={cn(
+                'absolute bottom-0.5 size-1 rounded-full',
+                isActive ? 'bg-foreground' : 'bg-transparent',
+              )}
+            />
+          </button>
+        );
+      })}
+
+      {discoverableItems.length > 0 ? (
+        <CapabilityDisclosureMenu
+          entries={disclosureEntries(discoverableItems)}
+          onSelect={onToolChange}
+          label="Workspace capabilities"
+          testIdPrefix="workspace-capability-picker"
+          trigger={
+            /* `+` is capability disclosure, never "create". Its name says
+               so in both the accessible name and the tooltip, and what it
+               opens is the same capability list the row's icons come from —
+               `entries` above is built from capability snapshots, so the
+               menu cannot become a resource picker without this line
+               changing too (#1051 criterion 7). */
+            <button
+              type="button"
+              aria-label="More workspace capabilities"
+              title="More workspace capabilities"
+              data-testid="workspace-capability-more"
+              className="flex size-[length:var(--dock-target)] shrink-0 items-center justify-center rounded-[var(--radius-md)] text-muted-foreground transition-colors duration-[var(--motion-shell-duration)] ease-[var(--motion-shell-ease)] hover:text-foreground"
+            >
+              <Plus className="size-[length:var(--icon-md)]" aria-hidden />
+            </button>
+          }
+        />
+      ) : null}
+    </nav>
+  );
+}
+
+/**
  * Workspace framework: semantic capabilities resolve first, then a bounded
  * Nession-owned presentation model decides what earns direct presence and what
  * stays progressively discoverable through More.
@@ -99,6 +210,7 @@ export function WorkspaceShell({
   activeCapabilityId,
   depth = NO_DEPTH_CONTROL,
   pushed = false,
+  surfaceAction,
 }: WorkspaceShellProps) {
   const resolution = resolveWorkspaceCapabilities(ctx);
   const presences = resolveCapabilityPresences(resolution.snapshots, {
@@ -132,6 +244,10 @@ export function WorkspaceShell({
   // its own page and its own Back, so a global capability switcher over it would
   // be a second navigation owner answering to a depth it does not belong to.
   const showDock = hasNavigation && !pushed;
+  // `#1204`: the surface-leave action answers to a different axis than the
+  // dock — a pushed depth hides *capability* navigation, never the route back
+  // to the peer surface. Web only; the App's leave is its page header's Back.
+  const showSurfaceAction = ctx.experience === 'web' && surfaceAction !== undefined;
 
   return (
     <div
@@ -162,80 +278,23 @@ export function WorkspaceShell({
         )}
       </div>
 
-      {showDock ? (
+      {showDock || showSurfaceAction ? (
+        /* Bottom controls, centered as one group (#1204 §3): surface navigation
+           adjacent to — never merged into — capability navigation. */
         <div
           data-testid="workspace-tool-bar"
           data-navigation-mode="contextual"
-          className="pointer-events-none absolute inset-x-0 bottom-[var(--shell-space-3)] z-10 flex justify-center px-4"
+          className="pointer-events-none absolute inset-x-0 bottom-[var(--shell-space-3)] z-10 flex items-center justify-center gap-[length:var(--shell-space-2)] px-4"
         >
-          <nav
-            aria-label="Workspace capabilities"
-            className="pointer-events-auto flex items-center gap-1 rounded-full bg-background px-1.5 py-1.5 shadow-[var(--elevation-floating)]"
-          >
-            {directItems.map((item) => {
-              const binding = bindingFor(item)!;
-              const Icon = binding.icon;
-              const isActive = item.snapshot.id === activeCapabilityId;
-              return (
-                <button
-                  key={item.snapshot.id}
-                  id={`workspace-capability-${item.snapshot.id}`}
-                  type="button"
-                  aria-pressed={isActive}
-                  aria-label={item.snapshot.title}
-                  title={item.snapshot.title}
-                  data-testid={`workspace-tool-${item.snapshot.id}`}
-                  data-capability-state={item.snapshot.state}
-                  data-capability-presence={item.presence.level}
-                  onClick={() => ctx.onToolChange(item.snapshot.id)}
-                  className={cn(
-                    'relative flex size-[length:var(--dock-target)] shrink-0 items-center justify-center rounded-[var(--radius-md)] transition-colors duration-[var(--motion-shell-duration)] ease-[var(--motion-shell-ease)]',
-                    isActive
-                      ? 'text-foreground'
-                      : 'text-muted-foreground hover:text-foreground',
-                  )}
-                >
-                  <Icon className="size-[length:var(--icon-md)]" aria-hidden />
-                  {/* The open capability is marked by a dot, not by filling the
-                      target. It is always rendered so the row's geometry does
-                      not shift between states. */}
-                  <span
-                    aria-hidden
-                    className={cn(
-                      'absolute bottom-0.5 size-1 rounded-full',
-                      isActive ? 'bg-foreground' : 'bg-transparent',
-                    )}
-                  />
-                </button>
-              );
-            })}
-
-            {discoverableItems.length > 0 ? (
-              <CapabilityDisclosureMenu
-                entries={disclosureEntries(discoverableItems)}
-                onSelect={ctx.onToolChange}
-                label="Workspace capabilities"
-                testIdPrefix="workspace-capability-picker"
-                trigger={
-                  /* `+` is capability disclosure, never "create". Its name says
-                     so in both the accessible name and the tooltip, and what it
-                     opens is the same capability list the row's icons come from —
-                     `entries` above is built from capability snapshots, so the
-                     menu cannot become a resource picker without this line
-                     changing too (#1051 criterion 7). */
-                  <button
-                    type="button"
-                    aria-label="More workspace capabilities"
-                    title="More workspace capabilities"
-                    data-testid="workspace-capability-more"
-                    className="flex size-[length:var(--dock-target)] shrink-0 items-center justify-center rounded-[var(--radius-md)] text-muted-foreground transition-colors duration-[var(--motion-shell-duration)] ease-[var(--motion-shell-ease)] hover:text-foreground"
-                  >
-                    <Plus className="size-[length:var(--icon-md)]" aria-hidden />
-                  </button>
-                }
-              />
-            ) : null}
-          </nav>
+          {showSurfaceAction ? <SurfaceNavigation>{surfaceAction}</SurfaceNavigation> : null}
+          {showDock ? (
+            <CapabilityDock
+              directItems={directItems}
+              discoverableItems={discoverableItems}
+              activeCapabilityId={activeCapabilityId}
+              onToolChange={ctx.onToolChange}
+            />
+          ) : null}
         </div>
       ) : null}
     </div>
