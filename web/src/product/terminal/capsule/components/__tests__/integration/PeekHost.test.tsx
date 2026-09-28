@@ -5,6 +5,10 @@ import { PeekHost } from '../../PeekHost';
 import type { CapsuleCapabilityProjection } from '@/product/terminal/capsule/types';
 
 const sendText = vi.fn();
+/** Renders a semantic key as `semantic:<name>`, the seam both key tests use. */
+const sendPhysKey = vi.fn((key: { semanticKey?: string; seq?: string }) => {
+  sendText(key.semanticKey ? `semantic:${key.semanticKey}` : key.seq);
+});
 
 function projection(
   overrides: Partial<CapsuleCapabilityProjection> = {},
@@ -24,9 +28,18 @@ function projection(
 /**
  * The frame takes the capsule's transport and hands it to whatever body it
  * draws. Nothing here exercises it — Terminal Keys' own test does that.
+ *
+ * Both senders are supplied because that is the shape the real host has:
+ * `TerminalSurface` always passes `sendPhysKey`, and the body's fallback to raw
+ * bytes exists only for a host that omits it. Leaving it out here made a test
+ * about *frame survival* quietly exercise a configuration production cannot
+ * reach — and, once the key row stopped carrying sequences of its own (#1096
+ * criterion 4), that configuration stopped being able to send anything at all.
  */
 function frame(value: CapsuleCapabilityProjection) {
-  return <PeekHost projection={value} sendText={sendText} disabled={false} />;
+  return (
+    <PeekHost projection={value} sendText={sendText} sendPhysKey={sendPhysKey} disabled={false} />
+  );
 }
 
 function renderFrame(value: CapsuleCapabilityProjection) {
@@ -309,6 +322,8 @@ describe('capability projection frame', () => {
 
     rerender(frame(keysPeek));
     await userEvent.click(screen.getByTestId('phys-key-Esc'));
-    expect(sendText).toHaveBeenCalledWith('\x1b');
+    // Esc routes through the semantic seam like every other named key in the
+    // row (#1096 criterion 4) — the row owns no escape of its own.
+    expect(sendText).toHaveBeenCalledWith('semantic:Escape');
   });
 });

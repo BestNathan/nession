@@ -38,6 +38,38 @@ function isSemanticKey(key: string): key is TerminalSemanticKey {
   return SEMANTIC_KEYS.has(key);
 }
 
+/** Cursor keys whose final byte is the same in both cursor modes. */
+type CursorKey = 'ArrowUp' | 'ArrowDown' | 'ArrowLeft' | 'ArrowRight' | 'Home' | 'End';
+
+const CURSOR_KEY_FINAL: Record<CursorKey, string> = {
+  ArrowUp: 'A',
+  ArrowDown: 'B',
+  ArrowLeft: 'D',
+  ArrowRight: 'C',
+  Home: 'H',
+  End: 'F',
+};
+
+function isCursorKey(key: TerminalSemanticKey): key is CursorKey {
+  return key in CURSOR_KEY_FINAL;
+}
+
+/**
+ * Keys whose encoding does not vary with the cursor mode. Exhaustive by type,
+ * so adding a TerminalSemanticKey without deciding its sequence is a compile
+ * error rather than a key that silently sends nothing.
+ */
+const FIXED_KEY_SEQUENCES: Record<Exclude<TerminalSemanticKey, CursorKey>, string> = {
+  PageUp: '\x1b[5~',
+  PageDown: '\x1b[6~',
+  Delete: '\x1b[3~',
+  Escape: '\x1b',
+  Tab: '\t',
+  Enter: '\r',
+  Backspace: '\x7f',
+  Space: ' ',
+};
+
 /**
  * Single authority for PTY-bound bytes: keyboard semantics, paste, and committed
  * text. UI adapters call this instead of hand-writing ANSI (#1096).
@@ -70,25 +102,22 @@ export class TerminalInteractionController {
   }
 
   /**
-   * Route a semantic key through xterm's keyboard handler so application cursor
-   * mode and keypad mode match a physical keyboard.
+   * Encode a semantic key for the terminal's *current* mode, so App/mobile
+   * controls produce the bytes a physical keyboard would (#1096).
+   *
+   * This cannot be delegated by dispatching a synthetic KeyboardEvent: an event
+   * built from KeyboardEventInit carries `keyCode` 0, xterm's key evaluator is
+   * keyCode-driven, so it matched nothing and emitted nothing — silently, since
+   * an unrecognised key is indistinguishable from a key that was never pressed.
+   * The mode comes from xterm's own proposed `modes` API, and the bytes go back
+   * through `input()` so they take the same onData path — and the same
+   * `disableStdin` gate — as real typing.
    */
   sendSemanticKey(key: TerminalSemanticKey): void {
-    const helper = this.helperTextarea();
-    if (!helper) {
-      return;
-    }
-    const init: KeyboardEventInit = {
-      key,
-      code: semanticKeyToCode(key),
-      bubbles: true,
-      cancelable: true,
-    };
-    helper.dispatchEvent(new KeyboardEvent('keydown', init));
-    if (key === 'Enter' || key === 'Tab' || key === 'Backspace' || key === 'Delete') {
-      helper.dispatchEvent(new KeyboardEvent('keypress', init));
-    }
-    helper.dispatchEvent(new KeyboardEvent('keyup', init));
+    const bytes = isCursorKey(key)
+      ? `\x1b${this.terminal.modes.applicationCursorKeysMode ? 'O' : '['}${CURSOR_KEY_FINAL[key]}`
+      : FIXED_KEY_SEQUENCES[key];
+    this.terminal.input(bytes, true);
   }
 
   trySendSemanticKey(key: string): boolean {
@@ -107,44 +136,4 @@ export class TerminalInteractionController {
     return () => disposable.dispose();
   }
 
-  private helperTextarea(): HTMLTextAreaElement | null {
-    return this.terminal.element?.querySelector<HTMLTextAreaElement>('.xterm-helper-textarea') ?? null;
-  }
-}
-
-function semanticKeyToCode(key: TerminalSemanticKey): string {
-  switch (key) {
-    case 'ArrowUp':
-      return 'ArrowUp';
-    case 'ArrowDown':
-      return 'ArrowDown';
-    case 'ArrowLeft':
-      return 'ArrowLeft';
-    case 'ArrowRight':
-      return 'ArrowRight';
-    case 'Home':
-      return 'Home';
-    case 'End':
-      return 'End';
-    case 'PageUp':
-      return 'PageUp';
-    case 'PageDown':
-      return 'PageDown';
-    case 'Escape':
-      return 'Escape';
-    case 'Tab':
-      return 'Tab';
-    case 'Enter':
-      return 'Enter';
-    case 'Backspace':
-      return 'Backspace';
-    case 'Delete':
-      return 'Delete';
-    case 'Space':
-      return 'Space';
-    default: {
-      const _exhaustive: never = key;
-      return _exhaustive;
-    }
-  }
 }

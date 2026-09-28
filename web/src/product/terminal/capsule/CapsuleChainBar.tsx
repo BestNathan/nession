@@ -18,14 +18,19 @@
  * `design/tokens/experience/{web,app}.json`.
  */
 import { Button } from '@/components/ui/button';
-import { formatSeq } from '@/product/terminal/capsule/physKeys';
+import { formatKey, type PhysKey } from '@/product/terminal/capsule/physKeys';
 import {
   capsuleChainBarClass,
   capsuleMiniButtonClass,
 } from '@/product/terminal/capsule/capsuleStyles';
 
 interface CapsuleChainBarProps {
-  buffer: readonly string[];
+  /**
+   * The keys in the chain, not their bytes — a semantic key has no bytes until
+   * it is sent, and the strip names the key the user pressed rather than a
+   * sequence that depends on a mode this component cannot see (#1096).
+   */
+  buffer: readonly PhysKey[];
   onCancel: () => void;
   onSend: () => void;
 }
@@ -34,7 +39,9 @@ export function CapsuleChainBar({ buffer, onCancel, onSend }: CapsuleChainBarPro
   return (
     <div data-testid="capsule-chain-bar" className={capsuleChainBarClass}>
       <span className="text-muted-foreground">Chain:</span>
-      <code className="font-mono text-primary">{buffer.map(formatSeq).join(' ')}</code>
+      <code data-testid="capsule-chain-keys" className="font-mono text-primary">
+        {buffer.map(formatKey).join(' ')}
+      </code>
       <div className="flex-1" />
       <Button variant="ghost" size="sm" className={capsuleMiniButtonClass} onClick={onCancel}>
         Cancel

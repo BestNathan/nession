@@ -51,7 +51,7 @@ export function PeekHost({
   /** How a capability's body reaches the terminal — the capsule owns this. */
   sendText: (text: string) => void;
   sendPhysKey?: (key: {
-    seq: string;
+    seq?: string;
     semanticKey?: import('@/platform/terminal-runtime/interaction/TerminalInteractionController').TerminalSemanticKey;
   }) => void;
   disabled: boolean;
