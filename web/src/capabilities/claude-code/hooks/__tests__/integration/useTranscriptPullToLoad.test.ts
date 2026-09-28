@@ -81,4 +81,28 @@ describe('useTranscriptPullToLoad', () => {
 
     expect(onCommitLoad).not.toHaveBeenCalled();
   });
+
+  it('commits load when the wheel overscrolls up at the top edge', () => {
+    const onCommitLoad = vi.fn();
+    const scrollEl = document.createElement('div');
+    scrollEl.scrollTop = 0;
+    const scrollRef = { current: scrollEl } as RefObject<HTMLDivElement>;
+
+    const { result } = renderHook(() =>
+      useTranscriptPullToLoad({ scrollRef, enabled: true, onCommitLoad }),
+    );
+
+    const wheelEvent = {
+      deltaY: -20,
+      preventDefault: vi.fn(),
+      currentTarget: scrollEl,
+    } as unknown as Parameters<NonNullable<typeof result.current.pullHandlers.onWheel>>[0];
+    act(() => {
+      result.current.pullHandlers.onWheel(wheelEvent);
+      result.current.pullHandlers.onWheel(wheelEvent);
+      result.current.pullHandlers.onWheel(wheelEvent);
+    });
+
+    expect(onCommitLoad).toHaveBeenCalledTimes(1);
+  });
 });

@@ -49,18 +49,24 @@ export function ConversationTranscript({
 
   const canPullOlder =
     view.hasMore && !view.loadingOlder && view.items.length > 0 && view.state === 'ready';
-  const { pullPx, progress, isPulling, pullHandlers } = useTranscriptPullToLoad({
-    scrollRef,
-    enabled: canPullOlder,
-    onCommitLoad: captureAnchorAndLoadOlder,
-  });
+  const { pullPx, progress, isPulling, atTopEdge, syncTopEdge, pullHandlers } =
+    useTranscriptPullToLoad({
+      scrollRef,
+      enabled: canPullOlder,
+      onCommitLoad: captureAnchorAndLoadOlder,
+    });
+
+  const handleScroll = () => {
+    syncTopEdge();
+    onScroll();
+  };
 
   return (
     <div
       ref={scrollRef}
       data-testid="conversation-transcript-scroll"
-      className={cn('min-h-0 flex-1 overflow-y-auto p-4 touch-pan-y', isPulling && 'overscroll-none')}
-      onScroll={onScroll}
+      className={cn('min-h-0 flex-1 overflow-y-auto p-4 touch-pan-y', isPulling && 'touch-none overscroll-none')}
+      onScroll={handleScroll}
       {...pullHandlers}
     >
       <div
@@ -69,11 +75,17 @@ export function ConversationTranscript({
       >
         {canPullOlder ? (
           <div
-            className="flex items-end justify-center overflow-hidden transition-[height] duration-75"
-            style={{ height: pullPx > 0 ? pullPx : 0 }}
+            className="flex flex-col items-center justify-end overflow-hidden transition-[height] duration-75"
+            style={{ height: pullPx > 0 ? pullPx : atTopEdge ? 28 : 0 }}
             data-testid="conversation-pull-indicator"
           >
-            <TranscriptPullToLoadIndicator progress={progress} />
+            {pullPx > 0 ? (
+              <TranscriptPullToLoadIndicator progress={progress} />
+            ) : atTopEdge ? (
+              <p className="pb-1 text-[10px] text-muted-foreground" data-testid="conversation-pull-hint">
+                Pull down for earlier messages
+              </p>
+            ) : null}
           </div>
         ) : null}
       {view.loadingOlder ? (

@@ -1,7 +1,15 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, type RefObject } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  type MutableRefObject,
+  type RefObject,
+} from 'react';
+
+import { TRANSCRIPT_TOP_EDGE_PX } from './transcriptScrollConstants';
 
 const BOTTOM_AFFINITY_PX = 48;
-const TOP_LOAD_THRESHOLD_PX = 80;
 
 type TopSentinelObserverArgs = {
   root: HTMLDivElement;
@@ -21,10 +29,29 @@ function installTopSentinelObserver(args: TopSentinelObserverArgs): () => void {
       }
       onNearTop();
     },
-    { root, rootMargin: `${TOP_LOAD_THRESHOLD_PX}px 0px 0px 0px`, threshold: 0 },
+    { root, rootMargin: `${TRANSCRIPT_TOP_EDGE_PX}px 0px 0px 0px`, threshold: 0 },
   );
   observer.observe(sentinel);
   return () => observer.disconnect();
+}
+
+type OlderFetchRefs = {
+  loadingOlderRef: RefObject<boolean>;
+  olderFetchArmedRef: MutableRefObject<boolean>;
+  pendingAnchorRef: MutableRefObject<{ scrollHeight: number; scrollTop: number } | null>;
+  loadOlderRef: MutableRefObject<() => void>;
+};
+
+function requestOlderPage(el: HTMLDivElement, refs: OlderFetchRefs): void {
+  refs.pendingAnchorRef.current = { scrollHeight: el.scrollHeight, scrollTop: el.scrollTop };
+  refs.loadOlderRef.current();
+  queueMicrotask(() => {
+    if (refs.loadingOlderRef.current) {
+      refs.olderFetchArmedRef.current = true;
+    } else {
+      refs.pendingAnchorRef.current = null;
+    }
+  });
 }
 
 /**
@@ -81,13 +108,16 @@ export function useTranscriptScroll({
       loadingOlderRef.current ||
       olderFetchArmedRef.current ||
       !hasMoreRef.current ||
-      el.scrollTop > TOP_LOAD_THRESHOLD_PX
+      el.scrollTop > TRANSCRIPT_TOP_EDGE_PX
     ) {
       return;
     }
-    pendingAnchorRef.current = { scrollHeight: el.scrollHeight, scrollTop: el.scrollTop };
-    olderFetchArmedRef.current = true;
-    loadOlderRef.current();
+    requestOlderPage(el, {
+      loadingOlderRef,
+      olderFetchArmedRef,
+      pendingAnchorRef,
+      loadOlderRef,
+    });
   }, []);
 
   const updateFollowingLatest = useCallback(() => {
@@ -122,20 +152,17 @@ export function useTranscriptScroll({
       el.scrollTop = el.scrollHeight;
       initialScrollDoneRef.current = true;
       followingLatestRef.current = true;
-      maybeLoadOlderNearTop(); // short first page: IO may have fired too early (#1190)
+      maybeLoadOlderNearTop();
       return;
+    }
+
+    if (!loadingOlder && hasMore) {
+      maybeLoadOlderNearTop();
     }
 
     if (grew && followingLatestRef.current) {
       el.scrollTop = el.scrollHeight;
     }
-  }, [itemCount, maybeLoadOlderNearTop]);
-
-  useLayoutEffect(() => {
-    if (loadingOlder || !hasMore || itemCount === 0) {
-      return;
-    }
-    maybeLoadOlderNearTop();
   }, [hasMore, itemCount, loadingOlder, maybeLoadOlderNearTop]);
 
   useEffect(() => {
@@ -155,7 +182,6 @@ export function useTranscriptScroll({
 
   const onScroll = () => {
     updateFollowingLatest();
-    maybeLoadOlderNearTop();
   };
 
   return {
