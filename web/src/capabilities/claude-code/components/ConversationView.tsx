@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { MessageSquare } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { ConversationViewState } from '../hooks/useConversation';
@@ -176,6 +176,74 @@ function StateNotice({
   );
 }
 
+/**
+ * How this section lays out, which is a width decision before it is anything
+ * else — `master-detail` for Web, `push` for App (#1120).
+ */
+export type ConversationLayout = 'master-detail' | 'push';
+
+/**
+ * Push-layout list surface: bounded scroll owner (#1189).
+ * Ref stays on this component so tsc accepts the scroll container assignment.
+ */
+function PushConversationList({
+  candidates,
+  open,
+  showList,
+  layout,
+  onOpen,
+  onBack,
+}: {
+  candidates: Candidate[];
+  open: string | null;
+  showList: boolean;
+  layout: ConversationLayout;
+  onOpen: (claudeSessionId: string) => void;
+  onBack?: () => void;
+}) {
+  const listScrollRef = useRef<HTMLDivElement>(null);
+  const savedListScrollTop = useRef(0);
+
+  const rememberListScroll = () => {
+    const el = listScrollRef.current;
+    if (el) {
+      savedListScrollTop.current = el.scrollTop;
+    }
+  };
+
+  useLayoutEffect(() => {
+    if (layout !== 'push' || (!showList && open !== null)) {
+      return;
+    }
+    const el = listScrollRef.current;
+    if (!el) {
+      return;
+    }
+    el.scrollTop = savedListScrollTop.current;
+  }, [layout, open, showList]);
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div
+        ref={listScrollRef}
+        data-testid="conversation-list-scroll"
+        className="min-h-0 flex-1 overflow-y-auto"
+        onScroll={rememberListScroll}
+      >
+        <ConversationList
+          candidates={candidates}
+          open={open}
+          onOpen={(id) => {
+            rememberListScroll();
+            onOpen(id);
+          }}
+          onBack={onBack}
+        />
+      </div>
+    </div>
+  );
+}
+
 function ConversationList({
   candidates,
   open,
@@ -262,22 +330,6 @@ function ConversationHeader({
 }
 
 /**
- * How this section lays out, which is a width decision before it is anything
- * else.
- *
- * `master-detail` keeps the list and the conversation on screen together, which
- * is what a Web viewport has the room for and what `#1120` item 8 asks for: the
- * two are read against each other — you pick a conversation *by* comparing it to
- * the one you have open.
- *
- * `push` shows one at a time, and is what App uses. `#1120` item 9 is explicit
- * that App must **not** get the master/detail grid shrunk down; the correct App
- * behaviour is the one this component already had before there was a second
- * layout, so `push` is the old path rather than a new one.
- */
-type ConversationLayout = 'master-detail' | 'push';
-
-/**
  * The Session's Claude conversation, or the list to choose one from.
  *
  * Every state the provider can answer with has its own rendering, and none of
@@ -305,6 +357,20 @@ export function ConversationView({
   // request. They agree whenever a selection succeeded, and the provider's is
   // the one that is true when it did not.
   const open = view.conversation?.claude_session_id ?? null;
+
+  const renderPushList = (onBack?: () => void) => (
+    <PushConversationList
+      candidates={view.candidates}
+      open={open}
+      showList={showList}
+      layout={layout}
+      onOpen={(id) => {
+        setShowList(false);
+        onSelect(id);
+      }}
+      onBack={onBack}
+    />
+  );
 
   if (view.loading) {
     return <StateNotice testId="conversation-loading">Loading conversation...</StateNotice>;
@@ -377,22 +443,15 @@ export function ConversationView({
   }
 
   if (showList || open === null) {
-    return (
-      <ConversationList
-        candidates={view.candidates}
-        open={open}
-        onOpen={(id) => {
-          setShowList(false);
-          onSelect(id);
-        }}
-        onBack={() => setShowList(false)}
-      />
-    );
+    return renderPushList(() => setShowList(false));
   }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="conversation-open">
-      <ConversationHeader view={view} onShowList={() => setShowList(true)} />
+      <ConversationHeader
+        view={view}
+        onShowList={() => setShowList(true)}
+      />
       <ConversationTranscript view={view} onLoadOlder={onLoadOlder} />
     </div>
   );

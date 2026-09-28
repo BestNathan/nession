@@ -146,6 +146,70 @@ describe('useConversation', () => {
     }
   });
 
+  it('does not drop an older page when a poll overlaps (#1190)', async () => {
+    vi.useFakeTimers();
+    try {
+      const olderDeferred = deferred<ClaudeCodeConversationResponse>();
+      vi.mocked(claudeCodeApi.claudeCodeConversation)
+        .mockResolvedValueOnce(
+          response({
+            items: [message('c')],
+            next_cursor: '1',
+            has_more: true,
+          }),
+        )
+        .mockReturnValueOnce(olderDeferred.promise)
+        .mockResolvedValueOnce(response({ items: [message('c')] }));
+
+      const { result } = renderHook(() => useConversation({ agentId: 'a', sessionId: 'a:s' }));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(result.current.view.items.map((i) => i.id)).toEqual(['c']);
+
+      let loadPromise: Promise<void> = Promise.resolve();
+      act(() => {
+        loadPromise = result.current.loadOlder();
+      });
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3100);
+      });
+
+      await act(async () => {
+        olderDeferred.resolve(response({ items: [message('a')], next_cursor: null }));
+        await loadPromise;
+      });
+
+      expect(result.current.view.items.map((i) => i.id)).toEqual(['a', 'c']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps readable items when older pagination fails (#1190)', async () => {
+    vi.mocked(claudeCodeApi.claudeCodeConversation)
+      .mockResolvedValueOnce(
+        response({
+          items: [message('c')],
+          next_cursor: '1',
+          has_more: true,
+        }),
+      )
+      .mockRejectedValueOnce(new Error('older failed'));
+
+    const { result } = renderHook(() => useConversation({ agentId: 'a', sessionId: 'a:s' }));
+    await waitFor(() => expect(result.current.view.items.map((i) => i.id)).toEqual(['c']));
+
+    await act(async () => {
+      await result.current.loadOlder();
+    });
+
+    expect(result.current.view.items.map((i) => i.id)).toEqual(['c']);
+    expect(result.current.view.olderError).toBe('older failed');
+    expect(result.current.view.error).toBeNull();
+  });
+
   it('does not poll a conversation that has stopped', async () => {
     // `inactive` means Claude has finished, and asking again forever would be
     // traffic for a file that is not being written to.
