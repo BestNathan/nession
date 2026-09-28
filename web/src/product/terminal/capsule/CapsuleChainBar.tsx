@@ -39,7 +39,9 @@ export function CapsuleChainBar({ buffer, onCancel, onSend }: CapsuleChainBarPro
   return (
     <div data-testid="capsule-chain-bar" className={capsuleChainBarClass}>
       <span className="text-muted-foreground">Chain:</span>
-      <code className="font-mono text-primary">{buffer.map(formatKey).join(' ')}</code>
+      <code data-testid="capsule-chain-keys" className="font-mono text-primary">
+        {buffer.map(formatKey).join(' ')}
+      </code>
       <div className="flex-1" />
       <Button variant="ghost" size="sm" className={capsuleMiniButtonClass} onClick={onCancel}>
         Cancel

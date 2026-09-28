@@ -96,6 +96,11 @@ describe('Terminal Keys accessory', () => {
     await waitFor(() => {
       expect(screen.getByTestId('capsule-chain-bar')).toBeInTheDocument();
     });
+    // The strip names the key. It used to render the key's *sequence* through a
+    // table that mapped escapes back to names — and `Shift` has no sequence,
+    // because it sends nothing, so the strip read `\xNaN` for the one key the
+    // chord is built from.
+    expect(screen.getByTestId('capsule-chain-keys')).toHaveTextContent(/^Shift$/);
     await userEvent.pointer({ target: shift, keys: '[/MouseLeft]' });
     await userEvent.click(screen.getByTestId('phys-key-Del'));
     await userEvent.click(
@@ -135,7 +140,10 @@ describe('Terminal Keys accessory', () => {
       });
       fireEvent.pointerUp(screen.getByTestId('phys-key-↑'));
 
-      expect(screen.getByTestId('capsule-chain-bar')).toBeInTheDocument();
+      // The strip names the arrow rather than the escape it will become — the
+      // sequence is not knowable until it is sent, and is the terminal's to
+      // decide.
+      expect(screen.getByTestId('capsule-chain-keys')).toHaveTextContent(/^↑$/);
 
       fireEvent.pointerDown(screen.getByTestId('phys-key-Del'));
       act(() => {

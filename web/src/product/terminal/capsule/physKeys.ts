@@ -51,24 +51,17 @@ export const QUICK_MOBILE_KEYS: PhysKey[] = [
   { label: 'Ctrl+C', seq: '\x03' },
 ];
 
-export const SEQ_LABELS: Record<string, string> = {
-  '\x1b': 'Esc',
-  '\t': 'Tab',
-  '\r': 'Enter',
-  ' ': 'Space',
-  '\x03': 'Ctrl-C',
-};
-
-export function formatSeq(seq: string): string {
-  return SEQ_LABELS[seq] ?? (seq.length === 1 ? seq : `\\x${seq.charCodeAt(0).toString(16)}`);
-}
-
 /**
- * How a key reads in the chain strip.
+ * How a key reads in the chain strip: its own label, which is also what the
+ * button the user pressed said.
  *
- * A semantic key has no sequence to render — that is the point of it — so it
- * shows its own label, which is also what the button the user pressed said.
+ * A key *name* is the only honest thing to show. It used to render the key's
+ * sequence, through a table that mapped escapes back to names — so a semantic
+ * key, which has no sequence by construction, had nothing to render, and
+ * `Shift`, whose sequence is empty because it sends nothing, came out as
+ * `\xNaN`. The table is gone with it: nothing here speaks in escapes any more
+ * (#1096 criterion 4).
  */
 export function formatKey(key: PhysKey): string {
-  return key.semanticKey ? key.label : formatSeq(key.seq);
+  return key.label;
 }
