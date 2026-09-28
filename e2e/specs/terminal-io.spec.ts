@@ -34,6 +34,45 @@ async function readTerminalBuffer(page: import('@playwright/test').Page): Promis
 }
 
 /**
+ * Which screen xterm is drawing to — `normal` or `alternate`.
+ *
+ * This is the one observable that separates the two attach transports, because
+ * it is the one tmux's *client* decides rather than the application. Under
+ * `AttachMode::plain` the client enters the alternate screen unconditionally
+ * (measured on 3.6b), so a plain shell sits on `alternate` and has no
+ * scrollback; under `control` the pane's own bytes arrive, a shell never asks
+ * for the alternate screen, and the same shell sits on `normal`. A test that
+ * asserts this is therefore a test about which transport the browser is on.
+ */
+async function readBufferType(page: import('@playwright/test').Page): Promise<string> {
+  return page.evaluate(() => {
+    const xtermEl = document.querySelector('.xterm');
+    const term = (xtermEl?.parentElement as { xtermInstance?: { buffer: { active: { type: string } } } } | null)
+      ?.xtermInstance;
+    if (!term) {
+      throw new Error('xtermInstance not mounted');
+    }
+    return term.buffer.active.type;
+  });
+}
+
+/**
+ * Put the pointer over the terminal grid and roll the wheel there.
+ *
+ * A real wheel event, not a synthesised xterm call: whether it scrolls locally
+ * or reaches the application is decided by `occlusionScroll`'s wheel handler,
+ * which only runs for an event that arrives the way a user's does.
+ */
+async function wheelOverTerminal(page: import('@playwright/test').Page, deltaY: number): Promise<void> {
+  const box = await page.locator('.xterm-screen').boundingBox();
+  if (!box) {
+    throw new Error('the terminal grid has no box');
+  }
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.wheel(0, deltaY);
+}
+
+/**
  * xterm's own grid — what the *browser* thinks the terminal is.
  *
  * That is not the same question as what the application thinks, which is the
@@ -511,6 +550,42 @@ test.describe('Terminal I/O', () => {
     await expect(async () => {
       expect(await countInBuffer(page, '^[OA')).toBeGreaterThan(before);
     }).toPass({ timeout: 15_000 });
+  });
+
+  test('the application, not tmux, owns the terminal the browser drives (#321 S3)', async ({ page }, testInfo) => {
+    // Two claims with one cause. The attach transport decides what xterm
+    // receives: tmux's own client rendering, or the pane's raw output. The
+    // buffer type is the observable that separates them, and the wheel is what
+    // the difference is *for* — #1096 criterion 7 and #321's scrollback goals
+    // are both unreachable while tmux's client sits in between.
+    //
+    // Both assertions fail against `AttachMode::plain`, which is what makes
+    // this a test about the transport rather than about the wheel: the shell
+    // would be on the alternate screen, and the wheel would be consumed by tmux
+    // instead of reaching the application.
+    test.skip(!process.env.CI, 'local only — runs in CI workflow only');
+    const SESSION_NAME = `e2e-transport-${testInfo.retry}`;
+    await createSession(page, SESSION_NAME);
+    await attachToSession(page, SESSION_NAME, 'Relay');
+    await waitForInteractiveShell(page);
+
+    // A shell asks for no alternate screen, so it is still on the normal
+    // buffer — which is the buffer that has scrollback at all.
+    expect(await readBufferType(page)).toBe('normal');
+
+    await submitTerminalCommand(page, ptyProbeInstaller());
+    await startPtyProbe(page, 'mouse-sgr');
+
+    // The probe asked for mouse tracking, so `shouldScrollLocally()` must hand
+    // the wheel to the application. What comes back is not `cat -v`'s doing:
+    // the *tty driver* echoes the bytes it receives, rendering ESC as `^[`, so
+    // an SGR report reads as `^[[<…`. No newline is needed — the same mechanism
+    // the arrow-key test above relies on.
+    await wheelOverTerminal(page, -120);
+    await expect
+      .poll(async () => countInBuffer(page, '^[[<'), { timeout: 15_000 })
+      .toBeGreaterThan(0);
+    await stopPtyProbe(page);
   });
 
   test('capsule arrow follows the cursor mode the PTY asked for (#1096)', async ({ page }, testInfo) => {
