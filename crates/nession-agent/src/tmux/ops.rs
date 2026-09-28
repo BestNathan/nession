@@ -202,6 +202,36 @@ fn send_keys_args<'a>(session: &'a str, keys: &'a str) -> [&'a str; 5] {
     ["send-keys", "-t", session, keys, "Enter"]
 }
 
+/// The argument vector for capturing a pane's content with its escapes kept:
+/// `capture-pane -t <session> -p -S <from> -E - -e`.
+///
+/// Every flag is load-bearing and each was a way to get this wrong:
+///
+/// - `-e` keeps the ANSI escape sequences. Without it xterm.js is handed plain
+///   text and the bootstrap loses every colour and cursor move.
+/// - `-S <from>` is where the capture starts, and it is counted **back from the
+///   bottom** rather than forward from the top — so the result is the visible
+///   screen plus up to that many lines above it, which is what a client
+///   attaching to a live session wants. `from` arrives already spelled `-N`.
+/// - `-E -` stops at the last line, so a pane that is not full is not padded
+///   out to an arbitrary height.
+///
+/// `from` is one entry, so the sign cannot be dropped at a call site and turn
+/// "the last N lines" into "from line N" — the mistake this arity prevents.
+fn capture_pane_args<'a>(session: &'a str, from: &'a str) -> [&'a str; 9] {
+    [
+        "capture-pane",
+        "-t",
+        session,
+        "-p",
+        "-S",
+        from,
+        "-E",
+        "-",
+        "-e",
+    ]
+}
+
 /// The query that resolves a client's name from the process that owns it.
 ///
 /// `detach-client -t` takes a **client** target, and a session name is not one
@@ -449,6 +479,48 @@ impl TmuxOps {
             output.status,
             String::from_utf8_lossy(&output.stderr).trim()
         )
+    }
+
+    /// The last `lines` lines of `session`'s active pane, escapes included, as
+    /// raw bytes — or `Ok(None)` when tmux answers successfully with nothing,
+    /// which is a session that exists and has no history yet.
+    ///
+    /// The three-state answer is the operation's, and it is deliberately not
+    /// collapsed: "nothing to capture" and "could not capture" are a client
+    /// that gets an empty prefill either way, but only one of them is worth a
+    /// line in a log.
+    ///
+    /// **The failure is returned rather than replaced.** This used to be a
+    /// free function in `util.rs` that resolved the process-wide tmux instead
+    /// of the injected one, so a caller holding a `TmuxDep` for a *different*
+    /// tmux would capture from the wrong server — silently, because the
+    /// capture still succeeded and still returned bytes (#991's boundary).
+    ///
+    /// Size is **not** read here. A caller that wants the pane's geometry asks
+    /// [`window_size`](Self::window_size) and decides for itself what a failure
+    /// to read it means; `util::capture_scrollback` is the one caller that
+    /// wants both and it says there why it falls back rather than propagating.
+    pub async fn capture_pane(&self, session: &str, lines: u32) -> Result<Option<Vec<u8>>> {
+        let from = format!("-{lines}");
+        let output = self
+            .cmd
+            .tokio()
+            .args(capture_pane_args(session, &from))
+            .stderr(std::process::Stdio::piped())
+            .output()
+            .await
+            .with_context(|| format!("failed to spawn tmux capture-pane for {session}"))?;
+        if !output.status.success() {
+            anyhow::bail!(
+                "tmux capture-pane -t {session} -S {from} failed: {} ({})",
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+        }
+        if output.stdout.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(output.stdout))
     }
 
     /// Detach the tmux client owned by `pid` — the one this backend spawned.
@@ -1071,7 +1143,8 @@ mod tests {
         let mut seen = String::new();
         while tokio::time::Instant::now() < deadline {
             if let Ok(Some((bytes, _, _))) =
-                super::super::util::capture_scrollback(guard.name(), 100).await
+                super::super::util::capture_scrollback(&super::TmuxDep::global(), guard.name(), 100)
+                    .await
             {
                 seen = String::from_utf8_lossy(&bytes).into_owned();
                 if seen.contains("step5-send-keys-ran") {

@@ -1197,8 +1197,13 @@ p2p_routes! { ctx, msg_type, payload_value;
                     warn!("agent: capture_preview lines too large: {}", payload.lines);
                     return ctx.err("lines_too_large", "lines exceeds 100000 ceiling");
                 }
-                match crate::tmux::util::capture_scrollback(&payload.session_name, payload.lines)
-                    .await
+                let capture_tmux = ctx.tmux.tmux_dep();
+                match crate::tmux::util::capture_scrollback(
+                    &capture_tmux,
+                    &payload.session_name,
+                    payload.lines,
+                )
+                .await
                 {
                     Ok(Some((bytes, cols, rows))) => {
                         use base64::Engine;
@@ -1440,13 +1445,17 @@ p2p_routes! { ctx, msg_type, payload_value;
                             // Capture scrollback BEFORE starting the live output stream.
                             // Done synchronously (not spawned) to guarantee it arrives
                             // before any live output from the control-mode attach.
-                            let scrollback_bytes =
-                                match crate::tmux::util::capture_scrollback(&session_name, 2000)
-                                    .await
-                                {
-                                    Ok(Some((bytes, _cols, _rows))) => bytes,
-                                    Ok(None) | Err(_) => Vec::new(),
-                                };
+                            let capture_tmux = ctx.tmux.tmux_dep();
+                            let scrollback_bytes = match crate::tmux::util::capture_scrollback(
+                                &capture_tmux,
+                                &session_name,
+                                2000,
+                            )
+                            .await
+                            {
+                                Ok(Some((bytes, _cols, _rows))) => bytes,
+                                Ok(None) | Err(_) => Vec::new(),
+                            };
 
                             // Send captured scrollback so xterm.js can pre-fill its buffer.
                             if !scrollback_bytes.is_empty() {
