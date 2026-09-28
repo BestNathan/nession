@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import type { EnvFileInfo } from '@/types';
 import { refKey } from '@/capabilities/env/model/envRef';
 
@@ -69,31 +69,45 @@ export interface EnvironmentScreen {
 export function useEnvironmentScreen(): EnvironmentScreen {
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [editor, setEditor] = useState<EditorTarget | null>(null);
-  const [dirty, setDirty] = useState(false);
+  const [dirty, setDirtyState] = useState(false);
   const [pending, setPending] = useState<(() => void) | null>(null);
 
-  const openEditor = useCallback((target: EditorTarget | null) => {
-    setEditor(target);
-    setDirty(false);
+  /**
+   * The guard decision reads a ref, not a render closure: the editor reports
+   * dirty from a passive effect, so a `leaveDepth` captured one render ago —
+   * the one the shell is still holding between the dirty commit and the
+   * effect that re-publishes the pushed entry — would otherwise observe a
+   * stale `false` and pop a dirty edit without confirming. Every writer goes
+   * through `setDirty`, which updates the ref synchronously.
+   */
+  const dirtyRef = useRef(false);
+  const setDirty = useCallback((next: boolean) => {
+    dirtyRef.current = next;
+    setDirtyState(next);
   }, []);
 
-  const guarded = useCallback(
-    (action: () => void) => {
-      if (dirty) {
-        setPending(() => action);
-      } else {
-        action();
-      }
+  const openEditor = useCallback(
+    (target: EditorTarget | null) => {
+      setEditor(target);
+      setDirty(false);
     },
-    [dirty],
+    [setDirty],
   );
+
+  const guarded = useCallback((action: () => void) => {
+    if (dirtyRef.current) {
+      setPending(() => action);
+    } else {
+      action();
+    }
+  }, []);
 
   const confirmGuard = useCallback(() => {
     const action = pending;
     setPending(null);
     setDirty(false);
     action?.();
-  }, [pending]);
+  }, [pending, setDirty]);
 
   const cancelGuard = useCallback(() => {
     setPending(null);
@@ -135,13 +149,16 @@ export function useEnvironmentScreen(): EnvironmentScreen {
     });
   }, [guarded, openEditor]);
 
-  const finishEdit = useCallback((selectKey?: string | null) => {
-    setEditor(null);
-    setDirty(false);
-    if (selectKey !== undefined) {
-      setSelectedKey(selectKey);
-    }
-  }, []);
+  const finishEdit = useCallback(
+    (selectKey?: string | null) => {
+      setEditor(null);
+      setDirty(false);
+      if (selectKey !== undefined) {
+        setSelectedKey(selectKey);
+      }
+    },
+    [setDirty],
+  );
 
   const leaveDepth = useCallback(() => {
     if (!editor) {
@@ -158,7 +175,7 @@ export function useEnvironmentScreen(): EnvironmentScreen {
     setEditor(null);
     setDirty(false);
     setPending(null);
-  }, []);
+  }, [setDirty]);
 
   return {
     selectedKey,

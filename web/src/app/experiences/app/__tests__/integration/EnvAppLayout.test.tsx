@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { Agent, EnvFileInfo, Session } from '@/types';
 import type {
@@ -109,6 +109,11 @@ describe('EnvAppLayout', () => {
     );
     view?.dispatch({ changes: { from: view.state.doc.length, insert: 'B=2\n' } });
     await waitFor(() => expect(screen.getByTestId('env-editor-dirty')).toBeInTheDocument());
+    // The badge renders from the editor's local draft, but the editor reports
+    // dirty to the screen hook from a passive effect — drain the work queue so
+    // the report has landed before invoking the depth's leave. (CI failed here
+    // under load: the dispatch's microtask beat the effect flush.)
+    await act(async () => {});
 
     pushed.current?.onLeave();
     const dialog = await screen.findByRole('alertdialog');
