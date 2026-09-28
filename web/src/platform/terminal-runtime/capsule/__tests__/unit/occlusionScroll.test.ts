@@ -89,6 +89,7 @@ describe('occlusionScroll helpers', () => {
     const terminal = {
       buffer: { active: activeBuffer },
       rows: 24,
+      modes: { mouseTrackingMode: 'none' },
       scrollToBottom: vi.fn(),
       scrollLines: vi.fn((lines: number) => {
         activeBuffer.viewportY = Math.max(0, activeBuffer.viewportY + lines);
@@ -118,6 +119,7 @@ describe('occlusionScroll helpers', () => {
     const terminal = {
       buffer: { active: { type: 'alternate', viewportY: 0, length: 24 } },
       rows: 24,
+      modes: { mouseTrackingMode: 'none' },
       scrollToBottom: vi.fn(),
       scrollLines: vi.fn(),
     } as unknown as import('@xterm/xterm').Terminal;
@@ -137,6 +139,65 @@ describe('occlusionScroll helpers', () => {
     expect(terminal.scrollLines).not.toHaveBeenCalled();
     expect(event.preventDefault).not.toHaveBeenCalled();
     expect(event.stopPropagation).not.toHaveBeenCalled();
+  });
+
+  it('leaves the wheel to an application that enabled mouse tracking (#1096)', () => {
+    // htop, `less`, vim with `set mouse=a` and Claude Code read the wheel
+    // themselves. Taking it for local history silently breaks them — and the
+    // buffer type cannot say whether they asked for mouse input, which is why
+    // this came from `terminal.modes` rather than from the proxy.
+    const terminal = {
+      buffer: { active: { type: 'normal', viewportY: 16, length: 40 } },
+      rows: 24,
+      modes: { mouseTrackingMode: 'vt200' },
+      scrollToBottom: vi.fn(),
+      scrollLines: vi.fn(),
+    } as unknown as import('@xterm/xterm').Terminal;
+    const host = {
+      style: { setProperty: vi.fn(), getPropertyValue: () => '48px' },
+      dataset: {} as DOMStringMap,
+    } as unknown as HTMLElement;
+    const occlusion = new CapsuleOcclusionScroll(terminal, host, () => 16);
+    const event = {
+      deltaY: -32,
+      deltaMode: 0,
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    } as unknown as WheelEvent;
+
+    // `true` is "not handled" — the event continues to xterm, which reports it
+    // to the application.
+    expect(occlusion.handleWheel(event)).toBe(true);
+    expect(terminal.scrollLines).not.toHaveBeenCalled();
+    expect(event.preventDefault).not.toHaveBeenCalled();
+    expect(event.stopPropagation).not.toHaveBeenCalled();
+  });
+
+  it('still takes the wheel when a normal-buffer app has not asked for the mouse (#1096)', () => {
+    // The same buffer shape as the test above, only the mouse mode differs —
+    // which is the whole point: buffer type alone would treat these two
+    // identically.
+    const terminal = {
+      buffer: { active: { type: 'normal', viewportY: 16, length: 40 } },
+      rows: 24,
+      modes: { mouseTrackingMode: 'none' },
+      scrollToBottom: vi.fn(),
+      scrollLines: vi.fn(),
+    } as unknown as import('@xterm/xterm').Terminal;
+    const host = {
+      style: { setProperty: vi.fn(), getPropertyValue: () => '48px' },
+      dataset: {} as DOMStringMap,
+    } as unknown as HTMLElement;
+    const occlusion = new CapsuleOcclusionScroll(terminal, host, () => 16);
+    const event = {
+      deltaY: -32,
+      deltaMode: 0,
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    } as unknown as WheelEvent;
+
+    expect(occlusion.handleWheel(event)).toBe(false);
+    expect(terminal.scrollLines).toHaveBeenCalled();
   });
 
   it('routes page scrolling through the same local history state machine', () => {
