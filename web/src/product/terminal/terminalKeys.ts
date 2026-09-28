@@ -60,9 +60,12 @@ export const terminalKeysProjection: CapsuleProjectionBinding = {
     createElement(TerminalKeysProjection, {
       sendSeq: sendText,
       sendPhysKey: (key) => {
+        // `seq` is absent on a semantic key by construction, so the two arms
+        // cannot both apply — and the fallback exists only for a host that
+        // cannot send semantic keys at all.
         if (key.semanticKey && sendPhysKey) {
           sendPhysKey(key);
-        } else {
+        } else if (key.seq) {
           sendText(key.seq);
         }
       },

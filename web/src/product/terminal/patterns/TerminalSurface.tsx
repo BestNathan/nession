@@ -69,7 +69,7 @@ export function TerminalSurface({
     });
   };
 
-  const capsuleSendPhysKey = (key: { seq: string; semanticKey?: TerminalSemanticKey }) => {
+  const capsuleSendPhysKey = (key: { seq?: string; semanticKey?: TerminalSemanticKey }) => {
     if (inputDisabled) {
       return;
     }
