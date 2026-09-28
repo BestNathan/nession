@@ -14,6 +14,7 @@ import { copyToClipboard } from '@/shared/lib/clipboard';
 import { cn } from '@/shared/lib/utils';
 import { Markdown } from '@/shared/markdown';
 import type { ConversationViewState } from '../hooks/useConversation';
+import { useTranscriptScroll } from '../hooks/useTranscriptScroll';
 import type { ClaudeCodeConversationResponse } from '../types';
 import { clockTime } from '../model/clockTime';
 
@@ -26,17 +27,8 @@ type Payload = NonNullable<Tool['input']>;
 /**
  * The transcript, from the newest page backwards.
  *
- * The one conversation renderer, shared by the Workspace and the Peek's overlay.
- * Exported and shared rather than drawn twice because `#1120` forbids "one chat
- * visual system for Peek and another for Workspace", and a second transcript
- * renderer is exactly how that happens. It also owns its own `overflow-y-auto`,
- * which the overlay needs — it must scroll itself and never the Terminal behind
- * it.
- *
- * The kind dispatch lives here and nowhere else. Since `#1167` the wire is a
- * tagged union, so the arm a client switches on is the arm it deserialized —
- * v1's flat `text` + `optional tool` allowed an item that was both and an item
- * that was neither, and the renderer had to guess which.
+ * Scroll-driven older pagination (#1190): no Load older button; the container
+ * owns vertical scroll and preserves anchor on prepend.
  */
 export function ConversationTranscript({
   view,
@@ -45,27 +37,54 @@ export function ConversationTranscript({
   view: ConversationViewState;
   onLoadOlder: () => void;
 }) {
+  const { scrollRef, topSentinelRef, onScroll, captureAnchorAndLoadOlder } = useTranscriptScroll({
+    conversationId: view.conversation?.claude_session_id ?? null,
+    itemCount: view.items.length,
+    hasMore: view.hasMore,
+    loadingOlder: view.loadingOlder,
+    onLoadOlder,
+  });
+
   return (
-    <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
-      {view.hasMore ? (
-        <Button
-          variant="outline"
-          size="sm"
-          data-testid="conversation-load-older"
-          disabled={view.loadingOlder}
-          onClick={() => onLoadOlder()}
+    <div
+      ref={scrollRef}
+      data-testid="conversation-transcript-scroll"
+      className="min-h-0 flex-1 overflow-y-auto p-4"
+      onScroll={onScroll}
+    >
+      {view.loadingOlder ? (
+        <p
+          className="flex items-center justify-center gap-2 pb-3 text-xs text-muted-foreground"
+          data-testid="conversation-loading-older"
+          role="status"
         >
-          {view.loadingOlder ? 'Loading...' : 'Load older'}
-        </Button>
-      ) : null}
-      {view.items.length === 0 ? (
-        <p className="flex items-center gap-2 text-sm text-muted-foreground">
-          <AlertCircle className="h-4 w-4" />
-          This conversation has no messages yet.
+          <Loader aria-hidden className="h-3.5 w-3.5 animate-spin" />
+          Loading earlier messages…
         </p>
-      ) : (
-        view.items.map((item) => <ItemView key={item.id} item={item} />)
-      )}
+      ) : null}
+      {view.olderError ? (
+        <div
+          className="flex flex-wrap items-center gap-2 pb-3 text-xs text-destructive"
+          data-testid="conversation-older-error"
+          role="alert"
+        >
+          <span>{view.olderError}</span>
+          <Button variant="outline" size="xs" type="button" onClick={() => captureAnchorAndLoadOlder()}>
+            Retry
+          </Button>
+        </div>
+      ) : null}
+      <div ref={topSentinelRef} className="h-px w-full shrink-0" aria-hidden />
+      <div className="space-y-4">
+        {view.items.length === 0 ? (
+          <p className="flex items-center gap-2 text-sm text-muted-foreground">
+            <AlertCircle className="h-4 w-4" />
+            This conversation has no messages yet.
+          </p>
+        ) : (
+          view.items.map((item) => <ItemView key={item.id} item={item} />)
+        )}
+      </div>
     </div>
   );
 }

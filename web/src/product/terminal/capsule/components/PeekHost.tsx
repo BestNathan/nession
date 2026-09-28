@@ -148,11 +148,14 @@ export function PeekHost({
 
             The content still scrolls itself rather than the Terminal: the
             dialog is portalled and bounded, so nothing behind it moves. */}
-        <DialogContent data-testid="capsule-capability-detail">
+        <DialogContent
+          data-testid="capsule-capability-detail"
+          className="flex max-h-[calc(100dvh-2rem)] flex-col overflow-hidden sm:max-w-lg"
+        >
           <DialogHeader>
             <DialogTitle>{detail?.title ?? ''}</DialogTitle>
           </DialogHeader>
-          <div className="min-h-0">{detail?.content}</div>
+          <div className="flex min-h-0 flex-1 flex-col">{detail?.content}</div>
         </DialogContent>
       </Dialog>
     </div>
