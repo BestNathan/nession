@@ -110,6 +110,46 @@ describe('capsule emergence', () => {
     expect(onSurfaceChange).not.toHaveBeenCalled();
   });
 
+  it('dismisses a Signal that emerged from the running branch (#1165)', () => {
+    // `onDismiss` used to record the dismissal from `current.chosen`, which is
+    // null here because nobody chose anything. So nothing was added to
+    // `dismissed`, the next render re-emerged the same Signal, and the ✕ looked
+    // dead — it fired and was undone in the same frame.
+    const { result } = setup({ session: session('s1', 'claude.exe') });
+
+    expect(result.current.projection?.id).toBe('claude-code');
+
+    act(() => result.current.projection?.onDismiss());
+
+    expect(result.current.projection).toBeUndefined();
+  });
+
+  it('deepens a Signal that emerged from the running branch (#1165)', () => {
+    // The title offers the step because the capability declared a Peek, but the
+    // step used to read `chosen` and so moved nothing for an observed
+    // capability — and the running branch reports `signal` unconditionally.
+    const { result } = setup({ session: session('s1', 'claude.exe') });
+
+    act(() => result.current.projection?.onDeeper?.());
+
+    expect(result.current.projection?.id).toBe('claude-code');
+    expect(result.current.projection?.depth).toBe('peek');
+  });
+
+  it('closes a Peek that emerged from the running branch back to its Signal (#1165)', () => {
+    const { result } = setup({ session: session('s1', 'claude.exe') });
+
+    act(() => result.current.projection?.onDeeper?.());
+    act(() => result.current.projection?.onDismiss());
+
+    expect(result.current.projection?.id).toBe('claude-code');
+    expect(result.current.projection?.depth).toBe('signal');
+
+    act(() => result.current.projection?.onDismiss());
+
+    expect(result.current.projection).toBeUndefined();
+  });
+
   it('gives a capability with nothing to add at Peek no deeper step', () => {
     // `onDeeper` absent is how "the Terminal stops here" is said, and the frame
     // turns it into an inert title rather than an empty Peek.

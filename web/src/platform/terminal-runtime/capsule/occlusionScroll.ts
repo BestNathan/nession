@@ -159,7 +159,7 @@ export class CapsuleOcclusionScroll {
   }
 
   handleWheel(event: WheelEvent): boolean {
-    if (!this.hasLocalScrollback()) {
+    if (!this.shouldScrollLocally()) {
       return true;
     }
     const lines = this.wheelLines(event.deltaY, event.deltaMode);
@@ -239,7 +239,7 @@ export class CapsuleOcclusionScroll {
   }
 
   private handleTouchMove(event: TouchEvent): void {
-    if (!this.hasLocalScrollback()) {
+    if (!this.shouldScrollLocally()) {
       return;
     }
     const currentY = event.touches[0]?.clientY;
@@ -294,7 +294,28 @@ export class CapsuleOcclusionScroll {
     this.resizeObserver?.observe(dock);
   }
 
-  private hasLocalScrollback(): boolean {
+  /**
+   * Whether the wheel belongs to Nession's local history or to the application.
+   *
+   * Two questions, and the second is the one that used to be answered by guess.
+   *
+   * First: is there local history to scroll? That is `buffer.type === 'normal'`
+   * with a scrollback longer than the viewport.
+   *
+   * Second: is the application asking for mouse input? A TUI that turned mouse
+   * tracking on reads the wheel as a gesture *inside itself* — htop, `less`,
+   * vim with `set mouse=a`, Claude Code — and taking that event for local
+   * history silently breaks it. Buffer type cannot answer this: an application
+   * may run in the normal buffer with tracking enabled, which is exactly how a
+   * full-screen TUI ends up scrolled by its own terminal (#1096).
+   *
+   * Reading the mode xterm already tracks is the point of the requirement — the
+   * answer comes from the terminal's state, not from a proxy for it.
+   */
+  private shouldScrollLocally(): boolean {
+    if (this.terminal.modes.mouseTrackingMode !== 'none') {
+      return false;
+    }
     const buffer = this.terminal.buffer.active;
     return buffer.type === 'normal' && buffer.length > this.terminal.rows;
   }

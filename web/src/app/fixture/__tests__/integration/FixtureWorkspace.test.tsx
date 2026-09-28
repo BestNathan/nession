@@ -103,13 +103,16 @@ describe('FixtureWorkspace', () => {
 
     expect(await screen.findByTestId('conversation-open')).toBeInTheDocument();
 
-    // Both message kinds render as turns — the rule the git surface follows for
-    // its repository statuses, applied to the transcript.
-    const kinds = (await screen.findAllByTestId('conversation-turn')).map((turn) =>
-      turn.getAttribute('data-kind'),
+    // Both speakers render as turns — the rule the git surface follows for its
+    // repository statuses, applied to the transcript. Since #1167 the wire's
+    // `kind` is the tag (`message`) and the speaker is a separate field, so the
+    // assertion moved to `data-role`; asserting `data-kind` for the speaker
+    // would be asserting a shape the wire no longer has.
+    const roles = (await screen.findAllByTestId('conversation-turn')).map((turn) =>
+      turn.getAttribute('data-role'),
     );
-    expect(kinds).toContain('user');
-    expect(kinds).toContain('assistant');
+    expect(roles).toContain('user');
+    expect(roles).toContain('assistant');
 
     // A tool call is its **own** rendering rather than a turn — a collapsed
     // `<details>`, because `#1005` criterion 10 says tool use must not drown the
