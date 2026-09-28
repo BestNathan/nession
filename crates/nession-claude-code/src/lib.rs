@@ -1,6 +1,7 @@
 pub mod agent;
 pub mod binding;
 pub mod conversation;
+pub mod conversation_v2;
 pub mod plugin;
 pub mod protocol;
 pub mod scanner;

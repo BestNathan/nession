@@ -403,6 +403,46 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
             )),
         },
         Unit {
+            owner: "claude-code",
+            id: "claude-code.conversation",
+            version: 2,
+            wires: &["claude-code.conversation"],
+            decls: vec![
+                decl_of::<nession_claude_code::protocol::conversation::v2::ConversationRequestV2>(
+                    cfg,
+                ),
+                decl_of::<nession_claude_code::protocol::conversation::v2::ConversationResponseV2>(
+                    cfg,
+                ),
+                decl_of::<nession_claude_code::protocol::conversation::v2::ConversationStateV2>(cfg),
+                decl_of::<nession_claude_code::protocol::conversation::v2::ConversationItemV2>(cfg),
+                decl_of::<nession_claude_code::protocol::conversation::v2::ConversationContentV2>(
+                    cfg,
+                ),
+                decl_of::<nession_claude_code::protocol::conversation::v2::RoleV2>(cfg),
+                decl_of::<nession_claude_code::protocol::conversation::v2::ToolV2>(cfg),
+                decl_of::<nession_claude_code::protocol::conversation::v2::ToolStatusV2>(cfg),
+                decl_of::<nession_claude_code::protocol::conversation::v2::PayloadV2>(cfg),
+                decl_of::<nession_claude_code::protocol::conversation::v2::PayloadKindV2>(cfg),
+                decl_of::<nession_claude_code::protocol::conversation::v2::ConversationIdentityV2>(
+                    cfg,
+                ),
+                decl_of::<nession_claude_code::protocol::conversation::v2::ConversationCandidateV2>(
+                    cfg,
+                ),
+            ],
+            request: Some((
+                "ConversationRequest",
+                nession_claude_code::protocol::conversation::v2::ConversationRequestV2::inline,
+                schema_of::<nession_claude_code::protocol::conversation::v2::ConversationRequestV2>,
+            )),
+            response: Some((
+                "ConversationResponse",
+                nession_claude_code::protocol::conversation::v2::ConversationResponseV2::inline,
+                schema_of::<nession_claude_code::protocol::conversation::v2::ConversationResponseV2>,
+            )),
+        },
+        Unit {
             owner: "core",
             id: "server.agent.register",
             version: 1,

@@ -45,6 +45,15 @@ use crate::protocol::conversation::v1::{
 /// Claude's record types that carry conversation.
 const MESSAGE_TYPES: [&str; 2] = ["user", "assistant"];
 
+/// Whether a record type is one that carries conversation.
+///
+/// Shared with [`crate::conversation_v2`], which asks the same question of the
+/// same open set: a type that is not a message is bookkeeping, and bookkeeping
+/// must not become a chat row in either generation.
+pub(crate) fn is_message_record(kind: &str) -> bool {
+    MESSAGE_TYPES.contains(&kind)
+}
+
 /// How much to read at a time while scanning backwards for a page boundary.
 const READ_CHUNK: u64 = 64 * 1024;
 
@@ -333,6 +342,22 @@ fn tail_facts(path: &Path) -> TailFacts {
     facts
 }
 
+/// The raw records of one page, before any of them is interpreted.
+///
+/// Shared by both contract generations: *which* records a page contains is a
+/// property of the transcript and the cursor, not of the shape a version
+/// renders them as. Only [`read_page`] and [`crate::conversation_v2::read_page`]
+/// differ after this point.
+pub(crate) struct Selected {
+    /// Oldest-first within the page, each with the byte offset it starts at.
+    pub(crate) records: Vec<(u64, String)>,
+    /// Byte offset to pass back to read the page before this one.
+    pub(crate) next_offset: Option<u64>,
+    pub(crate) has_more: bool,
+    /// The file ended mid-record. Normal for a transcript being appended to.
+    pub(crate) partial_tail: bool,
+}
+
 /// A page of `conversation`, ending at `end_offset` (or at the end of the file).
 ///
 /// Reads **backwards** from the end: the newest items are what a reader wants
@@ -346,11 +371,36 @@ pub fn read_page(
     let mut file = File::open(conversation.path())?;
     let file_len = file.metadata()?.len();
     let end = end_offset.unwrap_or(file_len).min(file_len);
+    let selected = select_records(&mut file, file_len, end, limit)?;
 
-    // Records newest-first, each with the byte offset it starts at. The offset
-    // is what makes the cursor exact: a page boundary that landed mid-record
-    // would show one item twice, or lose it between pages.
-    let mut page = Page::default();
+    let mut page = Page {
+        next_offset: selected.next_offset,
+        has_more: selected.has_more,
+        partial_tail: selected.partial_tail,
+        ..Page::default()
+    };
+    for (_, line) in &selected.records {
+        match normalize_line(line) {
+            Normalized::Items(items) => page.items.extend(items),
+            Normalized::Skipped => page.skipped += 1,
+        }
+    }
+    Ok(page)
+}
+
+/// Choose the `limit` newest records ending at `end`, reading backwards.
+///
+/// The byte offsets are what make the cursor exact: a page boundary that landed
+/// mid-record would show one item twice, or lose it between pages. They are also
+/// what [`crate::conversation_v2`] scans forward from when it pairs a tool call
+/// with a result that landed on the next page.
+pub(crate) fn select_records(
+    file: &mut File,
+    file_len: u64,
+    end: u64,
+    limit: usize,
+) -> std::io::Result<Selected> {
+    // Records newest-first, each with the byte offset it starts at.
     let mut records: Vec<(u64, String)> = Vec::new();
     let mut cursor = end;
     let mut partial_tail = false;
@@ -359,7 +409,7 @@ pub fn read_page(
     while cursor > 0 && records.len() <= limit {
         // Begin every chunk at a record boundary, so a record is never split
         // across two reads and each line's offset is computable.
-        let start = align_to_record(&mut file, cursor.saturating_sub(READ_CHUNK))?;
+        let start = align_to_record(file, cursor.saturating_sub(READ_CHUNK))?;
         if start >= cursor {
             // Alignment found no boundary before `cursor`; the remaining bytes
             // are one fragment, which only the file's own start can complete.
@@ -415,26 +465,26 @@ pub fn read_page(
     // The newest `limit` records form the page; older ones are the next page.
     // The page reads oldest-first, which is the order a conversation is read in.
     let take = records.len().min(limit);
-    let mut selected: Vec<&(u64, String)> = records.get(..take).unwrap_or(&[]).iter().collect();
-    selected.reverse();
-
-    for (_, line) in &selected {
-        match normalize_line(line) {
-            Normalized::Items(items) => page.items.extend(items),
-            Normalized::Skipped => page.skipped += 1,
-        }
-    }
+    let mut page_records: Vec<(u64, String)> = records.drain(..take).collect();
+    page_records.reverse();
 
     // Continue from the oldest record this page showed; everything before it is
-    // strictly older and cannot repeat a row.
-    page.has_more = records.len() > take;
-    page.next_offset = if page.has_more {
-        selected.first().map(|(offset, _)| *offset)
-    } else {
+    // strictly older and cannot repeat a row. Read off the page itself, before
+    // it is handed over, because it is the one fact a caller cannot recompute
+    // from the records alone.
+    let next_offset = if records.is_empty() {
         None
+    } else {
+        page_records.first().map(|(offset, _)| *offset)
     };
-    page.partial_tail = partial_tail;
-    Ok(page)
+    let has_more = !records.is_empty();
+
+    Ok(Selected {
+        records: page_records,
+        next_offset,
+        has_more,
+        partial_tail,
+    })
 }
 
 /// The next byte offset at or after `from` that begins a record.
@@ -610,8 +660,31 @@ fn truncate(s: &str, max: usize) -> String {
 }
 
 /// A string field, when the record carries one.
-fn string_field(record: &Value, key: &str) -> Option<String> {
+pub(crate) fn string_field(record: &Value, key: &str) -> Option<String> {
     record.get(key).and_then(Value::as_str).map(str::to_string)
+}
+
+/// Handles for tests in sibling modules.
+///
+/// `Discovered`'s transcript path is private to this module — that privacy is
+/// the mechanism keeping a path off the wire — so a sibling that wants to read a
+/// *specific* file has to be handed one from here rather than assembling the
+/// struct itself.
+#[cfg(test)]
+pub(crate) mod tests_support {
+    use super::{Discovered, Path};
+
+    /// A `Discovered` pointing at `path`, without running discovery.
+    pub(crate) fn discovered_at(path: &Path, cwd: &str) -> Discovered {
+        Discovered {
+            claude_session_id: "test-session".to_string(),
+            cwd: cwd.to_string(),
+            updated_at: None,
+            title: None,
+            preview: None,
+            path: path.to_path_buf(),
+        }
+    }
 }
 
 #[cfg(test)]
