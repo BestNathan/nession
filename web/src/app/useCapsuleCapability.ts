@@ -105,8 +105,15 @@ export function useCapsuleCapability(
     [],
   );
 
-  const onDeeper = useCallback(() => {
-    setEmergence((current) => ({ ...current, opened: true }));
+  /**
+   * Deepening acts on the projection that is on screen, so the id is bound in
+   * by the caller rather than read from `chosen`. A projection can also emerge
+   * from the observed-command path — a capability the Session is running right
+   * now — where `chosen` is null because the user never chose anything, and
+   * reading `chosen` there deepened nothing (#1165).
+   */
+  const onDeeper = useCallback((id: CapabilityId) => {
+    setEmergence((current) => ({ ...current, chosen: id, opened: true }));
   }, []);
 
   /**
@@ -116,17 +123,24 @@ export function useCapsuleCapability(
    * also destroy the indication that made it worth opening — and closing the
    * Signal returns to Dormant, recording the dismissal so the observed-command
    * path does not immediately re-emerge what the user just closed.
+   *
+   * The id is the projection actually on screen, not `current.chosen`. The two
+   * differ exactly when the projection emerged from the observed-command path:
+   * `chosen` is null there, so recording it put nothing into `dismissed` and
+   * the next render re-emerged the same Signal — the ✕ fired and was undone in
+   * the same frame, which is indistinguishable from a dead button (#1165).
    */
-  const onDismiss = useCallback(() => {
+  const onDismiss = useCallback((id: CapabilityId) => {
     setEmergence((current) => {
       if (current.opened) {
         return { ...current, opened: false };
       }
-      const id = current.chosen;
       return {
-        chosen: null,
+        chosen: current.chosen === id ? null : current.chosen,
         opened: false,
-        dismissed: id && !current.dismissed.includes(id) ? [...current.dismissed, id] : current.dismissed,
+        dismissed: current.dismissed.includes(id)
+          ? current.dismissed
+          : [...current.dismissed, id],
       };
     });
   }, []);
@@ -149,12 +163,14 @@ export function useCapsuleCapability(
             depth: active.depth,
             // Absent when the capability declared it has no Peek: the frame
             // reads that as an inert title rather than a step into nothing.
-            onDeeper: binding.entry === 'peek' ? onDeeper : undefined,
+            onDeeper: binding.entry === 'peek'
+              ? () => onDeeper(active.capabilityId)
+              : undefined,
             // The capability's own answer to "does this take the keyboard while
             // it is up", copied through untouched. The capsule reacts to the
             // boolean; only the capability knows which projections need it.
             ownsInputFocus: binding.ownsInputFocus,
-            onDismiss,
+            onDismiss: () => onDismiss(active.capabilityId),
             onOpenWorkspace: (resourceId) =>
               input.onOpenWorkspace(active.capabilityId, resourceId),
             // The body reports what the user picked; the frame holds it and
