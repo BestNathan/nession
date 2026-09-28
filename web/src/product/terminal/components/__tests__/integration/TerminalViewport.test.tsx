@@ -64,6 +64,25 @@ function flush(): Promise<void> {
   return new Promise((resolve) => { setTimeout(resolve, 50); });
 }
 
+/**
+ * Run `body` with a ResizeObserver stub installed.
+ *
+ * xterm's `open()` needs one in jsdom and the global setup does not provide it,
+ * so the tests that build a real controller install their own. Restoring it in
+ * a `finally` rather than after the assertions is the point: a failing test
+ * would otherwise leave the stub in place for everything that runs after it in
+ * this file, turning one red test into several confusing ones.
+ */
+async function withResizeObserverStub(body: () => Promise<void>): Promise<void> {
+  const original = globalThis.ResizeObserver;
+  globalThis.ResizeObserver = StubResizeObserver as unknown as typeof ResizeObserver;
+  try {
+    await body();
+  } finally {
+    globalThis.ResizeObserver = original;
+  }
+}
+
 describe('TerminalViewport', () => {
   it('renders a div with the terminal background colour', () => {
     const controller = makeController();
@@ -101,27 +120,69 @@ describe('TerminalViewport', () => {
     // deactivate, so the second attach left two live `onData` subscriptions and
     // a single typed `x` reached the PTY twice. The controller here is real —
     // mocking it would assert that attach was called, which is not the property.
-    const originalResizeObserver = globalThis.ResizeObserver;
-    globalThis.ResizeObserver = StubResizeObserver as unknown as typeof ResizeObserver;
+    await withResizeObserverStub(async () => {
+      const transport = makeTransport();
+      const controller = new TerminalController(makeSession(), () => transport);
 
-    const transport = makeTransport();
-    const controller = new TerminalController(makeSession(), () => transport);
+      render(
+        <StrictMode>
+          <TerminalViewport controller={controller} />
+        </StrictMode>,
+      );
+      await flush();
 
-    render(
-      <StrictMode>
-        <TerminalViewport controller={controller} />
-      </StrictMode>,
-    );
-    await flush();
+      const terminal = controller.terminal;
+      expect(terminal).not.toBeNull();
+      terminal!.input('x');
 
-    const terminal = controller.terminal;
-    expect(terminal).not.toBeNull();
-    terminal!.input('x');
+      expect(transport.send).toHaveBeenCalledTimes(1);
+      expect(transport.send).toHaveBeenCalledWith('x');
 
-    expect(transport.send).toHaveBeenCalledTimes(1);
-    expect(transport.send).toHaveBeenCalledWith('x');
+      controller.dispose();
+    });
+  });
 
-    controller.dispose();
-    globalThis.ResizeObserver = originalResizeObserver;
+  it('sends one typed keystroke exactly once after a transportEpoch rewire (#1096)', async () => {
+    // The production path #668 was about. A P2P route or socket identity change
+    // bumps `transportEpoch`, which detaches and re-attaches the same
+    // controller — StrictMode's cycle, reached a different way and without dev
+    // mode to trigger it. CI never caught the duplication here: `terminal-io`
+    // attaches once, and its own comment blames this exact window for stray
+    // bytes ("P2P attach can rewire the transport once the live agent-terminal
+    // API swaps (#668)") rather than asserting on it.
+    //
+    // Readiness across the bump is asserted in
+    // `useTerminalViewportTransportReady.test.tsx`. What is asserted here is
+    // what a user would see: one key, one send.
+    await withResizeObserverStub(async () => {
+      const transport = makeTransport();
+      let transports = 0;
+      const controller = new TerminalController(makeSession(), () => {
+        transports += 1;
+        return transport;
+      });
+
+      const { rerender } = render(
+        <TerminalViewport controller={controller} transportEpoch={0} />,
+      );
+      await flush();
+
+      rerender(<TerminalViewport controller={controller} transportEpoch={1} />);
+      await flush();
+
+      // The rewire is the thing under test, so assert it happened: a rerender
+      // that detached nothing would leave the counts below just as green.
+      expect(transports).toBe(2);
+
+      const terminal = controller.terminal;
+      expect(terminal).not.toBeNull();
+      transport.send.mockClear();
+      terminal!.input('x');
+
+      expect(transport.send).toHaveBeenCalledTimes(1);
+      expect(transport.send).toHaveBeenCalledWith('x');
+
+      controller.dispose();
+    });
   });
 });
