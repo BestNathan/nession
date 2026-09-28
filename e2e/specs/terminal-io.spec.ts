@@ -320,13 +320,22 @@ test.describe('Terminal I/O', () => {
     await page.waitForTimeout(3000);
 
     const before = await diagFacts(page);
-    await page.setViewportSize({ width: 1280, height: 900 });
-    await page.waitForTimeout(5000);
-    const after = await diagFacts(page);
+    await submitTerminalCommand(page, 'stty size');
+    await expect
+      .poll(async () => readTerminalBuffer(page), { timeout: 15_000 })
+      .toContain(`${before.rows} ${before.cols}`);
 
-    // The real property, so a red run says whether the fix landed. The log is
-    // the diagnostic either way.
-    expect(after.rows).toBeGreaterThan(before.rows);
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await expect
+      .poll(async () => (await diagFacts(page)).rows, { timeout: 15_000 })
+      .toBeGreaterThan(before.rows);
+
+    // The property the fix is about: the *session* is told, not just the grid.
+    const after = await diagFacts(page);
+    await submitTerminalCommand(page, 'stty size');
+    await expect
+      .poll(async () => readTerminalBuffer(page), { timeout: 15_000 })
+      .toContain(`${after.rows} ${after.cols}`);
   });
 
   test('capsule arrow follows the cursor mode the PTY asked for (#1096)', async ({ page }, testInfo) => {

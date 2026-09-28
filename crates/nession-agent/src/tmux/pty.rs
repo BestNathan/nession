@@ -240,7 +240,48 @@ impl super::session::TmuxSession for PtySession {
     }
 
     async fn resize(&mut self, cols: u16, rows: u16) -> Result<()> {
-        PtySession::resize(self, cols, rows)
+        // Move the shared window explicitly, the way `ControlModeSession::resize`
+        // does — the two backends move the same resource by different routes,
+        // and only the explicit one states the size rather than deriving it.
+        //
+        // Resizing this client's PTY alone leaves the window to tmux's
+        // `window-size` policy, and that policy does not always follow the
+        // client. Measured on CI: the browser grid resized and this route ran
+        // with the right numbers (`124x26`, then `124x41`), while the session
+        // went on reporting its old size — so a viewport change never reached
+        // the application, growing or shrinking.
+        //
+        // Both halves are kept. The PTY resize makes the *client* the right
+        // size; the explicit one makes the *window* the right size, and it goes
+        // last so that a policy which would recompute the window from the
+        // client cannot undo it.
+        PtySession::resize(self, cols, rows)?;
+        // DIAGNOSTIC (#1187) — remove before merge.
+        match self
+            .tmux
+            .ops()
+            .resize_window(&self.session_name, cols, rows)
+            .await
+        {
+            Ok(()) => {
+                tracing::info!(
+                    "DIAG resize_window ok: {} {}x{}",
+                    self.session_name,
+                    cols,
+                    rows
+                );
+                Ok(())
+            }
+            Err(e) => {
+                tracing::error!(
+                    "DIAG resize_window failed: {} {}x{}: {e:#}",
+                    self.session_name,
+                    cols,
+                    rows
+                );
+                Err(e)
+            }
+        }
     }
 
     fn viewport(&self) -> (u16, u16) {
