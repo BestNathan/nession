@@ -1,5 +1,12 @@
 import { test, expect } from '@playwright/test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { waitForShell } from '../helpers/shell';
+
+// __dirname (not import.meta): Playwright transforms specs to CJS — this
+// package.json is not "type": "module". Same convention as
+// e2e/helpers/ui-assert/contracts.ts, which loads the design contracts.
+declare const __dirname: string;
 
 /**
  * Read the xterm buffer text via the `xtermInstance` property exposed on the
@@ -144,9 +151,9 @@ async function waitForInteractiveShell(page: import('@playwright/test').Page): P
     .toBe(true);
 }
 
-/** Commit a shell command through xterm's input API (same path as keyboard). */
-async function submitTerminalCommand(page: import('@playwright/test').Page, command: string): Promise<void> {
-  await page.evaluate((cmd) => {
+/** Send raw bytes through xterm's input API — the same path as the keyboard. */
+async function sendRawToTerminal(page: import('@playwright/test').Page, data: string): Promise<void> {
+  await page.evaluate((bytes) => {
     const xtermEl = document.querySelector('.xterm');
     const container = xtermEl?.parentElement as
       | ({ xtermInstance?: { input(data: string, wasUserInput: boolean): void } } & Record<string, unknown>)
@@ -155,8 +162,65 @@ async function submitTerminalCommand(page: import('@playwright/test').Page, comm
     if (!term) {
       throw new Error('xtermInstance not mounted');
     }
-    term.input(`${cmd}\n`, true);
-  }, command);
+    term.input(bytes, true);
+  }, data);
+}
+
+/** Commit a shell command through xterm's input API (same path as keyboard). */
+async function submitTerminalCommand(page: import('@playwright/test').Page, command: string): Promise<void> {
+  await sendRawToTerminal(page, `${command}\n`);
+}
+
+/** How many times `needle` occurs in the scrollback. */
+async function countInBuffer(page: import('@playwright/test').Page, needle: string): Promise<number> {
+  const text = await readTerminalBuffer(page);
+  return text.split(needle).length - 1;
+}
+
+/**
+ * Put `pty-probe.sh` into the Session's working directory.
+ *
+ * The PTY's cwd is `/tmp/nession-e2e`, not the checkout, so the committed
+ * script cannot be run by path. Base64 keeps the install to one line with
+ * nothing for the shell to re-interpret, and keeps the committed script the
+ * only copy of itself — an inlined copy here would drift from it silently.
+ */
+function ptyProbeInstaller(): string {
+  const script = readFileSync(join(__dirname, '..', 'fixtures', 'pty-probe.sh'), 'utf8');
+  return `printf '%s' '${Buffer.from(script).toString('base64')}' | base64 -d > pty-probe.sh`;
+}
+
+/** Start the probe in `mode` and wait until it has set it. */
+async function startPtyProbe(page: import('@playwright/test').Page, mode: string): Promise<void> {
+  await submitTerminalCommand(page, `sh pty-probe.sh ${mode}`);
+  await expect(async () => {
+    expect(await readTerminalBuffer(page)).toContain(`PTY-PROBE READY ${mode}`);
+  }).toPass({ timeout: 15_000 });
+}
+
+/** End the probe: Ctrl-C kills `cat -v` and returns the shell prompt. */
+async function stopPtyProbe(page: import('@playwright/test').Page): Promise<void> {
+  await sendRawToTerminal(page, '\x03');
+  await expect
+    .poll(async () => /runner:\S*\$/m.test(await readTerminalBuffer(page)), { timeout: 15_000 })
+    .toBe(true);
+}
+
+/** The last line with anything on it — where a terminal's cursor actually is. */
+async function lastNonEmptyLine(page: import('@playwright/test').Page): Promise<string> {
+  const text = await readTerminalBuffer(page);
+  const lines = text
+    .split('\n')
+    .map((line) => line.trimEnd())
+    .filter((line) => line.length > 0);
+  return lines[lines.length - 1] ?? '';
+}
+
+/** Tap the capsule's ↑ — the App/mobile key path, not a keyboard event. */
+async function tapCapsuleArrowUp(page: import('@playwright/test').Page): Promise<void> {
+  await page.getByTestId('capsule-capability-more').click();
+  await page.getByTestId('capsule-capability-picker-terminal-keys').click();
+  await page.getByTestId('phys-key-↑').click();
 }
 
 // NOTE: these tests are CI-gated per repo convention (the fixture specs use
@@ -203,5 +267,69 @@ test.describe('Terminal I/O', () => {
       const text = await readTerminalBuffer(page);
       expect(text).toContain('nession-e2e-ok');
     }).toPass({ timeout: 15_000 });
+  });
+
+  test('a curses TUI renders and gives the shell back (#1096)', async ({ page }, testInfo) => {
+    // Criterion 15's curses smoke. Nothing here is Nession-specific, and that
+    // is the point: `less` reads keys in raw mode, paints its own screen from
+    // terminfo, and exits on a keystroke. The fixtures in this file drive the
+    // PTY with escapes the test itself wrote; this drives it with a program
+    // that was written without Nession in mind.
+    //
+    // It deliberately does not assert on the alternate screen. That is not
+    // observable from the browser: tmux owns its client's screen and mouse
+    // mode — `pty.rs` sets only `status off`, and tmux turns both on itself —
+    // so `buffer.active.type` reads `'alternate'` for a plain shell too.
+    test.skip(!process.env.CI, 'local only — runs in CI workflow only');
+    const SESSION_NAME = `e2e-curses-${testInfo.retry}`;
+    await createSession(page, SESSION_NAME);
+    await attachToSession(page, SESSION_NAME, 'Relay');
+    await waitForInteractiveShell(page);
+
+    await submitTerminalCommand(page, 'less /etc/hosts');
+    // It painted. `localhost` is in /etc/hosts on every runner.
+    await expect
+      .poll(async () => readTerminalBuffer(page), { timeout: 15_000 })
+      .toContain('localhost');
+
+    // `q` reaches it in raw mode, and only then does tmux repaint the prompt.
+    await sendRawToTerminal(page, 'q');
+    await expect.poll(async () => lastNonEmptyLine(page), { timeout: 15_000 }).toMatch(/runner:\S*\$/);
+  });
+
+  test('capsule arrow follows the cursor mode the PTY asked for (#1096)', async ({ page }, testInfo) => {
+    // The requirement's end-to-end claim, and the one thing every gate above
+    // this line can only approximate: the same tap produces different bytes
+    // because the *terminal* changed mode, not because the test changed a stub.
+    //
+    // Nothing here is typed on a physical keyboard. The key goes through the
+    // capsule's own control, which is the App/mobile interaction path — the
+    // criterion asks for that path specifically, and no spec had ever pressed
+    // one of those keys.
+    test.skip(!process.env.CI, 'local only — runs in CI workflow only');
+    const SESSION_NAME = `e2e-cursor-mode-${testInfo.retry}`;
+    await createSession(page, SESSION_NAME);
+    await attachToSession(page, SESSION_NAME, 'Relay');
+    await waitForInteractiveShell(page);
+    await submitTerminalCommand(page, ptyProbeInstaller());
+
+    // Normal cursor mode first: `cat -v` renders ESC [ A as `^[[A`.
+    await startPtyProbe(page, 'normal');
+    await tapCapsuleArrowUp(page);
+    await expect(async () => {
+      expect(await countInBuffer(page, '^[[A')).toBeGreaterThan(0);
+      // The mode is the variable, so the other encoding must not have appeared.
+      expect(await countInBuffer(page, '^[OA')).toBe(0);
+    }).toPass({ timeout: 15_000 });
+    await stopPtyProbe(page);
+
+    // Same tap, application cursor mode: ESC O A, rendered `^[OA`. A constant
+    // encoder passes the case above and fails this one.
+    await startPtyProbe(page, 'appcursor');
+    await tapCapsuleArrowUp(page);
+    await expect(async () => {
+      expect(await countInBuffer(page, '^[OA')).toBeGreaterThan(0);
+    }).toPass({ timeout: 15_000 });
+    await stopPtyProbe(page);
   });
 });

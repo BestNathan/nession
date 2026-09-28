@@ -34,6 +34,7 @@ export function TerminalKeysProjection({
     handleChainAdd,
     cancelChain,
     sendChain,
+    completeChain,
   } = usePhysKeyChain(sendSeq, sendPhysKey);
 
   return (
@@ -47,10 +48,10 @@ export function TerminalKeysProjection({
       <PhysKeyRow
         onKey={handlePhysKey}
         disabled={disabled}
-        chainBuffer={chainBuffer}
         isChaining={isChaining}
         onChainStart={handleChainStart}
         onChainAdd={handleChainAdd}
+        onChainComplete={completeChain}
       />
     </div>
   );
