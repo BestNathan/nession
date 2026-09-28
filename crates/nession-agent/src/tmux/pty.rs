@@ -264,11 +264,18 @@ impl super::session::TmuxSession for PtySession {
             .await
         {
             Ok(()) => {
+                // DIAGNOSTIC (#1187) — remove before merge. `resize-window`
+                // reports success and the pane goes on reporting the old size,
+                // so ask tmux what it thinks the window is now: that
+                // distinguishes "the size did not stick" from "the window moved
+                // and the pane did not".
+                let after = self.tmux.ops().window_size(&self.session_name).await;
                 tracing::info!(
-                    "DIAG resize_window ok: {} {}x{}",
+                    "DIAG resize_window ok: {} {}x{} -> tmux says {:?}",
                     self.session_name,
                     cols,
-                    rows
+                    rows,
+                    after.map_err(|e| e.to_string())
                 );
                 Ok(())
             }
