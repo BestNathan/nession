@@ -41,6 +41,7 @@ const view: ConversationViewState = {
   skipped: 0,
   loading: false,
   loadingOlder: false,
+  olderError: null,
   error: null,
 };
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { claudeCodeApi } from '../ClaudeCodePlugin';
 import {
   emptyPositions,
@@ -45,6 +45,8 @@ export interface ConversationViewState {
   skipped: number;
   loading: boolean;
   loadingOlder: boolean;
+  /** Older-page pagination failed while readable items remain (#1190). */
+  olderError: string | null;
   error: string | null;
 }
 
@@ -58,24 +60,23 @@ const EMPTY: ConversationViewState = {
   skipped: 0,
   loading: true,
   loadingOlder: false,
+  olderError: null,
   error: null,
 };
 
 /**
  * Whether an answer that just arrived is still the one being waited for.
  *
- * A module function rather than a callback: it closes over nothing, and the refs
- * it reads are the ones that hold the *current* identity — which is the point,
- * since the answer has to be compared against what is on screen when it lands,
- * not when the request was made.
+ * Newest-page refresh and older-page pagination use separate generations so a
+ * poll cannot drop a valid in-flight older response (#1190).
  */
 function stillWanted(
   context: { current: string | null },
-  latest: { current: number },
+  generation: { current: number },
   key: string,
   id: number,
 ): boolean {
-  return context.current === key && latest.current === id;
+  return context.current === key && generation.current === id;
 }
 
 function message(error: unknown): string {
@@ -100,6 +101,105 @@ function pageRequest(
     ...(claudeSessionId ? { claude_session_id: claudeSessionId } : {}),
     ...(cursor ? { cursor } : {}),
   };
+}
+
+async function fetchOlderPage({
+  agentId,
+  sessionId,
+  selected,
+  cursor,
+  contextRef,
+  olderRequestId,
+  positions,
+  setView,
+  key,
+  id,
+}: {
+  agentId: string;
+  sessionId: string;
+  selected: string | null;
+  cursor: string;
+  contextRef: { current: string | null };
+  olderRequestId: { current: number };
+  positions: { current: Positions };
+  setView: Dispatch<SetStateAction<ConversationViewState>>;
+  key: string;
+  id: number;
+}) {
+  setView((current) => ({ ...current, loadingOlder: true, olderError: null }));
+  try {
+    const response = await claudeCodeApi.claudeCodeConversation(
+      pageRequest(agentId, sessionId, selected, cursor),
+    );
+    if (!stillWanted(contextRef, olderRequestId, key, id)) {
+      return;
+    }
+    positions.current = withOlderPage(positions.current, response);
+    setView((current) => ({
+      ...current,
+      items: itemsOf(positions.current),
+      hasMore: hasOlder(positions.current),
+      loadingOlder: false,
+      olderError: null,
+    }));
+  } catch (error) {
+    if (!stillWanted(contextRef, olderRequestId, key, id)) {
+      return;
+    }
+    setView((current) => ({
+      ...current,
+      loadingOlder: false,
+      olderError: message(error),
+    }));
+  }
+}
+
+function useSessionConversationReset({
+  contextKey,
+  contextRef,
+  newestRequestId,
+  olderRequestId,
+  positions,
+  setSelected,
+  setView,
+  fetchNewest,
+  failNewestIfCurrent,
+}: {
+  contextKey: string | null;
+  contextRef: { current: string | null };
+  newestRequestId: { current: number };
+  olderRequestId: { current: number };
+  positions: { current: Positions };
+  setSelected: Dispatch<SetStateAction<string | null>>;
+  setView: Dispatch<SetStateAction<ConversationViewState>>;
+  fetchNewest: (claudeSessionId: string | null, key: string, id: number) => Promise<void>;
+  failNewestIfCurrent: (key: string, id: number, error: unknown) => void;
+}) {
+  // A Session change is a different conversation, so nothing about the old one
+  // may remain on screen — not the items, not the selection, not either cursor.
+  useEffect(() => {
+    contextRef.current = contextKey;
+    newestRequestId.current += 1;
+    olderRequestId.current += 1;
+    const id = newestRequestId.current;
+    positions.current = emptyPositions();
+    setSelected(null);
+    setView(EMPTY);
+    if (!contextKey) {
+      return;
+    }
+    void fetchNewest(null, contextKey, id).catch((e: unknown) => failNewestIfCurrent(contextKey, id, e));
+  }, [
+    contextKey,
+    contextRef,
+    failNewestIfCurrent,
+    fetchNewest,
+    newestRequestId,
+    olderRequestId,
+    positions,
+    setSelected,
+    setView,
+  ]);
 }
 
 /**
@@ -136,14 +236,13 @@ function useConversationLoader({
    *
    * `contextKey` changes when the Session changes — criterion 9 is about the old
    * Session's page arriving after the new one is on screen, and dropping such a
-   * response is the whole point. `requestId` does the same within one Session,
-   * for a poll that overlaps a manual reload. Both are refs: the comparison has
-   * to be against what is current *when the response lands*, not when the
-   * request was made.
+   * response is the whole point. `newestRequestId` and `olderRequestId` are
+   * separate so polling does not invalidate an in-flight older page (#1190).
    */
   const contextKey = agentId && sessionId ? `${agentId}:${sessionId}` : null;
   const contextRef = useRef<string | null>(contextKey);
-  const requestId = useRef(0);
+  const newestRequestId = useRef(0);
+  const olderRequestId = useRef(0);
   const positions = useRef<Positions>(emptyPositions());
 
   const fetchNewest = useCallback(
@@ -151,7 +250,7 @@ function useConversationLoader({
       const response = await claudeCodeApi.claudeCodeConversation(
         pageRequest(agentId as string, sessionId as string, claudeSessionId),
       );
-      if (!stillWanted(contextRef, requestId, key, id)) {
+      if (!stillWanted(contextRef, newestRequestId, key, id)) {
         return;
       }
       positions.current = withNewest(positions.current, response);
@@ -165,6 +264,7 @@ function useConversationLoader({
         skipped: response.skipped,
         loading: false,
         loadingOlder: false,
+        olderError: null,
         error:
           response.state === 'error'
             ? (response.error ?? 'The conversation could not be read')
@@ -174,9 +274,9 @@ function useConversationLoader({
     [agentId, sessionId],
   );
 
-  const failIfCurrent = useCallback(
+  const failNewestIfCurrent = useCallback(
     (key: string, id: number, error: unknown) => {
-      if (!stillWanted(contextRef, requestId, key, id)) {
+      if (!stillWanted(contextRef, newestRequestId, key, id)) {
         return;
       }
       setView((current) => ({ ...current, loading: false, loadingOlder: false, error: message(error) }));
@@ -184,29 +284,26 @@ function useConversationLoader({
     [],
   );
 
-  // A Session change is a different conversation, so nothing about the old one
-  // may remain on screen — not the items, not the selection, not either cursor.
-  useEffect(() => {
-    contextRef.current = contextKey;
-    requestId.current += 1;
-    const id = requestId.current;
-    positions.current = emptyPositions();
-    setSelected(null);
-    setView(EMPTY);
-    if (!contextKey) {
-      return;
-    }
-    void fetchNewest(null, contextKey, id).catch((e: unknown) => failIfCurrent(contextKey, id, e));
-  }, [contextKey, failIfCurrent, fetchNewest]);
+  useSessionConversationReset({
+    contextKey,
+    contextRef,
+    newestRequestId,
+    olderRequestId,
+    positions,
+    setSelected,
+    setView,
+    fetchNewest,
+    failNewestIfCurrent,
+  });
 
   /** Re-read the newest page, keeping whatever the user has open. */
   const reload = useCallback(() => {
     if (!contextKey) {
       return;
     }
-    const id = ++requestId.current;
-    void fetchNewest(selected, contextKey, id).catch((e: unknown) => failIfCurrent(contextKey, id, e));
-  }, [contextKey, failIfCurrent, fetchNewest, selected]);
+    const id = ++newestRequestId.current;
+    void fetchNewest(selected, contextKey, id).catch((e: unknown) => failNewestIfCurrent(contextKey, id, e));
+  }, [contextKey, failNewestIfCurrent, fetchNewest, selected]);
 
   /**
    * Re-read the newest page, swallowing a failure.
@@ -220,35 +317,29 @@ function useConversationLoader({
     if (!key) {
       return;
     }
-    void fetchNewest(selected, key, ++requestId.current).catch(() => undefined);
+    void fetchNewest(selected, key, ++newestRequestId.current).catch(() => undefined);
   }, [fetchNewest, selected]);
 
   const loadOlder = useCallback(async () => {
     const key = contextRef.current;
     const cursor = positions.current.cursor;
-    if (!key || cursor === null) {
+    if (!key || cursor === null || !agentId || !sessionId) {
       return;
     }
-    const id = ++requestId.current;
-    setView((current) => ({ ...current, loadingOlder: true }));
-    try {
-      const response = await claudeCodeApi.claudeCodeConversation(
-        pageRequest(agentId as string, sessionId as string, selected, cursor),
-      );
-      if (!stillWanted(contextRef, requestId, key, id)) {
-        return;
-      }
-      positions.current = withOlderPage(positions.current, response);
-      setView((current) => ({
-        ...current,
-        items: itemsOf(positions.current),
-        hasMore: hasOlder(positions.current),
-        loadingOlder: false,
-      }));
-    } catch (error) {
-      failIfCurrent(key, id, error);
-    }
-  }, [agentId, failIfCurrent, selected, sessionId]);
+    const id = ++olderRequestId.current;
+    await fetchOlderPage({
+      agentId,
+      sessionId,
+      selected,
+      cursor,
+      contextRef,
+      olderRequestId,
+      positions,
+      setView,
+      key,
+      id,
+    });
+  }, [agentId, selected, sessionId]);
 
   /** Open a conversation the user chose. `null` asks for the bound one again. */
   const select = useCallback(
@@ -257,12 +348,20 @@ function useConversationLoader({
         return;
       }
       setSelected(claudeSessionId);
-      const id = ++requestId.current;
+      const id = ++newestRequestId.current;
+      olderRequestId.current += 1;
       positions.current = emptyPositions();
-      setView((current) => ({ ...current, items: [], state: null, loading: true, error: null }));
-      void fetchNewest(claudeSessionId, contextKey, id).catch((e: unknown) => failIfCurrent(contextKey, id, e));
+      setView((current) => ({
+        ...current,
+        items: [],
+        state: null,
+        loading: true,
+        error: null,
+        olderError: null,
+      }));
+      void fetchNewest(claudeSessionId, contextKey, id).catch((e: unknown) => failNewestIfCurrent(contextKey, id, e));
     },
-    [contextKey, failIfCurrent, fetchNewest],
+    [contextKey, failNewestIfCurrent, fetchNewest],
   );
 
   return { view, selected, reload, loadOlder, select, poll };

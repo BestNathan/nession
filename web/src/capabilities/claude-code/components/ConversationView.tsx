@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { MessageSquare } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { ConversationViewState } from '../hooks/useConversation';
@@ -176,6 +176,41 @@ function StateNotice({
   );
 }
 
+/**
+ * Push-layout list surface: bounded scroll owner (#1189).
+ *
+ * Web master/detail keeps scroll on the `<aside>`; App push must opt in here
+ * because `WorkspaceShell` clips overflow at the tool boundary.
+ */
+function PushConversationList({
+  candidates,
+  open,
+  onOpen,
+  onBack,
+  listScrollRef,
+  onListScroll,
+}: {
+  candidates: Candidate[];
+  open: string | null;
+  onOpen: (claudeSessionId: string) => void;
+  onBack?: () => void;
+  listScrollRef: RefObject<HTMLDivElement | null>;
+  onListScroll: () => void;
+}) {
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div
+        ref={listScrollRef}
+        data-testid="conversation-list-scroll"
+        className="min-h-0 flex-1 overflow-y-auto"
+        onScroll={onListScroll}
+      >
+        <ConversationList candidates={candidates} open={open} onOpen={onOpen} onBack={onBack} />
+      </div>
+    </div>
+  );
+}
+
 function ConversationList({
   candidates,
   open,
@@ -301,10 +336,45 @@ export function ConversationView({
   // whenever nothing is open *and* whenever they asked to see it. Local, because
   // it is a view choice — asking the provider again would not answer it.
   const [showList, setShowList] = useState(false);
+  const listScrollRef = useRef<HTMLDivElement>(null);
+  const savedListScrollTop = useRef(0);
   // What is actually open, which is the provider's answer — not the client's
   // request. They agree whenever a selection succeeded, and the provider's is
   // the one that is true when it did not.
   const open = view.conversation?.claude_session_id ?? null;
+
+  const rememberListScroll = () => {
+    const el = listScrollRef.current;
+    if (el) {
+      savedListScrollTop.current = el.scrollTop;
+    }
+  };
+
+  useLayoutEffect(() => {
+    if (layout !== 'push' || (!showList && open !== null)) {
+      return;
+    }
+    const el = listScrollRef.current;
+    if (!el) {
+      return;
+    }
+    el.scrollTop = savedListScrollTop.current;
+  }, [layout, open, showList]);
+
+  const renderPushList = (onBack?: () => void) => (
+    <PushConversationList
+      candidates={view.candidates}
+      open={open}
+      onOpen={(id) => {
+        rememberListScroll();
+        setShowList(false);
+        onSelect(id);
+      }}
+      onBack={onBack}
+      listScrollRef={listScrollRef}
+      onListScroll={rememberListScroll}
+    />
+  );
 
   if (view.loading) {
     return <StateNotice testId="conversation-loading">Loading conversation...</StateNotice>;
@@ -377,22 +447,15 @@ export function ConversationView({
   }
 
   if (showList || open === null) {
-    return (
-      <ConversationList
-        candidates={view.candidates}
-        open={open}
-        onOpen={(id) => {
-          setShowList(false);
-          onSelect(id);
-        }}
-        onBack={() => setShowList(false)}
-      />
-    );
+    return renderPushList(() => setShowList(false));
   }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="conversation-open">
-      <ConversationHeader view={view} onShowList={() => setShowList(true)} />
+      <ConversationHeader
+        view={view}
+        onShowList={() => setShowList(true)}
+      />
       <ConversationTranscript view={view} onLoadOlder={onLoadOlder} />
     </div>
   );
