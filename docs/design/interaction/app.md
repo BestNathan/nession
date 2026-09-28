@@ -217,8 +217,12 @@ horizontal breadcrumb under it with search and folder-action entries. **Search**
 pushed depth: fuzzy filename/path match over a bounded `listDir` walk, results open the
 same viewer, and Back restores the saved directory stack. **Folder actions** (⋯) open a
 bottom sheet over the current list — refresh, copy workspace-relative path, copy full
-path — without a shell push. Selection mode and richer sheet actions extend this model
-in follow-up work; they must not reintroduce an expandable tree on App.
+path — without a shell push.
+
+**v1 shipped** with navigator, search, folder sheet, viewer push, scroll restoration,
+and App interaction docs/e2e for directory Back semantics. **Follow-up** (must not
+reintroduce an expandable tree on App): selection mode (#1174), Terminal /
+`path:line` deep-link (#1175), richer viewer and sheet actions as separate issues.
 
 ### One navigation bar per depth
 
