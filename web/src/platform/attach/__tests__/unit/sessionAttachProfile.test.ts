@@ -115,24 +115,21 @@ describe('buildOptionsFingerprint', () => {
 });
 
 describe('validateProfile', () => {
-  it('accepts a matching profile', () => {
-    expect(validateProfile(profile(), info(), true)).toEqual({ ok: true });
-  });
-
-  it('rejects when the options changed', () => {
+  it('accepts auto when candidate set changed (#1186)', () => {
     const p = profile();
     const changed = info({ addresses: [addr('ws://a/ws'), addr('ws://new/ws', 'vpn')] });
-    expect(validateProfile(p, changed, true)).toEqual({ ok: false, reason: 'fingerprint' });
+    expect(validateProfile(p, changed)).toEqual({ ok: true });
+  });
+
+  it('accepts a matching profile', () => {
+    expect(validateProfile(profile(), info())).toEqual({ ok: true });
   });
 
   it('rejects a manual url that left the candidate set', () => {
-    // Stored fingerprint matches the fresh options; only the saved selection
-    // is gone from the candidates → the manual-url guard, not 'fingerprint',
-    // must fire. (A changed option set would be reported as 'fingerprint'.)
     const p = profile({
       choice: { ...choice, mode: 'p2p', selectedUrl: 'ws://gone/ws' },
     });
-    expect(validateProfile(p, info(), true)).toEqual({ ok: false, reason: 'manual-url' });
+    expect(validateProfile(p, info())).toEqual({ ok: false, reason: 'manual-url' });
   });
 
   it('accepts a manual url still present in the candidate set', () => {
@@ -140,26 +137,6 @@ describe('validateProfile', () => {
       choice: { ...choice, mode: 'p2p', selectedUrl: 'ws://a/ws' },
       optionsFingerprint: buildOptionsFingerprint(info()),
     });
-    expect(validateProfile(p, info(), true)).toEqual({ ok: true });
-  });
-
-  it('rejects webgl when the browser does not support it', () => {
-    expect(validateProfile(profile(), info(), false)).toEqual({ ok: false, reason: 'renderer' });
-  });
-
-  it('reports fingerprint before manual-url, manual-url before renderer', () => {
-    // Options changed AND the saved url left the set → 'fingerprint' wins.
-    const changed = profile({
-      choice: { ...choice, mode: 'p2p', selectedUrl: 'ws://gone/ws' },
-      optionsFingerprint: buildOptionsFingerprint(info({ addresses: [addr('ws://gone/ws')] })),
-    });
-    expect(validateProfile(changed, info(), true)).toEqual({ ok: false, reason: 'fingerprint' });
-    // Options stable, url gone AND webgl unsupported → 'manual-url' wins.
-    // (The last link — fingerprint + url fine, webgl unsupported → 'renderer' —
-    // is pinned by the renderer test above.)
-    const gone = profile({
-      choice: { ...choice, mode: 'p2p', selectedUrl: 'ws://gone/ws' },
-    });
-    expect(validateProfile(gone, info(), false)).toEqual({ ok: false, reason: 'manual-url' });
+    expect(validateProfile(p, info())).toEqual({ ok: true });
   });
 });

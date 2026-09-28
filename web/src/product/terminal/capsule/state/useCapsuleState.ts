@@ -22,7 +22,6 @@ export interface CapsuleState {
   historyOpen: boolean;
   disabled: boolean;
   send: () => void;
-  pasteIntoInput: () => void;
   copyInput: () => Promise<void>;
 }
 
@@ -66,20 +65,6 @@ export function useCapsuleState({
     setHistoryOpen(false);
   }, [addEntry, inputValue, sendText, setComposerLayout, setHistoryOpen]);
 
-  const pasteIntoInput = useCallback(() => {
-    if (!navigator.clipboard?.readText) {
-      return;
-    }
-    navigator.clipboard
-      .readText()
-      .then((text) => {
-        if (text) {
-          setInputValue((prev) => prev + text);
-        }
-      })
-      .catch(() => undefined);
-  }, []);
-
   const copyInput = useCallback(async () => {
     try {
       await navigator.clipboard.writeText(inputValue);
@@ -100,7 +85,6 @@ export function useCapsuleState({
       historyOpen: openPopover === 'history',
       disabled,
       send,
-      pasteIntoInput,
       copyInput,
     }),
     [
@@ -110,7 +94,6 @@ export function useCapsuleState({
       disabled,
       inputValue,
       openPopover,
-      pasteIntoInput,
       send,
       setComposerLayout,
       setHistoryOpen,
