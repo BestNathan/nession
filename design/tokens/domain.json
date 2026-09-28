@@ -58,7 +58,13 @@
     "tool": {
       "surface": { "ref": "semantic.muted" },
       "foreground": { "ref": "semantic.muted-foreground" },
-      "error": { "ref": "semantic.danger" }
+      "error": { "ref": "semantic.danger" },
+      "success": { "ref": "domain.action" }
+    },
+    "code": {
+      "surface": { "ref": "semantic.muted" },
+      "foreground": { "ref": "semantic.muted-foreground" },
+      "border": { "ref": "semantic.border" }
     }
   }
 }

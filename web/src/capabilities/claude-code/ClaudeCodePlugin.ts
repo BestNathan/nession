@@ -8,11 +8,16 @@ import {
   VERSION as READ_VERSION,
   WIRE as READ_WIRE,
 } from '@/generated/protocol/claude-code/read/v1';
+// v2 (#1167). The requirement is the set of versions this client can *read*,
+// and the resolver picks the highest one the agent also serves — so naming v2
+// alone is a claim, not a preference: an agent that serves only v1 gets no
+// common version and this unit is refused, which is the designed answer rather
+// than a silent downgrade to a shape this renderer cannot draw.
 import {
   PROTOCOL as CONVERSATION_PROTOCOL,
   VERSION as CONVERSATION_VERSION,
   WIRE as CONVERSATION_WIRE,
-} from '@/generated/protocol/claude-code/conversation/v1';
+} from '@/generated/protocol/claude-code/conversation/v2';
 import { addressedPayload } from '@/platform/protocol';
 import type { TransportPlugin, PluginSurface } from '@/platform/socket/types';
 import type {

@@ -9,10 +9,14 @@
  * `response.content` got `undefined` on a failure with nothing to say so.
  */
 
+// v2 (#1167): a message carries structured content and a tool carries its
+// paired result, which is what the transcript renders. v1 is still served by
+// the agent — the manifest advertises both — but a client reads one generation,
+// and this one is the generation this renderer understands.
 import type {
   ConversationRequest,
   ConversationResponse,
-} from '@/generated/protocol/claude-code/conversation/v1';
+} from '@/generated/protocol/claude-code/conversation/v2';
 import type {
   ListRequest,
   ListResponse,

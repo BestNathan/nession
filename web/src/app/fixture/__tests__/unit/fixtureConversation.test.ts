@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { fixtureConversationSurface } from '@/app/fixture/fixtureConversation';
 import { FIXTURE_AGENTS } from '@/app/fixture/fixtureData';
-import type { ConversationResponse } from '@/generated/protocol/claude-code/conversation/v1';
+// v2, because that is the generation the fixture now serves (#1167). Reading it
+// through v1's types would have the test assert a shape the surface under test
+// no longer produces — and it would typecheck, which is the dangerous part.
+import type { ConversationResponse } from '@/generated/protocol/claude-code/conversation/v2';
 
 /**
  * The fixture's conversation surface is an *input*, so it has no rendering to
@@ -56,21 +59,58 @@ describe('fixture conversation surface', () => {
     expect(titles.some((t) => t === undefined || t === null)).toBe(true);
   });
 
-  it('covers all three item kinds, including a tool that failed', async () => {
-    // The transcript draws user, assistant and tool differently, and a tool
-    // twice more by `is_error`. A fixture that only ever produced successes
-    // would make the failure treatment unreachable from any golden.
+  it('covers every item kind the renderer has a branch for', async () => {
+    // The transcript draws a message by its speaker, a tool by its status, and a
+    // record it cannot read as a marker. Each of those is a different branch,
+    // and a fixture that missed one would make that branch unreachable from
+    // every golden — the state would exist and nothing could photograph it.
     const response = await surface.request<ConversationResponse>('claude-code.conversation', {});
     const items = response.items ?? [];
-    const kinds = items.map((item) => item.kind);
 
-    expect(kinds).toContain('user');
-    expect(kinds).toContain('assistant');
-    expect(kinds).toContain('tool');
+    expect(items.map((item) => item.kind)).toContain('message');
+    expect(items.map((item) => item.kind)).toContain('tool');
+    expect(items.map((item) => item.kind)).toContain('unknown');
 
-    const tools = items.filter((item) => item.kind === 'tool');
-    expect(tools.some((item) => item.tool?.is_error === true)).toBe(true);
-    expect(tools.some((item) => item.tool?.is_error === false)).toBe(true);
+    const roles = items.flatMap((item) => (item.kind === 'message' ? [item.role] : []));
+    expect(roles).toContain('user');
+    expect(roles).toContain('assistant');
+  });
+
+  it('covers every tool status, truncation, and a readable body', async () => {
+    // Four statuses, because they are four renderings — and `running` beside
+    // `unknown` most of all: describing the second as the first is the claim
+    // the provider deliberately does not make, so a fixture that only produced
+    // one of them could not show the difference.
+    const response = await surface.request<ConversationResponse>('claude-code.conversation', {});
+    const tools = (response.items ?? []).flatMap((item) => (item.kind === 'tool' ? [item.tool] : []));
+    const statuses = tools.map((tool) => tool.status);
+
+    expect(statuses).toContain('success');
+    expect(statuses).toContain('error');
+    expect(statuses).toContain('running');
+    expect(statuses).toContain('unknown');
+
+    // The error has to carry its output: a failed tool with nothing to read is
+    // the state a reader most needs, and the one v1 could not express at all.
+    const failed = tools.find((tool) => tool.status === 'error');
+    expect(failed?.output?.text).toBeTruthy();
+
+    // And truncation, which is indistinguishable from a short body unless
+    // something says so.
+    expect(tools.some((tool) => tool.output?.truncated === true)).toBe(true);
+  });
+
+  it('carries Markdown and a code fence, so the renderer has something to draw', async () => {
+    // The regression this guards is the one #714 recorded: the fixture stops
+    // reaching the feature, the golden keeps passing, and the gate goes on
+    // protecting a screen the product no longer has.
+    const response = await surface.request<ConversationResponse>('claude-code.conversation', {});
+    const prose = (response.items ?? []).flatMap((item) =>
+      item.kind === 'message' ? item.content.flatMap((c) => (c.type === 'text' ? [c.text] : [])) : [],
+    );
+
+    expect(prose.some((text) => text.includes('## '))).toBe(true);
+    expect(prose.some((text) => text.includes('```'))).toBe(true);
   });
 
   it('models the ambiguous and no-conversation states, not just the happy one', async () => {

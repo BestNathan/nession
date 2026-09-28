@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { ConversationView } from '../../ConversationView';
 import type { ConversationViewState } from '../../../hooks/useConversation';
+import type { ConversationItems } from '../../../model/conversationPositions';
 
 function state(overrides: Partial<ConversationViewState> = {}): ConversationViewState {
   return {
@@ -48,15 +49,32 @@ function renderView(view: ConversationViewState, handlers: Partial<{
   return { onSelect, onLoadOlder, onReload };
 }
 
-const turns = [
-  { id: '1', kind: 'user' as const, timestamp: '2026-09-25T10:00:00Z', text: 'hello' },
-  { id: '2', kind: 'assistant' as const, timestamp: '2026-09-25T10:00:05Z', text: 'hi there' },
+const turns: ConversationItems = [
+  {
+    id: '1',
+    kind: 'message',
+    role: 'user',
+    timestamp: '2026-09-25T10:00:00Z',
+    content: [{ type: 'text', text: 'hello' }],
+  },
+  {
+    id: '2',
+    kind: 'message',
+    role: 'assistant',
+    timestamp: '2026-09-25T10:00:05Z',
+    content: [{ type: 'text', text: 'hi there' }],
+  },
   {
     id: '3',
-    kind: 'tool' as const,
+    kind: 'tool',
     timestamp: '2026-09-25T10:00:06Z',
-    text: 'the whole result',
-    tool: { name: 'Bash', summary: 'ls -la', is_error: false, truncated: false },
+    tool: {
+      call_id: 'c1',
+      name: 'Bash',
+      status: 'success',
+      summary: 'ls -la',
+      output: { text: 'the whole result', kind: 'text', truncated: false },
+    },
   },
 ];
 
@@ -65,7 +83,11 @@ describe('ConversationView', () => {
     renderView(state({ items: turns }));
 
     const rendered = screen.getAllByTestId('conversation-turn');
-    expect(rendered.map((el) => el.getAttribute('data-kind'))).toEqual(['user', 'assistant']);
+    // `kind` is the wire's tag — both turns are `message` now — and the speaker
+    // is the separate fact the wire carries on `role`. Asserting both is what
+    // says the frame reports the item rather than flattening one into the other.
+    expect(rendered.map((el) => el.getAttribute('data-kind'))).toEqual(['message', 'message']);
+    expect(rendered.map((el) => el.getAttribute('data-role'))).toEqual(['user', 'assistant']);
     expect(screen.getByText('hello')).toBeInTheDocument();
     expect(screen.getByText('hi there')).toBeInTheDocument();
   });
@@ -83,8 +105,13 @@ describe('ConversationView', () => {
     renderView(state({ items: turns }));
 
     const rendered = screen.getAllByTestId('conversation-turn');
+    // The user's turn is pushed to the end of the row; Claude's is not — it
+    // stretches, so that its code fences scroll inside a definite width instead
+    // of widening the column. Asserting `items-start` here would pin the older
+    // value and the overflow it caused; what matters is that the two are not
+    // both anchored the same way.
     expect(rendered[0]!.className).toContain('items-end');
-    expect(rendered[1]!.className).toContain('items-start');
+    expect(rendered[1]!.className).not.toContain('items-end');
   });
 
   it('collapses tool calls so they do not drown the conversation', () => {
@@ -370,5 +397,138 @@ describe('ConversationView', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('the transcript could not be read');
     await user.click(screen.getByRole('button', { name: 'Retry' }));
     expect(onReload).toHaveBeenCalled();
+  });
+});
+
+/**
+ * #1167's content grammar: prose as Markdown, code as a readable surface, and a
+ * tool call as one activity that can be opened.
+ */
+describe('ConversationView — structured transcript', () => {
+  function message(text: string, role: 'user' | 'assistant' = 'assistant'): ConversationItems[number] {
+    return { id: `m-${text}`, kind: 'message', role, content: [{ type: 'text', text }] };
+  }
+
+  function tool(overrides: Partial<Extract<ConversationItems[number], { kind: 'tool' }>['tool']> = {}): ConversationItems[number] {
+    return {
+      id: 'tool-1',
+      kind: 'tool',
+      tool: {
+        call_id: 'c1',
+        name: 'Bash',
+        status: 'success',
+        summary: 'cargo test',
+        ...overrides,
+      },
+    };
+  }
+
+  it('renders assistant prose as Markdown rather than as literal text', () => {
+    // The headline of #1167: a heading, a list and emphasis have to become
+    // elements. Asserting on the *element* is the point — text matching would
+    // pass just as well if the asterisks were still on screen.
+    renderView(state({ items: [message('# Heading\n\n- one\n- two\n\n**bold**')] }));
+
+    expect(
+      screen.getByRole('heading', { name: 'Heading' }),
+      'the Markdown heading did not become an element',
+    ).toBeInTheDocument();
+    expect(screen.getAllByRole('listitem')).toHaveLength(2);
+    expect(screen.getByText('bold')).toHaveProperty('tagName', 'STRONG');
+  });
+
+  it('keeps a Markdown heading below the page heading', () => {
+    // A message is not a page. A `#` rendered as an `<h1>` would compete with
+    // the Workspace's own heading and rewrite the document outline with
+    // whatever the model happened to write.
+    renderView(state({ items: [message('# Heading')] }));
+
+    expect(screen.getByRole('heading', { name: 'Heading' })).toHaveProperty('tagName', 'H2');
+    expect(screen.queryByRole('heading', { level: 1 })).not.toBeInTheDocument();
+  });
+
+  it('gives a fenced block its language and a way to copy it', async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+
+    renderView(state({ items: [message('```rust\nfn main() {}\n```')] }));
+
+    expect(screen.getByTestId('code-block-language')).toHaveTextContent('rust');
+    await user.click(screen.getByRole('button', { name: /copy rust code/i }));
+    // The *source*, not the rendered element's text: the copy has to be
+    // something that can be pasted back into a file.
+    expect(writeText).toHaveBeenCalledWith('fn main() {}\n');
+  });
+
+  it('drops raw HTML in a message instead of executing it', () => {
+    // The sanitizer's promise, asserted from the consumer's side. There is no
+    // `rehype-raw` anywhere in the tree, so a raw node never becomes an
+    // element — this is what makes the transcript safe to render at all.
+    renderView(state({ items: [message('<img src=x onerror="alert(1)">')] }));
+
+    expect(screen.queryByRole('img')).not.toBeInTheDocument();
+    expect(document.body.innerHTML).not.toContain('onerror');
+  });
+
+  it('shows a tool call collapsed by default, with its arguments and result apart', () => {
+    // Collapsed is the default the whole design rests on (#1005 criterion 10).
+    // It is asserted on the `open` attribute rather than on the body's absence
+    // because a native `<details>` keeps its children in the DOM either way —
+    // jsdom does not model their hiddenness, so "not in the document" would be
+    // an assertion about jsdom, not about this component.
+    renderView(
+      state({
+        items: [
+          tool({
+            input: { text: '{"command":"cargo test"}', kind: 'json', truncated: false },
+            output: { text: '42 tests passed', kind: 'text', truncated: false },
+          }),
+        ],
+      }),
+    );
+
+    expect(screen.getByTestId('conversation-tool')).not.toHaveAttribute('open');
+    // Two sections, named — the separation #1167 asks for, rather than one blob.
+    expect(screen.getByRole('heading', { name: 'Input' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Output' })).toBeInTheDocument();
+    expect(screen.getByText('42 tests passed')).toBeInTheDocument();
+    // `[object Object]` is the failure the JSON payload exists to prevent.
+    expect(screen.getByText(/"command":"cargo test"/)).toBeInTheDocument();
+  });
+
+  it('says a tool failed without relying on colour', () => {
+    renderView(state({ items: [tool({ status: 'error', output: { text: 'boom', kind: 'text', truncated: false } })] }));
+
+    expect(screen.getByTestId('conversation-tool')).toHaveAttribute('data-status', 'error');
+    // The word, not only the red. A screen reader and a monochrome display both
+    // need the status to be readable.
+    expect(screen.getByText('failed')).toBeInTheDocument();
+  });
+
+  it('marks a truncated body so a short answer is not mistaken for the whole one', () => {
+    renderView(
+      state({ items: [tool({ output: { text: 'the first part', kind: 'text', truncated: true } })] }),
+    );
+
+    expect(screen.getByTestId('conversation-tool-truncated')).toHaveTextContent('truncated');
+  });
+
+  it('says a call whose outcome was not loaded is unknown, not still running', () => {
+    // `running` and `unknown` are different claims, and the provider only makes
+    // the first when it knows there is nothing newer in the transcript.
+    renderView(state({ items: [tool({ status: 'unknown', output: undefined })] }));
+
+    expect(screen.getByText('outcome not loaded')).toBeInTheDocument();
+    expect(screen.queryByText('still running')).not.toBeInTheDocument();
+  });
+
+  it('shows a record this version cannot read rather than a hole where it was', () => {
+    renderView(state({ items: [{ id: 'u1', kind: 'unknown' }] }));
+
+    expect(screen.getByTestId('conversation-unknown')).toBeInTheDocument();
   });
 });
