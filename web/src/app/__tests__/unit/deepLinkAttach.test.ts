@@ -237,7 +237,7 @@ describe('resolveProfileAttach', () => {
     expect(resolution).toMatchObject({ kind: 'choice' });
   });
 
-  it('returns dialog when the options changed', async () => {
+  it('returns choice when candidates changed but intent is still auto (#1186)', async () => {
     sessionsApiMock.requestAttach.mockResolvedValue({
       mode: 'p2p', session_id: 'agent-1:dev', connection_token: 'tok',
       addresses: [
@@ -246,12 +246,26 @@ describe('resolveProfileAttach', () => {
       ],
     });
     const resolution = await resolveProfileAttach(p2pSession, p2pProfile(), new Map());
+    expect(resolution).toMatchObject({ kind: 'choice' });
+  });
+
+  it('returns dialog when a saved manual url is no longer offered', async () => {
+    sessionsApiMock.requestAttach.mockResolvedValue({
+      mode: 'p2p', session_id: 'agent-1:dev', connection_token: 'tok',
+      addresses: [{
+        url: 'ws://a/ws', label: 'lan', network_type: 'lan',
+        priority: 0, status: 'reachable',
+      }],
+    });
+    const manual = p2pProfile();
+    manual.choice = { ...p2pChoice, mode: 'relay', selectedUrl: 'ws://gone/ws' };
+    const resolution = await resolveProfileAttach(p2pSession, manual, new Map());
     expect(resolution).toEqual({ kind: 'dialog' });
   });
 
-  it('returns dialog when the attach request fails', async () => {
+  it('returns failed when the attach request fails', async () => {
     sessionsApiMock.requestAttach.mockRejectedValue(new Error('boom'));
     const resolution = await resolveProfileAttach(p2pSession, p2pProfile(), new Map());
-    expect(resolution).toEqual({ kind: 'dialog' });
+    expect(resolution).toEqual({ kind: 'failed', error: 'boom' });
   });
 });
