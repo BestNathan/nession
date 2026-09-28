@@ -492,12 +492,18 @@ test.describe('Terminal I/O', () => {
     }).toPass({ timeout: 15_000 });
 
     // A genuinely fresh client: the document reloads and xterm is built from
-    // nothing, while the probe keeps running in the pane. Counting before and
-    // after rather than asserting presence, because the reattach re-bootstraps
-    // the scrollback and the earlier `^[OA` comes back with it.
+    // nothing, while the probe keeps running in the pane.
+    //
+    // No `attachToSession` here, and that is the point rather than a shortcut.
+    // The route still names the Session and the attach profile is persisted
+    // (#1186), so a reload reattaches on the ordinary path — there is no second
+    // confirmation to click, and waiting for one is what this test did first
+    // and failed on. Waiting for the shell is waiting for the reattach.
+    //
+    // Counting `^[OA` before and after rather than asserting presence, because
+    // the reattach re-bootstraps the scrollback and the earlier one comes back
+    // with it.
     await page.reload();
-    await waitForTerminal(page);
-    await attachToSession(page, SESSION_NAME, 'Relay');
     await waitForInteractiveShell(page);
 
     const before = await countInBuffer(page, '^[OA');
