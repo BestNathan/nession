@@ -54,9 +54,10 @@ export function useEnvEditorDraft(
 ): EnvEditorDraft {
   const proposedName = proposedNameFor(target);
   const initialSource = initialSourceFor(target);
+  const [initialAgent] = useState(() => initialAgentFor(target, agents));
   const [name, setName] = useState(proposedName);
   const [source, setSource] = useState<EnvSource>(initialSource);
-  const [agentId, setAgentId] = useState(() => initialAgentFor(target, agents));
+  const [agentId, setAgentId] = useState(initialAgent);
   const [content, setContent] = useState('');
   const [originalContent, setOriginalContent] = useState('');
   const initialized = useRef(false);
@@ -74,7 +75,8 @@ export function useEnvEditorDraft(
   const dirty = isNew
     ? name.trim() !== proposedName ||
       content !== originalContent ||
-      source !== initialSource
+      source !== initialSource ||
+      agentId !== initialAgent
     : content !== originalContent;
 
   const buildRef = (): EnvFileRef => {

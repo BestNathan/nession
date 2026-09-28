@@ -8,6 +8,20 @@ export type EditorTarget =
   | { kind: 'new' }
   | { kind: 'duplicate'; source: EnvFileInfo };
 
+/**
+ * Remount key for the Edit depth: one target, one draft. Both experiences key
+ * the editor by this so switching targets can never inherit a stale draft.
+ */
+export function editorTargetKey(editor: EditorTarget, selectedKey: string | null): string {
+  if (editor.kind === 'duplicate') {
+    return `duplicate:${refKey(editor.source)}`;
+  }
+  if (editor.kind === 'new') {
+    return 'new';
+  }
+  return `existing:${selectedKey ?? ''}`;
+}
+
 export interface EnvironmentScreen {
   /** `refKey` of the selected profile; null shows the empty detail (Web) / the list (App). */
   selectedKey: string | null;
@@ -26,8 +40,10 @@ export interface EnvironmentScreen {
   /**
    * After a successful save or import: close Edit, clear dirty, and select the
    * saved profile unguarded — saving is what made the state safe to leave.
+   * Passing `null` explicitly clears the selection (the deleted profile's
+   * detail must not linger); omitting the argument keeps it.
    */
-  finishEdit: (selectKey?: string) => void;
+  finishEdit: (selectKey?: string | null) => void;
   setDirty: (dirty: boolean) => void;
   /**
    * The App's Back policy (#1051): a dirty edit confirms through the guard, a
@@ -37,6 +53,11 @@ export interface EnvironmentScreen {
   leaveDepth: () => void;
   confirmGuard: () => void;
   cancelGuard: () => void;
+  /**
+   * Unconditional reset for a Session switch: the old Session's selection and
+   * any edit in flight belong to that Session and must not reappear (#1202).
+   */
+  reset: () => void;
 }
 
 /**
@@ -114,7 +135,7 @@ export function useEnvironmentScreen(): EnvironmentScreen {
     });
   }, [guarded, openEditor]);
 
-  const finishEdit = useCallback((selectKey?: string) => {
+  const finishEdit = useCallback((selectKey?: string | null) => {
     setEditor(null);
     setDirty(false);
     if (selectKey !== undefined) {
@@ -132,6 +153,13 @@ export function useEnvironmentScreen(): EnvironmentScreen {
     });
   }, [editor, guarded, openEditor]);
 
+  const reset = useCallback(() => {
+    setSelectedKey(null);
+    setEditor(null);
+    setDirty(false);
+    setPending(null);
+  }, []);
+
   return {
     selectedKey,
     editor,
@@ -147,5 +175,6 @@ export function useEnvironmentScreen(): EnvironmentScreen {
     leaveDepth,
     confirmGuard,
     cancelGuard,
+    reset,
   };
 }

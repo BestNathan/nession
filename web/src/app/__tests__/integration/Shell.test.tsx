@@ -71,10 +71,8 @@ vi.mock('@/app/TerminalRegion', () => ({
 vi.mock('@/app/experiences/web/FilesWebLayout', () => ({
   FilesWebLayout: () => <div data-testid="file-workspace" />,
 }));
-vi.mock('@/capabilities/env/components/EnvManager', () => ({
-  EnvManager: ({ embedded }: { embedded?: boolean }) => (
-    <div data-testid="env-manager" data-embedded={embedded ? 'true' : 'false'} />
-  ),
+vi.mock('@/app/experiences/web/EnvWebLayout', () => ({
+  EnvWebLayout: () => <div data-testid="env-workspace" />,
 }));
 vi.mock('@/product/session/components/CreateSessionDialog', () => ({
   // The stub exposes what the real dialog hands over on success — the created
@@ -101,13 +99,6 @@ vi.mock('@/product/session/components/CreateSessionDialog', () => ({
 vi.mock('@/product/session/components/KillConfirmDialog', () => ({
   KillConfirmDialog: ({ isOpen }: { isOpen: boolean }) =>
     isOpen ? <div data-testid="kill-session-dialog" /> : null,
-}));
-vi.mock('@/capabilities/env/components/EnvManager', () => ({
-  EnvManager: ({ onBack }: { onBack: () => void }) => (
-    <div data-testid="env-manager">
-      <button type="button" onClick={() => onBack()}>Back</button>
-    </div>
-  ),
 }));
 vi.mock('@/platform/server/components/ServerInfoMenu', () => ({
   ServerInfoMenu: () => <div data-testid="server-info-menu" />,
@@ -506,8 +497,8 @@ describe('Shell', () => {
     renderShell();
     await userEvent.click(screen.getByTestId('session-item-a1:fix'));
     await userEvent.click(screen.getByRole('button', { name: 'Open Workspace' }));
-    await clickDisclosedCapability('Env');
-    expect(screen.getByTestId('env-manager')).toBeInTheDocument();
+    await clickDisclosedCapability('Environment');
+    expect(screen.getByTestId('env-workspace')).toBeInTheDocument();
   });
 
   it('renders without the global chrome bar', () => {

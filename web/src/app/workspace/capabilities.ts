@@ -63,7 +63,7 @@ const WORKSPACE_CAPABILITY_PROVIDERS: readonly WorkspaceCapabilityProvider[] = [
   { id: 'files', title: 'Files', available: (ctx) => ctx.fileOps !== null },
   { id: 'session', title: 'Session', available: () => true },
   { id: 'agent', title: 'Agent', available: () => true },
-  { id: 'env', title: 'Env', available: () => true },
+  { id: 'env', title: 'Environment', available: () => true },
 ];
 
 function providerFor(

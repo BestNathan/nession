@@ -1,9 +1,8 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Plus, Search } from 'lucide-react';
 import { cn } from '@/shared/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   DropdownMenu,
@@ -29,6 +28,13 @@ export interface EnvironmentNavigatorProps {
   onNew: () => void;
   onImport: () => void;
   onRetry: () => void;
+  /**
+   * App only (#1051): the pushed detail hides the list, so the list's scroll
+   * position leaves with it — restore it when the detail pops. Same prop
+   * names as `FileList`, which solves the same problem.
+   */
+  restoredScrollTop?: number;
+  onScrollSnapshot?: (scrollTop: number) => void;
 }
 
 function EnvironmentRow({
@@ -163,9 +169,20 @@ function NavigatorBody(props: EnvironmentNavigatorProps & { query: string }) {
  */
 export function EnvironmentNavigator(props: EnvironmentNavigatorProps) {
   const [query, setQuery] = useState('');
+  const listRef = useRef<HTMLDivElement>(null);
   const activeNames = props.profiles
     .filter((p) => props.activeKeys.has(refKey(p)))
     .map((p) => p.name);
+
+  useEffect(() => {
+    if (props.restoredScrollTop === undefined || props.loading) {
+      return;
+    }
+    const node = listRef.current;
+    if (node) {
+      node.scrollTop = props.restoredScrollTop;
+    }
+  }, [props.restoredScrollTop, props.loading]);
 
   return (
     <div data-testid="env-navigator" className="flex h-full min-h-0 flex-col">
@@ -215,9 +232,19 @@ export function EnvironmentNavigator(props: EnvironmentNavigatorProps) {
         </p>
       ) : null}
 
-      <ScrollArea className="min-h-0 flex-1">
+      <div
+        ref={listRef}
+        className="min-h-0 flex-1 overflow-y-auto"
+        data-testid="env-navigator-list"
+        onScroll={() => {
+          const node = listRef.current;
+          if (node && props.onScrollSnapshot) {
+            props.onScrollSnapshot(node.scrollTop);
+          }
+        }}
+      >
         <NavigatorBody {...props} query={query} />
-      </ScrollArea>
+      </div>
     </div>
   );
 }
