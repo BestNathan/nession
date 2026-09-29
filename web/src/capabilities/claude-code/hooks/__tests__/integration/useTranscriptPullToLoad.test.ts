@@ -34,7 +34,7 @@ describe('useTranscriptPullToLoad', () => {
     const { scrollRef, handleEl } = refs();
 
     const { result } = renderHook(() =>
-      useTranscriptPullToLoad({ scrollRef, pullHandle: handleEl, enabled: true, onCommitLoad }),
+      useTranscriptPullToLoad({ scrollRef, enabled: true, onCommitLoad }),
     );
 
     act(() => {
@@ -64,7 +64,7 @@ describe('useTranscriptPullToLoad', () => {
     const { scrollRef, handleEl } = refs();
 
     const { result } = renderHook(() =>
-      useTranscriptPullToLoad({ scrollRef, pullHandle: handleEl, enabled: true, onCommitLoad }),
+      useTranscriptPullToLoad({ scrollRef, enabled: true, onCommitLoad }),
     );
 
     act(() => {
@@ -93,10 +93,10 @@ describe('useTranscriptPullToLoad', () => {
     // Four full wheel ticks: each contributes the capped 24px step, so the
     // ring reaches the 96px trigger exactly — a deliberate overscroll.
     const onCommitLoad = vi.fn();
-    const { scrollRef, handleEl } = refs();
+    const { scrollRef } = refs();
 
     const { result } = renderHook(() =>
-      useTranscriptPullToLoad({ scrollRef, pullHandle: handleEl, enabled: true, onCommitLoad }),
+      useTranscriptPullToLoad({ scrollRef, enabled: true, onCommitLoad }),
     );
 
     const wheelEvent = {
@@ -119,10 +119,10 @@ describe('useTranscriptPullToLoad', () => {
     // the old 56px trigger. Under the 96px trigger it must fill the ring
     // partially and commit nothing.
     const onCommitLoad = vi.fn();
-    const { scrollRef, handleEl } = refs();
+    const { scrollRef } = refs();
 
     const { result } = renderHook(() =>
-      useTranscriptPullToLoad({ scrollRef, pullHandle: handleEl, enabled: true, onCommitLoad }),
+      useTranscriptPullToLoad({ scrollRef, enabled: true, onCommitLoad }),
     );
 
     const wheelEvent = {
@@ -145,10 +145,10 @@ describe('useTranscriptPullToLoad', () => {
     // deltaY > 0 is toward *newer* content — an ordinary scroll that goes
     // nowhere at the exact top, never a pull.
     const onCommitLoad = vi.fn();
-    const { scrollRef, handleEl } = refs();
+    const { scrollRef } = refs();
 
     const { result } = renderHook(() =>
-      useTranscriptPullToLoad({ scrollRef, pullHandle: handleEl, enabled: true, onCommitLoad }),
+      useTranscriptPullToLoad({ scrollRef, enabled: true, onCommitLoad }),
     );
 
     const wheelDown = {
@@ -168,10 +168,10 @@ describe('useTranscriptPullToLoad', () => {
 
   it('drains a partial wheel pull when the gesture reverses direction', () => {
     const onCommitLoad = vi.fn();
-    const { scrollRef, handleEl } = refs();
+    const { scrollRef } = refs();
 
     const { result } = renderHook(() =>
-      useTranscriptPullToLoad({ scrollRef, pullHandle: handleEl, enabled: true, onCommitLoad }),
+      useTranscriptPullToLoad({ scrollRef, enabled: true, onCommitLoad }),
     );
 
     const wheel = (deltaY: number) =>
@@ -210,7 +210,7 @@ describe('useTranscriptPullToLoad', () => {
     const handleEl = document.createElement('div');
 
     const { result } = renderHook(() =>
-      useTranscriptPullToLoad({ scrollRef, pullHandle: handleEl, enabled: true, onCommitLoad }),
+      useTranscriptPullToLoad({ scrollRef, enabled: true, onCommitLoad }),
     );
 
     act(() => {
@@ -245,10 +245,9 @@ describe('useTranscriptPullToLoad', () => {
       configurable: true,
     });
     const scrollRef = { current: scrollEl } as RefObject<HTMLDivElement>;
-    const handleEl = document.createElement('div');
 
     const { result } = renderHook(() =>
-      useTranscriptPullToLoad({ scrollRef, pullHandle: handleEl, enabled: true, onCommitLoad }),
+      useTranscriptPullToLoad({ scrollRef, enabled: true, onCommitLoad }),
     );
 
     const wheelEvent = {
@@ -267,37 +266,91 @@ describe('useTranscriptPullToLoad', () => {
     expect(onCommitLoad).toHaveBeenCalledWith({ scrollHeight: 1000, scrollTop: 0 });
   });
 
-  it('re-installs touch listeners when the handle node is replaced', () => {
-    // The handle unmounts whenever the transcript leaves the top edge and a
-    // fresh node mounts on return; the touch gesture must work on every node,
-    // not just the first.
+  it('commits when a touch drag pulls down on the feed at the top edge', () => {
+    // The touch gesture lives on the scroll root: a drag anywhere on the
+    // feed pulls, not only a drag that lands on the hint bar.
     const onCommitLoad = vi.fn();
     const { scrollRef } = refs();
-    const firstHandle = document.createElement('div');
 
-    const { rerender } = renderHook(
-      ({ pullHandle }: { pullHandle: HTMLDivElement | null }) =>
-        useTranscriptPullToLoad({ scrollRef, pullHandle, enabled: true, onCommitLoad }),
-      { initialProps: { pullHandle: firstHandle as HTMLDivElement | null } },
+    renderHook(() =>
+      useTranscriptPullToLoad({ scrollRef, enabled: true, onCommitLoad }),
     );
 
-    rerender({ pullHandle: null });
-    const secondHandle = document.createElement('div');
-    rerender({ pullHandle: secondHandle });
-
-    const touchDrag = (el: HTMLDivElement) => {
-      el.dispatchEvent(Object.assign(new Event('touchstart'), { touches: [{ clientY: 100 }] }));
-      el.dispatchEvent(
+    act(() => {
+      const root = scrollRef.current!;
+      root.dispatchEvent(
+        Object.assign(new Event('touchstart'), { touches: [{ clientY: 100 }] }),
+      );
+      root.dispatchEvent(
         Object.assign(new Event('touchmove'), {
           touches: [{ clientY: 100 + TRANSCRIPT_PULL_TRIGGER_PX + 10 }],
         }),
       );
-      el.dispatchEvent(new Event('touchend'));
-    };
-    act(() => {
-      touchDrag(secondHandle);
+      root.dispatchEvent(new Event('touchend'));
     });
 
     expect(onCommitLoad).toHaveBeenCalledTimes(1);
+  });
+
+  it('still pulls when the touch drag starts on the hint bar itself', () => {
+    // The hint bar is a child of the scroll root; its touches must bubble up
+    // to the same gesture.
+    const onCommitLoad = vi.fn();
+    const { scrollRef, handleEl } = refs();
+    scrollRef.current!.appendChild(handleEl);
+
+    renderHook(() =>
+      useTranscriptPullToLoad({ scrollRef, enabled: true, onCommitLoad }),
+    );
+
+    act(() => {
+      handleEl.dispatchEvent(
+        Object.assign(new Event('touchstart', { bubbles: true }), {
+          touches: [{ clientY: 100 }],
+        }),
+      );
+      handleEl.dispatchEvent(
+        Object.assign(new Event('touchmove', { bubbles: true }), {
+          touches: [{ clientY: 100 + TRANSCRIPT_PULL_TRIGGER_PX + 10 }],
+        }),
+      );
+      handleEl.dispatchEvent(new Event('touchend', { bubbles: true }));
+    });
+
+    expect(onCommitLoad).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not pull when the touch gesture starts away from the top edge', () => {
+    // A pull must start at the top: a drag that begins mid-feed and scrolls
+    // up *into* the top edge inside the same gesture is still an ordinary
+    // scroll, not a pull — otherwise every fast upward flick that reaches
+    // the top would hijack the gesture's tail into a load.
+    const onCommitLoad = vi.fn();
+    const { scrollRef } = refs();
+    scrollRef.current!.scrollTop = 300;
+
+    const { result } = renderHook(() =>
+      useTranscriptPullToLoad({ scrollRef, enabled: true, onCommitLoad }),
+    );
+
+    act(() => {
+      const root = scrollRef.current!;
+      root.dispatchEvent(
+        Object.assign(new Event('touchstart'), { touches: [{ clientY: 400 }] }),
+      );
+      // Scroll up into the top edge…
+      root.dispatchEvent(
+        Object.assign(new Event('touchmove'), { touches: [{ clientY: 100 }] }),
+      );
+      scrollRef.current!.scrollTop = 0;
+      // …then drag back down past the gesture's start.
+      root.dispatchEvent(
+        Object.assign(new Event('touchmove'), { touches: [{ clientY: 450 }] }),
+      );
+      root.dispatchEvent(new Event('touchend'));
+    });
+
+    expect(result.current.pullPx).toBe(0);
+    expect(onCommitLoad).not.toHaveBeenCalled();
   });
 });
