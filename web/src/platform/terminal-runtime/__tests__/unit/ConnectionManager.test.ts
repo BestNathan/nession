@@ -49,7 +49,10 @@ function makeAgentApi(): AgentApiHarness & { unsubs: { output: ReturnType<typeof
       errorHandlers.push(cb);
       return unsubs.error;
     }),
-    ping: vi.fn(),
+    // Resolves, because the real `ping` returns a promise and the keepalive
+    // attaches a `.catch` to it: a mock returning `undefined` would throw a
+    // TypeError and pass for the wrong reason (#1233).
+    ping: vi.fn().mockResolvedValue(undefined),
   };
   return {
     api: api as unknown as TerminalAgentApi,

@@ -161,6 +161,36 @@ export class WebSocketService implements PluginSurface {
   }
 
   /**
+   * The peer has stopped answering on a socket the browser still reports OPEN.
+   *
+   * **A half-open socket fires no `close`, and that is the whole problem.**
+   * `handleSocketLoss()` is the only reconnect scheduler and it is wired to
+   * `onclose`, so a peer that goes silent — a replaced pod, a dropped NAT
+   * mapping — leaves `state` at `'connected'` forever. Everything downstream
+   * reads that state: the attach gate keeps letting input through, and
+   * `sendRaw` checks only `readyState`, which is still 1, so keystrokes are
+   * written into the void with no error and no UI signal (#1233).
+   *
+   * Called by the liveness probe layered above this class; this method makes no
+   * judgement about liveness itself (see `web/CLAUDE.md` §2 — the transport is
+   * shared by the relay singleton and every P2P service, so probing belongs to
+   * the caller that knows what it is talking to).
+   *
+   * Deliberately routed through the ordinary loss path rather than a private
+   * shortcut: reconnect budget, candidate rotation and force-relay all key off
+   * the state transition this produces, so they apply unchanged.
+   */
+  reportUnresponsive(): void {
+    if (this.disposed || this.userClosed) {
+      return;
+    }
+    // `teardownSocket()` detaches `onclose` before closing, so this cannot
+    // schedule a second reconnect through the event it is about to fire.
+    this.teardownSocket();
+    this.handleSocketLoss();
+  }
+
+  /**
    * Permanently stop the transport: plugins are torn down (each once), an
    * in-flight `connect()` is rejected with 'WebSocketService disposed', and
    * the state ends at 'disconnected' (never left frozen mid-connect).

@@ -108,6 +108,24 @@ function isSameSnapshot(a: SessionRuntimeSnapshot, b: SessionRuntimeSnapshot): b
     && a.reconnectCount === b.reconnectCount;
 }
 
+/**
+ * How often the live P2P transport is asked to prove it is still there.
+ *
+ * Short enough that a user typing into a dead socket finds out in seconds
+ * rather than never, long enough not to be the "high-frequency heartbeat"
+ * #1213 rules out. Worst-case detection is this plus {@link P2P_PROBE_TIMEOUT_MS}.
+ */
+const P2P_PROBE_INTERVAL_MS = 15_000;
+
+/**
+ * How long a probe may go unanswered before the peer is declared gone.
+ *
+ * Generous next to a LAN/tunnel round trip (measured ~90 ms in the attach
+ * dialog), because a false positive costs a reconnect. The failure this guards
+ * against never answers at all, so the deadline does not need to be tight.
+ */
+const P2P_PROBE_TIMEOUT_MS = 5_000;
+
 export class SessionRuntime {
   readonly sessionId: string;
   readonly attachState: AttachStateMachine;
@@ -127,6 +145,14 @@ export class SessionRuntime {
   /** Latest P2P attach stream cursor from agent.attach (#1094). */
   private p2pStreamSeed: { streamEpoch?: number; streamCursor?: number } | null = null;
   private connectionUnsub: (() => void) | null = null;
+  /** Liveness probe for the live P2P transport — see `startLivenessProbe`. */
+  private livenessTimer: ReturnType<typeof setInterval> | null = null;
+  /**
+   * Invalidates in-flight probes. Bumped whenever the probe is disarmed, so a
+   * pong deadline that expires *after* the transport already moved on cannot
+   * declare a dead socket the recovery is in the middle of replacing.
+   */
+  private livenessProbeToken = 0;
   private readonly connectionStateListeners = new Set<(state: ConnectionState) => void>();
   private readonly runtimeEventListeners = new Set<(event: SessionRuntimeEvent) => void>();
   private readonly attachOutcomeListeners = new Set<(result: AttachTransitionResult) => void>();
@@ -504,6 +530,73 @@ export class SessionRuntime {
   private teardownConnectionHandler(): void {
     this.connectionUnsub?.();
     this.connectionUnsub = null;
+    // Every path that drops the connection handler also ends the probe, and
+    // `wireConnectionHandler` re-arms it on the next `'connected'`. Kept here
+    // rather than in `dispose()` because the other three callers are the ones
+    // that rebuild the transport — a probe left armed across a rebuild would
+    // be questioning a socket that no longer exists.
+    this.stopLivenessProbe();
+  }
+
+  /**
+   * Ask the agent to prove it is still there, for as long as the P2P transport
+   * *claims* to be connected.
+   *
+   * **This is the only client-side thing that can notice a half-open socket**,
+   * and the reason the claim is the right trigger: when a peer goes silent the
+   * browser fires no `close`, so `WebSocketService`'s loss path — wired to
+   * `onclose` — never runs. `connectionState` stays `'connected'`, the attach
+   * gate stays open, and `sendRaw`'s guard checks only `readyState`, which is
+   * still 1. Keystrokes are written into the void with no error, no reconnect
+   * and nothing on screen — the terminal stays interactive-looking while both
+   * directions are dead (#1233).
+   *
+   * A missed pong is that missing signal. The agent already replies
+   * (`make_response(&self.id, CONTROL_PONG, ())`), so the probe only has to
+   * wait — and the failure is handed to `reportUnresponsive()`, which routes it
+   * through the ordinary loss path so the reconnect budget, candidate rotation
+   * and force-relay all apply unchanged.
+   */
+  private startLivenessProbe(): void {
+    this.stopLivenessProbe();
+    const api = this.agentTerminalApi;
+    if (!api) {
+      return;
+    }
+    const token = this.livenessProbeToken;
+    this.livenessTimer = setInterval(() => {
+      // Only the **attached** state has the hole this fills. An unattached
+      // transport is already driven by the attach retry budget, which is
+      // working as designed — probing underneath it would tear down a socket
+      // mid-retry and race a mechanism that is mid-recovery. The state this
+      // exists for is the one where the terminal looks interactive and nothing
+      // else is watching (#1233).
+      if (this.attachState.phase !== 'attached') {
+        return;
+      }
+      const live = this.agentTerminalApi;
+      if (!live) {
+        return;
+      }
+      live.ping(P2P_PROBE_TIMEOUT_MS).catch(() => {
+        // Disarmed, or the transport was swapped while this ping was in
+        // flight: either way the deadline that just expired belongs to a
+        // socket that is already being replaced, and acting on it would
+        // schedule a second reconnect on top of the running one.
+        if (this.livenessProbeToken !== token) {
+          return;
+        }
+        this.agentWs?.reportUnresponsive();
+      });
+    }, P2P_PROBE_INTERVAL_MS);
+  }
+
+  private stopLivenessProbe(): void {
+    this.livenessProbeToken += 1;
+    if (this.livenessTimer !== null) {
+      clearInterval(this.livenessTimer);
+      this.livenessTimer = null;
+    }
   }
 
   private teardownRelayServerHandler(): void {
@@ -603,16 +696,24 @@ export class SessionRuntime {
     this.connectionUnsub = this.agentWs.onConnectionStateChange((next) => {
       this.emitConnectionState(next);
       if (next === 'connected') {
+        // The probe only means anything while the transport *claims* to be
+        // connected — that is the exact state a half-open socket hides in.
+        this.startLivenessProbe();
         this.maybeStartP2PAttach();
-      } else if (
-        (next === 'reconnecting' || next === 'connecting')
-        && this.attachState.phase === 'attached'
-      ) {
-        this.attachedTransportGeneration = null;
-        const result = this.attachController.dispatch({ type: 'TRANSPORT_LOST' });
-        this.emitRuntimeEvent({ type: 'route-intent-changed', phase: result.phase });
-      } else if (next === 'disconnected') {
-        this.handleTerminalDisconnect();
+      } else {
+        // Anything else: recovery is already running, and a probe tick would
+        // only race it.
+        this.stopLivenessProbe();
+        if (
+          (next === 'reconnecting' || next === 'connecting')
+          && this.attachState.phase === 'attached'
+        ) {
+          this.attachedTransportGeneration = null;
+          const result = this.attachController.dispatch({ type: 'TRANSPORT_LOST' });
+          this.emitRuntimeEvent({ type: 'route-intent-changed', phase: result.phase });
+        } else if (next === 'disconnected') {
+          this.handleTerminalDisconnect();
+        }
       }
     });
   }
