@@ -194,17 +194,10 @@ function JsonInspectorNode({
                 />
               </div>
             ))}
-            {!isRoot ? (
-              <div className={cn(jsonTreeMonoClass(), jsonSyntax.bracket, 'py-0.5')}>
-                {closingBracket}
-              </div>
-            ) : null}
           </div>
-          {isRoot ? (
-            <div className={cn(jsonTreeMonoClass(), jsonSyntax.bracket, 'py-0.5')}>
-              {closingBracket}
-            </div>
-          ) : null}
+          <div className={cn(jsonTreeMonoClass(), jsonSyntax.bracket, 'py-0.5')}>
+            {closingBracket}
+          </div>
         </>
       ) : null}
     </div>
