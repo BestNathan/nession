@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { JsonTree } from '@/components/json/JsonTree';
+import { JsonScalar } from '@/components/json/JsonScalar';
+import { COMPACT_STRING_CHARS } from '@/components/json/jsonTreeLimits';
 
 describe('JsonTree', () => {
   it('compact mode renders root object as one inline line', () => {
@@ -20,7 +22,22 @@ describe('JsonTree', () => {
       e: 5,
     };
     render(<JsonTree value={value} mode="compact" />);
-    expect(screen.getByText(/\+1 more fields/)).toBeInTheDocument();
+    expect(screen.getByText(/… \+1/)).toBeInTheDocument();
+  });
+
+  it('compact mode truncates long strings before render (#1199)', () => {
+    const long = 'z'.repeat(COMPACT_STRING_CHARS + 500);
+    render(<JsonTree value={{ note: long }} mode="compact" />);
+    expect(screen.queryByRole('button', { name: 'Expand' })).not.toBeInTheDocument();
+    expect(document.body.textContent?.includes(long)).toBe(false);
+    expect(document.body.textContent).toMatch(/…/);
+  });
+
+  it('JsonScalar compact mode truncates without expand control', () => {
+    const long = 'a'.repeat(200);
+    render(<JsonScalar value={long} />);
+    expect(screen.queryByRole('button', { name: 'Expand' })).not.toBeInTheDocument();
+    expect(document.body.textContent?.includes(long)).toBe(false);
   });
 
   it('inspector mode exposes tree semantics and disclosure', async () => {
