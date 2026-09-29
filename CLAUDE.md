@@ -321,6 +321,8 @@ agent 启动时会把实际路径和这条命令打进日志(`tmux socket: …`)
 
 **唯一收口点是 `crates/nession-agent/src/tmux/cmd.rs`** —— `TmuxCmd::tokio()` / `.std()` / `.pty()`(portable-pty 的 `CommandBuilder` 是另一套 API,单列一个构造器)。三者都会 `env_remove("TMUX")` 和 `env_remove("TMUX_TMPDIR")`:寻址只靠 `-S`,继承来的 `TMUX` 描述的是**别的** server。同理 `create_session` 往 session 里转发进程环境时会剔掉这两个变量,否则 nession session 里的 shell 会以为自己属于开发者那台 server。
 
+**同步调用走 `TmuxCmd::output()` / `output_with()` / `output_blocking()`,不要直接用三个构造器。** 它们包了 #1225 的 stale socket 自愈:server 死掉(崩溃、`exit-empty` 带走)会留下 socket 文件,此后每次调用都只报 `server exited unexpectedly`,机器永久不可用(#1225)。这三个方法在失败时先做精确判定 —— 是 socket 文件 **且** connect 返回 `ECONNREFUSED`(只认「没有监听者」;权限错、超时、文件不存在都不算)—— 成立才删文件并用同一 argv 重试一次,删了什么会打进日志;`configure()`(启动)和 `global()`(懒初始化)也会各做一次。长生命周期客户端(`.pty()` attach、`-C` control)和 `-V` 探测不在此列。
+
 - **⛔ 禁止 `TMUX_TMPDIR`。** 它不是隔离手段:`$TMUX` 一旦存在(从 tmux 里面跑任何东西时必然存在)tmux 就完全无视它,静默落回默认 socket;socket 目录不存在时同样静默回落。实测见 #574。
 - **⛔ 禁止在 `cmd.rs` 之外派生 tmux 进程。** 门禁 `just check-tmux-socket`(`scripts/check-tmux-socket.sh`)会拦住三种形态:字面量 `Command::new("tmux")`、**变量形态 `Command::new(<expr>)`**(`&self.tmux_bin` 就是这种,只匹配字面量的门禁会对它报「零风险」)、以及 `CommandBuilder::new("tmux")`;另外扫 `scripts/**`、`e2e/**`、`deploy/**`、`justfile` 里不带 `-S` 的 shell 调用,和任何 `TMUX_TMPDIR` 赋值。已接入 `pre-commit` 与 `just check`(CI)。
   - 确实不是 tmux 的变量派生,在该行或其上三行内写 `// not-tmux: <理由>` 放行 —— 逐行、且必须写清理由,不给整文件开口子。

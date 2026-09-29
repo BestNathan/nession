@@ -452,14 +452,11 @@ impl TmuxOps {
     /// different problems and a summary that dropped the difference is what made
     /// #980 unreadable even in the logs that had it.
     pub async fn set_environment(&self, session: &str, name: &str, value: &str) -> Result<()> {
+        // `TmuxCmd::output` captures stderr: tmux's message is the only thing
+        // that says *why* a mutation failed.
         let output = self
             .cmd
-            .tokio()
-            .args(set_environment_args(session, name, value))
-            // Deliberately not `stderr(Stdio::null())`: tmux's message is the
-            // only thing that says *why* a mutation failed.
-            .stderr(std::process::Stdio::piped())
-            .output()
+            .output(&set_environment_args(session, name, value))
             .await
             .with_context(|| {
                 format!("failed to spawn tmux set-environment for {name} on session {session}")
@@ -490,10 +487,7 @@ impl TmuxOps {
     pub async fn show_environment(&self, session: &str, name: &str) -> Result<Option<String>> {
         let output = self
             .cmd
-            .tokio()
-            .args(show_environment_args(session, name))
-            .stderr(std::process::Stdio::piped())
-            .output()
+            .output(&show_environment_args(session, name))
             .await
             .with_context(|| {
                 format!("failed to spawn tmux show-environment for {name} on session {session}")
@@ -539,10 +533,7 @@ impl TmuxOps {
     pub async fn window_size(&self, session: &str) -> Result<(u16, u16)> {
         let output = self
             .cmd
-            .tokio()
-            .args(window_size_args(session))
-            .stderr(std::process::Stdio::piped())
-            .output()
+            .output(&window_size_args(session))
             .await
             .with_context(|| format!("failed to spawn tmux display-message for {session}"))?;
         if !output.status.success() {
@@ -579,10 +570,7 @@ impl TmuxOps {
     pub async fn pane_mode_flags(&self, session: &str) -> Result<PaneModeFlags> {
         let output = self
             .cmd
-            .tokio()
-            .args(pane_mode_args(session))
-            .stderr(std::process::Stdio::piped())
-            .output()
+            .output(&pane_mode_args(session))
             .await
             .with_context(|| format!("failed to spawn tmux display-message for {session}"))?;
         if !output.status.success() {
@@ -613,10 +601,7 @@ impl TmuxOps {
         let rows = rows.to_string();
         let output = self
             .cmd
-            .tokio()
-            .args(resize_window_args(session, &cols, &rows))
-            .stderr(std::process::Stdio::piped())
-            .output()
+            .output(&resize_window_args(session, &cols, &rows))
             .await
             .with_context(|| format!("failed to spawn tmux resize-window for session {session}"))?;
         if output.status.success() {
@@ -651,10 +636,7 @@ impl TmuxOps {
     pub async fn send_keys(&self, session: &str, keys: &str) -> Result<()> {
         let output = self
             .cmd
-            .tokio()
-            .args(send_keys_args(session, keys))
-            .stderr(std::process::Stdio::piped())
-            .output()
+            .output(&send_keys_args(session, keys))
             .await
             .with_context(|| format!("failed to spawn tmux send-keys for session {session}"))?;
         if output.status.success() {
@@ -690,10 +672,7 @@ impl TmuxOps {
         let from = format!("-{lines}");
         let output = self
             .cmd
-            .tokio()
-            .args(capture_pane_args(session, &from))
-            .stderr(std::process::Stdio::piped())
-            .output()
+            .output(&capture_pane_args(session, &from))
             .await
             .with_context(|| format!("failed to spawn tmux capture-pane for {session}"))?;
         if !output.status.success() {
@@ -728,10 +707,7 @@ impl TmuxOps {
         };
         let output = self
             .cmd
-            .tokio()
-            .args(detach_client_args(&client))
-            .stderr(std::process::Stdio::piped())
-            .output()
+            .output(&detach_client_args(&client))
             .await
             .with_context(|| format!("failed to spawn tmux detach-client for {client}"))?;
         if output.status.success() {
@@ -757,12 +733,7 @@ impl TmuxOps {
         };
         let output = self
             .cmd
-            .std()
-            .args(detach_client_args(&client))
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .output()
+            .output_blocking(&detach_client_args(&client))
             .with_context(|| format!("failed to spawn tmux detach-client for {client}"))?;
         if output.status.success() {
             return Ok(true);
@@ -779,10 +750,7 @@ impl TmuxOps {
     async fn client_name_for_pid(&self, pid: u32) -> Result<Option<String>> {
         let output = self
             .cmd
-            .tokio()
-            .args(list_clients_args())
-            .stderr(std::process::Stdio::piped())
-            .output()
+            .output(&list_clients_args())
             .await
             .with_context(|| format!("failed to spawn tmux list-clients to resolve pid {pid}"))?;
         if !output.status.success() {
@@ -800,12 +768,7 @@ impl TmuxOps {
     fn client_name_for_pid_blocking(&self, pid: u32) -> Result<Option<String>> {
         let output = self
             .cmd
-            .std()
-            .args(list_clients_args())
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .output()
+            .output_blocking(&list_clients_args())
             .with_context(|| format!("failed to spawn tmux list-clients to resolve pid {pid}"))?;
         if !output.status.success() {
             anyhow::bail!(

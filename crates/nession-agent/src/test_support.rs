@@ -344,18 +344,29 @@ impl FakeTmux {
 #[cfg(unix)]
 pub(crate) const FAKE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
-/// A manager addressed at an injected binary, with [`FAKE_TIMEOUT`] on every
-/// command.
+/// A manager addressed at an injected fake — binary **and** socket — with
+/// [`FAKE_TIMEOUT`] on every command.
 ///
 /// Tests that inject a binary are asking what the caller does with what it
 /// says, not whether the machine is fast; giving them the production bounds
 /// makes them answer a question nobody asked. Prefer this over
 /// `SessionManager::new()` + `with_tmux_bin` so the bound cannot be forgotten
 /// one call site at a time.
+///
+/// The socket is the fake's own, which nothing ever binds. Since #1225 a
+/// failed call inspects the manager's socket and heals + retries when it is
+/// verifiably dead (`ECONNREFUSED`), and the shared per-run socket can be
+/// exactly that mid-run — measured on tmux 3.6b: when the last session on a
+/// server dies, `exit-empty` takes the server down and **leaves the socket
+/// file behind**. A test that counts the fake's calls must therefore own the
+/// socket the retry decision reads, or a scheduling accident turns one
+/// recorded call into two (measured:
+/// `with_tmux_bin_reaches_the_env_manager_beside_the_manager` flaked red in
+/// a full-suite run while passing every isolated run).
 #[cfg(unix)]
-pub(crate) fn manager_with_fake(bin: &str) -> crate::tmux::manager::SessionManager {
+pub(crate) fn manager_with_fake(fake: &FakeTmux) -> crate::tmux::manager::SessionManager {
     let mut mgr = crate::tmux::manager::SessionManager::new();
-    mgr.with_tmux_bin(bin);
+    mgr.with_tmux_cmd(fake.dep().cmd());
     mgr.with_timeouts(FAKE_TIMEOUT, FAKE_TIMEOUT, FAKE_TIMEOUT);
     mgr
 }
