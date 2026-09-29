@@ -4,30 +4,39 @@ import {
   useLayoutEffect,
   useRef,
   type MutableRefObject,
-  type RefObject,
 } from 'react';
 
-import { TRANSCRIPT_TOP_EDGE_PX } from './transcriptScrollConstants';
+import { TRANSCRIPT_TOP_EDGE_PX, type TranscriptAnchor } from './transcriptScrollConstants';
 
 const BOTTOM_AFFINITY_PX = 48;
 
 type OlderFetchRefs = {
-  loadingOlderRef: RefObject<boolean>;
   olderFetchArmedRef: MutableRefObject<boolean>;
-  pendingAnchorRef: MutableRefObject<{ scrollHeight: number; scrollTop: number } | null>;
-  loadOlderRef: MutableRefObject<() => void>;
+  pendingAnchorRef: MutableRefObject<TranscriptAnchor | null>;
+  loadOlderRef: MutableRefObject<() => boolean>;
 };
 
-function requestOlderPage(el: HTMLDivElement, refs: OlderFetchRefs): void {
-  refs.pendingAnchorRef.current = { scrollHeight: el.scrollHeight, scrollTop: el.scrollTop };
+function requestOlderPage(
+  el: HTMLDivElement,
+  refs: OlderFetchRefs,
+  gestureAnchor: TranscriptAnchor | null,
+): void {
+  // A pull commit hands over the anchor from gesture begin — at commit time
+  // the layout is inflated by the pull itself. Every other path measures
+  // here, against a resting layout.
+  refs.pendingAnchorRef.current =
+    gestureAnchor ?? { scrollHeight: el.scrollHeight, scrollTop: el.scrollTop };
   refs.olderFetchArmedRef.current = true;
-  refs.loadOlderRef.current();
-  queueMicrotask(() => {
-    if (!refs.loadingOlderRef.current) {
-      refs.olderFetchArmedRef.current = false;
-      refs.pendingAnchorRef.current = null;
-    }
-  });
+  // The engagement answer must come back synchronously: inferring it from
+  // `loadingOlder` one task later races React's flush of the spinner render,
+  // which discrete events (pointerup) run before a microtask but continuous
+  // events (wheel) defer to the scheduler — the pull would then disarm a
+  // fetch that is genuinely on its way and lose the anchor.
+  const engaged = refs.loadOlderRef.current();
+  if (!engaged) {
+    refs.olderFetchArmedRef.current = false;
+    refs.pendingAnchorRef.current = null;
+  }
 }
 
 /**
@@ -45,13 +54,13 @@ export function useTranscriptScroll({
   itemCount: number;
   hasMore: boolean;
   loadingOlder: boolean;
-  onLoadOlder: () => void;
+  onLoadOlder: () => boolean;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const topSentinelRef = useRef<HTMLDivElement>(null);
   const followingLatestRef = useRef(true);
   const initialScrollDoneRef = useRef(false);
-  const pendingAnchorRef = useRef<{ scrollHeight: number; scrollTop: number } | null>(null);
+  const pendingAnchorRef = useRef<TranscriptAnchor | null>(null);
   const loadOlderRef = useRef(onLoadOlder);
   loadOlderRef.current = onLoadOlder;
   const hasMoreRef = useRef(hasMore);
@@ -67,41 +76,55 @@ export function useTranscriptScroll({
     }
   }, [loadingOlder]);
 
-  useEffect(() => {
-    followingLatestRef.current = true;
-    initialScrollDoneRef.current = false;
-    pendingAnchorRef.current = null;
-    itemCountRef.current = 0;
-    olderFetchArmedRef.current = false;
-  }, [conversationId]);
+  /**
+   * Conversation switches reset the scroll bookkeeping — but the reset must
+   * not be a passive effect. `conversationId` starts `null` while the first
+   * page loads and becomes a real id in the same commit that brings the first
+   * items; a passive reset would then run *after* the layout effect below had
+   * already marked the initial scroll done, leaving `initialScrollDoneRef`
+   * stuck `false` and every older-page request rejected — which is exactly
+   * what killed pull-to-load on a freshly opened conversation. The layout
+   * effect owns scroll state, so the reset lives there, synchronously before
+   * the bookkeeping it clears.
+   */
+  const conversationIdRef = useRef(conversationId);
 
-  const requestIfReady = useCallback((requireTopEdge: boolean) => {
-    const el = scrollRef.current;
-    if (
-      !el ||
-      !initialScrollDoneRef.current ||
-      loadingOlderRef.current ||
-      olderFetchArmedRef.current ||
-      !hasMoreRef.current ||
-      (requireTopEdge && el.scrollTop > TRANSCRIPT_TOP_EDGE_PX)
-    ) {
-      return;
-    }
-    requestOlderPage(el, {
-      loadingOlderRef,
-      olderFetchArmedRef,
-      pendingAnchorRef,
-      loadOlderRef,
-    });
-  }, []);
+  const requestIfReady = useCallback(
+    (requireTopEdge: boolean, gestureAnchor: TranscriptAnchor | null = null) => {
+      const el = scrollRef.current;
+      if (
+        !el ||
+        !initialScrollDoneRef.current ||
+        loadingOlderRef.current ||
+        olderFetchArmedRef.current ||
+        !hasMoreRef.current ||
+        (requireTopEdge && el.scrollTop > TRANSCRIPT_TOP_EDGE_PX)
+      ) {
+        return;
+      }
+      requestOlderPage(
+        el,
+        {
+          olderFetchArmedRef,
+          pendingAnchorRef,
+          loadOlderRef,
+        },
+        gestureAnchor,
+      );
+    },
+    [],
+  );
 
   const maybeLoadOlderNearTop = useCallback(() => {
     requestIfReady(true);
   }, [requestIfReady]);
 
-  const loadOlderFromPull = useCallback(() => {
-    requestIfReady(false);
-  }, [requestIfReady]);
+  const loadOlderFromPull = useCallback(
+    (gestureAnchor: TranscriptAnchor | null = null) => {
+      requestIfReady(false, gestureAnchor);
+    },
+    [requestIfReady],
+  );
 
   const updateFollowingLatest = useCallback(() => {
     const el = scrollRef.current;
@@ -113,12 +136,26 @@ export function useTranscriptScroll({
   }, []);
 
   useLayoutEffect(() => {
+    if (conversationIdRef.current !== conversationId) {
+      conversationIdRef.current = conversationId;
+      followingLatestRef.current = true;
+      initialScrollDoneRef.current = false;
+      pendingAnchorRef.current = null;
+      itemCountRef.current = 0;
+      olderFetchArmedRef.current = false;
+    }
     const el = scrollRef.current;
     if (!el || itemCount === 0) {
       return;
     }
 
-    if (pendingAnchorRef.current) {
+    // The anchor is meaningful only against the render the older page lands
+    // in. The intermediate spinner render (`loadingOlder: true`) also re-runs
+    // this effect — the handle swaps for a spinner and the scroll height
+    // *shrinks* — so consuming the anchor there would restore against the
+    // wrong content and leave the actual prepend render anchorless, jumping
+    // the viewport to the new items.
+    if (pendingAnchorRef.current && !loadingOlder) {
       const anchor = pendingAnchorRef.current;
       const delta = el.scrollHeight - anchor.scrollHeight;
       el.scrollTop = anchor.scrollTop + delta;
@@ -142,7 +179,7 @@ export function useTranscriptScroll({
     if (grew && followingLatestRef.current) {
       el.scrollTop = el.scrollHeight;
     }
-  }, [hasMore, itemCount, loadingOlder, maybeLoadOlderNearTop]);
+  }, [conversationId, hasMore, itemCount, loadingOlder, maybeLoadOlderNearTop]);
 
   const onScroll = () => {
     updateFollowingLatest();

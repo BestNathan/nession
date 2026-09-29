@@ -9,32 +9,54 @@ import {
   TRANSCRIPT_PULL_MAX_PX,
   TRANSCRIPT_PULL_TRIGGER_PX,
   transcriptIsAtTopEdge,
+  type TranscriptAnchor,
 } from './transcriptScrollConstants';
 
 export function createTranscriptPullWheelHandler({
   scrollRef,
   enabled,
   wheelPullRef,
+  gestureAnchorRef,
   applyPullPx,
   commitIfFilled,
 }: {
   scrollRef: RefObject<HTMLDivElement | null>;
   enabled: boolean;
   wheelPullRef: MutableRefObject<number>;
+  gestureAnchorRef: MutableRefObject<TranscriptAnchor | null>;
   applyPullPx: (next: number) => void;
   commitIfFilled: () => boolean;
 }): WheelEventHandler<HTMLDivElement> {
   return (event) => {
     const root = scrollRef.current;
-    if (!enabled || !root || !transcriptIsAtTopEdge(root)) {
+    // A wheel pull is only a pull while wheeling *toward older* content —
+    // with natural scrolling that is `deltaY < 0`. Wheeling toward newer
+    // messages at the exact top is an ordinary scroll that goes nowhere, not
+    // a pull; anything accumulated so far is stale the moment the gesture
+    // reverses or leaves the edge.
+    const stale =
+      !enabled || !root || !transcriptIsAtTopEdge(root) || event.deltaY > 0;
+    if (stale) {
+      if (wheelPullRef.current > 0) {
+        wheelPullRef.current = 0;
+        applyPullPx(0);
+      }
       return;
     }
-    const pullDown = event.deltaY > 0 && root.scrollTop <= 0;
-    const pullUp = event.deltaY < 0;
-    if (!pullDown && !pullUp) {
+    if (event.deltaY === 0) {
       return;
     }
-    event.preventDefault();
+    // No preventDefault: React attaches wheel listeners as passive at the
+    // root, so the call is a no-op that only logs an intervention. At the top
+    // edge the container cannot scroll further up anyway.
+    if (wheelPullRef.current === 0) {
+      // The wheel gesture's first fill — the last moment the layout is in its
+      // resting state. The anchor the commit hands over is measured here.
+      gestureAnchorRef.current = {
+        scrollHeight: root.scrollHeight,
+        scrollTop: root.scrollTop,
+      };
+    }
     const step = Math.min(24, Math.abs(event.deltaY));
     wheelPullRef.current = Math.min(
       TRANSCRIPT_PULL_MAX_PX,

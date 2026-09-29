@@ -1,4 +1,4 @@
-import { useEffect, type RefObject } from 'react';
+import { useEffect } from 'react';
 
 type PullTouchCallbacks = {
   isAtTopEdge: () => boolean;
@@ -52,23 +52,30 @@ export function installTranscriptPullTouch(
   };
 }
 
+/**
+ * The handle is conditionally rendered — it unmounts every time the
+ * transcript leaves the top edge and mounts fresh on return. A
+ * `RefObject`-based effect never re-runs for the new node (all its deps are
+ * stable), so the first unmount permanently killed the touch gesture. Taking
+ * the *node* (from a callback ref stored in state) makes the effect re-run
+ * per node: every mounted handle gets its own listeners.
+ */
 export function useInstallTranscriptPullTouch({
-  pullHandleRef,
+  pullHandle,
   enabled,
   isAtTopEdge,
   beginPull,
   movePull,
   commitIfFilled,
 }: {
-  pullHandleRef: RefObject<HTMLDivElement | null>;
+  pullHandle: HTMLDivElement | null;
   enabled: boolean;
 } & PullTouchCallbacks): void {
   useEffect(() => {
-    const handle = pullHandleRef.current;
-    if (!enabled || !handle) {
+    if (!enabled || !pullHandle) {
       return;
     }
-    return installTranscriptPullTouch(handle, {
+    return installTranscriptPullTouch(pullHandle, {
       isAtTopEdge,
       beginPull,
       movePull,
@@ -80,6 +87,6 @@ export function useInstallTranscriptPullTouch({
     enabled,
     isAtTopEdge,
     movePull,
-    pullHandleRef,
+    pullHandle,
   ]);
 }
