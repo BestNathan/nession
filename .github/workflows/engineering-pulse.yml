@@ -2,9 +2,9 @@ name: Engineering Pulse
 
 on:
   schedule:
-    # Daily keeps README fresh without making this workflow a meaningful share
-    # of the Workflow Runs metric it reports.
-    - cron: '17 3 * * *'
+    # Every four hours keeps README reasonably fresh without running on every
+    # main commit and materially inflating the Workflow Runs metric it reports.
+    - cron: '17 */4 * * *'
   workflow_dispatch:
 
 permissions:
