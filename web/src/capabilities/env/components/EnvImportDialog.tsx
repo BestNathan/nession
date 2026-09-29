@@ -38,7 +38,7 @@ function FileDropZone({
   disabled,
 }: {
   file: File | null;
-  inputRef: RefObject<HTMLInputElement>;
+  inputRef: RefObject<HTMLInputElement | null>;
   onSelect: (file: File | null) => void;
   disabled: boolean;
 }) {
@@ -185,7 +185,7 @@ function PhaseBody({
   busy: boolean;
   name: string;
   inUseBy: string[];
-  inputRef: RefObject<HTMLInputElement>;
+  inputRef: RefObject<HTMLInputElement | null>;
   onFile: (f: File | null) => void;
   onSource: (v: EnvSource) => void;
   onAgent: (v: string) => void;
