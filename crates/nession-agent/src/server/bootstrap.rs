@@ -35,6 +35,8 @@
 //! [`TmuxOps::capture_pane`]: crate::tmux::ops::TmuxOps::capture_pane
 //! [`HISTORY_LIMIT_LINES`]: crate::tmux::HISTORY_LIMIT_LINES
 
+use crate::tmux::ops::PaneModeFlags;
+
 /// The most raw capture bytes a client is handed.
 ///
 /// Above the ~0.4 MB a typical 5000-line capture measures, below anything the
@@ -90,6 +92,65 @@ pub fn bound(mut capture: Vec<u8>) -> Bounded {
     }
 }
 
+/// The escapes that put a **fresh** terminal into the modes `flags` reports,
+/// ready to be written ahead of a capture.
+///
+/// A capture restores the pane's *text*; this restores the *state* that text
+/// was drawn in. Both are needed, and neither is the other: `capture-pane -e`
+/// carries SGR attributes and never a private mode (measured — see
+/// [`TmuxOps::pane_mode_flags`]).
+///
+/// # Ordering, and why `?1049` is not symmetric
+///
+/// The result goes **before** the capture bytes, so the escape for the
+/// application's screen runs first and the capture lands on the screen it came
+/// from. Sent the other way round, a TUI's text would be written to the normal
+/// buffer and then hidden behind an empty alternate screen until the
+/// application happened to redraw.
+///
+/// `?1049` is emitted only when it is **set**, and that asymmetry is
+/// deliberate: entering the alternate screen is what the application's screen
+/// requires, while leaving it is not a state a snapshot can assert — the client
+/// this is written to has just been built and has no screen to leave. Every
+/// other flag here is a level, so it is emitted in both directions, which also
+/// means a mode that is *off* is stated rather than assumed.
+///
+/// # What is not here
+///
+/// **Bracketed paste (`?2004`) is not restored.** tmux exposes no format
+/// variable for it — checked against 3.6b's own FORMATS list, which has the
+/// flags this function reads and no others. An application that enabled it
+/// before the client attached will not have it back until it re-asserts it.
+/// Stated rather than left for someone to discover from a failing paste.
+///
+/// [`TmuxOps::pane_mode_flags`]: crate::tmux::ops::TmuxOps::pane_mode_flags
+pub fn mode_escapes(flags: &PaneModeFlags) -> Vec<u8> {
+    let mut out = Vec::new();
+    // DEC private modes, each a level: `h` to set, `l` to clear.
+    for (mode, on) in [
+        (1u16, flags.keypad_cursor),
+        (6, flags.origin),
+        (7, flags.wrap),
+        (25, flags.cursor_visible),
+        (1000, flags.mouse_standard),
+        (1002, flags.mouse_button),
+        (1003, flags.mouse_all),
+        (1006, flags.mouse_sgr),
+        (1005, flags.mouse_utf8),
+    ] {
+        out.extend_from_slice(format!("\x1b[?{mode}{}", if on { 'h' } else { 'l' }).as_bytes());
+    }
+    if flags.alternate {
+        // Set only — see the note on asymmetry above.
+        out.extend_from_slice(b"\x1b[?1049h");
+    }
+    // IRM is not a private mode: `CSI 4 h`, with no `?`.
+    out.extend_from_slice(if flags.insert { b"\x1b[4h" } else { b"\x1b[4l" });
+    // DECKPAM / DECKPNM — a two-byte sequence, not a CSI at all.
+    out.extend_from_slice(if flags.keypad { b"\x1b=" } else { b"\x1b>" });
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -104,6 +165,94 @@ mod tests {
             out.push(b'\n');
         }
         out
+    }
+
+    /// Every mode off, except autowrap which tmux reports on by default.
+    fn quiet_pane() -> PaneModeFlags {
+        PaneModeFlags {
+            wrap: true,
+            cursor_visible: true,
+            ..PaneModeFlags::default()
+        }
+    }
+
+    #[test]
+    fn an_application_cursor_pane_is_restored_into_that_mode() {
+        let flags = PaneModeFlags {
+            keypad_cursor: true,
+            ..quiet_pane()
+        };
+        let escapes = String::from_utf8(mode_escapes(&flags)).unwrap();
+        assert!(
+            escapes.contains("\x1b[?1h"),
+            "criterion 13 is application cursor mode; without this the next \
+             arrow key is `^[[A` while the application waits for `^[OA`: {escapes:?}"
+        );
+    }
+
+    #[test]
+    fn a_mode_that_is_off_is_cleared_rather_than_omitted() {
+        let flags = PaneModeFlags {
+            wrap: false,
+            cursor_visible: false,
+            ..PaneModeFlags::default()
+        };
+        let escapes = String::from_utf8(mode_escapes(&flags)).unwrap();
+        // Both directions, because these are levels: a client that assumed a
+        // default would be wrong for whichever default it assumed.
+        assert!(escapes.contains("\x1b[?7l"), "{escapes:?}");
+        assert!(escapes.contains("\x1b[?25l"), "{escapes:?}");
+    }
+
+    #[test]
+    fn the_alternate_screen_is_entered_but_never_left() {
+        let entered = String::from_utf8(mode_escapes(&PaneModeFlags {
+            alternate: true,
+            ..quiet_pane()
+        }))
+        .unwrap();
+        assert!(entered.contains("\x1b[?1049h"), "{entered:?}");
+
+        let not_entered = String::from_utf8(mode_escapes(&quiet_pane())).unwrap();
+        assert!(
+            !not_entered.contains("1049"),
+            "a fresh client has no alternate screen to leave, and `?1049l` \
+             would clear one it might already be on: {not_entered:?}"
+        );
+    }
+
+    #[test]
+    fn each_mouse_reporting_mode_is_restored_by_name() {
+        // Not collapsed into "some mouse mode": 1000 reports presses, 1002 adds
+        // drags and 1003 adds every move, and an application that asked for one
+        // and got another has different gestures.
+        let flags = PaneModeFlags {
+            mouse_button: true,
+            mouse_sgr: true,
+            ..quiet_pane()
+        };
+        let escapes = String::from_utf8(mode_escapes(&flags)).unwrap();
+        assert!(escapes.contains("\x1b[?1002h"), "{escapes:?}");
+        assert!(escapes.contains("\x1b[?1006h"), "{escapes:?}");
+        assert!(
+            escapes.contains("\x1b[?1000l") && escapes.contains("\x1b[?1003l"),
+            "the modes that are not set are cleared, not left to a default: {escapes:?}"
+        );
+    }
+
+    #[test]
+    fn the_two_non_private_modes_are_spelled_differently() {
+        // IRM is `CSI 4 h` with no `?`, and DECKPAM is `ESC =`. Spelling either
+        // as a private mode would set a mode the application never asked for.
+        let escapes = String::from_utf8(mode_escapes(&PaneModeFlags {
+            insert: true,
+            keypad: true,
+            ..quiet_pane()
+        }))
+        .unwrap();
+        assert!(escapes.contains("\x1b[4h"), "{escapes:?}");
+        assert!(!escapes.contains("\x1b[?4h"), "{escapes:?}");
+        assert!(escapes.contains("\x1b="), "{escapes:?}");
     }
 
     #[test]

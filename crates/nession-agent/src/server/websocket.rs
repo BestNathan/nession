@@ -567,7 +567,30 @@ async fn send_bootstrap(
     let Some(capture) = capture else {
         return true;
     };
-    let bounded = crate::server::bootstrap::bound(capture);
+    // The pane's modes, prepended to the text — see
+    // `bootstrap::mode_escapes` for what a capture cannot carry. A query that
+    // fails costs the modes and not the history: a client with the session's
+    // text and default modes is strictly better off than one with nothing, and
+    // that is the same judgement the capture failure above makes.
+    let modes = match tmux.ops().pane_mode_flags(session_name).await {
+        Ok(flags) => crate::server::bootstrap::mode_escapes(&flags),
+        Err(e) => {
+            warn!("bootstrap: pane modes for {session_name} failed: {e:#}");
+            Vec::new()
+        }
+    };
+    let mut bounded = crate::server::bootstrap::bound(capture);
+    if !modes.is_empty() {
+        // In front, so the application's screen is entered before its text is
+        // written into it. Prepended after `bound` rather than before: the
+        // escapes are under 100 bytes and constant, and letting them count
+        // against the ceiling would make the ceiling a different number of
+        // history bytes depending on which modes happened to be on.
+        let mut with_modes = Vec::with_capacity(modes.len() + bounded.bytes.len());
+        with_modes.extend_from_slice(&modes);
+        with_modes.extend_from_slice(&bounded.bytes);
+        bounded.bytes = with_modes;
+    }
     use base64::Engine;
     let payload = TerminalOutputPayload {
         session_name: session_name.to_string(),

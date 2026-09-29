@@ -172,6 +172,136 @@ fn size_from_line(line: &str) -> Result<(u16, u16)> {
     Ok((cols, rows))
 }
 
+/// The pane's terminal modes, as tmux reports them (#1096 criterion 13).
+///
+/// **Why tmux is asked rather than tracked.** The modes belong to the pane's
+/// terminal, and tmux is the thing that owns it: it keeps these flags so that
+/// *it* can redraw, and it exposes them as format variables. An agent that
+/// scanned the output stream for `CSI ? … h` instead would be re-deriving state
+/// its own tmux already holds, and would get it wrong exactly where the stream
+/// is lossy — a resumed control connection, a chunk boundary inside a sequence,
+/// output produced before the agent attached.
+///
+/// Field order is the [`PANE_MODE_FORMAT`] order and is not alphabetical: it
+/// follows the DEC private modes the escapes below are spelled in, so a reader
+/// can hold both in their head at once.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct PaneModeFlags {
+    /// `?1` — application cursor keys. The one criterion 13 is named for.
+    pub keypad_cursor: bool,
+    /// `?1049` — the alternate screen.
+    pub alternate: bool,
+    /// `?6` — cursor addressing relative to the scroll region.
+    pub origin: bool,
+    /// `?7` — autowrap. On by default, so its *off* state is the interesting one.
+    pub wrap: bool,
+    /// `?25` — cursor visible.
+    pub cursor_visible: bool,
+    /// `?4` — insert mode (IRM). The one flag here that is not a DEC private
+    /// mode; it is spelled `CSI 4 h`, not `CSI ? 4 h`.
+    pub insert: bool,
+    /// `?1000` — report button press and release.
+    pub mouse_standard: bool,
+    /// `?1002` — report button events, including drags.
+    pub mouse_button: bool,
+    /// `?1003` — report every pointer move.
+    pub mouse_all: bool,
+    /// `?1006` — SGR-encoded coordinates, a modifier of whichever of the three
+    /// above is on rather than a reporting mode of its own.
+    pub mouse_sgr: bool,
+    /// `?1005` — UTF-8-encoded coordinates. Deprecated by xterm in favour of
+    /// `?1006`, and still requested by applications in the wild.
+    pub mouse_utf8: bool,
+    /// `ESC =` — application keypad (DECKPAM). Not a CSI private mode at all,
+    /// which is why it is last and spelled differently below.
+    pub keypad: bool,
+}
+
+/// The format string one pane-mode query asks for, field for field in
+/// [`PaneModeFlags`]' order.
+///
+/// A single const so the query and the parse cannot disagree about how many
+/// fields there are or what they mean — [`pane_mode_flags_from_line`] checks
+/// the count against this string rather than against a number written twice.
+const PANE_MODE_FORMAT: &str = concat!(
+    "#{keypad_cursor_flag} ",
+    "#{alternate_on} ",
+    "#{origin_flag} ",
+    "#{wrap_flag} ",
+    "#{cursor_flag} ",
+    "#{insert_flag} ",
+    "#{mouse_standard_flag} ",
+    "#{mouse_button_flag} ",
+    "#{mouse_all_flag} ",
+    "#{mouse_sgr_flag} ",
+    "#{mouse_utf8_flag} ",
+    "#{keypad_flag}",
+);
+
+/// How many fields [`PANE_MODE_FORMAT`] expands to.
+fn pane_mode_field_count() -> usize {
+    PANE_MODE_FORMAT.split_whitespace().count()
+}
+
+/// The argument vector for one pane-mode query, shaped like
+/// [`window_size_args`] and for the same reasons: `-p` prints instead of
+/// writing a status line, `-t` binds the answer to the session that was asked
+/// about, and the arity is in the type so a second format cannot be appended.
+fn pane_mode_args(session: &str) -> [&str; 5] {
+    ["display-message", "-p", "-t", session, PANE_MODE_FORMAT]
+}
+
+/// Parse the flags line [`TmuxOps::pane_mode_flags`] asks for.
+///
+/// **Every field is checked, and a wrong count is an error.** tmux expands a
+/// format variable it does not know to nothing, and it exits 0 with an empty
+/// line for a target that does not exist — so a short line means "this tmux
+/// could not answer", not "these modes are off". Reading it as the latter would
+/// silently restore nothing, which is the failure this whole op exists to fix.
+///
+/// `0` and `1` are the only values tmux produces for a flag. Anything else is
+/// treated the same way as a missing field: an answer this code does not
+/// understand is not one to act on.
+fn pane_mode_flags_from_line(line: &str) -> Result<PaneModeFlags> {
+    let fields: Vec<&str> = line.split_whitespace().collect();
+    if fields.len() != pane_mode_field_count() {
+        anyhow::bail!(
+            "expected {} pane mode flags, got {}: {line:?}",
+            pane_mode_field_count(),
+            fields.len()
+        );
+    }
+    // One closure over the fields, so each named field below reads as the
+    // position it is — the count check above makes the `None` arm unreachable,
+    // and it is an error rather than a default anyway: a flag this code did not
+    // receive is not a flag that is off.
+    let mut bits = fields.iter().copied();
+    let mut next = || -> Result<bool> {
+        match bits.next() {
+            Some("0") => Ok(false),
+            Some("1") => Ok(true),
+            Some(other) => Err(anyhow::anyhow!(
+                "pane mode flag is neither 0 nor 1: {other:?}"
+            )),
+            None => Err(anyhow::anyhow!("pane mode flags ended early")),
+        }
+    };
+    Ok(PaneModeFlags {
+        keypad_cursor: next()?,
+        alternate: next()?,
+        origin: next()?,
+        wrap: next()?,
+        cursor_visible: next()?,
+        insert: next()?,
+        mouse_standard: next()?,
+        mouse_button: next()?,
+        mouse_all: next()?,
+        mouse_sgr: next()?,
+        mouse_utf8: next()?,
+        keypad: next()?,
+    })
+}
+
 /// The argument vector for resizing a session's window:
 /// `resize-window -t <session> -x <cols> -y <rows>`.
 ///
@@ -410,6 +540,46 @@ impl TmuxOps {
         let line = stdout.trim_end_matches(['\r', '\n']);
         size_from_line(line).with_context(|| {
             format!("tmux display-message -p -t {session} answered no window size")
+        })
+    }
+
+    /// The modes `session`'s pane terminal is currently in.
+    ///
+    /// Read by the bootstrap so a client that rebuilds its terminal learns the
+    /// application's *state* and not only its text (#1096 criterion 13): a pane
+    /// sitting in application-cursor mode must come back in it, or the next
+    /// arrow key is encoded `^[[A` while the application waits for `^[OA`.
+    ///
+    /// [`TmuxOps::capture_pane`] cannot carry this. Measured against a pane put
+    /// into `?1h`: `capture-pane -e` emits SGR attribute escapes and nothing
+    /// else — private modes are terminal state, not text attributes, and tmux
+    /// reconstructs the capture from the grid.
+    ///
+    /// Fails rather than guessing, like [`window_size`](Self::window_size) and
+    /// for the same measured reason: an unknown target is an empty line and a
+    /// zero exit, so the parse is the only place that can tell "no modes are
+    /// set" from "tmux did not answer". The bootstrap's caller decides what a
+    /// missing answer costs — see `send_bootstrap`.
+    pub async fn pane_mode_flags(&self, session: &str) -> Result<PaneModeFlags> {
+        let output = self
+            .cmd
+            .tokio()
+            .args(pane_mode_args(session))
+            .stderr(std::process::Stdio::piped())
+            .output()
+            .await
+            .with_context(|| format!("failed to spawn tmux display-message for {session}"))?;
+        if !output.status.success() {
+            anyhow::bail!(
+                "tmux display-message -p -t {session} failed: {} ({})",
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+        }
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let line = stdout.trim_end_matches(['\r', '\n']);
+        pane_mode_flags_from_line(line).with_context(|| {
+            format!("tmux display-message -p -t {session} answered no pane mode flags")
         })
     }
 
@@ -949,6 +1119,93 @@ mod tests {
              reports a size that never existed: {format:?}"
         );
         assert_eq!(argv.len(), 5, "arity is part of the grammar: {argv:?}");
+    }
+
+    #[test]
+    fn pane_mode_args_ask_for_every_flag_in_the_structs_order() {
+        let argv = pane_mode_args("sess");
+        assert_eq!(argv[0], "display-message");
+        assert_eq!(
+            argv,
+            ["display-message", "-p", "-t", "sess", PANE_MODE_FORMAT],
+            "`-p` and `-t` are load-bearing for the reasons window_size_args gives"
+        );
+        // The order the parse reads in is the order the format asks in, and
+        // inserting a field is the mutation this pins: a new flag added to one
+        // side only would shift every field after it.
+        for (i, name) in [
+            "keypad_cursor_flag",
+            "alternate_on",
+            "origin_flag",
+            "wrap_flag",
+            "cursor_flag",
+            "insert_flag",
+            "mouse_standard_flag",
+            "mouse_button_flag",
+            "mouse_all_flag",
+            "mouse_sgr_flag",
+            "mouse_utf8_flag",
+            "keypad_flag",
+        ]
+        .iter()
+        .enumerate()
+        {
+            let field = PANE_MODE_FORMAT.split_whitespace().nth(i);
+            assert_eq!(
+                field,
+                Some(format!("#{{{name}}}").as_str()),
+                "field {i} of the format is not {name}: {PANE_MODE_FORMAT:?}"
+            );
+        }
+        assert_eq!(pane_mode_field_count(), 12);
+    }
+
+    #[test]
+    fn pane_mode_flags_reads_the_line_tmux_prints() {
+        let all_on = pane_mode_flags_from_line("1 1 1 1 1 1 1 1 1 1 1 1").unwrap();
+        assert_eq!(
+            all_on,
+            PaneModeFlags {
+                keypad_cursor: true,
+                alternate: true,
+                origin: true,
+                wrap: true,
+                cursor_visible: true,
+                insert: true,
+                mouse_standard: true,
+                mouse_button: true,
+                mouse_all: true,
+                mouse_sgr: true,
+                mouse_utf8: true,
+                keypad: true,
+            }
+        );
+        let all_off = pane_mode_flags_from_line("0 0 0 0 0 0 0 0 0 0 0 0").unwrap();
+        assert_eq!(all_off, PaneModeFlags::default());
+    }
+
+    #[test]
+    fn pane_mode_flags_refuses_a_short_or_unreadable_answer() {
+        // The mutation this exists for: reading a short line as "those modes are
+        // off". tmux prints an **empty line and exits 0** for a target that does
+        // not exist (measured on 3.6b, see `window_size`), so a short answer is
+        // tmux failing to answer — and treating it as all-off would restore
+        // nothing while looking exactly like a success.
+        for line in [
+            "",
+            "0 0 0",
+            "1 1 1 1 1 1 1 1 1 1 1 1 1",
+            "0 0 0 0 0 0 0 0 0 0 0",
+        ] {
+            assert!(
+                pane_mode_flags_from_line(line).is_err(),
+                "{line:?} is not an answer to a twelve-flag query"
+            );
+        }
+        assert!(
+            pane_mode_flags_from_line("0 0 0 0 0 0 0 0 0 0 0 2").is_err(),
+            "a flag tmux does not produce is not one to act on"
+        );
     }
 
     #[test]

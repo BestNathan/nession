@@ -331,10 +331,11 @@ async fn integration_client_attach_creates_pty() {
 
 #[tokio::test]
 async fn a_plain_first_attach_sends_the_history_it_was_asked_for() {
-    // #321 S6. The Plain arm's first attach used to send nothing at all, so a
-    // browser on the fallback transport got no scrollback — and under Plain
-    // there is nowhere else for it to come from: a tmux client paints its own
-    // screen and never replays the pane's history into xterm's.
+    // #321 S6, plus the mode restoration of #1096 criterion 13. The Plain arm's
+    // first attach used to send nothing at all, so a browser on the fallback
+    // transport got no scrollback — and under Plain there is nowhere else for
+    // it to come from: a tmux client paints its own screen and never replays
+    // the pane's history into xterm's.
     //
     // The assertion is on the wire, before the ok, because that ordering *is*
     // the contract: the snapshot has to be enqueued before the live forwarder
@@ -348,28 +349,39 @@ async fn a_plain_first_attach_sends_the_history_it_was_asked_for() {
         .await
         .unwrap();
 
-    // Something the pane's history holds and the client could not have got any
-    // other way. `send_keys` runs it in the session before anyone attaches.
+    // A pane that both holds a marker and is *in a mode* — the two things a
+    // capture can and cannot carry, in one fixture. `sh -c` with a blocking
+    // `cat` rather than a plain `echo`, because a shell that comes back to its
+    // prompt resets the mode on the way: readline re-asserts its own, and the
+    // measured symptom is a `keypad_cursor_flag` of 0 by the time anything asks.
     let marker = "PLAIN-BOOTSTRAP-MARKER";
+    let mut setup = String::from("sh -c 'printf \"\\033[?1h\"; echo ");
+    setup.push_str(marker);
+    setup.push_str("; cat > /dev/null'\n");
     TmuxDep::global()
         .ops()
-        .send_keys(&session_name, &format!("echo {marker}\n"))
+        .send_keys(&session_name, &setup)
         .await
         .unwrap();
+
+    // Waited on the *flags*, not on the marker: the mode is what the wait is
+    // for, and asking tmux for it is the same query the bootstrap under test
+    // makes — so a wrong reading here fails here rather than as a mysterious
+    // wire assertion below.
     let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
     loop {
-        let seen = TmuxDep::global()
+        let flags = TmuxDep::global()
             .ops()
-            .capture_pane(&session_name, 50)
+            .pane_mode_flags(&session_name)
             .await
-            .unwrap()
-            .unwrap_or_default();
-        if String::from_utf8_lossy(&seen).contains(marker) {
+            .expect("the pane mode query works against a real tmux");
+        if flags.keypad_cursor {
             break;
         }
         assert!(
             tokio::time::Instant::now() < deadline,
-            "the marker never reached the pane, so this test cannot ask about it"
+            "if this fails the fixture never set the mode, and the assertion \
+             below would be asking about nothing"
         );
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
@@ -433,12 +445,29 @@ async fn a_plain_first_attach_sends_the_history_it_was_asked_for() {
         .decode(bootstrap["data"].as_str().expect("base64 data"))
         .expect("the bootstrap payload is base64");
     // The join of the snapshot has to be the session's own history, not a
-    // screenful of whatever tmux redrew: the marker was echoed before the
+    // screenful of whatever tmux redrew: the marker was printed before the
     // attach and reaches the client only through this frame.
     assert!(
         String::from_utf8_lossy(&bytes).contains(marker),
         "the bootstrap does not carry the pane's history: {:?}",
         String::from_utf8_lossy(&bytes)
+    );
+
+    // **The mode, in front of the text.** This is the half a `capture-pane` can
+    // never supply and the reason `pane_mode_flags` exists: the pane is in
+    // application-cursor mode, `capture-pane -e` carries only SGR attributes
+    // (measured — the escapes below appear on no captured line), and a client
+    // that came back without this would encode its next arrow key `^[[A` while
+    // the application waits for `^[OA` (#1096 criterion 13).
+    //
+    // Asserted as a position rather than a containment: written after the text
+    // it would still restore the mode for *later* keystrokes, but the ordering
+    // is the contract — the application's screen is entered before its text is
+    // written into it.
+    assert!(
+        bytes.starts_with(b"\x1b[?1h"),
+        "the bootstrap does not open with the pane's mode escapes: {:?}",
+        String::from_utf8_lossy(&bytes[..bytes.len().min(80)])
     );
 
     tmux.kill_session(&session_name).await.ok();
