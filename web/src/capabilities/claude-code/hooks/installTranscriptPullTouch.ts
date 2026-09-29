@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, type RefObject } from 'react';
 
 type PullTouchCallbacks = {
   isAtTopEdge: () => boolean;
@@ -7,9 +7,16 @@ type PullTouchCallbacks = {
   commitIfFilled: () => void;
 };
 
-/** Non-passive touchmove on the pull handle so mobile browsers honor the gesture. */
+/**
+ * Non-passive touchmove on the scroll root, so a downward drag anywhere on
+ * the feed fills the pull ring — not only a drag that lands on the hint bar.
+ * The hint bar lives inside the root, so its touches bubble up here too.
+ * `preventDefault` is what lets the pull own the gesture over the
+ * container's native scroll; it only fires once the drag moves down past
+ * its start, so an upward flick at the top edge still scrolls normally.
+ */
 export function installTranscriptPullTouch(
-  handle: HTMLDivElement,
+  root: HTMLDivElement,
   callbacks: PullTouchCallbacks,
 ): () => void {
   let touchStartY = 0;
@@ -39,43 +46,42 @@ export function installTranscriptPullTouch(
     callbacks.commitIfFilled();
   };
 
-  handle.addEventListener('touchstart', onTouchStart, { passive: true });
-  handle.addEventListener('touchmove', onTouchMove, { passive: false });
-  handle.addEventListener('touchend', onTouchEnd);
-  handle.addEventListener('touchcancel', onTouchEnd);
+  root.addEventListener('touchstart', onTouchStart, { passive: true });
+  root.addEventListener('touchmove', onTouchMove, { passive: false });
+  root.addEventListener('touchend', onTouchEnd);
+  root.addEventListener('touchcancel', onTouchEnd);
 
   return () => {
-    handle.removeEventListener('touchstart', onTouchStart);
-    handle.removeEventListener('touchmove', onTouchMove);
-    handle.removeEventListener('touchend', onTouchEnd);
-    handle.removeEventListener('touchcancel', onTouchEnd);
+    root.removeEventListener('touchstart', onTouchStart);
+    root.removeEventListener('touchmove', onTouchMove);
+    root.removeEventListener('touchend', onTouchEnd);
+    root.removeEventListener('touchcancel', onTouchEnd);
   };
 }
 
 /**
- * The handle is conditionally rendered — it unmounts every time the
- * transcript leaves the top edge and mounts fresh on return. A
- * `RefObject`-based effect never re-runs for the new node (all its deps are
- * stable), so the first unmount permanently killed the touch gesture. Taking
- * the *node* (from a callback ref stored in state) makes the effect re-run
- * per node: every mounted handle gets its own listeners.
+ * The listeners live on the scroll root, which — unlike the conditionally
+ * rendered hint bar — never unmounts while the transcript is on screen, so
+ * a ref read in the effect is enough; there is no per-node re-install to
+ * arrange.
  */
 export function useInstallTranscriptPullTouch({
-  pullHandle,
+  scrollRef,
   enabled,
   isAtTopEdge,
   beginPull,
   movePull,
   commitIfFilled,
 }: {
-  pullHandle: HTMLDivElement | null;
+  scrollRef: RefObject<HTMLDivElement | null>;
   enabled: boolean;
 } & PullTouchCallbacks): void {
   useEffect(() => {
-    if (!enabled || !pullHandle) {
+    const root = scrollRef.current;
+    if (!enabled || !root) {
       return;
     }
-    return installTranscriptPullTouch(pullHandle, {
+    return installTranscriptPullTouch(root, {
       isAtTopEdge,
       beginPull,
       movePull,
@@ -87,6 +93,6 @@ export function useInstallTranscriptPullTouch({
     enabled,
     isAtTopEdge,
     movePull,
-    pullHandle,
+    scrollRef,
   ]);
 }

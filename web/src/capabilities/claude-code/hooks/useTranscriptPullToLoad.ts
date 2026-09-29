@@ -144,12 +144,10 @@ function usePullGestureState({
  */
 export function useTranscriptPullToLoad({
   scrollRef,
-  pullHandle,
   enabled,
   onCommitLoad,
 }: {
   scrollRef: RefObject<HTMLDivElement | null>;
-  pullHandle: HTMLDivElement | null;
   enabled: boolean;
   onCommitLoad: (anchor: TranscriptAnchor | null) => void;
 }) {
@@ -197,7 +195,7 @@ export function useTranscriptPullToLoad({
   });
 
   useInstallTranscriptPullTouch({
-    pullHandle,
+    scrollRef,
     enabled,
     isAtTopEdge,
     beginPull,
