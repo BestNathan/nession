@@ -834,11 +834,15 @@ test.describe('Terminal I/O', () => {
     await expect
       .poll(async () => countInBuffer(page, 'BROWSING-'), { timeout: 20_000 })
       .toBeGreaterThan(echoed);
+    // `toStrictEqual`, not `toBe`: `readViewport` builds a fresh object each
+    // time, so identity comparison fails on two equal readings and reports it
+    // as "serializes to the same string" — which is how the first version of
+    // this assertion failed three times on a product that was behaving.
     expect(
       await readViewport(page),
       'the viewport moved under a reader: output while browsing must not scroll ' +
         'the view',
-    ).toBe(parked);
+    ).toStrictEqual(parked);
     expect(await readScrollMode(page)).toBe('history');
 
     // And the way back: at the real bottom the terminal follows again, and the
