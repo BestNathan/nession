@@ -1,8 +1,9 @@
-//! How much of a captured pane is handed to a client, and why that number.
+//! What of a captured pane is handed to a client, and why.
 //!
-//! The capture itself is [`TmuxOps::capture_pane`]'s; this module is the one
-//! decision made about its result on the way out — a byte ceiling, applied to
-//! the tail, measured against the socket it will travel on.
+//! The capture itself is [`TmuxOps::capture_pane`]'s; this module makes the two
+//! decisions about its result on the way out. [`strip_trailing_blank_rows`]
+//! drops the part of the screen the pane never wrote to, and [`bound`] applies a
+//! byte ceiling to the tail, measured against the socket it will travel on.
 //!
 //! # Why a byte ceiling and not a line count
 //!
@@ -90,6 +91,86 @@ pub fn bound(mut capture: Vec<u8>) -> Bounded {
         bytes: capture,
         truncated: true,
     }
+}
+
+/// Drop the blank screen under the last row the session wrote to.
+///
+/// `capture-pane -p -S - -E -` ends at the bottom of the **visible pane**, not
+/// at the last row anything was written to, and on a shell that has not filled
+/// its screen those are different rows. Measured on a 41-row pane holding three
+/// commands: 40 captured lines, **13 of them empty**, and the pane's own cursor
+/// reported `cursor_y 27` — the row the last prompt sits on.
+///
+/// Every one of those empty rows was written into xterm anyway. The cursor ends
+/// on the last of them, so the user gets their content at the top of a
+/// mostly-empty screen with the caret far below it — 41 rows of screen geometry
+/// presented as 41 rows of history.
+///
+/// **A row is blank when nothing on it would be visible** — no bytes, or only
+/// whitespace and escape sequences. Measured, tmux emits a bare empty line
+/// today; defining this as "zero bytes" would be a definition that stops being
+/// the right one the first time a version pads instead of trimming, and it
+/// would do it silently.
+///
+/// The last line's terminator goes with them. A terminal's cursor sits where the
+/// application left it — after `root:~# `, not on the row below — and a stream
+/// ending in a bare LF puts it on the next one, a row lower than the pane this
+/// is mirroring.
+pub fn strip_trailing_blank_rows(capture: &mut Vec<u8>) {
+    // The index just past the last line that had something on it, its own
+    // terminator excluded — so the stream ends on that line rather than below
+    // it. A final line with no terminator at all is handled by the same pass.
+    let mut keep = 0usize;
+    let mut start = 0usize;
+    for (i, byte) in capture.iter().enumerate() {
+        if *byte != b'\n' {
+            continue;
+        }
+        if let Some(line) = capture.get(start..i) {
+            if !line_is_blank(line) {
+                keep = i;
+            }
+        }
+        start = i + 1;
+    }
+    // A final line the capture did not terminate. An empty one is blank by the
+    // same rule as any other, so it needs no special case.
+    if let Some(line) = capture.get(start..) {
+        if !line_is_blank(line) {
+            keep = capture.len();
+        }
+    }
+    capture.truncate(keep);
+}
+
+/// Whether `line` would draw anything. Escape sequences are skipped whole, so a
+/// row carrying only an SGR reset is still blank — see
+/// [`strip_trailing_blank_rows`] for why the question is asked this way.
+fn line_is_blank(line: &[u8]) -> bool {
+    let mut rest = line;
+    while let Some((&byte, tail)) = rest.split_first() {
+        match byte {
+            b' ' | b'\t' | b'\r' => rest = tail,
+            0x1b => match tail.split_first() {
+                // CSI: `ESC [`, then parameter and intermediate bytes, then a
+                // final byte in `@`–`~`. Skipped whole, so a row carrying only
+                // an SGR reset is still a row that draws nothing.
+                Some((&b'[', after)) => {
+                    rest = after
+                        .iter()
+                        .position(|b| (0x40..=0x7e).contains(b))
+                        .and_then(|n| after.get(n + 1..))
+                        .unwrap_or_default();
+                }
+                // A two-byte escape, e.g. `ESC =` or `ESC >`.
+                Some((_, after)) => rest = after,
+                // A trailing `ESC` with nothing after it.
+                None => rest = tail,
+            },
+            _ => return false,
+        }
+    }
+    true
 }
 
 /// A capture, turned into bytes a terminal can be *fed*.
@@ -414,5 +495,80 @@ mod tests {
             typical.len()
         );
         assert_eq!(bounded.bytes, typical);
+    }
+
+    #[test]
+    fn the_rows_the_pane_never_wrote_to_are_not_history() {
+        // The shape measured on a live pane: a shell that had run three
+        // commands on a 41-row screen, whose capture was 27 lines of content
+        // followed by 13 empty ones. Every one of those empty rows was written
+        // into xterm and the cursor landed on the last, so the user saw their
+        // content at the top of a mostly-empty screen.
+        let mut capture = b"root:~# echo hi\nhi\nroot:~# \n".to_vec();
+        capture.extend(std::iter::repeat_n(b'\n', 13));
+        strip_trailing_blank_rows(&mut capture);
+        assert_eq!(
+            capture,
+            b"root:~# echo hi\nhi\nroot:~# ".to_vec(),
+            "the stream has to end where the pane's cursor is — after the \
+             prompt, not on the row below it"
+        );
+    }
+
+    #[test]
+    fn a_blank_row_between_two_written_ones_is_history() {
+        // Only the trailing run is geometry. A gap the session printed is a gap
+        // the user asked for, and dropping it would rewrite their output.
+        let mut capture = b"one\n\ntwo\n\n\n".to_vec();
+        strip_trailing_blank_rows(&mut capture);
+        assert_eq!(capture, b"one\n\ntwo".to_vec());
+    }
+
+    #[test]
+    fn a_row_that_would_draw_nothing_is_blank_however_it_is_spelled() {
+        // tmux emits a bare empty line today — measured. Asking "is it zero
+        // bytes" would be a question that quietly stops being the right one the
+        // first time a version pads instead of trimming, so the row is judged
+        // by what it would draw.
+        let mut capture = b"text\n   \n\x1b[0m\n\x1b[m\t\n".to_vec();
+        strip_trailing_blank_rows(&mut capture);
+        assert_eq!(
+            capture,
+            b"text".to_vec(),
+            "spaces and escapes draw nothing, so none of them are the last row"
+        );
+    }
+
+    #[test]
+    fn a_row_with_text_on_it_is_never_blank() {
+        // The dangerous direction, and the one that would be silent: a parser
+        // that over-consumed an escape could call a real row blank and truncate
+        // the history without saying so. The prompt wears five escapes.
+        let mut capture = b"\x1b[32mroot\x1b[39m:\x1b[34m~\x1b[39m# \n\n\n".to_vec();
+        strip_trailing_blank_rows(&mut capture);
+        assert_eq!(
+            capture,
+            b"\x1b[32mroot\x1b[39m:\x1b[34m~\x1b[39m# ".to_vec()
+        );
+    }
+
+    #[test]
+    fn a_capture_with_nothing_on_it_becomes_nothing() {
+        let mut capture = vec![b'\n'; 41];
+        strip_trailing_blank_rows(&mut capture);
+        assert!(
+            capture.is_empty(),
+            "a screen nobody wrote to is not a history: {:?}",
+            String::from_utf8_lossy(&capture)
+        );
+    }
+
+    #[test]
+    fn a_capture_that_already_ends_on_content_is_untouched() {
+        // The function runs on every bootstrap, including one whose capture
+        // already ends where it should. It has to be a no-op there.
+        let mut capture = b"a\nb".to_vec();
+        strip_trailing_blank_rows(&mut capture);
+        assert_eq!(capture, b"a\nb".to_vec());
     }
 }

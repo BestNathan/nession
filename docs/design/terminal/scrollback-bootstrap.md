@@ -71,6 +71,25 @@ the client has not measured yet — the ordinary case on a reload — so an
 unjoined capture is what made every restored history 80-column fragments inside
 a 142-column terminal.
 
+**The pane's unwritten screen is dropped, not sent.** `-S - -E -` captures from
+the start of the history to the bottom of the **visible pane**, and a pane that
+has run three commands is mostly rows nothing was ever written to. Measured on a
+41-row screen: 40 captured lines, **13 of them empty**, with the pane's own
+cursor reported at `cursor_y 27` — the row the last prompt sits on. Every empty
+row was written into xterm anyway and the cursor landed on the last of them, so
+the session's content arrived at the top of a mostly-empty screen with the caret
+far below it: 41 rows of screen geometry presented as 41 rows of history.
+
+`bootstrap::strip_trailing_blank_rows` removes the trailing run before the
+ceiling is applied, so the bound counts history. A row counts as blank when
+nothing on it would be visible — no bytes, or only whitespace and escape
+sequences. tmux emits a bare empty line today, and defining it as "zero bytes"
+would be a definition that silently stops being the right one the first time a
+version pads instead of trimming. The last line's terminator goes with it: a
+terminal's cursor sits where the application left it — after `root:~# `, not on
+the row below — and a stream ending in a bare LF puts it one row lower than the
+pane it is mirroring.
+
 **Modalities are tmux's format variables.** See below.
 
 ## The barrier

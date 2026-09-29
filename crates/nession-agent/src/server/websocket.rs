@@ -564,7 +564,7 @@ async fn send_bootstrap(
     };
     // `None` is tmux answering successfully with nothing — a session that
     // exists and has no history yet. No frame, and not a failure.
-    let Some(capture) = capture else {
+    let Some(mut capture) = capture else {
         return true;
     };
     // The pane's modes, prepended to the text — see
@@ -579,6 +579,11 @@ async fn send_bootstrap(
             Vec::new()
         }
     };
+    // The pane's unwritten screen is dropped before anything else, so what
+    // follows counts history rather than geometry — `capture-pane` ends at the
+    // bottom of the visible pane, and on a shell that has not filled its screen
+    // most of what it returns is rows nothing was ever written to.
+    crate::server::bootstrap::strip_trailing_blank_rows(&mut capture);
     // The ceiling is applied to the *capture*, before the two translations
     // below. Both of them grow the frame — the escapes by under 100 bytes, the
     // CRs by one per line — and counting either against the ceiling would make

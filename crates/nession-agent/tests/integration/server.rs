@@ -467,6 +467,27 @@ async fn a_plain_first_attach_sends_the_history_it_was_asked_for() {
         String::from_utf8_lossy(&bytes[..bytes.len().min(120)])
     );
 
+    // **The snapshot ends on the last row the session wrote to**, not on the
+    // blank screen underneath it. `capture-pane -p -S - -E -` ends at the bottom
+    // of the *visible pane*, and a pane that has run three commands is mostly
+    // rows nothing was ever written to — measured: 13 of 40 captured rows empty
+    // on a 41-row screen. Every one of them was written into xterm and the
+    // cursor landed on the last, so the user's content sat at the top of a
+    // mostly-empty screen with the caret far below it.
+    //
+    // Asserted as "the stream does not end in a line terminator", which is the
+    // same statement: a trailing blank row *is* a terminator with nothing after
+    // it, so this reddens the moment `strip_trailing_blank_rows` stops being
+    // called — the wiring half that the unit tests in `bootstrap.rs` cannot see.
+    let text = String::from_utf8_lossy(&bytes);
+    let last_line = text.rsplit("\r\n").next().unwrap_or_default();
+    assert!(
+        !last_line.is_empty(),
+        "the snapshot ends below its own content, so the pane's unwritten \
+         screen is being sent as history (last 60 bytes: {:?})",
+        String::from_utf8_lossy(&bytes[bytes.len().saturating_sub(60)..])
+    );
+
     // **The mode, in front of the text.** This is the half a `capture-pane` can
     // never supply and the reason `pane_mode_flags` exists: the pane is in
     // application-cursor mode, `capture-pane -e` carries only SGR attributes
