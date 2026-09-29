@@ -32,7 +32,7 @@ export function ConversationOverlay({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="conversation-overlay">
-      <ConversationTranscript view={view} onLoadOlder={() => void loadOlder()} />
+      <ConversationTranscript view={view} onLoadOlder={() => loadOlder()} />
     </div>
   );
 }

@@ -329,6 +329,94 @@ async fn integration_client_attach_creates_pty() {
     handle.shutdown().await.ok();
 }
 
+/// #1226: a second `agent.attach` on the SAME connection must be answered,
+/// and the connection must survive it.
+///
+/// The path that reaches this is a product one: the client's attach state
+/// machine retries on a timeout, and when the first attach actually
+/// succeeded (its reply was slow or lost) the retry lands in the
+/// `already_attached` arm. That arm replaces the peer; the old forwarder's
+/// receiver ends; and the old verdict — "the session is still in the map" —
+/// read that as "the subscriber stopped draining" and closed the connection.
+/// The retry's own reply then had no socket to arrive on: the client waited
+/// out its timeout and the terminal dropped for no visible reason.
+///
+/// Red without the fix: the second or third `round_trip` gets no frame at
+/// all (not even an error) — exactly the silence the issue measures. The
+/// third attach is what makes the red deterministic: the misjudged close
+/// wins any race against the second reply, but it cannot take longer than
+/// two round trips.
+#[tokio::test]
+async fn a_second_attach_on_the_same_connection_is_answered() {
+    let (addr, handle, credentials) = start_server(0).await.unwrap();
+
+    let tmux = SessionManager::new();
+    let session = TestSession::new("reattach");
+    let session_name = session.name().to_string();
+    tmux.create_session(&session_name, 80, 24, "/tmp", &[])
+        .await
+        .unwrap();
+
+    let (mut sink, mut stream) = connect_for(&credentials, addr, &session_name)
+        .await
+        .unwrap();
+
+    let attach = |session_name: &str| {
+        new_message(
+            msg_types::CLIENT_ATTACH,
+            ClientAttachPayload {
+                session_name: session_name.to_string(),
+                width: 80,
+                height: 24,
+                env_snapshots: Vec::new(),
+                // The history is not what is under test, and asking for it
+                // would only give the misjudged close a longer window.
+                needs_bootstrap: Some(false),
+            },
+        )
+    };
+
+    let req = attach(&session_name);
+    let resp: nession_agent::server::websocket::Message<ClientAttachResponse> =
+        round_trip(&mut sink, &mut stream, &req).await.unwrap();
+    assert_eq!(resp.msg_type, msg_types::OK);
+
+    // The retry: same connection, same session, same client id. Its answer
+    // must arrive on this connection.
+    let req = attach(&session_name);
+    let answered = tokio::time::timeout(
+        Duration::from_secs(5),
+        round_trip(&mut sink, &mut stream, &req),
+    )
+    .await;
+    let resp: nession_agent::server::websocket::Message<ClientAttachResponse> = answered
+        .unwrap_or_else(|_| {
+            panic!(
+                "the second attach got no reply: the connection was closed by \
+                 the peer it replaced (#1226)"
+            )
+        })
+        .unwrap();
+    assert_eq!(resp.msg_type, msg_types::OK);
+    assert_eq!(resp.payload.session_name, session_name);
+
+    // And the connection is still usable afterwards — a close that lost the
+    // race to the second reply is still a close.
+    let req = attach(&session_name);
+    let answered = tokio::time::timeout(
+        Duration::from_secs(5),
+        round_trip(&mut sink, &mut stream, &req),
+    )
+    .await;
+    let resp: nession_agent::server::websocket::Message<ClientAttachResponse> = answered
+        .unwrap_or_else(|_| panic!("the connection did not survive the second attach (#1226)"))
+        .unwrap();
+    assert_eq!(resp.msg_type, msg_types::OK);
+
+    tmux.kill_session(&session_name).await.ok();
+    handle.shutdown().await.ok();
+}
+
 #[tokio::test]
 async fn a_plain_first_attach_sends_the_history_it_was_asked_for() {
     // #321 S6, plus the mode restoration of #1096 criterion 13. The Plain arm's

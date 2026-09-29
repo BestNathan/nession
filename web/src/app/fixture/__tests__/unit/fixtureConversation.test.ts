@@ -170,6 +170,47 @@ describe('fixture conversation surface', () => {
     expect((none.items ?? []).length).toBe(0);
   });
 
+  it('models an older page behind a cursor, so pull-to-load is reachable', async () => {
+    // Without this scenario the entire older-page path — pull-to-load,
+    // prepend, anchor preservation — is a shipped feature no fixture state
+    // could reach, which is exactly how it broke without a gate noticing.
+    const paged = fixtureConversationSurface('?conversation=paged');
+    const list = await paged.request<ConversationsResponse>('claude-code.conversations', {});
+    expect(list.state).toBe('ready');
+    const boundId = list.binding?.conversation_id as string;
+    expect(boundId).toBeTruthy();
+
+    const newest = await paged.request<MessagesResponse>('claude-code.messages', {
+      conversation_id: boundId,
+    });
+    expect(newest.has_more).toBe(true);
+    const cursor = newest.next_cursor as string;
+    expect(cursor).toBeTruthy();
+
+    // The cursor is the paging contract: handing it back must return a page
+    // that is *different* items, older than everything held, and the end of
+    // the history.
+    const older = await paged.request<MessagesResponse>('claude-code.messages', {
+      conversation_id: boundId,
+      cursor,
+    });
+    expect(older.state).toBe('ready');
+    expect(older.has_more).toBe(false);
+    const newestIds = (newest.items ?? []).map((item) => item.id);
+    const olderIds = (older.items ?? []).map((item) => item.id);
+    expect(olderIds.length).toBeGreaterThan(0);
+    expect(olderIds.every((id) => !newestIds.includes(id))).toBe(true);
+
+    // A cursor no page handed out is a client bug, and the fixture says so
+    // loudly rather than answering a page that cannot exist.
+    await expect(
+      paged.request<MessagesResponse>('claude-code.messages', {
+        conversation_id: boundId,
+        cursor: 'not-a-cursor',
+      }),
+    ).rejects.toThrow(/no page handed out/);
+  });
+
   it('answers not_found for a conversation id it does not know', async () => {
     // The unit's only selection mechanism is the explicit id, and an unknown
     // one is never substituted — not by the binding, not by the newest, not by

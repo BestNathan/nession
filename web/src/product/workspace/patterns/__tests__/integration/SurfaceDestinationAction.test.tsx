@@ -33,6 +33,13 @@ describe('SurfaceDestinationAction (#1204)', () => {
     expect(screen.queryByRole('tablist')).not.toBeInTheDocument();
   });
 
+  it('matches the capsule/dock chrome band, not the bare control target (#1204)', () => {
+    render(<SurfaceDestinationAction destination="workspace" onOpen={vi.fn()} />);
+
+    const action = screen.getByTestId('surface-action-open-workspace');
+    expect(action.className).toMatch(/calc\(var\(--control-md\)\+2\*var\(--terminal-capsule-shell-pad-y\)\)/);
+  });
+
   it('restores pointer hit-testing inside a pointer-events-none dock region', () => {
     render(
       <div className="pointer-events-none">

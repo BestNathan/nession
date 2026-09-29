@@ -18,7 +18,20 @@
 //! environment. Neither is used for addressing — `-S` decides that — but an
 //! inherited `TMUX` describes some *other* server, and leaving it in place lets
 //! a tmux client or a shell inside a session act on that one instead.
+//!
+//! ## A dead server's socket is healed, once (#1225)
+//!
+//! A tmux server that dies without unlinking (SIGKILL, a crash, power loss)
+//! leaves the socket file behind, and every later call against it fails with
+//! `server exited unexpectedly` — a message that names neither the socket nor
+//! the fact that nothing listens on it, so the whole session surface stays
+//! broken until someone deletes the file by hand. [`heal_stale_socket`] is the
+//! precise check (`ECONNREFUSED` on a file that is a socket), [`configure`]
+//! runs it at startup, and [`TmuxCmd::output`] / [`TmuxCmd::output_with`] /
+//! [`TmuxCmd::output_blocking`] run it between a failure and one retry.
 
+#[cfg(unix)]
+use std::os::unix::fs::FileTypeExt;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
@@ -160,6 +173,55 @@ impl TmuxCmd {
         arg(server_config_path(&self.socket).as_os_str());
     }
 
+    /// Run `tmux <args>` to completion, capturing stdout and stderr, with one
+    /// self-heal: when the command fails because a dead server left its socket
+    /// behind, remove the stale socket and run the command once more (#1225).
+    ///
+    /// `Command::output()` semantics — both pipes captured, stdin closed — so
+    /// the `.stderr(Stdio::piped())` call sites used to write beside
+    /// `.output()` is implied (tokio's `output()` re-pipes right before
+    /// spawning regardless). The heal runs *between* the failure and the
+    /// retry: a command that fails against a **live** server is returned
+    /// as-is, unretried — the retry exists only for the state the heal
+    /// removed, not for second-guessing tmux's own answers.
+    pub async fn output(&self, args: &[&str]) -> std::io::Result<std::process::Output> {
+        self.output_with(|cmd| {
+            cmd.args(args);
+        })
+        .await
+    }
+
+    /// [`output`](Self::output) for a command built incrementally.
+    ///
+    /// The closure runs against a fresh command per attempt, so a retried
+    /// call gets exactly the argv the first attempt had — relevant to
+    /// `create_session`, whose argument list is assembled in loops over the
+    /// environment and cannot be re-spelled as one `&[&str]`.
+    pub async fn output_with(
+        &self,
+        build: impl Fn(&mut tokio::process::Command),
+    ) -> std::io::Result<std::process::Output> {
+        let mut first = self.tokio();
+        build(&mut first);
+        let out = first.output().await?;
+        if out.status.success() || !heal_stale_socket(&self.socket) {
+            return Ok(out);
+        }
+        let mut retry = self.tokio();
+        build(&mut retry);
+        retry.output().await
+    }
+
+    /// The blocking form of [`output`](Self::output), for callers that cannot
+    /// await (`Drop`, sync setup). [`std`](Self::std)-based, same heal.
+    pub fn output_blocking(&self, args: &[&str]) -> std::io::Result<std::process::Output> {
+        let out = self.std().args(args).output()?;
+        if out.status.success() || !heal_stale_socket(&self.socket) {
+            return Ok(out);
+        }
+        self.std().args(args).output()
+    }
+
     /// A `portable_pty::CommandBuilder` for `tmux -S <socket> -f <config>`.
     ///
     /// portable-pty has its own command type, so this cannot reuse
@@ -184,6 +246,66 @@ impl TmuxCmd {
     }
 }
 
+/// One self-heal for a socket a dead server left behind (#1225): remove it,
+/// but only when it provably has no listener.
+///
+/// The criterion is `ECONNREFUSED`, not "connect failed". Permission errors
+/// and timeouts also fail a connect, and in those cases the server may be
+/// serving — deleting its socket would take a live server off addressing,
+/// which is the #574/#575 class of mistake (a wrong server-level cleanup that
+/// destroyed a real session). Refused is the kernel's own "nothing is
+/// listening", identical on Linux and macOS, and the only condition under
+/// which the file is removed. A path that is not a socket is never touched
+/// either: it is not ours to delete.
+///
+/// The accepted race: a server in the microseconds between `bind` and
+/// `listen` also answers `ECONNREFUSED`. It is accepted because the
+/// alternative is the permanent unavailability #1225 measures, and because
+/// nession runs one agent per socket — the only process that could be
+/// starting that server is this one.
+///
+/// Returns `true` when a stale socket was found and removed. The removal is
+/// logged with its path: a delete without a trace is how the #574-class
+/// mistakes stayed invisible for as long as they did.
+#[cfg(unix)]
+pub fn heal_stale_socket(socket: &Path) -> bool {
+    let Ok(meta) = std::fs::symlink_metadata(socket) else {
+        return false; // nothing there — nothing to heal
+    };
+    if !meta.file_type().is_socket() {
+        return false;
+    }
+    let Err(err) = std::os::unix::net::UnixStream::connect(socket) else {
+        return false; // someone is listening — the socket is alive
+    };
+    if err.kind() != std::io::ErrorKind::ConnectionRefused {
+        return false; // only "no listener" is ours to repair
+    }
+    match std::fs::remove_file(socket) {
+        Ok(()) => {
+            tracing::warn!(
+                "removed stale tmux socket {} — nothing was listening on it \
+                 (ECONNREFUSED); the previous server died without unlinking (#1225)",
+                socket.display()
+            );
+            true
+        }
+        Err(err) => {
+            tracing::warn!(
+                "tmux socket {} has no listener but could not be removed: {err}",
+                socket.display()
+            );
+            false
+        }
+    }
+}
+
+/// tmux is unix-only; elsewhere there is no unix socket to heal.
+#[cfg(not(unix))]
+pub fn heal_stale_socket(_socket: &Path) -> bool {
+    false
+}
+
 /// Resolve the socket path, create its directory, and install the result as the
 /// process-wide tmux addressing. Call once at startup, before any tmux use.
 ///
@@ -203,6 +325,10 @@ pub fn configure(configured: Option<&str>) -> Result<PathBuf> {
     // The server configuration, written before any tmux command can start a
     // server — which is the only moment tmux reads it.
     write_server_config(&socket)?;
+    // Startup is the one moment nothing of ours can be listening yet, so a
+    // socket file that survived a crashed server is healed here rather than
+    // after the first user-facing failure (#1225).
+    heal_stale_socket(&socket);
 
     let cmd = TmuxCmd::new("tmux", socket.clone());
     if let Err(existing) = GLOBAL.set(cmd) {
@@ -245,6 +371,10 @@ pub fn global() -> &'static TmuxCmd {
         // `configure()` reports and this one has no caller to report to. A
         // missing file is harmless — tmux tolerates `-f` naming nothing.
         let _ = write_server_config(cmd.socket_path());
+        // Same heal as `configure()`, for the same reason: the lazy path is
+        // the one tests and the short-lived CLI take, and a stale socket
+        // fails them identically (#1225).
+        heal_stale_socket(cmd.socket_path());
         cmd
     })
 }
@@ -423,5 +553,190 @@ mod tests {
     #[test]
     fn global_is_stable_across_calls() {
         assert_eq!(global().socket_path(), global().socket_path());
+    }
+
+    // ── stale-socket healing (#1225) ─────────────────────────────────────────
+
+    /// A dead server's leftover, without a server: a bound-then-dropped
+    /// listener leaves the socket file on disk, and `connect` on it answers
+    /// `ECONNREFUSED` — the kernel's "nothing is listening", on Linux and
+    /// macOS alike.
+    ///
+    /// The drop alone does not settle the fixture: this test binary forks
+    /// children constantly (shim installs, spawns under test), and a child
+    /// forked in the bind→drop window inherits the listening fd, keeping the
+    /// endpoint alive until its `exec` closes it (`CLOEXEC`) — a `connect` in
+    /// that window *succeeds* (measured: 2 in 5 full-suite runs on macOS).
+    /// Poll until the kernel's answer is the stable one; once every inherited
+    /// copy has exec'd away there is no listener left to inherit, so the
+    /// refusal is permanent.
+    #[cfg(unix)]
+    fn dead_socket(path: &Path) {
+        drop(std::os::unix::net::UnixListener::bind(path).expect("bind a listener"));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            match std::os::unix::net::UnixStream::connect(path) {
+                Err(err) if err.kind() == std::io::ErrorKind::ConnectionRefused => return,
+                other if std::time::Instant::now() < deadline => {
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                    drop(other);
+                }
+                other => panic!("the dead socket never settled to ECONNREFUSED: {other:?}"),
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn heal_removes_a_socket_no_one_listens_on() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let socket = dir.path().join("tmux.sock");
+        dead_socket(&socket);
+
+        assert!(heal_stale_socket(&socket), "a refused socket must heal");
+        assert!(
+            !socket.exists(),
+            "and the file must be gone — it was blocking every call"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn heal_never_touches_a_live_server() {
+        // The #574/#575 guard: deleting a serving socket takes a live server
+        // off addressing. A listener held open answers connect(2) with
+        // success, and the file must survive untouched.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let socket = dir.path().join("tmux.sock");
+        let _listener = std::os::unix::net::UnixListener::bind(&socket).expect("bind");
+
+        assert!(!heal_stale_socket(&socket), "a live socket is not stale");
+        assert!(socket.exists(), "the live server's socket is left alone");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn heal_ignores_a_file_that_is_not_a_socket() {
+        // `connect` on a regular file also answers ECONNREFUSED, so the
+        // is-socket check is the only thing standing between the heal and
+        // deleting a file that was never tmux's.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let not_a_socket = dir.path().join("tmux.sock");
+        std::fs::write(&not_a_socket, b"not a socket").expect("write");
+
+        assert!(!heal_stale_socket(&not_a_socket));
+        assert_eq!(
+            std::fs::read(&not_a_socket).expect("the file must survive"),
+            b"not a socket"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn heal_ignores_a_missing_path() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        assert!(!heal_stale_socket(&dir.path().join("tmux.sock")));
+    }
+
+    /// The fake answers `server exited unexpectedly` while the socket file
+    /// exists and succeeds once it is gone — the two arms of one heal cycle.
+    #[cfg(unix)]
+    fn stale_then_gone_script(socket: &Path) -> String {
+        format!(
+            "if [ -S \"{}\" ]; then echo 'server exited unexpectedly' >&2; exit 1; fi\n\
+             printf 'healed-ok\\n'",
+            socket.display()
+        )
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_failed_call_on_a_stale_socket_is_healed_and_retried_once() {
+        // The #1225 cycle end to end: the first attempt fails the way tmux
+        // fails against a dead server's file, the heal removes it, and the
+        // retry — the same argv — succeeds. The mutation this reddens on is
+        // dropping the retry: the result would be the first attempt's
+        // failure, and `calls()` would hold one entry, not two.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let socket = dir.path().join("tmux.sock");
+        dead_socket(&socket);
+        let fake = crate::test_support::FakeTmux::new(dir.path(), &stale_then_gone_script(&socket));
+        let cmd = TmuxCmd::new(fake.bin(), &socket);
+
+        let out = cmd
+            .output(&["list-sessions"])
+            .await
+            .expect("the retry runs against a real process");
+
+        assert!(
+            out.status.success(),
+            "the retried call succeeds: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&out.stdout),
+            "healed-ok\n",
+            "and it is the retry's answer, not the failure's"
+        );
+        assert_eq!(
+            fake.calls(),
+            vec![
+                vec!["list-sessions".to_string()],
+                vec!["list-sessions".to_string()]
+            ],
+            "failed once, healed, retried once — the same argv twice"
+        );
+        assert!(!socket.exists(), "the stale socket was removed");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_failed_call_on_a_live_server_is_returned_unretried() {
+        // The other half of the contract: a failure alone never deletes and
+        // never retries. tmux's own refusals (`no such session`, a bad flag)
+        // must reach the caller as tmux made them, or every failure would be
+        // reported twice and a live server's socket would be at risk.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let socket = dir.path().join("tmux.sock");
+        let _listener = std::os::unix::net::UnixListener::bind(&socket).expect("bind");
+        let fake = crate::test_support::FakeTmux::new(
+            dir.path(),
+            "echo 'no such session: nope' >&2; exit 1",
+        );
+        let cmd = TmuxCmd::new(fake.bin(), &socket);
+
+        let out = cmd.output(&["has-session"]).await.expect("spawned");
+
+        assert!(!out.status.success(), "the failure is the caller's to see");
+        assert_eq!(
+            String::from_utf8_lossy(&out.stderr).trim(),
+            "no such session: nope",
+            "and it is tmux's own answer, not a retry's"
+        );
+        assert_eq!(
+            fake.calls().len(),
+            1,
+            "a live server means no heal and no second attempt"
+        );
+        assert!(socket.exists(), "the live socket was not touched");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_blocking_form_heals_and_retries_the_same_way() {
+        // `output_blocking` is the `Drop`-path spelling of the same heal; a
+        // shared predicate does not prove the std command path runs it.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let socket = dir.path().join("tmux.sock");
+        dead_socket(&socket);
+        let fake = crate::test_support::FakeTmux::new(dir.path(), &stale_then_gone_script(&socket));
+        let cmd = TmuxCmd::new(fake.bin(), &socket);
+
+        let out = cmd.output_blocking(&["list-sessions"]).expect("spawned");
+
+        assert!(out.status.success());
+        assert_eq!(String::from_utf8_lossy(&out.stdout), "healed-ok\n");
+        assert_eq!(fake.calls().len(), 2, "one failure, one heal, one retry");
+        assert!(!socket.exists());
     }
 }

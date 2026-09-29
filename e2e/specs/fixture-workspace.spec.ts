@@ -69,6 +69,7 @@ test('the Terminal destination action sits left of the capability dock (#1204)',
   expect(gap).toBeLessThanOrEqual(16);
   const actionCenter = actionBox.y + actionBox.height / 2;
   expect(Math.abs(actionCenter - (dockBox.y + dockBox.height / 2))).toBeLessThanOrEqual(8);
+  expect(Math.abs(actionBox.height - dockBox.height)).toBeLessThanOrEqual(1);
 });
 
 test('the sessions sidebar is present in the resting shell', async ({ page }) => {
