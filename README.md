@@ -6,7 +6,7 @@
   <img alt="Nession Engineering Pulse — repository scale and rolling seven-day activity" src="https://raw.githubusercontent.com/BestNathan/nession/metrics/project-pulse-light.svg">
 </picture>
 
-<sub>Generated daily from <code>main</code> · rolling 7d · <a href="https://raw.githubusercontent.com/BestNathan/nession/metrics/metrics.json">raw metrics</a></sub>
+<sub>Generated every 4 hours from <code>main</code> · rolling 7d · <a href="https://raw.githubusercontent.com/BestNathan/nession/metrics/metrics.json">raw metrics</a></sub>
 
 > An intelligent workspace for continuous work across devices, environments, and compute nodes.
 
