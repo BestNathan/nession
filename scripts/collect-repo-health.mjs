@@ -52,7 +52,12 @@ function unavailableCoverage(reason, includeCrates = false) {
   };
 }
 
+function stripAnsi(text) {
+  return text.replace(/\u001b\[[0-9;]*m/g, '');
+}
+
 function parseCargoSummaries(text) {
+  text = stripAnsi(text);
   let passed = 0;
   let failed = 0;
   let skipped = 0;
@@ -181,22 +186,16 @@ function write(path, value) {
 }
 
 function collectRust(output) {
-  const unitRun = run('cargo', [
-    'test',
-    '--workspace',
-    '--lib',
+  const unitRun = run('bash', [
+    './scripts/filtered-test.sh',
     '--no-fail-fast',
-    '--color',
-    'never',
+    '--lib',
   ]);
-  const integrationRun = run('cargo', [
-    'test',
-    '--workspace',
+  const integrationRun = run('bash', [
+    './scripts/filtered-test.sh',
+    '--no-fail-fast',
     '--test',
     'integration',
-    '--no-fail-fast',
-    '--color',
-    'never',
   ]);
 
   const unit = parseCargoSummaries(
@@ -220,19 +219,23 @@ function collectRust(output) {
   }
 
   const thresholds = rustThresholds();
-  const packages = Object.keys(thresholds).flatMap((crate) => ['-p', crate]);
-  const coverageRun = run('cargo', [
-    'llvm-cov',
-    ...packages,
-    '--json',
-    '--',
-    '--skip',
-    'terminal_io',
-  ]);
+  const coveragePath = resolve(
+    mkdtempSync(join(tmpdir(), 'nession-rust-coverage-')),
+    'coverage.json',
+  );
+  const coverageRun = run('bash', ['./scripts/check-coverage.sh'], {
+    env: { NSESSION_COVERAGE_JSON: coveragePath },
+  });
 
   let coverage;
   try {
-    coverage = parseRustCoverage(JSON.parse(coverageRun.stdout), thresholds);
+    if (!existsSync(coveragePath)) {
+      throw new Error('canonical coverage gate produced no JSON artifact');
+    }
+    coverage = parseRustCoverage(
+      JSON.parse(readFileSync(coveragePath, 'utf8')),
+      thresholds,
+    );
   } catch (error) {
     if (unit.failed > 0 || integration.failed > 0) {
       coverage = unavailableCoverage(
