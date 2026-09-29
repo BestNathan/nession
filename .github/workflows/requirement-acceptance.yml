@@ -24,7 +24,7 @@ jobs:
         with:
           node-version: '24'
       - name: Self-test acceptance validator
-        run: node scripts/requirement-accceptance.mjs self-test
+        run: node scripts/requirement-acceptance.mjs self-test
       - name: Validate closing requirement issues
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
