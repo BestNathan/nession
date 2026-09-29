@@ -319,4 +319,39 @@ function validBody() {
 function runSelfTest() {
   const cases = [
     ['valid accepted requirement', validBody(), true, null],
-    ['missing success criteria', '## Accceptance Report\n\n| Criterion | Result | Evidence |\n|---|---|---|', false, 'missing `"7V66W727&—FW&–uÒÀ¢²v7&—FW&–öâv—F†÷WB–BrÂr227V66W727&—FW&–Æà¢Ò·…Òv÷&·5ÆåÆâ2266WFæ6R&W÷'EÆåÆçÂ7&—FW&–öâÂ&W7VÇBÂWf–FVæ6RÅÆçÂÒÒ×ÂÒÒ×ÂÒÒ×ÂrÂfÇ6RÂvÖ—76–ær7F&ÆR42×‡‚–BuÒÀ¢²wVæ6†V6¶VB7&—FW&–öârÂfÆ–D&öG’‚’ç&WÆ6R‚rÒ·…Ò42ÓrÂrÒ²Ò42Ór’ÂfÇ6RÂu42Ó—2æ÷B6†V6¶VBuÒÀ¢²vÖ—76–ær&W÷'B&÷rrÂfÆ–D&öG’‚’ç&WÆ6R‚wÂ42Ó"ÂâôÂ7WW'6VFVB'’3ƒ‚gFW"&WV—&VÖVçBÖVæFÖVçBÂrÂrr’ÂfÇ6RÂu42Ó"†2æò66WFæ6R&W÷'B&÷ruÒÀ¢²wVæF–ær&W7VÇBrÂfÆ–D&öG’‚’ç&WÆ6R‚wÂ42ÓÂ72ÂVæ—BFW7C¢67&—G2öföòçFW7BÂrÂwÂ42ÓÂVæF–ærÂ7Fv–ærfW&–f–6F–öâÂr’ÂfÇ6RÂu42Ó&W7VÇB—2VæF–æruÒÀ¢²vf–Â&W7VÇBrÂfÆ–D&öG’‚’ç&WÆ6R‚wÂ42ÓÂ72ÂVæ—BFW7C¢67&—G2öföòçFW7BÂrÂwÂ42ÓÂf–ÂÂ'&÷w6W"&Vw&W76–öâÂr’ÂfÇ6RÂu42Ó&W7VÇB—2f–ÂuÒÀ¢²vÖ—76–ærWf–FVæ6RrÂfÆ–D&öG’‚’ç&WÆ6R‚wÂ42ÓÂ72ÂVæ—BFW7C¢67&—G2öföòçFW7BÂrÂwÂ42ÓÂ72ÂÒÂr’ÂfÇ6RÂu42Ó×W7B–æ6ÇVFR6öæ7&WFR66WFæ6RWf–FVæ6RuÒÀ¢²wVæ¶æ÷vâ&W÷'B7&—FW&–öârÂG·fÆ–D&öG’‚—ÕÆçÂ42Ó“’Â72Âv†÷7BÆÂfÇ6RÂwVæ¶æ÷vâ7&—FW&–öâ42Ó“’uÒÀ¢²vGWÆ–6FR7V66W72–BrÂfÆ–D&öG’‚’ç&WÆ6R‚rÒ·…Ò42Ó"&V†fW2rÂrÒ·…Ò42ÓGWÆ–6FRr’ÂfÇ6RÂvGWÆ–6FR7V66W727&—FW&–öâ–B42ÓuÒÀ¢²vGWÆ–6FR&W÷'B–BrÂfÆ–D&öG’‚’ç&WÆ6R‚wÂ42Ó"ÂâôÂ7WW'6VFVB'’3ƒ‚gFW"&WV—&VÖVçBÖVæFÖVçBÂrÂwÂ42ÓÂ72Â6V6öæBÂr’ÂfÇ6RÂvGWÆ–6FR66WFæ6R&W÷'B&÷rf÷"42ÓuÒÀ¢Ó° ¢f÷"†6öç7B¶æÖRÂ&öG’ÂW‡V7FVDö²ÂW‡V7FVDW'&÷%Òöb66W2’°¢6öç7B&W7VÇBÒfÆ–FFU&WV—&VÖVçD&öG’†&öG’“°¢76W'BæWVÂ‡&W7VÇBæö²ÂW‡V7FVDö²ÂG¶æÖWÓ¢W‡V7FVBö³ÒG¶W‡V7FVDö·ÒÂv÷BG´¥4ôâç7G&–æv–g’‡&W7VÇB—Ö“°¢–b†W‡V7FVDW'&÷"’°¢76W'Bæö²‡&W7VÇBæW'&÷'2ç6öÖR‚†W'&÷"’ÓâW'&÷"æ–æ6ÇVFW2†W‡V7FVDW'&÷"’’ÂG¶æÖWÓ¢Ö—76–ærG¶W‡V7FVDW'&÷'Ó²v÷BG·&W7VÇBæW'&÷'2æ¦ö–â‚s²r—Ö“°¢Ð¢Ð¢6öç6öÆRæÆör†&WV—&VÖVçBÖ66WFæ6R6VÆb×FW7C¢G¶66W2æÆVæwF‡Ò66W276VF“°§Ð ¦7–æ2gVæ7F–öâÖ–â‚’°¢6öç7B6öÖÖæBÒ&ö6W72æ&we³%Ó°¢–b†6öÖÖæBÓÓÒw6VÆb×FW7Br’&WGW&â'Vå6VÆeFW7B‚“°¢–b†6öÖÖæBÓÓÒw"ÖvFRr’&WGW&â'Vå$vFR‚“°¢–b†6öÖÖæBÓÓÒv—77VRÖ6Æ÷6RÖwV&Br’&WGW&â'Vä—77VT6Æ÷6TwV&B‚“°¢F‡&÷ræWrW'&÷"‚wW6vS¢æöFR67&—G2÷&WV—&VÖVçBÖ66WFæ6RæÖ§2Ç6VÆb×FW7GÇ"ÖvFWÆ—77VRÖ6Æ÷6RÖwV&Câr“°§Ð ¦–b†–×÷'BæÖWFçW&ÂÓÓÒf–ÆS¢òòG·&ö6W72æ&we³×Ö’°¢Ö–â‚’æ6F6‚‚†W'&÷"’Óâ°¢6öç6öÆRæW'&÷"†W'&÷"–ç7Fæ6VöbW'&÷"òW'&÷"æÖW76vR¢W'&÷"“°¢&ö6W72æW†—D6öFRÒ°¢Ò“°§Ð 
+    ['missing success criteria', '## Acceptance Report\n\n| Criterion | Result | Evidence |\n|---|---|---|', false, 'missing `## Success Criteria`'],
+    ['criterion without id', '## Success Criteria\n\n- [x] works\n\n## Acceptance Report\n\n| Criterion | Result | Evidence |\n|---|---|---|', false, 'missing a stable SC-xx id'],
+    ['unchecked criterion', validBody().replace('- [x] SC-01', '- [ ] SC-01'), false, 'SC-01 is not checked'],
+    ['missing report row', validBody().replace('| SC-02 | N/A | superseded by #88 after requirement amendment |', ''), false, 'SC-02 has no Acceptance Report row'],
+    ['pending result', validBody().replace('| SC-01 | Pass | unit test: scripts/foo.test |', '| SC-01 | Pending | staging verification |'), false, 'SC-01 result is Pending'],
+    ['fail result', validBody().replace('| SC-01 | Pass | unit test: scripts/foo.test |', '| SC-01 | Fail | browser regression |'), false, 'SC-01 result is Fail'],
+    ['missing evidence', validBody().replace('| SC-01 | Pass | unit test: scripts/foo.test |', '| SC-01 | Pass | - |'), false, 'SC-01 must include concrete acceptance evidence'],
+    ['unknown report criterion', `${validBody()}\n| SC-99 | Pass | ghost |`, false, 'unknown criterion SC-99'],
+    ['duplicate success id', validBody().replace('- [x] SC-02 behaves', '- [x] SC-01 duplicate'), false, 'duplicate Success Criterion id SC-01'],
+    ['duplicate report id', validBody().replace('| SC-02 | N/A | superseded by #88 after requirement amendment |', '| SC-01 | Pass | second |'), false, 'duplicate Acceptance Report row for SC-01'],
+  ];
+
+  for (const [name, body, expectedOk, expectedError] of cases) {
+    const result = validateRequirementBody(body);
+    assert.equal(result.ok, expectedOk, `${name}: expected ok=${expectedOk}, got ${JSON.stringify(result)}`);
+    if (expectedError) {
+      assert.ok(result.errors.some((error) => error.includes(expectedError)), `${name}: missing ${expectedError}; got ${result.errors.join('; ')}`);
+    }
+  }
+  console.log(`requirement-acceptance self-test: ${cases.length} cases passed`);
+}
+
+async function main() {
+  const command = process.argv[2];
+  if (command === 'self-test') return runSelfTest();
+  if (command === 'pr-gate') return runPrGate();
+  if (command === 'issue-close-guard') return runIssueCloseGuard();
+  throw new Error('usage: node scripts/requirement-acceptance.mjs <self-test|pr-gate|issue-close-guard>');
+}
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((error) => {
+    console.error(error instanceof Error ? error.message : error);
+    process.exitCode = 1;
+  });
+}
