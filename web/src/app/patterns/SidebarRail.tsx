@@ -73,7 +73,11 @@ export function SidebarRail({
     <nav
       data-testid="sidebar-rail"
       aria-label="Sidebar (collapsed)"
-      className="flex w-[length:var(--shell-rail-width)] shrink-0 flex-col items-center gap-1 py-[var(--shell-space-2)]"
+      // h-full: the aside wrapper is a full-height flex column; without it the
+      // nav shrink-wrapped its content, the flex-1 spacer collapsed to zero,
+      // and the status dot sat directly under the summaries instead of pinned
+      // to the bottom edge where the expanded footer carries it.
+      className="flex h-full w-[length:var(--shell-rail-width)] shrink-0 flex-col items-center gap-1 py-[var(--shell-space-2)]"
     >
       <button
         type="button"

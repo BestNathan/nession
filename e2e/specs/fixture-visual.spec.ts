@@ -275,6 +275,20 @@ test.describe('Web 1440×900', () => {
     const expandedXterm = (await xterm.boundingBox())?.width ?? 0;
     expect(expandedColumn).toBeGreaterThan(railWidth * 2);
 
+    // An icon-only shell button centers its glyph in the box — the shared
+    // class owns this, so a raw <button> cannot drift to flush-left while a
+    // Button-primitive consumer stays centered (both were shipped once).
+    const glyphCenterOffset = async (testid: string) => {
+      const button = page.getByTestId(testid);
+      const buttonBox = await button.boundingBox();
+      const glyphBox = await button.locator('svg').first().boundingBox();
+      if (!buttonBox || !glyphBox) throw new Error(`${testid} not measurable`);
+      return Math.abs(
+        glyphBox.x + glyphBox.width / 2 - (buttonBox.x + buttonBox.width / 2),
+      );
+    };
+    expect(await glyphCenterOffset('sidebar-collapse')).toBeLessThanOrEqual(0.5);
+
     // Pointer path: the one Collapse control, in the Agents section head.
     await page.getByTestId('sidebar-collapse').click();
 
@@ -299,6 +313,24 @@ test.describe('Web 1440×900', () => {
     const sessionsSummary = page.getByTestId('sidebar-rail-sessions');
     await expect(sessionsSummary).toHaveText('6');
     await expect(sessionsSummary).toHaveAttribute('aria-label', '6 sessions');
+
+    // The rail fills the column's full height: the status dot sits one
+    // --shell-space-2 off the bottom edge, mirroring where the expanded footer
+    // carries the same status — not directly under the summaries, which is
+    // where a shrink-wrapped nav left it.
+    expect(await glyphCenterOffset('sidebar-rail-expand')).toBeLessThanOrEqual(0.5);
+    const shellSpace2 = await page.evaluate(() =>
+      parseFloat(
+        getComputedStyle(document.documentElement).getPropertyValue('--shell-space-2'),
+      ),
+    );
+    const viewportH = page.viewportSize()?.height ?? 0;
+    const railBox = await rail.boundingBox();
+    const statusBox = await page.getByTestId('sidebar-rail-status').boundingBox();
+    expect(railBox?.height ?? 0).toBe(viewportH);
+    expect(
+      Math.abs(viewportH - shellSpace2 - (statusBox?.bottom ?? 0)),
+    ).toBeLessThanOrEqual(1);
 
     await expect(page).toHaveScreenshot('web-sidebar-rail.png', {
       fullPage: true,
