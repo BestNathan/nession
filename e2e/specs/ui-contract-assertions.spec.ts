@@ -10,7 +10,7 @@
 //
 // Expectations always come from design/generated/contracts.json; the only
 // px in this file are intentional violations crafted for the proofs.
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import {
   expectAlignedY,
   expectDrawnAffordance,
@@ -33,6 +33,26 @@ const ITEM_APP = { pattern: 'pattern.session-item', experience: 'app' as const, 
 async function rejectsWith(assertion: Promise<void>, rule: string): Promise<void> {
   await expect(assertion).rejects.toThrow(/UI_CONTRACT_VIOLATION/);
   await expect(assertion).rejects.toThrow(new RegExp(`rule: ${rule}`));
+}
+
+/**
+ * How far the work surface is pushed past the viewport, in px.
+ *
+ * `docs/design/composition.md` — "Extra viewport width belongs to the work
+ * surface before it belongs to navigation" — has no contract row, so it is
+ * asserted here (#1269). Measured as an *overhang* rather than `scrollWidth`:
+ * the shell hides overflow, so `scrollWidth` reports the viewport even while
+ * the surface sits 192px beyond it. That is also why this went unnoticed —
+ * nothing scrolls, so nothing looks wrong except the terminal's own size.
+ */
+async function workSurfaceOverhang(page: Page): Promise<number> {
+  return page.evaluate(() => {
+    const main = document.querySelector('main');
+    if (main === null) {
+      throw new Error('UI_CONTRACT_VIOLATION — rule: work-surface — the shell has no <main>');
+    }
+    return Math.round(main.getBoundingClientRect().right - window.innerWidth);
+  });
 }
 
 // ── 1. Broken-fixture proofs ───────────────────────────────────────────────
@@ -103,6 +123,30 @@ test.describe('assertion helpers detect deliberate violations', () => {
 
     await page.setContent(`<div id="root" style="width: 300px;"><span>fits</span></div>`);
     await expectNoUnexpectedOverflow(page.locator('#root'), ITEM_WEB); // passes
+  });
+
+  test('work surface: a floored flex item overhangs, min-w-0 contains it (#1269)', async ({ page }) => {
+    // The mechanism #1269 shipped on, in isolation: a flex item with the
+    // default `min-width: auto` is floored at its *content*, so a child wider
+    // than the space available pushes the row past the viewport instead of
+    // being contained. `main` is that item in the shell.
+    //
+    // `margin: 0` on the body is load-bearing: `setContent` gives it the UA's
+    // 8px margin, which shifts the row right and leaves the *contained* case
+    // overhanging by 8 — measured, and it fails the assertion below.
+    const row = (mainStyle: string) => `
+      <body style="margin: 0;">
+        <div style="display: flex; width: 100vw;">
+          <div style="flex: 0 0 246px;"></div>
+          <main style="${mainStyle}"><div style="flex: 0 0 1200px; height: 10px;"></div></main>
+        </div>
+      </body>`;
+
+    await page.setContent(row('display: flex; flex: 1 1 0%;'));
+    expect(await workSurfaceOverhang(page)).toBeGreaterThan(0);
+
+    await page.setContent(row('display: flex; flex: 1 1 0%; min-width: 0;'));
+    expect(await workSurfaceOverhang(page)).toBeLessThanOrEqual(0);
   });
 
   test('touch target: undersized App hit area fails, 44px+ passes (session-item)', async ({ page }) => {
@@ -229,6 +273,30 @@ test.describe('real fixture surfaces satisfy their contracts', () => {
     // action beside the capsule is the visible route (#1204), so its presence
     // is what the contract protects.
     await expect(page.getByRole('button', { name: 'Open Workspace' })).toBeVisible();
+  });
+
+  test('web: expanding the sidebar gives the work surface its width back (#1269)', async ({ page }) => {
+    // #1195 fixed the sidebar column's own width, which is what made
+    // *collapsing* hand the space over. Taking it back is the other half, and
+    // the half a floor hides: `main` defaults to `min-width: auto`, so once the
+    // Terminal had rendered at the collapsed width its grid held the column
+    // open and expanding the sidebar left the row 192px past the viewport —
+    // with no container resize, so no `terminal.resize` either, and the PTY
+    // kept the collapsed cols.
+    await page.goto('/#/fixture');
+    await expect(page.locator('main')).toHaveCount(1);
+    const surface = page.locator('main');
+    const width = async () => Math.round(await surface.evaluate((el) => el.getBoundingClientRect().width));
+
+    const expanded = await width();
+    expect(await workSurfaceOverhang(page)).toBeLessThanOrEqual(0);
+
+    await page.getByTestId('sidebar-collapse').click();
+    await expect.poll(width).toBeGreaterThan(expanded);
+
+    await page.getByTestId('sidebar-rail-expand').click();
+    await expect.poll(width).toBe(expanded);
+    expect(await workSurfaceOverhang(page)).toBeLessThanOrEqual(0);
   });
 
   test('web: workspace direct chrome is bounded and inside the tool bar', async ({ page }) => {
