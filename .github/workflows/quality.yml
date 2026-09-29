@@ -48,6 +48,7 @@ jobs:
         run: |
           node scripts/collect-repo-health.mjs --self-test
           node scripts/generate-repo-metrics.mjs --self-test
+          node scripts/protocol-gate.mjs --json >/dev/null
       - run: cd web && npm ci
       - run: just design-check full
       - run: just web-lint
