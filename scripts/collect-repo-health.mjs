@@ -43,6 +43,15 @@ function execution(passed, failed, skipped) {
   };
 }
 
+function unavailableCoverage(reason, includeCrates = false) {
+  return {
+    status: 'unavailable',
+    reason,
+    lines: { covered: null, total: null, rate: null },
+    ...(includeCrates ? { crates: {} } : {}),
+  };
+}
+
 function parseCargoSummaries(text) {
   let passed = 0;
   let failed = 0;
@@ -219,14 +228,21 @@ function collectRust(output) {
     'terminal_io',
   ]);
 
-  let coveragePayload;
+  let coverage;
   try {
-    coveragePayload = JSON.parse(coverageRun.stdout);
-  } catch {
-    fail(
-      'cargo llvm-cov did not produce parseable JSON',
-      'install cargo-llvm-cov + llvm-tools-preview and inspect its stderr output.',
-    );
+    coverage = parseRustCoverage(JSON.parse(coverageRun.stdout), thresholds);
+  } catch (error) {
+    if (unit.failed > 0 || integration.failed > 0) {
+      coverage = unavailableCoverage(
+        'coverage unavailable because the measured Rust test revision has failing tests',
+        true,
+      );
+    } else {
+      fail(
+        `cargo llvm-cov did not produce usable JSON: ${error?.message ?? error}`,
+        'install cargo-llvm-cov + llvm-tools-preview and inspect its stderr output.',
+      );
+    }
   }
 
   write(output, {
@@ -235,7 +251,7 @@ function collectRust(output) {
     commit_sha: gitSha(),
     measured_at: new Date().toISOString(),
     tests: { unit, integration },
-    coverage: parseRustCoverage(coveragePayload, thresholds),
+    coverage,
     commands: {
       unit_exit_code: unitRun.code,
       integration_exit_code: integrationRun.code,
@@ -295,20 +311,45 @@ function collectWeb(output) {
     { cwd: 'web' },
   );
   const summaryPath = resolve('web/coverage/coverage-summary.json');
-  if (!existsSync(summaryPath)) {
-    fail(
-      'Vitest coverage-summary.json is missing',
-      'keep `json-summary` in web/vite.config.ts coverage reporters.',
-    );
+  let coverage;
+
+  if (existsSync(summaryPath)) {
+    try {
+      const summary = JSON.parse(readFileSync(summaryPath, 'utf8'));
+      const lines = summary?.total?.lines;
+      if (!lines) throw new Error('coverage summary has no total.lines');
+
+      coverage = {
+        lines: {
+          covered: Number(lines.covered ?? 0),
+          total: Number(lines.total ?? 0),
+          rate:
+            Number(lines.total ?? 0) === 0
+              ? null
+              : Number(lines.covered ?? 0) / Number(lines.total),
+        },
+      };
+    } catch (error) {
+      if (unit.failed === 0 && integration.failed === 0) {
+        fail(
+          `Vitest coverage summary is invalid: ${error?.message ?? error}`,
+          'verify @vitest/coverage-v8 JSON summary output.',
+        );
+      }
+    }
   }
 
-  const summary = JSON.parse(readFileSync(summaryPath, 'utf8'));
-  const lines = summary?.total?.lines;
-  if (!lines) {
-    fail(
-      'Vitest coverage summary has no total.lines',
-      'verify @vitest/coverage-v8 JSON summary output.',
-    );
+  if (!coverage) {
+    if (unit.failed > 0 || integration.failed > 0) {
+      coverage = unavailableCoverage(
+        'coverage unavailable because the measured Web test revision has failing tests',
+      );
+    } else {
+      fail(
+        'Vitest coverage-summary.json is missing',
+        'keep `json-summary` in web/vite.config.ts coverage reporters.',
+      );
+    }
   }
 
   write(output, {
@@ -317,16 +358,7 @@ function collectWeb(output) {
     commit_sha: gitSha(),
     measured_at: new Date().toISOString(),
     tests: { unit, integration },
-    coverage: {
-      lines: {
-        covered: Number(lines.covered ?? 0),
-        total: Number(lines.total ?? 0),
-        rate:
-          Number(lines.total ?? 0) === 0
-            ? null
-            : Number(lines.covered ?? 0) / Number(lines.total),
-      },
-    },
+    coverage,
     commands: {
       unit_exit_code: unitRun.code,
       integration_exit_code: integrationRun.code,
