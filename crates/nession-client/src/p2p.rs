@@ -98,6 +98,11 @@ pub fn attach_frame(session_name: &str, cols: u16, rows: u16) -> Message<ClientA
             width: cols,
             height: rows,
             env_snapshots: Vec::new(),
+            // `None` — "decide it yourself", which is the agent's own rule for
+            // a backend it is not attached to yet (#321). This builder has no
+            // buffer to have an opinion about: what it serves is the CLI, whose
+            // terminal is the caller's.
+            needs_bootstrap: None,
         },
     )
 }

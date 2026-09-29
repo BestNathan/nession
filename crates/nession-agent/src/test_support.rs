@@ -214,6 +214,12 @@ impl FakeTmux {
     /// Write the fake into `dir`. Panics if it cannot be written or made
     /// executable — a fake that silently failed to install would take a test
     /// down a path that looks like the wiring under test.
+    ///
+    /// Both of `TmuxCmd`'s global flags are stripped before recording (`-S`,
+    /// the socket, and `-f`, the server config). They are addressing, not the
+    /// command under test: a fake that left them in would make every recorded
+    /// argv say `-S`/`-f` and every assertion against a subcommand miss, which
+    /// is a test that passes while checking nothing.
     pub(crate) fn new(dir: &Path, script: &str) -> Self {
         let bin = dir.join("tmux");
         install_via_a_child(
@@ -221,6 +227,7 @@ impl FakeTmux {
             &format!(
                 "#!/bin/sh\n\
                  if [ \"$1\" = \"-S\" ]; then shift 2; fi\n\
+                 if [ \"$1\" = \"-f\" ]; then shift 2; fi\n\
                  n=0\n\
                  while true; do\n\
                  while [ -e \"{dir}/{prefix}$n\" ]; do n=$((n + 1)); done\n\

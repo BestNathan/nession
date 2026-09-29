@@ -26,7 +26,23 @@ export type ClientAttachPayload = { session_name: string, width: number, height:
  * Resolved env-file snapshots to apply via `tmux set-environment`
  * before PTY creation. Empty (default) preserves pre-env behaviour.
  */
-env_snapshots: Array<EnvSnapshot>, };
+env_snapshots: Array<EnvSnapshot>, 
+/**
+ * Whether this client wants the session's history sent before live output
+ * (#321), or `None` for the agent's own answer.
+ *
+ * The agent cannot decide this alone. It knows whether the *backend* is
+ * already attached; it cannot know whether the client is holding a buffer
+ * with that history already in it — a page that reattached over a surviving
+ * socket keeps its xterm, and one whose xterm was rebuilt does not. The
+ * client is the only party that knows, so it says.
+ *
+ * **Absence preserves the old meaning.** `None` means "decide it yourself",
+ * which is the agent's rule: bootstrap a backend that is not attached yet,
+ * stay silent for one that is. That is also exactly what a client written
+ * before this field would get.
+ */
+needs_bootstrap?: boolean | null, };
 export type ClientAttachResponse = { session_name: string, control_generation?: number | null, control_role?: string | null, controller_client_id?: string | null, stream_epoch?: number | null, stream_cursor?: number | null, };
 export type EnvSnapshot = { name: string, source: EnvSource, agent_id?: string | null, 
 /**
@@ -47,7 +63,23 @@ export type ClientAttachCall = { session_name: string, width: number, height: nu
  * Resolved env-file snapshots to apply via `tmux set-environment`
  * before PTY creation. Empty (default) preserves pre-env behaviour.
  */
-env_snapshots: Array<EnvSnapshot>, };
+env_snapshots: Array<EnvSnapshot>, 
+/**
+ * Whether this client wants the session's history sent before live output
+ * (#321), or `None` for the agent's own answer.
+ *
+ * The agent cannot decide this alone. It knows whether the *backend* is
+ * already attached; it cannot know whether the client is holding a buffer
+ * with that history already in it — a page that reattached over a surviving
+ * socket keeps its xterm, and one whose xterm was rebuilt does not. The
+ * client is the only party that knows, so it says.
+ *
+ * **Absence preserves the old meaning.** `None` means "decide it yourself",
+ * which is the agent's rule: bootstrap a backend that is not attached yet,
+ * stay silent for one that is. That is also exactly what a client written
+ * before this field would get.
+ */
+needs_bootstrap?: boolean | null, };
 
 /** The payload the provider answers with. */
 export type ClientAttachReply = { session_name: string, control_generation?: number | null, control_role?: string | null, controller_client_id?: string | null, stream_epoch?: number | null, stream_cursor?: number | null, };

@@ -49,8 +49,56 @@ fn terminal_output_mirrors_input() {
         data: "d29ybGQ=".to_string(),
         stream_epoch: None,
         stream_seq: None,
+        bootstrap: None,
     };
     let back: TerminalOutputPayload =
         serde_json::from_str(&serde_json::to_string(&msg).unwrap()).unwrap();
     assert_eq!(back.data, "d29ybGQ=");
+}
+
+/// The one property the version decision rests on: a frame with no `bootstrap`
+/// is **byte-identical** to the frame this contract produced before #321 added
+/// the field.
+///
+/// That is what "a new optional field whose absence preserves the old meaning"
+/// (`docs/architecture/protocol.md`) buys, and it is not free — it is this
+/// attribute pair. Drop either half and an old reader sees a null it has to
+/// tolerate, or a new writer emits one an old reader may not.
+///
+/// Asserted against a literal rather than against a round-trip, because a
+/// round-trip passes for any self-consistent shape.
+#[test]
+fn a_frame_without_a_bootstrap_is_unchanged_on_the_wire() {
+    let msg = TerminalOutputPayload {
+        session_name: "work".to_string(),
+        data: "d29ybGQ=".to_string(),
+        stream_epoch: None,
+        stream_seq: None,
+        bootstrap: None,
+    };
+    assert_eq!(
+        serde_json::to_string(&msg).unwrap(),
+        r#"{"session_name":"work","data":"d29ybGQ="}"#
+    );
+}
+
+/// And when it is present, it says both of the things a client needs to decide
+/// how to apply it.
+#[test]
+fn a_bootstrap_carries_what_was_asked_for_and_whether_it_was_cut() {
+    let msg = TerminalOutputPayload {
+        session_name: "work".to_string(),
+        data: "d29ybGQ=".to_string(),
+        stream_epoch: None,
+        stream_seq: None,
+        bootstrap: Some(TerminalBootstrapPayload {
+            requested_lines: 5000,
+            truncated: true,
+        }),
+    };
+    let back: TerminalOutputPayload =
+        serde_json::from_str(&serde_json::to_string(&msg).unwrap()).unwrap();
+    let bootstrap = back.bootstrap.expect("the marker survives a round trip");
+    assert_eq!(bootstrap.requested_lines, 5000);
+    assert!(bootstrap.truncated);
 }

@@ -25,9 +25,58 @@ use std::sync::OnceLock;
 use anyhow::{Context, Result};
 use nession_common::tmux_socket;
 
+use super::HISTORY_LIMIT_LINES;
+
 /// Environment variables that describe a tmux server we are not addressing.
 /// Stripped from every child so behaviour never depends on inheritance.
 const INHERITED_TMUX_VARS: [&str; 2] = ["TMUX", "TMUX_TMPDIR"];
+
+/// The name of nession's own tmux configuration, inside the socket directory.
+const SERVER_CONFIG_FILE: &str = "nession.conf";
+
+/// Where the server configuration lives for a given socket: beside it, in the
+/// directory nession already owns and creates with 0700.
+fn server_config_path(socket: &Path) -> PathBuf {
+    socket.with_file_name(SERVER_CONFIG_FILE)
+}
+
+/// What that file says.
+///
+/// One setting, and it is here rather than in a `set-option` call for a
+/// measured reason: tmux reads a server configuration **only when it starts a
+/// server**, and that is the only moment a server default can be installed
+/// before the first window exists. `set-option`'s own manual is explicit that
+/// it is not retroactive — "applies only to new windows … existing window
+/// histories are not resized" — so a `set-option -g history-limit` issued after
+/// `new-session` cannot fix the window `new-session` just created.
+///
+/// Measured on tmux 3.6b, cold socket, in this order:
+///
+/// - `set-option -g history-limit 5000` → `error connecting … (No such file or
+///   directory)`: there is no server to set it on.
+/// - `start-server` then `set-option` → `no server running`: a server with no
+///   sessions exits immediately, because `exit-empty` defaults to on.
+/// - one client invocation running `start-server ; set-option … ; new-session
+///   …` → works, but puts command-list grammar at the call site.
+/// - `-f <this file>` on the invocation that starts the server → works, and is
+///   what tmux is designed for.
+pub fn server_config_contents() -> String {
+    format!("set -g history-limit {HISTORY_LIMIT_LINES}\n")
+}
+
+/// Write the server configuration beside `socket`, creating nothing else —
+/// [`configure`] has already made the directory.
+///
+/// Idempotent rewrite rather than create-if-missing: the content is derived
+/// from a compile-time constant, so an agent upgraded on a PVC-backed `/root`
+/// must not be stuck with the previous version's file. That is the failure the
+/// image's `/root/.tmux.conf` has (`deploy/entrypoint-agent.sh` writes it only
+/// when absent).
+fn write_server_config(socket: &Path) -> Result<()> {
+    let path = server_config_path(socket);
+    std::fs::write(&path, server_config_contents())
+        .with_context(|| format!("failed to write tmux config {}", path.display()))
+}
 
 /// Process-wide tmux addressing, set once at startup by
 /// [`configure`] and read by [`global`].
@@ -68,36 +117,59 @@ impl TmuxCmd {
         }
     }
 
-    /// A `tokio::process::Command` for `tmux -S <socket>`.
+    /// A `tokio::process::Command` for `tmux -S <socket> -f <config>`.
     pub fn tokio(&self) -> tokio::process::Command {
         let mut cmd = tokio::process::Command::new(&self.bin);
-        cmd.arg("-S").arg(&self.socket);
+        self.apply_addressing(|arg| {
+            cmd.arg(arg);
+        });
         for var in INHERITED_TMUX_VARS {
             cmd.env_remove(var);
         }
         cmd
     }
 
-    /// A `std::process::Command` for `tmux -S <socket>`, for the synchronous
-    /// call sites (`Drop`, which cannot await).
+    /// A `std::process::Command` for `tmux -S <socket> -f <config>`, for the
+    /// synchronous call sites (`Drop`, which cannot await).
     pub fn std(&self) -> std::process::Command {
         let mut cmd = std::process::Command::new(&self.bin);
-        cmd.arg("-S").arg(&self.socket);
+        self.apply_addressing(|arg| {
+            cmd.arg(arg);
+        });
         for var in INHERITED_TMUX_VARS {
             cmd.env_remove(var);
         }
         cmd
     }
 
-    /// A `portable_pty::CommandBuilder` for `tmux -S <socket>`.
+    /// The two global flags every invocation carries, in order.
+    ///
+    /// `-f` is here rather than at a `set-option` call site because a server
+    /// configuration is read only when tmux *starts* a server — see
+    /// [`server_config_contents`]. Passing it unconditionally is what makes
+    /// whichever invocation happens to start the server the one that installs
+    /// nession's defaults, and it costs nothing on the ones that do not: tmux
+    /// ignores `-f` when a server is already running, and a `-f` naming a file
+    /// that does not exist is harmless (measured: exit 0, session created).
+    /// That last property is what keeps this safe for a `TmuxCmd` built in a
+    /// test against a socket directory nothing has written a config into.
+    fn apply_addressing(&self, mut arg: impl FnMut(&std::ffi::OsStr)) {
+        arg(std::ffi::OsStr::new("-S"));
+        arg(self.socket.as_os_str());
+        arg(std::ffi::OsStr::new("-f"));
+        arg(server_config_path(&self.socket).as_os_str());
+    }
+
+    /// A `portable_pty::CommandBuilder` for `tmux -S <socket> -f <config>`.
     ///
     /// portable-pty has its own command type, so this cannot reuse
     /// [`TmuxCmd::std`] — the PTY attach path needs its own constructor rather
     /// than a mechanical substitution.
     pub fn pty(&self) -> portable_pty::CommandBuilder {
         let mut cmd = portable_pty::CommandBuilder::new(&self.bin);
-        cmd.arg("-S");
-        cmd.arg(&self.socket);
+        self.apply_addressing(|arg| {
+            cmd.arg(arg);
+        });
         for var in INHERITED_TMUX_VARS {
             cmd.env_remove(var);
         }
@@ -128,6 +200,9 @@ pub fn configure(configured: Option<&str>) -> Result<PathBuf> {
     let socket = tmux_socket::resolve_socket_path(configured);
     tmux_socket::prepare_socket_dir(&socket)
         .with_context(|| format!("failed to prepare tmux socket {}", socket.display()))?;
+    // The server configuration, written before any tmux command can start a
+    // server — which is the only moment tmux reads it.
+    write_server_config(&socket)?;
 
     let cmd = TmuxCmd::new("tmux", socket.clone());
     if let Err(existing) = GLOBAL.set(cmd) {
@@ -156,7 +231,22 @@ pub fn configure(configured: Option<&str>) -> Result<PathBuf> {
 /// default one, so it is safe rather than merely convenient. It does not create
 /// the socket directory; tmux reports a clear "error creating" if it is absent.
 pub fn global() -> &'static TmuxCmd {
-    GLOBAL.get_or_init(|| TmuxCmd::new("tmux", tmux_socket::resolve_socket_path(None)))
+    GLOBAL.get_or_init(|| {
+        let cmd = TmuxCmd::new("tmux", tmux_socket::resolve_socket_path(None));
+        // Install the server configuration here too, and not only in
+        // [`configure`]. `-f` is read when tmux *starts a server*, so a file
+        // written after that has no effect on the server that is already up —
+        // which makes "who got there first" decide the depth. Production runs
+        // `configure()` at startup, before any tmux command; this path is the
+        // one tests and the short-lived CLI take, and it has to reach the same
+        // state before its own first tmux command.
+        //
+        // BestEffort: a socket directory that cannot be written is a state
+        // `configure()` reports and this one has no caller to report to. A
+        // missing file is harmless — tmux tolerates `-f` naming nothing.
+        let _ = write_server_config(cmd.socket_path());
+        cmd
+    })
 }
 
 #[cfg(test)]
@@ -177,6 +267,59 @@ mod tests {
         assert!(
             rendered.contains("/tmp/nession-probe/tmux.sock"),
             "missing socket path: {rendered}"
+        );
+        // The server config rides every invocation; see `apply_addressing` for
+        // why it has to be on whichever one starts the server.
+        assert!(rendered.contains("-f"), "missing -f: {rendered}");
+        assert!(
+            rendered.contains("nession.conf"),
+            "missing server config path: {rendered}"
+        );
+    }
+
+    #[test]
+    fn the_server_config_sits_beside_the_socket() {
+        // Same directory, so it inherits the 0700 the socket directory already
+        // gets and shares its lifetime. A config somewhere else would be a
+        // second location to keep in step with the socket.
+        assert_eq!(
+            server_config_path(Path::new("/tmp/nession-probe/tmux.sock")),
+            PathBuf::from("/tmp/nession-probe/nession.conf")
+        );
+    }
+
+    #[test]
+    fn the_server_config_carries_the_history_depth() {
+        // The one setting, and it is the value the bootstrap asks for later —
+        // two spellings of it would be two answers to one question.
+        assert_eq!(
+            server_config_contents(),
+            format!("set -g history-limit {HISTORY_LIMIT_LINES}\n")
+        );
+    }
+
+    #[test]
+    fn configuring_writes_the_server_config() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let socket = dir.path().join("tmux.sock");
+        std::fs::create_dir_all(dir.path()).expect("mkdir");
+
+        write_server_config(&socket).expect("write");
+
+        let written = std::fs::read_to_string(dir.path().join("nession.conf"))
+            .expect("the config is beside the socket");
+        assert_eq!(written, server_config_contents());
+
+        // Rewritten, not create-if-missing: an agent upgraded over a
+        // PVC-backed directory must not keep a previous version's file — the
+        // failure the image's `/root/.tmux.conf` has.
+        std::fs::write(dir.path().join("nession.conf"), "set -g history-limit 1\n")
+            .expect("pre-write a stale config");
+        write_server_config(&socket).expect("rewrite");
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("nession.conf")).expect("read"),
+            server_config_contents(),
+            "a stale config must be replaced, not preserved"
         );
     }
 

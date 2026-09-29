@@ -172,7 +172,13 @@ The web terminal supports zoom controls for better readability on different devi
 - **Reset:** Click the reset button to restore default zoom for your device
 - **Scrolling:** When terminal size exceeds viewport, use scrollbars or touch gestures to navigate
 
-Zoom level is session-specific and resets on page refresh.
+Zoom level is session-specific and resets on page refresh. A Session's history is
+xterm's own scrollback — the wheel stays in the browser and never enters tmux
+copy mode — and attaching (or reloading) fills it from the Session, so the
+context is there the moment the terminal is. That holds on the default attach
+transport; `attach_mode = "plain"` is a fallback, and
+[docs/design/terminal/scrollback-bootstrap.md](docs/design/terminal/scrollback-bootstrap.md)
+states exactly what it does and does not give you.
 
 ---
 

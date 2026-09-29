@@ -4,8 +4,20 @@ import { WIRE as RELAY_END_WIRE } from '@/generated/protocol/core/server-session
 import { WIRE as TERMINAL_INPUT_WIRE } from '@/generated/protocol/core/agent-terminal-input/v1';
 import { WIRE as TERMINAL_RESIZE_WIRE } from '@/generated/protocol/core/agent-terminal-resize/v1';
 import type { TransportPlugin, PluginSurface } from '@/platform/socket/types';
+// The shared options shape, owned next to the runtime that drives relay. A
+// type-only import across the layer boundary, which the rule allows — and the
+// alternative (each side declaring its own) is how the two would drift.
+import type { RelayBeginOptions } from '@/platform/attach/relayServerConnection';
 
-type RelayOutputCallback = (data: Uint8Array) => void;
+/**
+ * A relay output frame. `bootstrap` is true when the bytes are the session's
+ * **history** rather than its live output (#321) — the marker the agent sets on
+ * the snapshot it sends an attaching client. It travels the relay unchanged
+ * because the Server forwards the agent's `agent.terminal.output` payload
+ * frame-for-frame; the only reason it needs naming here is that this callback
+ * takes bytes rather than a frame.
+ */
+type RelayOutputCallback = (data: Uint8Array, bootstrap?: boolean) => void;
 type RelayResizeCallback = (cols: number, rows: number) => void;
 
 /** One registration, tagged with the install generation that created it. */
@@ -37,7 +49,7 @@ function getSessionId(payload: Record<string, unknown>): string {
  * frames per frame via the isRelay discriminator below.
  */
 export interface TerminalServerApi {
-  beginRelay(sessionId: string, relayUrl?: string, cols?: number, rows?: number): void;
+  beginRelay(sessionId: string, opts?: RelayBeginOptions): void;
   endRelay(sessionId: string): void;
   /** Relay terminal input — base64-wrapped, mirroring the server wire. */
   sendRelayInput(sessionName: string, data: string): void;
@@ -100,16 +112,21 @@ export class TerminalServerPlugin implements TransportPlugin, TerminalServerApi 
     };
   }
 
-  beginRelay(sessionId: string, relayUrl?: string, cols?: number, rows?: number): void {
+  beginRelay(sessionId: string, opts?: RelayBeginOptions): void {
     const payload: Record<string, unknown> = { session_id: sessionId };
-    if (relayUrl) {
-      payload.relay_url = relayUrl;
+    if (opts?.relayUrl) {
+      payload.relay_url = opts.relayUrl;
     }
-    if (cols !== undefined) {
-      payload.cols = cols;
+    if (opts?.cols !== undefined) {
+      payload.cols = opts.cols;
     }
-    if (rows !== undefined) {
-      payload.rows = rows;
+    if (opts?.rows !== undefined) {
+      payload.rows = opts.rows;
+    }
+    // Sent only when the caller has an opinion — omitted asks the agent to
+    // decide, which is what a caller that says nothing has always got (#321).
+    if (opts?.needsBootstrap !== undefined) {
+      payload.needs_bootstrap = opts.needsBootstrap;
     }
     this.requireConnection().send(RELAY_BEGIN_WIRE, payload);
   }
@@ -148,10 +165,14 @@ export class TerminalServerPlugin implements TransportPlugin, TerminalServerApi 
       data = new TextEncoder().encode(rawData);
     }
 
+    // Presence of the marker is the fact, not its contents — the same reading
+    // the P2P path in ./agent gives it.
+    const bootstrap = payload.bootstrap === undefined ? undefined : true;
+
     const callbacks = this.outputCallbacks.get(sessionId);
     if (callbacks) {
       for (const entry of callbacks) {
-        entry.cb(data);
+        entry.cb(data, bootstrap);
       }
     }
   }

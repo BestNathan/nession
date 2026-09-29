@@ -2750,6 +2750,182 @@ async fn wait_for_session(client: &mut TestWs, session_id: &str) -> anyhow::Resu
     }
 }
 
+/// A mock agent that answers `agent.attach` the way the real one does when a
+/// client has history coming: **the bootstrap first, the reply second**.
+///
+/// That order is the bootstrap contract (`server::bootstrap` — the snapshot is
+/// enqueued before the live forwarder exists, and the queue is FIFO), and it is
+/// also the one frame order the relay used to eat: it waited for the attach
+/// reply with a single frame read and treated whatever came back as the answer,
+/// so a frame that was not the reply was logged and dropped. Put the bootstrap
+/// there and the first chunk of every relayed history disappeared silently.
+///
+/// A dedicated endpoint rather than a flag on the shared one, because this is
+/// the only test whose agent says anything at all before it answers: making the
+/// others speak would change what they are measuring.
+async fn start_bootstrapping_mock_agent_endpoint() -> anyhow::Result<MockAgentEndpoint> {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let addr = listener.local_addr()?;
+    let (tx, frames) = tokio::sync::mpsc::unbounded_channel();
+
+    tokio::spawn(async move {
+        while let Ok((stream, _)) = listener.accept().await {
+            let tx = tx.clone();
+            tokio::spawn(async move {
+                let Ok(ws) = tokio_tungstenite::accept_async(stream).await else {
+                    return;
+                };
+                let (mut sink, mut stream) = ws.split();
+                while let Some(Ok(message)) = stream.next().await {
+                    let tokio_tungstenite::tungstenite::Message::Text(text) = message else {
+                        continue;
+                    };
+                    let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&text) else {
+                        continue;
+                    };
+                    if parsed.get("msg_type").and_then(serde_json::Value::as_str)
+                        != Some("agent.attach")
+                    {
+                        if tx.send(parsed).is_err() {
+                            return;
+                        }
+                        continue;
+                    }
+
+                    // The history. An `id` of its own and no correlation to the
+                    // attach: a bootstrap is a notification, not a reply to
+                    // anything, which is exactly why a reader looking for *the*
+                    // answer must not take it for one.
+                    let bootstrap = serde_json::json!({
+                        "msg_type": "agent.terminal.output",
+                        "id": "bootstrap-1",
+                        "timestamp": current_timestamp(),
+                        "payload": {
+                            // `.get`, not `parsed["payload"]["session_name"]`:
+                            // this is an endpoint closure rather than a
+                            // `#[test]` function, so the workspace's in-tests
+                            // indexing allowance does not reach it.
+                            "session_name": parsed
+                                .get("payload")
+                                .and_then(|p| p.get("session_name"))
+                                .cloned()
+                                .unwrap_or(serde_json::Value::Null),
+                            "data": "Rk9SRS1UUkFOU0xBVEU=",
+                            "bootstrap": { "requested_lines": 5000, "truncated": false },
+                        },
+                    });
+                    if sink
+                        .send(tokio_tungstenite::tungstenite::Message::Text(
+                            bootstrap.to_string(),
+                        ))
+                        .await
+                        .is_err()
+                    {
+                        return;
+                    }
+
+                    let answer = serde_json::json!({
+                        "msg_type": "agent.attach",
+                        "id": parsed.get("id").cloned().unwrap_or(serde_json::Value::Null),
+                        "timestamp": current_timestamp(),
+                        "payload": parsed
+                            .get("payload")
+                            .cloned()
+                            .unwrap_or(serde_json::Value::Null),
+                    });
+                    if sink
+                        .send(tokio_tungstenite::tungstenite::Message::Text(
+                            answer.to_string(),
+                        ))
+                        .await
+                        .is_err()
+                    {
+                        return;
+                    }
+                    if tx.send(parsed).is_err() {
+                        return;
+                    }
+                }
+            });
+        }
+    });
+
+    Ok(MockAgentEndpoint { addr, frames })
+}
+
+/// The relay forwards the frames that arrive **before** the attach reply.
+///
+/// The bootstrap contract puts the session's history on the wire ahead of the
+/// ok, because that ordering is what makes it a barrier rather than a race. The
+/// relay therefore sees a non-reply frame while it is waiting for a reply, and
+/// it has exactly one frame read to get that wrong with: read one, call it the
+/// answer, and the history is logged and dropped — silently, because a frame
+/// that was not the reply also is not an error.
+///
+/// The witness is the client's own socket, and the assertion is on the bytes
+/// the browser would write into xterm rather than on a frame count — so a relay
+/// that forwarded an envelope with an empty payload fails here too.
+#[tokio::test]
+async fn the_relay_forwards_what_the_agent_says_before_it_answers() -> anyhow::Result<()> {
+    let (_db_dir, addr, _handle) = start_ownership_server("test_ws_relay_bootstrap.db").await?;
+    let mut endpoint = start_bootstrapping_mock_agent_endpoint().await?;
+
+    let mut agent = connect_agent_on_port(addr, "a1", endpoint.addr.port()).await?;
+    send_json(&mut agent, session_update("a1", "dev")).await?;
+
+    let mut client = connect_client(addr).await?;
+    wait_for_session(&mut client, "a1:dev").await?;
+    send_json(
+        &mut client,
+        serde_json::json!({
+            "msg_type": "server.session.relay.begin",
+            "id": "begin-1",
+            "timestamp": current_timestamp(),
+            "payload": { "session_id": "a1:dev", "cols": 80, "rows": 24, "needs_bootstrap": true },
+        }),
+    )
+    .await?;
+    acknowledge_grant(&mut agent).await?;
+
+    // The agent answers the attach with the history first — see the endpoint.
+    let attach = expect_frame_of_type(
+        &mut endpoint.frames,
+        "agent.attach",
+        std::time::Duration::from_secs(5),
+    )
+    .await?;
+    assert_eq!(attach["payload"]["session_name"], serde_json::json!("dev"));
+    assert_eq!(
+        attach["payload"]["needs_bootstrap"],
+        serde_json::json!(true),
+        "the client asked for the history and the relay must pass that on: a \
+         bootstrap the agent was never asked for is one it will not send"
+    );
+
+    // And the client has it. Read until the frame arrives rather than taking
+    // the next one: the attach reply is also forwarded once the relay is live,
+    // and which of the two the client sees first is not what is being asserted.
+    let forwarded = loop {
+        let frame = next_json(&mut client).await?;
+        if frame.get("msg_type").and_then(serde_json::Value::as_str)
+            == Some("agent.terminal.output")
+        {
+            break frame;
+        }
+    };
+    assert_eq!(
+        forwarded["payload"]["data"],
+        serde_json::json!("Rk9SRS1UUkFOU0xBVEU="),
+        "the bootstrap reached the client's socket with its bytes intact"
+    );
+    assert!(
+        forwarded["payload"].get("bootstrap").is_some(),
+        "and still marked as the history: unmarked, the client would append it \
+         instead of replacing its buffer: {forwarded}"
+    );
+    Ok(())
+}
+
 /// While the relay is on, the connection's frames belong to it.
 ///
 /// This is the "relay mode entered" edge case, and what it characterizes is
