@@ -479,9 +479,9 @@ pub use nession_protocol::contracts::file::v1::{
     FileWritePayload, FileWriteResponse,
 };
 pub use nession_protocol::contracts::terminal::v1::{
-    TerminalControlAcquirePayload, TerminalControlAcquireResponse, TerminalControlChangedPayload,
-    TerminalInputPayload, TerminalOutputPayload, TerminalResizePayload,
-    TerminalStreamResumePayload, TerminalStreamResumeResponse,
+    TerminalBootstrapPayload, TerminalControlAcquirePayload, TerminalControlAcquireResponse,
+    TerminalControlChangedPayload, TerminalInputPayload, TerminalOutputPayload,
+    TerminalResizePayload, TerminalStreamResumePayload, TerminalStreamResumeResponse,
 };
 
 // --- Protocol helpers ---
@@ -528,6 +528,73 @@ async fn send_terminal_resize_msg(
         outbound.try_send_state(WsMessage::Text(json)),
         Err(OutboundError::Closed)
     )
+}
+
+/// Send `session`'s history to one connection, marked as a **bootstrap** (#321).
+///
+/// Awaited, and in order, before the caller starts live forwarding. That
+/// ordering *is* the barrier: the live producer does not exist yet and the
+/// outbound queue is FIFO, so nothing the session produces can overtake the
+/// snapshot — there is no gap to close and nothing to reconcile afterwards. The
+/// alternative, a cursor plus a reconciliation pass, is the shape #1148
+/// measured going wrong.
+///
+/// **Not recorded in the stream log.** A bootstrap is a snapshot taken *before*
+/// the stream, not an event in it. Giving it a `stream_seq` would put it inside
+/// `agent.terminal.stream.resume`'s replay window, which is duplication by
+/// construction. It carries no epoch or seq for the same reason — see
+/// `TerminalOutputPayload::bootstrap`.
+///
+/// Returns `false` once the connection is over. **A capture that fails is not
+/// that**: a client with no history is a client with an empty screen, which is
+/// the state every attach was in before this existed, so it is logged and the
+/// attach proceeds.
+async fn send_bootstrap(
+    outbound: &P2pOutbound,
+    tmux: &crate::tmux::ops::TmuxDep,
+    session_name: &str,
+) -> bool {
+    let lines = crate::tmux::HISTORY_LIMIT_LINES;
+    let capture = match tmux.ops().capture_pane(session_name, lines).await {
+        Ok(capture) => capture,
+        Err(e) => {
+            warn!("bootstrap: capture for {session_name} failed: {e:#}");
+            return true;
+        }
+    };
+    // `None` is tmux answering successfully with nothing — a session that
+    // exists and has no history yet. No frame, and not a failure.
+    let Some(capture) = capture else {
+        return true;
+    };
+    let bounded = crate::server::bootstrap::bound(capture);
+    use base64::Engine;
+    let payload = TerminalOutputPayload {
+        session_name: session_name.to_string(),
+        data: base64::engine::general_purpose::STANDARD.encode(&bounded.bytes),
+        stream_epoch: None,
+        stream_seq: None,
+        bootstrap: Some(TerminalBootstrapPayload {
+            requested_lines: lines,
+            truncated: bounded.truncated,
+        }),
+    };
+    let msg = new_message(msg_types::TERMINAL_OUTPUT, payload);
+    let Ok(json) = serde_json::to_string(&msg) else {
+        return true;
+    };
+    match outbound.send_terminal(WsMessage::Text(json)).await {
+        Ok(()) => true,
+        Err(OutboundError::Stalled) => {
+            // The honest verdict, and the same one the live-output task takes:
+            // a client that cannot drain a one-off snapshot is not going to
+            // drain the session behind it.
+            warn!("bootstrap: client stalled on the snapshot for {session_name}");
+            outbound.close();
+            false
+        }
+        Err(_) => false,
+    }
 }
 
 pub fn new_message<P: Serialize>(msg_type: &str, payload: P) -> Message<P> {
@@ -1291,6 +1358,28 @@ p2p_routes! { ctx, msg_type, payload_value;
                             client_attach_response(payload.session_name.clone(), shared, &client_id)
                         };
 
+                        // The session's history, before the live forwarder
+                        // exists — `send_bootstrap` carries why that ordering is
+                        // the whole barrier.
+                        //
+                        // Asked of the **client**, because the agent cannot
+                        // answer it: this arm runs whenever the backend is
+                        // already attached, which is equally true of a page that
+                        // reattached over a surviving socket (its xterm still
+                        // holds the history, and re-sending would duplicate it
+                        // on screen) and of one whose xterm was rebuilt (it
+                        // holds nothing). Absent means "the backend is attached,
+                        // so no" — the behaviour an older client already has.
+                        if payload.needs_bootstrap.unwrap_or(false) {
+                            let bootstrap_tmux = ctx.tmux.tmux_dep();
+                            if !send_bootstrap(ctx.outbound, &bootstrap_tmux, &session_name).await {
+                                return ctx.err(
+                                    "bootstrap_stalled",
+                                    "the client stalled while its history was being sent",
+                                );
+                            }
+                        }
+
                         spawn_output_forwarder(
                             rx,
                             ctx.outbound.clone(),
@@ -1445,51 +1534,27 @@ p2p_routes! { ctx, msg_type, payload_value;
                             // block that holds this arm's locals.
                             sessions_lock(ctx.sessions).insert(session_name.clone(), attached);
 
-                            // Capture scrollback BEFORE starting the live output stream.
-                            // Done synchronously (not spawned) to guarantee it arrives
-                            // before any live output from the control-mode attach.
-                            let capture_tmux = ctx.tmux.tmux_dep();
-                            let scrollback_bytes = match crate::tmux::util::capture_scrollback(
-                                &capture_tmux,
-                                &session_name,
-                                2000,
-                            )
-                            .await
+                            // The session's history, before the live output
+                            // stream is spawned — `send_bootstrap` carries why
+                            // that ordering is the whole barrier, and why the
+                            // frame is no longer recorded in the stream log.
+                            //
+                            // This is the *first* attach for this session on
+                            // this connection, so the backend was not attached
+                            // before it: the history belongs to a client that
+                            // has none, and no client has to ask. `needs_bootstrap`
+                            // is still honoured, because a client that says
+                            // `false` is one that has already been sent it.
+                            let bootstrap_tmux = ctx.tmux.tmux_dep();
+                            let wants_bootstrap = payload.needs_bootstrap.unwrap_or(true);
+                            if wants_bootstrap
+                                && !send_bootstrap(ctx.outbound, &bootstrap_tmux, &session_name)
+                                    .await
                             {
-                                Ok(Some((bytes, _cols, _rows))) => bytes,
-                                Ok(None) | Err(_) => Vec::new(),
-                            };
-
-                            // Send captured scrollback so xterm.js can pre-fill its buffer.
-                            if !scrollback_bytes.is_empty() {
-                                use base64::Engine;
-                                let encoded = base64::engine::general_purpose::STANDARD
-                                    .encode(&scrollback_bytes);
-                                let (stream_epoch, stream_seq) = {
-                                    let mut guard = sessions_lock(ctx.sessions);
-                                    guard
-                                        .get_mut(&session_name)
-                                        .map(|s| {
-                                            s.stream.record_output(&session_name, encoded.clone())
-                                        })
-                                        .unwrap_or((1, 0))
-                                };
-                                let output = TerminalOutputPayload {
-                                    session_name: session_name.clone(),
-                                    data: encoded,
-                                    stream_epoch: Some(stream_epoch),
-                                    stream_seq: Some(stream_seq),
-                                    // Live output; the prefill above is what
-                                    // becomes the bootstrap in S4b (#321).
-                                    bootstrap: None,
-                                };
-                                let msg = new_message(msg_types::TERMINAL_OUTPUT, output);
-                                if let Ok(json) = serde_json::to_string(&msg) {
-                                    let _ = ctx
-                                        .outbound
-                                        .send_terminal(WsMessage::Text(json))
-                                        .await;
-                                }
+                                return ctx.err(
+                                    "bootstrap_stalled",
+                                    "the client stalled while its history was being sent",
+                                );
                             }
 
                             // Spawn a background task that consumes the output
