@@ -5,15 +5,30 @@ export async function assertVisibleJsonlRecordsDoNotOverlap(
   page: Page,
   tolerancePx = 2,
 ): Promise<void> {
-  const lines = page.locator('[data-jsonl-line]');
-  const count = await lines.count();
-  const boxes: Array<{ top: number; bottom: number }> = [];
-  for (let i = 0; i < count; i++) {
-    const box = await lines.nth(i).boundingBox();
-    if (box) {
-      boxes.push({ top: box.y, bottom: box.y + box.height });
-    }
-  }
+  // Every rect is read in **one** round trip, deliberately.
+  //
+  // The list is virtualized, so `[data-jsonl-line]` elements mount and unmount
+  // as rows are measured — and expanding a record changes row heights, which
+  // re-renders the window. Counting first and then reading `nth(i)` gives the
+  // DOM a chance to move in between; when it does, that index resolves to zero
+  // elements and `boundingBox()` *waits* for one to appear, which surfaced as
+  // `locator.boundingBox: Test timeout of 30000ms exceeded` on this assertion
+  // and nowhere else — an intermittent failure that looked like a flaky suite
+  // (#1199). Reading the whole set atomically removes the window rather than
+  // widening a timeout to hide it.
+  const boxes = await page.evaluate(() =>
+    Array.from(document.querySelectorAll('[data-jsonl-line]'))
+      .map((el) => el.getBoundingClientRect())
+      // `getBoundingClientRect` reports an all-zero rect for a hidden element,
+      // which is how the previous `if (box)` guard excluded them.
+      .filter((rect) => rect.height > 0)
+      .map((rect) => ({ top: rect.top, bottom: rect.bottom })),
+  );
+
+  // Without this the overlap check below is vacuously true for an empty list —
+  // a test that passes because it measured nothing.
+  expect(boxes.length, 'no visible JSONL rows to compare').toBeGreaterThan(0);
+
   boxes.sort((a, b) => a.top - b.top);
   for (let i = 0; i < boxes.length - 1; i++) {
     expect(boxes[i].bottom).toBeLessThanOrEqual(boxes[i + 1].top + tolerancePx);
