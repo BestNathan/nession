@@ -448,6 +448,15 @@ test.describe('Attach bootstrap (#321)', () => {
       .poll(async () => countInBuffer(page, renderedForm('a1')), { timeout: 15_000 })
       .toBe(1);
 
+    // The other session, so the second client has something real to attach to.
+    // It is created by the same client and left attached — the point is only
+    // that it holds no marker, and that the sibling session's history does not
+    // leak into it.
+    await createSession(page, WITHOUT);
+    await attachToSession(page, WITHOUT, 'Relay');
+    await waitForInteractiveShell(page);
+    expect(await countInBuffer(page, renderedForm('a1'))).toBe(0);
+
     const second = await browser.newContext();
     try {
       const other = await second.newPage();
