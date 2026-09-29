@@ -1,0 +1,63 @@
+import { useId } from 'react';
+import { ChevronDown } from 'lucide-react';
+import { cn } from '@/shared/lib/utils';
+import { JsonTree } from '@/components/json/JsonTree';
+import type { JsonlRecord as JsonlRecordModel } from '../model/jsonParse';
+
+interface JsonlRecordProps {
+  record: JsonlRecordModel;
+  expanded: boolean;
+  onToggleExpanded: () => void;
+}
+
+export function JsonlRecord({
+  record,
+  expanded,
+  onToggleExpanded,
+}: JsonlRecordProps) {
+  const lineLabelId = useId();
+  const lineLabel = `Line ${record.lineNumber}`;
+
+  return (
+    <section
+      data-jsonl-line={record.lineNumber}
+      className="border-b border-border/50 py-[var(--shell-space-2)] px-[var(--workspace-editor-head-pad-x)] min-w-0"
+      aria-labelledby={lineLabelId}
+    >
+      <div className="flex items-center gap-2 mb-1">
+        <span
+          id={lineLabelId}
+          className="text-[10px] uppercase tracking-wide text-muted-foreground font-mono"
+        >
+          {lineLabel}
+        </span>
+        {record.kind === 'valid' ? (
+          <button
+            type="button"
+            className={cn(
+              'ml-auto inline-flex items-center gap-1 text-[length:var(--workspace-editor-action-font-size)] text-muted-foreground hover:text-foreground',
+            )}
+            aria-expanded={expanded}
+            onClick={() => onToggleExpanded()}
+          >
+            {expanded ? 'Collapse record' : 'Expand record'}
+            <ChevronDown className={cn('h-3 w-3 transition-transform', expanded && 'rotate-180')} />
+          </button>
+        ) : null}
+      </div>
+      {record.kind === 'invalid' ? (
+        <div role="alert" className="text-sm min-w-0">
+          <p className="text-destructive font-medium">Invalid JSON</p>
+          <p className="text-muted-foreground font-mono text-[length:var(--workspace-editor-font-size)] mt-1">
+            {record.message}
+          </p>
+          <pre className="mt-2 font-mono text-[length:var(--workspace-editor-font-size)] whitespace-pre-wrap break-all text-foreground/80">
+            {record.raw}
+          </pre>
+        </div>
+      ) : (
+        <JsonTree value={record.value} mode={expanded ? 'inspector' : 'compact'} pinRootOpen={expanded} />
+      )}
+    </section>
+  );
+}
