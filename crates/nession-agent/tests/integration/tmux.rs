@@ -480,3 +480,93 @@ async fn a_refused_required_mutation_is_reported_from_outside_the_crate() {
         "and it must carry tmux's own diagnostic: {message}"
     );
 }
+
+/// A capture returns **logical** lines, not the pane's wrapping of them.
+///
+/// This is the defect that made a reloaded terminal show the session's history
+/// as 80-column fragments inside a 142-column grid. tmux wraps a long line in
+/// its own grid and `capture-pane` emits one line **per grid row**, so without
+/// `-J` the break arrives as data — indistinguishable from a real newline, and
+/// nothing downstream can undo it. xterm re-joins a row it wrapped *itself*
+/// (measured: a 107-character line written into an 80-column xterm comes back
+/// as one row after a resize to 142, deep into the scrollback), which is what
+/// makes the distinction the whole fix.
+///
+/// The pane is 40 columns and the line is 100, so the pane must wrap it three
+/// times: a capture that returns it whole can only have joined them.
+#[tokio::test]
+async fn capture_pane_returns_a_wrapped_line_whole() {
+    let manager = SessionManager::new();
+    let session = TestSession::new("capturejoin");
+    let name = session.name().to_string();
+
+    manager
+        .create_session(&name, 40, 24, "/tmp", &[])
+        .await
+        .unwrap();
+
+    // **The pane has to be narrow, and `create_session`'s size is not enough to
+    // make it so** — measured here: asking for 40×24 gave a **200-column** pane,
+    // so the first version of this test had a 100-character line that was never
+    // wrapped, and it passed against a build with `-J` removed. Resized
+    // explicitly, and then checked rather than assumed.
+    manager
+        .tmux_dep()
+        .ops()
+        .resize_window(&name, 40, 24)
+        .await
+        .unwrap();
+    let (cols, _rows) = manager.tmux_dep().ops().window_size(&name).await.unwrap();
+    assert!(
+        cols < 100,
+        "the pane is {cols} columns, so a 100-character line is not wrapped and          this test cannot tell a joined capture from an unjoined one"
+    );
+
+    // Exactly 100 characters, printed as one logical line. `printf` with a
+    // counted format rather than a literal, so the length cannot drift from the
+    // assertion below.
+    manager
+        .tmux_dep()
+        .ops()
+        .send_keys(&name, "printf 'J%.0s' $(seq 1 100); echo")
+        .await
+        .unwrap();
+
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+    let capture = loop {
+        let captured = manager
+            .tmux_dep()
+            .ops()
+            .capture_pane(&name, 200)
+            .await
+            .unwrap()
+            .unwrap_or_default();
+        let text = String::from_utf8_lossy(&captured).to_string();
+        if text.contains("JJJJJ") {
+            break text;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the line never reached the pane, so this test cannot ask about it"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    };
+
+    // The prompt line and the echoed command are in here too, so the claim is
+    // about the one line that is nothing but `J`s.
+    let joined = capture
+        .lines()
+        .map(str::trim_end)
+        .find(|l| l.len() >= 100 && l.chars().all(|c| c == 'J'));
+    let joined = joined.unwrap_or_else(|| {
+        panic!(
+            "no unbroken 100-character line in the capture — the pane wrapped it \
+             and the capture did not join it:\n{capture}"
+        )
+    });
+    assert_eq!(
+        joined.len(),
+        100,
+        "the line came back at a different length than it was written"
+    );
+}
