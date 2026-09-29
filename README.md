@@ -1,12 +1,12 @@
 # Nession
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/BestNathan/nession/metrics/project-pulse-dark.svg?sanitize=true&v=1">
-  <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/BestNathan/nession/metrics/project-pulse-light.svg?sanitize=true&v=1">
-  <img alt="Nession Engineering Pulse — repository scale and rolling seven-day activity" src="https://raw.githubusercontent.com/BestNathan/nession/metrics/project-pulse-light.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/BestNathan/nession/metrics/repo-metrics-dark.svg?sanitize=true&v=2">
+  <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/BestNathan/nession/metrics/repo-metrics-light.svg?sanitize=true&v=2">
+  <img alt="Nession Repository Telemetry — repository health and rolling engineering efficiency" src="https://raw.githubusercontent.com/BestNathan/nession/metrics/repo-metrics-light.svg?sanitize=true&v=2">
 </picture>
 
-<sub>Generated daily from <code>main</code> · rolling 7d · <a href="https://raw.githubusercontent.com/BestNathan/nession/metrics/metrics.json">raw metrics</a></sub>
+<sub>Generated every 4 hours from <code>main</code> · rolling 7d · <a href="https://raw.githubusercontent.com/BestNathan/nession/metrics/metrics.json">raw metrics</a></sub>
 
 > An intelligent workspace for continuous work across devices, environments, and compute nodes.
 
