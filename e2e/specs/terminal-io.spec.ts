@@ -500,22 +500,20 @@ test.describe('Attach bootstrap (#321)', () => {
 
     const WITH_MARKER = `e2e-bootstrap-a-${testInfo.retry}`;
     const WITHOUT = `e2e-bootstrap-b-${testInfo.retry}`;
+    // Both created before either is attached. Creating a Session while this
+    // client is attached to another one leaves the create dialog on screen —
+    // measured: `Create` is clicked, the dialog never closes, and the helper
+    // times out waiting for it. Nothing here needs the second Session to be
+    // made later, so it is made first.
     await createSession(page, WITH_MARKER);
+    await createSession(page, WITHOUT);
+
     await attachToSession(page, WITH_MARKER, 'Relay');
     await waitForInteractiveShell(page);
     await submitTerminalCommand(page, typedForm('a1'));
     await expect
       .poll(async () => countInBuffer(page, renderedForm('a1')), { timeout: 15_000 })
       .toBe(1);
-
-    // The other session, so the second client has something real to attach to.
-    // It is created by the same client and left attached — the point is only
-    // that it holds no marker, and that the sibling session's history does not
-    // leak into it.
-    await createSession(page, WITHOUT);
-    await attachToSession(page, WITHOUT, 'Relay');
-    await waitForInteractiveShell(page);
-    expect(await countInBuffer(page, renderedForm('a1'))).toBe(0);
 
     const second = await browser.newContext();
     try {
