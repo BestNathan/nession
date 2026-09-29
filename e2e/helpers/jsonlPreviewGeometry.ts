@@ -97,9 +97,86 @@ export async function assertInspectorKeyColonShareRowWithValue(
   expect(value.top).toBeGreaterThanOrEqual(key.top - 4);
 }
 
+/**
+ * Bring a record into the virtualized window (#1272).
+ *
+ * The preview unmounts rows outside its window (#1199), so a record far down
+ * the file has **no DOM at all** until it is scrolled to — `[data-jsonl-line=
+ * "111"]` is simply not there. Targeting such a record without revealing it
+ * first waits out the whole test budget for an element that will never appear,
+ * which is what turned four cases into 30s timeouts.
+ *
+ * Steps a viewport at a time rather than jumping, because the window is
+ * recomputed from the scroll event in a later task — a single jump can land
+ * where the row is still unmounted.
+ */
+export async function revealJsonlRecord(page: Page, lineNumber: number): Promise<void> {
+  // The loop runs in the page: a round trip per step costs far more than the
+  // render it is waiting for (measured: 327ms to reach record 111 at 1280x720,
+  // 979ms at 390x844, where each step is only a short viewport). The step is
+  // one client height, never more — the mounted window is the viewport plus
+  // overscan, so consecutive steps overlap and a row cannot be stepped over.
+  const verdict = await page.evaluate(async (line) => {
+    const scroller = document.querySelector('[data-testid="jsonl-preview-scroll"]');
+    if (!(scroller instanceof HTMLElement)) {
+      return 'no scroll container';
+    }
+    const selector = `[data-jsonl-line="${line}"]`;
+    for (let step = 0; step < 200; step += 1) {
+      if (document.querySelector(selector) !== null) {
+        return 'found';
+      }
+      const before = scroller.scrollTop;
+      scroller.scrollTop = Math.min(before + scroller.clientHeight, scroller.scrollHeight);
+      if (scroller.scrollTop === before) {
+        return 'reached the end';
+      }
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    }
+    return 'stepped 200 times';
+  }, lineNumber);
+
+  await expect(
+    page.locator(`[data-jsonl-line="${lineNumber}"]`),
+    `record ${lineNumber} never entered the virtualized window (${verdict})`,
+  ).toHaveCount(1);
+}
+
 export async function expandJsonlRecord(page: Page, lineNumber: number): Promise<void> {
   const section = page.locator(`[data-jsonl-line="${lineNumber}"]`);
   await section.getByRole('button', { name: 'Expand record' }).click();
+}
+
+/**
+ * Collapse an expanded record.
+ *
+ * Not `expandJsonlRecord` again: once open, the header control's label flips to
+ * `Collapse record`, so repeating the expand call waits for a button that no
+ * longer exists (#1272).
+ */
+export async function collapseJsonlRecord(page: Page, lineNumber: number): Promise<void> {
+  await page
+    .locator(`[data-jsonl-line="${lineNumber}"]`)
+    .getByRole('button', { name: 'Collapse record' })
+    .click();
+}
+
+/**
+ * Scroll the preview and wait for the virtualized window to actually move.
+ *
+ * `scrollJsonlPreview` sets `scrollTop` synchronously; the window is recomputed
+ * from the resulting scroll event in a later task. Reading straight after the
+ * assignment sees the pre-scroll window — which is why the two scroll cases
+ * compared two *identical* sets and failed as `not.toEqual` (#1272).
+ */
+export async function expectJsonlWindowMoved(page: Page, before: number[]): Promise<void> {
+  const key = (lines: number[]) => [...lines].sort((a, b) => a - b).join(',');
+  const beforeKey = key(before);
+  await expect
+    .poll(async () => key(await readVisibleJsonlLineNumbers(page)), {
+      message: 'the virtualized window never moved after scrolling',
+    })
+    .not.toBe(beforeKey);
 }
 
 export async function scrollJsonlPreview(page: Page, scrollTop: number): Promise<number> {
