@@ -778,9 +778,20 @@ test.describe('Terminal I/O', () => {
     // the default transport: `shouldScrollLocally()` is dead code under Plain
     // (a tmux client owns the screen), so before S3 there was no mode to be in.
     //
+    // **The reader must not type while the output arrives.** xterm's
+    // `scrollOnUserInput` (default on) scrolls to the bottom on *input*, and
+    // `sendRawToTerminal` passes `wasUserInput: true` — so a test that types the
+    // command which produces the output is scrolling itself and measuring that.
+    // Measured on CI: the first version of this test failed with the viewport at
+    // `baseY` and the mode back to `following`, on a change that had not touched
+    // the follow logic at all.
+    //
+    // So the producer is started *before* the wheel and left running: the
+    // output arrives with this client sending nothing.
+    //
     // Asserted on the product's own signal — `data-terminal-scroll-mode` on the
     // capsule host, written by `occlusionScroll`'s `setMode` — rather than on
-    // `viewportY` alone: the mode is what the capsule's inset and the follow
+    // `viewportY` alone: the mode is what the capsule's inset and every follow
     // decision are keyed on, and a terminal that scrolled locally while still
     // believing it was following would pass a viewport-only assertion.
     test.skip(!process.env.CI, 'local only — runs in CI workflow only');
@@ -789,15 +800,26 @@ test.describe('Terminal I/O', () => {
     await attachToSession(page, SESSION_NAME, 'Relay');
     await waitForInteractiveShell(page);
 
-    // Enough output to have somewhere to scroll to. Waited on `baseY` — the
-    // bottom of the scrollback — rather than on the mode, because the mode is
-    // already `following` before any of this output exists and a poll for it
-    // would pass without waiting for anything.
+    // Enough output to have somewhere to scroll to, and a producer that keeps
+    // going afterwards. Waited on `baseY` — the bottom of the scrollback —
+    // rather than on the mode, because the mode is already `following` before
+    // any of this output exists and a poll for it would pass without waiting.
     await submitTerminalCommand(page, 'seq 1 200');
+    await submitTerminalCommand(
+      page,
+      'for i in $(seq 1 30); do printf "BROWSING-%02d\\n" $i; sleep 1; done &',
+    );
     await expect
       .poll(async () => (await readViewport(page)).baseY, { timeout: 15_000 })
       .toBeGreaterThan(100);
     expect(await readScrollMode(page)).toBe('following');
+
+    // What the *command line* contributes to the count. `BROWSING-` appears
+    // once in the echoed `printf` and never again — the output is
+    // `BROWSING-01` — so any growth past this is output the session produced.
+    // Counting rather than polling for a fixed index, because a fixed index
+    // could already be on screen before the wheel and the wait would be vacuous.
+    const echoed = await countInBuffer(page, 'BROWSING-');
 
     // Browse: a real wheel event, the same one a user produces.
     await wheelOverTerminal(page, -400);
@@ -806,33 +828,28 @@ test.describe('Terminal I/O', () => {
       .toBe('history');
     const parked = await readViewport(page);
 
-    // Output arrives while the user is reading. It must not drag the view down:
-    // the whole point of local scrollback is that history stays where it was
-    // put. The line is printed by the *session*, so the client cannot have
-    // moved itself to see it.
-    await submitTerminalCommand(page, 'echo WHILE-BROWSING');
+    // Output arrives while the user is reading — from the session, with nothing
+    // sent from here — and it must not drag the view down. The whole point of
+    // local scrollback is that history stays where it was put.
     await expect
-      .poll(async () => countInBuffer(page, 'WHILE-BROWSING'), { timeout: 15_000 })
-      .toBeGreaterThan(0);
+      .poll(async () => countInBuffer(page, 'BROWSING-'), { timeout: 20_000 })
+      .toBeGreaterThan(echoed);
     expect(
       await readViewport(page),
-      'the viewport moved under a reader: output while browsing must not scroll the view',
+      'the viewport moved under a reader: output while browsing must not scroll ' +
+        'the view',
     ).toBe(parked);
     expect(await readScrollMode(page)).toBe('history');
 
-    // And the way back: at the real bottom the terminal follows again.
+    // And the way back: at the real bottom the terminal follows again, and the
+    // producer is still running so there is something to follow.
     await wheelOverTerminal(page, 4000);
     await expect
       .poll(async () => readScrollMode(page), { timeout: 5_000 })
       .toBe('following');
-    // Following means following: the next line arrives at the bottom of a
-    // viewport that is still there.
-    await submitTerminalCommand(page, 'echo AFTER-RETURN');
     await expect
-      .poll(async () => countInBuffer(page, 'AFTER-RETURN'), { timeout: 15_000 })
-      .toBeGreaterThan(0);
-    expect(await readScrollMode(page)).toBe('following');
-    expect((await readViewport(page)).following).toBe(true);
+      .poll(async () => (await readViewport(page)).following, { timeout: 15_000 })
+      .toBe(true);
   });
 
   test('the application, not tmux, owns the terminal the browser drives (#321 S3)', async ({ page }, testInfo) => {
