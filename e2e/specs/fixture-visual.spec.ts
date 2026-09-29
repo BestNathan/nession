@@ -319,18 +319,29 @@ test.describe('Web 1440×900', () => {
     // carries the same status — not directly under the summaries, which is
     // where a shrink-wrapped nav left it.
     expect(await glyphCenterOffset('sidebar-rail-expand')).toBeLessThanOrEqual(0.5);
-    const shellSpace2 = await page.evaluate(() =>
-      parseFloat(
-        getComputedStyle(document.documentElement).getPropertyValue('--shell-space-2'),
-      ),
-    );
+    // A custom property's computed value keeps the author's unit, so
+    // getPropertyValue('--shell-space-2') reads "0.5rem" and parseFloat makes
+    // it 0.5, not 8 (--shell-rail-width above is px-valued, which is why the
+    // same trick works there). Measure it through a probe element instead.
+    const shellSpace2 = await page.evaluate(() => {
+      const probe = document.createElement('div');
+      probe.style.cssText =
+        'position:absolute;visibility:hidden;height:var(--shell-space-2)';
+      document.body.appendChild(probe);
+      const px = probe.getBoundingClientRect().height;
+      probe.remove();
+      return px;
+    });
     const viewportH = page.viewportSize()?.height ?? 0;
-    const railBox = await rail.boundingBox();
-    const statusBox = await page.getByTestId('sidebar-rail-status').boundingBox();
-    expect(railBox?.height ?? 0).toBe(viewportH);
-    expect(
-      Math.abs(viewportH - shellSpace2 - (statusBox?.bottom ?? 0)),
-    ).toBeLessThanOrEqual(1);
+    await expect.poll(async () => (await rail.boundingBox())?.height ?? 0).toBe(viewportH);
+    // boundingBox is null while the dot is not yet measurable after the
+    // collapse swap — poll through it rather than reading once.
+    await expect
+      .poll(async () => {
+        const box = await page.getByTestId('sidebar-rail-status').boundingBox();
+        return box ? Math.abs(viewportH - shellSpace2 - box.bottom) : Number.POSITIVE_INFINITY;
+      })
+      .toBeLessThanOrEqual(1);
 
     await expect(page).toHaveScreenshot('web-sidebar-rail.png', {
       fullPage: true,
