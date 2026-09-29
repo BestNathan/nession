@@ -25,9 +25,7 @@ export function jsonlRecordBodyClass(expanded: boolean, className?: string) {
   return cn(
     jsonPreviewSurfaceClass(),
     !expanded &&
-      'relative max-h-[calc(var(--workspace-editor-line-height)*9em)] overflow-hidden',
-    !expanded &&
-      'after:pointer-events-none after:absolute after:inset-x-0 after:bottom-0 after:h-[var(--shell-space-4)] after:bg-gradient-to-t after:from-background after:to-transparent',
+      'max-h-[calc(var(--workspace-editor-line-height)*9em)] overflow-hidden [mask-image:linear-gradient(to_bottom,black_75%,transparent)]',
     className,
   );
 }
