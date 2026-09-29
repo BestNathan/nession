@@ -349,8 +349,9 @@ Before a main-targeting PR may close a `requirement`, staging acceptance must be
 
 The **Requirement Acceptance** workflow runs `scripts/requirement-acceptance.mjs pr-gate`
 for PRs targeting `main`. If a closing requirement is incomplete, the check fails and
-the workflow converts the PR back to **Draft**. Fix the requirement acceptance first,
-then mark the PR ready again. Do not merge around a red acceptance gate.
+the workflow **closes the PR**. Fix the requirement acceptance first, then reopen the PR;
+the `reopened` event runs the same gate again. This makes the block effective even when
+repository rulesets are disabled. Do not recreate or merge around a failed acceptance gate.
 
 A second `issues: closed` guard runs the same validator. If a requirement is closed as
 completed without passing acceptance, it is reopened automatically with criterion-level

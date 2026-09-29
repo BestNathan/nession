@@ -242,15 +242,12 @@ async function closingRequirementIssues({ owner, name, body, token }) {
   return issues;
 }
 
-async function convertPrToDraft(prId, token) {
-  const mutation = `
-    mutation($id: ID!) {
-      convertPullRequestToDraft(input: { pullRequestId: $id }) {
-        pullRequest { number isDraft }
-      }
-    }
-  `;
-  await graphql(mutation, { id: prId }, token);
+async function closePullRequest(owner, name, number, token) {
+  await githubRequest(`/repos/${owner}/${name}/pulls/${number}`, {
+    token,
+    method: 'PATCH',
+    body: { state: 'closed' },
+  });
 }
 
 async function runPrGate() {
@@ -268,9 +265,9 @@ async function runPrGate() {
     else console.log(`Requirement #${issue.number}: ${result.criteriaCount} criteria accepted.`);
   }
   if (failures.length) {
-    if (pr.node_id && !pr.draft) {
-      await convertPrToDraft(pr.node_id, token);
-      console.error(`PR #${number} was converted to draft because requirement acceptance is incomplete.`);
+    if (pr.state !== 'closed') {
+      await closePullRequest(owner, name, number, token);
+      console.error(`PR #${number} was closed because requirement acceptance is incomplete. Fix acceptance, then reopen the PR.`);
     }
     throw new Error(`Requirement acceptance gate failed:\n\n${failures.join('\n\n')}`);
   }
