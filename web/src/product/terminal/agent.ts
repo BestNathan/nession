@@ -37,6 +37,20 @@ export interface TerminalOutputFrame {
   data: Uint8Array;
   streamEpoch?: number;
   streamSeq?: number;
+  /**
+   * True when this frame is the session's **history** rather than its live
+   * output (#321).
+   *
+   * The distinction is the client's whole part of the bootstrap contract: a
+   * bootstrap **replaces** the buffer, live output appends to it. That is what
+   * lets the agent re-send a session's history on every attach that needs one
+   * without the client ending up with two copies of it on screen.
+   *
+   * Absent on every frame a provider has ever sent, which is why the field is
+   * additive and the wire keeps its version — see
+   * `TerminalOutputPayload::bootstrap`.
+   */
+  bootstrap?: boolean;
 }
 
 export interface TerminalStreamResumeResult {
@@ -71,7 +85,7 @@ export interface TerminalAgentApi {
   attach(
     sessionName: string,
     size?: TerminalSize,
-    opts?: { timeoutMs?: number },
+    opts?: { timeoutMs?: number; needsBootstrap?: boolean },
   ): Promise<AttachResult>;
   /** Send terminal input (keystrokes) to the session — base64-encoded. */
   sendInput(sessionName: string, data: string): void;
@@ -110,13 +124,19 @@ async function attachToSession(
   surface: PluginSurface,
   lease: ControlLease,
   sessionName: string,
-  attachOpts?: { size?: TerminalSize; timeoutMs?: number },
+  attachOpts?: { size?: TerminalSize; timeoutMs?: number; needsBootstrap?: boolean },
 ): Promise<AttachResult> {
   try {
     const size = attachOpts?.size;
     const reply = await surface.request(ATTACH_WIRE, {
       session_name: sessionName,
       ...(size ? { width: size.cols, height: size.rows } : {}),
+      // Sent only when the caller has an opinion. Omitting it is not the same
+      // as sending `false`: absent asks the agent to decide, and the agent's
+      // rule is the one an older client already gets (#321).
+      ...(attachOpts?.needsBootstrap !== undefined
+        ? { needs_bootstrap: attachOpts.needsBootstrap }
+        : {}),
     }, { timeoutMs: attachOpts?.timeoutMs ?? ATTACH_TIMEOUT_MS });
     const fields = readAttachControlFields(reply);
     const role =
@@ -181,6 +201,7 @@ export function createTerminalAgentApi(surface: PluginSurface): TerminalAgentApi
       attachToSession(surface, lease, sessionName, {
         size,
         timeoutMs: opts?.timeoutMs,
+        needsBootstrap: opts?.needsBootstrap,
       }),
 
     sendInput: (sessionName: string, data: string): void => {
@@ -223,6 +244,7 @@ export function createTerminalAgentApi(surface: PluginSurface): TerminalAgentApi
           data?: unknown;
           stream_epoch?: unknown;
           stream_seq?: unknown;
+          bootstrap?: unknown;
         };
         const data = p.data as string | undefined;
         if (data) {
@@ -231,6 +253,10 @@ export function createTerminalAgentApi(surface: PluginSurface): TerminalAgentApi
             streamEpoch:
               typeof p.stream_epoch === 'number' ? p.stream_epoch : undefined,
             streamSeq: typeof p.stream_seq === 'number' ? p.stream_seq : undefined,
+            // Presence of the marker is the fact, not its contents: a provider
+            // that sends `bootstrap: {}` means the same thing as one that sends
+            // a populated payload, and the client's job is the same either way.
+            bootstrap: p.bootstrap === undefined ? undefined : true,
           });
         }
       });

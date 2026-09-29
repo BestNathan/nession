@@ -25,6 +25,7 @@ import { terminalServerApi } from '@/product/terminal';
 import { useTerminal } from '@/product/terminal/hooks/useTerminal';
 import { useTerminalAttach } from '@/product/terminal/useTerminalAttach';
 import { ConnectionManager } from '@/platform/terminal-runtime/ConnectionManager';
+import type { TerminalController } from '@/platform/terminal-runtime/controller/TerminalController';
 import { createAttachGate } from '@/platform/terminal-runtime/adapters/TransportAttachGate';
 import { detectProfile, PROFILES } from '@/platform/terminal-runtime/DeviceProfile';
 import type { TerminalTransport } from '@/platform/terminal-runtime/transport/TerminalTransport';
@@ -191,12 +192,24 @@ export function useTerminalOrchestration({
   // the runtime (begin/endRelay + state), the transport factory (relay I/O),
   // the banner, and disconnect cleanup. Rebuilt only when the service does.
   const relayServer = useMemo(() => relayServerHandle(wsService, terminalServerApi), [wsService]);
+  // The bootstrap question (#321) is answered by the live Terminal, which does
+  // not exist yet at this point in the hook — so the runtime is handed a reader
+  // over a ref that the controller assignment below fills in. Reading through a
+  // ref is what makes the answer current at *attach* time rather than at the
+  // time this closure was built, and the controller outlives every runtime
+  // rewire, so there is exactly one authority for it.
+  const controllerRef = useRef<TerminalController | null>(null);
+  const hasSessionOutput = useCallback(
+    () => controllerRef.current?.hasSessionOutput ?? false,
+    [],
+  );
   const { waitingForAddressPlan, agentTerminalApi, connectionState, runtime, snapshot, fileOps } = useP2PAttachTransport({
     attachInfo,
     sessionName,
     orderedUrls,
     manualOverride,
     serverConnection: relayServer,
+    hasSessionOutput,
   });
 
   const { control: terminalControl, takeControl } = useTerminalControlBridge(
@@ -240,6 +253,12 @@ export function useTerminalOrchestration({
     scrollbackMode,
     runtime,
   });
+  // Filled here rather than in an effect: `useTerminal` memoizes the
+  // controller, so this is the same instance every render, and an effect would
+  // leave the reader answering `false` for the whole first commit — including
+  // the viewport's layout-effect attach, which is what starts the first
+  // `client.attach` this flag is read by.
+  controllerRef.current = controller;
 
   const banner = useReconnectBanner({
     sessionId, terminalState, reconnectCount, effectiveMode, serverConnection: relayServer,

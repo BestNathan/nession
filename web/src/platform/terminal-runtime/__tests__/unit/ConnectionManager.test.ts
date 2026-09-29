@@ -15,13 +15,13 @@ async function flushMicrotasks(): Promise<void> {
 
 interface AgentApiHarness {
   api: TerminalAgentApi;
-  outputHandlers: Array<(frame: { data: Uint8Array; streamEpoch?: number; streamSeq?: number }) => void>;
+  outputHandlers: Array<(frame: { data: Uint8Array; streamEpoch?: number; streamSeq?: number; bootstrap?: boolean }) => void>;
   resizeHandlers: Array<(cols: number, rows: number) => void>;
   errorHandlers: Array<(error: AgentError) => void>;
 }
 
 function makeAgentApi(): AgentApiHarness & { unsubs: { output: ReturnType<typeof vi.fn>; resize: ReturnType<typeof vi.fn>; error: ReturnType<typeof vi.fn> } } {
-  const outputHandlers: Array<(frame: { data: Uint8Array; streamEpoch?: number; streamSeq?: number }) => void> = [];
+  const outputHandlers: Array<(frame: { data: Uint8Array; streamEpoch?: number; streamSeq?: number; bootstrap?: boolean }) => void> = [];
   const resizeHandlers: Array<(cols: number, rows: number) => void> = [];
   const errorHandlers: Array<(error: AgentError) => void> = [];
   const unsubs = {
@@ -228,7 +228,24 @@ describe('ConnectionManager', () => {
 
       const bytes = new Uint8Array([104, 105]);
       outputHandlers[0]?.({ data: bytes });
-      expect(onOutput).toHaveBeenCalledWith(bytes);
+      // `undefined`, not `false`: absence is the whole meaning of the marker's
+      // absence (#321), and a consumer that conflated the two could not tell a
+      // live frame from a bootstrap declared not to be one.
+      expect(onOutput).toHaveBeenCalledWith(bytes, undefined);
+      cm.dispose();
+    });
+
+    it('carries the bootstrap marker through to onOutput', () => {
+      const { api, outputHandlers } = makeAgentApi();
+      const cm = new ConnectionManager({
+        mode: 'p2p', sessionName: 'test', sessionId: 'a:test', agentApi: api, ...attached,
+      });
+      const onOutput = vi.fn();
+      cm.onOutput = onOutput;
+
+      const bytes = new Uint8Array([104, 105]);
+      outputHandlers[0]?.({ data: bytes, bootstrap: true });
+      expect(onOutput).toHaveBeenCalledWith(bytes, true);
       cm.dispose();
     });
 

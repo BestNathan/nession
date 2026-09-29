@@ -66,6 +66,10 @@ pub enum HandlerAction {
         cols: u16,
         /// Terminal rows for the initial tmux resize (from browser viewport).
         rows: u16,
+        /// The browser's answer to whether the relay should open with a
+        /// bootstrap (#321), forwarded verbatim into the `agent.attach` the
+        /// Server builds. `None` leaves the agent to decide.
+        needs_bootstrap: Option<bool>,
     },
     /// Close the connection.
     Close,
@@ -1649,6 +1653,9 @@ impl ConnectionHandler {
                 relay_url: None,
                 cols: 80,
                 rows: 24,
+                // An unparseable payload has no opinion to forward; the agent's
+                // own rule is what a caller that says nothing already gets.
+                needs_bootstrap: None,
             });
 
         let session_id = payload.session_id.as_str();
@@ -1812,6 +1819,7 @@ impl ConnectionHandler {
             env_snapshots: Vec::new(),
             cols,
             rows,
+            needs_bootstrap: payload.needs_bootstrap,
         })
     }
 
@@ -6046,11 +6054,17 @@ mod tests {
                 env_snapshots,
                 cols: _,
                 rows: _,
+                needs_bootstrap,
             } => {
                 assert!(!agent_ws_urls.is_empty(), "expected at least one relay URL");
                 assert!(agent_ws_urls[0].contains("1.2.3.4"));
                 assert_eq!(session_name, "dev");
                 assert!(env_snapshots.is_empty());
+                // This payload said nothing about bootstrap (#321), and the
+                // difference between `None` and `Some(false)` is the whole
+                // point of the field: absent leaves the agent to decide, which
+                // is what every client predating it gets.
+                assert_eq!(needs_bootstrap, None);
                 // The credential rides **on the URLs**, which is what makes both
                 // relay dials carry it without knowing about it — the attach dial
                 // iterates this list, and the detach dial reuses the one that

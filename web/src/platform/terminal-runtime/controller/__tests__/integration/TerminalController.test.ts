@@ -319,6 +319,62 @@ describe('TerminalController', () => {
     controller.detach();
   });
 
+  it('wipes the buffer before a bootstrap, and only its own modes survive', () => {
+    const transport = makeTransport();
+    const controller = new TerminalController(makeSession(), () => transport);
+    controller.attach(host());
+
+    const writeSpy = vi.spyOn(controller.terminal!, 'write');
+    const resetSpy = vi.spyOn(controller.terminal!, 'reset');
+    transport.onOutput!(new Uint8Array([104, 105]), true);
+
+    // Erase display, erase scrollback, cursor home — in that order, before the
+    // snapshot itself, so the history it carries is all the buffer holds.
+    expect(writeSpy).toHaveBeenNthCalledWith(1, '\x1b[2J\x1b[3J\x1b[H');
+    expect(writeSpy).toHaveBeenNthCalledWith(2, new Uint8Array([104, 105]), expect.any(Function));
+    // `reset()` would leave the alternate screen and clear modes the
+    // application set — a TUI's pane would come back normal-buffered.
+    expect(resetSpy).not.toHaveBeenCalled();
+    writeSpy.mockRestore();
+    resetSpy.mockRestore();
+    controller.detach();
+  });
+
+  it('appends, without wiping, when the frame carries no marker', () => {
+    const transport = makeTransport();
+    const controller = new TerminalController(makeSession(), () => transport);
+    controller.attach(host());
+
+    const writeSpy = vi.spyOn(controller.terminal!, 'write');
+    transport.onOutput!(new Uint8Array([1]));
+    transport.onOutput!(new Uint8Array([2]), undefined);
+
+    expect(writeSpy).toHaveBeenCalledTimes(2);
+    expect(writeSpy).toHaveBeenNthCalledWith(1, new Uint8Array([1]), expect.any(Function));
+    expect(writeSpy).toHaveBeenNthCalledWith(2, new Uint8Array([2]), expect.any(Function));
+    writeSpy.mockRestore();
+    controller.detach();
+  });
+
+  it('reports hasSessionOutput only once output has arrived, bootstrap included', () => {
+    const transport = makeTransport();
+    const controller = new TerminalController(makeSession(), () => transport);
+    controller.attach(host());
+
+    // A freshly attached controller is what a page reload produces, and it is
+    // the case a bootstrap exists for.
+    expect(controller.hasSessionOutput).toBe(false);
+
+    // A local write is display, not the session's history — it must not stop
+    // the attach from asking for one.
+    controller.write('local banner');
+    expect(controller.hasSessionOutput).toBe(false);
+
+    transport.onOutput!(new Uint8Array([104, 105]), true);
+    expect(controller.hasSessionOutput).toBe(true);
+    controller.detach();
+  });
+
   it('detach disposes xterm, transport, and resize observer', () => {
     const transport = makeTransport();
     const controller = new TerminalController(makeSession(), () => transport);

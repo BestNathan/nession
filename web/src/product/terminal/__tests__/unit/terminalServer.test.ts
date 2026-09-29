@@ -48,7 +48,7 @@ describe('TerminalServerPlugin', () => {
     });
 
     it('beginRelay includes relay_url and the viewport only when given', () => {
-      plugin.beginRelay('sess-1', 'ws://agent:19090/ws', 120, 40);
+      plugin.beginRelay('sess-1', { relayUrl: 'ws://agent:19090/ws', cols: 120, rows: 40 });
 
       expect(surface.sent).toEqual([
         {
@@ -59,10 +59,22 @@ describe('TerminalServerPlugin', () => {
     });
 
     it('beginRelay omits relay_url when absent and rows when only cols is given', () => {
-      plugin.beginRelay('sess-1', undefined, 100);
+      plugin.beginRelay('sess-1', { cols: 100 });
 
       expect(surface.sent).toEqual([
         { type: 'server.session.relay.begin', payload: { session_id: 'sess-1', cols: 100 } },
+      ]);
+    });
+
+    it('beginRelay carries needs_bootstrap only when the caller has an opinion', () => {
+      plugin.beginRelay('sess-1', { needsBootstrap: true });
+      // Absence is not `false` (#321): a caller that says nothing asks the
+      // agent to decide, which is what an older client already gets.
+      plugin.beginRelay('sess-2');
+
+      expect(surface.sent).toEqual([
+        { type: 'server.session.relay.begin', payload: { session_id: 'sess-1', needs_bootstrap: true } },
+        { type: 'server.session.relay.begin', payload: { session_id: 'sess-2' } },
       ]);
     });
 
@@ -115,6 +127,24 @@ describe('TerminalServerPlugin', () => {
 
       // Non-relay frames carry a plain byte string — no base64 decoding.
       expect(cb.mock.calls[0]?.[0]).toEqual(new TextEncoder().encode('aGk='));
+    });
+
+    it('carries the bootstrap marker the Server forwarded, and nothing when it did not', () => {
+      const cb = vi.fn();
+      plugin.onRelayOutput('work', cb);
+
+      surface.pushMessage('agent.terminal.output', {
+        session_name: 'work', data: 'aGk=', bootstrap: { requested_lines: 5000, truncated: false },
+      });
+      surface.pushMessage('agent.terminal.output', { session_name: 'work', data: 'aGk=' });
+
+      // Presence is the fact, not the contents — the payload's fields are the
+      // agent's account of the snapshot, and the client's job is the same
+      // whatever they say.
+      expect(cb.mock.calls[0]?.[1]).toBe(true);
+      // A live frame says `undefined`, which is not `false`: a consumer must be
+      // able to tell "not a bootstrap" from "no marker at all" (#321).
+      expect(cb.mock.calls[1]?.[1]).toBeUndefined();
     });
 
     it('preserves non-UTF-8 octets through relay decode', () => {
