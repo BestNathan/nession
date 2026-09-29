@@ -617,4 +617,151 @@ describe('SessionRuntime', () => {
     expect(rt.attachState.phase).toBe('attached');
     rt.dispose();
   });
+
+  /**
+   * A peer that goes silent leaves the browser socket *open*: no `close`, so
+   * `WebSocketService`'s loss path never runs, `connectionState` stays
+   * `'connected'`, and keystrokes are written into a socket nothing is reading
+   * — with no error and nothing on screen (#1233). The liveness probe is the
+   * only thing that can notice, so these tests are about it noticing, and about
+   * it not firing when the peer is fine.
+   */
+  describe('P2P liveness probe (#1233)', () => {
+    /** Ids already answered, so a helper cannot settle the same request twice. */
+    let answeredIds = new Set<string>();
+
+    /** How many `control.ping` requests have gone out on any tracked ws. */
+    function countPings(): number {
+      let count = 0;
+      for (const ws of wsInstances) {
+        for (const call of ws.send.mock.calls) {
+          try {
+            if (JSON.parse(String(call[0])).msg_type === 'control.ping') {
+              count += 1;
+            }
+          } catch {
+            // non-JSON (binary) frame — ignore
+          }
+        }
+      }
+      return count;
+    }
+
+    /**
+     * Reply to every tracked request of `type` that has not been answered yet.
+     *
+     * Tracked by id rather than "always the first": answering an already-settled
+     * request is a no-op, so a helper that re-answered the oldest ping would
+     * leave every later one to time out and would make a healthy transport look
+     * dead.
+     */
+    function answerPending(type: string, replyType: string): number {
+      let answered = 0;
+      for (const ws of wsInstances) {
+        for (const call of ws.send.mock.calls) {
+          let parsed: { msg_type?: string; id?: string };
+          try {
+            parsed = JSON.parse(String(call[0]));
+          } catch {
+            continue;
+          }
+          if (parsed.msg_type !== type || !parsed.id || answeredIds.has(parsed.id)) {
+            continue;
+          }
+          answeredIds.add(parsed.id);
+          // The agent answers as `make_response(&self.id, …)` — the reply
+          // carries the request's own id, which is what the request layer
+          // matches on. Reproducing that is the point: a reply with a different
+          // id would prove nothing about correlation.
+          ws.onmessage?.({
+            data: JSON.stringify({ msg_type: replyType, id: parsed.id, payload: {} }),
+          } as MessageEvent);
+          answered += 1;
+        }
+      }
+      return answered;
+    }
+
+    function answerAttach(): number {
+      return answerPending('agent.attach', 'ok');
+    }
+
+    function answerPings(): number {
+      return answerPending('control.ping', 'control.pong');
+    }
+
+    beforeEach(() => {
+      answeredIds = new Set();
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('declares the transport lost when the agent stops answering', async () => {
+      const rt = new SessionRuntime(makeConfig({ transportReady: true }));
+      rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
+      openWs();
+      await flushMicrotasks();
+      answerAttach();
+      await flushMicrotasks();
+      expect(rt.attachState.phase).toBe('attached');
+      expect(rt.connectionState).toBe('connected');
+      const socketsBefore = wsInstances.length;
+
+      // Nothing answers: the probe fires, its request times out, and the
+      // transport is declared gone. Deliberately a generous span rather than
+      // `interval + timeout` — a test that restates the probe's constants would
+      // break when they change for good reasons, and the claim here is only
+      // "within a minute of a peer going silent, the user stops being lied to".
+      await vi.advanceTimersByTimeAsync(60_000);
+      await flushMicrotasks();
+
+      expect(countPings()).toBeGreaterThan(0);
+      // Stated as the thing only the loss path does — it tears the socket down
+      // and dials a replacement — rather than as a specific later state, since
+      // by the time the timer span elapses the reconnect has already moved on
+      // from `'reconnecting'`. Asserting the state *after* would be asserting
+      // whichever phase the recovery happened to be in.
+      expect(wsInstances.length).toBeGreaterThan(socketsBefore);
+      expect(rt.connectionState).not.toBe('connected');
+      expect(rt.attachState.phase).not.toBe('attached');
+      rt.dispose();
+    });
+
+    it('leaves a healthy transport alone when the agent answers', async () => {
+      const rt = new SessionRuntime(makeConfig({ transportReady: true }));
+      rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
+      openWs();
+      await flushMicrotasks();
+      answerAttach();
+      await flushMicrotasks();
+
+      // Answer every probe as it arrives, for well past several intervals.
+      for (let i = 0; i < 12; i += 1) {
+        await vi.advanceTimersByTimeAsync(5_000);
+        answerPings();
+        await flushMicrotasks();
+      }
+      await vi.advanceTimersByTimeAsync(1_000);
+      await flushMicrotasks();
+
+      // The mutation this pins is treating "a ping was sent" as the signal.
+      // A fire-and-forget probe would report `attached` here too, and the
+      // assertion above would still pass — this one is what separates them.
+      expect(countPings()).toBeGreaterThan(0);
+      expect(rt.connectionState).toBe('connected');
+      expect(rt.attachState.phase).toBe('attached');
+      rt.dispose();
+    });
+
+    // NOTE: there is deliberately no "stops probing once disposed" test here.
+    // One was written and then deleted: removing `stopLivenessProbe()` from
+    // `teardownConnectionHandler` — the mutation it was meant to catch — left
+    // all 32 tests green, because two other guards already cover it (`dispose()`
+    // nulls the agent api, and the tick returns early unless the phase is
+    // 'attached'). A test that cannot fail is worse than no test: it is the
+    // artefact a reviewer stops looking at.
+  });
 });

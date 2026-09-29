@@ -1,5 +1,7 @@
 import { useState } from 'react';
+import { cn } from '@/shared/lib/utils';
 import { COMPACT_STRING_CHARS, TREE_STRING_PREVIEW_CHARS, TREE_STRING_EXPAND_CHARS } from './jsonTreeLimits';
+import { jsonSyntax } from './jsonTreeSyntax';
 
 interface JsonScalarProps {
   value: string | number | boolean | null;
@@ -12,13 +14,13 @@ export function JsonScalar({ value, allowExpand = false, maxChars }: JsonScalarP
   const [expanded, setExpanded] = useState(false);
 
   if (value === null) {
-    return <span className="text-muted-foreground italic">null</span>;
+    return <span className={jsonSyntax.literal}>null</span>;
   }
   if (typeof value === 'boolean') {
-    return <span className="text-muted-foreground">{value ? 'true' : 'false'}</span>;
+    return <span className={jsonSyntax.literal}>{value ? 'true' : 'false'}</span>;
   }
   if (typeof value === 'number') {
-    return <span className="tabular-nums text-foreground">{String(value)}</span>;
+    return <span className={jsonSyntax.number}>{String(value)}</span>;
   }
 
   const limit = maxChars ?? (allowExpand ? TREE_STRING_PREVIEW_CHARS : COMPACT_STRING_CHARS);
@@ -29,7 +31,7 @@ export function JsonScalar({ value, allowExpand = false, maxChars }: JsonScalarP
   const display = JSON.stringify(body);
 
   return (
-    <span className="break-words text-foreground min-w-0">
+    <span className={cn('break-words min-w-0', jsonSyntax.string)}>
       {display}
       {needsExpand ? (
         <button

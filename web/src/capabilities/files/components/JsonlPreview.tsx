@@ -1,11 +1,14 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { parseJsonlRecords, type JsonlRecord } from '../model/jsonParse';
 import { JsonlRecord as JsonlRecordRow } from './JsonlRecord';
 
-const ESTIMATED_COLLAPSED_PX = 120;
-const ESTIMATED_EXPANDED_PX = 280;
-const VIRTUAL_OVERSCAN = 8;
+/** Line label + padded section + capped compact body (measured after mount). */
+const ESTIMATED_COLLAPSED_PX = 176;
+const ESTIMATED_EXPANDED_PX = 360;
+const VIRTUAL_OVERSCAN = 6;
+/** Below this count, a plain list avoids virtual overlap glitches in tight viewports. */
+const VIRTUALIZE_MIN_RECORDS = 48;
 
 interface JsonlPreviewProps {
   content: string;
@@ -36,17 +39,22 @@ export function JsonlPreview({ content }: JsonlPreviewProps) {
     [expandedLines, records],
   );
 
+  const shouldVirtualize = scrollportReady && records.length >= VIRTUALIZE_MIN_RECORDS;
+
   const virtualizer = useVirtualizer({
     count: records.length,
     getScrollElement: () => parentRef.current,
     estimateSize,
     overscan: VIRTUAL_OVERSCAN,
     getItemKey: (index) => records[index]?.lineNumber ?? index,
+    enabled: shouldVirtualize,
   });
 
-  useEffect(() => {
-    virtualizer.measure();
-  }, [expandedLines, virtualizer]);
+  useLayoutEffect(() => {
+    if (shouldVirtualize) {
+      virtualizer.measure();
+    }
+  }, [expandedLines, records, shouldVirtualize, virtualizer]);
 
   const toggleLine = useCallback((lineNumber: number) => {
     setExpandedLines((prev) => {
@@ -60,15 +68,6 @@ export function JsonlPreview({ content }: JsonlPreviewProps) {
     });
   }, []);
 
-  const renderRecord = (record: JsonlRecord) => (
-    <JsonlRecordRow
-      key={record.lineNumber}
-      record={record}
-      expanded={expandedLines.has(record.lineNumber)}
-      onToggleExpanded={() => toggleLine(record.lineNumber)}
-    />
-  );
-
   if (records.length === 0) {
     return (
       <div className="p-[var(--workspace-editor-pad-y)] px-[var(--workspace-editor-head-pad-x)] text-sm text-muted-foreground">
@@ -77,42 +76,53 @@ export function JsonlPreview({ content }: JsonlPreviewProps) {
     );
   }
 
+  const renderRecord = (record: JsonlRecord) => (
+    <JsonlRecordRow
+      record={record}
+      expanded={expandedLines.has(record.lineNumber)}
+      onToggleExpanded={() => toggleLine(record.lineNumber)}
+    />
+  );
+
+  if (!shouldVirtualize) {
+    return (
+      <div ref={parentRef} className="overflow-y-auto h-full min-w-0">
+        {records.map((record) => (
+          <div key={record.lineNumber}>{renderRecord(record)}</div>
+        ))}
+      </div>
+    );
+  }
+
   const virtualItems = virtualizer.getVirtualItems();
-  const useVirtualList = scrollportReady && virtualItems.length > 0;
 
   return (
-    <div ref={parentRef} className="overflow-y-auto h-full min-w-0">
-      {useVirtualList ? (
-        <div
-          style={{
-            height: `${virtualizer.getTotalSize()}px`,
-            width: '100%',
-            position: 'relative',
-          }}
-        >
-          {virtualItems.map((virtualRow) => {
-            const record: JsonlRecord = records[virtualRow.index];
-            return (
-              <div
-                key={record.lineNumber}
-                data-index={virtualRow.index}
-                ref={virtualizer.measureElement}
-                style={{
-                  position: 'absolute',
-                  top: 0,
-                  left: 0,
-                  width: '100%',
-                  transform: `translateY(${virtualRow.start}px)`,
-                }}
-              >
-                {renderRecord(record)}
-              </div>
-            );
-          })}
-        </div>
-      ) : (
-        records.map((record) => renderRecord(record))
-      )}
+    <div ref={parentRef} className="overflow-y-auto h-full min-w-0 overscroll-contain">
+      <div
+        style={{
+          height: `${virtualizer.getTotalSize()}px`,
+          width: '100%',
+          position: 'relative',
+        }}
+      >
+        {virtualItems.map((virtualRow) => {
+          const record: JsonlRecord = records[virtualRow.index];
+          return (
+            <div
+              key={virtualRow.key}
+              data-index={virtualRow.index}
+              ref={virtualizer.measureElement}
+              className="left-0 top-0 w-full overflow-hidden isolate"
+              style={{
+                position: 'absolute',
+                transform: `translate3d(0, ${virtualRow.start}px, 0)`,
+              }}
+            >
+              {renderRecord(record)}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
