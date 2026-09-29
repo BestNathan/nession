@@ -294,15 +294,44 @@ if (process.argv.includes('--json')) {
     (wire) => !wire.startsWith('control.'),
   );
 
-  const answerers = {};
-  for (const id of ids) {
-    const answerer = id.split('.')[0] ?? 'other';
-    answerers[answerer] = (answerers[answerer] ?? 0) + 1;
+  // README asks for runtime surfaces, not namespace prefixes. Core units carry
+  // their runtime in the first segment, while extension providers (git,
+  // claude-code, future AgentExtensions) intentionally keep their own protocol
+  // namespace and are composed into the Agent runtime by ExtensionRegistry.
+  // Derive extension ownership from the provider implementation rather than
+  // maintaining a second allow-list here.
+  const agentExtensionOwners = new Set();
+  for (const binding of bindingOf.values()) {
+    const owner = /^generated\/protocol\/([^/]+)\//.exec(binding)?.[1];
+    if (!owner || owner === 'core' || agentExtensionOwners.has(owner)) continue;
+
+    const providerSrc = join(ROOT, 'crates', `nession-${owner}`, 'src');
+    if (!existsSync(providerSrc)) continue;
+
+    const isAgentExtension = sourceFiles(providerSrc).some((file) =>
+      /impl\s+(?:[A-Za-z_][\w]*::)*AgentExtension\s+for\s+/.test(
+        maskComments(readFileSync(file, 'utf8'), 'rs'),
+      ),
+    );
+    if (isAgentExtension) agentExtensionOwners.add(owner);
   }
 
-  const server = answerers.server ?? 0;
-  const agent = answerers.agent ?? 0;
-  const other = ids.size - server - agent;
+  const runtimeOf = (id) => {
+    const first = id.split('.')[0] ?? '';
+    if (first === 'server') return 'server';
+    if (first === 'agent' || first === 'client') return 'agent';
+
+    const binding = bindingOf.get(id) ?? '';
+    const owner = /^generated\/protocol\/([^/]+)\//.exec(binding)?.[1];
+    if (owner && agentExtensionOwners.has(owner)) return 'agent';
+
+    return 'other';
+  };
+
+  const runtimes = { server: 0, agent: 0, other: 0 };
+  for (const id of ids) runtimes[runtimeOf(id)] += 1;
+
+  const { server, agent, other } = runtimes;
 
   console.log(
     JSON.stringify(
@@ -312,7 +341,8 @@ if (process.argv.includes('--json')) {
           server,
           agent,
           other,
-          by_answerer: answerers,
+          by_runtime: runtimes,
+          agent_extension_owners: [...agentExtensionOwners].sort(),
         },
         notifications: notificationWires.length,
         controls: controlWires.length,
