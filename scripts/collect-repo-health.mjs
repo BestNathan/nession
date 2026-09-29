@@ -185,6 +185,7 @@ function collectRust(output) {
     'test',
     '--workspace',
     '--lib',
+    '--no-fail-fast',
     '--color',
     'never',
   ]);
@@ -193,6 +194,7 @@ function collectRust(output) {
     '--workspace',
     '--test',
     'integration',
+    '--no-fail-fast',
     '--color',
     'never',
   ]);
