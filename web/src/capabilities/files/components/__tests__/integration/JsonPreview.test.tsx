@@ -4,10 +4,10 @@ import { JsonPreview } from '@/capabilities/files/components/JsonPreview';
 import { JsonlPreview } from '@/capabilities/files/components/JsonlPreview';
 
 describe('JsonPreview', () => {
-  it('renders parsed structure', () => {
+  it('renders parsed structure as an inspector tree', () => {
     render(<JsonPreview content='{"tags":["a","b"]}' />);
+    expect(screen.getByRole('tree')).toBeInTheDocument();
     expect(screen.getByText('"tags"')).toBeInTheDocument();
-    expect(screen.getByText('"a"')).toBeInTheDocument();
   });
 });
 
