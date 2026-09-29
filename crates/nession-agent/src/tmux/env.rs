@@ -55,10 +55,7 @@ fn unsource_script_path(base_dir: PathBuf, client_id: &str, session: &str, name:
 pub(crate) async fn clear_history(tmux: &TmuxDep, session_name: &str) {
     match tmux
         .cmd()
-        .tokio()
-        .args(["clear-history", "-t", session_name])
-        .stderr(std::process::Stdio::piped())
-        .output()
+        .output(&["clear-history", "-t", session_name])
         .await
     {
         Ok(out) if out.status.success() => {}
