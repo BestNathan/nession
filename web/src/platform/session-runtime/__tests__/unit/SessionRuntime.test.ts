@@ -756,6 +756,52 @@ describe('SessionRuntime', () => {
       rt.dispose();
     });
 
+    it('asks for the history again after a transport loss, though the Terminal holds output', async () => {
+      const rt = new SessionRuntime(makeConfig({
+        transportReady: true,
+        hasSessionOutput: () => true,
+      }));
+      rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
+      openWs();
+      await flushMicrotasks();
+      answerAttach();
+      await flushMicrotasks();
+
+      // Attached, Terminal non-empty, nothing lost: no history requested. The
+      // fix must add nothing to the ordinary path.
+      expect(clientAttachBootstrapFlags()).toEqual([false]);
+
+      // The peer goes silent and the probe declares the transport lost — the
+      // only thing that tells this client its buffer is suspect.
+      await vi.advanceTimersByTimeAsync(60_000);
+      await flushMicrotasks();
+
+      // The replacement socket opens and the runtime re-attaches. This is the
+      // assertion the bug was: `hasSessionOutput()` still returns `true`, and
+      // asking only that question is what left the hole in place. The buffer is
+      // not empty, it is *incomplete*, and only tmux's snapshot can repair it —
+      // the stream resume comes back with zero events, because the agent
+      // records only while someone is attached.
+      openWs();
+      await flushMicrotasks();
+
+      const flags = clientAttachBootstrapFlags();
+      expect(flags.length).toBeGreaterThan(1);
+      expect(flags[flags.length - 1]).toBe(true);
+
+      rt.dispose();
+    });
+
+    // NOT COVERED, deliberately: that the flag is *cleared* on a successful
+    // attach. It matters — left set, every later attach would ask for a
+    // bootstrap, and a bootstrap replaces the buffer, so the user would see a
+    // full-screen repaint on every attach. But no assertion here can catch
+    // dropping the clear: the clear is only observable on an attach that
+    // follows a loss and is *not* itself preceded by one, and this harness has
+    // no way to start a second attach (re-dispatching `SESSION_SELECTED` is a
+    // no-op — measured, `clientAttachBootstrapFlags()` comes back `[]`).
+    // Stated rather than papered over with an assertion that cannot fail.
+
     // NOTE: there is deliberately no "stops probing once disposed" test here.
     // One was written and then deleted: removing `stopLivenessProbe()` from
     // `teardownConnectionHandler` — the mutation it was meant to catch — left
