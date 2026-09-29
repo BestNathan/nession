@@ -281,6 +281,49 @@ const notifications = declaredWires(declaringFiles());
 const advertised = new Set([...ids, ...wires]);
 for (const w of notifications.keys()) advertised.add(w);
 
+// Machine-readable catalog for repository metrics. This is deliberately
+// derived from the same generated bindings/declarations as the gate itself:
+// metrics must never grow a second protocol parser that can disagree with the
+// repository's source of truth.
+if (process.argv.includes('--json')) {
+  const nonUnits = [...notifications.keys()].filter(
+    (wire) => !ids.has(wire) && !wires.has(wire),
+  );
+  const controlWires = nonUnits.filter((wire) => wire.startsWith('control.'));
+  const notificationWires = nonUnits.filter(
+    (wire) => !wire.startsWith('control.'),
+  );
+
+  const answerers = {};
+  for (const id of ids) {
+    const answerer = id.split('.')[0] ?? 'other';
+    answerers[answerer] = (answerers[answerer] ?? 0) + 1;
+  }
+
+  const server = answerers.server ?? 0;
+  const agent = answerers.agent ?? 0;
+  const other = ids.size - server - agent;
+
+  console.log(
+    JSON.stringify(
+      {
+        units: {
+          total: ids.size,
+          server,
+          agent,
+          other,
+          by_answerer: answerers,
+        },
+        notifications: notificationWires.length,
+        controls: controlWires.length,
+      },
+      null,
+      2,
+    ),
+  );
+  process.exit(0);
+}
+
 if (process.argv.includes('--list')) {
   const rows = [...advertised].sort();
   console.log(`${rows.length} advertised names (${ids.size} units)`);
