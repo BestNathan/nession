@@ -142,6 +142,22 @@ export class SessionRuntime {
   private transportReady = false;
   /** Transport generation for which client.attach succeeded. */
   private attachedTransportGeneration: number | null = null;
+  /**
+   * The transport dropped while this runtime was attached, so the Terminal's
+   * buffer may have a hole and must not be trusted as complete.
+   *
+   * Output produced during the outage is not merely undelivered — it was never
+   * *recorded*: the agent's stream log is written by the broadcast task it
+   * spawns for a session's first subscriber, and the pane reader it consumes
+   * comes from the backend created by that attach. A detached client therefore
+   * leaves nothing behind to resume from, which is why
+   * `agent.terminal.stream.resume` comes back with zero events after a
+   * reconnect and why this cannot be repaired by replaying the stream.
+   *
+   * Set where `TRANSPORT_LOST` is dispatched; cleared by the next successful
+   * attach.
+   */
+  private historyMayHaveGap = false;
   /** Latest P2P attach stream cursor from agent.attach (#1094). */
   private p2pStreamSeed: { streamEpoch?: number; streamCursor?: number } | null = null;
   private connectionUnsub: (() => void) | null = null;
@@ -184,6 +200,11 @@ export class SessionRuntime {
     this.attachController.subscribeOutcomes((result) => {
       if (result.phase === 'attached') {
         this.attachedTransportGeneration = this.transportGeneration;
+        // Whatever the last outage left behind has just been repaired by this
+        // attach's bootstrap (if it needed one). A later re-attach on the same
+        // healthy transport must not ask again — the snapshot is a full screen
+        // repaint, and re-requesting it on every attach would flicker.
+        this.historyMayHaveGap = false;
       }
       if (result.forceRelay) {
         this.applyForceRelay();
@@ -297,9 +318,21 @@ export class SessionRuntime {
    * Read at each attach rather than cached, because the answer changes exactly
    * when output first arrives and this runtime may have been built before or
    * after that — see {@link SessionRuntimeConfig.hasSessionOutput}.
+   *
+   * **Two questions, and only one of them was being asked.**
+   * `hasSessionOutput` answers "does my Terminal hold anything". A client whose
+   * transport dropped mid-session holds plenty — it holds a buffer with a hole
+   * in it — so it answered *yes* and skipped the snapshot, which is how a
+   * recovered session kept the gap (#1233).
+   *
+   * {@link historyMayHaveGap} is the second question: "can my buffer be trusted
+   * to be complete". A bootstrap is the right repair for it and not merely a
+   * convenient one — it **replaces** the buffer from tmux's own scrollback,
+   * which tmux retains regardless of who is attached, so refilling a hole
+   * cannot duplicate what the client already has.
    */
   private needsBootstrap(): boolean {
-    return !(this.config.hasSessionOutput?.() ?? false);
+    return this.historyMayHaveGap || !(this.config.hasSessionOutput?.() ?? false);
   }
 
   updateContext(next: Partial<SessionRuntimeConfig>): RuntimeMirrorSnapshot {
@@ -619,6 +652,9 @@ export class SessionRuntime {
       // disconnect). The phase guard keeps this inert before the relay is live.
       if (state !== 'connected') {
         if (this.attachState.phase === 'attached') {
+          // Attached when it dropped: the buffer is now suspect, so the next
+          // attach must ask for a bootstrap even though it is not empty.
+          this.historyMayHaveGap = true;
           const result = this.attachController.dispatch({ type: 'TRANSPORT_LOST' });
           this.emitRuntimeEvent({ type: 'route-intent-changed', phase: result.phase });
         }
@@ -709,6 +745,9 @@ export class SessionRuntime {
           && this.attachState.phase === 'attached'
         ) {
           this.attachedTransportGeneration = null;
+          // Attached when it dropped: the buffer is now suspect, so the next
+          // attach must ask for a bootstrap even though it is not empty.
+          this.historyMayHaveGap = true;
           const result = this.attachController.dispatch({ type: 'TRANSPORT_LOST' });
           this.emitRuntimeEvent({ type: 'route-intent-changed', phase: result.phase });
         } else if (next === 'disconnected') {
