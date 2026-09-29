@@ -3,35 +3,34 @@ import {
   useRef,
   useState,
   type PointerEvent,
-  type PointerEventHandler,
   type RefObject,
-  type WheelEventHandler,
 } from 'react';
-import { TRANSCRIPT_TOP_EDGE_PX } from './transcriptScrollConstants';
+import { useInstallTranscriptPullTouch } from './installTranscriptPullTouch';
+import {
+  createTranscriptPullPointerHandlers,
+  createTranscriptPullWheelHandler,
+} from './transcriptPullGestureHandlers';
+import {
+  TRANSCRIPT_PULL_MAX_PX,
+  TRANSCRIPT_PULL_TRIGGER_PX,
+  transcriptIsAtTopEdge,
+  transcriptPullProgress,
+} from './transcriptScrollConstants';
 
-/** Pull distance that fills the ring and commits a load on release. */
-export const TRANSCRIPT_PULL_TRIGGER_PX = 56;
-const PULL_MAX_PX = 80;
-
-function pullProgress(pullPx: number): number {
-  return Math.min(1, pullPx / TRANSCRIPT_PULL_TRIGGER_PX);
-}
-
-function isAtTopEdge(root: HTMLDivElement): boolean {
-  return root.scrollTop <= TRANSCRIPT_TOP_EDGE_PX;
-}
+export { TRANSCRIPT_PULL_TRIGGER_PX } from './transcriptScrollConstants';
 
 /**
  * Top-edge pull-down to load older transcript pages (#1190). Progress fills a
- * ring; release above threshold commits `onCommitLoad`. Wheel-up at the top
- * edge also fills the ring for trackpad users.
+ * ring; release above threshold commits `onCommitLoad`.
  */
 export function useTranscriptPullToLoad({
   scrollRef,
+  pullHandleRef,
   enabled,
   onCommitLoad,
 }: {
   scrollRef: RefObject<HTMLDivElement | null>;
+  pullHandleRef: RefObject<HTMLDivElement | null>;
   enabled: boolean;
   onCommitLoad: () => void;
 }) {
@@ -41,6 +40,8 @@ export function useTranscriptPullToLoad({
   const startYRef = useRef(0);
   const pullPxRef = useRef(0);
   const wheelPullRef = useRef(0);
+  const onCommitLoadRef = useRef(onCommitLoad);
+  onCommitLoadRef.current = onCommitLoad;
 
   const resetPull = useCallback(() => {
     pullingRef.current = false;
@@ -50,100 +51,104 @@ export function useTranscriptPullToLoad({
   }, []);
 
   const applyPullPx = useCallback((next: number) => {
-    const clamped = Math.max(0, Math.min(next, PULL_MAX_PX));
+    const clamped = Math.max(0, Math.min(next, TRANSCRIPT_PULL_MAX_PX));
     pullPxRef.current = clamped;
     setPullPx(clamped);
   }, []);
 
   const commitIfFilled = useCallback(() => {
-    if (pullPxRef.current >= TRANSCRIPT_PULL_TRIGGER_PX) {
-      resetPull();
-      onCommitLoad();
-      return true;
-    }
+    const filled = pullPxRef.current >= TRANSCRIPT_PULL_TRIGGER_PX;
     resetPull();
-    return false;
-  }, [onCommitLoad, resetPull]);
+    if (filled) {
+      onCommitLoadRef.current();
+    }
+    return filled;
+  }, [resetPull]);
 
   const syncTopEdge = useCallback(() => {
     const root = scrollRef.current;
     if (!root) {
       return;
     }
-    setAtTopEdge(isAtTopEdge(root));
+    setAtTopEdge(transcriptIsAtTopEdge(root));
   }, [scrollRef]);
 
-  const onPointerDown: PointerEventHandler<HTMLDivElement> = (event) => {
-    const root = scrollRef.current;
-    if (!enabled || !root || (event.button ?? 0) !== 0 || !isAtTopEdge(root)) {
-      return;
-    }
+  const beginPull = useCallback((clientY: number) => {
     pullingRef.current = true;
-    startYRef.current = event.clientY;
-    if (typeof root.setPointerCapture === 'function') {
-      root.setPointerCapture(event.pointerId);
-    }
-  };
+    startYRef.current = clientY;
+  }, []);
 
-  const onPointerMove: PointerEventHandler<HTMLDivElement> = (event) => {
-    if (!pullingRef.current) {
-      return;
-    }
-    const root = scrollRef.current;
-    if (!root || !isAtTopEdge(root)) {
-      resetPull();
-      return;
-    }
-    const delta = event.clientY - startYRef.current;
-    if (delta <= 0) {
-      applyPullPx(0);
-      return;
-    }
-    event.preventDefault();
-    applyPullPx(delta);
-  };
+  const movePull = useCallback(
+    (clientY: number, preventDefault?: () => void) => {
+      if (!pullingRef.current) {
+        return;
+      }
+      const root = scrollRef.current;
+      if (!root || !transcriptIsAtTopEdge(root)) {
+        resetPull();
+        return;
+      }
+      const delta = clientY - startYRef.current;
+      if (delta <= 0) {
+        applyPullPx(0);
+        return;
+      }
+      preventDefault?.();
+      applyPullPx(delta);
+    },
+    [applyPullPx, resetPull, scrollRef],
+  );
 
   const finishPull = useCallback(
     (event: PointerEvent<HTMLDivElement>) => {
       if (!pullingRef.current) {
         return;
       }
-      const root = scrollRef.current;
-      if (root && typeof root.releasePointerCapture === 'function') {
-        root.releasePointerCapture(event.pointerId);
+      if (typeof event.currentTarget.releasePointerCapture === 'function') {
+        event.currentTarget.releasePointerCapture(event.pointerId);
       }
       commitIfFilled();
     },
-    [commitIfFilled, scrollRef],
+    [commitIfFilled],
   );
 
-  const onWheel: WheelEventHandler<HTMLDivElement> = (event) => {
+  const pullHandleHandlers = createTranscriptPullPointerHandlers({
+    enabled,
+    beginPull,
+    movePull,
+    finishPull,
+  });
+
+  const onWheel = createTranscriptPullWheelHandler({
+    scrollRef,
+    enabled,
+    wheelPullRef,
+    applyPullPx,
+    commitIfFilled,
+  });
+
+  const isAtTopEdge = useCallback(() => {
     const root = scrollRef.current;
-    if (!enabled || !root || !isAtTopEdge(root) || event.deltaY >= 0) {
-      return;
-    }
-    event.preventDefault();
-    wheelPullRef.current = Math.min(
-      PULL_MAX_PX,
-      wheelPullRef.current + Math.min(24, Math.abs(event.deltaY)),
-    );
-    applyPullPx(wheelPullRef.current);
-    if (wheelPullRef.current >= TRANSCRIPT_PULL_TRIGGER_PX) {
-      commitIfFilled();
-    }
-  };
+    return root ? transcriptIsAtTopEdge(root) : false;
+  }, [scrollRef]);
+
+  useInstallTranscriptPullTouch({
+    pullHandleRef,
+    enabled,
+    isAtTopEdge,
+    beginPull,
+    movePull,
+    commitIfFilled,
+  });
 
   return {
     pullPx,
-    progress: pullProgress(pullPx),
+    progress: transcriptPullProgress(pullPx),
     isPulling: pullPx > 0,
     atTopEdge,
     syncTopEdge,
-    pullHandlers: {
-      onPointerDown,
-      onPointerMove,
-      onPointerUp: finishPull,
-      onPointerCancel: finishPull,
+    pullHandleHandlers,
+    scrollHandlers: {
       onWheel,
     },
   };

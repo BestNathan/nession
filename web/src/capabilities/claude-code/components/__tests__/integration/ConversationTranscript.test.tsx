@@ -123,11 +123,13 @@ describe('ConversationTranscript scroll (#1190)', () => {
 
     const scroll = screen.getByTestId('conversation-transcript-scroll');
     scroll.scrollTop = 0;
+    fireEvent.scroll(scroll);
 
-    fireEvent.pointerDown(scroll, { clientY: 100, pointerId: 1, button: 0 });
-    fireEvent.pointerMove(scroll, { clientY: 140, pointerId: 1 });
+    const handle = screen.getByTestId('conversation-pull-handle');
+    fireEvent.pointerDown(handle, { clientY: 100, pointerId: 1, button: 0 });
+    fireEvent.pointerMove(handle, { clientY: 140, pointerId: 1 });
 
-    expect(screen.getByTestId('conversation-pull-indicator')).toHaveStyle({ height: '40px' });
+    expect(handle).toHaveStyle({ height: '44px' });
     expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '71');
   });
 });
