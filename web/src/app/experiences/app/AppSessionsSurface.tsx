@@ -46,7 +46,9 @@ import type { SortDirection, SortField, StatusFilter } from '@/app/useDashboard'
  */
 export type AppSessionsSurfaceProps = Omit<
   SidebarProps,
-  'className' | 'collapsible'
+  // `collapsed`/`onCollapsedChange` join `collapsible` outside the boundary
+  // (#1196 §8): the App Sessions layer must not gain rail state in any form.
+  'className' | 'collapsible' | 'collapsed' | 'onCollapsedChange'
 >;
 
 /**

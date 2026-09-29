@@ -2732,7 +2732,12 @@ mod tests {
         let path = dir.join("tmux");
         crate::test_support::install_via_a_child(
             &path,
-            &format!("#!/bin/sh\nif [ \"$1\" = \"-S\" ]; then shift 2; fi\n{script}\n"),
+            &format!(
+                "#!/bin/sh\n\
+                 if [ \"$1\" = \"-S\" ]; then shift 2; fi\n\
+                 if [ \"$1\" = \"-f\" ]; then shift 2; fi\n\
+                 {script}\n"
+            ),
         )
         .expect("install the fake tmux");
         path.to_string_lossy().into_owned()
@@ -3976,7 +3981,10 @@ core_routes!(agent, msg, responses;
                             Some("lines_too_large: lines exceeds 100000 ceiling".to_string()),
                         )
                     } else {
-                        match crate::tmux::util::capture_scrollback(&session_name, lines).await {
+                        let capture_tmux = agent.tmux.tmux_dep();
+                        match crate::tmux::util::capture_scrollback(&capture_tmux, &session_name, lines)
+                            .await
+                        {
                             Ok(Some((bytes, c, r))) => {
                                 use base64::Engine;
                                 let ansi_b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);

@@ -14,36 +14,46 @@ function pointerProps(clientY: number, pointerId = 1) {
     pointerId,
     button: 0,
     preventDefault: vi.fn(),
+    stopPropagation: vi.fn(),
+  };
+}
+
+function refs() {
+  const scrollEl = document.createElement('div');
+  scrollEl.scrollTop = 0;
+  const handleEl = document.createElement('div');
+  return {
+    scrollRef: { current: scrollEl } as RefObject<HTMLDivElement>,
+    pullHandleRef: { current: handleEl } as RefObject<HTMLDivElement>,
+    handleEl,
   };
 }
 
 describe('useTranscriptPullToLoad', () => {
   it('commits load when pull passes the trigger threshold', () => {
     const onCommitLoad = vi.fn();
-    const scrollEl = document.createElement('div');
-    scrollEl.scrollTop = 0;
-    const scrollRef = { current: scrollEl } as RefObject<HTMLDivElement>;
+    const { scrollRef, pullHandleRef, handleEl } = refs();
 
     const { result } = renderHook(() =>
-      useTranscriptPullToLoad({ scrollRef, enabled: true, onCommitLoad }),
+      useTranscriptPullToLoad({ scrollRef, pullHandleRef, enabled: true, onCommitLoad }),
     );
 
     act(() => {
-      result.current.pullHandlers.onPointerDown({
+      result.current.pullHandleHandlers.onPointerDown({
         ...pointerProps(100),
-        currentTarget: scrollEl,
+        currentTarget: handleEl,
       } as unknown as PullPointerEvent);
     });
     act(() => {
-      result.current.pullHandlers.onPointerMove({
+      result.current.pullHandleHandlers.onPointerMove({
         ...pointerProps(100 + TRANSCRIPT_PULL_TRIGGER_PX),
-        currentTarget: scrollEl,
+        currentTarget: handleEl,
       } as unknown as PullPointerEvent);
     });
     act(() => {
-      result.current.pullHandlers.onPointerUp({
+      result.current.pullHandleHandlers.onPointerUp({
         pointerId: 1,
-        currentTarget: scrollEl,
+        currentTarget: handleEl,
       } as unknown as PullPointerEvent);
     });
 
@@ -52,55 +62,51 @@ describe('useTranscriptPullToLoad', () => {
 
   it('does not commit when pull is released below the trigger threshold', () => {
     const onCommitLoad = vi.fn();
-    const scrollEl = document.createElement('div');
-    scrollEl.scrollTop = 0;
-    const scrollRef = { current: scrollEl } as RefObject<HTMLDivElement>;
+    const { scrollRef, pullHandleRef, handleEl } = refs();
 
     const { result } = renderHook(() =>
-      useTranscriptPullToLoad({ scrollRef, enabled: true, onCommitLoad }),
+      useTranscriptPullToLoad({ scrollRef, pullHandleRef, enabled: true, onCommitLoad }),
     );
 
     act(() => {
-      result.current.pullHandlers.onPointerDown({
+      result.current.pullHandleHandlers.onPointerDown({
         ...pointerProps(100),
-        currentTarget: scrollEl,
+        currentTarget: handleEl,
       } as unknown as PullPointerEvent);
     });
     act(() => {
-      result.current.pullHandlers.onPointerMove({
+      result.current.pullHandleHandlers.onPointerMove({
         ...pointerProps(130),
-        currentTarget: scrollEl,
+        currentTarget: handleEl,
       } as unknown as PullPointerEvent);
     });
     act(() => {
-      result.current.pullHandlers.onPointerUp({
+      result.current.pullHandleHandlers.onPointerUp({
         pointerId: 1,
-        currentTarget: scrollEl,
+        currentTarget: handleEl,
       } as unknown as PullPointerEvent);
     });
 
     expect(onCommitLoad).not.toHaveBeenCalled();
   });
 
-  it('commits load when the wheel overscrolls up at the top edge', () => {
+  it('commits load when the wheel overscrolls at the top edge', () => {
     const onCommitLoad = vi.fn();
-    const scrollEl = document.createElement('div');
-    scrollEl.scrollTop = 0;
-    const scrollRef = { current: scrollEl } as RefObject<HTMLDivElement>;
+    const { scrollRef, pullHandleRef } = refs();
 
     const { result } = renderHook(() =>
-      useTranscriptPullToLoad({ scrollRef, enabled: true, onCommitLoad }),
+      useTranscriptPullToLoad({ scrollRef, pullHandleRef, enabled: true, onCommitLoad }),
     );
 
     const wheelEvent = {
       deltaY: -20,
       preventDefault: vi.fn(),
-      currentTarget: scrollEl,
-    } as unknown as Parameters<NonNullable<typeof result.current.pullHandlers.onWheel>>[0];
+      currentTarget: scrollRef.current,
+    } as unknown as Parameters<NonNullable<typeof result.current.scrollHandlers.onWheel>>[0];
     act(() => {
-      result.current.pullHandlers.onWheel(wheelEvent);
-      result.current.pullHandlers.onWheel(wheelEvent);
-      result.current.pullHandlers.onWheel(wheelEvent);
+      result.current.scrollHandlers.onWheel(wheelEvent);
+      result.current.scrollHandlers.onWheel(wheelEvent);
+      result.current.scrollHandlers.onWheel(wheelEvent);
     });
 
     expect(onCommitLoad).toHaveBeenCalledTimes(1);

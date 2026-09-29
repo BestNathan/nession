@@ -64,17 +64,41 @@ impl AdvertiseAddress {
     }
 }
 
-/// How the agent attaches to tmux sessions.
+/// How the agent attaches to tmux sessions — which is, in effect, **what the
+/// browser's terminal is**.
 ///
-/// - `plain`: Spawn `tmux attach` under a real PTY.  tmux handles resize,
-///   redraw, and multi-client natively.  One PTY shared per session.
-/// - `control`: Use `tmux -C attach` (control mode).  Per-client sessions
-///   with structured message parsing.  Preserved for backward compatibility.
+/// - `control`: `tmux -C attach`. The pane's own output is parsed into raw ANSI
+///   bytes and sent to the client, so xterm renders the stream **the
+///   application produced**. A shell never enters the alternate screen and
+///   keeps its scrollback; a TUI enters it because it asked; the application's
+///   mouse mode arrives unmodified. [#321] needs all three.
+/// - `plain`: `tmux attach` under a real PTY, one PTY shared per session. tmux
+///   handles resize, redraw and multi-client natively — but its *client* then
+///   owns the outer terminal, and it enters the alternate screen and enables
+///   mouse reporting unconditionally (measured on 3.6b). So the browser's xterm
+///   never has history to scroll, and `mouseTrackingMode` describes tmux rather
+///   than the application.
+///
+/// **`control` is the default, and `plain` is the fallback** — the reverse of
+/// what this enum said until #321 S3. That sentence used to read "per-client
+/// sessions … preserved for backward compatibility", and both halves were
+/// wrong: `control` keeps **one** `tmux -C attach` per session shared by every
+/// client (`control.rs`), and it was never a legacy path — it is the one that
+/// carries the scrollback prefill.
+///
+/// The distinction is not cosmetic and does not reduce to preference:
+/// [#1096]'s mouse and scroll criteria and [#321]'s scrollback goals are
+/// **unreachable under `plain`**, because tmux's client terminal is what stands
+/// between the application and xterm. `plain` stays selectable as a fallback
+/// and carries the same bootstrap, but it delegates history to tmux.
+///
+/// [#321]: https://github.com/BestNathan/nession/issues/321
+/// [#1096]: https://github.com/BestNathan/nession/issues/1096
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AttachMode {
-    #[default]
     Plain,
+    #[default]
     Control,
 }
 
@@ -194,7 +218,10 @@ impl Default for AgentConfig {
             server_url: "ws://localhost:8443".to_string(),
             auth_token: String::new(),
             agent_token: String::new(),
-            attach_mode: AttachMode::Plain,
+            // `AttachMode`'s own default, not a second copy of it: this field
+            // spelled `Plain` literally until #321 S3, which is one of the ways
+            // a default can be changed in one place and not the other.
+            attach_mode: AttachMode::default(),
             listen_address: default_listen_address(),
             tls_cert_path: None,
             tls_key_path: None,
@@ -301,7 +328,12 @@ mod tests {
     }
 
     #[test]
-    fn test_attach_mode_default_is_plain() {
+    fn test_attach_mode_default_is_control() {
+        // The default decides what the browser's terminal *is*: under `plain`
+        // tmux's client owns the outer terminal and xterm never has history to
+        // scroll, so #321's scrollback goals and #1096's mouse criteria are
+        // unreachable. Flipping this back would make them unreachable again
+        // without any other test noticing.
         let config: AgentConfig = toml::from_str(
             r#"
             agent_id = "test"
@@ -310,7 +342,18 @@ mod tests {
             "#,
         )
         .unwrap();
-        assert!(matches!(config.attach_mode, AttachMode::Plain));
+        assert!(matches!(config.attach_mode, AttachMode::Control));
+        // And `plain` is still expressible, because it is still selectable.
+        let explicit: AgentConfig = toml::from_str(
+            r#"
+            agent_id = "test"
+            server_url = "ws://localhost:8443"
+            auth_token = "tok"
+            attach_mode = "plain"
+            "#,
+        )
+        .unwrap();
+        assert!(matches!(explicit.attach_mode, AttachMode::Plain));
     }
 
     #[test]

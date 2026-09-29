@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
 import { toastError } from '@/shared/lib/errorHelpers';
-import { getViewerType, parseExt, type ViewerType } from '../model/viewerRegistry';
+import { getJsonPreviewKind, getViewerType, parseExt, type JsonPreviewKind, type ViewerType } from '../model/viewerRegistry';
 import {
   AUTO_APPLY_CONFIDENCE,
   SUGGEST_CONFIDENCE,
@@ -9,6 +9,7 @@ import {
   isMarkdownExt,
 } from '@/shared/markdown';
 import { readFileChunked, type FileOps } from '@/capabilities/files';
+import { useMarkdownPreviewErrorFallback } from './useMarkdownPreviewErrorFallback';
 export type ViewMode = 'preview' | 'raw';
 
 /**
@@ -220,10 +221,12 @@ function useFileLoader(
  */
 export function useFileViewer({ fileOps, path, filename, onClose, onDirtyChange, fileSize }: UseFileViewerParams) {
   const ext = parseExt(path);
+  const jsonPreviewKind: JsonPreviewKind | null = ext ? getJsonPreviewKind(ext) : null;
   // Markdown detection — extension-based wins, content-based is fallback
   const isMarkdownByExt = ext ? isMarkdownExt(ext) : false;
+  const opensInPreviewByExt = isMarkdownByExt || jsonPreviewKind !== null;
   const [isMarkdown, setIsMarkdown] = useState(isMarkdownByExt);
-  const [viewMode, setViewMode] = useState<ViewMode>(isMarkdownByExt ? 'preview' : 'raw');
+  const [viewMode, setViewMode] = useState<ViewMode>(opensInPreviewByExt ? 'preview' : 'raw');
   const [showSuggestion, setShowSuggestion] = useState(false);
   const suggestionDismissedRef = useRef(false);
 
@@ -264,18 +267,6 @@ export function useFileViewer({ fileOps, path, filename, onClose, onDirtyChange,
     loadFile, setContent, setOriginalContent, handleCancelLoad,
   } = useFileLoader(fileOps, path, fileSize, handleDecoded);
 
-  // Listen for MarkdownPreview error events
-  useEffect(() => {
-    const handler = (e: Event) => {
-      const detail = (e as CustomEvent<{ filename: string }>).detail;
-      if (detail.filename === filename) {
-        setViewMode('raw');
-      }
-    };
-    window.addEventListener('markdown-preview-error', handler);
-    return () => window.removeEventListener('markdown-preview-error', handler);
-  }, [filename]);
-
   const handleEditToggle = () => {
     // Chunked-loaded files are forced read-only — too large to round-trip safely.
     if (forceReadOnly) { return; }
@@ -286,6 +277,8 @@ export function useFileViewer({ fileOps, path, filename, onClose, onDirtyChange,
     setViewMode(mode);
     if (mode === 'raw') { setIsReadOnly(true); }
   };
+
+  useMarkdownPreviewErrorFallback(filename, handleSetViewMode);
 
   const handleContentChange = (newContent: string) => {
     setContent(newContent);
@@ -334,9 +327,13 @@ export function useFileViewer({ fileOps, path, filename, onClose, onDirtyChange,
   const isMedia = viewerType !== null && viewerType !== 'markdown';
   const isText = !isMedia;
 
+  const hasPreviewRawToggle = isMarkdown || jsonPreviewKind !== null;
+
   return {
     viewerType,
     isMarkdown,
+    jsonPreviewKind,
+    hasPreviewRawToggle,
     viewMode,
     showSuggestion,
     content,

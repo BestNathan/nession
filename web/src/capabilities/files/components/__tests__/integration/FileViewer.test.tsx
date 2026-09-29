@@ -294,3 +294,61 @@ Run the deploy script.
     expect(close.className).not.toMatch(/(^|\s)text-xs(\s|$)/);
   });
 });
+
+describe('FileViewer JSON / JSONL integration (#1199)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('opens .json in structured preview by default', async () => {
+    const ops = mockFileOps({
+      readFile: vi.fn().mockResolvedValue({
+        path: '/test/config.json',
+        content: btoa('{"name":"nession","enabled":true}'),
+        mime_type: 'application/json',
+      }),
+    });
+    render(<FileViewer fileOps={ops} path="/test/config.json" filename="config.json" onClose={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('"name"')).toBeInTheDocument();
+      expect(screen.getByText('"nession"')).toBeInTheDocument();
+    });
+    expect(screen.getByRole('button', { name: 'Preview', pressed: true })).toBeInTheDocument();
+  });
+
+  it('shows local invalid JSON state without blocking Raw', async () => {
+    const ops = mockFileOps({
+      readFile: vi.fn().mockResolvedValue({
+        path: '/test/broken.json',
+        content: btoa('{not-json'),
+        mime_type: 'application/json',
+      }),
+    });
+    render(<FileViewer fileOps={ops} path="/test/broken.json" filename="broken.json" onClose={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Invalid JSON')).toBeInTheDocument();
+    });
+    await userEvent.click(screen.getByText('Raw'));
+    await waitFor(() => {
+      expect(screen.getByText('Edit')).toBeInTheDocument();
+    });
+  });
+
+  it('renders JSONL records with physical line labels', async () => {
+    const ops = mockFileOps({
+      readFile: vi.fn().mockResolvedValue({
+        path: '/test/events.jsonl',
+        content: btoa('{"id":1}\n\n{"id":2}'),
+        mime_type: 'application/x-ndjson',
+      }),
+    });
+    render(<FileViewer fileOps={ops} path="/test/events.jsonl" filename="events.jsonl" onClose={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Line 1')).toBeInTheDocument();
+      expect(screen.getByText('Line 3')).toBeInTheDocument();
+    });
+  });
+});

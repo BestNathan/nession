@@ -14,7 +14,7 @@
 use anyhow::Result;
 
 use super::cmd;
-use super::ops::TmuxOps;
+use super::ops::TmuxDep;
 
 /// Default window size for a session whose size could not be read.
 ///
@@ -36,8 +36,8 @@ const FALLBACK_WINDOW_SIZE: (u16, u16) = (80, 24);
 /// This is also where the two failure policies that used to hide inside two
 /// hand-written copies of one query stay distinguishable: `server/websocket.rs`
 /// propagates the same `Err` instead of falling back.
-async fn window_size_or_fallback(session: &str) -> (u16, u16) {
-    TmuxOps::global()
+async fn window_size_or_fallback(tmux: &TmuxDep, session: &str) -> (u16, u16) {
+    tmux.ops()
         .window_size(session)
         .await
         .unwrap_or(FALLBACK_WINDOW_SIZE)
@@ -89,42 +89,29 @@ pub async fn tmux_version() -> String {
 /// session is worse than a capture with a stale guess, which is the tradeoff
 /// this call site makes and the one `server/websocket.rs` declines to make.
 pub async fn capture_scrollback(
+    tmux: &TmuxDep,
     session: &str,
     lines: u32,
-) -> Result<Option<(Vec<u8>, u16, u16)>, std::io::Error> {
+) -> Result<Option<(Vec<u8>, u16, u16)>> {
     // First, get the session dimensions — BestEffort, see
     // `window_size_or_fallback`. The query itself is the owner's.
-    let (cols, rows) = window_size_or_fallback(session).await;
+    let (cols, rows) = window_size_or_fallback(tmux, session).await;
 
-    // Then capture the scrollback
-    let lines_str = lines.to_string();
-    let output = cmd::global()
-        .tokio()
-        .args([
-            "capture-pane",
-            "-t",
-            session,
-            "-p",
-            "-S",
-            &format!("-{lines_str}"),
-            "-E",
-            "-",
-            "-e",
-        ])
-        .output()
-        .await?;
-    if output.status.success() {
-        if output.stdout.is_empty() {
-            Ok(None)
-        } else {
-            Ok(Some((output.stdout, cols, rows)))
-        }
-    } else {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        Err(std::io::Error::other(format!(
-            "tmux capture-pane failed: {stderr}"
-        )))
-    }
+    // Then the capture, which is [`TmuxOps::capture_pane`]'s operation and
+    // returns its own failure. This function is the *composition* of the two:
+    // the size, the capture, and the one policy decision that belongs at a call
+    // site rather than in either operation — that a session whose geometry
+    // could not be read is still worth capturing.
+    //
+    // That policy is why this takes the injected `TmuxDep` rather than reaching
+    // for the process-wide one. It used to do the latter, so a caller holding a
+    // `TmuxDep` for a different tmux captured from the wrong server and got
+    // bytes anyway (#991's boundary — the failure mode of a wrong addressing
+    // that still succeeds is that nothing reports it).
+    let Some(bytes) = tmux.ops().capture_pane(session, lines).await? else {
+        return Ok(None);
+    };
+    Ok(Some((bytes, cols, rows)))
 }
 
 #[cfg(test)]
@@ -146,7 +133,7 @@ mod tests {
         mgr.create_session(ts.name(), 80, 24, "/tmp", &[])
             .await
             .expect("create session");
-        let result = capture_scrollback(ts.name(), 100).await;
+        let result = capture_scrollback(&TmuxDep::global(), ts.name(), 100).await;
         assert!(
             result.is_ok(),
             "expected Ok(_) for fresh session, got {result:?}"
@@ -168,7 +155,7 @@ mod tests {
             .await
             .expect("send keys");
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-        let result = capture_scrollback(ts.name(), 100).await;
+        let result = capture_scrollback(&TmuxDep::global(), ts.name(), 100).await;
         assert!(
             matches!(result, Ok(Some(_))),
             "expected Ok(Some(_)) after output, got {result:?}"
@@ -180,7 +167,8 @@ mod tests {
         if !check_tmux_available().await.unwrap_or(false) {
             return;
         }
-        let result = capture_scrollback("nession-test-does-not-exist-xyz", 100).await;
+        let result =
+            capture_scrollback(&TmuxDep::global(), "nession-test-does-not-exist-xyz", 100).await;
         assert!(result.is_err(), "expected error for nonexistent session");
     }
 
@@ -200,7 +188,7 @@ mod tests {
             return;
         }
         assert_eq!(
-            window_size_or_fallback("nession-test-does-not-exist-xyz").await,
+            window_size_or_fallback(&TmuxDep::global(), "nession-test-does-not-exist-xyz").await,
             FALLBACK_WINDOW_SIZE
         );
         assert_eq!(

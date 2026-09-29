@@ -16,6 +16,12 @@ export interface StartP2PAttachParams {
   agentApi: TerminalAgentApi;
   manualRoute: boolean;
   lastResize: { cols: number; rows: number } | null;
+  /**
+   * Whether this client's Terminal needs the session's history (#321). Resolved
+   * by the caller at attach time, not here, because only the caller can see the
+   * Terminal — see `SessionRuntimeConfig.hasSessionOutput`.
+   */
+  needsBootstrap: boolean;
   transportGeneration: number;
   onAttachOk?: (result: Extract<AttachResult, { ok: true }>) => void;
 }
@@ -100,6 +106,7 @@ export class SessionAttachController {
     void params.agentApi
       .attach(params.sessionName, params.lastResize ?? undefined, {
         timeoutMs: ATTACH_TIMEOUT_MS,
+        needsBootstrap: params.needsBootstrap,
       })
       .then(
         (result) => {

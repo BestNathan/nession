@@ -15,11 +15,13 @@ import type { CapabilityFocus } from '@/app/workspace/workspaceContext';
  * `collapsible` is dropped here rather than passed through as `false`: the App
  * surface has no rail, and `AppSessionsSurface` does not accept the prop at all
  * (#1050 Finding 1 — the App used to inherit its `true` default and could
- * collapse itself inside its own overlay).
+ * collapse itself inside its own overlay). `collapsed`/`onCollapsedChange` are
+ * dropped for the same reason on the controlled side (#1196 §8): rail state is
+ * Web column composition state and has no App presentation at all.
  */
 type SidebarFields = Omit<
   SidebarProps,
-  'className' | 'onSelect' | 'collapsible'
+  'className' | 'onSelect' | 'collapsible' | 'collapsed' | 'onCollapsedChange'
 >;
 
 interface MainShared {

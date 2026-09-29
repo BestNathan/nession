@@ -140,3 +140,5 @@ export function parseExt(path: string): string {
  * @deprecated Import from `@/shared/markdown` instead — this is a compatibility re-export. */
 export { isMarkdownExt } from '@/shared/markdown/extensions';
 
+export { getJsonPreviewKind, isJsonPreviewExt, isJsonlPreviewExt, type JsonPreviewKind } from './jsonPreviewKind';
+

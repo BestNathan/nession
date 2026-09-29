@@ -1,10 +1,15 @@
-//! Finding a Session's conversation on disk, and normalizing it (#1005).
+//! Finding a Session's conversations on disk (#1005).
 //!
 //! Two jobs, both of which exist to keep Claude Code's file format inside this
 //! crate:
 //!
 //! 1. **Discovery** — which transcripts belong to a given working directory.
-//! 2. **Normalization** — turning transcript records into conversation items.
+//! 2. **Page selection** — which records of one transcript a page contains.
+//!
+//! Turning those records into conversation items is [`crate::messages`]' job;
+//! the retired v1 normalization that used to live here was removed with the
+//! `claude-code.conversation` unit it served (#1222), and what survives is the
+//! half the two remaining units share.
 //!
 //! ## Discovery matches the record's own `cwd`, never the directory name
 //!
@@ -18,16 +23,6 @@
 //! `#1005` decision 7 requires strict matching — no parent, no git root, no
 //! subdirectory — and matching the wrong field would have made that rule
 //! unenforceable while looking enforced.
-//!
-//! ## Normalization is lossy on purpose
-//!
-//! A measured transcript carried, besides messages: `attachment`,
-//! `atis-latch`, `worktree-state`, `last-prompt`, `mode`, `permission-mode`,
-//! `relocated`, `pr-link`, `ai-title`, `file-history-delta`,
-//! `file-history-snapshot`, `queue-operation`, `system`. None is a chat turn,
-//! and rendering them as rows is the failure criterion 4 names. They are
-//! skipped — and *counted*, so a client can tell "nothing was missed" from
-//! "this version does not model what it saw".
 
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
@@ -38,18 +33,14 @@ use std::cell::RefCell;
 
 use serde_json::Value;
 
-use crate::protocol::conversation::v1::{
-    ConversationItemV1, ItemKindV1, ToolV1, TOOL_SUMMARY_CEILING,
-};
-
 /// Claude's record types that carry conversation.
 const MESSAGE_TYPES: [&str; 2] = ["user", "assistant"];
 
 /// Whether a record type is one that carries conversation.
 ///
-/// Shared with [`crate::conversation_v2`], which asks the same question of the
-/// same open set: a type that is not a message is bookkeeping, and bookkeeping
-/// must not become a chat row in either generation.
+/// Shared with [`crate::messages`], which asks the same question of the same
+/// open set: a type that is not a message is bookkeeping, and bookkeeping must
+/// not become a chat row.
 pub(crate) fn is_message_record(kind: &str) -> bool {
     MESSAGE_TYPES.contains(&kind)
 }
@@ -109,19 +100,6 @@ impl Discovered {
     pub(crate) fn path(&self) -> &Path {
         &self.path
     }
-}
-
-/// One page of a conversation, plus what the reader had to say about the file.
-#[derive(Debug, Clone, Default)]
-pub struct Page {
-    pub items: Vec<ConversationItemV1>,
-    /// Byte offset to pass back to read the page before this one.
-    pub next_offset: Option<u64>,
-    pub has_more: bool,
-    /// The file ended mid-record. Normal for a transcript being appended to.
-    pub partial_tail: bool,
-    /// Records this module did not model.
-    pub skipped: u64,
 }
 
 /// Every transcript whose recorded `cwd` is exactly `cwd`.
@@ -344,10 +322,9 @@ fn tail_facts(path: &Path) -> TailFacts {
 
 /// The raw records of one page, before any of them is interpreted.
 ///
-/// Shared by both contract generations: *which* records a page contains is a
-/// property of the transcript and the cursor, not of the shape a version
-/// renders them as. Only [`read_page`] and [`crate::conversation_v2::read_page`]
-/// differ after this point.
+/// *Which* records a page contains is a property of the transcript and the
+/// cursor, not of the shape a reader renders them as — which is why selection
+/// lives here and interpretation lives in [`crate::messages`].
 pub(crate) struct Selected {
     /// Oldest-first within the page, each with the byte offset it starts at.
     pub(crate) records: Vec<(u64, String)>,
@@ -358,42 +335,12 @@ pub(crate) struct Selected {
     pub(crate) partial_tail: bool,
 }
 
-/// A page of `conversation`, ending at `end_offset` (or at the end of the file).
-///
-/// Reads **backwards** from the end: the newest items are what a reader wants
-/// first (#1005 criterion 5), and a transcript can be far larger than anything
-/// worth holding in memory. Only the bytes needed for the page are read.
-pub fn read_page(
-    conversation: &Discovered,
-    end_offset: Option<u64>,
-    limit: usize,
-) -> std::io::Result<Page> {
-    let mut file = File::open(conversation.path())?;
-    let file_len = file.metadata()?.len();
-    let end = end_offset.unwrap_or(file_len).min(file_len);
-    let selected = select_records(&mut file, file_len, end, limit)?;
-
-    let mut page = Page {
-        next_offset: selected.next_offset,
-        has_more: selected.has_more,
-        partial_tail: selected.partial_tail,
-        ..Page::default()
-    };
-    for (_, line) in &selected.records {
-        match normalize_line(line) {
-            Normalized::Items(items) => page.items.extend(items),
-            Normalized::Skipped => page.skipped += 1,
-        }
-    }
-    Ok(page)
-}
-
 /// Choose the `limit` newest records ending at `end`, reading backwards.
 ///
 /// The byte offsets are what make the cursor exact: a page boundary that landed
 /// mid-record would show one item twice, or lose it between pages. They are also
-/// what [`crate::conversation_v2`] scans forward from when it pairs a tool call
-/// with a result that landed on the next page.
+/// what [`crate::messages`] scans forward from when it pairs a tool call with a
+/// result that landed on the next page.
 pub(crate) fn select_records(
     file: &mut File,
     file_len: u64,
@@ -510,155 +457,6 @@ fn align_to_record(file: &mut File, from: u64) -> std::io::Result<u64> {
     Ok(0)
 }
 
-/// What one transcript line turned into.
-enum Normalized {
-    Items(Vec<ConversationItemV1>),
-    Skipped,
-}
-
-/// Turn one transcript record into conversation items.
-///
-/// Anything this version does not model is `Skipped` — the transcript is
-/// append-only and upstream adds record types, so an unrecognised line is
-/// ordinary, not corruption (#1005 constraint 7).
-fn normalize_line(line: &str) -> Normalized {
-    let Ok(record) = serde_json::from_str::<Value>(line) else {
-        return Normalized::Skipped;
-    };
-
-    let Some(kind) = string_field(&record, "type") else {
-        return Normalized::Skipped;
-    };
-    if !MESSAGE_TYPES.contains(&kind.as_str()) {
-        return Normalized::Skipped;
-    }
-    // A subagent's records are not the main conversation. Edge case in #1005:
-    // "v1 不应错误地把 subagent transcript 当主 conversation".
-    if record.get("isSidechain").and_then(Value::as_bool) == Some(true) {
-        return Normalized::Skipped;
-    }
-
-    let Some(message) = record.get("message") else {
-        return Normalized::Skipped;
-    };
-    let id = string_field(&record, "uuid").unwrap_or_default();
-    let timestamp = string_field(&record, "timestamp");
-
-    let kind_of = |record_kind: &str| {
-        if record_kind == "assistant" {
-            ItemKindV1::Assistant
-        } else {
-            ItemKindV1::User
-        }
-    };
-
-    // `content` is either a plain string or a block list. Both occur: a measured
-    // transcript had 62 string-bodied user turns, so accepting only the list
-    // shape would drop real messages while looking like it worked.
-    if let Some(text) = message.get("content").and_then(Value::as_str) {
-        if text.trim().is_empty() {
-            return Normalized::Skipped;
-        }
-        return Normalized::Items(vec![ConversationItemV1 {
-            id,
-            kind: kind_of(&kind),
-            timestamp,
-            text: Some(text.to_string()),
-            tool: None,
-        }]);
-    }
-
-    let Some(blocks) = message.get("content").and_then(Value::as_array) else {
-        return Normalized::Skipped;
-    };
-
-    let mut items = Vec::new();
-    for (index, block) in blocks.iter().enumerate() {
-        let block_kind = string_field(block, "type").unwrap_or_default();
-        let item_id = if index == 0 {
-            id.clone()
-        } else {
-            format!("{id}#{index}")
-        };
-        match block_kind.as_str() {
-            "text" => {
-                let Some(text) = string_field(block, "text") else {
-                    continue;
-                };
-                if text.trim().is_empty() {
-                    continue;
-                }
-                items.push(ConversationItemV1 {
-                    id: item_id,
-                    kind: kind_of(&kind),
-                    timestamp: timestamp.clone(),
-                    text: Some(text),
-                    tool: None,
-                });
-            }
-            "tool_use" => {
-                let name = string_field(block, "name").unwrap_or_else(|| "tool".to_string());
-                let summary = tool_summary(block.get("input"));
-                items.push(ConversationItemV1 {
-                    id: item_id,
-                    kind: ItemKindV1::Tool,
-                    timestamp: timestamp.clone(),
-                    text: None,
-                    tool: Some(ToolV1 {
-                        name,
-                        summary,
-                        is_error: false,
-                        truncated: false,
-                    }),
-                });
-            }
-            // `thinking` is folded away: it is model reasoning, not a turn, and
-            // it is the second-largest block type in a real transcript. Showing
-            // it by default would bury the conversation.
-            //
-            // `tool_result` is not a row either — it pairs with the `tool_use`
-            // it answers, and rendering both doubles the tool noise.
-            _ => {}
-        }
-    }
-
-    if items.is_empty() {
-        Normalized::Skipped
-    } else {
-        Normalized::Items(items)
-    }
-}
-
-/// A bounded, single-line description of a tool call's input.
-///
-/// Never the payload: `#1005` bounds resource use and requires tool output not
-/// to drown the conversation. The value is summarized by its shape — how many
-/// keys, or a short scalar — rather than by copying whatever is in it.
-fn tool_summary(input: Option<&Value>) -> String {
-    let Some(input) = input else {
-        return String::new();
-    };
-    let described = match input {
-        Value::Object(map) => {
-            let mut keys: Vec<&str> = map.keys().map(String::as_str).collect();
-            keys.sort_unstable();
-            keys.join(", ")
-        }
-        Value::String(s) => s.clone(),
-        other => other.to_string(),
-    };
-    truncate(&described, TOOL_SUMMARY_CEILING)
-}
-
-/// Cut `s` to at most `max` characters, saying so when it does.
-fn truncate(s: &str, max: usize) -> String {
-    if s.chars().count() <= max {
-        return s.to_string();
-    }
-    let kept: String = s.chars().take(max).collect();
-    format!("{kept}…")
-}
-
 /// A string field, when the record carries one.
 pub(crate) fn string_field(record: &Value, key: &str) -> Option<String> {
     record.get(key).and_then(Value::as_str).map(str::to_string)
@@ -690,132 +488,6 @@ pub(crate) mod tests_support {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn item_texts(line: &str) -> Vec<(ItemKindV1, Option<String>)> {
-        match normalize_line(line) {
-            Normalized::Items(items) => items.into_iter().map(|i| (i.kind, i.text)).collect(),
-            Normalized::Skipped => Vec::new(),
-        }
-    }
-
-    #[test]
-    fn a_bookkeeping_record_is_not_a_message() {
-        // Measured real shapes. Each of these is a real record type from a live
-        // transcript, and none is a chat turn — rendering them is exactly what
-        // #1005 criterion 4 forbids.
-        for line in [
-            r#"{"type":"attachment","uuid":"a","cwd":"/w"}"#,
-            r#"{"type":"atis-latch","atis":true,"sessionId":"s"}"#,
-            r#"{"type":"mode","mode":"default","sessionId":"s"}"#,
-            r#"{"type":"permission-mode","permissionMode":"acceptEdits"}"#,
-            r#"{"type":"file-history-snapshot","messageId":"m"}"#,
-            r#"{"type":"queue-operation","operation":"x"}"#,
-            r#"{"type":"last-prompt","lastPrompt":"hi"}"#,
-            r#"{"type":"worktree-state","worktreeSession":{}}"#,
-            r#"{"type":"pr-link","sessionId":"s"}"#,
-        ] {
-            assert!(
-                matches!(normalize_line(line), Normalized::Skipped),
-                "bookkeeping record became a message: {line}"
-            );
-        }
-    }
-
-    #[test]
-    fn a_user_turn_is_a_message() {
-        let line = r#"{"type":"user","uuid":"u1","timestamp":"2026-09-25T00:00:00Z",
-                       "message":{"role":"user","content":"hello"}}"#;
-        assert_eq!(
-            item_texts(line),
-            vec![(ItemKindV1::User, Some("hello".to_string()))]
-        );
-    }
-
-    #[test]
-    fn assistant_text_becomes_one_item_and_thinking_does_not() {
-        // `thinking` is the second-largest block type in a real transcript.
-        // Making it a row would bury the conversation it is reasoning about.
-        let line = r#"{"type":"assistant","uuid":"a1",
-                       "message":{"role":"assistant","content":[
-                         {"type":"thinking","thinking":"secret reasoning"},
-                         {"type":"text","text":"the answer"}]}}"#;
-        assert_eq!(
-            item_texts(line),
-            vec![(ItemKindV1::Assistant, Some("the answer".to_string()))],
-            "reasoning leaked into the conversation as a turn"
-        );
-    }
-
-    #[test]
-    fn a_tool_call_becomes_one_collapsible_item_without_its_payload() {
-        let line = r#"{"type":"assistant","uuid":"a2",
-                       "message":{"role":"assistant","content":[
-                         {"type":"tool_use","id":"t1","name":"Bash",
-                          "input":{"command":"rm -rf /","description":"danger"}}]}}"#;
-        let Normalized::Items(items) = normalize_line(line) else {
-            panic!("a tool_use is an item");
-        };
-        assert_eq!(items.len(), 1);
-        assert_eq!(items[0].kind, ItemKindV1::Tool);
-        let tool = items[0].tool.as_ref().expect("tool detail");
-        assert_eq!(tool.name, "Bash");
-        assert!(
-            !tool.summary.contains("rm -rf"),
-            "the tool's payload was copied into the summary: {}",
-            tool.summary
-        );
-    }
-
-    #[test]
-    fn a_tool_result_is_not_a_second_row() {
-        // Paired with the call it answers; rendering both doubles tool noise.
-        let line = r#"{"type":"user","uuid":"u2",
-                       "message":{"role":"user","content":[
-                         {"type":"tool_result","tool_use_id":"t1","content":"output"}]}}"#;
-        assert!(item_texts(line).is_empty());
-    }
-
-    #[test]
-    fn a_sidechain_record_is_left_out_of_the_main_conversation() {
-        let line = r#"{"type":"assistant","uuid":"a3","isSidechain":true,
-                       "message":{"role":"assistant","content":[
-                         {"type":"text","text":"subagent work"}]}}"#;
-        assert!(
-            item_texts(line).is_empty(),
-            "a subagent's record was shown as the main conversation"
-        );
-    }
-
-    #[test]
-    fn an_unknown_record_kind_is_skipped_rather_than_failing_the_read() {
-        // Upstream adds record types; an unrecognised one must not make the
-        // whole conversation unopenable.
-        for line in [
-            r#"{"type":"something-added-later","payload":{}}"#,
-            r#"{"type":"assistant","message":{"content":[{"type":"new_block_kind"}]}}"#,
-            "not json at all",
-            "",
-        ] {
-            assert!(
-                matches!(normalize_line(line), Normalized::Skipped),
-                "an unmodelled line took the read down: {line}"
-            );
-        }
-    }
-
-    #[test]
-    fn a_long_tool_summary_is_bounded_and_says_so() {
-        let long = "k".repeat(TOOL_SUMMARY_CEILING * 3);
-        let summary = tool_summary(Some(&Value::String(long)));
-        assert!(summary.chars().count() <= TOOL_SUMMARY_CEILING + 1);
-        assert!(summary.ends_with('…'), "a cut summary must say it was cut");
-    }
-
-    #[test]
-    fn truncate_leaves_a_short_string_alone() {
-        assert_eq!(truncate("abc", 10), "abc");
-        assert_eq!(truncate("abcdef", 3), "abc…");
-    }
 
     // ---- discovery ------------------------------------------------------
 
@@ -1175,15 +847,38 @@ mod tests {
         }
     }
 
+    /// Select one page of raw records, the way [`crate::messages`] does before
+    /// it interprets them.
+    fn select(conversation: &Discovered, end_offset: Option<u64>, limit: usize) -> Selected {
+        let mut file = File::open(conversation.path()).expect("open the transcript");
+        let file_len = file.metadata().expect("the transcript's metadata").len();
+        let end = end_offset.unwrap_or(file_len).min(file_len);
+        select_records(&mut file, file_len, end, limit).expect("select a page")
+    }
+
+    /// The user-turn texts of a page's records, in page order.
+    fn texts_of(selected: &Selected) -> Vec<String> {
+        selected
+            .records
+            .iter()
+            .filter_map(|(_, line)| {
+                let record = serde_json::from_str::<Value>(line).ok()?;
+                record
+                    .pointer("/message/content")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            })
+            .collect()
+    }
+
     /// Walk every page backwards, newest first, and return the texts in
     /// conversation order.
     fn page_through(conversation: &Discovered, page_size: usize) -> Vec<String> {
         let mut pages = Vec::new();
         let mut offset = None;
         loop {
-            let page = read_page(conversation, offset, page_size).expect("read a page");
-            let texts: Vec<String> = page.items.iter().filter_map(|i| i.text.clone()).collect();
-            pages.push(texts);
+            let page = select(conversation, offset, page_size);
+            pages.push(texts_of(&page));
             match page.next_offset {
                 Some(next) => offset = Some(next),
                 None => break,
@@ -1200,10 +895,9 @@ mod tests {
         let body: String = (0..5).map(|n| format!("{}\n", turn(n))).collect();
         let conversation = transcript(dir.path(), &body);
 
-        let page = read_page(&conversation, None, 3).unwrap();
-        let texts: Vec<String> = page.items.iter().filter_map(|i| i.text.clone()).collect();
+        let page = select(&conversation, None, 3);
         assert_eq!(
-            texts,
+            texts_of(&page),
             vec!["message 2", "message 3", "message 4"],
             "the first page is the newest items, ordered for reading"
         );
@@ -1241,9 +935,8 @@ mod tests {
         );
         let conversation = transcript(dir.path(), &body);
 
-        let page = read_page(&conversation, None, 10).unwrap();
-        let texts: Vec<String> = page.items.iter().filter_map(|i| i.text.clone()).collect();
-        assert_eq!(texts, vec!["message 0", "message 1"]);
+        let page = select(&conversation, None, 10);
+        assert_eq!(texts_of(&page), vec!["message 0", "message 1"]);
         assert!(
             page.partial_tail,
             "a half-written last line must be reported, not silently ignored"
@@ -1254,26 +947,8 @@ mod tests {
     fn a_cleanly_terminated_transcript_is_not_reported_as_partial() {
         let dir = tempfile::tempdir().unwrap();
         let conversation = transcript(dir.path(), &format!("{}\n", turn(0)));
-        let page = read_page(&conversation, None, 10).unwrap();
+        let page = select(&conversation, None, 10);
         assert!(!page.partial_tail);
-    }
-
-    #[test]
-    fn unmodelled_records_are_counted_rather_than_silently_dropped() {
-        let dir = tempfile::tempdir().unwrap();
-        let body = format!(
-            "{}\n{}\n{}\n",
-            turn(0),
-            r#"{"type":"mode","mode":"default","sessionId":"s"}"#,
-            r#"{"type":"something-new","sessionId":"s"}"#
-        );
-        let conversation = transcript(dir.path(), &body);
-        let page = read_page(&conversation, None, 10).unwrap();
-        assert_eq!(page.items.len(), 1);
-        assert_eq!(
-            page.skipped, 2,
-            "a client must be able to tell it missed something"
-        );
     }
 
     #[test]

@@ -2,22 +2,22 @@ import { render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ClaudeCodeProjection } from '../../ClaudeCodeProjection';
 import { claudeCodeApi } from '../../../ClaudeCodePlugin';
-import type { ClaudeCodeConversationResponse, ClaudeCodeListResponse } from '../../../types';
+import type { ClaudeCodeConversationsResponse, ClaudeCodeListResponse } from '../../../types';
 
 vi.mock('../../../ClaudeCodePlugin', () => ({
   claudeCodeApi: {
     claudeCodeList: vi.fn(),
     claudeCodeRead: vi.fn(),
-    claudeCodeConversation: vi.fn(),
+    claudeCodeConversations: vi.fn(),
   },
 }));
 
 const mockedList = vi.mocked(claudeCodeApi.claudeCodeList);
-const mockedConversation = vi.mocked(claudeCodeApi.claudeCodeConversation);
+const mockedConversation = vi.mocked(claudeCodeApi.claudeCodeConversations);
 
-/** A Session with no conversation at this cwd. */
-function noConversation(): ClaudeCodeConversationResponse {
-  return { state: 'not_found', has_more: false, partial_tail: false, skipped: 0 };
+/** A Session with no conversation at this cwd — read, and empty (#1222). */
+function noConversation(): ClaudeCodeConversationsResponse {
+  return { state: 'ready', items: [], has_more: false };
 }
 
 /**
@@ -26,14 +26,12 @@ function noConversation(): ClaudeCodeConversationResponse {
  * `title` is nullable because a real transcript may carry none — measured, 3 of
  * 14 — and the two cases say different things.
  */
-function boundTo(title: string | null): ClaudeCodeConversationResponse {
+function boundTo(title: string | null): ClaudeCodeConversationsResponse {
   return {
     state: 'ready',
-    conversation: { claude_session_id: 'c1', cwd: '/work' },
-    candidates: [{ claude_session_id: 'c1', cwd: '/work', updated_at: null, title }],
+    items: [{ id: 'c1', cwd: '/work', updated_at: null, title }],
+    binding: { conversation_id: 'c1', activity: 'active' },
     has_more: false,
-    partial_tail: false,
-    skipped: 0,
   };
 }
 
@@ -182,12 +180,11 @@ describe('Claude Code Signal', () => {
  * Peek is a real second depth or a bigger Signal: a Peek that cannot offer the
  * candidates has nothing to say that the Signal did not.
  */
-function unbound(...titles: (string | null)[]): ClaudeCodeConversationResponse {
+function unbound(...titles: (string | null)[]): ClaudeCodeConversationsResponse {
   return {
-    state: 'ambiguous',
-    conversation: null,
-    candidates: titles.map((title, index) => ({
-      claude_session_id: `c${index + 1}`,
+    state: 'ready',
+    items: titles.map((title, index) => ({
+      id: `c${index + 1}`,
       cwd: '/work',
       // Dated, because that is what the fallback renders from: a titleless
       // candidate with no timestamp degrades to the bare word "Conversation",
@@ -195,9 +192,9 @@ function unbound(...titles: (string | null)[]): ClaudeCodeConversationResponse {
       updated_at: '2026-09-01T09:05:00Z',
       title,
     })),
+    // No binding — which is not an `ambiguous` state anymore: the list is the
+    // answer (#1222), and choosing from it is what #1005 forbids.
     has_more: false,
-    partial_tail: false,
-    skipped: 0,
   };
 }
 

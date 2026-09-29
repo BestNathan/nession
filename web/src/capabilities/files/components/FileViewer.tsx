@@ -5,7 +5,7 @@ import { cn } from '@/shared/lib/utils';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Progress } from '@/components/ui/progress';
 import { CodeMirrorEditor } from '@/platform/editor';
-import { MarkdownPreview } from './MarkdownPreview';
+import { StructuredTextPreview } from './StructuredTextPreview';
 import { ImageViewer } from './ImageViewer';
 import { VideoViewer } from './VideoViewer';
 import { AudioViewer } from './AudioViewer';
@@ -20,7 +20,7 @@ import {
   AlertDialogAction,
   AlertDialogCancel,
 } from '@/components/ui/alert-dialog';
-import { type ViewerType } from '../model/viewerRegistry';
+import { type JsonPreviewKind, type ViewerType } from '../model/viewerRegistry';
 import { formatSize } from '@/shared/lib/format';
 import { useFileViewer, type ViewMode } from '../hooks/useFileViewer';
 import type { FileOps } from '@/capabilities/files';
@@ -49,7 +49,7 @@ interface FileViewerToolbarProps {
   isText: boolean;
   isReadOnly: boolean;
   saving: boolean;
-  isMarkdown: boolean;
+  hasPreviewRawToggle: boolean;
   viewMode: ViewMode;
   forceReadOnly: boolean;
   onSave: () => void;
@@ -70,10 +70,10 @@ interface FileViewerToolbarProps {
 const fileViewerActionClass = 'text-[length:var(--workspace-editor-action-font-size)]';
 
 function FileViewerToolbar({
-  path, filename, isDirty, isText, isReadOnly, saving, isMarkdown, viewMode, forceReadOnly, onSave, onEditToggle, onSetViewMode, onCloseClick,
+  path, filename, isDirty, isText, isReadOnly, saving, hasPreviewRawToggle, viewMode, forceReadOnly, onSave, onEditToggle, onSetViewMode, onCloseClick,
 }: FileViewerToolbarProps) {
-  // Markdown files get a Preview/Raw mode toggle; Edit is only offered in raw mode.
-  const showEditToggle = isText && !forceReadOnly && (!isMarkdown || viewMode === 'raw');
+  // Structured previews get Preview/Raw; Edit is only offered in raw mode.
+  const showEditToggle = isText && !forceReadOnly && (!hasPreviewRawToggle || viewMode === 'raw');
 
   return (
     <div className="flex flex-shrink-0 items-center justify-between gap-[var(--shell-space-2)] border-b border-border/60 px-[var(--workspace-editor-head-pad-x)] py-[var(--shell-space-1)]">
@@ -96,7 +96,7 @@ function FileViewerToolbar({
             <Save className="h-3 w-3 mr-1" />{saving ? 'Saving...' : 'Save'}
           </Button>
         )}
-        {isMarkdown && (
+        {hasPreviewRawToggle && (
           <div className="flex items-center rounded-md bg-muted/60 p-0.5" role="group" aria-label="View mode">
             <Button
               variant={viewMode === 'preview' ? 'secondary' : 'ghost'}
@@ -142,6 +142,7 @@ interface FileViewerContentProps {
   isReadOnly: boolean;
   isDirty: boolean;
   isMarkdown: boolean;
+  jsonPreviewKind: JsonPreviewKind | null;
   viewMode: ViewMode;
   showSuggestion: boolean;
   isChunkedLoading: boolean;
@@ -157,7 +158,7 @@ interface FileViewerContentProps {
 
 function FileViewerContent({
   loading, error, viewerType, mediaBlobUrl, filename, originalContent, content,
-  isReadOnly, isDirty, isMarkdown, viewMode, showSuggestion,
+  isReadOnly, isDirty, isMarkdown, jsonPreviewKind, viewMode, showSuggestion,
   isChunkedLoading, loadedBytes, totalBytes,
   onRetry, onChange, onSuggestionPreview, onSuggestionDismiss, onCancelLoad, initialLine,
 }: FileViewerContentProps) {
@@ -202,33 +203,26 @@ function FileViewerContent({
     );
   }
 
-  // Markdown preview mode
-  if (isMarkdown && viewMode === 'preview') {
+  const structuredPreviewActive =
+    viewMode === 'preview' && (isMarkdown || jsonPreviewKind !== null);
+
+  if (structuredPreviewActive) {
     return (
-      <div className="flex-1 min-h-0 flex flex-col">
-        {isDirty && originalContent !== content && (
-          <div className="flex items-center gap-2 px-3 py-1.5 text-xs border-b bg-warning/10 border-warning/30 text-warning-foreground">
-            <Info className="h-3 w-3 shrink-0" />
-            <span>Preview shows the saved version. Save to update preview.</span>
-          </div>
-        )}
-        <div className="flex-1 min-h-0">
-          {isChunkedLoading ? chunkedProgressView : loading ? (
-            <div className="flex flex-col p-3 gap-2">
-              <Skeleton className="h-4 w-full" />
-              <Skeleton className="h-4 w-3/4" />
-              <Skeleton className="h-4 w-1/2" />
-            </div>
-          ) : error ? (
-            <div className="flex flex-col items-center justify-center h-full gap-2 p-3 text-sm">
-              <p className="text-destructive">{error}</p>
-              <Button variant="outline" size="sm" onClick={onRetry}>Retry</Button>
-            </div>
-          ) : (
-            <MarkdownPreview content={originalContent} filename={filename} />
-          )}
-        </div>
-      </div>
+      <StructuredTextPreview
+        filename={filename}
+        originalContent={originalContent}
+        content={content}
+        isDirty={isDirty}
+        isMarkdown={isMarkdown}
+        jsonPreviewKind={jsonPreviewKind}
+        loading={loading}
+        error={error}
+        isChunkedLoading={isChunkedLoading}
+        loadedBytes={loadedBytes}
+        totalBytes={totalBytes}
+        onRetry={onRetry}
+        onCancelLoad={onCancelLoad}
+      />
     );
   }
 
@@ -292,6 +286,8 @@ export function FileViewer({
   const {
     viewerType,
     isMarkdown,
+    jsonPreviewKind,
+    hasPreviewRawToggle,
     viewMode,
     showSuggestion,
     content,
@@ -330,7 +326,7 @@ export function FileViewer({
         isText={isText}
         isReadOnly={isReadOnly}
         saving={saving}
-        isMarkdown={isMarkdown}
+        hasPreviewRawToggle={hasPreviewRawToggle}
         viewMode={viewMode}
         forceReadOnly={forceReadOnly}
         onSave={handleSave}
@@ -349,6 +345,7 @@ export function FileViewer({
         isReadOnly={isReadOnly}
         isDirty={isDirty}
         isMarkdown={isMarkdown}
+        jsonPreviewKind={jsonPreviewKind}
         viewMode={viewMode}
         showSuggestion={showSuggestion}
         isChunkedLoading={isChunkedLoading}

@@ -31,7 +31,13 @@ export class ConnectionManager implements TerminalTransport {
   private isAttached: () => boolean;
 
   onStateChange: ((state: ConnectionState) => void) | null = null;
-  onOutput: ((data: Uint8Array) => void) | null = null;
+  /**
+   * Bytes from the agent. `bootstrap` marks the session's history rather than
+   * its live output (#321) — see {@link TerminalTransport.onOutput}. Both paths
+   * deliver it: P2P from the frame the agent API decoded, relay from the
+   * payload the Server forwarded verbatim.
+   */
+  onOutput: ((data: Uint8Array, bootstrap?: boolean) => void) | null = null;
   onError: ((error: Error) => void) | null = null;
   onDisconnect: (() => void) | null = null;
   onResize: ((cols: number, rows: number) => void) | null = null;
@@ -168,7 +174,7 @@ export class ConnectionManager implements TerminalTransport {
         return;
       }
       void this.handleStreamFrame(frame.streamEpoch, frame.streamSeq, () => {
-        this.onOutput?.(frame.data);
+        this.onOutput?.(frame.data, frame.bootstrap);
       });
     });
 
@@ -321,9 +327,9 @@ export class ConnectionManager implements TerminalTransport {
 
     // Use sessionName for relay subscriptions — agent protocol messages
     // carry session_name (short name), not session_id (agent:name format).
-    this.relayUnsubOutput = svc.onRelayOutput(this.sessionName, (data: Uint8Array) => {
+    this.relayUnsubOutput = svc.onRelayOutput(this.sessionName, (data: Uint8Array, bootstrap?: boolean) => {
       if (!this.disposed) {
-        this.onOutput?.(data);
+        this.onOutput?.(data, bootstrap);
       }
     });
 

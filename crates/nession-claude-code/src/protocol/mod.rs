@@ -2,14 +2,37 @@
 //!
 //! ```text
 //! protocol/
-//!   conversation/v1
+//!   conversations/v1
 //!   list/v1
+//!   messages/v1
 //!   read/v1
 //! ```
 //!
 //! A directory per Protocol Unit, a file per contract version — the same layout
 //! `nession-git` uses, for the reason recorded there: a v2 goes beside `v1.rs`
 //! and `v1.rs` is never edited to express it.
+//!
+//! ## Retirement: `claude-code.conversation` (v1, v2), 2026-09-29 (#1222)
+//!
+//! The unit that owned conversation discovery, binding resolution, selection
+//! and message pages as one operation is gone — contracts, handlers, catalog
+//! entries and generated bindings, in one change. It was replaced by two
+//! canonical units, one question each:
+//!
+//! - `claude-code.conversations` — the conversations visible at a Session's
+//!   strict cwd, plus the exact Nession↔Claude binding when one is current.
+//! - `claude-code.messages` — the normalized timeline of one explicitly named
+//!   conversation, with `session_id` and `conversation_id` both required and
+//!   no substitution for an unknown id.
+//!
+//! It was **not** carried as a v3: the retired unit's `claude_session_id?`
+//! field switched it between two operations, its `ambiguous` state existed
+//! only because they shared one, and its identity/metadata split forced every
+//! client to join `conversation` against `candidates` by id — the
+//! `boundCandidate()` join. Those are the unit's definition, not its version,
+//! so the unit was retired rather than versioned again. v1/v2 were never
+//! edited to express this: they were byte-stable until removal, as the
+//! version-evolution rule requires.
 //!
 //! ## The id, the wire and the dispatch key are one string
 //!
@@ -38,8 +61,9 @@
 //! a wire change that needs a new contract version and a client update in the
 //! same change, and it is recorded as such rather than smuggled in here.
 
-pub mod conversation;
+pub mod conversations;
 pub mod list;
+pub mod messages;
 pub mod read;
 
 use nession_protocol::{ContractDescriptor, ContractVersion, IdentityError, ProtocolDescriptor};
@@ -56,7 +80,8 @@ pub fn descriptors() -> Result<Vec<ProtocolDescriptor>, IdentityError> {
     Ok(vec![
         list::descriptor()?,
         read::descriptor()?,
-        conversation::descriptor()?,
+        conversations::descriptor()?,
+        messages::descriptor()?,
     ])
 }
 
@@ -68,66 +93,15 @@ pub(crate) fn v1_descriptor(id: &str, wire: &str) -> Result<ProtocolDescriptor, 
     )
 }
 
-/// The `contract_version` a payload names, or `1` when it names none.
-///
-/// **Absent means v1**, which is the rule the whole model rests on: a caller
-/// that names no version is addressing the unit as it was before versions
-/// existed. The registry has already refused a version this provider does not
-/// serve (`ExtensionRegistry::check_named_version`), so a handler below may
-/// read this and trust it.
-///
-/// ## Why this is a third copy
-///
-/// `nession-agent` and `nession-server` each have this function verbatim, for
-/// their own routing macros. Sharing it was considered and is not free in
-/// either direction: `nession-protocol` owns protocol semantics but depends on
-/// serde alone by design — its dependency list *is* the ownership rule — so it
-/// cannot take `serde_json`; and `nession-common` is where the old
-/// `nession_common::protocol` alias lived and was deliberately deleted, so
-/// re-growing protocol logic there would undo that. Five lines duplicated
-/// across the runtimes that route is the cheaper of the two costs.
-pub(crate) fn named_contract_version(payload: &serde_json::Value) -> u32 {
-    payload
-        .get("contract_version")
-        .and_then(serde_json::Value::as_u64)
-        .and_then(|n| u32::try_from(n).ok())
-        .unwrap_or(1)
-}
-
-/// A descriptor for one unit at exactly one generation.
-///
-/// The sibling [`v1_descriptor`] hardcodes `ContractVersion::V1`, which was
-/// honest while every contract was v1 and stops being so the moment one is not.
-/// This takes the number, the way `crates/nession-agent`'s and
-/// `crates/nession-server`'s helpers already do.
-///
-/// **A unit at two generations does not call this twice.** Two descriptors for
-/// one unit would advertise it as two entries and make the manifest's version
-/// union vacuous; `conversation::descriptor` composes one descriptor holding
-/// both contracts instead.
-pub(crate) fn versioned_descriptor(
-    id: &str,
-    wire: &str,
-    version: u32,
-) -> Result<ProtocolDescriptor, IdentityError> {
-    ProtocolDescriptor::new(
-        id,
-        OWNER,
-        vec![ContractDescriptor::new(
-            ContractVersion::new(version)?,
-            &[wire],
-        )],
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    const EXPECTED_IDS: [&str; 3] = [
+    const EXPECTED_IDS: [&str; 4] = [
         "claude-code.list",
         "claude-code.read",
-        "claude-code.conversation",
+        "claude-code.conversations",
+        "claude-code.messages",
     ];
 
     #[test]

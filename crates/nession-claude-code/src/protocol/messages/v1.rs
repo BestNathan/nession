@@ -1,55 +1,58 @@
-//! `claude-code.conversation` / v2.
+//! `claude-code.messages` / v1 — the normalized timeline of **one explicit**
+//! conversation (`#1222`).
 //!
-//! The same conversation as [`super::v1`], structured enough for a client to
-//! render it as an AI conversation rather than as a transcript of records
-//! (`#1167`). The wire is unchanged — a unit at two versions travels as one wire
-//! and `contract_version` selects the generation
-//! (`docs/architecture/protocol.md`, "One wire, several generations"). `v1.rs`
-//! is not edited: a shipped version is never rewritten to express a new one.
+//! This unit answers one question: what happened in the conversation the caller
+//! named. Which conversations exist and which one the Session is bound to are
+//! [`crate::protocol::conversations`]' questions; the two used to be a single
+//! `claude-code.conversation` unit, and the split is what this module's rules
+//! below exist to keep.
 //!
-//! ## What changed, and why each one is a version rather than an addition
+//! ## What this unit never does
 //!
-//! - **`text` is gone; a message carries `content`.** v1 emitted one item per
-//!   `text` block, so an assistant turn that wrote prose, called a tool and wrote
-//!   more prose arrived as three rows with no record of the turn they came from.
-//!   v2 emits one message per record with its content blocks in order. A removed
-//!   field and a changed item count are both consumer-observable.
-//! - **A tool carries its call's identity, its outcome and its bodies.** v1's
-//!   `ToolV1` has `name / summary / is_error / truncated`, and `is_error` shipped
-//!   hardcoded `false` — no result was ever read, so no tool could report what it
-//!   produced. `is_error: bool` could not express "still running" anyway.
-//! - **`kind` is a tag on a union rather than a field beside optional
-//!   siblings.** v1's `text` + `optional tool` is an implicit union one field
-//!   away from being unrepresentable; `#1167` names growing it further as the
-//!   thing to avoid.
+//! - **Never substitutes for the requested id.** `conversation_id` is the only
+//!   selection mechanism — an unknown id is `state: not_found`, not the binding,
+//!   not the newest, and not the only conversation in the directory (`#1005`
+//!   decision 3). A request that names nothing cannot be answered by
+//!   coincidence, because the request shape makes omission a malformed request
+//!   rather than a selectable default.
+//! - **Never guesses across Sessions.** `session_id` is required alongside
+//!   `conversation_id`: transcript visibility is scoped to a Session's cwd, and
+//!   a machine-wide transcript lookup is a path around that.
+//! - **Never carries a transcript path** — same structural rule as the sibling
+//!   unit.
 //!
-//! ## What deliberately did not change
+//! ## What `state` and `activity` each say
+//!
+//! The retired unit's `Ready`/`Inactive` states fused two facts: whether the
+//! read succeeded and whether Claude is still running. Here `state` answers
+//! only the first; `activity` answers the second, as a closed enum — "finished"
+//! and "the host cannot say" are different facts, and collapsing them lets a
+//! client present a dead conversation as live.
+//!
+//! ## What an item is
+//!
+//! The normalization model is the one `#1167` introduced as the retired unit's
+//! v2, carried forward under names that no longer call the whole thing "the
+//! conversation": one item per thing that happened (a message, a tool call, or
+//! a record this version does not model), a tool paired with its result, and
+//! payloads bounded three times over — [`TOOL_SUMMARY_CEILING`] on the collapsed
+//! line, [`TOOL_INPUT_CEILING`] / [`TOOL_OUTPUT_CEILING`] on one body, and
+//! [`PAGE_PAYLOAD_BUDGET`] on the page, because 200 tools at the per-body
+//! ceiling is 3.2 MB and no single-item limit prevents that.
 //!
 //! Raw `thinking` is still folded away — it is model reasoning, not a turn, and
 //! it is the *largest* block type in a measured transcript (650 blocks against
 //! 355 `text`), so exposing it would bury the conversation it reasons about. If
 //! Claude later offers a summarized reasoning concept it gets its own content
-//! type; it does not reopen this one.
-//!
-//! ## Payloads are bounded twice over
-//!
-//! `#1005` bounds resource use, and a tool is where a transcript's bytes live.
-//! Three limits, because one is not enough: [`TOOL_SUMMARY_CEILING`] bounds the
-//! collapsed line, [`TOOL_INPUT_CEILING`] / [`TOOL_OUTPUT_CEILING`] bound one
-//! body, and [`PAGE_PAYLOAD_BUDGET`] bounds the *response* — a page of 200 tools
-//! each at the per-body ceiling is 3.2 MB, which no single-item limit prevents.
+//! kind; it does not reopen this one.
 
 use nession_protocol::{IdentityError, ProtocolDescriptor};
 use serde::{Deserialize, Serialize};
 
-use crate::protocol::versioned_descriptor;
+use crate::protocol::conversations::v1::{ConversationActivityV1, ConversationItemV1};
+use crate::protocol::v1_descriptor;
 
-pub const WIRE: &str = "claude-code.conversation";
-
-/// The generation of this contract. Named rather than inlined into
-/// [`descriptor`] so the handler that dispatches on it can compare against the
-/// same number the descriptor advertises.
-pub const CONTRACT_VERSION: u32 = 2;
+pub const WIRE: &str = "claude-code.messages";
 
 /// Most items one response may carry, whatever the caller asks for.
 pub const ITEM_CEILING: u32 = 200;
@@ -87,21 +90,19 @@ pub const PAGE_PAYLOAD_BUDGET: usize = 128 * 1024;
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
-pub enum RoleV2 {
+pub enum MessageRoleV1 {
     User,
     Assistant,
 }
 
 /// Where a tool call stands.
 ///
-/// A closed enum rather than v1's `is_error: bool`, which cannot say "we do not
-/// know yet" — and which shipped hardcoded `false`, so it said "succeeded" about
-/// calls nobody had read a result for.
+/// A closed enum rather than a boolean, which cannot say "we do not know yet".
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
-pub enum ToolStatusV2 {
+pub enum ToolStatusV1 {
     /// The call is the newest thing in the transcript and no result exists yet.
     /// Ordinary, not an error: a tool that is still running is what a live
     /// conversation looks like.
@@ -113,7 +114,7 @@ pub enum ToolStatusV2 {
     /// No result could be paired *and we cannot say why* — the call sits at a
     /// page edge and its result lies beyond the window this read searched.
     ///
-    /// Deliberately distinct from [`ToolStatusV2::Running`]: "still going" and
+    /// Deliberately distinct from [`ToolStatusV1::Running`]: "still going" and
     /// "we did not look far enough" are different facts, and presenting the
     /// second as the first is a claim the provider cannot support.
     Unknown,
@@ -124,7 +125,7 @@ pub enum ToolStatusV2 {
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
-pub enum PayloadKindV2 {
+pub enum PayloadKindV1 {
     /// Serialized JSON — render preformatted, not as prose.
     Json,
     /// Anything else, kept verbatim.
@@ -134,14 +135,13 @@ pub enum PayloadKindV2 {
 /// One bounded body of a tool call.
 ///
 /// `text` is always present when the body is; `truncated` is what tells a reader
-/// the difference between a short result and a long one that was cut, which
-/// v1's `truncated` could not do because nothing was ever cut.
+/// the difference between a short result and a long one that was cut.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
-pub struct PayloadV2 {
+pub struct PayloadV1 {
     pub text: String,
-    pub kind: PayloadKindV2,
+    pub kind: PayloadKindV1,
     pub truncated: bool,
 }
 
@@ -149,7 +149,7 @@ pub struct PayloadV2 {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
-pub struct ToolV2 {
+pub struct ToolActivityV1 {
     /// The `tool_use.id` this call was made under.
     ///
     /// Carried because it is the only thing that identifies a *call* rather than
@@ -159,15 +159,15 @@ pub struct ToolV2 {
     pub call_id: String,
     /// The tool's name, e.g. `Bash`.
     pub name: String,
-    pub status: ToolStatusV2,
+    pub status: ToolStatusV1,
     /// A one-line description, truncated to [`TOOL_SUMMARY_CEILING`].
     pub summary: String,
     /// What the call was given, when the transcript recorded it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub input: Option<PayloadV2>,
+    pub input: Option<PayloadV1>,
     /// What it produced, when a result was paired.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub output: Option<PayloadV2>,
+    pub output: Option<PayloadV1>,
 }
 
 /// One block of a message's body.
@@ -179,7 +179,7 @@ pub struct ToolV2 {
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum ConversationContentV2 {
+pub enum MessageContentV1 {
     /// Prose. Carried verbatim: whether it is Markdown is the client's reading,
     /// and a provider that decided would be unable to change its mind.
     Text { text: String },
@@ -193,13 +193,13 @@ pub enum ConversationContentV2 {
 /// One thing that happened in the conversation, in order.
 ///
 /// Tagged on `kind`, so the shape a client switches on is the shape it
-/// deserializes — v1's flat `text` + `optional tool` allowed an item that was
-/// both and an item that was neither.
+/// deserializes. `id` is stable within the conversation, derived from the
+/// transcript record, and is what a client keys identity reuse on across polls.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub enum ConversationItemV2 {
+pub enum MessageItemV1 {
     /// A human or model turn, with its content blocks in order.
     Message {
         /// Stable within the conversation, derived from the transcript record.
@@ -207,17 +207,17 @@ pub enum ConversationItemV2 {
         /// The record's own timestamp, RFC 3339, when it carried one.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         timestamp: Option<String>,
-        role: RoleV2,
+        role: MessageRoleV1,
         /// Never empty: a turn whose blocks were all unmodelled is
-        /// [`ConversationItemV2::Unknown`], not a message with no content.
-        content: Vec<ConversationContentV2>,
+        /// [`MessageItemV1::Unknown`], not a message with no content.
+        content: Vec<MessageContentV1>,
     },
     /// A tool call, paired with its result when the transcript has one.
     Tool {
         id: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         timestamp: Option<String>,
-        tool: ToolV2,
+        tool: ToolActivityV1,
     },
     /// A record this version does not model.
     ///
@@ -230,7 +230,7 @@ pub enum ConversationItemV2 {
     },
 }
 
-impl ConversationItemV2 {
+impl MessageItemV1 {
     /// The item's id, whichever arm it is.
     pub fn id(&self) -> &str {
         match self {
@@ -239,51 +239,48 @@ impl ConversationItemV2 {
     }
 }
 
-/// Where the conversation stands, which is not the same as whether it loaded.
+/// Where the read of the requested conversation stands.
 ///
-/// Declared here rather than reused from [`super::v1`] so that a v1 change can
-/// never reach a v2 consumer through a shared type — the reason versions exist.
+/// Four states, all about the *read*. Whether Claude is still running is
+/// [`ConversationActivityV1`]'s answer, not a state; and "nothing selected" is
+/// not a state either — that is what the sibling unit's list is for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
-pub enum ConversationStateV2 {
-    /// Items are available, and Claude Code is running right now.
+pub enum MessagesStateV1 {
+    /// The requested conversation was found and the page is the answer.
     Ready,
-    /// Items are from the last conversation this Session was bound to, and
-    /// Claude Code is no longer running. A client must not present this as live.
-    Inactive,
-    /// The session's cwd has more than one candidate and nothing proves which is
-    /// current. The caller picks from [`ConversationResponseV2::candidates`].
-    Ambiguous,
-    /// The session's cwd has no conversations at all.
+    /// No conversation with the requested id is visible at the Session's cwd.
+    ///
+    /// Final — the response names no other conversation, because substituting
+    /// the binding or the newest for a request that named one would be a guess
+    /// the caller did not make (`#1005` decision 3).
     NotFound,
-    /// This provider cannot answer. Distinct from `NotFound`: nothing is wrong
-    /// with the session's cwd, the capability is simply absent.
+    /// The provider cannot establish the Session's cwd, so it cannot scope the
+    /// read. Distinct from `NotFound`: nothing is wrong with the id, the scope
+    /// is simply out of reach.
     Unavailable,
     /// The read was attempted and failed. `error` carries the reason.
     Error,
 }
 
 /// What the caller asks for.
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
-pub struct ConversationRequestV2 {
-    /// The Nession session whose conversation is wanted.
-    #[serde(default)]
-    #[cfg_attr(feature = "codegen", ts(optional))]
-    pub session_id: Option<String>,
+pub struct MessagesRequestV1 {
+    /// The Nession session the read is scoped to. Required: visibility is
+    /// per-Session-cwd, so a request without one would be a machine-wide
+    /// transcript lookup.
+    pub session_id: String,
 
-    /// The Claude conversation the caller has explicitly chosen.
-    ///
-    /// As in v1, **this is the only way a caller selects a conversation** —
-    /// there is deliberately no "newest" flag, because falling back to mtime is
-    /// forbidden and an API that cannot express the choice cannot make it by
-    /// accident.
-    #[serde(default)]
-    #[cfg_attr(feature = "codegen", ts(optional))]
-    pub claude_session_id: Option<String>,
+    /// The conversation to read — one of `claude-code.conversations`' `items[]`
+    /// ids (or its `binding.conversation_id`). Required: **this is the only way
+    /// a caller selects a conversation**. There is deliberately no "newest"
+    /// flag: falling back to mtime is forbidden, and an API that cannot express
+    /// a heuristic cannot make it by accident.
+    pub conversation_id: String,
 
     /// Where to continue from, from a previous response's `next_cursor`.
     #[serde(default)]
@@ -296,57 +293,27 @@ pub struct ConversationRequestV2 {
     pub limit: Option<u32>,
 }
 
-/// A conversation this session's cwd could be showing.
-///
-/// **No filesystem path**, as in v1: the transcript's location is the provider's
-/// business, and the response shape makes that structural rather than a rule.
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
-pub struct ConversationCandidateV2 {
-    pub claude_session_id: String,
-    /// The cwd the transcript itself recorded, not the directory it was found in.
-    pub cwd: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub updated_at: Option<String>,
-    /// A human-readable title, when Claude recorded one. Never identity.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub title: Option<String>,
-    /// What the user last asked, when Claude recorded it. Never identity.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub preview: Option<String>,
-}
-
-/// The conversation the response is about.
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
-pub struct ConversationIdentityV2 {
-    pub claude_session_id: String,
-    pub cwd: String,
-}
-
 /// The answer.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
-pub struct ConversationResponseV2 {
-    pub state: ConversationStateV2,
+pub struct MessagesResponseV1 {
+    pub state: MessagesStateV1,
 
-    /// Set when a conversation was resolved — including an `Inactive` one.
+    /// The conversation the page is from — the full item shape, not an
+    /// identity projection. A client renders its header from this and never
+    /// joins back against the list by id; the retired unit carried identity
+    /// and metadata as two shapes and that join was the cost.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub conversation: Option<ConversationIdentityV2>,
+    pub conversation: Option<ConversationItemV1>,
 
-    /// What the caller may choose from, when `state` is `Ambiguous`.
-    ///
-    /// Also populated for `Ready` so a client can offer the list without a
-    /// second round trip.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub candidates: Vec<ConversationCandidateV2>,
+    /// Whether the conversation is live relative to the requesting Session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub activity: Option<ConversationActivityV1>,
 
     /// The page, oldest-first within the page.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub items: Vec<ConversationItemV2>,
+    pub items: Vec<MessageItemV1>,
 
     /// Pass back to continue. Absent when there is nothing older.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -369,13 +336,13 @@ pub struct ConversationResponseV2 {
     pub error: Option<String>,
 }
 
-impl ConversationResponseV2 {
+impl MessagesResponseV1 {
     /// The answer for a state that carries no items.
-    pub fn bare(state: ConversationStateV2) -> Self {
+    pub fn bare(state: MessagesStateV1) -> Self {
         Self {
             state,
             conversation: None,
-            candidates: Vec::new(),
+            activity: None,
             items: Vec::new(),
             next_cursor: None,
             has_more: false,
@@ -389,7 +356,7 @@ impl ConversationResponseV2 {
     pub fn error(reason: impl Into<String>) -> Self {
         Self {
             error: Some(reason.into()),
-            ..Self::bare(ConversationStateV2::Error)
+            ..Self::bare(MessagesStateV1::Error)
         }
     }
 
@@ -402,7 +369,7 @@ impl ConversationResponseV2 {
 }
 
 pub fn descriptor() -> Result<ProtocolDescriptor, IdentityError> {
-    versioned_descriptor("claude-code.conversation", WIRE, CONTRACT_VERSION)
+    v1_descriptor(super::ID, WIRE)
 }
 
 #[cfg(test)]
@@ -411,15 +378,15 @@ mod tests {
 
     #[test]
     fn the_page_limit_is_clamped_and_never_zero() {
-        assert_eq!(ConversationResponseV2::page_limit(None), DEFAULT_ITEM_LIMIT);
-        assert_eq!(ConversationResponseV2::page_limit(Some(10)), 10);
+        assert_eq!(MessagesResponseV1::page_limit(None), DEFAULT_ITEM_LIMIT);
+        assert_eq!(MessagesResponseV1::page_limit(Some(10)), 10);
         assert_eq!(
-            ConversationResponseV2::page_limit(Some(u32::MAX)),
+            MessagesResponseV1::page_limit(Some(u32::MAX)),
             ITEM_CEILING,
             "a caller cannot make one response unbounded by asking for a large page"
         );
         assert_eq!(
-            ConversationResponseV2::page_limit(Some(0)),
+            MessagesResponseV1::page_limit(Some(0)),
             1,
             "a zero page would return nothing and read as an empty conversation"
         );
@@ -428,13 +395,12 @@ mod tests {
     #[test]
     fn an_item_serializes_with_its_kind_as_the_tag() {
         // The whole point of the union: a client switches on `kind`, and the
-        // arm it selects is the arm that deserializes. v1's flat shape could
-        // not promise that.
-        let message = ConversationItemV2::Message {
+        // arm it selects is the arm that deserializes.
+        let message = MessageItemV1::Message {
             id: "m1".into(),
             timestamp: Some("2026-09-25T00:00:00Z".into()),
-            role: RoleV2::Assistant,
-            content: vec![ConversationContentV2::Text {
+            role: MessageRoleV1::Assistant,
+            content: vec![MessageContentV1::Text {
                 text: "# heading".into(),
             }],
         };
@@ -443,13 +409,13 @@ mod tests {
         assert_eq!(json["role"], "assistant");
         assert_eq!(json["content"][0]["type"], "text");
 
-        let call = ConversationItemV2::Tool {
+        let call = MessageItemV1::Tool {
             id: "t1".into(),
             timestamp: None,
-            tool: ToolV2 {
+            tool: ToolActivityV1 {
                 call_id: "call-1".into(),
                 name: "Bash".into(),
-                status: ToolStatusV2::Error,
+                status: ToolStatusV1::Error,
                 summary: "cargo test".into(),
                 input: None,
                 output: None,
@@ -466,13 +432,13 @@ mod tests {
         // A client deciding whether to draw an Input section reads absence
         // directly. Sending `"input": null` would make "no input recorded"
         // and "input recorded as nothing" the same payload.
-        let call = ConversationItemV2::Tool {
+        let call = MessageItemV1::Tool {
             id: "t1".into(),
             timestamp: None,
-            tool: ToolV2 {
+            tool: ToolActivityV1 {
                 call_id: "call-1".into(),
                 name: "Read".into(),
-                status: ToolStatusV2::Success,
+                status: ToolStatusV1::Success,
                 summary: "src/main.rs".into(),
                 input: None,
                 output: None,
@@ -490,15 +456,14 @@ mod tests {
     }
 
     #[test]
-    fn the_three_tool_states_are_told_apart() {
-        // `Running` and `Unknown` are the pair worth pinning: v1's boolean
-        // could express neither, and collapsing them would let "we did not
-        // look far enough" be presented as "still going".
+    fn the_four_tool_states_are_told_apart() {
+        // `Running` and `Unknown` are the pair worth pinning: collapsing them
+        // would let "we did not look far enough" be presented as "still going".
         let states = [
-            (ToolStatusV2::Running, "running"),
-            (ToolStatusV2::Success, "success"),
-            (ToolStatusV2::Error, "error"),
-            (ToolStatusV2::Unknown, "unknown"),
+            (ToolStatusV1::Running, "running"),
+            (ToolStatusV1::Success, "success"),
+            (ToolStatusV1::Error, "error"),
+            (ToolStatusV1::Unknown, "unknown"),
         ];
         for (state, word) in states {
             assert_eq!(
@@ -509,36 +474,79 @@ mod tests {
     }
 
     #[test]
-    fn the_descriptor_advertises_the_version_the_handler_dispatches_on() {
-        // The descriptor is the only thing a peer reads to negotiate; the
-        // handler compares the payload's `contract_version` against
-        // CONTRACT_VERSION to pick an arm. If the two disagreed, a peer would
-        // negotiate one generation and be answered with another.
-        let advertised = descriptor().unwrap();
-        assert_eq!(
-            advertised.contracts.first().map(|c| c.version.get()),
-            Some(CONTRACT_VERSION)
+    fn the_states_do_not_include_ready_wired_to_liveness_or_ambiguous() {
+        // The retired unit's `inactive` was "the read succeeded but Claude
+        // finished" — a liveness fact wearing a state costume, now answered by
+        // `activity`. `ambiguous` died with the selection mechanism it served:
+        // an explicit id is either found or it is not.
+        for word in ["ready", "not_found", "unavailable", "error"] {
+            let state: MessagesStateV1 = serde_json::from_str(&format!("\"{word}\"")).unwrap();
+            assert_eq!(
+                serde_json::to_string(&state).unwrap(),
+                format!("\"{word}\"")
+            );
+        }
+        assert!(serde_json::from_str::<MessagesStateV1>("\"inactive\"").is_err());
+        assert!(serde_json::from_str::<MessagesStateV1>("\"ambiguous\"").is_err());
+    }
+
+    #[test]
+    fn a_request_without_both_ids_is_malformed_not_defaulted() {
+        // Required fields are the substitute-forbidding mechanism: a request
+        // that omits either id fails to deserialize, so there is no shape in
+        // which the provider is left to guess what was meant.
+        assert!(serde_json::from_str::<MessagesRequestV1>(
+            r#"{"session_id":"s1","conversation_id":"c1"}"#
+        )
+        .is_ok());
+        assert!(
+            serde_json::from_str::<MessagesRequestV1>(r#"{"conversation_id":"c1"}"#).is_err(),
+            "a session-less request would be a machine-wide lookup"
         );
-        assert_eq!(
-            advertised.contracts.first().map(|c| c.wire.clone()),
-            Some(vec![WIRE.to_string()]),
-            "v2 travels on the unit's one wire, not a versioned respelling"
+        assert!(
+            serde_json::from_str::<MessagesRequestV1>(r#"{"session_id":"s1"}"#).is_err(),
+            "a conversation-less request would need a default selection"
+        );
+    }
+
+    #[test]
+    fn a_not_found_response_names_no_other_conversation() {
+        // The substitution ban, pinned structurally: `bare(NotFound)` is the
+        // whole answer — no conversation, no binding, no newest.
+        let value =
+            serde_json::to_value(MessagesResponseV1::bare(MessagesStateV1::NotFound)).unwrap();
+        assert_eq!(value["state"], "not_found");
+        assert!(
+            !value
+                .as_object()
+                .is_some_and(|o| o.contains_key("conversation")),
+            "a substituted conversation would be a guess: {value}"
         );
     }
 
     #[test]
     fn a_response_never_serializes_a_filesystem_path() {
-        let candidate = ConversationCandidateV2 {
-            claude_session_id: "abc".into(),
+        let mut response = MessagesResponseV1::bare(MessagesStateV1::Ready);
+        response.conversation = Some(ConversationItemV1 {
+            id: "abc".into(),
             cwd: "/work".into(),
             updated_at: None,
             title: Some("a readable title".into()),
             preview: None,
-        };
-        let json = serde_json::to_string(&candidate).unwrap();
+        });
+        let json = serde_json::to_string(&response).unwrap();
         assert!(
             !json.contains("transcript") && !json.contains(".jsonl"),
-            "the candidate leaks where the transcript is: {json}"
+            "the response leaks where the transcript is: {json}"
         );
+    }
+
+    #[test]
+    fn the_descriptor_names_this_unit_its_owner_and_its_wire() {
+        let d = descriptor().unwrap();
+        assert_eq!(d.id.as_str(), "claude-code.messages");
+        assert_eq!(d.owner, "nession-claude-code");
+        assert_eq!(d.contracts[0].wire, vec![WIRE.to_string()]);
+        assert!(d.validate().is_ok());
     }
 }

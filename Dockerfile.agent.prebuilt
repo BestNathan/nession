@@ -45,8 +45,11 @@ RUN apt-get update && \
 RUN mkdir -p /root/.claude && \
     printf '{"hasCompletedOnboarding":true}\n' > /root/.claude.json
 
-# tmux configuration (mouse, scrollback, vi-mode keys, focus events)
-RUN printf 'set -g mouse on\nset -g history-limit 50000\nsetw -g mode-keys vi\nset -g focus-events on\n' > /root/.tmux.conf
+# tmux configuration (mouse, vi-mode keys, focus events)
+#
+# No history-limit: the agent owns that value now, as a server default it sets
+# itself. See Dockerfile.agent and #321.
+RUN printf 'set -g mouse on\nsetw -g mode-keys vi\nset -g focus-events on\n' > /root/.tmux.conf
 
 # Stable files first — rarely change, always cache-hit
 COPY deploy/nginx.conf.template /etc/nginx/templates/default.conf.template

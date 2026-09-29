@@ -5,7 +5,7 @@ import type { ReactElement } from 'react';
 import { ClaudeCodeWorkspace } from '../../ClaudeCodeWorkspace';
 import { claudeCodeApi } from '../../../ClaudeCodePlugin';
 import type {
-  ClaudeCodeConversationResponse,
+  ClaudeCodeConversationsResponse,
   ClaudeCodeListResponse,
   ClaudeCodeReadResponse,
 } from '../../../types';
@@ -17,7 +17,8 @@ vi.mock('../../../ClaudeCodePlugin', () => ({
   claudeCodeApi: {
     claudeCodeList: vi.fn(),
     claudeCodeRead: vi.fn(),
-    claudeCodeConversation: vi.fn(),
+    claudeCodeConversations: vi.fn(),
+    claudeCodeMessages: vi.fn(),
   },
 }));
 
@@ -29,13 +30,12 @@ vi.mock('../../../ClaudeCodePlugin', () => ({
  * point — so they open the browser first (see `renderConfig`). This answer keeps
  * the view they are not looking at from being an error.
  */
-const noConversations: ClaudeCodeConversationResponse = {
-  state: 'not_found',
-  candidates: [],
+const noConversations: ClaudeCodeConversationsResponse = {
+  // Read, and empty: there is no list-level `not_found` anymore (#1222) — an
+  // empty list is the complete answer the "nothing here" screen renders from.
+  state: 'ready',
   items: [],
   has_more: false,
-  partial_tail: false,
-  skipped: 0,
 };
 
 const agent: Agent = {
@@ -171,8 +171,9 @@ describe('ClaudeCodeWorkspace', () => {
     vi.clearAllMocks();
     vi.mocked(claudeCodeApi.claudeCodeList).mockReset();
     vi.mocked(claudeCodeApi.claudeCodeRead).mockReset();
-    vi.mocked(claudeCodeApi.claudeCodeConversation).mockReset();
-    vi.mocked(claudeCodeApi.claudeCodeConversation).mockResolvedValue(noConversations);
+    vi.mocked(claudeCodeApi.claudeCodeConversations).mockReset();
+    vi.mocked(claudeCodeApi.claudeCodeConversations).mockResolvedValue(noConversations);
+    vi.mocked(claudeCodeApi.claudeCodeMessages).mockReset();
   });
 
   it('opens on the conversation, and keeps configuration one section away', async () => {
@@ -196,20 +197,20 @@ describe('ClaudeCodeWorkspace', () => {
     expect(screen.queryByRole('tab', { name: 'Project' })).not.toBeInTheDocument();
   });
 
-  it('asks the provider which conversation this Session is in, without naming one', async () => {
-    // The client has no say in the choice: it names a Session and nothing else,
-    // so there is no path here that could fall back to a timestamp.
+  it('asks the provider for the list and the binding, and names nothing itself', async () => {
+    // The client has no say in what is open: it names a Session and nothing
+    // else, and only the binding the provider reports can become a `messages`
+    // request — there is no path here that could fall back to a timestamp.
+    // With no binding (this fixture), no conversation is opened at all.
     mockLists();
     render(<ClaudeCodeWorkspace ctx={makeContext()} />);
 
-    await waitFor(() => expect(claudeCodeApi.claudeCodeConversation).toHaveBeenCalled());
-    expect(vi.mocked(claudeCodeApi.claudeCodeConversation).mock.calls[0][0]).toMatchObject({
+    await waitFor(() => expect(claudeCodeApi.claudeCodeConversations).toHaveBeenCalled());
+    expect(vi.mocked(claudeCodeApi.claudeCodeConversations).mock.calls[0][0]).toMatchObject({
       agent_id: 'agent-1',
       session_id: 'agent-1:work',
     });
-    expect(vi.mocked(claudeCodeApi.claudeCodeConversation).mock.calls[0][0]).not.toHaveProperty(
-      'claude_session_id',
-    );
+    expect(claudeCodeApi.claudeCodeMessages).not.toHaveBeenCalled();
   });
 
   it('requests both scopes and renders the global file browser', async () => {

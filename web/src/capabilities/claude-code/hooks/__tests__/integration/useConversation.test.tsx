@@ -2,19 +2,35 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useConversation } from '../../useConversation';
 import { claudeCodeApi } from '../../../ClaudeCodePlugin';
-import type { ClaudeCodeConversationResponse } from '../../../types';
+import type {
+  ClaudeCodeConversationsResponse,
+  ClaudeCodeMessagesResponse,
+} from '../../../types';
 
 vi.mock('../../../ClaudeCodePlugin', () => ({
   claudeCodeApi: {
-    claudeCodeConversation: vi.fn(),
+    claudeCodeConversations: vi.fn(),
+    claudeCodeMessages: vi.fn(),
   },
 }));
 
-function response(overrides: Partial<ClaudeCodeConversationResponse> = {}): ClaudeCodeConversationResponse {
+function conversationsResponse(
+  overrides: Partial<ClaudeCodeConversationsResponse> = {},
+): ClaudeCodeConversationsResponse {
   return {
     state: 'ready',
-    conversation: { claude_session_id: 'claude-1', cwd: '/work' },
-    candidates: [],
+    cwd: '/work',
+    items: [],
+    has_more: false,
+    ...overrides,
+  };
+}
+
+function messagesResponse(
+  overrides: Partial<ClaudeCodeMessagesResponse> = {},
+): ClaudeCodeMessagesResponse {
+  return {
+    state: 'ready',
     items: [],
     has_more: false,
     partial_tail: false,
@@ -24,7 +40,7 @@ function response(overrides: Partial<ClaudeCodeConversationResponse> = {}): Clau
 }
 
 /** One message item, which is all these tests care about the shape of. */
-function message(id: string): NonNullable<ClaudeCodeConversationResponse['items']>[number] {
+function message(id: string): NonNullable<ClaudeCodeMessagesResponse['items']>[number] {
   return { id, kind: 'message', role: 'user', content: [{ type: 'text', text: id }] };
 }
 
@@ -36,80 +52,139 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
+const conversations = vi.mocked(claudeCodeApi.claudeCodeConversations);
+const messages = vi.mocked(claudeCodeApi.claudeCodeMessages);
+
 describe('useConversation', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(claudeCodeApi.claudeCodeConversation).mockReset();
+    conversations.mockReset();
+    messages.mockReset();
   });
 
-  it('asks for the bound conversation without naming one', async () => {
-    // The mechanism of "auto-open on an exact binding" (#1005 criterion 2), and
-    // the reason this hook cannot pick wrongly: the request carries no
-    // `claude_session_id`, so the side holding the binding decides. Nothing here
-    // could fall back to the newest transcript, because it never sees a list to
-    // fall back *from*.
-    vi.mocked(claudeCodeApi.claudeCodeConversation).mockResolvedValue(response());
+  it('opens the conversation the binding names — and only that one', async () => {
+    // The mechanism of "auto-open on an exact binding" (#1005 criterion 2) in
+    // the only form #1222 allows: the list answers with the exact id, and the
+    // messages request carries *that* id. Nothing here could fall back to the
+    // newest transcript, because the client never names a conversation the
+    // provider did not name first.
+    conversations.mockResolvedValue(
+      conversationsResponse({
+        items: [{ id: 'claude-1', cwd: '/work' }],
+        binding: { conversation_id: 'claude-1', activity: 'active' },
+      }),
+    );
+    messages.mockResolvedValue(
+      messagesResponse({ conversation: { id: 'claude-1', cwd: '/work' }, activity: 'active' }),
+    );
 
     const { result } = renderHook(() => useConversation({ agentId: 'a', sessionId: 'a:s' }));
 
-    await waitFor(() => expect(result.current.view.state).toBe('ready'));
-    const sent = vi.mocked(claudeCodeApi.claudeCodeConversation).mock.calls[0][0];
-    expect(sent).toMatchObject({ agent_id: 'a', session_id: 'a:s' });
-    expect(sent).not.toHaveProperty('claude_session_id');
+    await waitFor(() => expect(result.current.view.conversation?.id).toBe('claude-1'));
+    const sent = messages.mock.calls[0][0];
+    expect(sent).toMatchObject({ agent_id: 'a', session_id: 'a:s', conversation_id: 'claude-1' });
+  });
+
+  it('opens nothing when there is no binding — the list is the answer', async () => {
+    // #1222: an unbound session is not an `ambiguous` state to resolve, it is a
+    // list the user has not chosen from yet. No messages request may leave the
+    // client until they do.
+    conversations.mockResolvedValue(
+      conversationsResponse({ items: [{ id: 'claude-1', cwd: '/work' }] }),
+    );
+
+    const { result } = renderHook(() => useConversation({ agentId: 'a', sessionId: 'a:s' }));
+
+    await waitFor(() => expect(result.current.view.listState).toBe('ready'));
+    expect(result.current.view.conversations.map((c) => c.id)).toEqual(['claude-1']);
+    expect(result.current.view.conversation).toBeNull();
+    expect(messages).not.toHaveBeenCalled();
   });
 
   it('drops an answer that belongs to the Session the user has left', async () => {
     // #1005 criterion 9. The old Session's page arrives *after* the new one is on
     // screen, and rendering it would show another Session's conversation under
     // this one's name — the failure success criterion 1 is about.
-    const slow = deferred<ClaudeCodeConversationResponse>();
-    vi.mocked(claudeCodeApi.claudeCodeConversation)
+    conversations.mockImplementation((req) => {
+      const id = req.session_id === 'a:first' ? 'claude-A' : 'claude-B';
+      return Promise.resolve(
+        conversationsResponse({
+          items: [{ id, cwd: '/x' }],
+          binding: { conversation_id: id, activity: 'active' },
+        }),
+      );
+    });
+    const slow = deferred<ClaudeCodeMessagesResponse>();
+    messages
       .mockReturnValueOnce(slow.promise)
-      .mockResolvedValueOnce(response({ conversation: { claude_session_id: 'claude-B', cwd: '/b' } }));
+      .mockResolvedValue(
+        messagesResponse({ conversation: { id: 'claude-B', cwd: '/b' }, activity: 'active' }),
+      );
 
     const { result, rerender } = renderHook(
       ({ sessionId }) => useConversation({ agentId: 'a', sessionId }),
       { initialProps: { sessionId: 'a:first' } },
     );
 
+    // The abandoned request must actually be *abandoned*: rerendering before
+    // it is in flight would hang the live one on `slow` instead.
+    await waitFor(() => expect(messages).toHaveBeenCalledTimes(1));
+    expect(messages.mock.calls[0][0]).toMatchObject({
+      session_id: 'a:first',
+      conversation_id: 'claude-A',
+    });
+
     rerender({ sessionId: 'a:second' });
-    await waitFor(() => expect(result.current.view.conversation?.claude_session_id).toBe('claude-B'));
+    await waitFor(() => expect(result.current.view.conversation?.id).toBe('claude-B'));
 
     // Now the abandoned request answers.
     await act(async () => {
-      slow.resolve(response({ conversation: { claude_session_id: 'claude-A', cwd: '/a' } }));
+      slow.resolve(
+        messagesResponse({ conversation: { id: 'claude-A', cwd: '/a' }, activity: 'active' }),
+      );
       await slow.promise;
     });
 
-    expect(result.current.view.conversation?.claude_session_id).toBe('claude-B');
+    expect(result.current.view.conversation?.id).toBe('claude-B');
   });
 
-  it('sends the chosen conversation back as the selection', async () => {
-    vi.mocked(claudeCodeApi.claudeCodeConversation).mockResolvedValue(response());
+  it('sends the chosen conversation as an explicit id', async () => {
+    conversations.mockResolvedValue(
+      conversationsResponse({ items: [{ id: 'claude-1', cwd: '/work' }] }),
+    );
+    messages.mockResolvedValue(
+      messagesResponse({ conversation: { id: 'claude-2', cwd: '/work' }, activity: 'inactive' }),
+    );
 
     const { result } = renderHook(() => useConversation({ agentId: 'a', sessionId: 'a:s' }));
-    await waitFor(() => expect(result.current.view.state).toBe('ready'));
+    await waitFor(() => expect(result.current.view.listState).toBe('ready'));
 
     act(() => result.current.select('claude-2'));
 
     await waitFor(() => {
-      const calls = vi.mocked(claudeCodeApi.claudeCodeConversation).mock.calls;
-      expect(calls[calls.length - 1][0]).toMatchObject({ claude_session_id: 'claude-2' });
+      const calls = messages.mock.calls;
+      expect(calls[calls.length - 1][0]).toMatchObject({ conversation_id: 'claude-2' });
     });
   });
 
   it('keeps older items in front of the newest page after paging back', async () => {
-    vi.mocked(claudeCodeApi.claudeCodeConversation)
+    conversations.mockResolvedValue(
+      conversationsResponse({
+        items: [{ id: 'claude-1', cwd: '/work' }],
+        binding: { conversation_id: 'claude-1', activity: 'active' },
+      }),
+    );
+    messages
       .mockResolvedValueOnce(
-        response({
+        messagesResponse({
+          conversation: { id: 'claude-1', cwd: '/work' },
+          activity: 'active',
           items: [message('c')],
           next_cursor: '1',
           has_more: true,
         }),
       )
-      .mockResolvedValueOnce(
-        response({ items: [message('a')], next_cursor: null }),
-      );
+      .mockResolvedValueOnce(messagesResponse({ items: [message('a')], next_cursor: null }));
 
     const { result } = renderHook(() => useConversation({ agentId: 'a', sessionId: 'a:s' }));
     await waitFor(() => expect(result.current.view.items.map((i) => i.id)).toEqual(['c']));
@@ -122,25 +197,34 @@ describe('useConversation', () => {
     expect(result.current.view.hasMore).toBe(false);
   });
 
-  it('asks again on its own while the conversation is running', async () => {
-    // #1005 criterion 3: a new turn appears without the user reloading.
+  it('polls the messages unit only — never the list (#1222)', async () => {
+    // The timeline is the thing that grows under the reader; the list is
+    // re-asked for on an explicit reload, not on a timer.
     vi.useFakeTimers();
     try {
-      vi.mocked(claudeCodeApi.claudeCodeConversation).mockResolvedValue(response({ state: 'ready' }));
+      conversations.mockResolvedValue(
+        conversationsResponse({
+          items: [{ id: 'claude-1', cwd: '/work' }],
+          binding: { conversation_id: 'claude-1', activity: 'active' },
+        }),
+      );
+      messages.mockResolvedValue(
+        messagesResponse({ conversation: { id: 'claude-1', cwd: '/work' }, activity: 'active' }),
+      );
 
       const { result } = renderHook(() => useConversation({ agentId: 'a', sessionId: 'a:s' }));
       await act(async () => {
         await vi.advanceTimersByTimeAsync(0);
       });
-      expect(result.current.view.state).toBe('ready');
-      const afterFirstLoad = vi.mocked(claudeCodeApi.claudeCodeConversation).mock.calls.length;
+      expect(result.current.view.messagesState).toBe('ready');
+      const listCalls = conversations.mock.calls.length;
+      const messageCalls = messages.mock.calls.length;
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(3100);
       });
-      expect(vi.mocked(claudeCodeApi.claudeCodeConversation).mock.calls.length).toBeGreaterThan(
-        afterFirstLoad,
-      );
+      expect(messages.mock.calls.length).toBeGreaterThan(messageCalls);
+      expect(conversations.mock.calls.length).toBe(listCalls);
     } finally {
       vi.useRealTimers();
     }
@@ -149,17 +233,25 @@ describe('useConversation', () => {
   it('does not drop an older page when a poll overlaps (#1190)', async () => {
     vi.useFakeTimers();
     try {
-      const olderDeferred = deferred<ClaudeCodeConversationResponse>();
-      vi.mocked(claudeCodeApi.claudeCodeConversation)
+      conversations.mockResolvedValue(
+        conversationsResponse({
+          items: [{ id: 'claude-1', cwd: '/work' }],
+          binding: { conversation_id: 'claude-1', activity: 'active' },
+        }),
+      );
+      const olderDeferred = deferred<ClaudeCodeMessagesResponse>();
+      messages
         .mockResolvedValueOnce(
-          response({
+          messagesResponse({
+            conversation: { id: 'claude-1', cwd: '/work' },
+            activity: 'active',
             items: [message('c')],
             next_cursor: '1',
             has_more: true,
           }),
         )
         .mockReturnValueOnce(olderDeferred.promise)
-        .mockResolvedValueOnce(response({ items: [message('c')] }));
+        .mockResolvedValueOnce(messagesResponse({ items: [message('c')] }));
 
       const { result } = renderHook(() => useConversation({ agentId: 'a', sessionId: 'a:s' }));
       await act(async () => {
@@ -177,7 +269,7 @@ describe('useConversation', () => {
       });
 
       await act(async () => {
-        olderDeferred.resolve(response({ items: [message('a')], next_cursor: null }));
+        olderDeferred.resolve(messagesResponse({ items: [message('a')], next_cursor: null }));
         await loadPromise;
       });
 
@@ -188,9 +280,17 @@ describe('useConversation', () => {
   });
 
   it('keeps readable items when older pagination fails (#1190)', async () => {
-    vi.mocked(claudeCodeApi.claudeCodeConversation)
+    conversations.mockResolvedValue(
+      conversationsResponse({
+        items: [{ id: 'claude-1', cwd: '/work' }],
+        binding: { conversation_id: 'claude-1', activity: 'active' },
+      }),
+    );
+    messages
       .mockResolvedValueOnce(
-        response({
+        messagesResponse({
+          conversation: { id: 'claude-1', cwd: '/work' },
+          activity: 'active',
           items: [message('c')],
           next_cursor: '1',
           has_more: true,
@@ -215,7 +315,15 @@ describe('useConversation', () => {
     // traffic for a file that is not being written to.
     vi.useFakeTimers();
     try {
-      vi.mocked(claudeCodeApi.claudeCodeConversation).mockResolvedValue(response({ state: 'inactive' }));
+      conversations.mockResolvedValue(
+        conversationsResponse({
+          items: [{ id: 'claude-1', cwd: '/work' }],
+          binding: { conversation_id: 'claude-1', activity: 'inactive' },
+        }),
+      );
+      messages.mockResolvedValue(
+        messagesResponse({ conversation: { id: 'claude-1', cwd: '/work' }, activity: 'inactive' }),
+      );
 
       const { result } = renderHook(() => useConversation({ agentId: 'a', sessionId: 'a:s' }));
       await act(async () => {
@@ -223,15 +331,57 @@ describe('useConversation', () => {
       });
       // Without this the test would pass for the wrong reason: nothing polling
       // and nothing loading look identical from the outside.
-      expect(result.current.view.state).toBe('inactive');
-      const afterFirstLoad = vi.mocked(claudeCodeApi.claudeCodeConversation).mock.calls.length;
+      expect(result.current.view.activity).toBe('inactive');
+      const messageCalls = messages.mock.calls.length;
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(10_000);
       });
-      expect(vi.mocked(claudeCodeApi.claudeCodeConversation).mock.calls.length).toBe(afterFirstLoad);
+      expect(messages.mock.calls.length).toBe(messageCalls);
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('keeps polling when the host cannot say whether Claude is running', async () => {
+    // `unknown` makes no claim — but a live conversation frozen on screen is
+    // worse than a re-read that changes nothing, so the timer stays on.
+    vi.useFakeTimers();
+    try {
+      conversations.mockResolvedValue(
+        conversationsResponse({
+          items: [{ id: 'claude-1', cwd: '/work' }],
+          binding: { conversation_id: 'claude-1', activity: 'unknown' },
+        }),
+      );
+      messages.mockResolvedValue(
+        messagesResponse({ conversation: { id: 'claude-1', cwd: '/work' }, activity: 'unknown' }),
+      );
+
+      const { result } = renderHook(() => useConversation({ agentId: 'a', sessionId: 'a:s' }));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(result.current.view.activity).toBe('unknown');
+      const messageCalls = messages.mock.calls.length;
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3100);
+      });
+      expect(messages.mock.calls.length).toBeGreaterThan(messageCalls);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('re-asks the list only when the user reloads', async () => {
+    conversations.mockResolvedValue(conversationsResponse());
+    const { result } = renderHook(() => useConversation({ agentId: 'a', sessionId: 'a:s' }));
+    await waitFor(() => expect(result.current.view.listState).toBe('ready'));
+    const listCalls = conversations.mock.calls.length;
+
+    act(() => result.current.reload());
+
+    await waitFor(() => expect(conversations.mock.calls.length).toBe(listCalls + 1));
   });
 });

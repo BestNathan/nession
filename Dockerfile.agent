@@ -99,8 +99,16 @@ RUN apt-get update && \
 RUN mkdir -p /root/.claude && \
     printf '{"hasCompletedOnboarding":true}\n' > /root/.claude.json
 
-# tmux configuration (mouse, scrollback, vi-mode keys, focus events)
-RUN printf 'set -g mouse on\nset -g history-limit 50000\nsetw -g mode-keys vi\nset -g focus-events on\n' > /root/.tmux.conf
+# tmux configuration (mouse, vi-mode keys, focus events)
+#
+# history-limit is deliberately NOT here. It is the agent's decision, not the
+# image's: an agent on bare metal has no /root/.tmux.conf, so an image-set depth
+# meant a container agent and a bare-metal one retained different amounts. The
+# agent now sets it as a server default at startup and before every create
+# (`crates/nession-agent/src/tmux/mod.rs`, `HISTORY_LIMIT_LINES`), which also
+# wins over this file — a file is read when the server starts, the option is set
+# after. See #321.
+RUN printf 'set -g mouse on\nsetw -g mode-keys vi\nset -g focus-events on\n' > /root/.tmux.conf
 
 COPY --from=rust-builder /build/target/release/nession-agent /usr/local/bin/nession-agent
 COPY --from=web-builder /build/dist /usr/share/nginx/html
