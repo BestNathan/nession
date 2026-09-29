@@ -56,7 +56,7 @@ function unbound(overrides: Partial<ConversationViewState> = {}): ConversationVi
  */
 function renderView(view: ConversationViewState, handlers: Partial<{
   onSelect: (id: string | null) => void;
-  onLoadOlder: () => void;
+  onLoadOlder: () => boolean;
   onReload: () => void;
 }> = {}, layout: 'master-detail' | 'push' = 'push') {
   const onSelect = handlers.onSelect ?? vi.fn();

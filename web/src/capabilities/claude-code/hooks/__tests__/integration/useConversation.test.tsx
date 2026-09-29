@@ -259,10 +259,11 @@ describe('useConversation', () => {
       });
       expect(result.current.view.items.map((i) => i.id)).toEqual(['c']);
 
-      let loadPromise: Promise<void> = Promise.resolve();
+      let engaged = false;
       act(() => {
-        loadPromise = result.current.loadOlder();
+        engaged = result.current.loadOlder();
       });
+      expect(engaged).toBe(true);
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(3100);
@@ -270,7 +271,7 @@ describe('useConversation', () => {
 
       await act(async () => {
         olderDeferred.resolve(messagesResponse({ items: [message('a')], next_cursor: null }));
-        await loadPromise;
+        await vi.advanceTimersByTimeAsync(0);
       });
 
       expect(result.current.view.items.map((i) => i.id)).toEqual(['a', 'c']);
