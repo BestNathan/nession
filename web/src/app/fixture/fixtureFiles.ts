@@ -6,12 +6,26 @@ import type { FileEntry } from '@/capabilities/files';
  */
 export const FIXTURE_MODIFIED_TS = 1_756_000_000;
 
+/** Large JSONL for virtual-scroll geometry checks (#1199). */
+function buildFixtureJsonl(recordCount: number): string {
+  return Array.from({ length: recordCount }, (_, i) =>
+    JSON.stringify({
+      id: i + 1,
+      kind: 'fixture-event',
+      payload: `row-${i + 1}-${'z'.repeat(48)}`,
+    }),
+  ).join('\n');
+}
+
+export const FIXTURE_JSONL_EVENTS = buildFixtureJsonl(120);
+
 /**
  * Deterministic file contents for the viewer — keyed by path. File sizes are
  * derived from these at module load, so the size column and readFile's
  * total_size always agree.
  */
 export const FIXTURE_FILE_CONTENTS: Record<string, string> = {
+  'fixtures/events.jsonl': FIXTURE_JSONL_EVENTS,
   'docs/design/visual-language.md': '# Visual Language\n\nTerminal dominates. Chrome recedes.\n',
   'docs/design/composition.md': '# Layout / Composition\n\nChrome yields first, the work surface yields last.\n',
   'web/src/App.tsx': "export function App() {\n  return <div>session-first</div>;\n}\n",
@@ -27,6 +41,14 @@ export const FIXTURE_FILE_CONTENTS: Record<string, string> = {
  * wall clock; the fixture data itself is static.
  */
 const FIXTURE_FILE_BASE: Array<Omit<FileEntry, 'size'>> = [
+  { path: 'fixtures', name: 'fixtures', full_path: '/fixtures', is_dir: true, modified: FIXTURE_MODIFIED_TS },
+  {
+    path: 'fixtures/events.jsonl',
+    name: 'events.jsonl',
+    full_path: '/fixtures/events.jsonl',
+    is_dir: false,
+    modified: FIXTURE_MODIFIED_TS,
+  },
   { path: 'docs/design', name: 'design', full_path: '/docs/design', is_dir: true, modified: FIXTURE_MODIFIED_TS },
   { path: 'docs/design/visual-language.md', name: 'visual-language.md', full_path: '/docs/design/visual-language.md', is_dir: false, modified: FIXTURE_MODIFIED_TS },
   { path: 'docs/design/composition.md', name: 'composition.md', full_path: '/docs/design/composition.md', is_dir: false, modified: FIXTURE_MODIFIED_TS },

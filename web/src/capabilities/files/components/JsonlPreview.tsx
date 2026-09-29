@@ -1,14 +1,12 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { useVirtualizer } from '@tanstack/react-virtual';
+import { observeElementRect as defaultObserveElementRect, useVirtualizer } from '@tanstack/react-virtual';
 import { parseJsonlRecords, type JsonlRecord } from '../model/jsonParse';
 import { JsonlRecord as JsonlRecordRow } from './JsonlRecord';
+import { readScrollportHeight, syncJsonlScrollportHeight } from './jsonlScrollport';
 
-/** Line label + padded section + capped compact body (measured after mount). */
-const ESTIMATED_COLLAPSED_PX = 176;
-const ESTIMATED_EXPANDED_PX = 360;
+/** Bootstrap only — real height comes from measureElement + ResizeObserver (#1199 review). */
+const ESTIMATE_BEFORE_MEASURE_PX = 96;
 const VIRTUAL_OVERSCAN = 6;
-/** Below this count, a plain list avoids virtual overlap glitches in tight viewports. */
-const VIRTUALIZE_MIN_RECORDS = 48;
 
 interface JsonlPreviewProps {
   content: string;
@@ -25,36 +23,35 @@ export function JsonlPreview({ content }: JsonlPreviewProps) {
     if (!el) {
       return;
     }
-    const sync = () => {
-      setScrollportReady(el.clientHeight > 0);
+    const syncScrollportHeight = () => {
+      syncJsonlScrollportHeight(el);
+      setScrollportReady(readScrollportHeight(el) > 0);
     };
-    sync();
-    const observer = new ResizeObserver(sync);
+    syncScrollportHeight();
+    const parent = el.parentElement;
+    if (!parent) {
+      return;
+    }
+    const observer = new ResizeObserver(syncScrollportHeight);
+    observer.observe(parent);
     observer.observe(el);
     return () => observer.disconnect();
   }, [records.length]);
 
-  const estimateSize = useCallback(
-    (index: number) => (expandedLines.has(records[index]?.lineNumber ?? -1) ? ESTIMATED_EXPANDED_PX : ESTIMATED_COLLAPSED_PX),
-    [expandedLines, records],
-  );
-
-  const shouldVirtualize = scrollportReady && records.length >= VIRTUALIZE_MIN_RECORDS;
-
   const virtualizer = useVirtualizer({
     count: records.length,
     getScrollElement: () => parentRef.current,
-    estimateSize,
+    estimateSize: () => ESTIMATE_BEFORE_MEASURE_PX,
     overscan: VIRTUAL_OVERSCAN,
     getItemKey: (index) => records[index]?.lineNumber ?? index,
-    enabled: shouldVirtualize,
+    enabled: scrollportReady,
+    observeElementRect: (instance, cb) =>
+      defaultObserveElementRect(instance, (rect) => {
+        const el = instance.scrollElement;
+        const height = el ? readScrollportHeight(el) : rect.height;
+        cb(height > 0 ? { ...rect, height } : rect);
+      }),
   });
-
-  useLayoutEffect(() => {
-    if (shouldVirtualize) {
-      virtualizer.measure();
-    }
-  }, [expandedLines, records, shouldVirtualize, virtualizer]);
 
   const toggleLine = useCallback((lineNumber: number) => {
     setExpandedLines((prev) => {
@@ -76,31 +73,13 @@ export function JsonlPreview({ content }: JsonlPreviewProps) {
     );
   }
 
-  const renderRecord = (record: JsonlRecord) => (
-    <JsonlRecordRow
-      record={record}
-      expanded={expandedLines.has(record.lineNumber)}
-      onToggleExpanded={() => toggleLine(record.lineNumber)}
-    />
-  );
-
-  if (!shouldVirtualize) {
-    return (
-      <div ref={parentRef} className="overflow-y-auto h-full min-w-0">
-        {records.map((record) => (
-          <div key={record.lineNumber}>{renderRecord(record)}</div>
-        ))}
-      </div>
-    );
-  }
-
-  const virtualItems = virtualizer.getVirtualItems();
+  const virtualItems = scrollportReady ? virtualizer.getVirtualItems() : [];
 
   return (
-    <div ref={parentRef} className="overflow-y-auto h-full min-w-0 overscroll-contain">
+    <div ref={parentRef} data-testid="jsonl-preview-scroll" className="overflow-y-auto h-full min-w-0">
       <div
         style={{
-          height: `${virtualizer.getTotalSize()}px`,
+          height: scrollportReady ? `${virtualizer.getTotalSize()}px` : undefined,
           width: '100%',
           position: 'relative',
         }}
@@ -112,13 +91,16 @@ export function JsonlPreview({ content }: JsonlPreviewProps) {
               key={virtualRow.key}
               data-index={virtualRow.index}
               ref={virtualizer.measureElement}
-              className="left-0 top-0 w-full overflow-hidden isolate"
+              className="absolute left-0 top-0 w-full"
               style={{
-                position: 'absolute',
-                transform: `translate3d(0, ${virtualRow.start}px, 0)`,
+                transform: `translateY(${virtualRow.start}px)`,
               }}
             >
-              {renderRecord(record)}
+              <JsonlRecordRow
+                record={record}
+                expanded={expandedLines.has(record.lineNumber)}
+                onToggleExpanded={() => toggleLine(record.lineNumber)}
+              />
             </div>
           );
         })}

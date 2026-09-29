@@ -6,6 +6,7 @@ import { JsonCompactValue } from './JsonCompactValue';
 import { JsonScalar } from './JsonScalar';
 import { jsonTreeMonoClass } from './jsonTreeClasses';
 import { jsonSyntax } from './jsonTreeSyntax';
+import { jsonKvRowGridClass, jsonKvValueCellClass } from './jsonTreeRowLayout';
 import { formatJsonPath, pathKey } from './jsonPath';
 
 interface JsonTreeInspectorProps {
@@ -24,22 +25,22 @@ interface NodeProps {
   propertyKey?: string | number;
 }
 
-const rowBaselineClass = cn(
-  jsonTreeMonoClass(),
-  'flex flex-wrap items-baseline gap-x-1 py-0.5 min-w-0',
-);
-
 function isExpandable(value: unknown): value is Record<string, unknown> | unknown[] {
   return typeof value === 'object' && value !== null;
 }
 
 function PropertyKeyLabel({ name }: { name: string | number }) {
-  return <span className={cn(jsonSyntax.key, 'shrink-0')}>{JSON.stringify(name)}</span>;
+  return <span className={cn(jsonSyntax.key, 'whitespace-nowrap')}>{JSON.stringify(name)}</span>;
 }
 
-function PropertyKeyPrefix({ propertyKey }: { propertyKey?: string | number }) {
+function JsonKeyValueCells({ propertyKey }: { propertyKey?: string | number }) {
   if (propertyKey === undefined) {
-    return null;
+    return (
+      <>
+        <span aria-hidden />
+        <span aria-hidden />
+      </>
+    );
   }
   return (
     <>
@@ -53,9 +54,11 @@ function JsonScalarTreeRow({ path, value, propertyKey }: { path: string; value: 
   const scalar = value as string | number | boolean | null;
   return (
     <JsonCopyMenu path={path} value={value}>
-      <div role="treeitem" aria-selected={false} className={rowBaselineClass} tabIndex={-1}>
-        <PropertyKeyPrefix propertyKey={propertyKey} />
-        <JsonScalar value={scalar} allowExpand />
+      <div role="treeitem" aria-selected={false} className={jsonKvRowGridClass} tabIndex={-1}>
+        <JsonKeyValueCells propertyKey={propertyKey} />
+        <div className={jsonKvValueCellClass}>
+          <JsonScalar value={scalar} allowExpand />
+        </div>
       </div>
     </JsonCopyMenu>
   );
@@ -92,26 +95,27 @@ function JsonExpandableDisclosureRow({
         aria-expanded={open}
         tabIndex={propertyKey === undefined ? 0 : -1}
         className={cn(
-          rowBaselineClass,
-          propertyKey === undefined && 'items-start',
+          jsonKvRowGridClass,
           'rounded-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
         )}
         onKeyDown={onKeyDown}
       >
-        <PropertyKeyPrefix propertyKey={propertyKey} />
-        <button
-          type="button"
-          className="shrink-0 text-muted-foreground hover:text-foreground self-center"
-          aria-label={open ? 'Collapse' : 'Expand'}
-          onClick={onToggle}
-        >
-          <ChevronRight className={cn('h-3 w-3 transition-transform', open && 'rotate-90')} />
-        </button>
-        {!open ? (
-          <JsonCompactValue value={value} depth={0} inline />
-        ) : (
-          <span className={jsonSyntax.bracket}>{isArray ? '[' : '{'}</span>
-        )}
+        <JsonKeyValueCells propertyKey={propertyKey} />
+        <div className={cn(jsonKvValueCellClass, 'flex flex-wrap items-baseline gap-x-1')}>
+          <button
+            type="button"
+            className="shrink-0 text-muted-foreground hover:text-foreground"
+            aria-label={open ? 'Collapse' : 'Expand'}
+            onClick={onToggle}
+          >
+            <ChevronRight className={cn('h-3 w-3 transition-transform', open && 'rotate-90')} />
+          </button>
+          {!open ? (
+            <JsonCompactValue value={value} depth={0} inline />
+          ) : (
+            <span className={jsonSyntax.bracket}>{isArray ? '[' : '{'}</span>
+          )}
+        </div>
       </div>
     </JsonCopyMenu>
   );

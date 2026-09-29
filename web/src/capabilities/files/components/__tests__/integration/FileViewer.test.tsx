@@ -344,7 +344,11 @@ describe('FileViewer JSON / JSONL integration (#1199)', () => {
         mime_type: 'application/x-ndjson',
       }),
     });
-    render(<FileViewer fileOps={ops} path="/test/events.jsonl" filename="events.jsonl" onClose={vi.fn()} />);
+    render(
+      <div style={{ height: 600, display: 'flex', flexDirection: 'column' }}>
+        <FileViewer fileOps={ops} path="/test/events.jsonl" filename="events.jsonl" onClose={vi.fn()} />
+      </div>,
+    );
 
     await waitFor(() => {
       expect(screen.getByText('Line 1')).toBeInTheDocument();
