@@ -92,6 +92,42 @@ pub fn bound(mut capture: Vec<u8>) -> Bounded {
     }
 }
 
+/// A capture, turned into bytes a terminal can be *fed*.
+///
+/// **The capture's line separator is LF, and a terminal's is not.** Measured
+/// against a live pane: `capture-pane -p` emits `41 41 41 0a` for a line `AAA`
+/// — a bare newline. The live stream from the same pane carries `\r\n`, because
+/// the tty's output post-processing (ONLCR) is upstream of tmux, and it is the
+/// *grid* that loses it: a capture is a reconstruction of a screen, and a screen
+/// has no carriage returns in it.
+///
+/// That difference is invisible until it is written into xterm with
+/// `convertEol: false` — where LF moves down and leaves the cursor in the same
+/// **column**, so every line starts where the previous one ended and the
+/// history arrives as a diagonal. It was found in a screenshot rather than by a
+/// test: the e2e assertions are about *content*, and the content was all there.
+///
+/// So the CR is restored here, which is the same act as [`mode_escapes`]: the
+/// capture is a screen image, and this module is where a screen image becomes a
+/// stream. An LF that already has a CR in front of it is left alone — tmux does
+/// not emit one today, and a client that received `\r\r\n` would be no worse off
+/// (a second CR at column 0 is a no-op), but a translation that doubles a
+/// separator it was given is a translation that will eventually be wrong.
+///
+/// [`mode_escapes`]: self::mode_escapes
+pub fn as_terminal_stream(capture: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(capture.len() + capture.len() / 40 + 16);
+    let mut previous: Option<u8> = None;
+    for &byte in capture {
+        if byte == b'\n' && previous != Some(b'\r') {
+            out.push(b'\r');
+        }
+        out.push(byte);
+        previous = Some(byte);
+    }
+    out
+}
+
 /// The escapes that put a **fresh** terminal into the modes `flags` reports,
 /// ready to be written ahead of a capture.
 ///
@@ -174,6 +210,42 @@ mod tests {
             cursor_visible: true,
             ..PaneModeFlags::default()
         }
+    }
+
+    #[test]
+    fn every_line_gets_the_carriage_return_the_capture_cannot_express() {
+        // The mutation this pins is deleting the translation: an LF-only
+        // capture written into xterm with `convertEol: false` leaves the cursor
+        // in the same column, so the history arrives as a diagonal — which is
+        // how it was found, in a screenshot, with every content assertion green.
+        assert_eq!(
+            as_terminal_stream(b"one\ntwo\n"),
+            b"one\r\ntwo\r\n".to_vec()
+        );
+    }
+
+    #[test]
+    fn an_lf_that_already_has_its_carriage_return_is_left_alone() {
+        // Not because tmux emits one — it does not — but because a translation
+        // that doubles a separator it was handed is one that will be wrong the
+        // first time something upstream does.
+        assert_eq!(
+            as_terminal_stream(b"one\r\ntwo\r\n"),
+            b"one\r\ntwo\r\n".to_vec()
+        );
+    }
+
+    #[test]
+    fn the_translation_does_not_touch_anything_else() {
+        // The capture is a screen image with SGR attributes in it, and a
+        // translation that rewrote bytes it did not understand would be a
+        // capture corruptor. A bare CR, an ESC, and a non-ASCII octet all pass
+        // through untouched.
+        let input: &[u8] = b"\x1b[31mred\x1b[0m\rmid\n\xc3\xa9\n";
+        assert_eq!(
+            as_terminal_stream(input),
+            b"\x1b[31mred\x1b[0m\rmid\r\n\xc3\xa9\r\n".to_vec()
+        );
     }
 
     #[test]

@@ -453,6 +453,20 @@ async fn a_plain_first_attach_sends_the_history_it_was_asked_for() {
         String::from_utf8_lossy(&bytes)
     );
 
+    // **Every line ends CRLF, not LF.** A capture is a screen reconstruction
+    // and a screen has no carriage returns in it — measured: `capture-pane -p`
+    // emits `41 41 41 0a` for a line `AAA` — while the live stream from the same
+    // pane carries `\r\n`, because the tty's ONLCR runs upstream of tmux.
+    // Written into xterm with `convertEol: false`, an LF-only capture leaves the
+    // cursor in the same column, so the history arrives as a diagonal. Found in
+    // a screenshot, with every content assertion green.
+    assert!(
+        bytes.windows(2).any(|w| w == b"\r\n"),
+        "the snapshot has no CRLF, so a terminal fed it would not start its \
+         lines at column zero: {:?}",
+        String::from_utf8_lossy(&bytes[..bytes.len().min(120)])
+    );
+
     // **The mode, in front of the text.** This is the half a `capture-pane` can
     // never supply and the reason `pane_mode_flags` exists: the pane is in
     // application-cursor mode, `capture-pane -e` carries only SGR attributes

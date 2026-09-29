@@ -579,18 +579,22 @@ async fn send_bootstrap(
             Vec::new()
         }
     };
-    let mut bounded = crate::server::bootstrap::bound(capture);
-    if !modes.is_empty() {
-        // In front, so the application's screen is entered before its text is
-        // written into it. Prepended after `bound` rather than before: the
-        // escapes are under 100 bytes and constant, and letting them count
-        // against the ceiling would make the ceiling a different number of
-        // history bytes depending on which modes happened to be on.
-        let mut with_modes = Vec::with_capacity(modes.len() + bounded.bytes.len());
-        with_modes.extend_from_slice(&modes);
-        with_modes.extend_from_slice(&bounded.bytes);
-        bounded.bytes = with_modes;
-    }
+    // The ceiling is applied to the *capture*, before the two translations
+    // below. Both of them grow the frame — the escapes by under 100 bytes, the
+    // CRs by one per line — and counting either against the ceiling would make
+    // it a different number of history bytes depending on which modes happened
+    // to be on and how the lines happened to be split.
+    let bounded = crate::server::bootstrap::bound(capture);
+    let text = crate::server::bootstrap::as_terminal_stream(&bounded.bytes);
+    let mut bytes = Vec::with_capacity(modes.len() + text.len());
+    // Modes first, so the application's screen is entered before its text is
+    // written into it.
+    bytes.extend_from_slice(&modes);
+    bytes.extend_from_slice(&text);
+    let bounded = crate::server::bootstrap::Bounded {
+        bytes,
+        truncated: bounded.truncated,
+    };
     use base64::Engine;
     let payload = TerminalOutputPayload {
         session_name: session_name.to_string(),
