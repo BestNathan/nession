@@ -1,5 +1,8 @@
 import { LayoutPanelTop, SquareTerminal } from 'lucide-react';
 
+import { surfaceDestinationActionBandClass } from '@/product/workspace/patterns/surfaceDestinationStyles';
+import { cn } from '@/shared/lib/utils';
+
 export type Surface = 'terminal' | 'workspace';
 
 export interface SurfaceDestinationActionProps {
@@ -50,7 +53,10 @@ export function SurfaceDestinationAction({
       title={label}
       data-testid={`surface-action-open-${destination}`}
       onClick={() => onOpen()}
-      className="pointer-events-auto flex size-[length:var(--control-md)] shrink-0 items-center justify-center rounded-full bg-[color:var(--terminal-capsule-surface)] text-muted-foreground shadow-[var(--elevation-floating)] backdrop-blur-md transition-colors duration-[var(--motion-shell-duration)] ease-[var(--motion-shell-ease)] hover:text-foreground focus-visible:text-foreground motion-reduce:transition-none"
+      className={cn(
+        'pointer-events-auto flex shrink-0 items-center justify-center rounded-full bg-[color:var(--terminal-capsule-surface)] text-muted-foreground shadow-[var(--elevation-floating)] backdrop-blur-md transition-colors duration-[var(--motion-shell-duration)] ease-[var(--motion-shell-ease)] hover:text-foreground focus-visible:text-foreground motion-reduce:transition-none',
+        surfaceDestinationActionBandClass,
+      )}
     >
       <Icon className="size-[length:var(--icon-md)]" aria-hidden />
     </button>

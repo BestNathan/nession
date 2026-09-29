@@ -66,13 +66,12 @@ test('the Workspace destination action sits beside the capsule and covers no ter
   expect(gap).toBeGreaterThan(0);
   expect(gap).toBeLessThanOrEqual(16);
 
-  // Bottom-aligned with the shell and no taller than it, so its top can never
-  // rise above the shell's — the shell-only occlusion measurement covers it,
-  // and the terminal loses no row to it.
+  // Same band as the capsule shell: bottom-aligned and equal height so the row
+  // reads as one piece of chrome (#1204).
   expect(actionBox.y).toBeGreaterThanOrEqual(shellBox.y - 1);
   expect(Math.abs(actionBox.y + actionBox.height - (shellBox.y + shellBox.height))).toBeLessThanOrEqual(1);
+  expect(Math.abs(actionBox.height - shellBox.height)).toBeLessThanOrEqual(1);
 
-  // Canonical control target, and circular.
+  // Circular destination control.
   expect(actionBox.width).toBe(actionBox.height);
-  expect(actionBox.height).toBeGreaterThanOrEqual(32);
 });
