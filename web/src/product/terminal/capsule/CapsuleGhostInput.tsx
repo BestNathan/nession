@@ -34,7 +34,7 @@ interface CapsuleGhostInputProps {
    * why it is being blurred — same division as `onFocus`, and the reason this is
    * a ref rather than a `blur()` prop.
    */
-  fieldRef?: RefObject<HTMLTextAreaElement>;
+  fieldRef?: RefObject<HTMLTextAreaElement | null>;
   className?: string;
 }
 
