@@ -1424,6 +1424,36 @@ p2p_routes! { ctx, msg_type, payload_value;
                             );
                             sessions_lock(ctx.sessions).insert(session_name.clone(), attached);
 
+                            // The session's history, before the live forwarder
+                            // exists — the same barrier the Control arm below
+                            // uses and `send_bootstrap` documents.
+                            //
+                            // It matters more here than there. A tmux *client*
+                            // paints its own screen and never replays the pane's
+                            // scrollback into xterm's, and it enters the
+                            // alternate screen on the way in — so under Plain
+                            // this snapshot is the only history the browser's
+                            // scrollback will ever hold. The client's redraw
+                            // comes after it and covers the viewport; what the
+                            // snapshot bought is everything above it.
+                            //
+                            // This is the session's **first** attach, so the
+                            // backend was not attached before it and the history
+                            // belongs to a client that has none: absent means
+                            // yes, the same default the Control arm takes. An
+                            // explicit `false` is honoured — a client that says
+                            // it already has this does.
+                            let bootstrap_tmux = ctx.tmux.tmux_dep();
+                            if payload.needs_bootstrap.unwrap_or(true)
+                                && !send_bootstrap(ctx.outbound, &bootstrap_tmux, &session_name)
+                                    .await
+                            {
+                                return ctx.err(
+                                    "bootstrap_stalled",
+                                    "the client stalled while its history was being sent",
+                                );
+                            }
+
                             // Spawn forwarding task for the first subscriber.
                             spawn_output_forwarder(
                                 rx,

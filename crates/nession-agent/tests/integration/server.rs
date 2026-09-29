@@ -17,9 +17,11 @@ use nession_agent::server::websocket::{
     SessionCreatePayload, SessionCreateResponse, SessionKillPayload, SessionKillResponse,
 };
 use nession_agent::tmux::manager::SessionManager;
+use nession_agent::tmux::ops::TmuxDep;
 use serde::Serialize;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 
 /// Start a test server (OS picks a free port) and return the real bound
@@ -322,6 +324,122 @@ async fn integration_client_attach_creates_pty() {
         round_trip(&mut sink, &mut stream, &req).await.unwrap();
     assert_eq!(resp.msg_type, msg_types::OK);
     assert_eq!(resp.payload.session_name, session_name);
+
+    tmux.kill_session(&session_name).await.ok();
+    handle.shutdown().await.ok();
+}
+
+#[tokio::test]
+async fn a_plain_first_attach_sends_the_history_it_was_asked_for() {
+    // #321 S6. The Plain arm's first attach used to send nothing at all, so a
+    // browser on the fallback transport got no scrollback — and under Plain
+    // there is nowhere else for it to come from: a tmux client paints its own
+    // screen and never replays the pane's history into xterm's.
+    //
+    // The assertion is on the wire, before the ok, because that ordering *is*
+    // the contract: the snapshot has to be enqueued before the live forwarder
+    // exists, or the two race.
+    let (addr, handle, credentials) = start_server(19086).await.unwrap();
+
+    let tmux = SessionManager::new();
+    let session = TestSession::new("plain-bootstrap");
+    let session_name = session.name().to_string();
+    tmux.create_session(&session_name, 80, 24, "/tmp", &[])
+        .await
+        .unwrap();
+
+    // Something the pane's history holds and the client could not have got any
+    // other way. `send_keys` runs it in the session before anyone attaches.
+    let marker = "PLAIN-BOOTSTRAP-MARKER";
+    TmuxDep::global()
+        .ops()
+        .send_keys(&session_name, &format!("echo {marker}\n"))
+        .await
+        .unwrap();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let seen = TmuxDep::global()
+            .ops()
+            .capture_pane(&session_name, 50)
+            .await
+            .unwrap()
+            .unwrap_or_default();
+        if String::from_utf8_lossy(&seen).contains(marker) {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the marker never reached the pane, so this test cannot ask about it"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    let (mut sink, mut stream) = connect_for(&credentials, addr, &session_name)
+        .await
+        .unwrap();
+
+    // `None` — the client says nothing, which is what every client predating
+    // the field does, and what the CLI's own attach sends.
+    let attach = ClientAttachPayload {
+        session_name: session_name.to_string(),
+        width: 80,
+        height: 24,
+        env_snapshots: Vec::new(),
+        needs_bootstrap: None,
+    };
+    let req = new_message(msg_types::CLIENT_ATTACH, attach);
+    sink.send(WsMessage::Text(serde_json::to_string(&req).unwrap()))
+        .await
+        .unwrap();
+
+    let mut bootstrap: Option<serde_json::Value> = None;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let frame = tokio::time::timeout(Duration::from_secs(2), stream.next())
+            .await
+            .expect("timeout waiting for the attach response")
+            .expect("stream ended")
+            .expect("error reading the attach response");
+        let WsMessage::Text(text) = frame else {
+            continue;
+        };
+        let parsed: serde_json::Value = serde_json::from_str(&text).unwrap();
+        match parsed["msg_type"].as_str().unwrap_or("") {
+            msg_types::OK => break,
+            msg_types::TERMINAL_OUTPUT => {
+                if let Some(marker_field) = parsed["payload"].get("bootstrap") {
+                    bootstrap = Some(serde_json::json!({
+                        "marker": marker_field.clone(),
+                        "data": parsed["payload"]["data"].clone(),
+                    }));
+                }
+            }
+            _ => {}
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "timed out waiting for ok, last frames: {bootstrap:?}"
+        );
+    }
+
+    let bootstrap = bootstrap.expect("a Plain first attach sent no bootstrap at all");
+    assert_eq!(
+        bootstrap["marker"]["requested_lines"].as_u64(),
+        Some(u64::from(nession_agent::tmux::HISTORY_LIMIT_LINES)),
+        "the snapshot is the depth the agent owns, not a number of its own"
+    );
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(bootstrap["data"].as_str().expect("base64 data"))
+        .expect("the bootstrap payload is base64");
+    // The join of the snapshot has to be the session's own history, not a
+    // screenful of whatever tmux redrew: the marker was echoed before the
+    // attach and reaches the client only through this frame.
+    assert!(
+        String::from_utf8_lossy(&bytes).contains(marker),
+        "the bootstrap does not carry the pane's history: {:?}",
+        String::from_utf8_lossy(&bytes)
+    );
 
     tmux.kill_session(&session_name).await.ok();
     handle.shutdown().await.ok();
@@ -699,6 +817,40 @@ impl ParkedFifo {
 impl Drop for ParkedFifo {
     fn drop(&mut self) {
         self.release();
+    }
+}
+
+/// The next **answer** within `window` — a frame that is not one the agent
+/// volunteers.
+///
+/// The ordering tests below ask which of two answers arrived first, and a
+/// session's history arrives before the attach's own answer: the Plain arm
+/// sends it, awaited, ahead of the reply, because that ordering is the
+/// bootstrap contract (#321). It is a `terminal.output` notification and not an
+/// answer to anything, so it is skipped here rather than counted as one.
+///
+/// Skipping is the whole of it — the frame is not asserted absent, because
+/// whether a given session has history to send is the arm's business and not
+/// this helper's.
+async fn next_answer_within(
+    stream: &mut WsStream,
+    window: std::time::Duration,
+) -> anyhow::Result<Option<serde_json::Value>> {
+    let deadline = tokio::time::Instant::now() + window;
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return Ok(None);
+        }
+        let Some(frame) = next_frame_within(stream, remaining).await? else {
+            return Ok(None);
+        };
+        // `.get`, not `frame["msg_type"]`: indexing panics on a frame that has
+        // no such key, and a helper is not a `#[test]` function, so the
+        // workspace's in-tests allowance does not reach here.
+        if frame.get("msg_type").and_then(|v| v.as_str()) != Some(msg_types::TERMINAL_OUTPUT) {
+            return Ok(Some(frame));
+        }
     }
 }
 
@@ -1654,7 +1806,7 @@ async fn a_sessions_frames_are_applied_in_order() {
             .expect("send to the agent");
     }
 
-    let answered_attach = next_frame_within(&mut stream, Duration::from_secs(30))
+    let answered_attach = next_answer_within(&mut stream, Duration::from_secs(30))
         .await
         .unwrap()
         .expect("an answer to the attach");
@@ -1664,7 +1816,7 @@ async fn a_sessions_frames_are_applied_in_order() {
         "the input was answered before the attach it was read behind"
     );
 
-    let answered_input = next_frame_within(&mut stream, Duration::from_secs(30))
+    let answered_input = next_answer_within(&mut stream, Duration::from_secs(30))
         .await
         .unwrap()
         .expect("an answer to the terminal input");
@@ -1724,7 +1876,7 @@ async fn a_slow_sessions_mutation_does_not_delay_another_sessions_frame() {
             .expect("send to the agent");
     }
 
-    let first = next_frame_within(&mut stream, Duration::from_secs(30))
+    let first = next_answer_within(&mut stream, Duration::from_secs(30))
         .await
         .unwrap()
         .expect("an answer to the second session's input");
@@ -1735,7 +1887,7 @@ async fn a_slow_sessions_mutation_does_not_delay_another_sessions_frame() {
     );
     assert_eq!(first["payload"]["code"], serde_json::json!("not_attached"));
 
-    let second = next_frame_within(&mut stream, Duration::from_secs(30))
+    let second = next_answer_within(&mut stream, Duration::from_secs(30))
         .await
         .unwrap()
         .expect("an answer to the attach");
