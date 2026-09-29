@@ -793,9 +793,13 @@ where
     // though the Server is the sender — the rule names the handler, not the
     // sender. Writing `server.attach` here reads as "the Server handles it",
     // which is the opposite of true and leaves the relay hanging.
+    // Kept, because the reply is matched on it below: `id` is how every reply in
+    // this tree is correlated (a reply carries its request's own wire name and
+    // is paired by `id`, not by arrival order).
+    let attach_id = uuid::Uuid::new_v4().to_string();
     let attach_msg = serde_json::json!({
         "msg_type": "agent.attach",
-        "id": uuid::Uuid::new_v4().to_string(),
+        "id": attach_id.clone(),
         "timestamp": std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
@@ -813,70 +817,60 @@ where
         ))
         .await?;
 
-    // Wait for ok/error response from agent (10s timeout).
-    let attach_response =
-        tokio::time::timeout(std::time::Duration::from_secs(10), agent_read.next()).await;
-    match attach_response {
-        Ok(Some(Ok(msg))) => {
-            if let Ok(text) = msg.to_text() {
-                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(text) {
-                    let resp_type = parsed
-                        .get("msg_type")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("");
-                    if resp_type == "error" {
-                        let err_msg = parsed
-                            .get("payload")
-                            .and_then(|p| p.get("message"))
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("attach failed");
-                        error!(
-                            "Agent rejected attach for session '{}': {}",
-                            session_name, err_msg
-                        );
-                        // Forward error to the browser client
-                        let client_error = tokio_tungstenite::tungstenite::Message::Text(
-                            serde_json::json!({
-                                "msg_type": "error",
-                                "id": uuid::Uuid::new_v4().to_string(),
-                                "timestamp": std::time::SystemTime::now()
-                                    .duration_since(std::time::UNIX_EPOCH)
-                                    .unwrap_or_default()
-                                    .as_secs(),
-                                "payload": {
-                                    "code": "attach_failed",
-                                    "message": format!(
-                                        "Failed to attach to session '{}': {}",
-                                        session_name, err_msg
-                                    ),
-                                }
-                            })
-                            .to_string(),
-                        );
-                        if sender.send_reply(client_error).await.is_err() {
-                            // The queue is closed — the client's connection is
-                            // already over, and the error it was going to be
-                            // told about is moot.
-                            return Ok(RelayEnd::Ended);
-                        }
-                        return Ok(RelayEnd::Ended);
-                    }
-                    info!(
-                        "Agent confirmed attach for session '{}' (msg_type={})",
-                        session_name, resp_type
-                    );
+    // Wait for the reply *to this request*, forwarding anything the agent says
+    // in the meantime. The whole wait shares the 10s budget.
+    //
+    // This used to read exactly **one** frame and treat whatever came back as
+    // the answer. That held only while the agent stayed silent between the
+    // request and its reply — and under control mode it does not: the scrollback
+    // prefill and an initial `terminal.resize` are sent first. Those frames were
+    // logged and dropped, so a relayed attach silently lost its bootstrap, which
+    // is not a shape anything reports. Measured in the #321 S3 e2e run:
+    // `Agent confirmed attach for session 'e2e-resize-0'
+    // (msg_type=agent.terminal.output)`.
+    //
+    // A frame that is not ours is the agent talking to the **client**; it rides
+    // the same terminal lane it would have without the relay in the path.
+    let attach_response = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            let Some(frame) = agent_read.next().await else {
+                return Err("Agent closed connection before accepting attach".to_string());
+            };
+            let msg = match frame {
+                Ok(msg) => msg,
+                Err(e) => return Err(format!("Agent connection error during attach: {e}")),
+            };
+            let parsed = msg
+                .to_text()
+                .ok()
+                .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok());
+            match parsed {
+                Some(value)
+                    if value.get("id").and_then(|v| v.as_str()) == Some(attach_id.as_str()) =>
+                {
+                    return Ok(value);
                 }
+                // Not the reply — including a frame that could not be read at
+                // all, which is forwarded rather than guessed at. An unknown
+                // wire is ignored everywhere else in this tree; here "ignored"
+                // and "dropped on the floor" are the same thing, so it goes on.
+                _ => {}
+            }
+            match sender.send_terminal(msg).await {
+                Ok(()) => {}
+                Err(crate::server::outbound::OutboundError::Stalled) => {
+                    return Err("Client stalled while the agent was still attaching".to_string());
+                }
+                Err(e) => return Err(format!("Failed to forward agent message: {e}")),
             }
         }
-        Ok(Some(Err(e))) => {
-            error!("WebSocket error waiting for attach response: {}", e);
-            return Err(anyhow::anyhow!("Agent connection error during attach: {e}",));
-        }
-        Ok(None) => {
-            error!("Agent closed connection during attach");
-            return Err(anyhow::anyhow!(
-                "Agent closed connection before accepting attach"
-            ));
+    })
+    .await;
+    let attach_response = match attach_response {
+        Ok(Ok(parsed)) => parsed,
+        Ok(Err(reason)) => {
+            error!("{reason}");
+            return Err(anyhow::anyhow!("{reason}"));
         }
         Err(_) => {
             error!("Timeout waiting for agent attach response (10s)");
@@ -884,7 +878,51 @@ where
                 "Timeout waiting for agent to accept attach for session '{session_name}'",
             ));
         }
+    };
+    let resp_type = attach_response
+        .get("msg_type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    if resp_type == "error" {
+        let err_msg = attach_response
+            .get("payload")
+            .and_then(|p| p.get("message"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("attach failed");
+        error!(
+            "Agent rejected attach for session '{}': {}",
+            session_name, err_msg
+        );
+        // Forward error to the browser client
+        let client_error = tokio_tungstenite::tungstenite::Message::Text(
+            serde_json::json!({
+                "msg_type": "error",
+                "id": uuid::Uuid::new_v4().to_string(),
+                "timestamp": std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs(),
+                "payload": {
+                    "code": "attach_failed",
+                    "message": format!(
+                        "Failed to attach to session '{}': {}",
+                        session_name, err_msg
+                    ),
+                }
+            })
+            .to_string(),
+        );
+        if sender.send_reply(client_error).await.is_err() {
+            // The queue is closed — the client's connection is already over,
+            // and the error it was going to be told about is moot.
+            return Ok(RelayEnd::Ended);
+        }
+        return Ok(RelayEnd::Ended);
     }
+    info!(
+        "Agent confirmed attach for session '{}' (msg_type={})",
+        session_name, resp_type
+    );
 
     info!("Relay established for session '{}'", session_name);
 
