@@ -311,7 +311,9 @@ test.describe('Web 1440×900', () => {
     await page.keyboard.press('Enter');
 
     expect((await column.boundingBox())?.width ?? 0).toBe(expandedColumn);
-    await expect(page.locator('[data-testid="session-item-row"][aria-current="true"]')).toHaveCount(1);
+    // `data-selected` is on the row wrapper; `aria-current` is on the button
+    // inside it — asserting the pair on one element matches nothing.
+    await expect(page.locator('[data-testid="session-item-row"][data-selected="true"]')).toHaveCount(1);
     await expect(xterm).toBeVisible();
   });
 });
