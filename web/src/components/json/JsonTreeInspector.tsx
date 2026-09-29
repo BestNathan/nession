@@ -6,7 +6,12 @@ import { JsonCompactValue } from './JsonCompactValue';
 import { JsonScalar } from './JsonScalar';
 import { jsonTreeMonoClass } from './jsonTreeClasses';
 import { jsonSyntax } from './jsonTreeSyntax';
-import { jsonKvRowGridClass, jsonKvValueCellClass } from './jsonTreeRowLayout';
+import {
+  jsonKvRowGridClass,
+  jsonKvValueCellClass,
+  jsonTreeNestedBodyIndentClass,
+  jsonTreeRootBodyIndentClass,
+} from './jsonTreeRowLayout';
 import { formatJsonPath, pathKey } from './jsonPath';
 
 interface JsonTreeInspectorProps {
@@ -166,29 +171,41 @@ function JsonInspectorNode({
         />
       ) : null}
       {open ? (
-        <div role="group" className={cn(!isRoot && 'pl-4 border-l border-border/30 ml-1.5')}>
+        <>
           {isRoot ? (
             <div className={cn(jsonTreeMonoClass(), jsonSyntax.bracket, 'py-0.5')}>
               {isArray ? '[' : '{'}
             </div>
           ) : null}
-          {entries.map(([entryKey, child]) => (
-            <div key={String(entryKey)} className="min-w-0">
-              <JsonInspectorNode
-                value={child}
-                segments={[...segments, entryKey]}
-                depth={depth + 1}
-                pinRootOpen={pinRootOpen}
-                expanded={expanded}
-                onToggle={onToggle}
-                propertyKey={isArray ? undefined : entryKey}
-              />
-            </div>
-          ))}
-          <div className={cn(jsonTreeMonoClass(), jsonSyntax.bracket, 'py-0.5')}>
-            {closingBracket}
+          <div
+            role="group"
+            className={cn(isRoot ? jsonTreeRootBodyIndentClass : jsonTreeNestedBodyIndentClass)}
+          >
+            {entries.map(([entryKey, child]) => (
+              <div key={String(entryKey)} className="min-w-0">
+                <JsonInspectorNode
+                  value={child}
+                  segments={[...segments, entryKey]}
+                  depth={depth + 1}
+                  pinRootOpen={pinRootOpen}
+                  expanded={expanded}
+                  onToggle={onToggle}
+                  propertyKey={isArray ? undefined : entryKey}
+                />
+              </div>
+            ))}
+            {!isRoot ? (
+              <div className={cn(jsonTreeMonoClass(), jsonSyntax.bracket, 'py-0.5')}>
+                {closingBracket}
+              </div>
+            ) : null}
           </div>
-        </div>
+          {isRoot ? (
+            <div className={cn(jsonTreeMonoClass(), jsonSyntax.bracket, 'py-0.5')}>
+              {closingBracket}
+            </div>
+          ) : null}
+        </>
       ) : null}
     </div>
   );
