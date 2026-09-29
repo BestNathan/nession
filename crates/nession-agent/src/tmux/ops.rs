@@ -333,7 +333,7 @@ fn send_keys_args<'a>(session: &'a str, keys: &'a str) -> [&'a str; 5] {
 }
 
 /// The argument vector for capturing a pane's content with its escapes kept:
-/// `capture-pane -t <session> -p -S <from> -E - -e`.
+/// `capture-pane -t <session> -p -S <from> -E - -e -J`.
 ///
 /// Every flag is load-bearing and each was a way to get this wrong:
 ///
@@ -345,10 +345,25 @@ fn send_keys_args<'a>(session: &'a str, keys: &'a str) -> [&'a str; 5] {
 ///   attaching to a live session wants. `from` arrives already spelled `-N`.
 /// - `-E -` stops at the last line, so a pane that is not full is not padded
 ///   out to an arbitrary height.
+/// - `-J` joins wrapped lines, and it is the difference between a snapshot a
+///   client can be *fed* and one it cannot. tmux wraps long lines in its own
+///   grid, and a capture is emitted **per grid row** — so without `-J` a
+///   107-column line that the pane wrapped at 80 arrives as two lines, and the
+///   client has no way to know they were ever one. xterm *does* re-join a row
+///   it wrapped itself when the grid later changes (measured: a 107-character
+///   line written into an 80-column xterm comes back as one row after a resize
+///   to 142, 170 rows into the scrollback), but a break that arrived as data is
+///   indistinguishable from a real newline and stays broken forever.
+///
+///   That is not hypothetical: the pane is created at the default 80×24 when
+///   the client has not measured yet, which is the ordinary case on a reload,
+///   so every restored history was 80-column fragments inside a 142-column
+///   terminal. From the manual, verbatim: *"-J preserves trailing spaces and
+///   joins any wrapped lines; -J implies -T."*
 ///
 /// `from` is one entry, so the sign cannot be dropped at a call site and turn
 /// "the last N lines" into "from line N" — the mistake this arity prevents.
-fn capture_pane_args<'a>(session: &'a str, from: &'a str) -> [&'a str; 9] {
+fn capture_pane_args<'a>(session: &'a str, from: &'a str) -> [&'a str; 10] {
     [
         "capture-pane",
         "-t",
@@ -359,6 +374,7 @@ fn capture_pane_args<'a>(session: &'a str, from: &'a str) -> [&'a str; 9] {
         "-E",
         "-",
         "-e",
+        "-J",
     ]
 }
 
@@ -1084,6 +1100,26 @@ mod tests {
     }
 
     // ── the window-size query ────────────────────────────────────────────────
+
+    #[test]
+    fn capture_pane_argv_joins_wrapped_lines() {
+        // The behaviour this pins is in
+        // `tests/integration/tmux.rs::capture_pane_returns_a_wrapped_line_whole`;
+        // this is the cheap half — the flag is still on the vector. A capture
+        // without `-J` emits one line **per grid row**, so a line the pane
+        // wrapped at 80 arrives as two and nothing downstream can rejoin them,
+        // because to a terminal that break is a real newline.
+        let argv = capture_pane_args("sess", "-5000");
+        assert!(
+            argv.contains(&"-J"),
+            "without -J the capture carries the pane's wrapping, not the \
+             session's lines: {argv:?}"
+        );
+        assert!(
+            argv.contains(&"-e"),
+            "and it still has to carry the escapes, or every colour is lost"
+        );
+    }
 
     #[test]
     fn window_size_argv_prints_the_target_and_both_dimensions() {

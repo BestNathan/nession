@@ -51,13 +51,25 @@ that file when it is *missing*, which means a PVC-backed `/root` keeps whatever
 an older image wrote.
 
 **Text is `capture-pane`, bounded by bytes.** The snapshot is
-`capture-pane -t <s> -p -S -<lines> -E - -e`, capped at `BOOTSTRAP_MAX_BYTES`
+`capture-pane -t <s> -p -S -<lines> -E - -e -J`, capped at `BOOTSTRAP_MAX_BYTES`
 (512 KiB) from the tail and starting on a line boundary. A byte ceiling and not
 a line count, because `-e` re-emits attributes on every line and ANSI-dense
 output is an order of magnitude heavier per line than a prompt — the ceiling is
 what makes the bound real, and 512 KiB is chosen so an ordinary 5000-line
 capture is not truncated at all while still fitting one frame well inside the
 outbound budget.
+
+**`-J` is what makes the snapshot *logical* lines.** A capture is emitted one
+line per **grid row**, and tmux wraps long lines in its own grid — so without
+`-J` a line the pane wrapped at 80 arrives as two, and nothing downstream can
+rejoin them: to a terminal, that break is indistinguishable from a real
+newline. xterm *does* re-join a row it wrapped itself when the grid changes
+(measured: a 107-character line written into an 80-column xterm comes back as
+one row after a resize to 142, deep into the scrollback), which is exactly the
+distinction. It matters because the pane is created at the default 80×24 when
+the client has not measured yet — the ordinary case on a reload — so an
+unjoined capture is what made every restored history 80-column fragments inside
+a 142-column terminal.
 
 **Modalities are tmux's format variables.** See below.
 
