@@ -148,6 +148,7 @@ function makeRuntime(opts: {
       agentApi: opts.api,
       manualRoute: opts.manualRoute ?? false,
       lastResize: null,
+      needsBootstrap: false,
       transportGeneration: transportGen,
     });
   };
@@ -247,7 +248,7 @@ describe('useTerminalAttach', () => {
     });
 
     expect(attach).toHaveBeenCalledTimes(1);
-    expect(attach).toHaveBeenCalledWith('sess', undefined, { timeoutMs: ATTACH_TIMEOUT_MS });
+    expect(attach).toHaveBeenCalledWith('sess', undefined, { timeoutMs: ATTACH_TIMEOUT_MS, needsBootstrap: false });
   });
 
   it('P2P: mirrors attach ok outcome to attached', async () => {

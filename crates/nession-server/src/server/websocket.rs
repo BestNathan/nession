@@ -552,15 +552,19 @@ where
                 env_snapshots,
                 cols,
                 rows,
+                needs_bootstrap,
             } => {
                 let outcome = relay_bidirectional_via_channel(
                     &mut read,
                     sender.clone(),
-                    &agent_ws_urls,
-                    &session_name,
-                    &env_snapshots,
-                    cols,
-                    rows,
+                    RelayRequest {
+                        agent_ws_urls: &agent_ws_urls,
+                        session_name: &session_name,
+                        env_snapshots: &env_snapshots,
+                        cols,
+                        rows,
+                        needs_bootstrap,
+                    },
                 )
                 .await;
                 // Relay ended — clean up the client registration so the
@@ -715,20 +719,40 @@ enum RelayEnd {
     ClientStalled,
 }
 
+/// What a relay was asked for: the addresses to try, and everything the attach
+/// the Server builds for the agent carries.
+///
+/// A struct rather than a positional tail because the fields are one thing —
+/// a request — and reading the call site should not require counting
+/// arguments. The Server interprets none of them; it passes each to the agent,
+/// which is where they mean something.
+struct RelayRequest<'a> {
+    /// Candidate agent WebSocket URLs, best-first.
+    agent_ws_urls: &'a [String],
+    /// Short session name, as the agent knows it.
+    session_name: &'a str,
+    /// Resolved env snapshots to inject via the attach.
+    env_snapshots: &'a [EnvSnapshot],
+    /// Terminal columns for the initial tmux resize.
+    cols: u16,
+    /// Terminal rows for the initial tmux resize.
+    rows: u16,
+    /// The browser's bootstrap answer (#321), forwarded verbatim. Whether a
+    /// client needs the session's history is a fact about *that client's*
+    /// terminal, which only the client has — so the Server does not read it.
+    needs_bootstrap: Option<bool>,
+}
+
 /// Relay mode using the connection's queued outbound path for client writes.
 /// Used when the write sink is managed by a relay task.
 ///
-/// Tries each URL in `agent_ws_urls` with a fast 2s connect timeout
+/// Tries each URL in `request.agent_ws_urls` with a fast 2s connect timeout
 /// until one succeeds.  This avoids long hangs when the first address
 /// is unreachable (common in k8s where pod IPs are not routable).
 async fn relay_bidirectional_via_channel<RS>(
     client_read: &mut RS,
     sender: crate::server::outbound::WsMessageSender,
-    agent_ws_urls: &[String],
-    session_name: &str,
-    env_snapshots: &[EnvSnapshot],
-    cols: u16,
-    rows: u16,
+    request: RelayRequest<'_>,
 ) -> anyhow::Result<RelayEnd>
 where
     RS: futures_util::Stream<
@@ -740,6 +764,15 @@ where
 {
     use futures_util::SinkExt;
     use futures_util::StreamExt;
+
+    let RelayRequest {
+        agent_ws_urls,
+        session_name,
+        env_snapshots,
+        cols,
+        rows,
+        needs_bootstrap,
+    } = request;
 
     info!(
         "Entering relay mode for session '{}', {} candidate URL(s)",
@@ -797,6 +830,28 @@ where
     // this tree is correlated (a reply carries its request's own wire name and
     // is paired by `id`, not by arrival order).
     let attach_id = uuid::Uuid::new_v4().to_string();
+    // Built as an object rather than a literal so the optional bootstrap answer
+    // can be *absent* rather than null: the agent's rule reads the field's
+    // presence (`Option<bool>`), and a JSON `null` and a missing key are the
+    // same thing to serde only because `Option` ignores both — but the wire is
+    // also what an older agent reads, and it has never seen this key.
+    let mut attach_payload = serde_json::json!({
+        "session_name": session_name,
+        "width": cols,
+        "height": rows,
+        "env_snapshots": env_snapshots,
+    });
+    if let Some(needs_bootstrap) = needs_bootstrap {
+        // `as_object_mut`, not `[…]`: the payload is a literal built three
+        // lines up, so indexing it is a panic waiting for someone to edit that
+        // literal — and there is no upside to the shorter spelling.
+        if let Some(object) = attach_payload.as_object_mut() {
+            object.insert(
+                "needs_bootstrap".to_string(),
+                serde_json::Value::Bool(needs_bootstrap),
+            );
+        }
+    }
     let attach_msg = serde_json::json!({
         "msg_type": "agent.attach",
         "id": attach_id.clone(),
@@ -804,12 +859,7 @@ where
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs(),
-        "payload": {
-            "session_name": session_name,
-            "width": cols,
-            "height": rows,
-            "env_snapshots": env_snapshots,
-        }
+        "payload": attach_payload,
     });
     agent_write
         .send(tokio_tungstenite::tungstenite::Message::Text(

@@ -15,7 +15,15 @@ export interface TerminalTransport {
   /** Flush every outbound buffer (input + coalesced resize) in order. */
   flushAllOutbound(): void;
 
-  onOutput: ((data: Uint8Array) => void) | null;
+  /**
+   * Bytes from the agent. `bootstrap` is true when they are the session's
+   * **history** rather than its live output (#321): a bootstrap replaces the
+   * consumer's buffer, live output appends to it. Absent means append — which
+   * is what every frame meant before the marker existed, and what a replay from
+   * `agent.terminal.stream.resume` still means (a bootstrap is deliberately not
+   * recorded in the stream timeline).
+   */
+  onOutput: ((data: Uint8Array, bootstrap?: boolean) => void) | null;
   onResize: ((cols: number, rows: number) => void) | null;
   onStateChange: ((state: ConnectionState) => void) | null;
   onError: ((err: Error) => void) | null;

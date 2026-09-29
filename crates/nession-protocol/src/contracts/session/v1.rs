@@ -508,6 +508,17 @@ pub struct ClientRelayBeginPayload {
     pub cols: u16,
     #[serde(default = "default_rows")]
     pub rows: u16,
+    /// Whether the browser's Terminal already holds this session's history, so
+    /// the agent can be told whether to open the relay with a bootstrap (#321).
+    ///
+    /// The same question `ClientAttachPayload::needs_bootstrap` asks on the P2P
+    /// path, answered by the same client and consumed by the same agent rule —
+    /// it is only carried differently because on this path the Server, not the
+    /// browser, is what sends the agent the attach. `None` (and a client that
+    /// predates the field, which serialises nothing) means "decide it
+    /// yourself", preserving the old behaviour exactly.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub needs_bootstrap: Option<bool>,
 }
 
 fn default_cols() -> u16 {

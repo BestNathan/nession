@@ -113,10 +113,11 @@ describe('SessionAttachController', () => {
       agentApi: api,
       manualRoute: false,
       lastResize: null,
+      needsBootstrap: false,
       transportGeneration: 0,
     });
 
-    expect(attach).toHaveBeenCalledWith('s1', undefined, { timeoutMs: ATTACH_TIMEOUT_MS });
+    expect(attach).toHaveBeenCalledWith('s1', undefined, { timeoutMs: ATTACH_TIMEOUT_MS, needsBootstrap: false });
     expect(sm.phase).toBe('connecting');
 
     attachResolvers[0]?.({ ok: true });
@@ -136,9 +137,10 @@ describe('SessionAttachController', () => {
       agentApi: api,
       manualRoute: false,
       lastResize: { cols: 120, rows: 40 },
+      needsBootstrap: false,
       transportGeneration: 0,
     });
-    expect(attach).toHaveBeenCalledWith('s1', { cols: 120, rows: 40 }, { timeoutMs: ATTACH_TIMEOUT_MS });
+    expect(attach).toHaveBeenCalledWith('s1', { cols: 120, rows: 40 }, { timeoutMs: ATTACH_TIMEOUT_MS, needsBootstrap: false });
   });
 
   it('signals force-relay after ATTACH_TIMEOUT budget exhausted', async () => {
@@ -150,6 +152,7 @@ describe('SessionAttachController', () => {
         agentApi: api,
         manualRoute: false,
         lastResize: null,
+        needsBootstrap: false,
         transportGeneration: i,
       });
       vi.advanceTimersByTime(ATTACH_TIMEOUT_MS);
@@ -168,6 +171,7 @@ describe('SessionAttachController', () => {
       agentApi: api,
       manualRoute: false,
       lastResize: null,
+      needsBootstrap: false,
       transportGeneration: 3,
     });
     controller.startP2PAttach({
@@ -175,6 +179,7 @@ describe('SessionAttachController', () => {
       agentApi: api,
       manualRoute: false,
       lastResize: null,
+      needsBootstrap: false,
       transportGeneration: 3,
     });
     expect(attach).toHaveBeenCalledTimes(1);
@@ -197,6 +202,7 @@ describe('SessionAttachController', () => {
       agentApi: api,
       manualRoute: false,
       lastResize: null,
+      needsBootstrap: false,
       transportGeneration: 0,
     });
     attachResolvers[0]?.({ ok: false, error });
@@ -216,10 +222,11 @@ describe('SessionAttachController', () => {
       agentApi: api,
       manualRoute: false,
       lastResize: null,
+      needsBootstrap: false,
       transportGeneration: 0,
     });
 
-    expect(attach).toHaveBeenCalledWith('s1', undefined, { timeoutMs: ATTACH_TIMEOUT_MS });
+    expect(attach).toHaveBeenCalledWith('s1', undefined, { timeoutMs: ATTACH_TIMEOUT_MS, needsBootstrap: false });
     expect(sm.phase).toBe('connecting');
     await flushMicrotasks();
 
@@ -239,6 +246,7 @@ describe('SessionAttachController', () => {
       agentApi: api,
       manualRoute: false,
       lastResize: null,
+      needsBootstrap: false,
       transportGeneration: 0,
     });
     attachResolvers[0]?.({ ok: false, error: 'session does not exist' });
@@ -253,6 +261,7 @@ describe('SessionAttachController', () => {
       agentApi: api,
       manualRoute: false,
       lastResize: null,
+      needsBootstrap: false,
       transportGeneration: 0,
     });
     expect(attach).toHaveBeenCalledTimes(2);
@@ -266,6 +275,7 @@ describe('SessionAttachController', () => {
       agentApi: api,
       manualRoute: true,
       lastResize: null,
+      needsBootstrap: false,
       transportGeneration: 0,
     });
     attachResolvers[0]?.({ ok: false, error: 'session does not exist' });
@@ -284,6 +294,7 @@ describe('SessionAttachController', () => {
       agentApi: api,
       manualRoute: false,
       lastResize: null,
+      needsBootstrap: false,
       transportGeneration: 0,
     });
     controller.cancelActiveAttach();
@@ -302,6 +313,7 @@ describe('SessionAttachController', () => {
       agentApi: api,
       manualRoute: false,
       lastResize: null,
+      needsBootstrap: false,
       transportGeneration: 0,
     });
     controller.startP2PAttach({
@@ -309,6 +321,7 @@ describe('SessionAttachController', () => {
       agentApi: api,
       manualRoute: false,
       lastResize: null,
+      needsBootstrap: false,
       transportGeneration: 1,
     });
     // The first attach's resolution lands after the supersede — a no-op.

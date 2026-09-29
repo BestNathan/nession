@@ -11,6 +11,8 @@ interface UseP2PAttachTransportOptions {
   manualOverride: string | null;
   /** Relay-mode server connection handle (see relayServerHandle). */
   serverConnection?: RelayServerHandle;
+  /** Whether the Terminal already holds this session's history (#321). */
+  hasSessionOutput?: () => boolean;
 }
 
 interface UseP2PAttachTransportResult {
@@ -31,6 +33,7 @@ interface UseP2PAttachTransportResult {
  */
 export function useP2PAttachTransport({
   serverConnection,
+  hasSessionOutput,
 }: UseP2PAttachTransportOptions): UseP2PAttachTransportResult {
   const {
     addressPlan, activeUrl, agentTerminalApi, connectionState,
@@ -38,6 +41,7 @@ export function useP2PAttachTransport({
   } = useSessionRuntime({
     configOwner: true,
     serverConnection,
+    hasSessionOutput,
   });
 
   return {

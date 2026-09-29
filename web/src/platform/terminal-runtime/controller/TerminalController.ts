@@ -26,6 +26,13 @@ import {
 import { gridFor } from '../grid';
 import type { FontSizeManager } from '../FontSizeManager';
 
+/**
+ * What replaces a buffer when a bootstrap arrives (#321): erase the display,
+ * erase the scrollback, home the cursor. Deliberately not `terminal.reset()`,
+ * which also resets modes — see {@link TerminalController.hasSessionOutput}.
+ */
+const BOOTSTRAP_BUFFER_RESET = '\x1b[2J\x1b[3J\x1b[H';
+
 export interface TerminalControllerEvents {
   onTransportReady?: (ready: boolean) => void;
   onInputModeChange?: (sessionId: string, mode: InputMode) => void;
@@ -98,6 +105,18 @@ export class TerminalController {
   private useMobileIme: boolean;
   private readonly scrollbackMode: TerminalScrollbackMode;
   private attached = false;
+  /**
+   * Whether the transport has delivered any of this session's output into this
+   * xterm. Latches — output arriving is the only transition — and a bootstrap
+   * counts, because the buffer it replaces is gone while what replaced it is
+   * history the user can see.
+   *
+   * Read by the attach path (`!hasSessionOutput` ⇒ ask for a bootstrap, #321).
+   * A local {@link TerminalController.write} deliberately does not set it: that
+   * writes display, not history, and a page whose first session output is the
+   * snapshot must still be able to ask for one.
+   */
+  private _hasSessionOutput = false;
   events?: TerminalControllerEvents;
 
   /** Callbacks → Jotai */
@@ -194,13 +213,27 @@ export class TerminalController {
     this.teardownTransport();
     const transport = this.transportFactory();
     this.transport = transport;
-    transport.onOutput = (data: Uint8Array) => {
+    transport.onOutput = (data: Uint8Array, bootstrap?: boolean) => {
+      // A bootstrap is the session's history, not more output: it **replaces**
+      // this buffer instead of appending to it, which is the whole reason the
+      // agent can re-send history on every attach that needs one without the
+      // user ending up with two copies on screen (#321).
+      //
+      // The wipe is escape sequences rather than `terminal.reset()`, which
+      // would also leave every mode the application set — including the
+      // alternate screen of a TUI whose pane this snapshot came from. Erase
+      // display, erase scrollback, cursor home: the three things a replaced
+      // buffer needs, and nothing else.
+      if (bootstrap) {
+        terminal.write(BOOTSTRAP_BUFFER_RESET);
+      }
       const follow = this.capsuleOcclusionScroll?.snapshotFollowing() ?? false;
       terminal.write(data, () => {
         if (follow) {
           this.capsuleOcclusionScroll?.afterOutputWhileFollowing();
         }
       });
+      this.markSessionOutput();
     };
     transport.onResize = (cols: number, rows: number) => { terminal.resize(cols, rows); };
     transport.onStateChange = (state: ConnectionState) => {
@@ -209,6 +242,25 @@ export class TerminalController {
     transport.onError = (err: Error) => { this.onError?.(err); };
     transport.onDisconnect = () => { this.onDisconnect?.(); };
     this.events?.onTransportReady?.(true);
+  }
+
+  /**
+   * Called from the output path, so it stays cheap: the flag check is the whole
+   * cost on every frame after the first. No event — a reader at attach time is
+   * what the flag is for, and a consumer that had to be notified would be one
+   * more thing to keep in step with a fact that never un-sets.
+   */
+  private markSessionOutput(): void {
+    this._hasSessionOutput = true;
+  }
+
+  /**
+   * Whether this xterm already holds the session's history. False only for a
+   * buffer no session output has reached — a fresh xterm, which is exactly what
+   * a page reload produces and exactly the case a bootstrap exists for.
+   */
+  get hasSessionOutput(): boolean {
+    return this._hasSessionOutput;
   }
 
   private teardownTransport(): void {
@@ -336,7 +388,13 @@ export class TerminalController {
 
   // ── Data flow ───────────────────────────────────────────────────────────
 
-  /** Write data to the xterm display (e.g. from an external source). */
+  /**
+   * Write data to the xterm display (e.g. from an external source).
+   *
+   * Display, not session history: this does not lift
+   * {@link TerminalController.hasSessionOutput}, so a controller that has only
+   * ever been written to here still asks for a bootstrap on attach.
+   */
   write(data: string | Uint8Array): void {
     const follow = this.capsuleOcclusionScroll?.snapshotFollowing() ?? false;
     this._terminal?.write(data, () => {
