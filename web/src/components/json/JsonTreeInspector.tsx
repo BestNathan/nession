@@ -21,32 +21,118 @@ interface NodeProps {
   pinRootOpen: boolean;
   expanded: Set<string>;
   onToggle: (key: string) => void;
+  propertyKey?: string | number;
 }
+
+const rowBaselineClass = cn(
+  jsonTreeMonoClass(),
+  'flex flex-wrap items-baseline gap-x-1 py-0.5 min-w-0',
+);
 
 function isExpandable(value: unknown): value is Record<string, unknown> | unknown[] {
   return typeof value === 'object' && value !== null;
 }
 
-function JsonInspectorNode({ value, segments, depth, pinRootOpen, expanded, onToggle }: NodeProps) {
+function PropertyKeyLabel({ name }: { name: string | number }) {
+  return <span className={cn(jsonSyntax.key, 'shrink-0')}>{JSON.stringify(name)}</span>;
+}
+
+function PropertyKeyPrefix({ propertyKey }: { propertyKey?: string | number }) {
+  if (propertyKey === undefined) {
+    return null;
+  }
+  return (
+    <>
+      <PropertyKeyLabel name={propertyKey} />
+      <span className={jsonSyntax.punct}>:</span>
+    </>
+  );
+}
+
+function JsonScalarTreeRow({ path, value, propertyKey }: { path: string; value: unknown; propertyKey?: string | number }) {
+  const scalar = value as string | number | boolean | null;
+  return (
+    <JsonCopyMenu path={path} value={value}>
+      <div role="treeitem" aria-selected={false} className={rowBaselineClass} tabIndex={-1}>
+        <PropertyKeyPrefix propertyKey={propertyKey} />
+        <JsonScalar value={scalar} allowExpand />
+      </div>
+    </JsonCopyMenu>
+  );
+}
+
+interface ExpandableDisclosureProps {
+  path: string;
+  value: Record<string, unknown> | unknown[];
+  propertyKey?: string | number;
+  isArray: boolean;
+  open: boolean;
+  onToggle: () => void;
+}
+
+function JsonExpandableDisclosureRow({
+  path,
+  value,
+  propertyKey,
+  isArray,
+  open,
+  onToggle,
+}: ExpandableDisclosureProps) {
+  const onKeyDown = (event: KeyboardEvent) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      onToggle();
+    }
+  };
+
+  return (
+    <JsonCopyMenu path={path} value={value}>
+      <div
+        role="treeitem"
+        aria-expanded={open}
+        tabIndex={propertyKey === undefined ? 0 : -1}
+        className={cn(
+          rowBaselineClass,
+          propertyKey === undefined && 'items-start',
+          'rounded-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+        )}
+        onKeyDown={onKeyDown}
+      >
+        <PropertyKeyPrefix propertyKey={propertyKey} />
+        <button
+          type="button"
+          className="shrink-0 text-muted-foreground hover:text-foreground self-center"
+          aria-label={open ? 'Collapse' : 'Expand'}
+          onClick={onToggle}
+        >
+          <ChevronRight className={cn('h-3 w-3 transition-transform', open && 'rotate-90')} />
+        </button>
+        {!open ? (
+          <JsonCompactValue value={value} depth={0} inline />
+        ) : (
+          <span className={jsonSyntax.bracket}>{isArray ? '[' : '{'}</span>
+        )}
+      </div>
+    </JsonCopyMenu>
+  );
+}
+
+function JsonInspectorNode({
+  value,
+  segments,
+  depth,
+  pinRootOpen,
+  expanded,
+  onToggle,
+  propertyKey,
+}: NodeProps) {
   const path = formatJsonPath(segments);
   const key = pathKey(segments);
   const isRoot = segments.length === 0;
   const open = isRoot && pinRootOpen ? true : expanded.has(key);
 
   if (!isExpandable(value)) {
-    const scalar = value as string | number | boolean | null;
-    return (
-      <JsonCopyMenu path={path} value={value}>
-        <div
-          role="treeitem"
-          aria-selected={false}
-          className={cn(jsonTreeMonoClass(), 'py-0.5 min-w-0')}
-          tabIndex={-1}
-        >
-          <JsonScalar value={scalar} allowExpand />
-        </div>
-      </JsonCopyMenu>
-    );
+    return <JsonScalarTreeRow path={path} value={value} propertyKey={propertyKey} />;
   }
 
   const isArray = Array.isArray(value);
@@ -61,90 +147,43 @@ function JsonInspectorNode({ value, segments, depth, pinRootOpen, expanded, onTo
     onToggle(key);
   };
 
-  const onKeyDown = (event: KeyboardEvent) => {
-    if (event.key === 'Enter' || event.key === ' ') {
-      event.preventDefault();
-      toggle();
-    }
-  };
+  const closingBracket = isArray ? ']' : '}';
 
   return (
-    <div role="none" className="min-w-0">
+    <div role="none" className={cn('min-w-0', propertyKey !== undefined && 'w-full')}>
       {!isRoot ? (
-        <JsonCopyMenu path={path} value={value}>
-          <div
-            role="treeitem"
-            aria-expanded={open}
-            tabIndex={0}
-            className={cn(
-              jsonTreeMonoClass(),
-              'flex items-start gap-1 py-0.5 min-w-0 rounded-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
-            )}
-            onKeyDown={onKeyDown}
-          >
-            <button
-              type="button"
-              className="mt-0.5 shrink-0 text-muted-foreground hover:text-foreground"
-              aria-label={open ? 'Collapse' : 'Expand'}
-              onClick={toggle}
-            >
-              <ChevronRight className={cn('h-3 w-3 transition-transform', open && 'rotate-90')} />
-            </button>
-            <div className="min-w-0 flex-1">
-              {!open ? (
-                <JsonCompactValue value={value} depth={0} inline />
-              ) : (
-                <span className={jsonSyntax.bracket}>{isArray ? '[' : '{'}</span>
-              )}
-            </div>
-          </div>
-        </JsonCopyMenu>
+        <JsonExpandableDisclosureRow
+          path={path}
+          value={value}
+          propertyKey={propertyKey}
+          isArray={isArray}
+          open={open}
+          onToggle={toggle}
+        />
       ) : null}
       {open ? (
         <div role="group" className={cn(!isRoot && 'pl-4 border-l border-border/30 ml-1.5')}>
-          {isRoot && isExpandable(value) ? (
+          {isRoot ? (
             <div className={cn(jsonTreeMonoClass(), jsonSyntax.bracket, 'py-0.5')}>
               {isArray ? '[' : '{'}
             </div>
           ) : null}
           {entries.map(([entryKey, child]) => (
             <div key={String(entryKey)} className="min-w-0">
-              {!isArray ? (
-                <div className={cn(jsonTreeMonoClass(), 'py-0.5 flex flex-wrap items-baseline gap-x-1 min-w-0')}>
-                  <span className={cn(jsonSyntax.key, 'shrink-0')}>{JSON.stringify(entryKey)}</span>
-                  <span className={jsonSyntax.punct}>:</span>
-                  <div className="min-w-0 flex-1 basis-full sm:basis-auto">
-                    <JsonInspectorNode
-                      value={child}
-                      segments={[...segments, entryKey]}
-                      depth={depth + 1}
-                      pinRootOpen={pinRootOpen}
-                      expanded={expanded}
-                      onToggle={onToggle}
-                    />
-                  </div>
-                </div>
-              ) : (
-                <JsonInspectorNode
-                  value={child}
-                  segments={[...segments, entryKey]}
-                  depth={depth + 1}
-                  pinRootOpen={pinRootOpen}
-                  expanded={expanded}
-                  onToggle={onToggle}
-                />
-              )}
+              <JsonInspectorNode
+                value={child}
+                segments={[...segments, entryKey]}
+                depth={depth + 1}
+                pinRootOpen={pinRootOpen}
+                expanded={expanded}
+                onToggle={onToggle}
+                propertyKey={isArray ? undefined : entryKey}
+              />
             </div>
           ))}
-          {!isRoot ? (
-            <div className={cn(jsonTreeMonoClass(), jsonSyntax.bracket, 'py-0.5')}>
-              {isArray ? ']' : '}'}
-            </div>
-          ) : isRoot && isExpandable(value) ? (
-            <div className={cn(jsonTreeMonoClass(), jsonSyntax.bracket, 'py-0.5')}>
-              {isArray ? ']' : '}'}
-            </div>
-          ) : null}
+          <div className={cn(jsonTreeMonoClass(), jsonSyntax.bracket, 'py-0.5')}>
+            {closingBracket}
+          </div>
         </div>
       ) : null}
     </div>
