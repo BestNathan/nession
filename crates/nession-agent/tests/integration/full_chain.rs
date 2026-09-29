@@ -334,6 +334,7 @@ async fn test_terminal_io_through_full_chain() {
         width: 80,
         height: 24,
         env_snapshots: Vec::new(),
+        needs_bootstrap: None,
     };
     let req = new_message(agent_msg_types::CLIENT_ATTACH, attach);
     let json = serde_json::to_string(&req).unwrap();

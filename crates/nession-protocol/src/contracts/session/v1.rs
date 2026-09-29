@@ -606,6 +606,21 @@ pub struct ClientAttachPayload {
     /// before PTY creation. Empty (default) preserves pre-env behaviour.
     #[serde(default)]
     pub env_snapshots: Vec<EnvSnapshot>,
+    /// Whether this client wants the session's history sent before live output
+    /// (#321), or `None` for the agent's own answer.
+    ///
+    /// The agent cannot decide this alone. It knows whether the *backend* is
+    /// already attached; it cannot know whether the client is holding a buffer
+    /// with that history already in it — a page that reattached over a surviving
+    /// socket keeps its xterm, and one whose xterm was rebuilt does not. The
+    /// client is the only party that knows, so it says.
+    ///
+    /// **Absence preserves the old meaning.** `None` means "decide it yourself",
+    /// which is the agent's rule: bootstrap a backend that is not attached yet,
+    /// stay silent for one that is. That is also exactly what a client written
+    /// before this field would get.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub needs_bootstrap: Option<bool>,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]

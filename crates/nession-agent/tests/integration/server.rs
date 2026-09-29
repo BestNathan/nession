@@ -305,6 +305,7 @@ async fn integration_client_attach_creates_pty() {
         width: 80,
         height: 24,
         env_snapshots: Vec::new(),
+        needs_bootstrap: None,
     };
     let req = new_message(msg_types::CLIENT_ATTACH, attach);
     let resp: nession_agent::server::websocket::Message<ClientAttachResponse> =
@@ -349,6 +350,7 @@ async fn integration_terminal_io_flow() {
         width: 80,
         height: 24,
         env_snapshots: Vec::new(),
+        needs_bootstrap: None,
     };
     let req = new_message(msg_types::CLIENT_ATTACH, attach);
     let _: nession_agent::server::websocket::Message<ClientAttachResponse> =

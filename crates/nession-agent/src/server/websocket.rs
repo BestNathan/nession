@@ -238,6 +238,9 @@ fn spawn_output_forwarder(
                 data: encoded,
                 stream_epoch: Some(stream_epoch),
                 stream_seq: Some(stream_seq),
+                // Live output, not the session's history: the bootstrap
+                // marker lands here in S4b (#321).
+                bootstrap: None,
             };
             let msg = new_message(msg_types::TERMINAL_OUTPUT, output);
             if let Ok(json) = serde_json::to_string(&msg) {
@@ -1476,6 +1479,9 @@ p2p_routes! { ctx, msg_type, payload_value;
                                     data: encoded,
                                     stream_epoch: Some(stream_epoch),
                                     stream_seq: Some(stream_seq),
+                                    // Live output; the prefill above is what
+                                    // becomes the bootstrap in S4b (#321).
+                                    bootstrap: None,
                                 };
                                 let msg = new_message(msg_types::TERMINAL_OUTPUT, output);
                                 if let Ok(json) = serde_json::to_string(&msg) {
@@ -1515,6 +1521,9 @@ p2p_routes! { ctx, msg_type, payload_value;
                                         data: encoded,
                                         stream_epoch: Some(stream_epoch),
                                         stream_seq: Some(stream_seq),
+                                    // Live output; the prefill above is what
+                                    // becomes the bootstrap in S4b (#321).
+                                    bootstrap: None,
                                     };
                                     let msg = new_message(msg_types::TERMINAL_OUTPUT, output);
                                     if let Ok(json) = serde_json::to_string(&msg) {
@@ -3248,6 +3257,7 @@ mod tests {
             width: 80,
             height: 24,
             env_snapshots: Vec::new(),
+            needs_bootstrap: None,
         };
         let attach_req = new_message(msg_types::CLIENT_ATTACH, attach_payload);
         let attach_resp: Message<ClientAttachResponse> =
@@ -3294,6 +3304,7 @@ mod tests {
             width: 80,
             height: 24,
             env_snapshots: Vec::new(),
+            needs_bootstrap: None,
         };
         let attach_req = new_message(msg_types::CLIENT_ATTACH, attach_payload);
         let attach_resp: Message<ClientAttachResponse> =
@@ -3939,6 +3950,7 @@ mod tests {
             width: 80,
             height: 24,
             env_snapshots: Vec::new(),
+            needs_bootstrap: None,
         };
         let attach_req = new_message(msg_types::CLIENT_ATTACH, attach_payload);
         let _ = send_and_receive::<_, serde_json::Value>(&mut sink, &mut stream, &attach_req).await;
