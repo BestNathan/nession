@@ -12,6 +12,9 @@ description: Use when troubleshooting CI/CD pipeline failures for nession, modif
 - **Staging** (`staging.yml`): merge to staging triggers full build + deploy to staging
 - **Release** (`release.yml`): merge to main triggers release build + deploy to production
 
+One additional governance workflow protects requirement closure:
+- **Requirement Acceptance** (`requirement-acceptance.yml`): PRs to `main` validate every closing `requirement` issue; completed requirement closure is guarded after the fact as a second safety net.
+
 ```
 Local dev → verify locally
   → branch off main → PR to staging → quality gate passes → merge to staging
@@ -335,6 +338,28 @@ The mirror-image mistake is a branch cut from `main` but targeting `staging` whi
 `EnterWorktree` bases on `origin/main` by default. For the staging exception, use manual `git worktree add … origin/staging` — do not reset project root away from `main`.
 
 ### Issue auto-close
+
+Before a main-targeting PR may close a `requirement`, staging acceptance must be complete:
+
+1. every Success Criterion has a stable `SC-xx` id;
+2. every accepted criterion is checked `[x]`;
+3. `## Acceptance Report` contains exactly one matching row per criterion;
+4. every row is `Pass` or justified `N/A`;
+5. every accepted row carries concrete evidence.
+
+The **Requirement Acceptance** workflow runs `scripts/requirement-acceptance.mjs pr-gate`
+for PRs targeting `main`. If a closing requirement is incomplete, the check fails and
+the workflow **closes the PR**. Fix the requirement acceptance first, then reopen the PR;
+the `reopened` event runs the same gate again. This makes the block effective even when
+repository rulesets are disabled. Do not recreate or merge around a failed acceptance gate.
+
+A second `issues: closed` guard runs the same validator. If a requirement is closed as
+completed without passing acceptance, it is reopened automatically with criterion-level
+diagnostics. `Close as not planned` is the explicit cancellation path and is not treated
+as completed acceptance.
+
+This gate intentionally does **not** run on feature/fix PRs to `staging`: staging is the
+environment where browser/device/deployment criteria are often verified.
 
 Put every `Closes #N` in the **`staging` → `main` release PR body**. Nowhere else.
 

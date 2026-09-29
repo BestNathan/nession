@@ -1,0 +1,55 @@
+name: Requirement Acceptance
+
+on:
+  pull_request_target:
+    branches: [main]
+    types: [opened, synchronize, reopened, edited, ready_for_review]
+  issues:
+    types: [closed]
+
+permissions:
+  contents: read
+
+jobs:
+  acceptance-pr-gate:
+    if: github.event_name == 'pull_request_target'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: write
+    steps:
+      # Security boundary: run the validator from the trusted default branch.
+      # Never checkout the PR head in a pull_request_target workflow.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Self-test acceptance validator
+        run: node scripts/requirement-acceptance.mjs self-test
+      - name: Validate closing requirement issues
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/requirement-acceptance.mjs pr-gate
+
+  acceptance-close-guard:
+    if: github.event_name == 'issues'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Self-test acceptance validator
+        run: node scripts/requirement-acceptance.mjs self-test
+      - name: Guard completed requirement closure
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/requirement-acceptance.mjs issue-close-guard
