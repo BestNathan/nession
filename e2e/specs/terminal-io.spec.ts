@@ -430,6 +430,66 @@ test.describe('Attach bootstrap (#321)', () => {
     }
   });
 
+  test('a client attaching mid-stream has no gap and no repeat at the boundary', async ({ page, browser }, testInfo) => {
+    // The barrier's own test, and the one the plan called flagship. Everything
+    // else asserts that the history *arrives*; this asserts that it *joins*.
+    //
+    // The producer numbers every line, so the two ways a join can be wrong are
+    // both visible in one reading: a **missing** index is a gap at the boundary
+    // (live output the snapshot did not include, and the forwarder started
+    // after), and a **repeated** index is the opposite failure (the snapshot
+    // overlapping output already delivered — #1148's class).
+    //
+    // Asserted as a set equality rather than "the last line is there": a client
+    // that received lines 1..3 and 9..99 passes the latter.
+    test.skip(!process.env.CI, 'local only — runs in CI workflow only');
+    await page.goto(APP_URL);
+    await waitForShell(page);
+
+    const SESSION_NAME = `e2e-gap-${testInfo.retry}`;
+    await createSession(page, SESSION_NAME);
+    await attachToSession(page, SESSION_NAME, 'Relay');
+    await waitForInteractiveShell(page);
+
+    // Slowed deliberately: the second client has to attach *while* this is
+    // still producing, or there is no boundary to be wrong about. ~6s of output
+    // with the attach landing a second or two in.
+    const TOTAL = 60;
+    await submitTerminalCommand(
+      page,
+      `for i in $(seq 1 ${TOTAL}); do printf 'GAP-%03d\\n' $i; sleep 0.1; done`,
+    );
+
+    const second = await browser.newContext();
+    try {
+      const other = await second.newPage();
+      await other.goto(APP_URL);
+      await waitForShell(other);
+      await attachToSession(other, SESSION_NAME, 'Relay');
+      await waitForInteractiveShell(other);
+
+      // Wait for the producer to finish, so what is asserted is the whole range
+      // rather than a prefix of it.
+      await expect
+        .poll(async () => countInBuffer(other, `GAP-${String(TOTAL).padStart(3, '0')}`), {
+          timeout: 30_000,
+        })
+        .toBe(1);
+
+      const text = await readTerminalBuffer(other);
+      const indices = [...text.matchAll(/GAP-(\d{3})/g)].map((m) => Number(m[1]));
+
+      expect(
+        [...indices].sort((a, b) => a - b),
+        `the second client's indices are not 1..${TOTAL} each exactly once — a ` +
+          `missing one is a gap at the attach boundary, a duplicate is the ` +
+          `snapshot overlapping the live stream`,
+      ).toEqual(Array.from({ length: TOTAL }, (_, i) => i + 1));
+    } finally {
+      await second.close();
+    }
+  });
+
   test("a bootstrap is that session's history and not another session's", async ({ page, browser }, testInfo) => {
     // The negative control. Without it, "the second client sees `BOOT-a1`"
     // would also pass if the marker reached it some other way — a shared
