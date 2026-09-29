@@ -1,5 +1,13 @@
 # Nession
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/BestNathan/nession/metrics/project-pulse-dark.svg?sanitize=true&v=1">
+  <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/BestNathan/nession/metrics/project-pulse-light.svg?sanitize=true&v=1">
+  <img alt="Nession Engineering Pulse — repository scale and rolling seven-day activity" src="https://raw.githubusercontent.com/BestNathan/nession/metrics/project-pulse-light.svg">
+</picture>
+
+<sub>Generated daily from <code>main</code> · rolling 7d · <a href="https://raw.githubusercontent.com/BestNathan/nession/metrics/metrics.json">raw metrics</a></sub>
+
 > An intelligent workspace for continuous work across devices, environments, and compute nodes.
 
 Nession connects local machines, remote servers, cloud environments, terminals, coding agents, and other execution contexts into one continuous working experience. The infrastructure may be distributed and complex; the product should remain coherent, quiet, and extensible.

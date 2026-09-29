@@ -86,6 +86,7 @@ export function Shell({ connectionStatus }: ShellProps) {
             connectionStatus={connectionStatus}
             agents={data.agents}
             filteredSessions={data.filteredSessions}
+            totalSessionCount={data.sessions.length}
             staleAgents={data.staleAgents}
             selectedId={state.selectedId}
             clientSessionId={state.clientSessionId}

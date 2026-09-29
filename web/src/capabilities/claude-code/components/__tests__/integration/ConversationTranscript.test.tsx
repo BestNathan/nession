@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { ConversationTranscript } from '../../ConversationTranscript';
 import type { ConversationViewState } from '../../../hooks/useConversation';
@@ -86,5 +86,50 @@ describe('ConversationTranscript scroll (#1190)', () => {
     await waitFor(() => {
       expect(onLoadOlder).toHaveBeenCalled();
     });
+  });
+
+  it('shows a pull hint when older pages are available at the top edge', () => {
+    render(
+      <ConversationTranscript
+        view={viewState({
+          hasMore: true,
+          items: [
+            { id: '1', kind: 'message', role: 'user', content: [{ type: 'text', text: 'hello' }] },
+          ],
+        })}
+        onLoadOlder={vi.fn()}
+      />,
+    );
+
+    const scroll = screen.getByTestId('conversation-transcript-scroll');
+    scroll.scrollTop = 0;
+    fireEvent.scroll(scroll);
+
+    expect(screen.getByTestId('conversation-pull-hint')).toHaveTextContent('Pull down for earlier messages');
+  });
+
+  it('reveals pull progress while dragging down at the top edge', () => {
+    render(
+      <ConversationTranscript
+        view={viewState({
+          hasMore: true,
+          items: [
+            { id: '1', kind: 'message', role: 'user', content: [{ type: 'text', text: 'hello' }] },
+          ],
+        })}
+        onLoadOlder={vi.fn()}
+      />,
+    );
+
+    const scroll = screen.getByTestId('conversation-transcript-scroll');
+    scroll.scrollTop = 0;
+    fireEvent.scroll(scroll);
+
+    const handle = screen.getByTestId('conversation-pull-handle');
+    fireEvent.pointerDown(handle, { clientY: 100, pointerId: 1, button: 0 });
+    fireEvent.pointerMove(handle, { clientY: 140, pointerId: 1 });
+
+    expect(handle).toHaveStyle({ height: '44px' });
+    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '71');
   });
 });

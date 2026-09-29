@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { cn } from '@/shared/lib/utils';
 import { agentDisplayName } from '@/shared/lib/format';
 import { SidebarSectionHead } from '@/app/patterns/SidebarSectionHead';
@@ -7,6 +8,12 @@ export interface SidebarAgentsProps {
   agents: Agent[];
   /** The agent the active Session runs on, if any. */
   activeAgentId: string | null;
+  /**
+   * Optional trailing control in the section head (`SidebarSectionHead`'s
+   * `action` slot). The Web sidebar's Collapse control lives here (#1196 §1) —
+   * the head is the sidebar's top navigation zone.
+   */
+  action?: ReactNode;
   /**
    * Whether to draw the section's own "Agents" head.
    *
@@ -57,9 +64,14 @@ export interface SidebarAgentsProps {
 export function SidebarAgents({
   agents,
   activeAgentId,
+  action,
   showSectionHead = true,
 }: SidebarAgentsProps) {
-  if (agents.length === 0) {
+  // With no head and no rows there is nothing to show; but when a head (or a
+  // head action, like the Web Collapse control) is present it must not vanish
+  // with the Agent count — a shell control that disappears based on data is
+  // exactly the "jumping control" #1196 removes.
+  if (agents.length === 0 && (!showSectionHead || action === undefined)) {
     return null;
   }
 
@@ -69,7 +81,7 @@ export function SidebarAgents({
       aria-label="Agents"
       className="flex shrink-0 flex-col px-[var(--shell-space-2)]"
     >
-      {showSectionHead ? <SidebarSectionHead label="Agents" /> : null}
+      {showSectionHead ? <SidebarSectionHead label="Agents" action={action} /> : null}
       <ul className="flex flex-col">
         {agents.map((agent) => {
           const active = agent.agent_id === activeAgentId;

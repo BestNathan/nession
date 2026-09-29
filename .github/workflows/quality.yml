@@ -44,6 +44,7 @@ jobs:
           cache: 'npm'
           cache-dependency-path: web/package-lock.json
       - uses: extractions/setup-just@v2
+      - run: node scripts/generate-engineering-pulse.mjs --self-test
       - run: cd web && npm ci
       - run: just design-check full
       - run: just web-lint

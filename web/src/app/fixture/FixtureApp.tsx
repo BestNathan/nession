@@ -11,10 +11,12 @@ import { FIXTURE_CLIENT_SESSION_ID } from '@/app/fixture/fixtureData';
 import type { Surface } from '@/app/patterns/SessionHeader';
 import type { CapabilityId } from '@/product/capability';
 import { claudeCodeApi } from '@/capabilities/claude-code';
+import { envApi } from '@/capabilities/env';
 import { gitApi } from '@/capabilities/git';
 import { fixtureAgents } from './fixtureAgents';
 import { fixtureConnection } from './fixtureConnection';
 import { fixtureConversationSurface } from './fixtureConversation';
+import { fixtureEnvSurface } from './fixtureEnv';
 import { fixtureFileOps } from './fixtureFileOps';
 import { fixtureGitSurface } from './fixtureGit';
 import { fixtureSelectedId } from './fixtureSelection';
@@ -65,6 +67,12 @@ export function FixtureApp() {
   // is read once at mount rather than tracked, because a fixture route does not
   // change its query without a reload.
   useEffect(() => claudeCodeApi.install(fixtureConversationSurface(search)), [search]);
+
+  // The Environment stub, for the same reachability reason (#1202): the App's
+  // Environment navigator/pushed detail can only be captured if the route can
+  // open the capability at all. No mount-time gate is needed — the App reaches
+  // the capability through the tool strip after mount, not in the first frame.
+  useEffect(() => envApi.install(fixtureEnvSurface(search)), [search]);
 
   const [surface, setSurface] = useState<Surface>('terminal');
   const [tool, setTool] = useState<CapabilityId>('files');
@@ -118,6 +126,9 @@ export function FixtureApp() {
   const sidebarProps = {
     agents,
     filteredSessions,
+    // The unfiltered population, not `filteredSessions.length` — the fixture
+    // exercises real filters, so this is the one place the two can differ.
+    totalSessionCount: sessions.length,
     staleAgents,
     selectedId,
     clientSessionId: FIXTURE_CLIENT_SESSION_ID,

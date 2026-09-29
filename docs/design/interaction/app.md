@@ -50,6 +50,12 @@ shell no way to say which page was current.
 The Sessions layer is a **navigator**, and its resting composition is one screen with
 one job: pick or start work (#1083).
 
+It is also a **full spatial layer, never a collapsible sidebar** (#1196 §8). The Web
+shell may tuck its navigation column into a compact rail; the App has no such concept —
+no collapse control, no expand control, no icon-strip rail. Leaving and opening
+Sessions belongs to the App's spatial navigation (Session selection and its visible
+navigation affordances), not to a width state.
+
 ```text
 Sessions                         ＋        ← the page's name and its one action
 [ search ]                          ⚙︎     ← the only persistent control row

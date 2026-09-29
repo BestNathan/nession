@@ -57,6 +57,7 @@ function baseProps(
     connectionStatus: 'connected',
     agents: [agent],
     filteredSessions: [sess],
+    totalSessionCount: 1,
     staleAgents: [],
     selectedId: null,
     clientSessionId: '',
@@ -210,6 +211,43 @@ describe('WorkspaceRegion app layer composition', () => {
     // Desktop is two columns: the Session's identity is its row in the sidebar,
     // not a heading above the work area (the header is gone — #748).
     expect(screen.getByTestId('sidebar-column')).toBeInTheDocument();
+    expect(screen.getByTestId(`session-item-${sess.session_id}`)).toBeInTheDocument();
+  });
+
+  it('collapse is one state: the column reserves rail width and the work surface gets the rest (#1195/#1196 §5)', async () => {
+    // The #1195 defect was two independent facts: `Sidebar` privately knew it
+    // was a rail while this column kept reserving the expanded width. Now the
+    // composition owns the state and both views follow it.
+    const user = userEvent.setup();
+    render(
+      <WorkspaceRegion
+        {...baseProps({
+          isWide: true,
+          selectedId: sess.session_id,
+          selectedSession: sess,
+          selectedAgent: agent,
+          domain,
+        })}
+      />,
+    );
+
+    const column = screen.getByTestId('sidebar-column');
+    expect(column).not.toHaveAttribute('data-collapsed');
+    expect(column.className).toContain('--shell-sidebar-width');
+
+    await user.click(screen.getByTestId('sidebar-collapse'));
+
+    expect(column).toHaveAttribute('data-collapsed', 'true');
+    expect(column.className).toContain('--shell-rail-width');
+    expect(column.className).not.toContain('--shell-sidebar-width');
+    // The work surface stays mounted — collapse is geometry, not a remount.
+    expect(screen.getByTestId('terminal')).toBeInTheDocument();
+
+    await user.click(screen.getByTestId('sidebar-rail-expand'));
+
+    expect(column).not.toHaveAttribute('data-collapsed');
+    expect(column.className).toContain('--shell-sidebar-width');
+    // Selection and navigation state survive the round trip (#1196 §6).
     expect(screen.getByTestId(`session-item-${sess.session_id}`)).toBeInTheDocument();
   });
 

@@ -7,14 +7,16 @@ import {
   Wrench,
   X,
 } from 'lucide-react';
-import { memo, type ReactNode } from 'react';
+import { memo, useRef, type ReactNode } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { copyToClipboard } from '@/shared/lib/clipboard';
 import { cn } from '@/shared/lib/utils';
 import { Markdown } from '@/shared/markdown';
 import type { ConversationViewState } from '../hooks/useConversation';
+import { useTranscriptPullToLoad } from '../hooks/useTranscriptPullToLoad';
 import { useTranscriptScroll } from '../hooks/useTranscriptScroll';
+import { TranscriptPullToLoadIndicator } from './TranscriptPullToLoadIndicator';
 import type { ClaudeCodeConversationResponse } from '../types';
 import { clockTime } from '../model/clockTime';
 
@@ -27,8 +29,8 @@ type Payload = NonNullable<Tool['input']>;
 /**
  * The transcript, from the newest page backwards.
  *
- * Scroll-driven older pagination (#1190): no Load older button; the container
- * owns vertical scroll and preserves anchor on prepend.
+ * Older pagination (#1190): pull-down at the top (ring fills, then release),
+ * scroll-to-top fallback, and anchor preservation on prepend.
  */
 export function ConversationTranscript({
   view,
@@ -37,7 +39,8 @@ export function ConversationTranscript({
   view: ConversationViewState;
   onLoadOlder: () => void;
 }) {
-  const { scrollRef, topSentinelRef, onScroll, captureAnchorAndLoadOlder } = useTranscriptScroll({
+  const pullHandleRef = useRef<HTMLDivElement>(null);
+  const { scrollRef, topSentinelRef, onScroll, loadOlderFromPull } = useTranscriptScroll({
     conversationId: view.conversation?.claude_session_id ?? null,
     itemCount: view.items.length,
     hasMore: view.hasMore,
@@ -45,13 +48,53 @@ export function ConversationTranscript({
     onLoadOlder,
   });
 
+  const canPullOlder =
+    view.hasMore && !view.loadingOlder && view.items.length > 0 && view.state === 'ready';
+  const { pullPx, progress, isPulling, atTopEdge, syncTopEdge, pullHandleHandlers, scrollHandlers } =
+    useTranscriptPullToLoad({
+      scrollRef,
+      pullHandleRef,
+      enabled: canPullOlder,
+      onCommitLoad: loadOlderFromPull,
+    });
+
+  const handleScroll = () => {
+    syncTopEdge();
+    onScroll();
+  };
+
   return (
     <div
       ref={scrollRef}
       data-testid="conversation-transcript-scroll"
-      className="min-h-0 flex-1 overflow-y-auto p-4"
-      onScroll={onScroll}
+      className={cn('min-h-0 flex-1 overflow-y-auto p-4 touch-pan-y', isPulling && 'touch-none overscroll-none')}
+      onScroll={handleScroll}
+      {...scrollHandlers}
     >
+      <div
+        className={cn(!isPulling && pullPx === 0 && 'translate-y-0')}
+        style={pullPx > 0 ? { transform: `translateY(${pullPx}px)` } : undefined}
+      >
+        {canPullOlder && atTopEdge ? (
+          <div
+            ref={pullHandleRef}
+            className={cn(
+              'flex min-h-11 touch-none select-none flex-col items-center justify-end overflow-hidden transition-[height] duration-75',
+              isPulling ? 'cursor-grabbing' : 'cursor-grab',
+            )}
+            style={{ height: pullPx > 0 ? Math.max(pullPx, 44) : 44 }}
+            data-testid="conversation-pull-handle"
+            {...pullHandleHandlers}
+          >
+            {pullPx > 0 ? (
+              <TranscriptPullToLoadIndicator progress={progress} />
+            ) : (
+              <p className="pb-1 text-[10px] text-muted-foreground" data-testid="conversation-pull-hint">
+                Pull down for earlier messages
+              </p>
+            )}
+          </div>
+        ) : null}
       {view.loadingOlder ? (
         <p
           className="flex items-center justify-center gap-2 pb-3 text-xs text-muted-foreground"
@@ -69,7 +112,7 @@ export function ConversationTranscript({
           role="alert"
         >
           <span>{view.olderError}</span>
-          <Button variant="outline" size="xs" type="button" onClick={() => captureAnchorAndLoadOlder()}>
+          <Button variant="outline" size="xs" type="button" onClick={() => loadOlderFromPull()}>
             Retry
           </Button>
         </div>
@@ -84,6 +127,7 @@ export function ConversationTranscript({
         ) : (
           view.items.map((item) => <ItemView key={item.id} item={item} />)
         )}
+      </div>
       </div>
     </div>
   );

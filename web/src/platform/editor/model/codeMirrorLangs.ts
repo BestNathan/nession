@@ -1,35 +1,10 @@
 import type { Extension } from '@codemirror/state';
 import { LanguageSupport, StreamLanguage } from '@codemirror/language';
 import type { LanguageName } from '@uiw/codemirror-extensions-langs';
-import { getLangKey, parseBasename, parseExt } from './viewerRegistry';
 import { detectLanguage, type LanguageId } from '@/shared/lib/languageId';
-import { languageIdToCodeMirrorKey } from '@/capabilities/files/model/languageIdToCodeMirror';
+import { languageIdToCodeMirrorKey } from './languageIdToCodeMirror';
 
 type LangsModule = typeof import('@uiw/codemirror-extensions-langs');
-
-/** Map extension / legacy names to @uiw/codemirror-extensions-langs keys. */
-const LANG_KEY_ALIASES: Record<string, string> = {
-  env: 'properties',
-  zsh: 'sh',
-  fish: 'sh',
-  kotlin: 'kt',
-  javascript: 'js',
-  typescript: 'ts',
-  shell: 'sh',
-  ruby: 'rb',
-  rust: 'rs',
-  python: 'py',
-  markdown: 'md',
-  dockerfile: '__dockerfile__',
-};
-
-const BASENAME_LANG_KEYS: Record<string, string> = {
-  Dockerfile: '__dockerfile__',
-  Jenkinsfile: 'groovy',
-  Gemfile: 'rb',
-  Rakefile: 'rb',
-  'CMakeLists.txt': 'cmake',
-};
 
 let langsModule: LangsModule | null = null;
 let langsPromise: Promise<LangsModule> | null = null;
@@ -39,14 +14,6 @@ async function loadDockerfileExtension(): Promise<Extension> {
   const { dockerFile } = await import('@codemirror/legacy-modes/mode/dockerfile');
   return new LanguageSupport(StreamLanguage.define(dockerFile));
 }
-
-function normalizeLangKey(key: string): string {
-  return LANG_KEY_ALIASES[key] ?? key;
-}
-
-// ────────────────────────────────────────────────────────────────────────────
-// New LanguageId-based API
-// ────────────────────────────────────────────────────────────────────────────
 
 /** Collect unique LanguageIds present in a directory listing. */
 export function scanLanguageIdsFromPaths(paths: string[]): LanguageId[] {
@@ -71,7 +38,7 @@ export async function loadLangExtensionForLanguageId(
   return extensionForLangKey(key);
 }
 
-/** Register LanguageIds seen in FileBrowser; prefetches langs module when non-empty. */
+/** Register LanguageIds seen in a listing; prefetches the langs module when non-empty. */
 export function registerSeenLanguageIds(ids: Iterable<LanguageId>): void {
   for (const id of ids) {
     const key = languageIdToCodeMirrorKey(id);
@@ -84,48 +51,6 @@ export function registerSeenLanguageIds(ids: Iterable<LanguageId>): void {
   }
 }
 
-/** Resolve a UIW langs key from a file path or explicit language prop. */
-export function resolveLangKey(path: string, language?: string): string | null {
-  if (language) {
-    const fromProp = normalizeLangKey(language.toLowerCase());
-    if (fromProp !== '__dockerfile__') {
-      return fromProp;
-    }
-    return '__dockerfile__';
-  }
-
-  const basename = parseBasename(path);
-  const fromBasename = BASENAME_LANG_KEYS[basename];
-  if (fromBasename) {
-    return fromBasename;
-  }
-
-  const ext = parseExt(path);
-  if (!ext) {
-    return null;
-  }
-
-  const mapped = getLangKey(ext);
-  if (!mapped) {
-    return null;
-  }
-
-  return normalizeLangKey(mapped);
-}
-
-/** Collect unique UIW lang keys present in a directory listing.
- * @deprecated Use scanLanguageIdsFromPaths() instead. */
-export function scanLangKeysFromPaths(paths: string[]): string[] {
-  const seen = new Set<string>();
-  for (const path of paths) {
-    const key = resolveLangKey(path);
-    if (key) {
-      seen.add(key);
-    }
-  }
-  return [...seen];
-}
-
 /** Dynamic import of @uiw/codemirror-extensions-langs (once per session). */
 export function ensureLangsModule(): Promise<LangsModule> {
   if (langsModule) {
@@ -136,17 +61,6 @@ export function ensureLangsModule(): Promise<LangsModule> {
     return mod;
   });
   return langsPromise;
-}
-
-/** Register lang keys seen in FileBrowser; prefetches langs module when non-empty.
- * @deprecated Use registerSeenLanguageIds() instead. */
-export function registerSeenLangKeys(keys: Iterable<string>): void {
-  for (const key of keys) {
-    sessionSeenLangKeys.add(key);
-  }
-  if (sessionSeenLangKeys.size > 0) {
-    void ensureLangsModule();
-  }
 }
 
 export function getSessionSeenLangKeys(): ReadonlySet<string> {

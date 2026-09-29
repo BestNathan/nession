@@ -183,6 +183,185 @@ test.describe('Web 1440×900', () => {
       ...FIXTURE_SCREENSHOT,
     });
   });
+
+  // #1202 — Environment as a context-first capability. Three states because
+  // they are three different claims: the read-first detail is where
+  // sensitive-value masking lives, the editor is where the dirty state lives,
+  // and the impact dialog is where an in-use save explains itself. One image
+  // cannot stand in for the others.
+  test('Workspace / Environment', async ({ page }) => {
+    await page.goto('/#/fixture/workspace?capability=env');
+    await page.getByTestId('env-profile-list').waitFor();
+    await page.getByTestId('env-profile-row-server::staging.env').click();
+    // Asserted before the shutter: the masked row is the state this baseline
+    // exists to pin, and a screenshot taken against the loading detail would
+    // pin nothing.
+    await expect(page.getByTestId('env-var-masked-API_KEY')).toBeVisible();
+    await expect(page.getByTestId('env-profile-detail')).not.toContainText(
+      'staging-secret-9f2c7d',
+    );
+
+    await expect(page).toHaveScreenshot('web-env-profile.png', {
+      fullPage: true,
+      ...FIXTURE_SCREENSHOT,
+    });
+  });
+
+  test('Workspace / Environment, dirty edit', async ({ page }) => {
+    await page.goto('/#/fixture/workspace?capability=env');
+    await page.getByTestId('env-profile-list').waitFor();
+    await page.getByTestId('env-profile-row-server::staging.env').click();
+    await page.getByTestId('env-edit').click();
+
+    await page.locator('.cm-content').click();
+    // New line at the doc end — typing straight after the click glues the
+    // text onto the last content line.
+    await page.keyboard.press('ControlOrMeta+ArrowDown');
+    await page.keyboard.press('End');
+    await page.keyboard.press('Enter');
+    await page.keyboard.type('EXTRA=1');
+    // The dirty marker is the claim, so it is what the screenshot waits for.
+    await expect(page.getByTestId('env-editor-dirty')).toBeVisible();
+    await expect(page.getByTestId('env-editor-save')).toBeEnabled();
+
+    await expect(page).toHaveScreenshot('web-env-edit-dirty.png', {
+      fullPage: true,
+      ...FIXTURE_SCREENSHOT,
+    });
+  });
+
+  test('Workspace / Environment, in-use save impact', async ({ page }) => {
+    await page.goto('/#/fixture/workspace?capability=env');
+    await page.getByTestId('env-profile-list').waitFor();
+    await page.getByTestId('env-profile-row-agent:devbox-01:prod.env').click();
+    await expect(page.getByTestId('env-profile-usage')).toContainText('api-tests');
+
+    await page.getByTestId('env-edit').click();
+    await page.locator('.cm-content').click();
+    await page.keyboard.press('ControlOrMeta+ArrowDown');
+    await page.keyboard.press('End');
+    await page.keyboard.press('Enter');
+    await page.keyboard.type('EXTRA=1');
+    await page.getByTestId('env-editor-save').click();
+
+    const dialog = page.getByRole('alertdialog');
+    await expect(dialog).toContainText('Save and update running sessions?');
+    await expect(dialog).toContainText('api-tests, deploy');
+
+    await expect(page).toHaveScreenshot('web-env-save-impact.png', {
+      fullPage: true,
+      ...FIXTURE_SCREENSHOT,
+    });
+  });
+
+  // #1196 — the rail is one action plus information summaries, and collapsing
+  // is shell geometry (#1195): the column shrinks to the rail width, the work
+  // surface reclaims the rest with the Terminal still mounted, and expanding
+  // restores both the width and the selection. An image alone cannot say the
+  // summaries are not controls or that their counts are truthful, so those are
+  // assertions first and a screenshot second.
+  test('Sidebar rail', async ({ page }) => {
+    await gotoFixtureShell(page);
+    await waitForFixtureTerminal(page);
+
+    const railWidth = await page.evaluate(() =>
+      parseFloat(
+        getComputedStyle(document.documentElement).getPropertyValue('--shell-rail-width'),
+      ),
+    );
+    const column = page.getByTestId('sidebar-column');
+    const xterm = page.locator('.xterm').first();
+    const expandedColumn = (await column.boundingBox())?.width ?? 0;
+    const expandedXterm = (await xterm.boundingBox())?.width ?? 0;
+    expect(expandedColumn).toBeGreaterThan(railWidth * 2);
+
+    // An icon-only shell button centers its glyph in the box — the shared
+    // class owns this, so a raw <button> cannot drift to flush-left while a
+    // Button-primitive consumer stays centered (both were shipped once).
+    const glyphCenterOffset = async (testid: string) => {
+      const button = page.getByTestId(testid);
+      const buttonBox = await button.boundingBox();
+      const glyphBox = await button.locator('svg').first().boundingBox();
+      if (!buttonBox || !glyphBox) throw new Error(`${testid} not measurable`);
+      return Math.abs(
+        glyphBox.x + glyphBox.width / 2 - (buttonBox.x + buttonBox.width / 2),
+      );
+    };
+    expect(await glyphCenterOffset('sidebar-collapse')).toBeLessThanOrEqual(0.5);
+
+    // Pointer path: the one Collapse control, in the Agents section head.
+    await page.getByTestId('sidebar-collapse').click();
+
+    // Geometry: the column is exactly the rail width and the Terminal's own
+    // box — not just the flex gap beside it — absorbs the freed width, so the
+    // reclaim reached the work surface through the resize pipeline (#1195).
+    const collapsedColumn = (await column.boundingBox())?.width ?? 0;
+    expect(collapsedColumn).toBe(railWidth);
+    await expect
+      .poll(async () => (await xterm.boundingBox())?.width ?? 0)
+      .toBeGreaterThan(expandedXterm + (expandedColumn - railWidth) * 0.9);
+    await expect(xterm).toBeVisible();
+
+    // Interactive-role count: one control in the rail, and it is Expand. The
+    // summaries are information — present, counted, and not buttons.
+    const rail = page.getByTestId('sidebar-rail');
+    await expect(rail.getByRole('button')).toHaveCount(1);
+    await expect(rail.getByRole('button', { name: 'Expand sidebar' })).toBeVisible();
+    const agentsSummary = page.getByTestId('sidebar-rail-agents');
+    await expect(agentsSummary).toHaveText('3');
+    await expect(agentsSummary).toHaveAttribute('aria-label', '3 agents · 2 online');
+    const sessionsSummary = page.getByTestId('sidebar-rail-sessions');
+    await expect(sessionsSummary).toHaveText('6');
+    await expect(sessionsSummary).toHaveAttribute('aria-label', '6 sessions');
+
+    // The rail fills the column's full height: the status dot sits one
+    // --shell-space-2 off the bottom edge, mirroring where the expanded footer
+    // carries the same status — not directly under the summaries, which is
+    // where a shrink-wrapped nav left it.
+    expect(await glyphCenterOffset('sidebar-rail-expand')).toBeLessThanOrEqual(0.5);
+    // A custom property's computed value keeps the author's unit, so
+    // getPropertyValue('--shell-space-2') reads "0.5rem" and parseFloat makes
+    // it 0.5, not 8 (--shell-rail-width above is px-valued, which is why the
+    // same trick works there). Measure it through a probe element instead.
+    const shellSpace2 = await page.evaluate(() => {
+      const probe = document.createElement('div');
+      probe.style.cssText =
+        'position:absolute;visibility:hidden;height:var(--shell-space-2)';
+      document.body.appendChild(probe);
+      const px = probe.getBoundingClientRect().height;
+      probe.remove();
+      return px;
+    });
+    const viewportH = page.viewportSize()?.height ?? 0;
+    await expect.poll(async () => (await rail.boundingBox())?.height ?? 0).toBe(viewportH);
+    // boundingBox is null while the dot is not yet measurable after the
+    // collapse swap — poll through it rather than reading once. And it returns
+    // {x, y, width, height}, not a DOMRect: the bottom edge is y + height.
+    await expect
+      .poll(async () => {
+        const box = await page.getByTestId('sidebar-rail-status').boundingBox();
+        return box
+          ? Math.abs(viewportH - shellSpace2 - (box.y + box.height))
+          : Number.POSITIVE_INFINITY;
+      })
+      .toBeLessThanOrEqual(1);
+
+    await expect(page).toHaveScreenshot('web-sidebar-rail.png', {
+      fullPage: true,
+      ...FIXTURE_SCREENSHOT,
+    });
+
+    // Keyboard path back out: Expand is the rail's one tab stop and activates
+    // on Enter. Width and selection both survive the round trip.
+    await rail.getByRole('button', { name: 'Expand sidebar' }).focus();
+    await page.keyboard.press('Enter');
+
+    expect((await column.boundingBox())?.width ?? 0).toBe(expandedColumn);
+    // `data-selected` is on the row wrapper; `aria-current` is on the button
+    // inside it — asserting the pair on one element matches nothing.
+    await expect(page.locator('[data-testid="session-item-row"][data-selected="true"]')).toHaveCount(1);
+    await expect(xterm).toBeVisible();
+  });
 });
 
 test.describe('Web compact 1024×768', () => {
@@ -593,6 +772,30 @@ test.describe('App 390×844', () => {
     await expect(page.getByTestId('file-row-web')).toContainText('1 item', { timeout: 10_000 });
 
     await expect(page).toHaveScreenshot('app-files-list.png', {
+      fullPage: true,
+      ...FIXTURE_SCREENSHOT,
+    });
+  });
+
+  // #1202's App half: the Environment detail pushed over the navigator. This
+  // is the screen that proves the capability navigates through the shell's
+  // depth control rather than its own chrome — the header names the profile,
+  // the dock is gone, and the masked row reads the same as on Web. Driven
+  // through the capability picker for the same reason the conversation walk
+  // is: the App reaches a capability view that way.
+  test('Workspace / Environment, pushed detail', async ({ page }) => {
+    await gotoFixtureApp(page);
+    await page.getByTestId('app-header-workspace').first().click();
+    await page.getByTestId('workspace-capability-more').click();
+    await page.getByTestId('workspace-capability-picker-env').click();
+    await page.getByTestId('env-profile-list').waitFor();
+
+    await page.getByTestId('env-profile-row-server::staging.env').click();
+    await expect(page.getByTestId('app-page-header')).toContainText('staging.env');
+    await expect(page.getByTestId('workspace-tool-bar')).toHaveCount(0);
+    await expect(page.getByTestId('env-var-masked-API_KEY')).toBeVisible();
+
+    await expect(page).toHaveScreenshot('app-env-detail.png', {
       fullPage: true,
       ...FIXTURE_SCREENSHOT,
     });

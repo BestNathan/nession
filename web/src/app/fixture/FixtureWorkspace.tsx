@@ -12,8 +12,10 @@ import {
 import { mapDomainState } from '@/product/session/model/domainState';
 import type { CapabilityId } from '@/product/capability';
 import { claudeCodeApi } from '@/capabilities/claude-code';
+import { envApi } from '@/capabilities/env';
 import { gitApi } from '@/capabilities/git';
 import { fixtureConversationSurface } from './fixtureConversation';
+import { fixtureEnvSurface } from './fixtureEnv';
 import { fixtureFileOps } from './fixtureFileOps';
 import { fixtureGitSurface } from './fixtureGit';
 
@@ -37,6 +39,7 @@ export function FixtureWorkspace() {
     search,
     installConversationSurface,
   );
+  const envReady = useFixtureSurface(capability === 'env', search, installEnvSurface);
   const selectedSession =
     FIXTURE_SESSIONS.find((s) => s.session_id === FIXTURE_SELECTED_ID) ?? null;
   const selectedAgent = FIXTURE_AGENTS.find(
@@ -52,7 +55,7 @@ export function FixtureWorkspace() {
         attachFailedId: null,
       })
     : null;
-  if (!gitReady || !conversationReady) {
+  if (!gitReady || !conversationReady || !envReady) {
     // One frame, and only while the asked-for route's stub is being bound.
     return null;
   }
@@ -90,21 +93,33 @@ export function FixtureWorkspace() {
 /**
  * Which capability the route opens, defaulting to Files.
  *
- * Git and Claude Code have canned backends installed below; every other
- * capability keeps the canonical route exactly as the golden screenshots
- * capture it.
+ * Git, Claude Code, and Environment have canned backends installed below;
+ * every other capability keeps the canonical route exactly as the golden
+ * screenshots capture it.
  */
 function openedCapability(search: string): CapabilityId {
   const requested = new URLSearchParams(search).get('capability');
   if (requested === 'git') {
     return 'git';
   }
-  return requested === 'claude-code' ? 'claude-code' : 'files';
+  if (requested === 'claude-code') {
+    return 'claude-code';
+  }
+  return requested === 'env' ? 'env' : 'files';
 }
 
 /** Bind the Git stub to the shared singleton. */
 function installGitSurface(search: string): () => void {
   return gitApi.install(fixtureGitSurface(search));
+}
+
+/**
+ * Bind the Environment stub (#1202). Gated like Git: `?capability=env`
+ * renders the capability at mount, and the child effect would ask into an
+ * unbound singleton before this component's own effect could install.
+ */
+function installEnvSurface(search: string): () => void {
+  return envApi.install(fixtureEnvSurface(search));
 }
 
 /**
