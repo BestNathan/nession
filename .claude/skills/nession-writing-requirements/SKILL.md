@@ -29,6 +29,10 @@ Write issue bodies in the reporter's language; keep the section headers below, p
 - One requirement = one issue. Changes edit in place, never a new issue.
 - `bug` is lowercase. Never create `BUG`.
 - `Closes #N` belongs only in the `staging → main` release PR body.
+- Every Requirement Success Criterion uses a stable ID: `SC-01`, `SC-02`, ... . IDs survive wording edits so implementation, staging verification and release acceptance can refer to the same criterion.
+- A checked criterion means **accepted**, not merely implemented. Do not change `[ ]` to `[x]` until the criterion has an explicit acceptance conclusion and concrete evidence.
+- Every Requirement issue carries an `## Acceptance Report` with exactly one row per Success Criterion. New requirements start at `Pending`; completed closure requires every criterion to be `Pass` or justified `N/A` with evidence.
+- `Close as not planned` is the cancellation path. It does not claim the implementation met the requirement and therefore does not require acceptance.
 
 ---
 
@@ -50,6 +54,24 @@ Write issue bodies in the reporter's language; keep the section headers below, p
 [Full document from clarifying-requirements:
  Background / Goals / Non-Goals / Scope / Constraints /
  Success Criteria / Edge Cases / Open Questions]
+
+Success Criteria MUST be rendered as stable checklist IDs:
+
+- [ ] SC-01 [criterion]
+- [ ] SC-02 [criterion]
+
+## Acceptance Report
+
+| Criterion | Result | Evidence |
+|---|---|---|
+| SC-01 | Pending | implementation pending |
+| SC-02 | Pending | implementation pending |
+
+Create exactly one Pending row for every Success Criterion. During staging
+verification, replace Pending with Pass / Fail / justified N/A and replace the
+placeholder with concrete evidence (test, workflow run, screenshot/PR comment,
+staging observation, or other auditable proof). Only Pass / justified N/A rows
+may be checked `[x]`.
 
 ## Product alignment
 
@@ -105,7 +127,12 @@ gh issue edit [N] --repo BestNathan/nession --body "[updated document]"   # edit
 gh issue comment [N] --repo BestNathan/nession --body "[change discussion]"
 ```
 
-Update Status as it moves: Draft → In Discussion → Approved.
+Update specification Status as it moves: Draft → In Discussion → Approved.
+
+Acceptance is a separate lifecycle dimension. After implementation reaches staging,
+verify every Success Criterion, update its Acceptance Report row, and only then check
+the criterion. A requirement is ready for completed closure only when every criterion
+is checked and every row is Pass or justified N/A with concrete evidence.
 
 ---
 
@@ -243,7 +270,7 @@ Missing label? Create it now. Never drop a label to save a command.
 
 # Lifecycle
 
-**Requirement:** Draft → In Discussion → Approved → **claimed (`in-progress`)** → (implementation PR references it) → claim released → Closed. Status lives in the body; update it as it moves.
+**Requirement:** Draft → In Discussion → Approved → **claimed (`in-progress`)** → implementation → staging verification → **Acceptance Passed** → release → Closed. Specification Status lives in the body; acceptance lives in the Success Criteria + Acceptance Report. The feature PR may merge to staging while acceptance is still Pending; completed closure may not happen until acceptance passes.
 
 **Bug:** Filed with analysis → on confirmation, one edit updates the body *and* narrows the labels → **claimed (`in-progress`)** → fix PR references it → claim released → closed by the release PR's `Closes #N`.
 
