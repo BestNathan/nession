@@ -5,6 +5,7 @@ import { JsonCopyMenu } from './JsonCopyMenu';
 import { JsonCompactValue } from './JsonCompactValue';
 import { JsonScalar } from './JsonScalar';
 import { jsonTreeMonoClass } from './jsonTreeClasses';
+import { jsonSyntax } from './jsonTreeSyntax';
 import { formatJsonPath, pathKey } from './jsonPath';
 
 interface JsonTreeInspectorProps {
@@ -93,7 +94,7 @@ function JsonInspectorNode({ value, segments, depth, pinRootOpen, expanded, onTo
               {!open ? (
                 <JsonCompactValue value={value} depth={0} inline />
               ) : (
-                <span className="text-muted-foreground">{isArray ? '[' : '{'}</span>
+                <span className={jsonSyntax.bracket}>{isArray ? '[' : '{'}</span>
               )}
             </div>
           </div>
@@ -101,26 +102,46 @@ function JsonInspectorNode({ value, segments, depth, pinRootOpen, expanded, onTo
       ) : null}
       {open ? (
         <div role="group" className={cn(!isRoot && 'pl-4 border-l border-border/30 ml-1.5')}>
+          {isRoot && isExpandable(value) ? (
+            <div className={cn(jsonTreeMonoClass(), jsonSyntax.bracket, 'py-0.5')}>
+              {isArray ? '[' : '{'}
+            </div>
+          ) : null}
           {entries.map(([entryKey, child]) => (
             <div key={String(entryKey)} className="min-w-0">
               {!isArray ? (
-                <div className={cn(jsonTreeMonoClass(), 'text-muted-foreground py-0.5')}>
-                  {JSON.stringify(entryKey)}
-                  <span className="text-muted-foreground">: </span>
+                <div className={cn(jsonTreeMonoClass(), 'py-0.5 flex flex-wrap items-baseline gap-x-1 min-w-0')}>
+                  <span className={cn(jsonSyntax.key, 'shrink-0')}>{JSON.stringify(entryKey)}</span>
+                  <span className={jsonSyntax.punct}>:</span>
+                  <div className="min-w-0 flex-1 basis-full sm:basis-auto">
+                    <JsonInspectorNode
+                      value={child}
+                      segments={[...segments, entryKey]}
+                      depth={depth + 1}
+                      pinRootOpen={pinRootOpen}
+                      expanded={expanded}
+                      onToggle={onToggle}
+                    />
+                  </div>
                 </div>
-              ) : null}
-              <JsonInspectorNode
-                value={child}
-                segments={[...segments, entryKey]}
-                depth={depth + 1}
-                pinRootOpen={pinRootOpen}
-                expanded={expanded}
-                onToggle={onToggle}
-              />
+              ) : (
+                <JsonInspectorNode
+                  value={child}
+                  segments={[...segments, entryKey]}
+                  depth={depth + 1}
+                  pinRootOpen={pinRootOpen}
+                  expanded={expanded}
+                  onToggle={onToggle}
+                />
+              )}
             </div>
           ))}
           {!isRoot ? (
-            <div className={cn(jsonTreeMonoClass(), 'text-muted-foreground py-0.5')}>
+            <div className={cn(jsonTreeMonoClass(), jsonSyntax.bracket, 'py-0.5')}>
+              {isArray ? ']' : '}'}
+            </div>
+          ) : isRoot && isExpandable(value) ? (
+            <div className={cn(jsonTreeMonoClass(), jsonSyntax.bracket, 'py-0.5')}>
               {isArray ? ']' : '}'}
             </div>
           ) : null}

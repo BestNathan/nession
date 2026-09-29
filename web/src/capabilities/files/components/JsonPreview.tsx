@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { JsonTree } from '@/components/json/JsonTree';
+import { jsonPreviewSurfaceClass } from '@/components/json/jsonTreeSyntax';
 import { parseJsonDocument } from '../model/jsonParse';
 
 interface JsonPreviewProps {
@@ -24,7 +25,9 @@ export function JsonPreview({ content }: JsonPreviewProps) {
 
   return (
     <div className="overflow-y-auto h-full p-[var(--workspace-editor-pad-y)] px-[var(--workspace-editor-head-pad-x)] min-w-0">
-      <JsonTree value={parsed.value} mode="inspector" pinRootOpen />
+      <div className={jsonPreviewSurfaceClass('py-[var(--shell-space-2)]')}>
+        <JsonTree value={parsed.value} mode="inspector" pinRootOpen />
+      </div>
     </div>
   );
 }
