@@ -23,7 +23,7 @@ export function JsonCompactValue({ value, depth = 0, inline = false }: JsonCompa
   if (value === null || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
     return (
       <span className={jsonTreeMonoClass(inline ? 'inline' : undefined)}>
-        <JsonScalar value={value} maxChars={undefined} />
+        <JsonScalar value={value} />
       </span>
     );
   }

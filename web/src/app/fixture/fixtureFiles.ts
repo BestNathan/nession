@@ -6,18 +6,35 @@ import type { FileEntry } from '@/capabilities/files';
  */
 export const FIXTURE_MODIFIED_TS = 1_756_000_000;
 
-/** Large JSONL for virtual-scroll geometry checks (#1199). */
-function buildFixtureJsonl(recordCount: number): string {
-  return Array.from({ length: recordCount }, (_, i) =>
+/** Physical line numbers for heterogeneous JSONL geometry fixtures (#1199). */
+export const FIXTURE_JSONL_LONG_STRING_LINE = 111;
+export const FIXTURE_JSONL_NESTED_LINE = 112;
+export const FIXTURE_JSONL_MALFORMED_LINE = 113;
+export const FIXTURE_JSONL_ARRAY_LINE = 114;
+export const FIXTURE_JSONL_SCALAR_LINE = 115;
+export const FIXTURE_JSONL_NULL_LINE = 116;
+
+/** Large JSONL for virtual-scroll + variable-height geometry checks (#1199). */
+function buildFixtureJsonlEvents(): string {
+  const ordinary = Array.from({ length: 110 }, (_, i) =>
     JSON.stringify({
       id: i + 1,
       kind: 'fixture-event',
       payload: `row-${i + 1}-${'z'.repeat(48)}`,
     }),
-  ).join('\n');
+  );
+  const specials = [
+    JSON.stringify({ id: 'long-string', content: `fixture-${'w'.repeat(10_000)}` }),
+    JSON.stringify({ nested: { a: { b: { c: { d: { e: { f: { g: 1 } } } } } } } }),
+    '{broken json line',
+    JSON.stringify([1, 2, 3, 4, 5, 6, 7]),
+    JSON.stringify('scalar-root'),
+    'null',
+  ];
+  return [...ordinary, ...specials].join('\n');
 }
 
-export const FIXTURE_JSONL_EVENTS = buildFixtureJsonl(120);
+export const FIXTURE_JSONL_EVENTS = buildFixtureJsonlEvents();
 
 /**
  * Deterministic file contents for the viewer — keyed by path. File sizes are
