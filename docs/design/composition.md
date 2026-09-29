@@ -53,7 +53,9 @@ Preferred composition families include:
 
 A wide permanent sidebar is not an invariant. On a layout where it materially helps repeated Session switching, it must still remain visually secondary and should collapse when space or focus requires it.
 
-Extra viewport width belongs to the work surface before it belongs to navigation.
+The collapsed form is a rail with **one action (Expand) plus static Agent/Session summaries** whose counts are truthful totals — its anatomy and interaction rules are specified in [interaction/web.md](interaction/web.md) (#1196). What this layer owns is the composition rule behind it: **collapse is one state, held by the shell composition** (#1195). The composition decides both what the navigation column renders (sidebar or rail) and how much width it reserves; a navigation component must not privately know it is collapsed while the frame around it keeps reserving the expanded width — that split is what made collapse free no space for the work surface.
+
+Extra viewport width belongs to the work surface before it belongs to navigation — including the width a collapse releases, which the work surface reclaims through the normal resize pipeline, not by rebuilding the surface.
 
 ## 3. Top chrome
 

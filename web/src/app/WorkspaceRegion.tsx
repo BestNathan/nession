@@ -13,6 +13,11 @@ export interface WorkspaceRegionProps {
   connectionStatus: ConnectionState;
   agents: Agent[];
   filteredSessions: Session[];
+  /**
+   * Total Sessions before search/filter. The collapsed rail quotes this so a
+   * hidden filter never redefines what the number means (#1196 §3).
+   */
+  totalSessionCount: number;
   staleAgents: string[];
   selectedId: string | null;
   clientSessionId: string;
@@ -56,7 +61,7 @@ export interface WorkspaceRegionProps {
 
 export function WorkspaceRegion(props: WorkspaceRegionProps) {
   const {
-    connectionStatus, agents, filteredSessions, staleAgents, selectedId, clientSessionId,
+    connectionStatus, agents, filteredSessions, totalSessionCount, staleAgents, selectedId, clientSessionId,
     loadingSessions, searchQuery, setSearchQuery, statusFilter, setStatusFilter,
     sortField, sortDirection, toggleSort, isSearchActive, selectedSession,
     selectedAgent, domain, surface, tool, fileOps, onCreate, onRefresh, onSelect,
@@ -81,7 +86,7 @@ export function WorkspaceRegion(props: WorkspaceRegionProps) {
   });
 
   const sidebarProps = {
-    agents, filteredSessions, staleAgents, selectedId, clientSessionId, connectionStatus, domain,
+    agents, filteredSessions, totalSessionCount, staleAgents, selectedId, clientSessionId, connectionStatus, domain,
     loadingSessions, searchQuery, setSearchQuery, statusFilter, setStatusFilter,
     sortField, sortDirection, toggleSort, isSearchActive, onCreate, onRefresh,
     onConfigure, onKill,

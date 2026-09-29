@@ -253,6 +253,69 @@ test.describe('Web 1440×900', () => {
       ...FIXTURE_SCREENSHOT,
     });
   });
+
+  // #1196 — the rail is one action plus information summaries, and collapsing
+  // is shell geometry (#1195): the column shrinks to the rail width, the work
+  // surface reclaims the rest with the Terminal still mounted, and expanding
+  // restores both the width and the selection. An image alone cannot say the
+  // summaries are not controls or that their counts are truthful, so those are
+  // assertions first and a screenshot second.
+  test('Sidebar rail', async ({ page }) => {
+    await gotoFixtureShell(page);
+    await waitForFixtureTerminal(page);
+
+    const railWidth = await page.evaluate(() =>
+      parseFloat(
+        getComputedStyle(document.documentElement).getPropertyValue('--shell-rail-width'),
+      ),
+    );
+    const column = page.getByTestId('sidebar-column');
+    const xterm = page.locator('.xterm').first();
+    const expandedColumn = (await column.boundingBox())?.width ?? 0;
+    const expandedXterm = (await xterm.boundingBox())?.width ?? 0;
+    expect(expandedColumn).toBeGreaterThan(railWidth * 2);
+
+    // Pointer path: the one Collapse control, in the Agents section head.
+    await page.getByTestId('sidebar-collapse').click();
+
+    // Geometry: the column is exactly the rail width and the Terminal's own
+    // box — not just the flex gap beside it — absorbs the freed width, so the
+    // reclaim reached the work surface through the resize pipeline (#1195).
+    const collapsedColumn = (await column.boundingBox())?.width ?? 0;
+    expect(collapsedColumn).toBe(railWidth);
+    await expect
+      .poll(async () => (await xterm.boundingBox())?.width ?? 0)
+      .toBeGreaterThan(expandedXterm + (expandedColumn - railWidth) * 0.9);
+    await expect(xterm).toBeVisible();
+
+    // Interactive-role count: one control in the rail, and it is Expand. The
+    // summaries are information — present, counted, and not buttons.
+    const rail = page.getByTestId('sidebar-rail');
+    await expect(rail.getByRole('button')).toHaveCount(1);
+    await expect(rail.getByRole('button', { name: 'Expand sidebar' })).toBeVisible();
+    const agentsSummary = page.getByTestId('sidebar-rail-agents');
+    await expect(agentsSummary).toHaveText('3');
+    await expect(agentsSummary).toHaveAttribute('aria-label', '3 agents · 2 online');
+    const sessionsSummary = page.getByTestId('sidebar-rail-sessions');
+    await expect(sessionsSummary).toHaveText('6');
+    await expect(sessionsSummary).toHaveAttribute('aria-label', '6 sessions');
+
+    await expect(page).toHaveScreenshot('web-sidebar-rail.png', {
+      fullPage: true,
+      ...FIXTURE_SCREENSHOT,
+    });
+
+    // Keyboard path back out: Expand is the rail's one tab stop and activates
+    // on Enter. Width and selection both survive the round trip.
+    await rail.getByRole('button', { name: 'Expand sidebar' }).focus();
+    await page.keyboard.press('Enter');
+
+    expect((await column.boundingBox())?.width ?? 0).toBe(expandedColumn);
+    // `data-selected` is on the row wrapper; `aria-current` is on the button
+    // inside it — asserting the pair on one element matches nothing.
+    await expect(page.locator('[data-testid="session-item-row"][data-selected="true"]')).toHaveCount(1);
+    await expect(xterm).toBeVisible();
+  });
 });
 
 test.describe('Web compact 1024×768', () => {

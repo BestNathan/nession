@@ -86,6 +86,7 @@ function props(
 ): AppSessionsSurfaceProps {  return {
     agents,
     filteredSessions: sessions,
+    totalSessionCount: sessions.length,
     staleAgents: [],
     selectedId: 'devbox-01:fix-terminal-reconnect',
     clientSessionId: 'client-1',
@@ -183,10 +184,15 @@ describe('App Sessions surface (#1050 stage 1)', () => {
     // default, so its full-width overlay could collapse into a 50px rail with
     // no re-expand affordance anywhere in the App frame. The prop is not in
     // this component's props at all; this pins that it stays that way.
+    // #1196 §8 keeps the boundary on the controlled side too: no rail, no
+    // rail controls, no collapse state leaking into the App composition.
     render(<AppSessionsSurface {...props()} />);
 
     expect(screen.queryByTestId('sidebar-collapse')).not.toBeInTheDocument();
     expect(screen.queryByTestId('sidebar-rail')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('sidebar-rail-expand')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('sidebar-rail-agents')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('sidebar-rail-sessions')).not.toBeInTheDocument();
   });
 
   it('demotes Agents to a disclosure that starts closed', () => {
