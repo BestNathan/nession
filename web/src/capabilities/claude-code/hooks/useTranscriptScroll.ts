@@ -11,30 +11,6 @@ import { TRANSCRIPT_TOP_EDGE_PX } from './transcriptScrollConstants';
 
 const BOTTOM_AFFINITY_PX = 48;
 
-type TopSentinelObserverArgs = {
-  root: HTMLDivElement;
-  sentinel: HTMLDivElement;
-  initialScrollDoneRef: RefObject<boolean>;
-  loadingOlderRef: RefObject<boolean>;
-  onNearTop: () => void;
-};
-
-function installTopSentinelObserver(args: TopSentinelObserverArgs): () => void {
-  const { root, sentinel, initialScrollDoneRef, loadingOlderRef, onNearTop } = args;
-  const observer = new IntersectionObserver(
-    (entries) => {
-      const entry = entries[0];
-      if (!entry?.isIntersecting || !initialScrollDoneRef.current || loadingOlderRef.current) {
-        return;
-      }
-      onNearTop();
-    },
-    { root, rootMargin: `${TRANSCRIPT_TOP_EDGE_PX}px 0px 0px 0px`, threshold: 0 },
-  );
-  observer.observe(sentinel);
-  return () => observer.disconnect();
-}
-
 type OlderFetchRefs = {
   loadingOlderRef: RefObject<boolean>;
   olderFetchArmedRef: MutableRefObject<boolean>;
@@ -44,11 +20,11 @@ type OlderFetchRefs = {
 
 function requestOlderPage(el: HTMLDivElement, refs: OlderFetchRefs): void {
   refs.pendingAnchorRef.current = { scrollHeight: el.scrollHeight, scrollTop: el.scrollTop };
+  refs.olderFetchArmedRef.current = true;
   refs.loadOlderRef.current();
   queueMicrotask(() => {
-    if (refs.loadingOlderRef.current) {
-      refs.olderFetchArmedRef.current = true;
-    } else {
+    if (!refs.loadingOlderRef.current) {
+      refs.olderFetchArmedRef.current = false;
       refs.pendingAnchorRef.current = null;
     }
   });
@@ -99,8 +75,7 @@ export function useTranscriptScroll({
     olderFetchArmedRef.current = false;
   }, [conversationId]);
 
-  /** Load the next older page when the viewport is already near the top sentinel. */
-  const maybeLoadOlderNearTop = useCallback(() => {
+  const requestIfReady = useCallback((requireTopEdge: boolean) => {
     const el = scrollRef.current;
     if (
       !el ||
@@ -108,7 +83,7 @@ export function useTranscriptScroll({
       loadingOlderRef.current ||
       olderFetchArmedRef.current ||
       !hasMoreRef.current ||
-      el.scrollTop > TRANSCRIPT_TOP_EDGE_PX
+      (requireTopEdge && el.scrollTop > TRANSCRIPT_TOP_EDGE_PX)
     ) {
       return;
     }
@@ -119,6 +94,14 @@ export function useTranscriptScroll({
       loadOlderRef,
     });
   }, []);
+
+  const maybeLoadOlderNearTop = useCallback(() => {
+    requestIfReady(true);
+  }, [requestIfReady]);
+
+  const loadOlderFromPull = useCallback(() => {
+    requestIfReady(false);
+  }, [requestIfReady]);
 
   const updateFollowingLatest = useCallback(() => {
     const el = scrollRef.current;
@@ -156,29 +139,10 @@ export function useTranscriptScroll({
       return;
     }
 
-    if (!loadingOlder && hasMore) {
-      maybeLoadOlderNearTop();
-    }
-
     if (grew && followingLatestRef.current) {
       el.scrollTop = el.scrollHeight;
     }
   }, [hasMore, itemCount, loadingOlder, maybeLoadOlderNearTop]);
-
-  useEffect(() => {
-    const root = scrollRef.current;
-    const sentinel = topSentinelRef.current;
-    if (typeof IntersectionObserver === 'undefined' || !root || !sentinel || !hasMore) {
-      return;
-    }
-    return installTopSentinelObserver({
-      root,
-      sentinel,
-      initialScrollDoneRef,
-      loadingOlderRef,
-      onNearTop: maybeLoadOlderNearTop,
-    });
-  }, [conversationId, hasMore, loadingOlder, maybeLoadOlderNearTop]);
 
   const onScroll = () => {
     updateFollowingLatest();
@@ -189,5 +153,6 @@ export function useTranscriptScroll({
     topSentinelRef,
     onScroll,
     captureAnchorAndLoadOlder: maybeLoadOlderNearTop,
+    loadOlderFromPull,
   };
 }

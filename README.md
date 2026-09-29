@@ -1,8 +1,8 @@
 # Nession
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/BestNathan/nession/metrics/project-pulse-dark.svg">
-  <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/BestNathan/nession/metrics/project-pulse-light.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/BestNathan/nession/metrics/project-pulse-dark.svg?sanitize=true&v=1">
+  <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/BestNathan/nession/metrics/project-pulse-light.svg?sanitize=true&v=1">
   <img alt="Nession Engineering Pulse — repository scale and rolling seven-day activity" src="https://raw.githubusercontent.com/BestNathan/nession/metrics/project-pulse-light.svg">
 </picture>
 
