@@ -5,9 +5,13 @@ import type { ConversationViewState } from '../../../hooks/useConversation';
 
 function viewState(overrides: Partial<ConversationViewState> = {}): ConversationViewState {
   return {
-    state: 'ready',
-    conversation: { claude_session_id: 'claude-1', cwd: '/work' },
-    candidates: [],
+    listState: 'ready',
+    conversations: [],
+    binding: null,
+    messagesState: 'ready',
+    openId: 'claude-1',
+    conversation: { id: 'claude-1', cwd: '/work' },
+    activity: 'active',
     items: [{ id: '1', kind: 'message', role: 'user', content: [{ type: 'text', text: 'hello' }] }],
     hasMore: false,
     partialTail: false,

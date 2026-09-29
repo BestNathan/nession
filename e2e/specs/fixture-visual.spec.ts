@@ -141,10 +141,10 @@ test.describe('Web 1440×900', () => {
   });
 
   test('Claude Code conversation list', async ({ page }) => {
-    // `ambiguous`: several conversations at this cwd and no answer about which
+    // `unbound`: several conversations at this cwd and no answer about which
     // is the Session's. The fixture names one and leaves another untitled, so
     // both the title and the client's own fallback are in the picture.
-    await page.goto('/#/fixture/workspace?capability=claude-code&conversation=ambiguous');
+    await page.goto('/#/fixture/workspace?capability=claude-code&conversation=unbound');
 
     await expect(page.getByTestId('claude-code-workspace')).toBeVisible();
     const list = page.getByTestId('conversation-list');

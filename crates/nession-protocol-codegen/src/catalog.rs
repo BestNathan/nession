@@ -370,76 +370,76 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
         },
         Unit {
             owner: "claude-code",
-            id: "claude-code.conversation",
+            id: "claude-code.conversations",
             version: 1,
-            wires: &["claude-code.conversation"],
+            wires: &["claude-code.conversations"],
             decls: vec![
-                decl_of::<nession_claude_code::protocol::conversation::v1::ConversationRequestV1>(
+                decl_of::<nession_claude_code::protocol::conversations::v1::ConversationsRequestV1>(
                     cfg,
                 ),
-                decl_of::<nession_claude_code::protocol::conversation::v1::ConversationResponseV1>(
+                decl_of::<nession_claude_code::protocol::conversations::v1::ConversationsResponseV1>(
                     cfg,
                 ),
-                decl_of::<nession_claude_code::protocol::conversation::v1::ConversationStateV1>(cfg),
-                decl_of::<nession_claude_code::protocol::conversation::v1::ConversationItemV1>(cfg),
-                decl_of::<nession_claude_code::protocol::conversation::v1::ItemKindV1>(cfg),
-                decl_of::<nession_claude_code::protocol::conversation::v1::ToolV1>(cfg),
-                decl_of::<nession_claude_code::protocol::conversation::v1::ConversationIdentityV1>(
+                decl_of::<nession_claude_code::protocol::conversations::v1::ConversationsStateV1>(
                     cfg,
                 ),
-                decl_of::<nession_claude_code::protocol::conversation::v1::ConversationCandidateV1>(
+                decl_of::<nession_claude_code::protocol::conversations::v1::ConversationItemV1>(
+                    cfg,
+                ),
+                decl_of::<nession_claude_code::protocol::conversations::v1::ConversationBindingV1>(
+                    cfg,
+                ),
+                decl_of::<nession_claude_code::protocol::conversations::v1::ConversationActivityV1>(
                     cfg,
                 ),
             ],
             request: Some((
-                "ConversationRequest",
-                nession_claude_code::protocol::conversation::v1::ConversationRequestV1::inline,
-                schema_of::<nession_claude_code::protocol::conversation::v1::ConversationRequestV1>,
+                "ConversationsRequest",
+                nession_claude_code::protocol::conversations::v1::ConversationsRequestV1::inline,
+                schema_of::<nession_claude_code::protocol::conversations::v1::ConversationsRequestV1>,
             )),
             response: Some((
-                "ConversationResponse",
-                nession_claude_code::protocol::conversation::v1::ConversationResponseV1::inline,
-                schema_of::<nession_claude_code::protocol::conversation::v1::ConversationResponseV1>,
+                "ConversationsResponse",
+                nession_claude_code::protocol::conversations::v1::ConversationsResponseV1::inline,
+                schema_of::<nession_claude_code::protocol::conversations::v1::ConversationsResponseV1>,
             )),
         },
         Unit {
             owner: "claude-code",
-            id: "claude-code.conversation",
-            version: 2,
-            wires: &["claude-code.conversation"],
+            id: "claude-code.messages",
+            version: 1,
+            wires: &["claude-code.messages"],
             decls: vec![
-                decl_of::<nession_claude_code::protocol::conversation::v2::ConversationRequestV2>(
+                decl_of::<nession_claude_code::protocol::messages::v1::MessagesRequestV1>(cfg),
+                decl_of::<nession_claude_code::protocol::messages::v1::MessagesResponseV1>(cfg),
+                decl_of::<nession_claude_code::protocol::messages::v1::MessagesStateV1>(cfg),
+                decl_of::<nession_claude_code::protocol::messages::v1::MessageItemV1>(cfg),
+                decl_of::<nession_claude_code::protocol::messages::v1::MessageContentV1>(cfg),
+                decl_of::<nession_claude_code::protocol::messages::v1::MessageRoleV1>(cfg),
+                decl_of::<nession_claude_code::protocol::messages::v1::ToolActivityV1>(cfg),
+                decl_of::<nession_claude_code::protocol::messages::v1::ToolStatusV1>(cfg),
+                decl_of::<nession_claude_code::protocol::messages::v1::PayloadV1>(cfg),
+                decl_of::<nession_claude_code::protocol::messages::v1::PayloadKindV1>(cfg),
+                // Owned by `claude-code.conversations` and reused here as the
+                // page's `conversation`/`activity`, so they appear in both
+                // files — the Scope precedent across list/read: generated
+                // files duplicate rather than import.
+                decl_of::<nession_claude_code::protocol::conversations::v1::ConversationItemV1>(
                     cfg,
                 ),
-                decl_of::<nession_claude_code::protocol::conversation::v2::ConversationResponseV2>(
-                    cfg,
-                ),
-                decl_of::<nession_claude_code::protocol::conversation::v2::ConversationStateV2>(cfg),
-                decl_of::<nession_claude_code::protocol::conversation::v2::ConversationItemV2>(cfg),
-                decl_of::<nession_claude_code::protocol::conversation::v2::ConversationContentV2>(
-                    cfg,
-                ),
-                decl_of::<nession_claude_code::protocol::conversation::v2::RoleV2>(cfg),
-                decl_of::<nession_claude_code::protocol::conversation::v2::ToolV2>(cfg),
-                decl_of::<nession_claude_code::protocol::conversation::v2::ToolStatusV2>(cfg),
-                decl_of::<nession_claude_code::protocol::conversation::v2::PayloadV2>(cfg),
-                decl_of::<nession_claude_code::protocol::conversation::v2::PayloadKindV2>(cfg),
-                decl_of::<nession_claude_code::protocol::conversation::v2::ConversationIdentityV2>(
-                    cfg,
-                ),
-                decl_of::<nession_claude_code::protocol::conversation::v2::ConversationCandidateV2>(
+                decl_of::<nession_claude_code::protocol::conversations::v1::ConversationActivityV1>(
                     cfg,
                 ),
             ],
             request: Some((
-                "ConversationRequest",
-                nession_claude_code::protocol::conversation::v2::ConversationRequestV2::inline,
-                schema_of::<nession_claude_code::protocol::conversation::v2::ConversationRequestV2>,
+                "MessagesRequest",
+                nession_claude_code::protocol::messages::v1::MessagesRequestV1::inline,
+                schema_of::<nession_claude_code::protocol::messages::v1::MessagesRequestV1>,
             )),
             response: Some((
-                "ConversationResponse",
-                nession_claude_code::protocol::conversation::v2::ConversationResponseV2::inline,
-                schema_of::<nession_claude_code::protocol::conversation::v2::ConversationResponseV2>,
+                "MessagesResponse",
+                nession_claude_code::protocol::messages::v1::MessagesResponseV1::inline,
+                schema_of::<nession_claude_code::protocol::messages::v1::MessagesResponseV1>,
             )),
         },
         Unit {

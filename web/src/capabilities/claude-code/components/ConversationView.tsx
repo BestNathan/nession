@@ -2,7 +2,7 @@ import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { MessageSquare } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { ConversationViewState } from '../hooks/useConversation';
-import type { ClaudeCodeConversationResponse } from '../types';
+import type { ClaudeCodeConversationItem } from '../types';
 import { conversationLabel } from '../model/conversationLabel';
 import { clockTime } from '../model/clockTime';
 import { previewLine } from '../model/previewLine';
@@ -10,7 +10,7 @@ import { dateBucket, type DateBucket } from '../model/dateBucket';
 import { ConversationTranscript } from './ConversationTranscript';
 import { cn } from '@/shared/lib/utils';
 
-type Candidate = NonNullable<ClaudeCodeConversationResponse['candidates']>[number];
+type Candidate = ClaudeCodeConversationItem;
 
 /** The headings, and the order they are shown in — newest first. */
 const BUCKET_LABELS: Record<DateBucket, string> = {
@@ -36,12 +36,12 @@ function CandidateRow({
     <li>
       <button
         type="button"
-        aria-current={openId === candidate.claude_session_id ? 'true' : undefined}
-        onClick={() => onSelect(candidate.claude_session_id)}
+        aria-current={openId === candidate.id ? 'true' : undefined}
+        onClick={() => onSelect(candidate.id)}
         className={cn(
           'flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left transition-colors',
           'hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-          openId === candidate.claude_session_id && 'bg-accent text-accent-foreground',
+          openId === candidate.id && 'bg-accent text-accent-foreground',
         )}
       >
         <MessageSquare className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
@@ -58,7 +58,7 @@ function CandidateRow({
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span
             className="truncate text-sm font-medium"
-            title={candidate.claude_session_id}
+            title={candidate.id}
             data-testid="conversation-candidate-title"
           >
             {conversationLabel(candidate)}
@@ -112,7 +112,7 @@ function CandidateList({
 
   const row = (candidate: Candidate) => (
     <CandidateRow
-      key={candidate.claude_session_id}
+      key={candidate.id}
       candidate={candidate}
       openId={openId}
       onSelect={onSelect}
@@ -144,21 +144,6 @@ function CandidateList({
       {undated.length > 0 ? <ul className="space-y-0.5">{undated.map(row)}</ul> : null}
     </div>
   );
-}
-
-/**
- * The candidate the open conversation refers to, for labelling it.
- *
- * The response carries both — `candidates` is populated even when one was
- * resolved (`#1005` decision 3, so a client can offer the list without a second
- * round trip) — but the *identity* shape has no display metadata, so the title
- * lives on the candidate and this is how the header reaches it. A conversation
- * whose candidate is absent still renders: `conversationLabel` has a fallback,
- * and a header is not the place to fail.
- */
-function boundCandidate(view: ConversationViewState): Candidate | undefined {
-  const id = view.conversation?.claude_session_id;
-  return id === undefined ? undefined : view.candidates.find((c) => c.claude_session_id === id);
 }
 
 /** A state the provider answered with that is a message, not a conversation. */
@@ -297,16 +282,22 @@ function ConversationHeader({
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 border-b p-4">
       <div className="min-w-0">
-        <p className="truncate text-sm font-medium" title={view.conversation?.claude_session_id}>
-          {conversationLabel(boundCandidate(view))}
+        {/* The label comes from the `messages` response itself — its
+            `conversation` is the full item shape (#1222), so the header needs
+            no join into the list by id, and the two can never disagree. */}
+        <p className="truncate text-sm font-medium" title={view.conversation?.id}>
+          {conversationLabel(view.conversation)}
         </p>
         <p className="flex items-center gap-2 text-xs text-muted-foreground">
           {/* The provider's own word. `inactive` is a real, readable
               conversation whose Claude has finished (#1005 criterion 4) —
-              saying so is the difference between "not live" and "broken". */}
-          <span data-testid="conversation-state">
-            {view.state === 'ready' ? 'Running now' : 'Finished'}
-          </span>
+              saying so is the difference between "not live" and "broken" —
+              and `unknown` makes no claim at all rather than guessing. */}
+          {view.activity === 'active' ? (
+            <span data-testid="conversation-state">Running now</span>
+          ) : view.activity === 'inactive' ? (
+            <span data-testid="conversation-state">Finished</span>
+          ) : null}
           {view.partialTail ? (
             <span data-testid="conversation-partial">· still being written</span>
           ) : null}
@@ -315,7 +306,7 @@ function ConversationHeader({
           ) : null}
         </p>
       </div>
-      {view.candidates.length > 0 && onShowList ? (
+      {view.conversations.length > 0 && onShowList ? (
         <Button
           variant="outline"
           size="sm"
@@ -332,9 +323,11 @@ function ConversationHeader({
 /**
  * The Session's Claude conversation, or the list to choose one from.
  *
- * Every state the provider can answer with has its own rendering, and none of
- * them is a blank panel: `ambiguous` and `not_found` are answers a user acts on,
- * not failures (`#1005` criterion 2 keeps the list as the stable entry point).
+ * Every state the two units can answer with has its own rendering, and none of
+ * them is a blank panel. There is no `ambiguous` and no list-level `not_found`
+ * anymore (#1222): the list is the answer, an empty one included, and a
+ * conversation that cannot be found is said in the detail pane, where the list
+ * stays on screen to choose from.
  */
 export function ConversationView({
   view,
@@ -353,14 +346,14 @@ export function ConversationView({
   // whenever nothing is open *and* whenever they asked to see it. Local, because
   // it is a view choice — asking the provider again would not answer it.
   const [showList, setShowList] = useState(false);
-  // What is actually open, which is the provider's answer — not the client's
-  // request. They agree whenever a selection succeeded, and the provider's is
-  // the one that is true when it did not.
-  const open = view.conversation?.claude_session_id ?? null;
+  // What is actually open is the selection, not the response: a `not_found`
+  // carries no item, and deriving this from the response would bounce the
+  // reader back to the list with no explanation.
+  const open = view.openId;
 
   const renderPushList = (onBack?: () => void) => (
     <PushConversationList
-      candidates={view.candidates}
+      candidates={view.conversations}
       open={open}
       showList={showList}
       layout={layout}
@@ -385,14 +378,18 @@ export function ConversationView({
       </div>
     );
   }
-  if (view.state === 'unavailable') {
+  if (view.listState === 'unavailable') {
     return (
       <StateNotice testId="conversation-unavailable">
         The agent cannot reach this Session&rsquo;s Claude conversations.
       </StateNotice>
     );
   }
-  if (view.state === 'not_found') {
+  // An empty list is a complete answer, not an error — the `conversations`
+  // unit has no `not_found`, because "the list is the answer" (#1222). Only
+  // when nothing is open, though: an open conversation is the `messages`
+  // unit's business, and a list that shrank under it changes nothing there.
+  if (view.listState === 'ready' && view.conversations.length === 0 && view.openId === null) {
     return (
       <StateNotice testId="conversation-not-found">
         No Claude conversations in this Session&rsquo;s directory.
@@ -412,7 +409,7 @@ export function ConversationView({
             rather than of anything this component tracks. */}
         <aside className="min-h-0 overflow-y-auto border-r">
           <ConversationList
-            candidates={view.candidates}
+            candidates={view.conversations}
             open={open}
             onOpen={(id) => onSelect(id)}
           />
@@ -431,6 +428,13 @@ export function ConversationView({
             <StateNotice testId="conversation-nothing-open">
               Choose a conversation to read it here.
             </StateNotice>
+          ) : view.messagesState === 'not_found' || view.messagesState === 'unavailable' ? (
+            // Named but not there: the selection (or the binding) points at a
+            // conversation the provider will not substitute anything for
+            // (#1222) — say so, and leave the list beside it to choose from.
+            <StateNotice testId="conversation-missing">
+              That conversation is no longer in this Session&rsquo;s directory.
+            </StateNotice>
           ) : (
             <div className="flex min-h-0 flex-1 flex-col" data-testid="conversation-open">
               <ConversationHeader view={view} />
@@ -444,6 +448,19 @@ export function ConversationView({
 
   if (showList || open === null) {
     return renderPushList(() => setShowList(false));
+  }
+
+  if (view.messagesState === 'not_found' || view.messagesState === 'unavailable') {
+    return (
+      <div className="space-y-3 p-6" data-testid="conversation-missing">
+        <p className="text-sm text-muted-foreground">
+          That conversation is no longer in this Session&rsquo;s directory.
+        </p>
+        <Button variant="outline" size="sm" onClick={() => setShowList(true)}>
+          All conversations
+        </Button>
+      </div>
+    );
   }
 
   return (

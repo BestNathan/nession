@@ -1,17 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import { fixtureConversationSurface } from '@/app/fixture/fixtureConversation';
 import { FIXTURE_AGENTS } from '@/app/fixture/fixtureData';
-// v2, because that is the generation the fixture now serves (#1167). Reading it
-// through v1's types would have the test assert a shape the surface under test
-// no longer produces — and it would typecheck, which is the dangerous part.
-import type { ConversationResponse } from '@/generated/protocol/claude-code/conversation/v2';
+import type { ConversationsResponse } from '@/generated/protocol/claude-code/conversations/v1';
+import type { MessagesResponse } from '@/generated/protocol/claude-code/messages/v1';
 
 /**
  * The fixture's conversation surface is an *input*, so it has no rendering to
  * look wrong — which is how it went missing for three PRs (#1128).
  *
- * These tests are the two halves of that: the route is advertised, and what it
- * answers can actually reach the states the UI switches on.
+ * These tests are the two halves of that: the routes are advertised, and what
+ * they answer can actually reach the states the UI switches on. Since `#1222`
+ * that means **two** units — `conversations` (the list and the exact binding)
+ * and `messages` (one explicitly named conversation's timeline) — and the
+ * pairing assertions cover both, because a wire that is advertised but not
+ * answered, or answered but not advertised, never reaches the arm that would
+ * produce the screen.
  */
 describe('fixture conversation surface', () => {
   const surface = fixtureConversationSurface('');
@@ -22,38 +25,66 @@ describe('fixture conversation surface', () => {
    * updated — a request is resolved against the manifest *before* it is sent,
    * so an unadvertised wire never reaches the arm that would answer it.
    *
-   * Named as a literal rather than driven from a table: `scripts/protocol-gate.mjs`
+   * Named as literals rather than driven from a table: `scripts/protocol-gate.mjs`
    * refuses a `request` whose wire it cannot resolve, and it is right to.
    */
-  it('advertises the conversation wire it answers', () => {
+  it('advertises the conversation wires it answers', () => {
     const advertised = Object.keys(FIXTURE_AGENTS[0]?.protocols?.protocols ?? {});
-    expect(advertised, 'claude-code.conversation is answered but not advertised').toContain(
-      'claude-code.conversation',
+    expect(advertised, 'claude-code.conversations is answered but not advertised').toContain(
+      'claude-code.conversations',
     );
+    expect(advertised, 'claude-code.messages is answered but not advertised').toContain(
+      'claude-code.messages',
+    );
+    // And the retired unit is gone from both sides, not just one (#1222) —
+    // advertising it would route requests to an arm that no longer exists.
+    expect(advertised).not.toContain('claude-code.conversation');
   });
 
-  it('answers a conversation bound to the Session', async () => {
-    const response = await surface.request<ConversationResponse>('claude-code.conversation', {});
+  it('answers the list with the binding the auto-open follows', async () => {
+    const response = await surface.request<ConversationsResponse>(
+      'claude-code.conversations',
+      {},
+    );
 
     expect(response.state).toBe('ready');
-    expect(response.conversation).not.toBeNull();
-    // The bound conversation must be one of the candidates, because that is
-    // where its display metadata lives — the identity shape carries an id and a
-    // cwd and nothing to draw (#1124).
-    const bound = response.candidates?.find(
-      (c) => c.claude_session_id === response.conversation?.claude_session_id,
+    expect(response.binding).toBeDefined();
+    // The binding must name one of the listed items: the auto-open asks
+    // `messages` for exactly that id, so a binding that named nothing in the
+    // list would open with `not_found` — the one substitution #1222 forbids.
+    const bound = (response.items ?? []).find(
+      (c) => c.id === response.binding?.conversation_id,
     );
-    expect(bound, 'the bound conversation is missing from its own candidate list').toBeDefined();
+    expect(bound, 'the binding names a conversation the list does not carry').toBeDefined();
     expect(bound?.title).toBeTruthy();
   });
 
-  it('carries a named candidate and an unnamed one, so the fallback is reachable', async () => {
+  it('answers the bound conversation with the full item — no client join', async () => {
+    // The property #1222 bought: the header renders from this response alone,
+    // so the fixture must carry the display metadata *on the messages answer*
+    // or the join it replaced would secretly still be load-bearing.
+    const list = await surface.request<ConversationsResponse>('claude-code.conversations', {});
+    const boundId = list.binding?.conversation_id as string;
+    const response = await surface.request<MessagesResponse>('claude-code.messages', {
+      conversation_id: boundId,
+    });
+
+    expect(response.state).toBe('ready');
+    expect(response.conversation?.id).toBe(boundId);
+    expect(response.conversation?.title).toBeTruthy();
+    expect(response.activity).toBe('active');
+  });
+
+  it('carries a named conversation and an unnamed one, so the fallback is reachable', async () => {
     // Measured against real transcripts: 3 of 14 carry no `ai-title`. A fixture
     // where every conversation is named would leave the client's fallback
     // unreachable from every golden — the state would exist and nothing could
     // photograph it.
-    const response = await surface.request<ConversationResponse>('claude-code.conversation', {});
-    const titles = (response.candidates ?? []).map((c) => c.title);
+    const response = await surface.request<ConversationsResponse>(
+      'claude-code.conversations',
+      {},
+    );
+    const titles = (response.items ?? []).map((c) => c.title);
 
     expect(titles.some((t) => typeof t === 'string' && t.length > 0)).toBe(true);
     expect(titles.some((t) => t === undefined || t === null)).toBe(true);
@@ -64,7 +95,9 @@ describe('fixture conversation surface', () => {
     // record it cannot read as a marker. Each of those is a different branch,
     // and a fixture that missed one would make that branch unreachable from
     // every golden — the state would exist and nothing could photograph it.
-    const response = await surface.request<ConversationResponse>('claude-code.conversation', {});
+    const response = await surface.request<MessagesResponse>('claude-code.messages', {
+      conversation_id: 'c0a1b2c3-1111-4222-8333-444455556666',
+    });
     const items = response.items ?? [];
 
     expect(items.map((item) => item.kind)).toContain('message');
@@ -81,7 +114,9 @@ describe('fixture conversation surface', () => {
     // `unknown` most of all: describing the second as the first is the claim
     // the provider deliberately does not make, so a fixture that only produced
     // one of them could not show the difference.
-    const response = await surface.request<ConversationResponse>('claude-code.conversation', {});
+    const response = await surface.request<MessagesResponse>('claude-code.messages', {
+      conversation_id: 'c0a1b2c3-1111-4222-8333-444455556666',
+    });
     const tools = (response.items ?? []).flatMap((item) => (item.kind === 'tool' ? [item.tool] : []));
     const statuses = tools.map((tool) => tool.status);
 
@@ -91,7 +126,7 @@ describe('fixture conversation surface', () => {
     expect(statuses).toContain('unknown');
 
     // The error has to carry its output: a failed tool with nothing to read is
-    // the state a reader most needs, and the one v1 could not express at all.
+    // the state a reader most needs.
     const failed = tools.find((tool) => tool.status === 'error');
     expect(failed?.output?.text).toBeTruthy();
 
@@ -104,7 +139,9 @@ describe('fixture conversation surface', () => {
     // The regression this guards is the one #714 recorded: the fixture stops
     // reaching the feature, the golden keeps passing, and the gate goes on
     // protecting a screen the product no longer has.
-    const response = await surface.request<ConversationResponse>('claude-code.conversation', {});
+    const response = await surface.request<MessagesResponse>('claude-code.messages', {
+      conversation_id: 'c0a1b2c3-1111-4222-8333-444455556666',
+    });
     const prose = (response.items ?? []).flatMap((item) =>
       item.kind === 'message' ? item.content.flatMap((c) => (c.type === 'text' ? [c.text] : [])) : [],
     );
@@ -113,23 +150,37 @@ describe('fixture conversation surface', () => {
     expect(prose.some((text) => text.includes('```'))).toBe(true);
   });
 
-  it('models the ambiguous and no-conversation states, not just the happy one', async () => {
-    // `ambiguous` is the state `#1005` forbids guessing in, and `not_found` is
-    // the ordinary "no conversation here" — both are screens, so both need an
+  it('models the unbound and no-conversation states, not just the happy one', async () => {
+    // Unbound is the state `#1005` forbids guessing in — a list and no binding,
+    // which is *not* a state of its own anymore (#1222) — and an empty list is
+    // the ordinary "no conversation here". Both are screens, so both need an
     // input that produces them.
-    const ambiguous = await fixtureConversationSurface('?conversation=ambiguous').request<
-      ConversationResponse
-    >('claude-code.conversation', {});
-    expect(ambiguous.state).toBe('ambiguous');
-    expect(ambiguous.conversation ?? null).toBeNull();
-    expect((ambiguous.candidates ?? []).length).toBeGreaterThan(1);
+    const unbound = await fixtureConversationSurface('?conversation=unbound').request<
+      ConversationsResponse
+    >('claude-code.conversations', {});
+    expect(unbound.state).toBe('ready');
+    expect(unbound.binding ?? null).toBeNull();
+    expect((unbound.items ?? []).length).toBeGreaterThan(1);
 
-    const none = await fixtureConversationSurface('?conversation=none').request<ConversationResponse>(
-      'claude-code.conversation',
+    const none = await fixtureConversationSurface('?conversation=none').request<ConversationsResponse>(
+      'claude-code.conversations',
       {},
     );
-    expect(none.state).toBe('not_found');
+    expect(none.state).toBe('ready');
     expect((none.items ?? []).length).toBe(0);
+  });
+
+  it('answers not_found for a conversation id it does not know', async () => {
+    // The unit's only selection mechanism is the explicit id, and an unknown
+    // one is never substituted — not by the binding, not by the newest, not by
+    // the only conversation (#1222).
+    const response = await surface.request<MessagesResponse>('claude-code.messages', {
+      conversation_id: 'no-such-conversation',
+    });
+
+    expect(response.state).toBe('not_found');
+    expect(response.conversation ?? null).toBeNull();
+    expect((response.items ?? []).length).toBe(0);
   });
 
   it('refuses a scenario it does not model rather than inventing one', async () => {
@@ -139,7 +190,7 @@ describe('fixture conversation surface', () => {
     const surface = fixtureConversationSurface('?conversation=nonsense');
 
     await expect(
-      surface.request<ConversationResponse>('claude-code.conversation', {}),
+      surface.request<ConversationsResponse>('claude-code.conversations', {}),
     ).rejects.toThrow(/does not model/);
   });
 
@@ -153,7 +204,7 @@ describe('fixture conversation surface', () => {
     // quietly answers a wire it does not model would let a case assert on a
     // state the product cannot produce — so the example moved rather than the
     // assertion.
-    await expect(surface.request<ConversationResponse>('claude-code.read', {})).rejects.toThrow(
+    await expect(surface.request<ConversationsResponse>('claude-code.read', {})).rejects.toThrow(
       /does not answer/,
     );
   });

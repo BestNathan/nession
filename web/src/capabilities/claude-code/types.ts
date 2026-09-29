@@ -9,14 +9,21 @@
  * `response.content` got `undefined` on a failure with nothing to say so.
  */
 
-// v2 (#1167): a message carries structured content and a tool carries its
-// paired result, which is what the transcript renders. v1 is still served by
-// the agent — the manifest advertises both — but a client reads one generation,
-// and this one is the generation this renderer understands.
+// `#1222`: one retired `claude-code.conversation` unit became two — `conversations`
+// owns the list and the exact binding, `messages` owns one explicitly named
+// conversation's timeline. `messages` reuses `ConversationItemV1` for its
+// `conversation` field, so the header a client renders comes from the response
+// itself and no client-side join by id is ever needed.
 import type {
-  ConversationRequest,
-  ConversationResponse,
-} from '@/generated/protocol/claude-code/conversation/v2';
+  ConversationActivityV1,
+  ConversationItemV1,
+  ConversationsRequest,
+  ConversationsResponse,
+} from '@/generated/protocol/claude-code/conversations/v1';
+import type {
+  MessagesRequest,
+  MessagesResponse,
+} from '@/generated/protocol/claude-code/messages/v1';
 import type {
   ListRequest,
   ListResponse,
@@ -34,22 +41,29 @@ import type {
  */
 export type ClaudeCodeListRequest = ListRequest & { agent_id: string };
 export type ClaudeCodeReadRequest = ReadRequest & { agent_id: string };
-export type ClaudeCodeConversationRequest = ConversationRequest & { agent_id: string };
+export type ClaudeCodeConversationsRequest = ConversationsRequest & { agent_id: string };
+export type ClaudeCodeMessagesRequest = MessagesRequest & { agent_id: string };
 
 /** The capability's names for the responses. */
 export type ClaudeCodeListResponse = ListResponse;
 export type ClaudeCodeReadResponse = ReadResponse;
-export type ClaudeCodeConversationResponse = ConversationResponse;
+export type ClaudeCodeConversationsResponse = ConversationsResponse;
+export type ClaudeCodeMessagesResponse = MessagesResponse;
 
 /**
- * The conversation's state names, narrowed for callers.
+ * The two units' state names, narrowed for callers.
  *
  * Re-exported rather than written out: the union is the contract's, and a
  * hand-kept copy of it is the same mistake the `ReadResponse` mirror above
  * records — the states a client switches on must be the states the provider
  * can answer with.
  */
-export type ClaudeCodeConversationState = ConversationResponse['state'];
+export type ClaudeCodeConversationsState = ConversationsResponse['state'];
+export type ClaudeCodeMessagesState = MessagesResponse['state'];
+
+/** The conversation shape both units speak, and its liveness. */
+export type ClaudeCodeConversationItem = ConversationItemV1;
+export type ClaudeCodeConversationActivity = ConversationActivityV1;
 
 /**
  * The two halves of `claude-code.read`'s answer.
