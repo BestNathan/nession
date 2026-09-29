@@ -403,10 +403,11 @@ describe('ConversationView', () => {
     expect(screen.getByTestId('conversation-candidates')).toBeInTheDocument();
   });
 
-  it('does not render a Load older button; transcript scroll owns pagination (#1190)', () => {
+  it('does not render a Load older button; MessageScroller owns pagination (#1190)', () => {
     renderView(state({ items: turns, hasMore: true }));
     expect(screen.queryByTestId('conversation-load-older')).not.toBeInTheDocument();
-    expect(screen.getByTestId('conversation-transcript-scroll')).toBeInTheDocument();
+    // MessageScroller provides the viewport with role="region" and aria-label="Messages"
+    expect(screen.getByRole('region', { name: 'Messages' })).toBeInTheDocument();
   });
 
   it('gives push-layout conversation history a bounded scroll owner (#1189)', () => {
@@ -536,10 +537,15 @@ describe('ConversationView — structured transcript', () => {
     // The sanitizer's promise, asserted from the consumer's side. There is no
     // `rehype-raw` anywhere in the tree, so a raw node never becomes an
     // element — this is what makes the transcript safe to render at all.
+    // Note: MessageScroller stores the message ID in a data-message-id attribute,
+    // so the raw string may appear in data attributes, but it must not become an element.
     renderView(state({ items: [message('<img src=x onerror="alert(1)">')] }));
 
+    // No img element should be created
     expect(screen.queryByRole('img')).not.toBeInTheDocument();
-    expect(document.body.innerHTML).not.toContain('onerror');
+    // The onerror attribute should not exist on any actual element
+    const elementsWithOnerror = document.querySelectorAll('[onerror]');
+    expect(elementsWithOnerror).toHaveLength(0);
   });
 
   it('shows a tool call collapsed by default, with its arguments and result apart', () => {
