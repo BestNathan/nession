@@ -287,6 +287,7 @@ impl FakeTmux {
             &format!(
                 "#!/bin/sh\n\
                  if [ \"$1\" = \"-S\" ]; then shift 2; fi\n\
+                 if [ \"$1\" = \"-f\" ]; then shift 2; fi\n\
                  n=0\n\
                  while true; do\n\
                  while [ -e \"{dir}/{prefix}$n\" ]; do n=$((n + 1)); done\n\

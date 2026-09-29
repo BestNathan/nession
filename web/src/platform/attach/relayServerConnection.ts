@@ -5,6 +5,26 @@ import type { ConnectionState } from '@/platform/socket/types';
 import type { TerminalServerApi } from '@/product/terminal';
 
 /**
+ * Everything optional about a relay begin. An object rather than a positional
+ * tail because the fields are independent and all skippable: `relayUrl` is a
+ * manual override most callers do not set, and a caller that wants to state
+ * `needsBootstrap` would otherwise have to pass `undefined` for the three in
+ * front of it.
+ */
+export interface RelayBeginOptions {
+  /** Manual agent URL; omit to let the Server rank the agent's addresses. */
+  relayUrl?: string;
+  cols?: number;
+  rows?: number;
+  /**
+   * Whether this client's Terminal needs the session's history sent as a
+   * bootstrap (#321). Omitted means "decide it yourself", which is the agent's
+   * own rule for a client that says nothing.
+   */
+  needsBootstrap?: boolean;
+}
+
+/**
  * Relay-mode lifecycle surface SessionRuntime needs from the server
  * connection. A {@link RelayServerHandle} is the narrow, dependency-free view
  * of the app's server WebSocket plus the server-side terminal capability;
@@ -25,7 +45,7 @@ export interface RelayServerHandle {
    * agent direction). No-op when the connection is not ready; the caller
    * (terminal state machine) gates on {@link isReady}.
    */
-  beginRelay(sessionId: string, relayUrl?: string, cols?: number, rows?: number): void;
+  beginRelay(sessionId: string, opts?: RelayBeginOptions): void;
   /** Ask the server to stop relaying terminal traffic for a session. */
   endRelay(sessionId: string): void;
 }
@@ -66,9 +86,9 @@ export function relayServerHandle(
   return {
     onConnectionStateChange: (cb) => service.onConnectionStateChange(cb),
     isReady: () => !stale() && service.connectionState === 'connected',
-    beginRelay: (sessionId, relayUrl, cols, rows) => {
+    beginRelay: (sessionId, opts) => {
       if (stale()) { return; }
-      terminalServerApi.beginRelay(sessionId, relayUrl, cols, rows);
+      terminalServerApi.beginRelay(sessionId, opts);
     },
     endRelay: (sessionId) => {
       if (stale()) { return; }

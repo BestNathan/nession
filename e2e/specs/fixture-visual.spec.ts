@@ -141,10 +141,10 @@ test.describe('Web 1440×900', () => {
   });
 
   test('Claude Code conversation list', async ({ page }) => {
-    // `ambiguous`: several conversations at this cwd and no answer about which
+    // `unbound`: several conversations at this cwd and no answer about which
     // is the Session's. The fixture names one and leaves another untitled, so
     // both the title and the client's own fallback are in the picture.
-    await page.goto('/#/fixture/workspace?capability=claude-code&conversation=ambiguous');
+    await page.goto('/#/fixture/workspace?capability=claude-code&conversation=unbound');
 
     await expect(page.getByTestId('claude-code-workspace')).toBeVisible();
     const list = page.getByTestId('conversation-list');
@@ -252,6 +252,115 @@ test.describe('Web 1440×900', () => {
       fullPage: true,
       ...FIXTURE_SCREENSHOT,
     });
+  });
+
+  // #1196 — the rail is one action plus information summaries, and collapsing
+  // is shell geometry (#1195): the column shrinks to the rail width, the work
+  // surface reclaims the rest with the Terminal still mounted, and expanding
+  // restores both the width and the selection. An image alone cannot say the
+  // summaries are not controls or that their counts are truthful, so those are
+  // assertions first and a screenshot second.
+  test('Sidebar rail', async ({ page }) => {
+    await gotoFixtureShell(page);
+    await waitForFixtureTerminal(page);
+
+    const railWidth = await page.evaluate(() =>
+      parseFloat(
+        getComputedStyle(document.documentElement).getPropertyValue('--shell-rail-width'),
+      ),
+    );
+    const column = page.getByTestId('sidebar-column');
+    const xterm = page.locator('.xterm').first();
+    const expandedColumn = (await column.boundingBox())?.width ?? 0;
+    const expandedXterm = (await xterm.boundingBox())?.width ?? 0;
+    expect(expandedColumn).toBeGreaterThan(railWidth * 2);
+
+    // An icon-only shell button centers its glyph in the box — the shared
+    // class owns this, so a raw <button> cannot drift to flush-left while a
+    // Button-primitive consumer stays centered (both were shipped once).
+    const glyphCenterOffset = async (testid: string) => {
+      const button = page.getByTestId(testid);
+      const buttonBox = await button.boundingBox();
+      const glyphBox = await button.locator('svg').first().boundingBox();
+      if (!buttonBox || !glyphBox) throw new Error(`${testid} not measurable`);
+      return Math.abs(
+        glyphBox.x + glyphBox.width / 2 - (buttonBox.x + buttonBox.width / 2),
+      );
+    };
+    expect(await glyphCenterOffset('sidebar-collapse')).toBeLessThanOrEqual(0.5);
+
+    // Pointer path: the one Collapse control, in the Agents section head.
+    await page.getByTestId('sidebar-collapse').click();
+
+    // Geometry: the column is exactly the rail width and the Terminal's own
+    // box — not just the flex gap beside it — absorbs the freed width, so the
+    // reclaim reached the work surface through the resize pipeline (#1195).
+    const collapsedColumn = (await column.boundingBox())?.width ?? 0;
+    expect(collapsedColumn).toBe(railWidth);
+    await expect
+      .poll(async () => (await xterm.boundingBox())?.width ?? 0)
+      .toBeGreaterThan(expandedXterm + (expandedColumn - railWidth) * 0.9);
+    await expect(xterm).toBeVisible();
+
+    // Interactive-role count: one control in the rail, and it is Expand. The
+    // summaries are information — present, counted, and not buttons.
+    const rail = page.getByTestId('sidebar-rail');
+    await expect(rail.getByRole('button')).toHaveCount(1);
+    await expect(rail.getByRole('button', { name: 'Expand sidebar' })).toBeVisible();
+    const agentsSummary = page.getByTestId('sidebar-rail-agents');
+    await expect(agentsSummary).toHaveText('3');
+    await expect(agentsSummary).toHaveAttribute('aria-label', '3 agents · 2 online');
+    const sessionsSummary = page.getByTestId('sidebar-rail-sessions');
+    await expect(sessionsSummary).toHaveText('6');
+    await expect(sessionsSummary).toHaveAttribute('aria-label', '6 sessions');
+
+    // The rail fills the column's full height: the status dot sits one
+    // --shell-space-2 off the bottom edge, mirroring where the expanded footer
+    // carries the same status — not directly under the summaries, which is
+    // where a shrink-wrapped nav left it.
+    expect(await glyphCenterOffset('sidebar-rail-expand')).toBeLessThanOrEqual(0.5);
+    // A custom property's computed value keeps the author's unit, so
+    // getPropertyValue('--shell-space-2') reads "0.5rem" and parseFloat makes
+    // it 0.5, not 8 (--shell-rail-width above is px-valued, which is why the
+    // same trick works there). Measure it through a probe element instead.
+    const shellSpace2 = await page.evaluate(() => {
+      const probe = document.createElement('div');
+      probe.style.cssText =
+        'position:absolute;visibility:hidden;height:var(--shell-space-2)';
+      document.body.appendChild(probe);
+      const px = probe.getBoundingClientRect().height;
+      probe.remove();
+      return px;
+    });
+    const viewportH = page.viewportSize()?.height ?? 0;
+    await expect.poll(async () => (await rail.boundingBox())?.height ?? 0).toBe(viewportH);
+    // boundingBox is null while the dot is not yet measurable after the
+    // collapse swap — poll through it rather than reading once. And it returns
+    // {x, y, width, height}, not a DOMRect: the bottom edge is y + height.
+    await expect
+      .poll(async () => {
+        const box = await page.getByTestId('sidebar-rail-status').boundingBox();
+        return box
+          ? Math.abs(viewportH - shellSpace2 - (box.y + box.height))
+          : Number.POSITIVE_INFINITY;
+      })
+      .toBeLessThanOrEqual(1);
+
+    await expect(page).toHaveScreenshot('web-sidebar-rail.png', {
+      fullPage: true,
+      ...FIXTURE_SCREENSHOT,
+    });
+
+    // Keyboard path back out: Expand is the rail's one tab stop and activates
+    // on Enter. Width and selection both survive the round trip.
+    await rail.getByRole('button', { name: 'Expand sidebar' }).focus();
+    await page.keyboard.press('Enter');
+
+    expect((await column.boundingBox())?.width ?? 0).toBe(expandedColumn);
+    // `data-selected` is on the row wrapper; `aria-current` is on the button
+    // inside it — asserting the pair on one element matches nothing.
+    await expect(page.locator('[data-testid="session-item-row"][data-selected="true"]')).toHaveCount(1);
+    await expect(xterm).toBeVisible();
   });
 });
 

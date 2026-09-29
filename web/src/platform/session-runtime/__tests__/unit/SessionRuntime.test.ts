@@ -48,6 +48,28 @@ function countClientAttach(): number {
 }
 
 
+/**
+ * The `needs_bootstrap` value of every `agent.attach` sent on any tracked ws,
+ * in send order. `undefined` for a frame that omitted the field — which is a
+ * different claim from `false` and the one an older client makes (#321).
+ */
+function clientAttachBootstrapFlags(): (boolean | undefined)[] {
+  const flags: (boolean | undefined)[] = [];
+  for (const ws of wsInstances) {
+    for (const call of ws.send.mock.calls) {
+      try {
+        const parsed = JSON.parse(String(call[0]));
+        if (parsed.msg_type === 'agent.attach') {
+          flags.push(parsed.payload.needs_bootstrap);
+        }
+      } catch {
+        // non-JSON (binary) frame — ignore
+      }
+    }
+  }
+  return flags;
+}
+
 /** Flush one or two microtask hops (requestRelayAttach defers relay attach). */
 async function flushMicrotasks(): Promise<void> {
   await Promise.resolve();
@@ -464,6 +486,43 @@ describe('SessionRuntime', () => {
   describe('self-driving attach retry', () => {
     afterEach(() => {
       vi.useRealTimers();
+    });
+
+    it('asks the agent for a bootstrap only when its Terminal says it has no history (#321)', async () => {
+      const empty = new SessionRuntime(makeConfig({
+        transportReady: true,
+        hasSessionOutput: () => false,
+      }));
+      empty.attachController.dispatch({ type: 'SESSION_SELECTED' });
+      openWs();
+      await flushMicrotasks();
+      expect(clientAttachBootstrapFlags()).toEqual([true]);
+      empty.dispose();
+
+      wsInstances = [];
+      const holding = new SessionRuntime(makeConfig({
+        transportReady: true,
+        hasSessionOutput: () => true,
+      }));
+      holding.attachController.dispatch({ type: 'SESSION_SELECTED' });
+      openWs();
+      await flushMicrotasks();
+      // `false`, not absent: this client *has* an opinion, and its opinion is
+      // that re-sending the history would duplicate what is already on screen.
+      expect(clientAttachBootstrapFlags()).toEqual([false]);
+      holding.dispose();
+    });
+
+    it('asks for a bootstrap when no Terminal reader is wired at all', async () => {
+      // The safe direction for a consumer with no Terminal to ask — the CLI's
+      // own attach makes the same choice for the same reason, and the
+      // alternative silently withholds history from whoever needed it.
+      const rt = new SessionRuntime(makeConfig({ transportReady: true }));
+      rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
+      openWs();
+      await flushMicrotasks();
+      expect(clientAttachBootstrapFlags()).toEqual([true]);
+      rt.dispose();
     });
 
     it('re-sends client.attach automatically after each attach timeout until the budget is exhausted (auto route)', async () => {

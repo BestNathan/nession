@@ -14,9 +14,13 @@ import type { ConversationViewState } from '../../../hooks/useConversation';
  */
 
 const view: ConversationViewState = {
-  state: 'ready',
-  conversation: { claude_session_id: 'claude-1', cwd: '/work' },
-  candidates: [],
+  listState: 'ready',
+  conversations: [],
+  binding: null,
+  messagesState: 'ready',
+  openId: 'claude-1',
+  conversation: { id: 'claude-1', cwd: '/work' },
+  activity: 'active',
   items: [
     {
       id: 'm1',

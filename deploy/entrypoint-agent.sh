@@ -73,7 +73,6 @@ fi
 if [ ! -f /root/.tmux.conf ]; then
     cat > /root/.tmux.conf << 'TMUX'
 set -g mouse on
-set -g history-limit 50000
 setw -g mode-keys vi
 set -g focus-events on
 TMUX

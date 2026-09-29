@@ -8,23 +8,27 @@ import {
   VERSION as READ_VERSION,
   WIRE as READ_WIRE,
 } from '@/generated/protocol/claude-code/read/v1';
-// v2 (#1167). The requirement is the set of versions this client can *read*,
-// and the resolver picks the highest one the agent also serves — so naming v2
-// alone is a claim, not a preference: an agent that serves only v1 gets no
-// common version and this unit is refused, which is the designed answer rather
-// than a silent downgrade to a shape this renderer cannot draw.
+// `#1222`: the retired `claude-code.conversation` unit became two — the list
+// (`conversations`) and one conversation's timeline (`messages`).
 import {
-  PROTOCOL as CONVERSATION_PROTOCOL,
-  VERSION as CONVERSATION_VERSION,
-  WIRE as CONVERSATION_WIRE,
-} from '@/generated/protocol/claude-code/conversation/v2';
+  PROTOCOL as CONVERSATIONS_PROTOCOL,
+  VERSION as CONVERSATIONS_VERSION,
+  WIRE as CONVERSATIONS_WIRE,
+} from '@/generated/protocol/claude-code/conversations/v1';
+import {
+  PROTOCOL as MESSAGES_PROTOCOL,
+  VERSION as MESSAGES_VERSION,
+  WIRE as MESSAGES_WIRE,
+} from '@/generated/protocol/claude-code/messages/v1';
 import { addressedPayload } from '@/platform/protocol';
 import type { TransportPlugin, PluginSurface } from '@/platform/socket/types';
 import type {
-  ClaudeCodeConversationRequest,
-  ClaudeCodeConversationResponse,
+  ClaudeCodeConversationsRequest,
+  ClaudeCodeConversationsResponse,
   ClaudeCodeListRequest,
   ClaudeCodeListResponse,
+  ClaudeCodeMessagesRequest,
+  ClaudeCodeMessagesResponse,
   ClaudeCodeReadRequest,
   ClaudeCodeReadResponse,
 } from './types';
@@ -41,7 +45,8 @@ import type {
 const CONSUMER_REQUIREMENTS = {
   [LIST_PROTOCOL]: [LIST_VERSION],
   [READ_PROTOCOL]: [READ_VERSION],
-  [CONVERSATION_PROTOCOL]: [CONVERSATION_VERSION],
+  [CONVERSATIONS_PROTOCOL]: [CONVERSATIONS_VERSION],
+  [MESSAGES_PROTOCOL]: [MESSAGES_VERSION],
 } as const satisfies Record<string, readonly number[]>;
 
 type ClaudeCodeUnit = keyof typeof CONSUMER_REQUIREMENTS;
@@ -95,20 +100,37 @@ export class ClaudeCodePlugin implements TransportPlugin {
   }
 
   /**
-   * One Nession Session's Claude conversation, normalized and paged (#1005).
+   * The conversations visible at one Nession Session's strict cwd, plus the
+   * exact Nession↔Claude binding when one is current (#1222).
    *
-   * A query in every direction: it names a session, and optionally a
-   * `claude_session_id` to open. There is deliberately no "give me the current
-   * one" — the provider answers `ambiguous` with the candidates a user may
-   * choose from, and never picks by recency. A follow-up page passes the
-   * previous response's `next_cursor` back as `cursor`.
+   * **The list is the answer**: this unit resolves nothing — an unbound
+   * session is not an ambiguity, it is a list the caller has not chosen from
+   * yet. Opening one is `claudeCodeMessages`, with an explicit id.
    */
-  async claudeCodeConversation(
-    req: ClaudeCodeConversationRequest,
-  ): Promise<ClaudeCodeConversationResponse> {
-    return this.requireConnection().request<ClaudeCodeConversationResponse>(
-      CONVERSATION_WIRE,
-      this.addressed(CONVERSATION_PROTOCOL, req.agent_id, req),
+  async claudeCodeConversations(
+    req: ClaudeCodeConversationsRequest,
+  ): Promise<ClaudeCodeConversationsResponse> {
+    return this.requireConnection().request<ClaudeCodeConversationsResponse>(
+      CONVERSATIONS_WIRE,
+      this.addressed(CONVERSATIONS_PROTOCOL, req.agent_id, req),
+    );
+  }
+
+  /**
+   * One explicitly named conversation's normalized timeline, paged (#1222).
+   *
+   * `conversation_id` is the only selection mechanism — an unknown id answers
+   * `not_found`, never the binding, the newest, or the only conversation. A
+   * follow-up page passes the previous response's `next_cursor` back as
+   * `cursor`. The response's `conversation` is the full item shape, so the
+   * header renders from this response alone.
+   */
+  async claudeCodeMessages(
+    req: ClaudeCodeMessagesRequest,
+  ): Promise<ClaudeCodeMessagesResponse> {
+    return this.requireConnection().request<ClaudeCodeMessagesResponse>(
+      MESSAGES_WIRE,
+      this.addressed(MESSAGES_PROTOCOL, req.agent_id, req),
     );
   }
 

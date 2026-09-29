@@ -61,6 +61,13 @@ Acceptable placements include:
 
 A persistent left column may still be appropriate on some desktop compositions, but it is an implementation choice. It must remain secondary to the active Session and should yield when space/focus makes that beneficial.
 
+Where the placement is a collapsible sidebar, the collapsed rail is **not a miniature
+SessionList** (#1196): it carries one Expand action plus static summaries whose Session
+count is the unfiltered total — or an explicit "N shown · M total" while a filter is
+active — because a count that silently follows a hidden filter lies about the
+population. The full list, its search, and its filters exist only in the expanded
+placement.
+
 ### App
 
 SessionList lives in the Sessions spatial layer to the left of Terminal conceptually:

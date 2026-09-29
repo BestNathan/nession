@@ -4,7 +4,11 @@ import type { CapsuleDetail } from '@/product/terminal/capsule/types';
 import { capsulePeekActionClass } from '@/shared/lib/peekActionClass';
 import { claudeCodeApi } from '../ClaudeCodePlugin';
 import { stateLine } from '../model/stateLine';
-import type { ClaudeCodeConversationResponse, ClaudeCodeListResponse } from '../types';
+import type {
+  ClaudeCodeConversationItem,
+  ClaudeCodeConversationsResponse,
+  ClaudeCodeListResponse,
+} from '../types';
 import { ClaudeCodePeek } from './ClaudeCodePeek';
 
 /**
@@ -152,8 +156,8 @@ function useConversationSummary({
     }
 
     void claudeCodeApi
-      .claudeCodeConversation({ agent_id: agentId, session_id: sessionId })
-      .then((response: ClaudeCodeConversationResponse) => {
+      .claudeCodeConversations({ agent_id: agentId, session_id: sessionId })
+      .then((response: ClaudeCodeConversationsResponse) => {
         if (generation.current !== forGeneration) {
           return;
         }
@@ -197,7 +201,7 @@ export interface ConversationSummary {
   updatedAt: string | null;
 }
 
-type Candidate = NonNullable<ClaudeCodeConversationResponse['candidates']>[number];
+type Candidate = ClaudeCodeConversationItem;
 
 /** Module-stable, so an absent conversation is one object rather than a new one
  *  per render — the same reason the empty arrays elsewhere are constants. */
@@ -210,31 +214,43 @@ const NO_CONVERSATION: ConversationSummary = {
 };
 
 /**
- * What a response says about the conversation this Session is bound to.
+ * What a `conversations` response says about the conversation this Session is
+ * bound to.
  *
- * The title is on the **candidate**, not on `conversation`: the identity shape
- * carries an id and a cwd and no display metadata (#1124), so this matches by
- * id — the same join the Workspace header makes.
+ * The binding carries the id and the activity and no display metadata, so the
+ * title is read off the item it names — the one id-join the `conversations`
+ * unit is *for*. (The Workspace header needs no such join: `messages` answers
+ * with the full item, #1222.)
  */
-function summarize(response: ClaudeCodeConversationResponse): ConversationSummary {
-  const candidates = response.candidates ?? [];
-  const id = response.conversation?.claude_session_id;
+function summarize(response: ClaudeCodeConversationsResponse): ConversationSummary {
+  if (response.state !== 'ready') {
+    // A directory that cannot be read is silence on this surface, the same as
+    // a failure to ask — the Workspace is where that gets explained.
+    return NO_CONVERSATION;
+  }
+  const candidates = response.items ?? [];
+  const binding = response.binding;
 
-  if (id === undefined) {
-    // No binding: `ambiguous` and its neighbours mean a directory full of
-    // conversations and no answer about which is this Session's. Saying that
-    // much is all either depth may do — choosing one is what `#1005` forbids.
+  if (!binding) {
+    // No binding: a directory full of conversations and no answer about which
+    // is this Session's. Saying that much is all either depth may do — there
+    // is no `ambiguous` to render anymore, because the list *is* the answer
+    // (#1222), and choosing one is what `#1005` forbids.
     return { ...NO_CONVERSATION, hasConversation: candidates.length > 0, candidates };
   }
 
-  const candidate = candidates.find((c) => c.claude_session_id === id);
-  const title = candidate?.title?.trim();
+  // The binding names the item; the display metadata lives on the item itself.
+  // It can be paged out of this response (the binding is computed from the
+  // provider's full list, before pagination) — then there is a bound
+  // conversation and nothing more to say about it here.
+  const bound = candidates.find((c) => c.id === binding.conversation_id);
+  const title = bound?.title?.trim();
   return {
     title: title ? title : null,
     bound: true,
     hasConversation: true,
     candidates,
-    updatedAt: candidate?.updated_at ?? null,
+    updatedAt: bound?.updated_at ?? null,
   };
 }
 

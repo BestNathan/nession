@@ -94,7 +94,7 @@ describe('FixtureWorkspace', () => {
    * `fixture-visual` now photographs the open transcript and the list, and
    * `#1134`'s cases assert the header names the work rather than the UUID. What
    * no image says is which of these the view is *doing*: whether a tool call is
-   * a collapsed disclosure or expanded, whether `ambiguous` refused to choose,
+   * a collapsed disclosure or expanded, whether an unbound list refused to choose,
    * and whether the two empty answers stayed apart. Those are decidable, so
    * they are asserted here rather than paid for at a CI round each.
    */
@@ -124,7 +124,7 @@ describe('FixtureWorkspace', () => {
   });
 
   it('offers the candidates instead of choosing a conversation for the user', async () => {
-    renderFixture('/fixture/workspace?capability=claude-code&conversation=ambiguous');
+    renderFixture('/fixture/workspace?capability=claude-code&conversation=unbound');
 
     // `#1005` decision 3: the list is the stable entry point, not a fallback. A
     // fixture that resolved a conversation here would let a case assert a
@@ -135,7 +135,7 @@ describe('FixtureWorkspace', () => {
 
   it('answers the config list, so Configuration is a reachable state', async () => {
     // `#1120`'s success criteria include "baselines include … Configuration",
-    // and that could not be met: this surface answered `claude-code.conversation`
+    // and that could not be met: this surface answered only the conversation
     // and rejected every other wire, so the Configuration section rendered a
     // transport error in every fixture route. Nothing asserted it either way,
     // which is how it stayed unnoticed — so this is the assertion that keeps it

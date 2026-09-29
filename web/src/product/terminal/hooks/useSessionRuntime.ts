@@ -19,6 +19,12 @@ export interface UseSessionRuntimeOptions {
   configOwner?: boolean;
   /** Relay-mode server connection handle (build via relayServerHandle(service)). Required for hidden-viewport recovery. */
   serverConnection?: RelayServerHandle;
+  /**
+   * Whether the Terminal already holds this session's history (#321) — see
+   * `SessionRuntimeConfig.hasSessionOutput`. A reader rather than a boolean, so
+   * the answer is taken at attach time from the live Terminal.
+   */
+  hasSessionOutput?: () => boolean;
 }
 
 export interface UseSessionRuntimeResult {
@@ -341,6 +347,7 @@ export function useSessionRuntime(options: UseSessionRuntimeOptions): UseSession
       // sits above `core/`, so the dependency has to point this way (#783).
       createFilesApi,
       createTerminalAgentApi,
+      hasSessionOutput: options.hasSessionOutput,
     };
   }, [
     sessionId,
@@ -353,6 +360,7 @@ export function useSessionRuntime(options: UseSessionRuntimeOptions): UseSession
     addressPlanReady,
     addressPlan.urls,
     options.serverConnection,
+    options.hasSessionOutput,
     routeIntentEpoch,
     lastResize,
     transportReady,

@@ -1,6 +1,15 @@
 import { manifestsOf, ProtocolDirectory } from '@/platform/protocol';
 import type { PluginSurface } from '@/platform/socket/types';
-import { PROTOCOL, type ConversationResponse } from '@/generated/protocol/claude-code/conversation/v2';
+import {
+  PROTOCOL,
+  type ConversationItemV1,
+  type ConversationsResponse,
+} from '@/generated/protocol/claude-code/conversations/v1';
+import {
+  PROTOCOL as MESSAGES_PROTOCOL,
+  type MessageItemV1,
+  type MessagesResponse,
+} from '@/generated/protocol/claude-code/messages/v1';
 import {
   PROTOCOL as LIST_PROTOCOL,
   type ConfigCategory,
@@ -10,7 +19,8 @@ import {
 import { FIXTURE_AGENTS } from './fixtureData';
 
 /**
- * The conversation half of the fixture's Claude Code capability (#1128).
+ * The conversation half of the fixture's Claude Code capability (#1128,
+ * re-cut for `#1222`'s two units).
  *
  * It exists because the manifest advertised `claude-code.list` and
  * `claude-code.read` and nothing else, so **no fixture state could render a
@@ -21,7 +31,9 @@ import { FIXTURE_AGENTS } from './fixtureData';
  * This is the other half of the same rule `#1108` taught: a wire lives in two
  * places — the manifest agents advertise and the surface that answers it — and
  * updating one without the other leaves a route that looks wired and answers
- * nothing. `fixtureConversation.test.ts` asserts the pairing.
+ * nothing. `fixtureConversation.test.ts` asserts the pairing, now for both
+ * units: `conversations` (the list and the binding) and `messages` (one
+ * explicitly named conversation's timeline).
  *
  * ## Scenarios are route parameters, like the git surface's
  *
@@ -36,7 +48,7 @@ import { FIXTURE_AGENTS } from './fixtureData';
 const BOUND_ID = 'c0a1b2c3-1111-4222-8333-444455556666';
 
 /**
- * The candidates, deliberately not all the same shape.
+ * The conversations, deliberately not all the same shape.
  *
  * Pairing has to be exercised, not just presence: a row is title + preview, and
  * each half can be absent on its own. So the three rows are the three
@@ -53,23 +65,23 @@ const BOUND_ID = 'c0a1b2c3-1111-4222-8333-444455556666';
  * The third is also the oldest, so the list has an order to show rather than a
  * single row.
  */
-const CANDIDATES = [
+const CONVERSATIONS: ConversationItemV1[] = [
   {
-    claude_session_id: BOUND_ID,
+    id: BOUND_ID,
     cwd: '/Users/dev/code/nession-capsule',
     updated_at: '2026-09-01T11:40:00Z',
     title: 'Terminal ownership handoff',
     preview: 'Review the controller/observer handoff before the capsule moves again',
   },
   {
-    claude_session_id: 'd4e5f6a7-2222-4333-8444-555566667777',
+    id: 'd4e5f6a7-2222-4333-8444-555566667777',
     cwd: '/Users/dev/code/nession-capsule',
     updated_at: '2026-09-01T09:05:00Z',
     // No title on purpose — the fallback is a real path, not a defensive one.
     preview: '/nession-web-design 收敛 radius 层级',
   },
   {
-    claude_session_id: 'e8f9a0b1-3333-4444-8555-666677778888',
+    id: 'e8f9a0b1-3333-4444-8555-666677778888',
     cwd: '/Users/dev/code/nession-capsule',
     updated_at: '2026-08-29T08:15:00Z',
     title: 'Capsule radius review',
@@ -104,9 +116,7 @@ const CANDIDATES = [
  * - **One `unknown`**, because it is a kind the wire can carry and nothing else
  *   in the app can produce it.
  */
-type ConversationItems = NonNullable<ConversationResponse['items']>;
-
-const ITEMS: ConversationItems = [
+const ITEMS: MessageItemV1[] = [
   {
     id: 'i1',
     kind: 'message',
@@ -271,72 +281,125 @@ const ITEMS: ConversationItems = [
   },
 ];
 
+/** The item a `messages` answer carries whole — no client join by id (#1222). */
+function itemOf(conversationId: string): ConversationItemV1 | undefined {
+  return CONVERSATIONS.find((c) => c.id === conversationId);
+}
+
 /**
- * What the provider answers for a named scenario.
+ * What the `conversations` unit answers for a named scenario.
  *
  * `undefined` for a scenario this fixture does not model, so the surface below
  * rejects loudly rather than answering something plausible: a fixture that
  * guessed would let a case assert on a state the product cannot produce.
  */
-function responseFor(scenario: string): ConversationResponse | undefined {
+function conversationsFor(scenario: string): ConversationsResponse | undefined {
   switch (scenario) {
     case 'ready':
       return {
         state: 'ready',
-        conversation: { claude_session_id: BOUND_ID, cwd: '/Users/dev/code/nession-capsule' },
-        candidates: CANDIDATES,
-        items: ITEMS,
+        cwd: '/Users/dev/code/nession-capsule',
+        items: CONVERSATIONS,
+        binding: { conversation_id: BOUND_ID, activity: 'active' },
         has_more: false,
-        partial_tail: false,
-        skipped: 0,
       };
-    case 'ambiguous':
+    case 'unbound':
       // No binding: several conversations at this cwd and no answer about
-      // which is the Session's. `#1005` forbids choosing one.
+      // which is the Session's. That is not an `ambiguous` state anymore —
+      // the list is the answer (#1222), and `#1005` forbids choosing from it.
       return {
-        state: 'ambiguous',
-        conversation: null,
-        candidates: CANDIDATES,
-        items: [],
+        state: 'ready',
+        cwd: '/Users/dev/code/nession-capsule',
+        items: CONVERSATIONS,
         has_more: false,
-        partial_tail: false,
-        skipped: 0,
       };
     case 'none':
+      // Read, and empty. There is no `not_found` on this unit: an empty list
+      // is a complete answer rather than an error.
       return {
-        state: 'not_found',
-        conversation: null,
-        candidates: [],
+        state: 'ready',
+        cwd: '/Users/dev/code/nession-capsule',
         items: [],
         has_more: false,
-        partial_tail: false,
-        skipped: 0,
       };
     case 'inactive':
-      // The same transcript as `ready`, and that is the point: `#1005`
-      // criterion 4 makes `inactive` a real, readable conversation whose Claude
-      // has finished, not an empty one. The only difference the UI draws is the
-      // header — `Finished` rather than `Running now` — so a fixture that gave
-      // this state no items would leave a reader unable to tell the two apart,
-      // and would make the distinction unassertable everywhere downstream.
+      // The same directory as `ready`, bound to a conversation whose Claude
+      // has finished: `#1005` criterion 4 makes that a real, readable
+      // conversation, and the only difference the UI draws is the header —
+      // `Finished` rather than `Running now`.
       return {
-        state: 'inactive',
-        conversation: { claude_session_id: BOUND_ID, cwd: '/Users/dev/code/nession-capsule' },
-        candidates: CANDIDATES,
-        items: ITEMS,
+        state: 'ready',
+        cwd: '/Users/dev/code/nession-capsule',
+        items: CONVERSATIONS,
+        binding: { conversation_id: BOUND_ID, activity: 'inactive' },
         has_more: false,
-        partial_tail: false,
-        skipped: 0,
       };
     case 'unavailable':
       // A different answer from `none`, and a different screen: the directory
       // could not be read at all, against one that was read and held no
       // conversations. `#1128` names both, and the view renders them apart.
+      return { state: 'unavailable', items: [], has_more: false };
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * What the `messages` unit answers for a named scenario and an explicit id.
+ *
+ * The id is the only selection mechanism — an unknown one answers `not_found`
+ * and never the binding, the newest, or the only conversation. `undefined`
+ * means the scenario itself is unmodelled, as above.
+ */
+function messagesFor(scenario: string, conversationId: string): MessagesResponse | undefined {
+  const named = itemOf(conversationId);
+  if (conversationsFor(scenario) === undefined) {
+    return undefined;
+  }
+  if (scenario === 'none' || scenario === 'unavailable' || named === undefined) {
+    return {
+      state: 'not_found',
+      items: [],
+      has_more: false,
+      partial_tail: false,
+      skipped: 0,
+    };
+  }
+  switch (scenario) {
+    case 'ready':
       return {
-        state: 'unavailable',
-        conversation: null,
-        candidates: [],
-        items: [],
+        state: 'ready',
+        conversation: named,
+        activity: 'active',
+        items: ITEMS,
+        has_more: false,
+        partial_tail: false,
+        skipped: 0,
+      };
+    case 'inactive':
+      // The same transcript as `ready`, and that is the point: a fixture that
+      // gave this state no items would leave a reader unable to tell the two
+      // apart, and would make the distinction unassertable everywhere
+      // downstream.
+      return {
+        state: 'ready',
+        conversation: named,
+        activity: 'inactive',
+        items: ITEMS,
+        has_more: false,
+        partial_tail: false,
+        skipped: 0,
+      };
+    case 'unbound':
+      // Reachable only by an explicit click — nothing auto-opens without a
+      // binding. `unknown` rather than a guessed liveness: the host is not
+      // claiming this one is or is not running, and the header draws no claim
+      // either. It is also the only scenario that reaches that third branch.
+      return {
+        state: 'ready',
+        conversation: named,
+        activity: 'unknown',
+        items: ITEMS,
         has_more: false,
         partial_tail: false,
         skipped: 0,
@@ -420,16 +483,31 @@ export function fixtureConversationSurface(search: string): PluginSurface {
     connectionState: 'connected',
     protocols,
     request<T>(type: string, payload: Record<string, unknown>): Promise<T> {
-      // The id is the contract's, not a literal: a renamed wire would then fail
-      // here rather than silently answering nothing.
+      // The ids are the contracts', not literals: a renamed wire would then
+      // fail here rather than silently answering nothing.
       if (type === PROTOCOL) {
-        const response = responseFor(scenario);
+        const response = conversationsFor(scenario);
         if (response === undefined) {
           return Promise.reject(
             new Error(`fixture conversation surface does not model ?conversation=${scenario}`),
           );
         }
         void payload;
+        return Promise.resolve(response as T);
+      }
+      if (type === MESSAGES_PROTOCOL) {
+        const conversationId = payload.conversation_id;
+        if (typeof conversationId !== 'string') {
+          return Promise.reject(
+            new Error('fixture messages request without a conversation_id — the unit has no other selection'),
+          );
+        }
+        const response = messagesFor(scenario, conversationId);
+        if (response === undefined) {
+          return Promise.reject(
+            new Error(`fixture conversation surface does not model ?conversation=${scenario}`),
+          );
+        }
         return Promise.resolve(response as T);
       }
       // The capability's other wire. It used to be rejected outright, which

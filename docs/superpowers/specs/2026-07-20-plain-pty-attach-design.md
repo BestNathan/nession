@@ -3,6 +3,24 @@
 **Date:** 2026-07-20
 **Status:** Draft
 
+> **Divergence, 2026-09-29 (#321 S3).** The default was reversed:
+> `AttachMode::Control` is now the default and `Plain` is the fallback. The
+> premise below — that plain PTY attach is the right shape for the browser — was
+> never measured against what it costs. tmux's *client* owns the outer terminal
+> on 3.6b, so under Plain it enters the alternate screen unconditionally and
+> enables mouse reporting (Nession's own `set-option mouse on`, `manager.rs`),
+> which means xterm accumulates no scrollback and the wheel goes to tmux copy
+> mode rather than to the application. That is [interaction-semantics.md](../../design/terminal/interaction-semantics.md)'s
+> "four modes cannot discriminate" paragraph, and it is a property of the
+> transport rather than of the Web code.
+>
+> Plain is **kept**: it still works, it now receives the attach bootstrap like
+> every other arm (S6), and it is the fallback when Control misbehaves. What it
+> cannot do is satisfy #1096 criteria 7–10. The canonical statement of the split
+> is [scrollback-bootstrap.md](../../design/terminal/scrollback-bootstrap.md);
+> this document is left as written rather than rewritten, so the reasoning that
+> led here stays legible.
+
 ---
 
 ## 1. Overview
@@ -171,7 +189,7 @@ Last writer wins — the most recent resize sets the PTY size for everyone.
 
 | Component | Fate |
 |-----------|------|
-| `ControlModeSession` | Keep (gated behind `attach_mode = "control"`) |
+| `ControlModeSession` | Keep — **and since 2026-09-29 it is what `attach_mode` defaults to**; the parenthetical that used to read "gated behind `attach_mode = "control"`" now describes Plain, not this |
 | `control_mode.rs` (parser) | Keep |
 | `control.rs` | Keep |
 | `read_output_loop` | Keep |

@@ -33,6 +33,29 @@ The product rule is stronger than the exact control:
 - navigation does not consume permanent space merely because it can;
 - current work receives the majority of the frame.
 
+When the Web sidebar is tucked away it becomes a **rail: one action plus information
+summaries** (#1196, revising #748's rail anatomy):
+
+- **Exactly one interactive control — Expand.** Agents and Sessions appear as static
+  summaries (icon plus a compact count, with tooltip/aria detail): they are not buttons,
+  take no tab focus, show no action hover, and expand nothing when clicked. A rail that
+  keeps hidden navigation behind its summaries is a collapsed menu, not a summary.
+- **The summaries quote truthful totals.** Agents reports the fleet ("3 agents ·
+  2 online"); one offline Agent does not color the summary unhealthy. Sessions reports
+  the unfiltered total — a hidden filter must not silently redefine the number, so when
+  a filter is active the summary says so ("2 shown · 8 total").
+- **Server status stays a separate static signal** — never a roll-up of Agent, Session,
+  or attachment health (`session-list.md` names that collapse an anti-pattern).
+- **Collapse state is owned by the shell composition, once** (#1195/#1196 §5). The same
+  single state drives both the rail rendering and the column's reserved width, so the
+  work surface reclaims the freed width through the normal resize pipeline — no
+  detach/reconnect — and expanding restores selection, search, and scroll. Collapse and
+  Expand live in the same top navigation zone across the two states (the Agents section
+  head expanded, the rail's one control collapsed); the service footer keeps only
+  service status.
+- The rail reads as *navigation tucked away with lightweight context* — no active
+  fills, badges, or per-Agent colors that would make it a vertical toolbar.
+
 ## Terminal and Workspace
 
 Terminal and Workspace are related but serve different depths:

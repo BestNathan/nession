@@ -349,6 +349,13 @@ impl SessionManager {
         working_dir: &str,
         env: &[(String, String)],
     ) -> Result<()> {
+        // History depth needs nothing here: it travels as `-f` on every tmux
+        // invocation this manager makes (`cmd.rs`), so whichever one starts the
+        // server installs it before the window below exists. A `set-option`
+        // call here could not do the job — tmux documents the option as
+        // applying only to new windows, and on a cold socket there is no server
+        // to set it on. `HISTORY_LIMIT_LINES` carries the measurements.
+
         // Stage 1: try with `-e` (tmux ≥ 3.0).  This injects env vars directly
         // into the shell process so they take effect before bashrc runs — the
         // only reliable way to set PS1 on Debian (bashrc unconditionally
@@ -832,6 +839,84 @@ mod window_size_lock_tests {
     }
 }
 
+/// `history-limit` is the agent's decision, made at the one moment it works.
+///
+/// Separate from `window_size_lock_tests` because the assertion is a different
+/// kind: window-size is asserted to be *unset*, this to be *set, to an exact
+/// value, early enough to matter*.
+#[cfg(test)]
+mod history_limit_tests {
+    use super::*;
+    use crate::test_support::TestSession;
+    use crate::tmux::HISTORY_LIMIT_LINES;
+
+    /// The **window's own** history-limit — not the server default, and not the
+    /// value the option happens to hold right now.
+    ///
+    /// That distinction is the whole test, and it was measured rather than
+    /// assumed (tmux 3.6b): with the global set to 10000, a window created
+    /// under it reports `#{history_limit}` 10000; after the global moves to
+    /// 5000 a window created then reports 5000 and the first still reports
+    /// 10000. So the number tracks the value **at window creation**, which is
+    /// exactly the property `set_history_limit_args` exists for.
+    ///
+    /// `show-option -t <session> -v history-limit` cannot be used: it reports
+    /// the *window-local* setting, which is empty for an option that was only
+    /// ever set globally — measured, and the reason this reads a format
+    /// instead. `#{history_limit}` is the effective value.
+    async fn read_window_history_limit(session: &str) -> Result<String> {
+        let out = cmd::global()
+            .tokio()
+            .args(["display-message", "-p", "-t", session, "#{history_limit}"])
+            .output()
+            .await?;
+        Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    }
+
+    #[tokio::test]
+    async fn create_session_sets_history_limit_before_the_window_exists() {
+        // Skip on machines without tmux (CI covers it).
+        if cmd::global().tokio().arg("-V").status().await.is_err() {
+            eprintln!("tmux not available, skipping");
+            return;
+        }
+
+        // `configure` is what writes the server configuration beside the
+        // socket, so this test has to run it — the depth arrives through `-f`
+        // on an invocation that starts a server, and a socket directory with
+        // no config file is the state every other test runs in (harmlessly:
+        // tmux tolerates a `-f` naming nothing).
+        //
+        // It is idempotent and resolves to the same socket `global()` already
+        // uses, so running it here does not disturb the tests sharing this
+        // process. Reddens without it, which is the point: it is the step that
+        // installs the value.
+        crate::tmux::cmd::configure(None).expect("configure the tmux addressing");
+
+        let mgr = SessionManager::new();
+        let session = TestSession::new("history-limit");
+        let name = session.name();
+        let cwd = std::env::temp_dir().to_string_lossy().into_owned();
+
+        mgr.create_session(name, 200, 60, &cwd, &[])
+            .await
+            .expect("create");
+
+        let value = read_window_history_limit(name)
+            .await
+            .expect("show-option history-limit");
+        assert_eq!(
+            value,
+            HISTORY_LIMIT_LINES.to_string(),
+            "the window must be created with nession's depth. This reads the \
+             value the window was created under, so tmux's own default here \
+             means the call moved after `new-session` — where tmux documents it \
+             as a no-op (#321)."
+        );
+        // `session` kills the tmux session on drop, panic or not.
+    }
+}
+
 /// The fake-tmux tests for `create_session`'s legacy stage 2.
 ///
 /// `#[cfg(test)]` with per-item `#[cfg(unix)]` rather than `cfg(all(test,
@@ -861,9 +946,12 @@ mod legacy_stage_two_tests {
     /// `create_session` takes its legacy stage-2 path (the one for a tmux
     /// without `-e`, i.e. before 3.0).
     ///
-    /// The `-S <socket>` prefix is stripped first, exactly as real tmux
-    /// receives it: a script matching on `$1` without that shift would see `-S`
-    /// and fall through to its catch-all, "working" while testing nothing.
+    /// The global flags are stripped first, exactly as real tmux receives them:
+    /// a script matching on `$1` without those shifts would see `-S` (and now
+    /// `-f`) and fall through to its catch-all, "working" while testing
+    /// nothing. `-f` is a server-config path the shim does not model — real
+    /// tmux ignores it unless it is starting a server, and tolerates one that
+    /// names no file at all.
     #[cfg(unix)]
     fn recording_shim(dir: &std::path::Path) -> (String, PathBuf) {
         let stage1 = dir.join("stage1-ran");
@@ -879,6 +967,7 @@ mod legacy_stage_two_tests {
             &format!(
                 "#!/bin/sh\n\
                  if [ \"$1\" = \"-S\" ]; then shift 2; fi\n\
+                 if [ \"$1\" = \"-f\" ]; then shift 2; fi\n\
                  n=0\n\
                  while true; do\n\
                  while [ -e \"{dir}/{prefix}$n\" ]; do n=$((n + 1)); done\n\

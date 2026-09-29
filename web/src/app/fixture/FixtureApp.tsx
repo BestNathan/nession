@@ -126,6 +126,9 @@ export function FixtureApp() {
   const sidebarProps = {
     agents,
     filteredSessions,
+    // The unfiltered population, not `filteredSessions.length` — the fixture
+    // exercises real filters, so this is the one place the two can differ.
+    totalSessionCount: sessions.length,
     staleAgents,
     selectedId,
     clientSessionId: FIXTURE_CLIENT_SESSION_ID,

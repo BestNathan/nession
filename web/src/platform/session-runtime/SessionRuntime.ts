@@ -40,6 +40,21 @@ export interface SessionRuntimeConfig {
    */
   createFilesApi: () => FilesPlugin;
   createTerminalAgentApi: (ws: WebSocketService) => TerminalAgentApi;
+  /**
+   * Whether the Terminal already holds this session's history (#321).
+   *
+   * A **reader**, not a flag, and deliberately: the xterm outlives this runtime
+   * (a rewire rebuilds the runtime under a surviving Terminal), so a value
+   * latched here could say "empty" about a buffer that is full — and the cost
+   * of being wrong in that direction is the user seeing their history twice.
+   * Asking the Terminal keeps one authority for a fact about the Terminal.
+   *
+   * Absent means "no" — ask for a bootstrap. That is the safe direction for a
+   * consumer with no Terminal to ask (the CLI's own `attach_frame` makes the
+   * same choice for the same reason), and it is visible in a test rather than
+   * silently suppressing history.
+   */
+  hasSessionOutput?: () => boolean;
 }
 
 export interface RuntimeMirrorSnapshot {
@@ -249,6 +264,18 @@ export class SessionRuntime {
     return this.filesApi;
   }
 
+  /**
+   * The client's half of the bootstrap handshake (#321): whether an attach made
+   * now should ask the agent for the session's history.
+   *
+   * Read at each attach rather than cached, because the answer changes exactly
+   * when output first arrives and this runtime may have been built before or
+   * after that — see {@link SessionRuntimeConfig.hasSessionOutput}.
+   */
+  private needsBootstrap(): boolean {
+    return !(this.config.hasSessionOutput?.() ?? false);
+  }
+
   updateContext(next: Partial<SessionRuntimeConfig>): RuntimeMirrorSnapshot {
     const routeChanged =
       next.routeIntentEpoch !== undefined
@@ -343,6 +370,7 @@ export class SessionRuntime {
       agentApi: this.agentTerminalApi,
       manualRoute: this.config.manualOverride !== null,
       lastResize: this.lastResize,
+      needsBootstrap: this.needsBootstrap(),
       transportGeneration: this.transportGeneration,
       onAttachOk: (result) => {
         this.p2pStreamSeed = {
@@ -544,7 +572,11 @@ export class SessionRuntime {
       return;
     }
     const resize = this.lastResize;
-    conn.beginRelay(this.sessionId, undefined, resize?.cols, resize?.rows);
+    conn.beginRelay(this.sessionId, {
+      cols: resize?.cols,
+      rows: resize?.rows,
+      needsBootstrap: this.needsBootstrap(),
+    });
     const result = this.attachController.dispatch({ type: 'RELAY_BEGIN_OK' });
     this.emitRuntimeEvent({ type: 'route-intent-changed', phase: result.phase });
   }

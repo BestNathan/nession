@@ -238,6 +238,9 @@ fn spawn_output_forwarder(
                 data: encoded,
                 stream_epoch: Some(stream_epoch),
                 stream_seq: Some(stream_seq),
+                // Live output, not the session's history: the bootstrap
+                // marker lands here in S4b (#321).
+                bootstrap: None,
             };
             let msg = new_message(msg_types::TERMINAL_OUTPUT, output);
             if let Ok(json) = serde_json::to_string(&msg) {
@@ -476,9 +479,9 @@ pub use nession_protocol::contracts::file::v1::{
     FileWritePayload, FileWriteResponse,
 };
 pub use nession_protocol::contracts::terminal::v1::{
-    TerminalControlAcquirePayload, TerminalControlAcquireResponse, TerminalControlChangedPayload,
-    TerminalInputPayload, TerminalOutputPayload, TerminalResizePayload,
-    TerminalStreamResumePayload, TerminalStreamResumeResponse,
+    TerminalBootstrapPayload, TerminalControlAcquirePayload, TerminalControlAcquireResponse,
+    TerminalControlChangedPayload, TerminalInputPayload, TerminalOutputPayload,
+    TerminalResizePayload, TerminalStreamResumePayload, TerminalStreamResumeResponse,
 };
 
 // --- Protocol helpers ---
@@ -525,6 +528,100 @@ async fn send_terminal_resize_msg(
         outbound.try_send_state(WsMessage::Text(json)),
         Err(OutboundError::Closed)
     )
+}
+
+/// Send `session`'s history to one connection, marked as a **bootstrap** (#321).
+///
+/// Awaited, and in order, before the caller starts live forwarding. That
+/// ordering *is* the barrier: the live producer does not exist yet and the
+/// outbound queue is FIFO, so nothing the session produces can overtake the
+/// snapshot — there is no gap to close and nothing to reconcile afterwards. The
+/// alternative, a cursor plus a reconciliation pass, is the shape #1148
+/// measured going wrong.
+///
+/// **Not recorded in the stream log.** A bootstrap is a snapshot taken *before*
+/// the stream, not an event in it. Giving it a `stream_seq` would put it inside
+/// `agent.terminal.stream.resume`'s replay window, which is duplication by
+/// construction. It carries no epoch or seq for the same reason — see
+/// `TerminalOutputPayload::bootstrap`.
+///
+/// Returns `false` once the connection is over. **A capture that fails is not
+/// that**: a client with no history is a client with an empty screen, which is
+/// the state every attach was in before this existed, so it is logged and the
+/// attach proceeds.
+async fn send_bootstrap(
+    outbound: &P2pOutbound,
+    tmux: &crate::tmux::ops::TmuxDep,
+    session_name: &str,
+) -> bool {
+    let lines = crate::tmux::HISTORY_LIMIT_LINES;
+    let capture = match tmux.ops().capture_pane(session_name, lines).await {
+        Ok(capture) => capture,
+        Err(e) => {
+            warn!("bootstrap: capture for {session_name} failed: {e:#}");
+            return true;
+        }
+    };
+    // `None` is tmux answering successfully with nothing — a session that
+    // exists and has no history yet. No frame, and not a failure.
+    let Some(capture) = capture else {
+        return true;
+    };
+    // The pane's modes, prepended to the text — see
+    // `bootstrap::mode_escapes` for what a capture cannot carry. A query that
+    // fails costs the modes and not the history: a client with the session's
+    // text and default modes is strictly better off than one with nothing, and
+    // that is the same judgement the capture failure above makes.
+    let modes = match tmux.ops().pane_mode_flags(session_name).await {
+        Ok(flags) => crate::server::bootstrap::mode_escapes(&flags),
+        Err(e) => {
+            warn!("bootstrap: pane modes for {session_name} failed: {e:#}");
+            Vec::new()
+        }
+    };
+    // The ceiling is applied to the *capture*, before the two translations
+    // below. Both of them grow the frame — the escapes by under 100 bytes, the
+    // CRs by one per line — and counting either against the ceiling would make
+    // it a different number of history bytes depending on which modes happened
+    // to be on and how the lines happened to be split.
+    let bounded = crate::server::bootstrap::bound(capture);
+    let text = crate::server::bootstrap::as_terminal_stream(&bounded.bytes);
+    let mut bytes = Vec::with_capacity(modes.len() + text.len());
+    // Modes first, so the application's screen is entered before its text is
+    // written into it.
+    bytes.extend_from_slice(&modes);
+    bytes.extend_from_slice(&text);
+    let bounded = crate::server::bootstrap::Bounded {
+        bytes,
+        truncated: bounded.truncated,
+    };
+    use base64::Engine;
+    let payload = TerminalOutputPayload {
+        session_name: session_name.to_string(),
+        data: base64::engine::general_purpose::STANDARD.encode(&bounded.bytes),
+        stream_epoch: None,
+        stream_seq: None,
+        bootstrap: Some(TerminalBootstrapPayload {
+            requested_lines: lines,
+            truncated: bounded.truncated,
+        }),
+    };
+    let msg = new_message(msg_types::TERMINAL_OUTPUT, payload);
+    let Ok(json) = serde_json::to_string(&msg) else {
+        return true;
+    };
+    match outbound.send_terminal(WsMessage::Text(json)).await {
+        Ok(()) => true,
+        Err(OutboundError::Stalled) => {
+            // The honest verdict, and the same one the live-output task takes:
+            // a client that cannot drain a one-off snapshot is not going to
+            // drain the session behind it.
+            warn!("bootstrap: client stalled on the snapshot for {session_name}");
+            outbound.close();
+            false
+        }
+        Err(_) => false,
+    }
 }
 
 pub fn new_message<P: Serialize>(msg_type: &str, payload: P) -> Message<P> {
@@ -1197,8 +1294,13 @@ p2p_routes! { ctx, msg_type, payload_value;
                     warn!("agent: capture_preview lines too large: {}", payload.lines);
                     return ctx.err("lines_too_large", "lines exceeds 100000 ceiling");
                 }
-                match crate::tmux::util::capture_scrollback(&payload.session_name, payload.lines)
-                    .await
+                let capture_tmux = ctx.tmux.tmux_dep();
+                match crate::tmux::util::capture_scrollback(
+                    &capture_tmux,
+                    &payload.session_name,
+                    payload.lines,
+                )
+                .await
                 {
                     Ok(Some((bytes, cols, rows))) => {
                         use base64::Engine;
@@ -1283,6 +1385,28 @@ p2p_routes! { ctx, msg_type, payload_value;
                             client_attach_response(payload.session_name.clone(), shared, &client_id)
                         };
 
+                        // The session's history, before the live forwarder
+                        // exists — `send_bootstrap` carries why that ordering is
+                        // the whole barrier.
+                        //
+                        // Asked of the **client**, because the agent cannot
+                        // answer it: this arm runs whenever the backend is
+                        // already attached, which is equally true of a page that
+                        // reattached over a surviving socket (its xterm still
+                        // holds the history, and re-sending would duplicate it
+                        // on screen) and of one whose xterm was rebuilt (it
+                        // holds nothing). Absent means "the backend is attached,
+                        // so no" — the behaviour an older client already has.
+                        if payload.needs_bootstrap.unwrap_or(false) {
+                            let bootstrap_tmux = ctx.tmux.tmux_dep();
+                            if !send_bootstrap(ctx.outbound, &bootstrap_tmux, &session_name).await {
+                                return ctx.err(
+                                    "bootstrap_stalled",
+                                    "the client stalled while its history was being sent",
+                                );
+                            }
+                        }
+
                         spawn_output_forwarder(
                             rx,
                             ctx.outbound.clone(),
@@ -1326,6 +1450,36 @@ p2p_routes! { ctx, msg_type, payload_value;
                                 &client_id,
                             );
                             sessions_lock(ctx.sessions).insert(session_name.clone(), attached);
+
+                            // The session's history, before the live forwarder
+                            // exists — the same barrier the Control arm below
+                            // uses and `send_bootstrap` documents.
+                            //
+                            // It matters more here than there. A tmux *client*
+                            // paints its own screen and never replays the pane's
+                            // scrollback into xterm's, and it enters the
+                            // alternate screen on the way in — so under Plain
+                            // this snapshot is the only history the browser's
+                            // scrollback will ever hold. The client's redraw
+                            // comes after it and covers the viewport; what the
+                            // snapshot bought is everything above it.
+                            //
+                            // This is the session's **first** attach, so the
+                            // backend was not attached before it and the history
+                            // belongs to a client that has none: absent means
+                            // yes, the same default the Control arm takes. An
+                            // explicit `false` is honoured — a client that says
+                            // it already has this does.
+                            let bootstrap_tmux = ctx.tmux.tmux_dep();
+                            if payload.needs_bootstrap.unwrap_or(true)
+                                && !send_bootstrap(ctx.outbound, &bootstrap_tmux, &session_name)
+                                    .await
+                            {
+                                return ctx.err(
+                                    "bootstrap_stalled",
+                                    "the client stalled while its history was being sent",
+                                );
+                            }
 
                             // Spawn forwarding task for the first subscriber.
                             spawn_output_forwarder(
@@ -1437,44 +1591,27 @@ p2p_routes! { ctx, msg_type, payload_value;
                             // block that holds this arm's locals.
                             sessions_lock(ctx.sessions).insert(session_name.clone(), attached);
 
-                            // Capture scrollback BEFORE starting the live output stream.
-                            // Done synchronously (not spawned) to guarantee it arrives
-                            // before any live output from the control-mode attach.
-                            let scrollback_bytes =
-                                match crate::tmux::util::capture_scrollback(&session_name, 2000)
+                            // The session's history, before the live output
+                            // stream is spawned — `send_bootstrap` carries why
+                            // that ordering is the whole barrier, and why the
+                            // frame is no longer recorded in the stream log.
+                            //
+                            // This is the *first* attach for this session on
+                            // this connection, so the backend was not attached
+                            // before it: the history belongs to a client that
+                            // has none, and no client has to ask. `needs_bootstrap`
+                            // is still honoured, because a client that says
+                            // `false` is one that has already been sent it.
+                            let bootstrap_tmux = ctx.tmux.tmux_dep();
+                            let wants_bootstrap = payload.needs_bootstrap.unwrap_or(true);
+                            if wants_bootstrap
+                                && !send_bootstrap(ctx.outbound, &bootstrap_tmux, &session_name)
                                     .await
-                                {
-                                    Ok(Some((bytes, _cols, _rows))) => bytes,
-                                    Ok(None) | Err(_) => Vec::new(),
-                                };
-
-                            // Send captured scrollback so xterm.js can pre-fill its buffer.
-                            if !scrollback_bytes.is_empty() {
-                                use base64::Engine;
-                                let encoded = base64::engine::general_purpose::STANDARD
-                                    .encode(&scrollback_bytes);
-                                let (stream_epoch, stream_seq) = {
-                                    let mut guard = sessions_lock(ctx.sessions);
-                                    guard
-                                        .get_mut(&session_name)
-                                        .map(|s| {
-                                            s.stream.record_output(&session_name, encoded.clone())
-                                        })
-                                        .unwrap_or((1, 0))
-                                };
-                                let output = TerminalOutputPayload {
-                                    session_name: session_name.clone(),
-                                    data: encoded,
-                                    stream_epoch: Some(stream_epoch),
-                                    stream_seq: Some(stream_seq),
-                                };
-                                let msg = new_message(msg_types::TERMINAL_OUTPUT, output);
-                                if let Ok(json) = serde_json::to_string(&msg) {
-                                    let _ = ctx
-                                        .outbound
-                                        .send_terminal(WsMessage::Text(json))
-                                        .await;
-                                }
+                            {
+                                return ctx.err(
+                                    "bootstrap_stalled",
+                                    "the client stalled while its history was being sent",
+                                );
                             }
 
                             // Spawn a background task that consumes the output
@@ -1506,6 +1643,9 @@ p2p_routes! { ctx, msg_type, payload_value;
                                         data: encoded,
                                         stream_epoch: Some(stream_epoch),
                                         stream_seq: Some(stream_seq),
+                                    // Live output; the prefill above is what
+                                    // becomes the bootstrap in S4b (#321).
+                                    bootstrap: None,
                                     };
                                     let msg = new_message(msg_types::TERMINAL_OUTPUT, output);
                                     if let Ok(json) = serde_json::to_string(&msg) {
@@ -1531,11 +1671,8 @@ p2p_routes! { ctx, msg_type, payload_value;
                                 // session was closed by the detach handler.
                             });
 
-                            // Spawn a second task that emits an initial
-                            // `terminal.resize` (so xterm.js can size its grid
-                            // to match the tmux pane before any output flows
-                            // in) and then forwards ongoing `%window-resize`
-                            // events on the same message type.
+                            // Spawn a second task that forwards
+                            // `%window-resize` events as `terminal.resize`.
                             //
                             // Each resize is ALSO published to the agent's
                             // resize lane so relay clients (browser → server →
@@ -1555,44 +1692,39 @@ p2p_routes! { ctx, msg_type, payload_value;
                             let session_name_resize = session_name.clone();
                             let resize_reporter = ctx.resize.clone();
                             let agent_id_resize = ctx.agent_id.to_string();
-                            // The same addressing the attach above was given,
-                            // rather than the process-wide one (#991 step 6):
-                            // a migrated operation reached from a handler
-                            // inherited from `ctx.tmux` like everything else on
-                            // this path, so an injected tmux is not bypassed by
-                            // the first query that follows the attach.
-                            let tmux_resize = ctx.tmux.tmux_dep();
                             tokio::spawn(async move {
-                                // Initial resize: query tmux for the pane's
-                                // current size and forward it as one message.
-                                // Runs inside the spawned task so the attach
-                                // OK response reaches the client first.
+                                // **No initial size announcement.** This arm
+                                // used to query the pane's size and send it, so
+                                // the attaching client would know what xterm.js
+                                // should expect. It cannot know that: the query
+                                // answers *now*, and the client is still
+                                // measuring. Measured on CI (#1187), verbatim
+                                // from a run's WebSocket capture:
                                 //
-                                // **Required** at this call site: the size is
-                                // what xterm.js is told to expect, so a session
-                                // whose size could not be read is not one to
-                                // announce a guessed one for — an 80×24 that was
-                                // never asked for would show as a real resize
-                                // and reflow nothing. The grammar is
-                                // `TmuxOps`'s; this arm is where the class is
-                                // decided (see #991 on the two policies this
-                                // query used to carry in two hand-written
-                                // copies).
-                                match tmux_resize.ops().window_size(&session_name_resize).await {
-                                    Ok((cols, rows)) => {
-                                        send_terminal_resize_msg(
-                                            &outbound_resize,
-                                            &session_name_resize,
-                                            cols,
-                                            rows,
-                                        )
-                                        .await;
-                                    }
-                                    Err(e) => warn!(
-                                        "failed to query initial window size for {}: {:#}",
-                                        session_name_resize, e
-                                    ),
-                                }
+                                //   2072.0  client → server   relay.begin {cols:124, rows:26}
+                                //   2090.1  client → agent    resize     {cols:124, rows:26}
+                                //   2146.8  agent  → client   resize     {cols:80,  rows:24}
+                                //
+                                // The backend was created at 80×24 — the
+                                // Server's default for a client that had not
+                                // measured yet — so that is what the query
+                                // returned, and it arrived *after* the client's
+                                // own fit. The client applied it (that arm
+                                // resizes xterm directly and sends nothing
+                                // back), leaving a grid of 80×24 over a pane of
+                                // 124×26, for good. Both halves were always true
+                                // of the old comment's worry — "an 80×24 that
+                                // was never asked for would show as a real
+                                // resize" — it just did not follow that
+                                // `window_size` returning `Ok` makes the answer
+                                // current by the time it is read.
+                                //
+                                // The attaching client is the one actor that
+                                // cannot need this: it is the authority on its
+                                // own viewport, and every size it will ever want
+                                // it sends itself. A *peer* reflowing the pane
+                                // is a different actor, and still arrives
+                                // through `resize_rx` below.
                                 while let Some((cols, rows)) = resize_rx.recv().await {
                                     let full_id =
                                         format!("{agent_id_resize}:{session_name_resize}");
@@ -3239,6 +3371,7 @@ mod tests {
             width: 80,
             height: 24,
             env_snapshots: Vec::new(),
+            needs_bootstrap: None,
         };
         let attach_req = new_message(msg_types::CLIENT_ATTACH, attach_payload);
         let attach_resp: Message<ClientAttachResponse> =
@@ -3285,6 +3418,7 @@ mod tests {
             width: 80,
             height: 24,
             env_snapshots: Vec::new(),
+            needs_bootstrap: None,
         };
         let attach_req = new_message(msg_types::CLIENT_ATTACH, attach_payload);
         let attach_resp: Message<ClientAttachResponse> =
@@ -3930,6 +4064,7 @@ mod tests {
             width: 80,
             height: 24,
             env_snapshots: Vec::new(),
+            needs_bootstrap: None,
         };
         let attach_req = new_message(msg_types::CLIENT_ATTACH, attach_payload);
         let _ = send_and_receive::<_, serde_json::Value>(&mut sink, &mut stream, &attach_req).await;

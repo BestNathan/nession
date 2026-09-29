@@ -644,6 +644,7 @@ mod tests {
             data: base64::engine::general_purpose::STANDARD.encode(b"hi"),
             stream_epoch: None,
             stream_seq: None,
+            bootstrap: None,
         };
         let msg = proto_msg(wire::AGENT_TERMINAL_OUTPUT, payload);
         let s = serde_json::to_string(&msg).unwrap();

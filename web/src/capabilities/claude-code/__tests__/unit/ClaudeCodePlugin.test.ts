@@ -16,6 +16,11 @@ const AGENT_MANIFEST: ProtocolManifest = {
   protocols: {
     'claude-code.list': { versions: [1] },
     'claude-code.read': { versions: [1] },
+    // The two units #1222 replaced the retired `claude-code.conversation` with.
+    // They are advertised here because `addressed()` resolves against the
+    // manifest before anything is sent — an unadvertised unit would throw.
+    'claude-code.conversations': { versions: [1] },
+    'claude-code.messages': { versions: [1] },
   },
 };
 
@@ -38,6 +43,19 @@ const readReq = {
   path: '~/.claude/settings.json',
   offset: 0,
   limit: 2048,
+} as const;
+
+const conversationsReq = {
+  agent_id: 'a1',
+  session_id: 'a1:work',
+  limit: 200,
+} as const;
+
+const messagesReq = {
+  agent_id: 'a1',
+  session_id: 'a1:work',
+  conversation_id: 'c0a1b2c3-1111-4222-8333-444455556666',
+  limit: 60,
 } as const;
 
 const listResponse = {
@@ -124,6 +142,41 @@ describe('ClaudeCodePlugin', () => {
       });
     });
 
+    it('claudeCodeConversations forwards the whole request object', async () => {
+      const pending = plugin.claudeCodeConversations(conversationsReq);
+      expect(surface.requests[0]).toMatchObject({
+        type: 'claude-code.conversations',
+        payload: conversationsReq,
+      });
+
+      const response = { state: 'ready', items: [], has_more: false };
+      surface.resolveNext('claude-code.conversations', response);
+      await expect(pending).resolves.toEqual(response);
+    });
+
+    it('claudeCodeMessages forwards the whole request object, conversation_id included', async () => {
+      // The id is the unit's only selection mechanism (#1222) — if it did not
+      // survive addressing intact, every read would name nothing and answer
+      // `not_found`.
+      const pending = plugin.claudeCodeMessages(messagesReq);
+      expect(surface.requests[0]).toMatchObject({
+        type: 'claude-code.messages',
+        payload: messagesReq,
+      });
+
+      const response = {
+        state: 'ready',
+        conversation: { id: messagesReq.conversation_id, cwd: '/work' },
+        activity: 'active',
+        items: [],
+        has_more: false,
+        partial_tail: false,
+        skipped: 0,
+      };
+      surface.resolveNext('claude-code.messages', response);
+      await expect(pending).resolves.toEqual(response);
+    });
+
     it('claudeCodeRead forwards the whole request object', async () => {
       const pending = plugin.claudeCodeRead(readReq);
       expect(surface.requests[0]).toMatchObject({
@@ -154,6 +207,12 @@ describe('ClaudeCodePlugin', () => {
         'claude-code feature is not connected',
       );
       await expect(plugin.claudeCodeRead(readReq)).rejects.toThrow(
+        'claude-code feature is not connected',
+      );
+      await expect(plugin.claudeCodeConversations(conversationsReq)).rejects.toThrow(
+        'claude-code feature is not connected',
+      );
+      await expect(plugin.claudeCodeMessages(messagesReq)).rejects.toThrow(
         'claude-code feature is not connected',
       );
       expect(surface.requests).toHaveLength(0);

@@ -27,11 +27,10 @@ const FIXTURE_MANIFEST: ProtocolManifest = {
     'git.worktrees': { versions: [1], wire: ['git.worktrees'] },
     'claude-code.list': { versions: [1], wire: ['claude-code.list'] },
     'claude-code.read': { versions: [1], wire: ['claude-code.read'] },
-    // Two generations, because the agent serves two (#1167) and the fixture's
-    // job is to be the shape the real one is. The client names the version it
-    // wants and the resolver picks the highest both support, so advertising
-    // only v1 here would exercise a negotiation the app never actually makes.
-    'claude-code.conversation': { versions: [1, 2], wire: ['claude-code.conversation'] },
+    // The retired `claude-code.conversation` unit became two (#1222): the list
+    // plus the exact binding, and one explicitly named conversation's timeline.
+    'claude-code.conversations': { versions: [1], wire: ['claude-code.conversations'] },
+    'claude-code.messages': { versions: [1], wire: ['claude-code.messages'] },
   },
 };
 

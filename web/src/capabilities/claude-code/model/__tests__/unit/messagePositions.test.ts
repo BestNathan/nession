@@ -5,10 +5,10 @@ import {
   itemsOf,
   withNewest,
   withOlderPage,
-  type ConversationItems,
-} from '../../conversationPositions';
+  type MessageItems,
+} from '../../messagePositions';
 
-function items(...ids: string[]): ConversationItems {
+function items(...ids: string[]): MessageItems {
   return ids.map((id) => ({
     id,
     kind: 'message' as const,
@@ -17,9 +17,9 @@ function items(...ids: string[]): ConversationItems {
   }));
 }
 
-const ids = (list: ConversationItems) => list.map((item) => item.id);
+const ids = (list: MessageItems) => list.map((item) => item.id);
 
-describe('conversationPositions', () => {
+describe('messagePositions', () => {
   it('puts a loaded older page in front of what is already there', () => {
     // The page is *older* than everything held, and its own items are
     // oldest-first — so it goes in front, unreordered.
@@ -87,7 +87,7 @@ describe('conversationPositions', () => {
     // missed optimisation: reusing an object whose content changed would freeze
     // the message on screen, and the transcript would stop updating.
     const first = withNewest(emptyPositions(), { items: items('a') });
-    const changed: ConversationItems = [
+    const changed: MessageItems = [
       { id: 'a', kind: 'message', role: 'user', content: [{ type: 'text', text: 'longer' }] },
     ];
 
@@ -101,14 +101,14 @@ describe('conversationPositions', () => {
     // The live case this exists for: a call is running when the page is first
     // read and has succeeded by the next poll. Its `id` is unchanged, so an
     // identity check keyed on the id alone would pin it at "running" forever.
-    const running: ConversationItems = [
+    const running: MessageItems = [
       {
         id: 't1',
         kind: 'tool',
         tool: { call_id: 'c1', name: 'Bash', status: 'running', summary: 'cargo test' },
       },
     ];
-    const done: ConversationItems = [
+    const done: MessageItems = [
       {
         id: 't1',
         kind: 'tool',

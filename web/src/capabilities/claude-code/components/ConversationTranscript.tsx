@@ -7,7 +7,7 @@ import {
   Wrench,
   X,
 } from 'lucide-react';
-import { memo, type ReactNode } from 'react';
+import { memo, useRef, type ReactNode } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { copyToClipboard } from '@/shared/lib/clipboard';
@@ -17,10 +17,10 @@ import type { ConversationViewState } from '../hooks/useConversation';
 import { useTranscriptPullToLoad } from '../hooks/useTranscriptPullToLoad';
 import { useTranscriptScroll } from '../hooks/useTranscriptScroll';
 import { TranscriptPullToLoadIndicator } from './TranscriptPullToLoadIndicator';
-import type { ClaudeCodeConversationResponse } from '../types';
+import type { ClaudeCodeMessagesResponse } from '../types';
 import { clockTime } from '../model/clockTime';
 
-type Item = NonNullable<ClaudeCodeConversationResponse['items']>[number];
+type Item = NonNullable<ClaudeCodeMessagesResponse['items']>[number];
 type MessageItem = Extract<Item, { kind: 'message' }>;
 type ToolItem = Extract<Item, { kind: 'tool' }>;
 type Tool = ToolItem['tool'];
@@ -39,8 +39,9 @@ export function ConversationTranscript({
   view: ConversationViewState;
   onLoadOlder: () => void;
 }) {
-  const { scrollRef, topSentinelRef, onScroll, captureAnchorAndLoadOlder } = useTranscriptScroll({
-    conversationId: view.conversation?.claude_session_id ?? null,
+  const pullHandleRef = useRef<HTMLDivElement>(null);
+  const { scrollRef, topSentinelRef, onScroll, loadOlderFromPull } = useTranscriptScroll({
+    conversationId: view.conversation?.id ?? null,
     itemCount: view.items.length,
     hasMore: view.hasMore,
     loadingOlder: view.loadingOlder,
@@ -48,12 +49,13 @@ export function ConversationTranscript({
   });
 
   const canPullOlder =
-    view.hasMore && !view.loadingOlder && view.items.length > 0 && view.state === 'ready';
-  const { pullPx, progress, isPulling, atTopEdge, syncTopEdge, pullHandlers } =
+    view.hasMore && !view.loadingOlder && view.items.length > 0 && view.messagesState === 'ready';
+  const { pullPx, progress, isPulling, atTopEdge, syncTopEdge, pullHandleHandlers, scrollHandlers } =
     useTranscriptPullToLoad({
       scrollRef,
+      pullHandleRef,
       enabled: canPullOlder,
-      onCommitLoad: captureAnchorAndLoadOlder,
+      onCommitLoad: loadOlderFromPull,
     });
 
   const handleScroll = () => {
@@ -67,25 +69,30 @@ export function ConversationTranscript({
       data-testid="conversation-transcript-scroll"
       className={cn('min-h-0 flex-1 overflow-y-auto p-4 touch-pan-y', isPulling && 'touch-none overscroll-none')}
       onScroll={handleScroll}
-      {...pullHandlers}
+      {...scrollHandlers}
     >
       <div
         className={cn(!isPulling && pullPx === 0 && 'translate-y-0')}
         style={pullPx > 0 ? { transform: `translateY(${pullPx}px)` } : undefined}
       >
-        {canPullOlder ? (
+        {canPullOlder && atTopEdge ? (
           <div
-            className="flex flex-col items-center justify-end overflow-hidden transition-[height] duration-75"
-            style={{ height: pullPx > 0 ? pullPx : atTopEdge ? 28 : 0 }}
-            data-testid="conversation-pull-indicator"
+            ref={pullHandleRef}
+            className={cn(
+              'flex min-h-11 touch-none select-none flex-col items-center justify-end overflow-hidden transition-[height] duration-75',
+              isPulling ? 'cursor-grabbing' : 'cursor-grab',
+            )}
+            style={{ height: pullPx > 0 ? Math.max(pullPx, 44) : 44 }}
+            data-testid="conversation-pull-handle"
+            {...pullHandleHandlers}
           >
             {pullPx > 0 ? (
               <TranscriptPullToLoadIndicator progress={progress} />
-            ) : atTopEdge ? (
+            ) : (
               <p className="pb-1 text-[10px] text-muted-foreground" data-testid="conversation-pull-hint">
                 Pull down for earlier messages
               </p>
-            ) : null}
+            )}
           </div>
         ) : null}
       {view.loadingOlder ? (
@@ -105,7 +112,7 @@ export function ConversationTranscript({
           role="alert"
         >
           <span>{view.olderError}</span>
-          <Button variant="outline" size="xs" type="button" onClick={() => captureAnchorAndLoadOlder()}>
+          <Button variant="outline" size="xs" type="button" onClick={() => loadOlderFromPull()}>
             Retry
           </Button>
         </div>
@@ -199,7 +206,7 @@ function MessageFrame({
  * What the user said — a bounded surface, right-aligned (#1120).
  *
  * Memoized so the three-second poll costs only what changed: the page is
- * re-read wholesale, and [`withNewest`](../model/conversationPositions.ts) hands
+ * re-read wholesale, and [`withNewest`](../model/messagePositions.ts) hands
  * back the *same object* for an item whose content is unchanged. Without this
  * the stable object would buy nothing, and every poll would re-parse every
  * message's Markdown.

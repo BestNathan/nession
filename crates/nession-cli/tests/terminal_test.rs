@@ -60,6 +60,7 @@ async fn test_extract_terminal_output_valid() {
         data: base64::engine::general_purpose::STANDARD.encode(b"test output"),
         stream_epoch: None,
         stream_seq: None,
+        bootstrap: None,
     };
     // The agent's frame, built the way the agent builds it: the contract type
     // and the wire constant this test is about.
@@ -160,6 +161,7 @@ async fn test_message_routing_output_from_transport() {
         data: base64::engine::general_purpose::STANDARD.encode(b"output data"),
         stream_epoch: None,
         stream_seq: None,
+        bootstrap: None,
     };
     // The agent's frame, built the way the agent builds it: the contract type
     // and the wire constant this test is about.

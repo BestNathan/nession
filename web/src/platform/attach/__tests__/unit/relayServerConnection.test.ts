@@ -31,7 +31,7 @@ describe('relayServerHandle', () => {
     await connected;
     expect(handle.isReady()).toBe(true);
 
-    handle.beginRelay('a:work', undefined, 120, 40);
+    handle.beginRelay('a:work', { cols: 120, rows: 40 });
     handle.sendRelayInput('work', 'hello');
     handle.sendRelayResize('work', 100, 30);
     handle.endRelay('a:work');
@@ -57,7 +57,7 @@ describe('relayServerHandle', () => {
     // the singleton would otherwise route these to a newer service binding),
     // and subscriptions return inert unsubscribes.
     expect(() => {
-      handle.beginRelay('a:work', undefined, 120, 40);
+      handle.beginRelay('a:work', { cols: 120, rows: 40 });
       handle.sendRelayInput('work', 'hi');
       handle.sendRelayResize('work', 80, 24);
       handle.endRelay('a:work');
