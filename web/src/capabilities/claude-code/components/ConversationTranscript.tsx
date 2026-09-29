@@ -17,10 +17,10 @@ import type { ConversationViewState } from '../hooks/useConversation';
 import { useTranscriptPullToLoad } from '../hooks/useTranscriptPullToLoad';
 import { useTranscriptScroll } from '../hooks/useTranscriptScroll';
 import { TranscriptPullToLoadIndicator } from './TranscriptPullToLoadIndicator';
-import type { ClaudeCodeConversationResponse } from '../types';
+import type { ClaudeCodeMessagesResponse } from '../types';
 import { clockTime } from '../model/clockTime';
 
-type Item = NonNullable<ClaudeCodeConversationResponse['items']>[number];
+type Item = NonNullable<ClaudeCodeMessagesResponse['items']>[number];
 type MessageItem = Extract<Item, { kind: 'message' }>;
 type ToolItem = Extract<Item, { kind: 'tool' }>;
 type Tool = ToolItem['tool'];
@@ -41,7 +41,7 @@ export function ConversationTranscript({
 }) {
   const pullHandleRef = useRef<HTMLDivElement>(null);
   const { scrollRef, topSentinelRef, onScroll, loadOlderFromPull } = useTranscriptScroll({
-    conversationId: view.conversation?.claude_session_id ?? null,
+    conversationId: view.conversation?.id ?? null,
     itemCount: view.items.length,
     hasMore: view.hasMore,
     loadingOlder: view.loadingOlder,
@@ -49,7 +49,7 @@ export function ConversationTranscript({
   });
 
   const canPullOlder =
-    view.hasMore && !view.loadingOlder && view.items.length > 0 && view.state === 'ready';
+    view.hasMore && !view.loadingOlder && view.items.length > 0 && view.messagesState === 'ready';
   const { pullPx, progress, isPulling, atTopEdge, syncTopEdge, pullHandleHandlers, scrollHandlers } =
     useTranscriptPullToLoad({
       scrollRef,
@@ -206,7 +206,7 @@ function MessageFrame({
  * What the user said — a bounded surface, right-aligned (#1120).
  *
  * Memoized so the three-second poll costs only what changed: the page is
- * re-read wholesale, and [`withNewest`](../model/conversationPositions.ts) hands
+ * re-read wholesale, and [`withNewest`](../model/messagePositions.ts) hands
  * back the *same object* for an item whose content is unchanged. Without this
  * the stable object would buy nothing, and every poll would re-parse every
  * message's Markdown.

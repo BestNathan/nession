@@ -74,13 +74,13 @@ export function ClaudeCodePeek({
           </p>
           <ul className="flex flex-col" data-testid="claude-code-peek-candidates">
             {recent.map((candidate) => (
-              <li key={candidate.claude_session_id}>
+              <li key={candidate.id}>
                 <button
                   type="button"
                   // Deepening carries the item, which is the one thing only this
                   // component knows — `#1046` moved that decision out of the
                   // host's footer and into the capability that made the row.
-                  onClick={() => onOpenWorkspace?.(candidate.claude_session_id)}
+                  onClick={() => onOpenWorkspace?.(candidate.id)}
                   className={cn(
                     'w-full truncate rounded text-left text-xs text-muted-foreground',
                     'transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',

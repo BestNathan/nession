@@ -1,10 +1,10 @@
-import type { ClaudeCodeConversationResponse } from '../types';
+import type { ClaudeCodeMessagesResponse } from '../types';
 
-export type ConversationItems = NonNullable<ClaudeCodeConversationResponse['items']>;
+export type MessageItems = NonNullable<ClaudeCodeMessagesResponse['items']>;
 
 /** One page of the contract, as this module needs it. */
 type Page = {
-  items?: ConversationItems | null;
+  items?: MessageItems | null;
   next_cursor?: string | null;
 };
 
@@ -31,8 +31,8 @@ type Page = {
  * `older.length > 0` the wrong test, so the flag says it directly.
  */
 export interface Positions {
-  newest: ConversationItems;
-  older: ConversationItems;
+  newest: MessageItems;
+  older: MessageItems;
   cursor: string | null;
   paged: boolean;
 }
@@ -83,7 +83,7 @@ export function withNewest(current: Positions, page: Page): Positions {
  * sides, so equal items compare equal; if that ever stopped holding, the
  * consequence is a missed reuse, not a wrong render.
  */
-function reusing(previous: ConversationItems, next: ConversationItems): ConversationItems {
+function reusing(previous: MessageItems, next: MessageItems): MessageItems {
   if (previous.length === 0) {
     return next;
   }
@@ -94,7 +94,7 @@ function reusing(previous: ConversationItems, next: ConversationItems): Conversa
   });
 }
 
-function sameItem(a: ConversationItems[number], b: ConversationItems[number]): boolean {
+function sameItem(a: MessageItems[number], b: MessageItems[number]): boolean {
   return a === b || JSON.stringify(a) === JSON.stringify(b);
 }
 
@@ -112,7 +112,7 @@ export function withOlderPage(current: Positions, page: Page): Positions {
 }
 
 /** Everything to render, oldest first. */
-export function itemsOf(positions: Positions): ConversationItems {
+export function itemsOf(positions: Positions): MessageItems {
   return [...positions.older, ...positions.newest];
 }
 

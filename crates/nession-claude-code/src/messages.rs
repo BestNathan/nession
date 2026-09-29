@@ -1,22 +1,25 @@
-//! Normalizing a transcript into `claude-code.conversation` v2 (#1167).
+//! Normalizing a transcript into `claude-code.messages` items (#1167, renamed
+//! for #1222).
 //!
-//! Kept beside [`crate::conversation`] rather than inside it so the v1 path
-//! stays independently readable: v1 is shipped and unchanged, and a reviewer
-//! checking "did v1 move?" should not have to diff it against a rewrite.
+//! This was the retired `claude-code.conversation` unit's v2 engine; the model
+//! is unchanged, only the unit it serves has a name of its own now. It sits
+//! beside [`crate::conversation`], which owns discovery — finding which
+//! transcripts belong to a cwd — while this module owns what one transcript
+//! *means*.
 //!
-//! ## Tool pairing is the whole difference, and it spans pages
+//! ## Tool pairing is the whole job, and it spans pages
 //!
-//! v1 turned a `tool_use` block into a row and dropped `tool_result` entirely,
-//! so no tool could report what it produced and `is_error` shipped hardcoded
-//! `false`. v2 pairs `tool_use.id` with `tool_result.tool_use_id` and renders one
-//! activity item per *call*.
+//! A `tool_use` block and its `tool_result` are different records, so a tool
+//! cannot report what it produced unless `tool_use.id` is paired with
+//! `tool_result.tool_use_id` and one activity item is rendered per *call*.
 //!
 //! The pairing cannot live in a per-record function. Pages are read backwards
 //! from the end of an append-only file, so a call can be the last record of one
 //! page while its result is the first record of the next — a per-line normalizer
 //! sees each half alone and can only ever call both halves orphans. So the page
-//! is selected first (by [`crate::conversation::select_records`], shared with v1)
-//! and then **scanned forward** past its own end for the results it is missing.
+//! is selected first (by [`crate::conversation::select_records`], shared with
+//! discovery) and then **scanned forward** past its own end for the results it
+//! is missing.
 //!
 //! The scan is bounded, and the bound is measured rather than guessed: over 1180
 //! real tool calls the gap between a call and its result was min 1, p50 2, p90 7,
@@ -25,7 +28,7 @@
 //! early on the "every call answered" condition rather than on the cap.
 //!
 //! When it *does* stop at the cap with calls outstanding, those calls report
-//! [`ToolStatusV2::Unknown`] — not `Running`. "We did not look far enough" and
+//! [`ToolStatusV1::Unknown`] — not `Running`. "We did not look far enough" and
 //! "it is still going" are different facts, and a provider that presents the
 //! first as the second is making a claim it cannot support.
 
@@ -36,9 +39,10 @@ use std::io::{Read, Seek, SeekFrom};
 use serde_json::Value;
 
 use crate::conversation::{select_records, string_field, Discovered};
-use crate::protocol::conversation::v2::{
-    ConversationContentV2, ConversationItemV2, PayloadKindV2, PayloadV2, RoleV2, ToolStatusV2,
-    ToolV2, PAGE_PAYLOAD_BUDGET, TOOL_INPUT_CEILING, TOOL_OUTPUT_CEILING, TOOL_SUMMARY_CEILING,
+use crate::protocol::messages::v1::{
+    MessageContentV1, MessageItemV1, MessageRoleV1, PayloadKindV1, PayloadV1, ToolActivityV1,
+    ToolStatusV1, PAGE_PAYLOAD_BUDGET, TOOL_INPUT_CEILING, TOOL_OUTPUT_CEILING,
+    TOOL_SUMMARY_CEILING,
 };
 
 /// How far past a page's end the pairing scan will look.
@@ -52,10 +56,10 @@ const PAIR_SCAN_MAX_BYTES: u64 = 256 * 1024;
 /// How much to read at a time while scanning forward.
 const READ_CHUNK: u64 = 32 * 1024;
 
-/// One page of a v2 conversation.
+/// One page of a conversation's normalized timeline.
 #[derive(Debug, Clone, Default)]
-pub struct PageV2 {
-    pub items: Vec<ConversationItemV2>,
+pub struct MessagesPage {
+    pub items: Vec<MessageItemV1>,
     /// Byte offset to pass back to read the page before this one.
     pub next_offset: Option<u64>,
     pub has_more: bool,
@@ -83,22 +87,22 @@ struct PendingCall {
     summary: String,
     /// Already cut to the per-body ceiling; the page budget is applied later,
     /// because it is a property of the page and not of the call.
-    input: Option<PayloadV2>,
+    input: Option<PayloadV1>,
 }
 
 /// Something a page is made of, in document order.
 #[derive(Debug)]
 enum Slot {
-    Item(ConversationItemV2),
+    Item(MessageItemV1),
     Call(PendingCall),
 }
 
-/// A page of `claude-code.conversation` v2.
+/// A page of `claude-code.messages` items for one conversation.
 pub fn read_page(
     conversation: &Discovered,
     end_offset: Option<u64>,
     limit: usize,
-) -> std::io::Result<PageV2> {
+) -> std::io::Result<MessagesPage> {
     let mut file = File::open(conversation.path())?;
     let file_len = file.metadata()?.len();
     let end = end_offset.unwrap_or(file_len).min(file_len);
@@ -150,7 +154,7 @@ pub fn read_page(
     let mut scan = scan_for_results(&mut file, end, file_len, unresolved)?;
     scan.results.extend(results);
 
-    Ok(PageV2 {
+    Ok(MessagesPage {
         items: materialize(slots, &scan),
         next_offset: selected.next_offset,
         has_more: selected.has_more,
@@ -164,7 +168,7 @@ pub fn read_page(
 /// The page budget is spent in document order, so the degradation is
 /// deterministic and a reader scrolling up sees the same tools cut every time —
 /// not whichever ones happened to be materialized first.
-fn materialize(slots: Vec<Slot>, scan: &ScanOutcome) -> Vec<ConversationItemV2> {
+fn materialize(slots: Vec<Slot>, scan: &ScanOutcome) -> Vec<MessageItemV1> {
     let mut budget = PAGE_PAYLOAD_BUDGET;
 
     slots
@@ -174,14 +178,14 @@ fn materialize(slots: Vec<Slot>, scan: &ScanOutcome) -> Vec<ConversationItemV2> 
             Slot::Call(call) => {
                 let fact = scan.results.get(&call.call_id);
                 let status = match fact {
-                    Some(fact) if fact.is_error => ToolStatusV2::Error,
-                    Some(_) => ToolStatusV2::Success,
+                    Some(fact) if fact.is_error => ToolStatusV1::Error,
+                    Some(_) => ToolStatusV1::Success,
                     // No result, and the scan did not stop early: the call is
                     // simply the newest thing written.
-                    None if !scan.hit_cap => ToolStatusV2::Running,
+                    None if !scan.hit_cap => ToolStatusV1::Running,
                     // No result, and the scan gave up. Deliberately not
                     // `Running` — see the module docs.
-                    None => ToolStatusV2::Unknown,
+                    None => ToolStatusV1::Unknown,
                 };
 
                 let input = call
@@ -190,19 +194,19 @@ fn materialize(slots: Vec<Slot>, scan: &ScanOutcome) -> Vec<ConversationItemV2> 
                 let output = fact.map(|fact| {
                     spend(
                         &mut budget,
-                        PayloadV2 {
+                        PayloadV1 {
                             text: fact.body.clone(),
-                            kind: PayloadKindV2::Text,
+                            kind: PayloadKindV1::Text,
                             truncated: false,
                         },
                         TOOL_OUTPUT_CEILING,
                     )
                 });
 
-                ConversationItemV2::Tool {
+                MessageItemV1::Tool {
                     id: call.id,
                     timestamp: call.timestamp,
-                    tool: ToolV2 {
+                    tool: ToolActivityV1 {
                         call_id: call.call_id,
                         name: call.name,
                         status,
@@ -223,7 +227,7 @@ fn materialize(slots: Vec<Slot>, scan: &ScanOutcome) -> Vec<ConversationItemV2> 
 /// not carry it" indistinguishable from "the transcript did not record it",
 /// which are the two things `skip_serializing_if` on the field is there to tell
 /// apart.
-fn spend(budget: &mut usize, mut payload: PayloadV2, ceiling: usize) -> PayloadV2 {
+fn spend(budget: &mut usize, mut payload: PayloadV1, ceiling: usize) -> PayloadV1 {
     let allowed = ceiling.min(*budget);
     let (text, cut) = truncate_bytes(&payload.text, allowed);
     *budget = budget.saturating_sub(text.len());
@@ -457,9 +461,9 @@ fn normalize_record(line: &str) -> Record {
     let id = string_field(&record, "uuid").unwrap_or_default();
     let timestamp = string_field(&record, "timestamp");
     let role = if kind == "assistant" {
-        RoleV2::Assistant
+        MessageRoleV1::Assistant
     } else {
-        RoleV2::User
+        MessageRoleV1::User
     };
 
     // `content` is either a plain string or a block list, and both occur — a
@@ -469,11 +473,11 @@ fn normalize_record(line: &str) -> Record {
         if text.trim().is_empty() {
             return Record::Silent;
         }
-        return Record::Slots(vec![Slot::Item(ConversationItemV2::Message {
+        return Record::Slots(vec![Slot::Item(MessageItemV1::Message {
             id,
             timestamp,
             role,
-            content: vec![ConversationContentV2::Text {
+            content: vec![MessageContentV1::Text {
                 text: text.to_string(),
             }],
         })]);
@@ -488,7 +492,7 @@ fn normalize_record(line: &str) -> Record {
     // paragraphs is one bubble rather than two. A tool call ends the run: the
     // activity is *between* the prose on either side of it, which is the order
     // the blocks are in and the order a reader expects.
-    let mut prose: Vec<ConversationContentV2> = Vec::new();
+    let mut prose: Vec<MessageContentV1> = Vec::new();
     let mut prose_starts_at: Option<usize> = None;
     let mut unmodelled = 0usize;
     // Whether anything a reader could use came out of this record. Distinct
@@ -497,12 +501,12 @@ fn normalize_record(line: &str) -> Record {
     let mut readable = 0usize;
 
     let flush =
-        |slots: &mut Vec<Slot>, prose: &mut Vec<ConversationContentV2>, at: &mut Option<usize>| {
+        |slots: &mut Vec<Slot>, prose: &mut Vec<MessageContentV1>, at: &mut Option<usize>| {
             if prose.is_empty() {
                 return;
             }
             let first = at.take().unwrap_or(0);
-            slots.push(Slot::Item(ConversationItemV2::Message {
+            slots.push(Slot::Item(MessageItemV1::Message {
                 id: item_id(&id, first),
                 timestamp: timestamp.clone(),
                 role,
@@ -523,7 +527,7 @@ fn normalize_record(line: &str) -> Record {
                     prose_starts_at = Some(index);
                 }
                 readable += 1;
-                prose.push(ConversationContentV2::Text { text });
+                prose.push(MessageContentV1::Text { text });
             }
             Some("tool_use") => {
                 flush(&mut slots, &mut prose, &mut prose_starts_at);
@@ -535,9 +539,9 @@ fn normalize_record(line: &str) -> Record {
                     timestamp: timestamp.clone(),
                     call_id: string_field(block, "id").unwrap_or_default(),
                     summary: tool_summary(&name, input),
-                    input: input.map(|input| PayloadV2 {
+                    input: input.map(|input| PayloadV1 {
                         text: serde_json::to_string_pretty(input).unwrap_or_default(),
-                        kind: PayloadKindV2::Json,
+                        kind: PayloadKindV1::Json,
                         truncated: false,
                     }),
                     name,
@@ -559,7 +563,7 @@ fn normalize_record(line: &str) -> Record {
                 if prose_starts_at.is_none() {
                     prose_starts_at = Some(index);
                 }
-                prose.push(ConversationContentV2::Unknown);
+                prose.push(MessageContentV1::Unknown);
             }
         }
     }
@@ -578,10 +582,7 @@ fn normalize_record(line: &str) -> Record {
     // partially-readable turn and keeps its bubble, while a record with nothing
     // readable in it is a marker and not a turn at all.
     if unmodelled > 0 {
-        return Record::Slots(vec![Slot::Item(ConversationItemV2::Unknown {
-            id,
-            timestamp,
-        })]);
+        return Record::Slots(vec![Slot::Item(MessageItemV1::Unknown { id, timestamp })]);
     }
     // Understood, and nothing to draw: a `tool_result` awaiting its call, or a
     // record of nothing but `thinking`. Neither is an event the client failed to
@@ -675,14 +676,14 @@ fn truncate_chars(s: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::conversation::v2::{ConversationResponseV2, ConversationStateV2};
+    use crate::protocol::messages::v1::{MessagesResponseV1, MessagesStateV1};
 
-    fn page_of(transcript: &str) -> PageV2 {
+    fn page_of(transcript: &str) -> MessagesPage {
         page_of_limited(transcript, 100)
     }
 
     /// The same, asking for a specific number of records.
-    fn page_of_limited(transcript: &str, limit: usize) -> PageV2 {
+    fn page_of_limited(transcript: &str, limit: usize) -> MessagesPage {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("t.jsonl");
         // Every record ends with a newline, and a reader relies on that: the
@@ -728,11 +729,11 @@ mod tests {
         out
     }
 
-    fn tools(page: &PageV2) -> Vec<&ToolV2> {
+    fn tools(page: &MessagesPage) -> Vec<&ToolActivityV1> {
         page.items
             .iter()
             .filter_map(|item| match item {
-                ConversationItemV2::Tool { tool, .. } => Some(tool),
+                MessageItemV1::Tool { tool, .. } => Some(tool),
                 _ => None,
             })
             .collect()
@@ -740,8 +741,8 @@ mod tests {
 
     #[test]
     fn a_tool_call_and_its_successful_result_are_one_activity() {
-        // The whole point of v2. v1 rendered the call as a row and dropped the
-        // result, so nothing could ever say what a tool produced.
+        // The whole point of the pairing pass: rendering the call as a row and
+        // dropping the result means nothing could ever say what a tool produced.
         let page = page_of(&join(&[
             call(
                 "t1",
@@ -753,7 +754,7 @@ mod tests {
 
         let tools = tools(&page);
         assert_eq!(tools.len(), 1, "the result became a second row");
-        assert_eq!(tools[0].status, ToolStatusV2::Success);
+        assert_eq!(tools[0].status, ToolStatusV1::Success);
         assert_eq!(tools[0].call_id, "t1");
         assert_eq!(
             tools[0].summary, "src/main.rs",
@@ -776,7 +777,7 @@ mod tests {
         ]));
 
         let tools = tools(&page);
-        assert_eq!(tools[0].status, ToolStatusV2::Error);
+        assert_eq!(tools[0].status, ToolStatusV1::Error);
         assert_eq!(
             tools[0].summary, "cargo test",
             "a Bash summarizes as its command"
@@ -799,7 +800,7 @@ mod tests {
         ));
 
         let tools = tools(&page);
-        assert_eq!(tools[0].status, ToolStatusV2::Running);
+        assert_eq!(tools[0].status, ToolStatusV1::Running);
         assert!(
             tools[0].output.is_none(),
             "a running call has no output yet"
@@ -834,7 +835,7 @@ mod tests {
         assert!(
             page.items
                 .iter()
-                .any(|item| matches!(item, ConversationItemV2::Tool { .. })),
+                .any(|item| matches!(item, MessageItemV1::Tool { .. })),
             "the fixture did not put the call in the page: {:?}",
             page.items
         );
@@ -843,7 +844,7 @@ mod tests {
         assert_eq!(tools.len(), 1);
         assert_eq!(
             tools[0].status,
-            ToolStatusV2::Success,
+            ToolStatusV1::Success,
             "a call whose result is on the next page reported {:?}",
             tools[0].status
         );
@@ -868,7 +869,7 @@ mod tests {
         // claiming: `Running` says it is still going, `Unknown` says the read
         // did not look far enough. At EOF there is nothing newer to look at.
         let page = page_of(&call("t1", "Bash", serde_json::json!({"command": "sleep"})));
-        assert_eq!(tools(&page)[0].status, ToolStatusV2::Running);
+        assert_eq!(tools(&page)[0].status, ToolStatusV1::Running);
     }
 
     #[test]
@@ -908,7 +909,7 @@ mod tests {
         assert_eq!(tools(&page).len(), 1, "the page should hold the call");
         assert_eq!(
             tools(&page)[0].status,
-            ToolStatusV2::Unknown,
+            ToolStatusV1::Unknown,
             "a call past the scan cap claimed to be still running"
         );
     }
@@ -928,13 +929,13 @@ mod tests {
         let page = page_of(&join(&[record]));
 
         assert_eq!(page.items.len(), 1);
-        let ConversationItemV2::Message { content, role, .. } = &page.items[0] else {
+        let MessageItemV1::Message { content, role, .. } = &page.items[0] else {
             panic!("expected a message, got {:?}", page.items[0]);
         };
-        assert_eq!(*role, RoleV2::Assistant);
+        assert_eq!(*role, MessageRoleV1::Assistant);
         assert_eq!(
             content,
-            &vec![ConversationContentV2::Text {
+            &vec![MessageContentV1::Text {
                 text: "the answer".into()
             }],
             "reasoning leaked into the conversation"
@@ -960,9 +961,9 @@ mod tests {
             .items
             .iter()
             .map(|item| match item {
-                ConversationItemV2::Message { .. } => "message",
-                ConversationItemV2::Tool { .. } => "tool",
-                ConversationItemV2::Unknown { .. } => "unknown",
+                MessageItemV1::Message { .. } => "message",
+                MessageItemV1::Tool { .. } => "tool",
+                MessageItemV1::Unknown { .. } => "unknown",
             })
             .collect();
         assert_eq!(shape, vec!["message", "tool", "message"]);
@@ -979,13 +980,13 @@ mod tests {
         )]));
 
         assert_eq!(page.items.len(), 1);
-        let ConversationItemV2::Message { role, content, .. } = &page.items[0] else {
+        let MessageItemV1::Message { role, content, .. } = &page.items[0] else {
             panic!("expected a message");
         };
-        assert_eq!(*role, RoleV2::User);
+        assert_eq!(*role, MessageRoleV1::User);
         assert_eq!(
             content,
-            &vec![ConversationContentV2::Text {
+            &vec![MessageContentV1::Text {
                 text: "block form".into()
             }]
         );
@@ -1005,16 +1006,16 @@ mod tests {
         );
         let page = page_of(&join(&[record]));
 
-        let ConversationItemV2::Message { content, .. } = &page.items[0] else {
+        let MessageItemV1::Message { content, .. } = &page.items[0] else {
             panic!("expected a message");
         };
         assert_eq!(
             content,
             &vec![
-                ConversationContentV2::Text {
+                MessageContentV1::Text {
                     text: "seen".into()
                 },
-                ConversationContentV2::Unknown,
+                MessageContentV1::Unknown,
             ]
         );
     }
@@ -1031,7 +1032,7 @@ mod tests {
         let page = page_of(&join(&[record]));
 
         assert!(
-            matches!(page.items.as_slice(), [ConversationItemV2::Unknown { .. }]),
+            matches!(page.items.as_slice(), [MessageItemV1::Unknown { .. }]),
             "expected one unknown item, got {:?}",
             page.items
         );
@@ -1200,7 +1201,7 @@ mod tests {
             serde_json::json!({"file_path": "a.rs", "limit": 5}),
         ));
         let input = tools(&page)[0].input.clone().expect("input");
-        assert_eq!(input.kind, PayloadKindV2::Json);
+        assert_eq!(input.kind, PayloadKindV1::Json);
         assert!(
             input.text.contains("\"file_path\": \"a.rs\""),
             "got {}",
@@ -1235,7 +1236,7 @@ mod tests {
     #[test]
     fn a_reader_that_found_nothing_answers_with_no_items() {
         // The shape the handler falls back to for every non-`Ready` state.
-        let not_found = ConversationResponseV2::bare(ConversationStateV2::NotFound);
+        let not_found = MessagesResponseV1::bare(MessagesStateV1::NotFound);
         assert!(not_found.items.is_empty());
         assert!(not_found.conversation.is_none());
         assert!(!not_found.has_more);

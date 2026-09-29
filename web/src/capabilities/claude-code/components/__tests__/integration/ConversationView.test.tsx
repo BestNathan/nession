@@ -3,13 +3,26 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { ConversationView } from '../../ConversationView';
 import type { ConversationViewState } from '../../../hooks/useConversation';
-import type { ConversationItems } from '../../../model/conversationPositions';
+import type { MessageItems } from '../../../model/messagePositions';
 
+/**
+ * A view with one conversation open and running.
+ *
+ * The defaults are the richest state, matching what these tests were written
+ * against: `listState`/`conversations` are the `conversations` unit's half,
+ * `messagesState`/`conversation`/`activity`/`items` are the `messages` unit's
+ * (#1222) — and the list tests override the open half away, because an unbound
+ * session is a list nobody has chosen from, not a state of its own.
+ */
 function state(overrides: Partial<ConversationViewState> = {}): ConversationViewState {
   return {
-    state: 'ready',
-    conversation: { claude_session_id: 'claude-1', cwd: '/work' },
-    candidates: [],
+    listState: 'ready',
+    conversations: [],
+    binding: null,
+    messagesState: 'ready',
+    openId: 'claude-1',
+    conversation: { id: 'claude-1', cwd: '/work' },
+    activity: 'active',
     items: [],
     hasMore: false,
     partialTail: false,
@@ -20,6 +33,17 @@ function state(overrides: Partial<ConversationViewState> = {}): ConversationView
     error: null,
     ...overrides,
   };
+}
+
+/** Nothing open: the list is on screen instead of a conversation. */
+function unbound(overrides: Partial<ConversationViewState> = {}): ConversationViewState {
+  return state({
+    messagesState: null,
+    openId: null,
+    conversation: null,
+    activity: null,
+    ...overrides,
+  });
 }
 
 /**
@@ -50,7 +74,7 @@ function renderView(view: ConversationViewState, handlers: Partial<{
   return { onSelect, onLoadOlder, onReload };
 }
 
-const turns: ConversationItems = [
+const turns: MessageItems = [
   {
     id: '1',
     kind: 'message',
@@ -130,35 +154,64 @@ describe('ConversationView', () => {
   it('says a finished conversation is finished but still shows it', () => {
     // #1005 criterion 4: Claude exiting does not take the conversation away.
     // The distinction the user needs is "not live", not "gone".
-    renderView(state({ state: 'inactive', items: turns }));
+    renderView(state({ activity: 'inactive', items: turns }));
 
     expect(screen.getByTestId('conversation-state')).toHaveTextContent('Finished');
     expect(screen.getAllByTestId('conversation-turn')).toHaveLength(2);
   });
 
   it('says a running conversation is running now', () => {
-    renderView(state({ state: 'ready', items: turns }));
+    renderView(state({ activity: 'active', items: turns }));
     expect(screen.getByTestId('conversation-state')).toHaveTextContent('Running now');
   });
 
-  it('offers the candidate list instead of choosing when the provider could not resolve one', () => {
-    // The whole point of `ambiguous`: the client must not pick. Nothing is
-    // opened, and the list is what is shown.
-    const candidates = [
+  it('makes no liveness claim when the host could not say', () => {
+    // `unknown` is not a third adjective — drawing "Finished" there would be a
+    // guess, and guessing is what #1005 forbids the client from doing.
+    renderView(state({ activity: 'unknown', items: turns }));
+
+    expect(screen.queryByTestId('conversation-state')).not.toBeInTheDocument();
+    expect(screen.getAllByTestId('conversation-turn')).toHaveLength(2);
+  });
+
+  it('names the open conversation from the messages response itself', () => {
+    // #1222: `messages.conversation` is the full item shape, so the header
+    // renders from it directly — no join into the list by id, and the two can
+    // never disagree.
+    renderView(
+      state({
+        conversation: { id: 'claude-1', cwd: '/work', title: 'terminal ownership handoff' },
+        conversations: [
+          { id: 'claude-1', cwd: '/work', title: 'a different name from the list' },
+        ],
+        items: turns,
+      }),
+    );
+
+    const header = screen.getByText('terminal ownership handoff');
+    expect(header).toBeInTheDocument();
+    expect(header).toHaveAttribute('title', 'claude-1');
+    expect(screen.queryByText('a different name from the list')).not.toBeInTheDocument();
+  });
+
+  it('offers the list instead of choosing when nothing is bound', () => {
+    // The whole point of retiring `ambiguous` (#1222): the list is the answer,
+    // the client must not pick, and nothing is opened until the user does.
+    const conversations = [
       {
-        claude_session_id: 'claude-1',
+        id: 'claude-1',
         cwd: '/work',
         updated_at: '2026-09-25T10:00:00Z',
         title: 'terminal ownership handoff',
       },
       {
-        claude_session_id: 'claude-2',
+        id: 'claude-2',
         cwd: '/work',
         updated_at: '2026-09-25T09:00:00Z',
         title: 'capsule radius',
       },
     ];
-    const { onSelect } = renderView(state({ state: 'ambiguous', conversation: null, candidates }));
+    const { onSelect } = renderView(unbound({ conversations }));
 
     expect(screen.queryByTestId('conversation-open')).not.toBeInTheDocument();
     // Found by its **title**, which is the behaviour this covers: a row used to
@@ -171,7 +224,7 @@ describe('ConversationView', () => {
     // this distinguishes "reachable" from "what the row is called".
     expect(screen.queryByRole('button', { name: /claude-[12]/ })).not.toBeInTheDocument();
 
-    // And choosing is what opens one — the id the provider will resolve.
+    // And choosing is what opens one — the id the messages unit will be asked for.
     screen.getByRole('button', { name: /capsule radius/ }).click();
     expect(onSelect).toHaveBeenCalledWith('claude-2');
   });
@@ -185,15 +238,15 @@ describe('ConversationView', () => {
     // runs at 00:01 or 23:59, which is not true of a boundary test but is true
     // of this one.
     const daysAgo = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString();
-    const candidates = [
-      { claude_session_id: 'a', cwd: '/work', updated_at: daysAgo(0), title: 'today one' },
-      { claude_session_id: 'b', cwd: '/work', updated_at: daysAgo(3), title: 'recent one' },
-      { claude_session_id: 'c', cwd: '/work', updated_at: daysAgo(40), title: 'old one' },
+    const conversations = [
+      { id: 'a', cwd: '/work', updated_at: daysAgo(0), title: 'today one' },
+      { id: 'b', cwd: '/work', updated_at: daysAgo(3), title: 'recent one' },
+      { id: 'c', cwd: '/work', updated_at: daysAgo(40), title: 'old one' },
       // No timestamp at all — the provider sorts these last, and they must not
       // be filed under "Older", which would assert a recency nothing knows.
-      { claude_session_id: 'd', cwd: '/work', updated_at: null, title: 'undated one' },
+      { id: 'd', cwd: '/work', updated_at: null, title: 'undated one' },
     ];
-    renderView(state({ state: 'ambiguous', conversation: null, candidates }));
+    renderView(unbound({ conversations }));
 
     expect(
       screen.getAllByTestId('conversation-bucket').map((el) => el.textContent),
@@ -216,22 +269,22 @@ describe('ConversationView', () => {
     // is called, the preview says where it got to. Measured, both halves can be
     // missing independently, so this asserts the *pair* rather than the
     // presence of either — one candidate has both, the other has a title only.
-    const candidates = [
+    const conversations = [
       {
-        claude_session_id: 'claude-1',
+        id: 'claude-1',
         cwd: '/work',
         updated_at: '2026-09-25T10:00:00Z',
         title: 'terminal ownership handoff',
         preview: 'review the controller/observer handoff',
       },
       {
-        claude_session_id: 'claude-2',
+        id: 'claude-2',
         cwd: '/work',
         updated_at: '2026-09-25T09:00:00Z',
         title: 'capsule radius',
       },
     ];
-    renderView(state({ state: 'ambiguous', conversation: null, candidates }));
+    renderView(unbound({ conversations }));
 
     const previews = screen.getAllByTestId('conversation-candidate-preview');
     expect(previews).toHaveLength(1);
@@ -251,19 +304,15 @@ describe('ConversationView', () => {
     // #1120 item 8. The two are read against each other — you choose a
     // conversation *by* comparing it to the one you have open — so the layout
     // that has the width shows both.
-    const candidates = [
+    const conversations = [
       {
-        claude_session_id: 'claude-1',
+        id: 'claude-1',
         cwd: '/work',
         updated_at: '2026-09-25T10:00:00Z',
         title: 'terminal ownership handoff',
       },
     ];
-    renderView(
-      state({ state: 'ready', conversation: { claude_session_id: 'claude-1', cwd: '/work' }, candidates, items: turns }),
-      {},
-      'master-detail',
-    );
+    renderView(state({ conversations, items: turns }), {}, 'master-detail');
 
     expect(screen.getByTestId('conversation-master-detail')).toBeInTheDocument();
     expect(screen.getByTestId('conversation-list')).toBeInTheDocument();
@@ -277,19 +326,15 @@ describe('ConversationView', () => {
     // things that master/detail already shows at once. Leaving them in would be
     // two buttons that appear to do nothing, which is worse than no button —
     // and this is the assertion that keeps them from creeping back.
-    const candidates = [
+    const conversations = [
       {
-        claude_session_id: 'claude-1',
+        id: 'claude-1',
         cwd: '/work',
         updated_at: '2026-09-25T10:00:00Z',
         title: 'terminal ownership handoff',
       },
     ];
-    renderView(
-      state({ state: 'ready', conversation: { claude_session_id: 'claude-1', cwd: '/work' }, candidates, items: turns }),
-      {},
-      'master-detail',
-    );
+    renderView(state({ conversations, items: turns }), {}, 'master-detail');
 
     expect(screen.queryByTestId('conversation-show-list')).not.toBeInTheDocument();
     expect(screen.queryByTestId('conversation-back')).not.toBeInTheDocument();
@@ -299,19 +344,15 @@ describe('ConversationView', () => {
     // The empty detail is an empty *pane*. The list beside it is a complete
     // answer, so replacing the whole capability with a notice would take away
     // the thing the reader needs in order to act on it.
-    const candidates = [
+    const conversations = [
       {
-        claude_session_id: 'claude-1',
+        id: 'claude-1',
         cwd: '/work',
         updated_at: '2026-09-25T10:00:00Z',
         title: 'terminal ownership handoff',
       },
     ];
-    renderView(
-      state({ state: 'ambiguous', conversation: null, candidates }),
-      {},
-      'master-detail',
-    );
+    renderView(unbound({ conversations }), {}, 'master-detail');
 
     expect(screen.getByTestId('conversation-nothing-open')).toBeInTheDocument();
     expect(screen.getByTestId('conversation-candidates')).toBeInTheDocument();
@@ -321,7 +362,7 @@ describe('ConversationView', () => {
     // #1120 item 9: App must not get the Web grid shrunk down. Asserted as an
     // absence, because "App looks fine" is not something a passing render says
     // — the failure would be a grid that technically fits and reads badly.
-    renderView(state({ state: 'ready', items: turns }));
+    renderView(state({ items: turns }));
 
     expect(screen.queryByTestId('conversation-master-detail')).not.toBeInTheDocument();
     expect(screen.getByTestId('conversation-open')).toBeInTheDocument();
@@ -331,8 +372,8 @@ describe('ConversationView', () => {
     // #1005 decision 3: the list is an entry point the user can always return
     // to, not a fallback shown only when resolution failed.
     const user = userEvent.setup();
-    const candidates = [{ claude_session_id: 'claude-1', cwd: '/work', updated_at: null }];
-    renderView(state({ candidates, items: turns }));
+    const conversations = [{ id: 'claude-1', cwd: '/work', updated_at: null }];
+    renderView(state({ conversations, items: turns }));
 
     await user.click(screen.getByTestId('conversation-show-list'));
     expect(screen.getByTestId('conversation-list')).toBeInTheDocument();
@@ -342,6 +383,26 @@ describe('ConversationView', () => {
     expect(screen.getByTestId('conversation-open')).toBeInTheDocument();
   });
 
+  it('says a named conversation that is no longer there, without hiding the list', () => {
+    // `messages` never substitutes (#1222): an id it does not know answers
+    // `not_found`, and the reader is told — in the detail pane, with the list
+    // still beside it to choose from, rather than silently bounced back.
+    renderView(
+      state({
+        openId: 'claude-9',
+        messagesState: 'not_found',
+        conversation: null,
+        activity: null,
+        conversations: [{ id: 'claude-1', cwd: '/work', updated_at: null, title: 'still here' }],
+      }),
+      {},
+      'master-detail',
+    );
+
+    expect(screen.getByTestId('conversation-missing')).toBeInTheDocument();
+    expect(screen.getByTestId('conversation-candidates')).toBeInTheDocument();
+  });
+
   it('does not render a Load older button; transcript scroll owns pagination (#1190)', () => {
     renderView(state({ items: turns, hasMore: true }));
     expect(screen.queryByTestId('conversation-load-older')).not.toBeInTheDocument();
@@ -349,8 +410,8 @@ describe('ConversationView', () => {
   });
 
   it('gives push-layout conversation history a bounded scroll owner (#1189)', () => {
-    renderView(state({ state: 'ambiguous', conversation: null, candidates: [
-      { claude_session_id: 'a', cwd: '/work', updated_at: null, title: 'one' },
+    renderView(unbound({ conversations: [
+      { id: 'a', cwd: '/work', updated_at: null, title: 'one' },
     ] }));
 
     const scroll = screen.getByTestId('conversation-list-scroll');
@@ -368,11 +429,14 @@ describe('ConversationView', () => {
     expect(screen.getByTestId('conversation-skipped')).toHaveTextContent('3');
   });
 
-  it('gives every state the provider can answer with a rendering', () => {
-    // None of these is a blank panel: each is an answer a user can act on.
+  it('gives every answer the two units can return a rendering', () => {
+    // None of these is a blank panel: each is an answer a user can act on. An
+    // empty directory is a *complete* answer on the `conversations` unit —
+    // there is no list-level `not_found` anymore (#1222) — and an unreadable
+    // one is a different screen.
     const { unmount } = render(
       <ConversationView
-        view={state({ state: 'not_found', conversation: null })}
+        view={unbound({ conversations: [] })}
         layout="push"
         onSelect={vi.fn()}
         onLoadOlder={vi.fn()}
@@ -384,7 +448,7 @@ describe('ConversationView', () => {
 
     render(
       <ConversationView
-        view={state({ state: 'unavailable', conversation: null })}
+        view={unbound({ listState: 'unavailable' })}
         layout="push"
         onSelect={vi.fn()}
         onLoadOlder={vi.fn()}
@@ -396,7 +460,7 @@ describe('ConversationView', () => {
 
   it('shows a read failure with a retry rather than an empty conversation', async () => {
     const user = userEvent.setup();
-    const { onReload } = renderView(state({ state: 'error', error: 'the transcript could not be read' }));
+    const { onReload } = renderView(state({ error: 'the transcript could not be read' }));
 
     expect(screen.getByRole('alert')).toHaveTextContent('the transcript could not be read');
     await user.click(screen.getByRole('button', { name: 'Retry' }));
@@ -409,11 +473,11 @@ describe('ConversationView', () => {
  * tool call as one activity that can be opened.
  */
 describe('ConversationView — structured transcript', () => {
-  function message(text: string, role: 'user' | 'assistant' = 'assistant'): ConversationItems[number] {
+  function message(text: string, role: 'user' | 'assistant' = 'assistant'): MessageItems[number] {
     return { id: `m-${text}`, kind: 'message', role, content: [{ type: 'text', text }] };
   }
 
-  function tool(overrides: Partial<Extract<ConversationItems[number], { kind: 'tool' }>['tool']> = {}): ConversationItems[number] {
+  function tool(overrides: Partial<Extract<MessageItems[number], { kind: 'tool' }>['tool']> = {}): MessageItems[number] {
     return {
       id: 'tool-1',
       kind: 'tool',
