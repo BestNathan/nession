@@ -134,6 +134,7 @@ describe('ConversationTranscript scroll (#1190)', () => {
     fireEvent.pointerMove(handle, { clientY: 140, pointerId: 1 });
 
     expect(handle).toHaveStyle({ height: '44px' });
-    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '71');
+    // 40px of drag against the 96px trigger ≈ 42% of the ring.
+    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '42');
   });
 });

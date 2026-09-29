@@ -80,11 +80,12 @@ impl PtySession {
         //
         // Observable rather than dropped (#991: "no silent accidental
         // policy"): the failure names the option and carries tmux's stderr.
-        // `.std()` + `.output()` rather than `.status()`, because a status-only
+        // `.output()` rather than `.status()`, because a status-only
         // call has no pipes to carry tmux's reason.
-        let mut status_bar = tmux.cmd().std();
-        status_bar.args(["set-option", "-t", session_name, "status", "off"]);
-        match status_bar.output() {
+        match tmux
+            .cmd()
+            .output_blocking(&["set-option", "-t", session_name, "status", "off"])
+        {
             Ok(out) if out.status.success() => {}
             Ok(out) => tracing::warn!(
                 "best-effort `set-option status off` for session {session_name} failed ({}): {}",

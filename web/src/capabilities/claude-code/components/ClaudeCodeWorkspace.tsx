@@ -628,7 +628,7 @@ export function ClaudeCodeWorkspace({ ctx }: { ctx: WorkspaceContext }) {
             // push.
             layout={ctx.experience === 'app' ? 'push' : 'master-detail'}
             onSelect={conversation.select}
-            onLoadOlder={() => void conversation.loadOlder()}
+            onLoadOlder={() => conversation.loadOlder()}
             onReload={conversation.reload}
           />
         </main>
