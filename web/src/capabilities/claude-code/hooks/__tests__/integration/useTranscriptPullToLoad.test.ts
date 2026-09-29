@@ -90,6 +90,34 @@ describe('useTranscriptPullToLoad', () => {
   });
 
   it('commits load when the wheel overscrolls at the top edge', () => {
+    // Four full wheel ticks: each contributes the capped 24px step, so the
+    // ring reaches the 96px trigger exactly — a deliberate overscroll.
+    const onCommitLoad = vi.fn();
+    const { scrollRef, handleEl } = refs();
+
+    const { result } = renderHook(() =>
+      useTranscriptPullToLoad({ scrollRef, pullHandle: handleEl, enabled: true, onCommitLoad }),
+    );
+
+    const wheelEvent = {
+      deltaY: -30,
+      preventDefault: vi.fn(),
+      currentTarget: scrollRef.current,
+    } as unknown as Parameters<NonNullable<typeof result.current.scrollHandlers.onWheel>>[0];
+    act(() => {
+      result.current.scrollHandlers.onWheel(wheelEvent);
+      result.current.scrollHandlers.onWheel(wheelEvent);
+      result.current.scrollHandlers.onWheel(wheelEvent);
+      result.current.scrollHandlers.onWheel(wheelEvent);
+    });
+
+    expect(onCommitLoad).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not commit a casual overscroll that stops short of the trigger', () => {
+    // Three wheel ticks accumulate 60px — the exact gesture that committed at
+    // the old 56px trigger. Under the 96px trigger it must fill the ring
+    // partially and commit nothing.
     const onCommitLoad = vi.fn();
     const { scrollRef, handleEl } = refs();
 
@@ -108,7 +136,9 @@ describe('useTranscriptPullToLoad', () => {
       result.current.scrollHandlers.onWheel(wheelEvent);
     });
 
-    expect(onCommitLoad).toHaveBeenCalledTimes(1);
+    expect(result.current.pullPx).toBeGreaterThan(0);
+    expect(result.current.pullPx).toBeLessThan(TRANSCRIPT_PULL_TRIGGER_PX);
+    expect(onCommitLoad).not.toHaveBeenCalled();
   });
 
   it('does not fill or commit when wheeling toward newer messages at the top edge', () => {
@@ -222,13 +252,14 @@ describe('useTranscriptPullToLoad', () => {
     );
 
     const wheelEvent = {
-      deltaY: -20,
+      deltaY: -30,
       preventDefault: vi.fn(),
       currentTarget: scrollEl,
     } as unknown as Parameters<NonNullable<typeof result.current.scrollHandlers.onWheel>>[0];
     act(() => {
       result.current.scrollHandlers.onWheel(wheelEvent);
       scrollHeight = 1100;
+      result.current.scrollHandlers.onWheel(wheelEvent);
       result.current.scrollHandlers.onWheel(wheelEvent);
       result.current.scrollHandlers.onWheel(wheelEvent);
     });

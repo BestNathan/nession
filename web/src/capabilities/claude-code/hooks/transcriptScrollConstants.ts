@@ -11,10 +11,18 @@ export const TRANSCRIPT_TOP_EDGE_PX = 80;
  */
 export type TranscriptAnchor = { scrollHeight: number; scrollTop: number };
 
-/** Pull distance that fills the ring and commits a load on release. */
-export const TRANSCRIPT_PULL_TRIGGER_PX = 56;
+/**
+ * Pull distance that fills the ring and commits a load on release.
+ *
+ * Deliberately a full gesture, not a nudge: at 56 a casual overscroll — three
+ * wheel ticks, a short drag — committed a load the user did not ask for. 96
+ * asks for intent (four wheel ticks, or a deliberate drag, in the usual
+ * pull-to-refresh band of 80–100).
+ */
+export const TRANSCRIPT_PULL_TRIGGER_PX = 96;
 
-export const TRANSCRIPT_PULL_MAX_PX = 80;
+/** Rubber-band headroom past the trigger, so a filled ring can keep pulling. */
+export const TRANSCRIPT_PULL_MAX_PX = 120;
 
 export function transcriptIsAtTopEdge(root: HTMLDivElement): boolean {
   return root.scrollTop <= TRANSCRIPT_TOP_EDGE_PX;
