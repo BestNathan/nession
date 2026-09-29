@@ -13,17 +13,20 @@ function extractSection(body, heading) {
   const lines = String(body ?? '').replace(/\r\n?/g, '\n').split('\n');
   const wanted = heading.trim().toLowerCase();
   let start = -1;
+  let level = null;
   for (let i = 0; i < lines.length; i += 1) {
-    const match = lines[i].match(/^##\s+(.+?)\s*$/);
-    if (match && match[1].trim().toLowerCase() === wanted) {
+    const match = lines[i].match(/^(#{2,6})\s+(.+?)\s*$/);
+    if (match && match[2].trim().toLowerCase() === wanted) {
       start = i + 1;
+      level = match[1].length;
       break;
     }
   }
-  if (start < 0) return null;
+  if (start < 0 || level == null) return null;
   let end = lines.length;
   for (let i = start; i < lines.length; i += 1) {
-    if (/^##\s+/.test(lines[i])) {
+    const match = lines[i].match(/^(#{2,6})\s+/);
+    if (match && match[1].length <= level) {
       end = i;
       break;
     }
@@ -60,7 +63,7 @@ function parseSuccessCriteria(section) {
   const errors = [];
   const criteria = new Map();
   if (section == null) {
-    return { criteria, errors: ['missing `## Success Criteria` section'] };
+    return { criteria, errors: ['missing Success Criteria section'] };
   }
 
   const checkboxLines = section.split('\n').filter((line) => /^\s*-\s+\[[ xX]\]\s+/.test(line));
@@ -92,7 +95,7 @@ function parseAcceptanceReport(section) {
   const errors = [];
   const rows = new Map();
   if (section == null) {
-    return { rows, errors: ['missing `## Acceptance Report` section'] };
+    return { rows, errors: ['missing Acceptance Report section'] };
   }
 
   const tableLines = section.split('\n').map(splitMarkdownRow).filter(Boolean);
@@ -313,13 +316,14 @@ async function runIssueCloseGuard() {
 }
 
 function validBody() {
-  return `## Success Criteria\n\n- [x] SC-01 works\n- [x] SC-02 behaves\n\n## Acceptance Report\n\n| Criterion | Result | Evidence |\n|---|---|---|\n| SC-01 | Pass | unit test: scripts/foo.test |\n| SC-02 | N/A | superseded by #88 after requirement amendment |`;
+  return `### Success Criteria\n\n- [x] SC-01 works\n- [x] SC-02 behaves\n\n## Acceptance Report\n\n| Criterion | Result | Evidence |\n|---|---|---|\n| SC-01 | Pass | unit test: scripts/foo.test |\n| SC-02 | N/A | superseded by #88 after requirement amendment |`;
 }
 
 function runSelfTest() {
   const cases = [
     ['valid accepted requirement', validBody(), true, null],
-    ['missing success criteria', '## Acceptance Report\n\n| Criterion | Result | Evidence |\n|---|---|---|', false, 'missing `## Success Criteria`'],
+    ['h2 success criteria remains supported', validBody().replace('### Success Criteria', '## Success Criteria'), true, null],
+    ['missing success criteria', '## Acceptance Report\n\n| Criterion | Result | Evidence |\n|---|---|---|', false, 'missing Success Criteria section'],
     ['criterion without id', '## Success Criteria\n\n- [x] works\n\n## Acceptance Report\n\n| Criterion | Result | Evidence |\n|---|---|---|', false, 'missing a stable SC-xx id'],
     ['unchecked criterion', validBody().replace('- [x] SC-01', '- [ ] SC-01'), false, 'SC-01 is not checked'],
     ['missing report row', validBody().replace('| SC-02 | N/A | superseded by #88 after requirement amendment |', ''), false, 'SC-02 has no Acceptance Report row'],
