@@ -335,11 +335,14 @@ test.describe('Web 1440×900', () => {
     const viewportH = page.viewportSize()?.height ?? 0;
     await expect.poll(async () => (await rail.boundingBox())?.height ?? 0).toBe(viewportH);
     // boundingBox is null while the dot is not yet measurable after the
-    // collapse swap — poll through it rather than reading once.
+    // collapse swap — poll through it rather than reading once. And it returns
+    // {x, y, width, height}, not a DOMRect: the bottom edge is y + height.
     await expect
       .poll(async () => {
         const box = await page.getByTestId('sidebar-rail-status').boundingBox();
-        return box ? Math.abs(viewportH - shellSpace2 - box.bottom) : Number.POSITIVE_INFINITY;
+        return box
+          ? Math.abs(viewportH - shellSpace2 - (box.y + box.height))
+          : Number.POSITIVE_INFINITY;
       })
       .toBeLessThanOrEqual(1);
 
