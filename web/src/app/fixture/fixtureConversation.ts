@@ -287,6 +287,36 @@ function itemOf(conversationId: string): ConversationItemV1 | undefined {
 }
 
 /**
+ * The page *behind* `ITEMS` — what the `paged` scenario answers to a request
+ * carrying the first page's cursor.
+ *
+ * Without a scenario whose newest page says `has_more`, the entire older-page
+ * path — pull-to-load, prepend, anchor preservation — is a shipped feature no
+ * fixture state can reach, which is exactly how it broke without a gate
+ * noticing. Two items is enough: what the client must prove is that a cursor
+ * request prepends, not that it can count.
+ */
+const OLDER_ITEMS: MessageItemV1[] = [
+  {
+    id: 'older-1',
+    kind: 'message',
+    role: 'user',
+    timestamp: '2026-09-01T11:20:00Z',
+    content: [{ type: 'text', text: 'Earlier page — the pull-to-load boundary marker.' }],
+  },
+  {
+    id: 'older-2',
+    kind: 'message',
+    role: 'assistant',
+    timestamp: '2026-09-01T11:21:00Z',
+    content: [{ type: 'text', text: 'This answer only arrives through the cursor request.' }],
+  },
+];
+
+/** The cursor the `paged` scenario's newest page hands out. */
+const PAGED_CURSOR = 'page-boundary-1';
+
+/**
  * What the `conversations` unit answers for a named scenario.
  *
  * `undefined` for a scenario this fixture does not model, so the surface below
@@ -339,6 +369,18 @@ function conversationsFor(scenario: string): ConversationsResponse | undefined {
       // could not be read at all, against one that was read and held no
       // conversations. `#1128` names both, and the view renders them apart.
       return { state: 'unavailable', items: [], has_more: false };
+    case 'paged':
+      // `ready`, plus a messages unit that admits an older page exists. See
+      // `messagesFor`: the paging lives entirely on the messages answer — the
+      // conversations list is identical to `ready`, because a longer history
+      // is not a property of the list.
+      return {
+        state: 'ready',
+        cwd: '/Users/dev/code/nession-capsule',
+        items: CONVERSATIONS,
+        binding: { conversation_id: BOUND_ID, activity: 'active' },
+        has_more: false,
+      };
     default:
       return undefined;
   }
@@ -351,7 +393,11 @@ function conversationsFor(scenario: string): ConversationsResponse | undefined {
  * and never the binding, the newest, or the only conversation. `undefined`
  * means the scenario itself is unmodelled, as above.
  */
-function messagesFor(scenario: string, conversationId: string): MessagesResponse | undefined {
+function messagesFor(
+  scenario: string,
+  conversationId: string,
+  cursor?: string,
+): MessagesResponse | undefined {
   const named = itemOf(conversationId);
   if (conversationsFor(scenario) === undefined) {
     return undefined;
@@ -376,6 +422,37 @@ function messagesFor(scenario: string, conversationId: string): MessagesResponse
         partial_tail: false,
         skipped: 0,
       };
+    case 'paged': {
+      // The only scenario with history behind the newest page. The cursor is
+      // the paging contract: the newest page hands out `PAGED_CURSOR`, and
+      // only that value is meaningful back. Anything else is a client bug,
+      // and the fixture says so loudly rather than answering a page that
+      // cannot exist — the same doctrine as an unknown conversation id.
+      if (cursor === undefined) {
+        return {
+          state: 'ready',
+          conversation: named,
+          activity: 'active',
+          items: ITEMS,
+          has_more: true,
+          next_cursor: PAGED_CURSOR,
+          partial_tail: false,
+          skipped: 0,
+        };
+      }
+      if (cursor === PAGED_CURSOR) {
+        return {
+          state: 'ready',
+          conversation: named,
+          activity: 'active',
+          items: OLDER_ITEMS,
+          has_more: false,
+          partial_tail: false,
+          skipped: 0,
+        };
+      }
+      return undefined;
+    }
     case 'inactive':
       // The same transcript as `ready`, and that is the point: a fixture that
       // gave this state no items would leave a reader unable to tell the two
@@ -502,11 +579,22 @@ export function fixtureConversationSurface(search: string): PluginSurface {
             new Error('fixture messages request without a conversation_id — the unit has no other selection'),
           );
         }
-        const response = messagesFor(scenario, conversationId);
-        if (response === undefined) {
+        const cursor = payload.cursor;
+        if (cursor !== undefined && typeof cursor !== 'string') {
           return Promise.reject(
-            new Error(`fixture conversation surface does not model ?conversation=${scenario}`),
+            new Error('fixture messages request with a non-string cursor — the contract sends a string'),
           );
+        }
+        const response = messagesFor(scenario, conversationId, cursor);
+        if (response === undefined) {
+          // Either the scenario is unmodelled at all, or the scenario is
+          // `paged` and the cursor is not the one its newest page handed out.
+          // Both are client bugs; the message says which.
+          const what =
+            scenario === 'paged'
+              ? `fixture paged scenario got cursor ${JSON.stringify(cursor)}, which no page handed out`
+              : `fixture conversation surface does not model ?conversation=${scenario}`;
+          return Promise.reject(new Error(what));
         }
         return Promise.resolve(response as T);
       }

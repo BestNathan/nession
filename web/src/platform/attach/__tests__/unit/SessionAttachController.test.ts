@@ -36,7 +36,10 @@ function makeAgentApi(): AgentApiHarness {
     onOutput: vi.fn(() => () => {}),
     onResize: vi.fn(() => () => {}),
     onError: vi.fn(() => () => {}),
-    ping: vi.fn(),
+    // Resolves: the real `ping` returns a promise and callers attach a
+    // `.catch` (#1233), so a mock returning `undefined` fails for the wrong
+    // reason.
+    ping: vi.fn().mockResolvedValue(undefined),
   };
   return { api: api as unknown as TerminalAgentApi, attach, attachResolvers };
 }
@@ -60,7 +63,10 @@ function makeTimedAgentApi(): AgentApiHarness {
     onOutput: vi.fn(() => () => {}),
     onResize: vi.fn(() => () => {}),
     onError: vi.fn(() => () => {}),
-    ping: vi.fn(),
+    // Resolves: the real `ping` returns a promise and callers attach a
+    // `.catch` (#1233), so a mock returning `undefined` fails for the wrong
+    // reason.
+    ping: vi.fn().mockResolvedValue(undefined),
   };
   return { api: api as unknown as TerminalAgentApi, attach, attachResolvers: [] };
 }
@@ -82,7 +88,10 @@ function makeRejectingAgentApi(): AgentApiHarness {
     onOutput: vi.fn(() => () => {}),
     onResize: vi.fn(() => () => {}),
     onError: vi.fn(() => () => {}),
-    ping: vi.fn(),
+    // Resolves: the real `ping` returns a promise and callers attach a
+    // `.catch` (#1233), so a mock returning `undefined` fails for the wrong
+    // reason.
+    ping: vi.fn().mockResolvedValue(undefined),
   };
   return { api: api as unknown as TerminalAgentApi, attach, attachResolvers: [] };
 }

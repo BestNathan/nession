@@ -7,7 +7,7 @@ import {
   Wrench,
   X,
 } from 'lucide-react';
-import { memo, useRef, type ReactNode } from 'react';
+import { memo, useState, type ReactNode } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { copyToClipboard } from '@/shared/lib/clipboard';
@@ -37,9 +37,12 @@ export function ConversationTranscript({
   onLoadOlder,
 }: {
   view: ConversationViewState;
-  onLoadOlder: () => void;
+  /** Starts an older-page fetch; answers synchronously whether one engaged. */
+  onLoadOlder: () => boolean;
 }) {
-  const pullHandleRef = useRef<HTMLDivElement>(null);
+  // The handle is conditionally rendered; a callback ref stored in state is
+  // what lets the touch installer re-run for each fresh node.
+  const [pullHandle, setPullHandle] = useState<HTMLDivElement | null>(null);
   const { scrollRef, topSentinelRef, onScroll, loadOlderFromPull } = useTranscriptScroll({
     conversationId: view.conversation?.id ?? null,
     itemCount: view.items.length,
@@ -53,7 +56,7 @@ export function ConversationTranscript({
   const { pullPx, progress, isPulling, atTopEdge, syncTopEdge, pullHandleHandlers, scrollHandlers } =
     useTranscriptPullToLoad({
       scrollRef,
-      pullHandleRef,
+      pullHandle,
       enabled: canPullOlder,
       onCommitLoad: loadOlderFromPull,
     });
@@ -77,7 +80,7 @@ export function ConversationTranscript({
       >
         {canPullOlder && atTopEdge ? (
           <div
-            ref={pullHandleRef}
+            ref={setPullHandle}
             className={cn(
               'flex min-h-11 touch-none select-none flex-col items-center justify-end overflow-hidden transition-[height] duration-75',
               isPulling ? 'cursor-grabbing' : 'cursor-grab',

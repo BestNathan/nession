@@ -131,6 +131,13 @@ if [ -z "$JSON" ]; then
 fi
 rm -f "$COV_STDERR"
 
+# Repository Metrics consumes the exact LLVM payload this canonical coverage
+# gate evaluates. Opt-in only: ordinary gate runs keep no generated state.
+if [ -n "${NSESSION_COVERAGE_JSON:-}" ]; then
+    mkdir -p "$(dirname "$NSESSION_COVERAGE_JSON")"
+    printf '%s\n' "$JSON" > "$NSESSION_COVERAGE_JSON"
+fi
+
 HAS_ERROR=0
 BELOW_THRESHOLD=()
 
