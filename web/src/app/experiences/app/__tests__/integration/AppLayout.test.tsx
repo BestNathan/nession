@@ -59,6 +59,7 @@ function renderLayout(onLayerChange = vi.fn()) {
       sidebarProps={{
         agents: [agent],
         filteredSessions: [sess],
+        totalSessionCount: 1,
         staleAgents: [],
         selectedId: sess.session_id,
         clientSessionId: 'client-1',

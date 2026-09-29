@@ -63,6 +63,7 @@ export function FixtureShell() {
         <WorkspaceRegion
           agents={FIXTURE_AGENTS}
           filteredSessions={FIXTURE_SESSIONS}
+          totalSessionCount={FIXTURE_SESSIONS.length}
           staleAgents={[]}
           selectedId={selectedId}
           clientSessionId={FIXTURE_CLIENT_SESSION_ID}
