@@ -46,6 +46,7 @@ use nession_runtime::lane::{KeyedLane, Work};
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 use tokio::net::TcpListener;
 use tokio::sync::{mpsc, Mutex};
@@ -77,6 +78,15 @@ struct SessionPeer {
     outbound: P2pOutbound,
     /// PTY multi-client fan-out; `None` for control-mode (direct outbound).
     output_tx: Option<mpsc::Sender<OutputChunk>>,
+    /// Set by [`fan_out_peers`] when it drops this peer for a full queue.
+    ///
+    /// The forwarder's receiver ends for several reasons — the session ended,
+    /// a newer attach of the same client replaced this peer, an explicit
+    /// detach, this eviction — and only the eviction may close the connection
+    /// (#1226). The cause therefore travels with the channel instead of being
+    /// re-derived from the session map at the receiver's end, where "the peer
+    /// is gone" and "the peer was replaced" used to be indistinguishable.
+    detached_for_not_draining: Arc<AtomicBool>,
 }
 
 struct AttachedSession {
@@ -152,6 +162,11 @@ fn fan_out_peers(peers: &mut Vec<SessionPeer>, chunk: OutputChunk) -> usize {
         match tx.try_send(chunk.clone()) {
             Ok(()) => true,
             Err(mpsc::error::TrySendError::Full(_)) => {
+                // Tell the forwarder *why* its channel is ending before the
+                // drop ends it — the one cause that must reach the client as
+                // a closed connection (#1226).
+                peer.detached_for_not_draining
+                    .store(true, Ordering::Release);
                 detached += 1;
                 false
             }
@@ -206,28 +221,39 @@ async fn notify_control_changed(peers: &[SessionPeer], payload: TerminalControlC
 }
 
 /// Forward one subscriber's terminal output to this connection's sink, and —
-/// when this subscriber was detached for not draining it — close the connection.
+/// only when this subscriber was detached for not draining it — close the
+/// connection.
 ///
-/// The queue ends in two ways, and they are not the same event:
+/// The receiver ends for several reasons, and they are not the same event:
 ///
 /// * **the session ended** (the PTY or the control-mode reader closed and the
 ///   fan-out task went with it). This connection may be serving other sessions,
 ///   so nothing is closed here: the other attachments are still running, and
 ///   ending their socket because one session exited would be a bug of its own.
+/// * **the peer was replaced** — a newer `agent.attach` of the same client
+///   superseded it (`already_attached`), or the client sent `agent.detach`.
+///   The client already knows, or has a fresh forwarder of its own; closing
+///   here would take that fresh attach's connection down with no reply
+///   (#1226, where "the peer is gone" was misread as the next case).
 /// * **this subscriber was detached** for having no room ([`SUBSCRIBER_QUEUE_SLOTS`]),
-///   which is the one case where the client must be told. The session is still
-///   there — that is how the two are told apart, by asking the map — and what
-///   the client is holding is a terminal that has stopped moving with nothing
-///   coming to say so. A `Close` is the only thing this path can say it with,
-///   and the client's own reconnect is what turns it into a redrawn screen.
+///   which is the one case where the client must be told. What the client is
+///   holding is a terminal that has stopped moving with nothing coming to say
+///   so. A `Close` is the only thing this path can say it with, and the
+///   client's own reconnect is what turns it into a redrawn screen.
+///
+/// The verdict is not re-derived from the session map: `fan_out_peers` sets
+/// `detached_for_not_draining` when it evicts this subscriber, and the flag
+/// is the whole of the third case. Any state-based check has to tell "the
+/// peer is gone" apart from "a peer with the same client id is back" under
+/// one lock, and both of those are true of a replacement.
 ///
 /// It used to be one task per subscriber inline in the attach arms, twice, and
 /// the only difference between the two was which names the locals had.
 fn spawn_output_forwarder(
     mut rx: mpsc::Receiver<OutputChunk>,
     outbound: P2pOutbound,
-    sessions: Arc<SessionMapLock>,
     session_name: String,
+    detached_for_not_draining: Arc<AtomicBool>,
 ) {
     tokio::spawn(async move {
         while let Some((bytes, stream_epoch, stream_seq)) = rx.recv().await {
@@ -260,16 +286,15 @@ fn spawn_output_forwarder(
             }
         }
 
-        let detached_for_not_draining = sessions_lock(&sessions).contains_key(&session_name);
-        if !detached_for_not_draining {
-            info!("terminal output for session {session_name} ended");
+        if detached_for_not_draining.load(Ordering::Acquire) {
+            info!(
+                "session {session_name}: subscriber was detached for not draining its terminal; \
+                 closing the connection"
+            );
+            outbound.close();
             return;
         }
-        info!(
-            "session {session_name}: subscriber was detached for not draining its terminal; \
-             closing the connection"
-        );
-        outbound.close();
+        info!("terminal output for session {session_name} ended");
     });
 }
 
@@ -530,14 +555,49 @@ async fn send_terminal_resize_msg(
     )
 }
 
+/// Take `session`'s history from a separate tmux process — the capture for
+/// the backends that have no control channel to take it on (#1228).
+///
+/// The Control arm's capture is exact: taken on the control channel, where
+/// tmux's own wire order says what the snapshot covers and the live stream
+/// the caller is about to spawn starts after it by construction. Here nothing
+/// orders the capture against that stream: a producer racing it can put a
+/// line in both, the window #1228 was opened for. The duplication is bounded
+/// (attach-to-capture), and the alternative — no bootstrap — is worse, so
+/// these arms accept it; the exact barrier belongs to the channel that can
+/// have one.
+///
+/// A failure is logged and flattens to `None`: a client with no history is a
+/// client with an empty screen, the state every attach was in before #321.
+async fn capture_for_bootstrap(
+    tmux: &crate::tmux::ops::TmuxDep,
+    session_name: &str,
+    lines: u32,
+) -> Option<Vec<u8>> {
+    match tmux.ops().capture_pane(session_name, lines).await {
+        Ok(capture) => capture,
+        Err(e) => {
+            warn!("bootstrap: capture for {session_name} failed: {e:#}");
+            None
+        }
+    }
+}
+
 /// Send `session`'s history to one connection, marked as a **bootstrap** (#321).
 ///
 /// Awaited, and in order, before the caller starts live forwarding. That
-/// ordering *is* the barrier: the live producer does not exist yet and the
-/// outbound queue is FIFO, so nothing the session produces can overtake the
-/// snapshot — there is no gap to close and nothing to reconcile afterwards. The
-/// alternative, a cursor plus a reconciliation pass, is the shape #1148
-/// measured going wrong.
+/// ordering *is* the barrier on the send side: the live producer does not
+/// exist yet and the outbound queue is FIFO, so nothing the session produces
+/// can overtake the snapshot — there is no gap to close and nothing to
+/// reconcile afterwards. The alternative, a cursor plus a reconciliation
+/// pass, is the shape #1148 measured going wrong.
+///
+/// `capture` is the snapshot, and where it came from is the barrier's other
+/// half (#1228): the Control arm's is taken **on the control channel**
+/// (`ControlModeSession::attach`), where tmux's own wire order makes "what
+/// the snapshot covers" exact; the PTY arms' comes from a separate tmux
+/// process (`capture_for_bootstrap`), where a racing producer can put a line
+/// in both snapshot and stream.
 ///
 /// **Not recorded in the stream log.** A bootstrap is a snapshot taken *before*
 /// the stream, not an event in it. Giving it a `stream_seq` would put it inside
@@ -545,25 +605,18 @@ async fn send_terminal_resize_msg(
 /// construction. It carries no epoch or seq for the same reason — see
 /// `TerminalOutputPayload::bootstrap`.
 ///
-/// Returns `false` once the connection is over. **A capture that fails is not
-/// that**: a client with no history is a client with an empty screen, which is
-/// the state every attach was in before this existed, so it is logged and the
-/// attach proceeds.
+/// Returns `false` once the connection is over. **A missing capture is not
+/// that**: `None` is a capture that failed, came back empty, or was never
+/// requested — a client with no history is a client with an empty screen,
+/// which is the state every attach was in before this existed. No frame is
+/// sent and the attach proceeds.
 async fn send_bootstrap(
     outbound: &P2pOutbound,
     tmux: &crate::tmux::ops::TmuxDep,
     session_name: &str,
+    capture: Option<Vec<u8>>,
 ) -> bool {
     let lines = crate::tmux::HISTORY_LIMIT_LINES;
-    let capture = match tmux.ops().capture_pane(session_name, lines).await {
-        Ok(capture) => capture,
-        Err(e) => {
-            warn!("bootstrap: capture for {session_name} failed: {e:#}");
-            return true;
-        }
-    };
-    // `None` is tmux answering successfully with nothing — a session that
-    // exists and has no history yet. No frame, and not a failure.
     let Some(mut capture) = capture else {
         return true;
     };
@@ -1376,16 +1429,24 @@ p2p_routes! { ctx, msg_type, payload_value;
                         // Session already exists: add a new subscriber.
                         let client_id = connection_client_id(ctx.client_id).await;
                         let (tx, rx) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
+                        let detached_for_not_draining = Arc::new(AtomicBool::new(false));
                         let resp = {
                             let mut guard = sessions_lock(ctx.sessions);
                             let Some(shared) = guard.get_mut(&session_name) else {
                                 return ctx.err("not_attached", "session ended during attach");
                             };
+                            // The peer this drops is *replaced*, not evicted:
+                            // its flag stays unset, so its forwarder ends
+                            // quietly instead of closing the connection this
+                            // attach is about to answer on (#1226).
                             shared.peers.retain(|p| p.client_id != client_id);
                             shared.peers.push(SessionPeer {
                                 client_id: client_id.clone(),
                                 outbound: ctx.outbound.clone(),
                                 output_tx: Some(tx),
+                                detached_for_not_draining: Arc::clone(
+                                    &detached_for_not_draining,
+                                ),
                             });
                             client_attach_response(payload.session_name.clone(), shared, &client_id)
                         };
@@ -1404,7 +1465,15 @@ p2p_routes! { ctx, msg_type, payload_value;
                         // so no" — the behaviour an older client already has.
                         if payload.needs_bootstrap.unwrap_or(false) {
                             let bootstrap_tmux = ctx.tmux.tmux_dep();
-                            if !send_bootstrap(ctx.outbound, &bootstrap_tmux, &session_name).await {
+                            let capture = capture_for_bootstrap(
+                                &bootstrap_tmux,
+                                &session_name,
+                                crate::tmux::HISTORY_LIMIT_LINES,
+                            )
+                            .await;
+                            if !send_bootstrap(ctx.outbound, &bootstrap_tmux, &session_name, capture)
+                                .await
+                            {
                                 return ctx.err(
                                     "bootstrap_stalled",
                                     "the client stalled while its history was being sent",
@@ -1415,8 +1484,8 @@ p2p_routes! { ctx, msg_type, payload_value;
                         spawn_output_forwarder(
                             rx,
                             ctx.outbound.clone(),
-                            Arc::clone(ctx.sessions),
                             session_name.clone(),
+                            detached_for_not_draining,
                         );
 
                         return serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
@@ -1436,6 +1505,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                         Ok((pty_session, mut output_rx)) => {
                             let client_id = connection_client_id(ctx.client_id).await;
                             let (tx, rx) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
+                            let detached_for_not_draining = Arc::new(AtomicBool::new(false));
                             let mut control = session_terminal::SessionControlState::new();
                             control.ensure_controller(&client_id);
                             let stream = session_terminal::SessionStreamState::new();
@@ -1445,6 +1515,9 @@ p2p_routes! { ctx, msg_type, payload_value;
                                     client_id: client_id.clone(),
                                     outbound: ctx.outbound.clone(),
                                     output_tx: Some(tx),
+                                    detached_for_not_draining: Arc::clone(
+                                        &detached_for_not_draining,
+                                    ),
                                 }],
                                 control,
                                 stream,
@@ -1476,9 +1549,18 @@ p2p_routes! { ctx, msg_type, payload_value;
                             // explicit `false` is honoured — a client that says
                             // it already has this does.
                             let bootstrap_tmux = ctx.tmux.tmux_dep();
-                            if payload.needs_bootstrap.unwrap_or(true)
-                                && !send_bootstrap(ctx.outbound, &bootstrap_tmux, &session_name)
-                                    .await
+                            let capture = if payload.needs_bootstrap.unwrap_or(true) {
+                                capture_for_bootstrap(
+                                    &bootstrap_tmux,
+                                    &session_name,
+                                    crate::tmux::HISTORY_LIMIT_LINES,
+                                )
+                                .await
+                            } else {
+                                None
+                            };
+                            if !send_bootstrap(ctx.outbound, &bootstrap_tmux, &session_name, capture)
+                                .await
                             {
                                 return ctx.err(
                                     "bootstrap_stalled",
@@ -1490,8 +1572,8 @@ p2p_routes! { ctx, msg_type, payload_value;
                             spawn_output_forwarder(
                                 rx,
                                 ctx.outbound.clone(),
-                                Arc::clone(ctx.sessions),
                                 session_name.clone(),
+                                detached_for_not_draining,
                             );
 
                             // Spawn ONE broadcast task for this session.
@@ -1561,15 +1643,28 @@ p2p_routes! { ctx, msg_type, payload_value;
                         return ctx.err("env_apply_failed", &format!("{e:#}"));
                     }
 
+                    // `needs_bootstrap` is answered at the attach itself: the
+                    // capture is taken on the control channel as part of it
+                    // (#1228), so a client that says `false` must not pay for
+                    // a snapshot it will not be sent. This is the session's
+                    // *first* attach on this connection, so absent means yes —
+                    // the backend was not attached before it, and the history
+                    // belongs to a client that has none.
+                    let wants_bootstrap = payload.needs_bootstrap.unwrap_or(true);
                     match crate::tmux::control::ControlModeSession::attach(
                         &ctx.tmux.tmux_dep(),
                         &payload.session_name,
                         payload.width,
                         payload.height,
+                        if wants_bootstrap {
+                            Some(crate::tmux::HISTORY_LIMIT_LINES)
+                        } else {
+                            None
+                        },
                     )
                     .await
                     {
-                        Ok((session, mut output_rx, mut resize_rx)) => {
+                        Ok((session, mut output_rx, mut resize_rx, capture)) => {
                             let session_name = payload.session_name.clone();
                             let client_id = connection_client_id(ctx.client_id).await;
                             let mut control = session_terminal::SessionControlState::new();
@@ -1581,6 +1676,11 @@ p2p_routes! { ctx, msg_type, payload_value;
                                     client_id: client_id.clone(),
                                     outbound: ctx.outbound.clone(),
                                     output_tx: None,
+                                    // Control-mode output goes straight to the
+                                    // connection's outbound, so nothing reads
+                                    // this flag here — a peer with no channel
+                                    // is never fanned out to.
+                                    detached_for_not_draining: Arc::new(AtomicBool::new(false)),
                                 }],
                                 control,
                                 stream,
@@ -1598,20 +1698,16 @@ p2p_routes! { ctx, msg_type, payload_value;
 
                             // The session's history, before the live output
                             // stream is spawned — `send_bootstrap` carries why
-                            // that ordering is the whole barrier, and why the
-                            // frame is no longer recorded in the stream log.
-                            //
-                            // This is the *first* attach for this session on
-                            // this connection, so the backend was not attached
-                            // before it: the history belongs to a client that
-                            // has none, and no client has to ask. `needs_bootstrap`
-                            // is still honoured, because a client that says
-                            // `false` is one that has already been sent it.
+                            // that ordering is the send-side barrier, and why
+                            // the frame is no longer recorded in the stream
+                            // log. The capture itself is the attach's, taken
+                            // on the control channel: tmux's own wire order
+                            // makes it the other half of the barrier (#1228) —
+                            // the output stream about to be spawned starts
+                            // exactly where this snapshot ends.
                             let bootstrap_tmux = ctx.tmux.tmux_dep();
-                            let wants_bootstrap = payload.needs_bootstrap.unwrap_or(true);
-                            if wants_bootstrap
-                                && !send_bootstrap(ctx.outbound, &bootstrap_tmux, &session_name)
-                                    .await
+                            if !send_bootstrap(ctx.outbound, &bootstrap_tmux, &session_name, capture)
+                                .await
                             {
                                 return ctx.err(
                                     "bootstrap_stalled",
@@ -3169,10 +3265,10 @@ mod tests {
     ///
     /// A detached subscriber's forwarder has exactly one thing left to do:
     /// close the connection, so the client re-attaches and is handed a redrawn
-    /// screen. This is that half, driven through the real forwarder with a
-    /// session the map still holds — which is the whole test of the map lookup
-    /// that tells "this subscriber was detached" apart from "this session
-    /// ended".
+    /// screen. This is that half, driven end to end through the production
+    /// path: `fan_out_peers` evicts the saturated subscriber, and the flag it
+    /// sets on the way out is what turns the receiver's end into the verdict
+    /// (#1226).
     ///
     /// The socket is not real here and does not need to be: what is asserted is
     /// the *verdict*, and `P2pOutbound::close` is where a verdict becomes a
@@ -3181,41 +3277,36 @@ mod tests {
     async fn a_detached_subscriber_closes_the_connection() {
         let (outbound, _rx) = P2pOutbound::new();
         let (tx, rx) = mpsc::channel::<OutputChunk>(SUBSCRIBER_QUEUE_SLOTS);
-        let (outbound_peer, _) = P2pOutbound::new();
-        let sessions: Arc<SessionMapLock> =
-            Arc::new(SessionMapLock::new(std::collections::HashMap::from([(
-                "s1".to_string(),
-                AttachedSession {
-                    backend: Arc::new(Mutex::new(Box::new(
-                        crate::tmux::pty::PtySession::attach(
-                            &crate::tmux::ops::TmuxDep::global(),
-                            "s1",
-                            80,
-                            24,
-                        )
-                        .expect("a PTY for the session under test")
-                        .0,
-                    ))),
-                    peers: vec![SessionPeer {
-                        client_id: "test-client".to_string(),
-                        outbound: outbound_peer,
-                        output_tx: None,
-                    }],
-                    control: session_terminal::SessionControlState::new(),
-                    stream: session_terminal::SessionStreamState::new(),
-                },
-            )])));
+        let detached_for_not_draining = Arc::new(AtomicBool::new(false));
+        let (peer_outbound, _) = P2pOutbound::new();
+        let mut peers = vec![SessionPeer {
+            client_id: "test-client".to_string(),
+            outbound: peer_outbound,
+            output_tx: Some(tx.clone()),
+            detached_for_not_draining: Arc::clone(&detached_for_not_draining),
+        }];
 
         spawn_output_forwarder(
             rx,
             outbound.clone(),
-            Arc::clone(&sessions),
             "s1".to_string(),
+            detached_for_not_draining,
         );
 
-        // The subscriber is detached: `fan_out` drops its sender, so the
-        // forwarder's receiver ends without the connection having ended.
+        // Saturate the subscriber queue, then let one more chunk evict it —
+        // the production trigger, not a re-enactment of it.
+        for n in 0..SUBSCRIBER_QUEUE_SLOTS {
+            tx.try_send((b"chunk".to_vec(), 1, n as u64))
+                .expect("room before the bound");
+        }
+        assert_eq!(
+            fan_out_peers(&mut peers, (b"one too many".to_vec(), 1, 0)),
+            1,
+            "the saturated subscriber is detached"
+        );
+        assert!(peers.is_empty(), "the eviction removes the peer");
         drop(tx);
+
         let closed = tokio::time::timeout(Duration::from_secs(5), async {
             while !outbound.is_closed() {
                 tokio::time::sleep(Duration::from_millis(10)).await;
@@ -3227,12 +3318,40 @@ mod tests {
             "a detached subscriber left the connection open: the client keeps a \
              terminal that has stopped moving, with nothing coming to say so"
         );
+    }
 
-        sessions_lock(&sessions)
-            .get_mut("s1")
-            .expect("the session under test")
-            .peers
-            .clear();
+    /// The #1226 half: the receiver also ends when a newer attach of the same
+    /// client *replaces* this peer, and that end must be quiet.
+    ///
+    /// Driven exactly the way the `already_attached` arm drives it: the peer's
+    /// sender is dropped with its flag never set. The old verdict — "the
+    /// session is still in the map" — closed the connection here, which is
+    /// the bug: the replacement attach's own reply then had no socket left to
+    /// arrive on.
+    #[tokio::test]
+    async fn a_superseded_forwarder_leaves_the_connection_open() {
+        let (outbound, _rx) = P2pOutbound::new();
+        let (tx, rx) = mpsc::channel::<OutputChunk>(SUBSCRIBER_QUEUE_SLOTS);
+
+        spawn_output_forwarder(
+            rx,
+            outbound.clone(),
+            "s1".to_string(),
+            Arc::new(AtomicBool::new(false)),
+        );
+
+        // `already_attached` drops the old peer's sender without setting the
+        // flag — that is the whole of "replaced, not evicted".
+        drop(tx);
+
+        // The forwarder gets its chance to misjudge, then the verdict: still
+        // open. An absent close can only be waited out.
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(
+            !outbound.is_closed(),
+            "a replaced peer's forwarder closed the connection: the attach that \
+             superseded it has no socket left to answer on (#1226)"
+        );
     }
 
     /// A terminal lane that never gets room ends the connection rather than
@@ -3263,13 +3382,11 @@ mod tests {
         );
 
         let (tx, rx) = mpsc::channel::<OutputChunk>(SUBSCRIBER_QUEUE_SLOTS);
-        let sessions: Arc<SessionMapLock> =
-            Arc::new(SessionMapLock::new(std::collections::HashMap::new()));
         spawn_output_forwarder(
             rx,
             outbound.clone(),
-            Arc::clone(&sessions),
             "s1".to_string(),
+            Arc::new(AtomicBool::new(false)),
         );
 
         tx.send((b"chunk".to_vec(), 1, 1))

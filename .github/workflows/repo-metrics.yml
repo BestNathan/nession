@@ -1,0 +1,154 @@
+name: Repository Metrics
+
+on:
+  schedule:
+    - cron: '17 */4 * * *'
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: write
+  issues: read
+  pull-requests: read
+
+concurrency:
+  group: repo-metrics
+  cancel-in-progress: true
+
+jobs:
+  rust-health:
+    runs-on: ubuntu-latest
+    env:
+      RUSTC_WRAPPER: ""
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with: { cache-workspaces: ".", cache-all-crates: "true" }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-llvm-cov
+          key: cargo-llvm-cov-v1
+      - run: which cargo-llvm-cov || cargo install cargo-llvm-cov
+      - run: rustup component add llvm-tools-preview
+      - name: Collect Rust health
+        run: node scripts/collect-repo-health.mjs rust "${RUNNER_TEMP}/rust-health.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rust-health
+          path: ${{ runner.temp }}/rust-health.json
+          retention-days: 1
+
+  web-health:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+      - run: cd web && npm ci
+      - name: Collect Web health
+        run: node scripts/collect-repo-health.mjs web "${RUNNER_TEMP}/web-health.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-health
+          path: ${{ runner.temp }}/web-health.json
+          retention-days: 1
+
+  e2e-health:
+    runs-on: ubuntu-latest
+    env:
+      RUSTC_WRAPPER: ""
+      PLAYWRIGHT_BROWSERS_PATH: ~/.cache/ms-playwright
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with: { cache-workspaces: ".", cache-all-crates: "true" }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: |
+            web/package-lock.json
+            e2e/package-lock.json
+      - run: sudo apt-get update && sudo apt-get install -y tmux
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ hashFiles('e2e/package-lock.json') }}
+      - run: cd e2e && npm ci && npx playwright install chromium --with-deps
+      - run: cd web && npm ci && npm run build
+      - run: cargo build -p nession-server -p nession-agent
+      - name: Collect E2E health
+        run: node scripts/collect-repo-health.mjs e2e "${RUNNER_TEMP}/e2e-health.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: e2e-health
+          path: ${{ runner.temp }}/e2e-health.json
+          retention-days: 1
+
+  publish:
+    if: ${{ always() }}
+    needs: [rust-health, web-health, e2e-health]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: '*-health'
+          path: ${{ runner.temp }}/repo-health
+          merge-multiple: true
+      - name: Verify metric tooling
+        run: |
+          node scripts/collect-repo-health.mjs --self-test
+          node scripts/generate-repo-metrics.mjs --self-test
+          node scripts/protocol-gate.mjs
+      - name: Generate repository metrics
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          REPO_METRICS_HEALTH_DIR: ${{ runner.temp }}/repo-health
+          METRICS_OUTPUT_DIR: ${{ runner.temp }}/repo-metrics
+        run: node scripts/generate-repo-metrics.mjs
+      - name: Publish orphan metrics branch
+        env:
+          OUT_DIR: ${{ runner.temp }}/repo-metrics
+        run: |
+          set -euo pipefail
+          for file in metrics.json repo-metrics-light.svg repo-metrics-dark.svg; do
+            if [[ ! -s "${OUT_DIR}/${file}" ]]; then
+              echo "✗ generated metric artifact is missing or empty: ${file}"
+              echo "  Fix: inspect the Repository Metrics collector/generator steps and re-run this workflow."
+              exit 1
+            fi
+          done
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch --orphan metrics
+          git rm -rf . >/dev/null 2>&1 || true
+
+          cp "${OUT_DIR}/metrics.json" .
+          cp "${OUT_DIR}/repo-metrics-light.svg" .
+          cp "${OUT_DIR}/repo-metrics-dark.svg" .
+
+          git add metrics.json repo-metrics-light.svg repo-metrics-dark.svg
+          git commit -m "metrics: update repository telemetry"
+          git push --force origin HEAD:metrics

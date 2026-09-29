@@ -6,12 +6,43 @@ import type { FileEntry } from '@/capabilities/files';
  */
 export const FIXTURE_MODIFIED_TS = 1_756_000_000;
 
+/** Physical line numbers for heterogeneous JSONL geometry fixtures (#1199). */
+export const FIXTURE_JSONL_LONG_STRING_LINE = 111;
+export const FIXTURE_JSONL_NESTED_LINE = 112;
+export const FIXTURE_JSONL_MALFORMED_LINE = 113;
+export const FIXTURE_JSONL_ARRAY_LINE = 114;
+export const FIXTURE_JSONL_SCALAR_LINE = 115;
+export const FIXTURE_JSONL_NULL_LINE = 116;
+
+/** Large JSONL for virtual-scroll + variable-height geometry checks (#1199). */
+function buildFixtureJsonlEvents(): string {
+  const ordinary = Array.from({ length: 110 }, (_, i) =>
+    JSON.stringify({
+      id: i + 1,
+      kind: 'fixture-event',
+      payload: `row-${i + 1}-${'z'.repeat(48)}`,
+    }),
+  );
+  const specials = [
+    JSON.stringify({ id: 'long-string', content: `fixture-${'w'.repeat(10_000)}` }),
+    JSON.stringify({ nested: { a: { b: { c: { d: { e: { f: { g: 1 } } } } } } } }),
+    '{broken json line',
+    JSON.stringify([1, 2, 3, 4, 5, 6, 7]),
+    JSON.stringify('scalar-root'),
+    'null',
+  ];
+  return [...ordinary, ...specials].join('\n');
+}
+
+export const FIXTURE_JSONL_EVENTS = buildFixtureJsonlEvents();
+
 /**
  * Deterministic file contents for the viewer — keyed by path. File sizes are
  * derived from these at module load, so the size column and readFile's
  * total_size always agree.
  */
 export const FIXTURE_FILE_CONTENTS: Record<string, string> = {
+  'fixtures/events.jsonl': FIXTURE_JSONL_EVENTS,
   'docs/design/visual-language.md': '# Visual Language\n\nTerminal dominates. Chrome recedes.\n',
   'docs/design/composition.md': '# Layout / Composition\n\nChrome yields first, the work surface yields last.\n',
   'web/src/App.tsx': "export function App() {\n  return <div>session-first</div>;\n}\n",
@@ -27,6 +58,14 @@ export const FIXTURE_FILE_CONTENTS: Record<string, string> = {
  * wall clock; the fixture data itself is static.
  */
 const FIXTURE_FILE_BASE: Array<Omit<FileEntry, 'size'>> = [
+  { path: 'fixtures', name: 'fixtures', full_path: '/fixtures', is_dir: true, modified: FIXTURE_MODIFIED_TS },
+  {
+    path: 'fixtures/events.jsonl',
+    name: 'events.jsonl',
+    full_path: '/fixtures/events.jsonl',
+    is_dir: false,
+    modified: FIXTURE_MODIFIED_TS,
+  },
   { path: 'docs/design', name: 'design', full_path: '/docs/design', is_dir: true, modified: FIXTURE_MODIFIED_TS },
   { path: 'docs/design/visual-language.md', name: 'visual-language.md', full_path: '/docs/design/visual-language.md', is_dir: false, modified: FIXTURE_MODIFIED_TS },
   { path: 'docs/design/composition.md', name: 'composition.md', full_path: '/docs/design/composition.md', is_dir: false, modified: FIXTURE_MODIFIED_TS },

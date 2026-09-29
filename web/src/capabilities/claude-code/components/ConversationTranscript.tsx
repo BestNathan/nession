@@ -7,7 +7,7 @@ import {
   Wrench,
   X,
 } from 'lucide-react';
-import { memo, useRef, type ReactNode } from 'react';
+import { memo, type ReactNode } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { copyToClipboard } from '@/shared/lib/clipboard';
@@ -37,9 +37,9 @@ export function ConversationTranscript({
   onLoadOlder,
 }: {
   view: ConversationViewState;
-  onLoadOlder: () => void;
+  /** Starts an older-page fetch; answers synchronously whether one engaged. */
+  onLoadOlder: () => boolean;
 }) {
-  const pullHandleRef = useRef<HTMLDivElement>(null);
   const { scrollRef, topSentinelRef, onScroll, loadOlderFromPull } = useTranscriptScroll({
     conversationId: view.conversation?.id ?? null,
     itemCount: view.items.length,
@@ -53,7 +53,6 @@ export function ConversationTranscript({
   const { pullPx, progress, isPulling, atTopEdge, syncTopEdge, pullHandleHandlers, scrollHandlers } =
     useTranscriptPullToLoad({
       scrollRef,
-      pullHandleRef,
       enabled: canPullOlder,
       onCommitLoad: loadOlderFromPull,
     });
@@ -77,7 +76,6 @@ export function ConversationTranscript({
       >
         {canPullOlder && atTopEdge ? (
           <div
-            ref={pullHandleRef}
             className={cn(
               'flex min-h-11 touch-none select-none flex-col items-center justify-end overflow-hidden transition-[height] duration-75',
               isPulling ? 'cursor-grabbing' : 'cursor-grab',

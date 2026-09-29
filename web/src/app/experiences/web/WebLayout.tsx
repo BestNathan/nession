@@ -101,7 +101,17 @@ export function WebLayout(props: WebLayoutProps) {
           }
         />
       )}
-      <main className="flex min-h-0 flex-1 flex-col">
+      {/* `min-w-0` is load-bearing, and it is the half #1195 did not cover.
+          As a flex item this column defaults to `min-width: auto`, which floors
+          it at its *content* — and xterm renders its grid at a fixed pixel
+          width, so once the Terminal has been laid out at the collapsed width
+          the column can no longer shrink back. Expanding the sidebar then
+          widened the row past the viewport (measured 1472 in a 1280 viewport)
+          and, because the container never changed size, no ResizeObserver fire
+          meant no `terminal.resize` — the PTY kept the collapsed cols (#1269).
+          Collapsing was always fine: growing the available width needs no
+          floor to be lifted. */}
+      <main className="flex min-h-0 min-w-0 flex-1 flex-col">
         <ShellMain
           {...mainShared}
           surface={surface}

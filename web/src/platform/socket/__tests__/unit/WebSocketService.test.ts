@@ -720,4 +720,64 @@ describe('WebSocketService', () => {
     socket.message(second);
     expect(handler).toHaveBeenCalledTimes(1);
   });
+
+  // `reportUnresponsive` is how a liveness probe tells the transport its peer
+  // went silent. Every assertion here is about it behaving *exactly* like a
+  // real loss: downstream recovery (reconnect budget, candidate rotation,
+  // force-relay) keys off the state transition and nothing else, so a special
+  // path would silently skip all of it (#1233).
+  describe('reportUnresponsive', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('runs the ordinary loss path, scheduling exactly one reconnect', async () => {
+      const service = new WebSocketService('ws://agent/ws', [], {
+        maxReconnectAttempts: 5,
+        reconnectBaseDelay: 5,
+      });
+      const connected = service.connect();
+      MockWebSocket.instances[0].open();
+      await connected;
+      expect(service.connectionState).toBe('connected');
+
+      service.reportUnresponsive();
+
+      // The mutation this pins: routing the teardown through the socket's own
+      // `onclose` as well. `teardownSocket()` detaches that handler precisely
+      // so the two cannot both fire — with both, this reads 2 and the caller
+      // burns reconnect budget twice as fast as the network actually failed.
+      expect(service.connectionState).toBe('reconnecting');
+      expect(service.reconnectAttempts).toBe(1);
+
+      await flushTimers(50);
+      expect(MockWebSocket.instances).toHaveLength(2);
+    });
+
+    it('leaves a socket that is already gone alone', async () => {
+      const service = new WebSocketService('ws://agent/ws', [], {
+        maxReconnectAttempts: 5,
+        reconnectBaseDelay: 5,
+      });
+      const connected = service.connect();
+      MockWebSocket.instances[0].open();
+      await connected;
+
+      service.disconnect();
+      expect(service.connectionState).toBe('disconnected');
+
+      service.reportUnresponsive();
+
+      // `disconnect()` is terminal by design; a stale probe must not resurrect
+      // the transport or add reconnect attempts to a torn-down service.
+      expect(service.connectionState).toBe('disconnected');
+      expect(service.reconnectAttempts).toBe(0);
+      await flushTimers(50);
+      expect(MockWebSocket.instances).toHaveLength(1);
+    });
+  });
 });

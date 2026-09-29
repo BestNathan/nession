@@ -8,7 +8,7 @@ describe('fixtureFileOps', () => {
   it('lists the root with synthesized intermediate dirs, no duplicates', async () => {
     const { entries } = await ops.listDir('');
     const paths = entries.map((e) => e.path);
-    expect([...paths].sort()).toEqual(['docs', 'web']);
+    expect([...paths].sort()).toEqual(['docs', 'fixtures', 'web']);
     expect(entries.every((e) => e.is_dir)).toBe(true);
     expect(new Set(paths).size).toBe(paths.length);
   });

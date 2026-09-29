@@ -1,10 +1,54 @@
 //! Session-scoped terminal control (#1095) and stream sequencing (#1094).
 
 use std::collections::VecDeque;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::OnceLock;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use nession_protocol::contracts::terminal::v1::TerminalStreamEventPayload;
 
 const DEFAULT_STREAM_EVENTS: usize = 4096;
+
+/// Hands out an epoch no client can already be holding.
+///
+/// **A fresh stream state is a *different* stream, and the epoch is the only
+/// thing that says so.** A client keeps its `lastStreamSeq` across a reconnect,
+/// and resets it only when the epoch it receives differs from the one it holds.
+/// So when a new stream state re-used an epoch, the client's cursor was never
+/// invalidated: the agent restarted its sequence at 1 while the client still
+/// held, say, 30, every live frame satisfied "not newer than my cursor", and
+/// `ConnectionManager` dropped each one silently — the snapshot rendered and
+/// then the screen froze (#1254).
+///
+/// Two properties are needed and only the first is obvious:
+///
+/// 1. **A counter**, so no two states in one process share an epoch.
+/// 2. **A seed that is not a constant**, so a state created after an *agent
+///    restart* cannot reproduce an epoch a client is still holding. A counter
+///    starting at 1 does exactly that — it is the original bug, one process
+///    later.
+///
+/// Only equality is ever tested (here and in the client), so the values need to
+/// be distinct rather than ordered. Seeded from wall-clock nanoseconds, which
+/// is already unique per process in any realistic deployment and costs no
+/// dependency.
+static NEXT_STREAM_EPOCH: OnceLock<AtomicU64> = OnceLock::new();
+
+fn next_stream_epoch() -> u64 {
+    NEXT_STREAM_EPOCH
+        .get_or_init(|| {
+            let seed = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                // Nanoseconds since the epoch exceed `u64` around the year
+                // 2554; the fallback is the saturation point rather than a
+                // wrap, so the value stays far from any counter's start.
+                .map_or(1, |since| {
+                    u64::try_from(since.as_nanos()).unwrap_or(u64::MAX)
+                });
+            AtomicU64::new(seed)
+        })
+        .fetch_add(1, Ordering::Relaxed)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TerminalRole {
@@ -82,7 +126,10 @@ pub struct SessionStreamState {
 impl SessionStreamState {
     pub fn new() -> Self {
         Self {
-            epoch: 1,
+            // Not a constant — see `next_stream_epoch`. This used to be `1`,
+            // which made every stream state indistinguishable from the last
+            // one and left a reconnecting client's cursor looking valid.
+            epoch: next_stream_epoch(),
             next_seq: 0,
             events: VecDeque::new(),
             max_events: DEFAULT_STREAM_EVENTS,
@@ -184,11 +231,54 @@ mod tests {
     #[test]
     fn stream_records_monotonic_seq() {
         let mut stream = SessionStreamState::new();
+        // The epoch is read off the state rather than written as a literal: it
+        // is no longer a constant (#1254), and a literal here would pin the
+        // test to whatever it happened to be rather than to the property.
+        let epoch = stream.epoch;
         let (_, s1) = stream.record_output("s", "YQ==".to_string());
         let (_, s2) = stream.record_resize("s", 80, 24);
         assert_eq!(s1, 1);
         assert_eq!(s2, 2);
-        let tail = stream.events_since(1, 0).expect("same epoch");
+        let tail = stream.events_since(epoch, 0).expect("same epoch");
         assert_eq!(tail.len(), 2);
+    }
+
+    /// A fresh stream must be *distinguishable* from the one it replaces.
+    ///
+    /// The mutation this pins is putting the old `epoch: 1` back. The client
+    /// clears its stream cursor only on an epoch change, so two states sharing
+    /// an epoch means a reconnecting client keeps a cursor the agent has
+    /// already reset underneath it — every live frame then looks stale and is
+    /// dropped, and the screen freezes after the snapshot (#1254).
+    #[test]
+    fn a_new_stream_never_reuses_the_epoch_it_replaces() {
+        let mut epochs = std::collections::HashSet::new();
+        for _ in 0..64 {
+            let stream = SessionStreamState::new();
+            assert!(
+                epochs.insert(stream.epoch),
+                "epoch {} was handed out twice; a client holding it from the \
+                 previous stream would never be told its cursor is stale",
+                stream.epoch
+            );
+        }
+        assert_eq!(epochs.len(), 64);
+    }
+
+    /// The other half of the same property, and the one a plain counter gets
+    /// wrong: the seed must not be a constant either, or a state created after
+    /// an agent restart reproduces an epoch a client is still holding.
+    #[test]
+    fn the_first_epoch_is_not_the_same_in_every_process() {
+        // Measured, not asserted about the source: the seed is wall-clock
+        // nanoseconds, so it must exceed anything a counter starting at 1 could
+        // reach immediately — which is what makes a restart a mismatch rather
+        // than a collision.
+        let epoch = SessionStreamState::new().epoch;
+        assert!(
+            epoch > 1_000_000,
+            "first epoch was {epoch}, which looks like a small constant seed — \
+             a client surviving an agent restart would collide with it"
+        );
     }
 }

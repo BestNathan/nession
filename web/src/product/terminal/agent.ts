@@ -114,8 +114,17 @@ export interface TerminalAgentApi {
    * errors are dropped by the transport filter.
    */
   onError(cb: (error: AgentError) => void): () => void;
-  /** Keepalive probe — the agent's connection watchdog. */
-  ping(): void;
+  /**
+   * Keepalive probe — the agent's connection watchdog.
+   *
+   * Resolves when the agent answers, rejects when it does not within
+   * `timeoutMs`. The two directions are different questions: the periodic
+   * fire-and-forget ping below keeps the *agent's* watchdog fed, while a
+   * rejection here is how a **browser** finds out its peer is gone — the only
+   * client-side signal that can, because a half-open socket fires no `close`
+   * (#1233).
+   */
+  ping(timeoutMs: number): Promise<void>;
 }
 
 type ControlLease = ReturnType<typeof createAgentControlLease>;
@@ -297,14 +306,19 @@ export function createTerminalAgentApi(surface: PluginSurface): TerminalAgentApi
       });
     },
 
-    ping: (): void => {
+    ping: (timeoutMs: number): Promise<void> =>
       // A literal, not an imported binding, because there is no binding:
       // `control.ping` is a control wire, and control wires are not Protocol
-      // Units, so `just codegen` emits no file for it. `send` is the right
-      // verb for the same reason — control has no reply mechanism, so nothing
-      // is registered as pending and `control.pong` carries no correlation
-      // back to this call.
-      surface.send('control.ping', {});
-    },
+      // Units, so `just codegen` emits no file for it.
+      //
+      // `request`, not `send`, and that is the correction to what used to be
+      // here. It claimed `control.pong` "carries no correlation back to this
+      // call" — true only of `send`, which registers nothing pending. The
+      // agent's reply is `make_response(&self.id, CONTROL_PONG, ())`
+      // (`crates/nession-agent/src/server/websocket.rs`), so the pong carries
+      // the ping's own id, and the router resolves pending entries by id
+      // alone. Awaiting it is what turns a probe into a *liveness* signal: a
+      // peer that is gone never answers, and the request layer rejects.
+      surface.request('control.ping', {}, { timeoutMs }).then(() => undefined),
   };
 }

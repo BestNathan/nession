@@ -195,10 +195,30 @@ describe('createTerminalAgentApi', () => {
   });
 
   describe('ping', () => {
-    it('sends control.ping with an empty payload', () => {
-      api.ping();
+    it('requests control.ping, carrying a deadline, so a missed pong is observable', async () => {
+      // The mutation this pins is reverting to `send`. A fire-and-forget ping
+      // registers nothing pending, so it cannot tell a live agent from one that
+      // stopped answering — and a peer that stopped answering is the *only*
+      // way a browser ever learns its socket went half-open, because the
+      // socket fires no `close` (#1233).
+      const pending = api.ping(1_234);
 
-      expect(surface.sent).toEqual([{ type: 'control.ping', payload: {} }]);
+      expect(surface.requests[0]).toMatchObject({
+        type: 'control.ping',
+        payload: {},
+        options: { timeoutMs: 1_234 },
+      });
+      expect(surface.sent).toEqual([]);
+
+      surface.resolveNext('control.ping', {});
+      await expect(pending).resolves.toBeUndefined();
+    });
+
+    it('rejects when the deadline passes with no pong', async () => {
+      const pending = api.ping(10);
+      surface.rejectNext('control.ping', new Error('Request timeout: control.ping'));
+
+      await expect(pending).rejects.toThrow(/timeout/i);
     });
   });
 });

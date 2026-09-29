@@ -83,7 +83,7 @@ export default defineConfig(({ mode }) => {
     ],
     coverage: {
       provider: 'v8',
-      reporter: ['text', 'html'],
+      reporter: ['text', 'html', 'json-summary'],
       thresholds: {
         lines: 80,
         functions: 72,
