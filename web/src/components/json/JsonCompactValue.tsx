@@ -61,12 +61,13 @@ export function JsonCompactValue({ value, depth = 0, inline = false }: JsonCompa
     }
     const shownKeys = keys.slice(0, COMPACT_MAX_OBJECT_KEYS);
     const hidden = keys.length - shownKeys.length;
-    if (inline && depth > 0) {
+    const useInlineObject = inline || depth === 0;
+    if (useInlineObject) {
       return (
-        <span className={jsonSyntax.bracket}>
+        <span className={cn('min-w-0', jsonSyntax.bracket)}>
           {'{ '}
           {shownKeys.map((key, index) => (
-            <span key={key}>
+            <span key={key} className="inline">
               <span className={jsonSyntax.key}>{JSON.stringify(key)}</span>
               <span className={jsonSyntax.punct}>: </span>
               <JsonCompactValue value={record[key]} depth={depth + 1} inline />
