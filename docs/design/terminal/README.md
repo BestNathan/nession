@@ -6,17 +6,18 @@ GitHub requirements (Approved):
 
 | Issue | Topic | Canonical design |
 |-------|--------|------------------|
+| [#321](https://github.com/BestNathan/nession/issues/321) | Live scrollback & attach bootstrap | [scrollback-bootstrap.md](scrollback-bootstrap.md) |
 | [#1096](https://github.com/BestNathan/nession/issues/1096) | PTY-faithful Web/App interaction & TUI compatibility | [interaction-semantics.md](interaction-semantics.md) |
 | [#1095](https://github.com/BestNathan/nession/issues/1095) | Multi-client Controller / Observer | [multi-client-ownership.md](multi-client-ownership.md) |
 | [#1094](https://github.com/BestNathan/nession/issues/1094) | Terminal stream, checkpoints & replay | [stream-replay.md](stream-replay.md) |
 
-Related: [#321](https://github.com/BestNathan/nession/issues/321) (live scrollback/bootstrap), [#1081](https://github.com/BestNathan/nession/issues/1081) (App shell gestures).
+Related: [#1081](https://github.com/BestNathan/nession/issues/1081) (App shell gestures).
 
 ## Dependency graph
 
 ```text
-#321 scrollback/bootstrap (existing)
-        │
+#321 scrollback/bootstrap ──► the snapshot a client attaches onto; the
+        │                     transport that decides what xterm sees
         ▼
 #1096 PTY semantics ──► one encoder/router; no app-specific branches
         │
@@ -29,6 +30,11 @@ Related: [#321](https://github.com/BestNathan/nession/issues/321) (live scrollba
                  ▼
      Observer replay while live continues (#1095 + #1094)
 ```
+
+#321 sits above #1096 rather than beside it: the attach transport
+(`AttachMode::Control`) is what makes #1096's mode criteria observable from the
+browser at all, and #1096's criterion 13 — the mode a reattached client comes
+back in — is satisfied *by* the bootstrap.
 
 **Implementation order**
 
