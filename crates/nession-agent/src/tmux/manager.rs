@@ -3,7 +3,6 @@
 use anyhow::{Context, Result};
 use std::path::PathBuf;
 use std::time::Duration;
-use tokio::process::Command;
 
 use super::cmd::{self, TmuxCmd};
 use super::env::EnvManager;
@@ -175,8 +174,7 @@ impl SessionManager {
         TmuxDep::injected(self.cmd.clone())
     }
 
-    /// Test seam: override the tmux binary (inject a fake `tmux`), keeping the
-    /// socket unchanged.
+    /// Test seam: replace the whole tmux addressing (binary **and** socket).
     ///
     /// The substitution is *total* as of #991 step 6: it rebinds the manager's
     /// own addressing **and** the [`EnvManager`] it holds, whose operations used
@@ -185,10 +183,22 @@ impl SessionManager {
     /// fake; before that, it was driving the real binary on the real socket and
     /// could not tell.
     #[cfg(test)]
-    pub(crate) fn with_tmux_bin(&mut self, tmux_bin: impl Into<String>) -> &mut Self {
-        self.cmd = self.cmd.with_bin(tmux_bin);
+    pub(crate) fn with_tmux_cmd(&mut self, cmd: TmuxCmd) -> &mut Self {
+        self.cmd = cmd;
         self.env.with_tmux(TmuxDep::injected(self.cmd.clone()));
         self
+    }
+
+    /// Test seam: override the tmux binary (inject a fake `tmux`), keeping the
+    /// socket unchanged. See [`with_tmux_cmd`](Self::with_tmux_cmd) for why the
+    /// rebind must reach the [`EnvManager`] too — and prefer that seam when the
+    /// test counts calls against a refusing fake: since #1225 a failed call
+    /// heals + retries when the socket is verifiably dead, so the socket the
+    /// retry decision reads must be one the test owns.
+    #[cfg(test)]
+    pub(crate) fn with_tmux_bin(&mut self, tmux_bin: impl Into<String>) -> &mut Self {
+        let cmd = self.cmd.with_bin(tmux_bin);
+        self.with_tmux_cmd(cmd)
     }
 
     /// Test seam: override per-command timeouts for fast, deterministic tests.
@@ -211,16 +221,19 @@ impl SessionManager {
     }
 
     pub async fn list_sessions(&self) -> Result<Vec<SessionInfo>> {
-        let mut cmd = self.cmd.tokio();
-        cmd.args([
-            "list-sessions",
-            "-F",
-            // Use | (pipe) as delimiter. Tmux converts tab characters (0x09)
-            // in -F format strings to underscores (0x5F), so \t is unusable.
-            // pane_current_command is last so a | inside it cannot shift the row.
-            "#{session_name}|#{session_created}|#{session_windows}|#{session_attached}|#{window_width}|#{window_height}|#{pane_current_path}|#{pane_current_command}",
-        ]);
-        let output = tmux_output(&mut cmd, self.list_timeout).await?;
+        // Use | (pipe) as delimiter. Tmux converts tab characters (0x09)
+        // in -F format strings to underscores (0x5F), so \t is unusable.
+        // pane_current_command is last so a | inside it cannot shift the row.
+        let output = tmux_output(
+            &self.cmd,
+            &[
+                "list-sessions",
+                "-F",
+                "#{session_name}|#{session_created}|#{session_windows}|#{session_attached}|#{window_width}|#{window_height}|#{pane_current_path}|#{pane_current_command}",
+            ],
+            self.list_timeout,
+        )
+        .await?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -267,9 +280,12 @@ impl SessionManager {
     /// One place for the call, so the two accessors above cannot drift in how
     /// they address a session or how they treat a failure.
     async fn display_message(&self, session_name: &str, format: &str) -> Result<String> {
-        let mut cmd = self.cmd.tokio();
-        cmd.args(["display-message", "-p", "-t", session_name, "-F", format]);
-        let output = tmux_output(&mut cmd, self.list_timeout).await?;
+        let output = tmux_output(
+            &self.cmd,
+            &["display-message", "-p", "-t", session_name, "-F", format],
+            self.list_timeout,
+        )
+        .await?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -356,25 +372,6 @@ impl SessionManager {
         // applying only to new windows, and on a cold socket there is no server
         // to set it on. `HISTORY_LIMIT_LINES` carries the measurements.
 
-        // Stage 1: try with `-e` (tmux ≥ 3.0).  This injects env vars directly
-        // into the shell process so they take effect before bashrc runs — the
-        // only reliable way to set PS1 on Debian (bashrc unconditionally
-        // overwrites it).
-        let mut cmd = self.cmd.tokio();
-        cmd.args([
-            "new-session",
-            "-d",
-            "-s",
-            name,
-            "-x",
-            &SESSION_WIDTH.to_string(),
-            "-y",
-            &SESSION_HEIGHT.to_string(),
-            "-c",
-            working_dir,
-        ])
-        .stderr(std::process::Stdio::piped());
-
         // Pass through the agent process environment (PATH, NODE_PATH, etc.)
         // so tools installed via init container are available in tmux sessions.
         // Skip TERM — we force xterm-256color below regardless of what the
@@ -383,59 +380,81 @@ impl SessionManager {
         // Collect first — std::env::vars() iterator is not Send.
         let caller_keys: Vec<&str> = env.iter().map(|(k, _)| k.as_str()).collect();
         let process_env: Vec<(String, String)> = std::env::vars().collect();
-        for (key, value) in process_env.iter() {
-            if skip_env(key, &caller_keys) {
-                continue;
-            }
-            cmd.arg("-e").arg(format!("{key}={value}"));
-        }
-        // Force TERM and locale so TUI apps render correctly.
-        // Containers default to C/POSIX locale (no Unicode) → box-drawing
-        // characters become underscores; TERM is typically unset or "dumb".
-        cmd.arg("-e").arg("TERM=xterm-256color");
-        cmd.arg("-e").arg("LANG=C.UTF-8");
-
-        let mut has_ps1 = false;
-        for (key, value) in env {
-            if key == "PS1" {
-                has_ps1 = true;
-            }
-            cmd.arg("-e").arg(format!("{key}={value}"));
-        }
-        if !has_ps1 {
-            cmd.arg("-e").arg(format!("NESSON_PS1={DEFAULT_PS1}"));
-            cmd.arg("-e").arg(
-                "PROMPT_COMMAND=[ -n \"$NESSON_PS1\" ] && { PS1=\"$NESSON_PS1\"; unset NESSON_PS1; }",
-            );
-        }
+        let has_ps1 = env.iter().any(|(key, _)| key == "PS1");
         let claude_env = claude_binding_env(name);
-        for (key, value) in &claude_env {
-            cmd.arg("-e").arg(format!("{key}={value}"));
-        }
 
-        let output = cmd.output().await?;
+        // Stage 1: try with `-e` (tmux ≥ 3.0).  This injects env vars directly
+        // into the shell process so they take effect before bashrc runs — the
+        // only reliable way to set PS1 on Debian (bashrc unconditionally
+        // overwrites it).
+        //
+        // `output_with` because the argv is assembled in loops; a stale-socket
+        // heal + retry (#1225) replays the closure against a fresh command and
+        // gets the same argv.
+        let output = self
+            .cmd
+            .output_with(|cmd| {
+                cmd.args([
+                    "new-session",
+                    "-d",
+                    "-s",
+                    name,
+                    "-x",
+                    &SESSION_WIDTH.to_string(),
+                    "-y",
+                    &SESSION_HEIGHT.to_string(),
+                    "-c",
+                    working_dir,
+                ])
+                .stderr(std::process::Stdio::piped());
+
+                for (key, value) in process_env.iter() {
+                    if skip_env(key, &caller_keys) {
+                        continue;
+                    }
+                    cmd.arg("-e").arg(format!("{key}={value}"));
+                }
+                // Force TERM and locale so TUI apps render correctly.
+                // Containers default to C/POSIX locale (no Unicode) → box-drawing
+                // characters become underscores; TERM is typically unset or "dumb".
+                cmd.arg("-e").arg("TERM=xterm-256color");
+                cmd.arg("-e").arg("LANG=C.UTF-8");
+
+                for (key, value) in env {
+                    cmd.arg("-e").arg(format!("{key}={value}"));
+                }
+                if !has_ps1 {
+                    cmd.arg("-e").arg(format!("NESSON_PS1={DEFAULT_PS1}"));
+                    cmd.arg("-e").arg(
+                        "PROMPT_COMMAND=[ -n \"$NESSON_PS1\" ] && { PS1=\"$NESSON_PS1\"; unset NESSON_PS1; }",
+                    );
+                }
+                for (key, value) in &claude_env {
+                    cmd.arg("-e").arg(format!("{key}={value}"));
+                }
+            })
+            .await?;
         let use_e = output.status.success();
 
         if !use_e {
             // Stage 2 (fallback): `-e` not supported (tmux < 3.0).
             // Retry without it, then inject via set-environment for future
             // windows and send-keys for the already-running initial shell.
-            let mut cmd2 = self.cmd.tokio();
-            cmd2.args([
-                "new-session",
-                "-d",
-                "-s",
-                name,
-                "-x",
-                &SESSION_WIDTH.to_string(),
-                "-y",
-                &SESSION_HEIGHT.to_string(),
-                "-c",
-                working_dir,
-            ])
-            .stderr(std::process::Stdio::piped());
-
-            let output2 = cmd2.output().await?;
+            let output2 = self
+                .cmd
+                .output(&[
+                    "new-session",
+                    "-d",
+                    "-s",
+                    name,
+                    "-x",
+                    &SESSION_WIDTH.to_string(),
+                    "-y",
+                    &SESSION_HEIGHT.to_string(),
+                    "-c",
+                    working_dir,
+                ])
+                .await?;
             if !output2.status.success() {
                 // Surface tmux's actual stderr so the failure is debuggable —
                 // previously we swallowed it and emitted only a generic
@@ -553,9 +572,11 @@ impl SessionManager {
         // Observable rather than dropped: `let _ = … .stderr(Stdio::null())`
         // discarded the status *and* tmux's reason, which is the invisibility
         // #980 fixed elsewhere (#991's "no silent accidental policy").
-        let mut mouse = self.cmd.tokio();
-        mouse.args(["set-option", "-t", name, "mouse", "on"]);
-        match mouse.output().await {
+        match self
+            .cmd
+            .output(&["set-option", "-t", name, "mouse", "on"])
+            .await
+        {
             Ok(out) if out.status.success() => {}
             Ok(out) => tracing::warn!(
                 "best-effort `set-option mouse on` for session {name} failed ({}): {}",
@@ -631,10 +652,8 @@ impl SessionManager {
     /// and "you are not allowed to" — the diagnostic was discarded before the
     /// message that reaches the user could hold it.
     pub async fn kill_session(&self, name: &str) -> Result<()> {
-        let mut cmd = self.cmd.tokio();
-        cmd.args(["kill-session", "-t", name])
-            .stderr(std::process::Stdio::piped());
-        let output = tmux_output(&mut cmd, self.kill_timeout).await?;
+        let output =
+            tmux_output(&self.cmd, &["kill-session", "-t", name], self.kill_timeout).await?;
 
         if !output.status.success() {
             anyhow::bail!(
@@ -684,15 +703,22 @@ fn is_no_sessions_stderr(stderr: &str) -> bool {
 /// measured: a `status()` call has no pipes, so everything tmux says about a
 /// failure is gone by the time the caller can report it. The two are not
 /// interchangeable at a `Required` call site, and this helper no longer has any
-/// other kind. (`.stderr(Stdio::piped())` beside it is declarative rather than
-/// load-bearing: `output()` sets both pipes itself — measured, `tokio`'s
-/// implementation calls `stdout(Stdio::piped())/stderr(Stdio::piped())` on the
-/// inner `std::process::Command` immediately before spawning, which *overrides*
-/// anything set earlier. `std::process::Command::output()` does not: there an
-/// explicit `Stdio::null()` survives and arrives empty. The distinction decides
-/// which sites can keep their `null()` and which cannot.)
-async fn tmux_output(cmd: &mut Command, timeout: Duration) -> Result<std::process::Output> {
-    match tokio::time::timeout(timeout, cmd.output()).await {
+/// other kind.
+///
+/// The execution is [`TmuxCmd::output`]'s, so the stale-socket heal and its
+/// one retry (#1225) run here too — the timeout wraps both attempts, which is
+/// the caller's one budget rather than a per-attempt one. (`.stderr(Stdio::
+/// piped())` beside a `.output()` was always declarative: `output()` sets both
+/// pipes itself — measured, `tokio`'s implementation calls
+/// `stdout(Stdio::piped())/stderr(Stdio::piped())` on the inner
+/// `std::process::Command` immediately before spawning, which *overrides*
+/// anything set earlier.)
+async fn tmux_output(
+    cmd: &TmuxCmd,
+    args: &[&str],
+    timeout: Duration,
+) -> Result<std::process::Output> {
+    match tokio::time::timeout(timeout, cmd.output(args)).await {
         Err(_) => Err(anyhow::anyhow!("tmux command timed out after {timeout:?}")),
         Ok(res) => Ok(res?),
     }
@@ -773,10 +799,16 @@ mod window_size_lock_tests {
         // that no longer exists. #991 step 7 removed it because its only caller
         // was `kill_session`, and a status-only call there is precisely the
         // shape that discarded tmux's reason for refusing to kill a session.
-        let mut cmd = Command::new("sleep");
-        cmd.arg("30");
+        //
+        // A fake tmux whose one behaviour is to sleep: the timeout is the
+        // whole budget (#1225 folded the heal + retry into `TmuxCmd::output`,
+        // so this helper no longer owns a process builder), and a 100ms
+        // budget against a 30s sleep must fail long before either ends.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let fake = crate::test_support::FakeTmux::new(dir.path(), "sleep 30");
+        let dep = fake.dep();
         let start = std::time::Instant::now();
-        let res = tmux_output(&mut cmd, Duration::from_millis(100)).await;
+        let res = tmux_output(&dep.cmd(), &["list-sessions"], Duration::from_millis(100)).await;
         assert!(res.is_err(), "expected timeout error, got {res:?}");
         assert!(start.elapsed() < Duration::from_secs(2));
     }
@@ -929,105 +961,6 @@ mod history_limit_tests {
 mod legacy_stage_two_tests {
     use super::*;
 
-    /// Prefix of the one-directory-per-call records the shim writes.
-    #[cfg(unix)]
-    const CALL_FILE_PREFIX: &str = "call.";
-
-    /// Name of the file inside `call.N` that holds the call's argv.
-    #[cfg(unix)]
-    const CALL_RECORD_NAME: &str = "argv";
-
-    /// Terminator the shim writes after the argv of each recorded call.
-    #[cfg(unix)]
-    const CALL_SEPARATOR: &str = "==call==";
-
-    /// A fake tmux that records its arguments — one record per call, so a
-    /// call's *boundaries* are visible — and fails the first `new-session` so
-    /// `create_session` takes its legacy stage-2 path (the one for a tmux
-    /// without `-e`, i.e. before 3.0).
-    ///
-    /// The global flags are stripped first, exactly as real tmux receives them:
-    /// a script matching on `$1` without those shifts would see `-S` (and now
-    /// `-f`) and fall through to its catch-all, "working" while testing
-    /// nothing. `-f` is a server-config path the shim does not model — real
-    /// tmux ignores it unless it is starting a server, and tolerates one that
-    /// names no file at all.
-    #[cfg(unix)]
-    fn recording_shim(dir: &std::path::Path) -> (String, PathBuf) {
-        let stage1 = dir.join("stage1-ran");
-        let path = dir.join("tmux");
-        // A child creates it; see `install_via_a_child` for why the exec'd path
-        // must not be one this process wrote (#1026).
-        crate::test_support::install_via_a_child(
-            &path,
-            // One file per call, claimed with an O_EXCL create, so two
-            // processes recording at once cannot interleave. The mechanism and
-            // the measurements are documented on `FakeTmux` in
-            // `crate::test_support`; keep this body in step with it.
-            &format!(
-                "#!/bin/sh\n\
-                 if [ \"$1\" = \"-S\" ]; then shift 2; fi\n\
-                 if [ \"$1\" = \"-f\" ]; then shift 2; fi\n\
-                 n=0\n\
-                 while true; do\n\
-                 while [ -e \"{dir}/{prefix}$n\" ]; do n=$((n + 1)); done\n\
-                 if mkdir \"{dir}/{prefix}$n\" 2>/dev/null; then break; fi\n\
-                 if [ ! -d \"{dir}/{prefix}$n\" ]; then\n\
-                 echo \"fake tmux: cannot claim {dir}/{prefix}$n\" >&2\n\
-                 exit 1\n\
-                 fi\n\
-                 n=$((n + 1))\n\
-                 done\n\
-                 printf '%s\\n' \"$@\" > \"{dir}/{prefix}$n/{record}\"\n\
-                 echo \"{sep}\" >> \"{dir}/{prefix}$n/{record}\"\n\
-                 case \"$1\" in\n\
-                   new-session)\n\
-                     if [ -f \"{stage1}\" ]; then exit 0; else : > \"{stage1}\"; exit 1; fi;;\n\
-                   *) exit 0;;\n\
-                 esac\n",
-                dir = dir.display(),
-                prefix = CALL_FILE_PREFIX,
-                record = CALL_RECORD_NAME,
-                sep = CALL_SEPARATOR,
-                stage1 = stage1.display(),
-            ),
-        )
-        .expect("install the shim");
-        (path.to_string_lossy().into_owned(), dir.to_path_buf())
-    }
-
-    /// The recorded calls, each as the list of argv entries tmux received.
-    #[cfg(unix)]
-    fn recorded_calls(dir: &std::path::Path) -> Vec<Vec<String>> {
-        let mut calls = Vec::new();
-        for n in 0.. {
-            let claimed = dir.join(format!("{CALL_FILE_PREFIX}{n}"));
-            // Indices are claimed in order by creating the directory, so the
-            // first unclaimed one means there is nothing after it either.
-            if !claimed.is_dir() {
-                break;
-            }
-            let text = match std::fs::read_to_string(claimed.join(CALL_RECORD_NAME)) {
-                Ok(text) => text,
-                // Claimed, but the argv is not on disk yet — and later indices
-                // may already be complete, so this is not where the scan ends.
-                Err(_) => continue,
-            };
-            let Some(body) = text.trim_end_matches('\n').strip_suffix(CALL_SEPARATOR) else {
-                continue;
-            };
-            let entries: Vec<String> = body
-                .trim_matches('\n')
-                .lines()
-                .map(str::to_string)
-                .collect();
-            if !entries.is_empty() {
-                calls.push(entries);
-            }
-        }
-        calls
-    }
-
     #[cfg(unix)]
     #[tokio::test]
     async fn stage_two_types_the_env_line_as_the_owners_argv() {
@@ -1042,15 +975,15 @@ mod legacy_stage_two_tests {
         // fail), splitting the line into key names (length), or swapping the
         // `-t` order (the prefix assertion).
         let dir = tempfile::tempdir().expect("tempdir");
-        let (shim, record_dir) = recording_shim(dir.path());
-        let mgr = crate::test_support::manager_with_fake(&shim);
+        let fake = stage_two_fake(dir.path(), "");
+        let mgr = crate::test_support::manager_with_fake(&fake);
         let session = crate::test_support::TestSession::new("stage2-argv");
 
         mgr.create_session(session.name(), SESSION_WIDTH, SESSION_HEIGHT, "/tmp", &[])
             .await
-            .expect("against the shim, create takes its legacy stage-2 path");
+            .expect("against the fake, create takes its legacy stage-2 path");
 
-        let calls = recorded_calls(&record_dir);
+        let calls = fake.calls();
         let typed = calls
             .iter()
             .find(|args| args.first().map(String::as_str) == Some("send-keys"))
@@ -1123,7 +1056,7 @@ mod legacy_stage_two_tests {
         // exists to prevent.
         let dir = tempfile::tempdir().expect("tempdir");
         let fake = stage_two_fake(dir.path(), "");
-        let mgr = crate::test_support::manager_with_fake(fake.bin());
+        let mgr = crate::test_support::manager_with_fake(&fake);
         let session = crate::test_support::TestSession::new("claude-binding-stage2");
 
         mgr.create_session(session.name(), SESSION_WIDTH, SESSION_HEIGHT, "/tmp", &[])
@@ -1167,7 +1100,7 @@ mod legacy_stage_two_tests {
             dir.path(),
             "send-keys) echo 'injected tmux refuses send-keys' >&2; exit 1;;\n",
         );
-        let mgr = crate::test_support::manager_with_fake(fake.bin());
+        let mgr = crate::test_support::manager_with_fake(&fake);
         let session = crate::test_support::TestSession::new("step7-required-stage2");
 
         let err = mgr
@@ -1212,7 +1145,7 @@ mod legacy_stage_two_tests {
             "clear-history) echo 'injected tmux refuses clear-history' >&2; exit 1;;\n\
              set-option) echo 'injected tmux refuses set-option' >&2; exit 1;;\n",
         );
-        let mgr = crate::test_support::manager_with_fake(fake.bin());
+        let mgr = crate::test_support::manager_with_fake(&fake);
         let session = crate::test_support::TestSession::new("step7-best-effort-stage2");
 
         mgr.create_session(session.name(), SESSION_WIDTH, SESSION_HEIGHT, "/tmp", &[])
@@ -1271,7 +1204,7 @@ mod injected_tmux_tests {
             "case \"$1\" in set-environment) echo 'injected tmux refuses nession-fake' >&2; \
              exit 1;; *) exit 0;; esac",
         );
-        let mgr = crate::test_support::manager_with_fake(fake.bin());
+        let mgr = crate::test_support::manager_with_fake(&fake);
 
         let err = mgr
             .env()
@@ -1312,7 +1245,7 @@ mod injected_tmux_tests {
         // it happens to have.
         let dir = tempfile::tempdir().expect("tempdir");
         let fake = crate::test_support::FakeTmux::new(dir.path(), "exit 0");
-        let mgr = crate::test_support::manager_with_fake(fake.bin());
+        let mgr = crate::test_support::manager_with_fake(&fake);
         let session = crate::test_support::TestSession::new("claude-binding-env");
 
         mgr.create_session(session.name(), SESSION_WIDTH, SESSION_HEIGHT, "/tmp", &[])
@@ -1381,7 +1314,7 @@ mod injected_tmux_tests {
             "case \"$1\" in set-environment) echo 'unknown flag -e' >&2; exit 1;; \
              *) exit 0;; esac",
         );
-        let mgr = crate::test_support::manager_with_fake(fake.bin());
+        let mgr = crate::test_support::manager_with_fake(&fake);
         let session = crate::test_support::TestSession::new("step6-best-effort");
 
         mgr.create_session(session.name(), SESSION_WIDTH, SESSION_HEIGHT, "/tmp", &[])
@@ -1438,7 +1371,7 @@ mod injected_tmux_tests {
             "case \"$1\" in kill-session) echo 'no such session: nession-fake-sess' >&2; exit 1;; \
              *) exit 0;; esac",
         );
-        let mgr = crate::test_support::manager_with_fake(fake.bin());
+        let mgr = crate::test_support::manager_with_fake(&fake);
 
         let err = mgr
             .kill_session("nession-fake-sess")
