@@ -200,44 +200,43 @@ async function graphql(query, variables, token) {
   return payload.data;
 }
 
-async function closingRequirementIssues({ owner, name, number, token }) {
-  const query = `
-    query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
-      repository(owner: $owner, name: $name) {
-        pullRequest(number: $number) {
-          id
-          isDraft
-          closingIssuesReferences(first: 100, after: $cursor) {
-            nodes {
-              number
-              body
-              stateReason
-              labels(first: 100) { nodes { name } }
-            }
-            pageInfo { hasNextPage endCursor }
-          }
-        }
-      }
+function parseClosingIssueNumbers(body, owner, name) {
+  const text = String(body ?? '').replace(/<!--[^]*?-->/g, '');
+  const lines = text.replace(/\r\n?/g, '\n').split('\n');
+  const numbers = new Set();
+  let fence = null;
+  const escapedOwner = owner.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const reference = `(?:#(\\d+)|${escapedOwner}\\/${escapedName}#(\\d+)|https:\\/\\/github\\.com\\/${escapedOwner}\\/${escapedName}\\/issues\\/(\\d+))`;
+  const closing = new RegExp(`\\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\\s+${reference}\\b`, 'gi');
+
+  for (const rawLine of lines) {
+    const fenceMatch = rawLine.match(/^\s*(`{3,}|~{3,})/);
+    if (fenceMatch) {
+      const marker = fenceMatch[1][0];
+      if (fence === marker) fence = null;
+      else if (fence == null) fence = marker;
+      continue;
     }
-  `;
+    if (fence || /^\s*>/.test(rawLine)) continue;
+    const line = rawLine.replace(/`[^`]*`/g, '');
+    for (const match of line.matchAll(closing)) {
+      const value = match[1] ?? match[2] ?? match[3];
+      if (value) numbers.add(Number(value));
+    }
+  }
+  return [...numbers];
+}
+
+async function closingRequirementIssues({ owner, name, body, token }) {
   const issues = [];
-  let cursor = null;
-  let prId = null;
-  let isDraft = false;
-  do {
-    const data = await graphql(query, { owner, name, number, cursor }, token);
-    const pr = data.repository?.pullRequest;
-    const refs = pr?.closingIssuesReferences;
-    if (!refs) throw new Error(`Unable to resolve closing issues for PR #${number}`);
-    prId = pr.id;
-    isDraft = pr.isDraft;
-    for (const issue of refs.nodes) {
-      const labels = new Set(issue.labels.nodes.map((label) => label.name));
-      if (labels.has('requirement')) issues.push(issue);
-    }
-    cursor = refs.pageInfo.hasNextPage ? refs.pageInfo.endCursor : null;
-  } while (cursor);
-  return { issues, prId, isDraft };
+  const numbers = parseClosingIssueNumbers(body, owner, name);
+  for (const number of numbers) {
+    const issue = await githubRequest(`/repos/${owner}/${name}/issues/${number}`, { token });
+    const labels = new Set((issue.labels ?? []).map((label) => typeof label === 'string' ? label : label.name));
+    if (labels.has('requirement')) issues.push(issue);
+  }
+  return issues;
 }
 
 async function convertPrToDraft(prId, token) {
@@ -254,10 +253,11 @@ async function convertPrToDraft(prId, token) {
 async function runPrGate() {
   const event = JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'));
   const [owner, name] = process.env.GITHUB_REPOSITORY.split('/');
-  const number = event.pull_request?.number ?? event.number;
-  if (!owner || !name || !number) throw new Error('pull_request event context is required');
+  const pr = event.pull_request;
+  const number = pr?.number ?? event.number;
+  if (!owner || !name || !number || !pr) throw new Error('pull_request event context is required');
   const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
-  const { issues: requirements, prId, isDraft } = await closingRequirementIssues({ owner, name, number, token });
+  const requirements = await closingRequirementIssues({ owner, name, body: pr.body, token });
   const failures = [];
   for (const issue of requirements) {
     const result = validateRequirementBody(issue.body);
@@ -265,8 +265,8 @@ async function runPrGate() {
     else console.log(`Requirement #${issue.number}: ${result.criteriaCount} criteria accepted.`);
   }
   if (failures.length) {
-    if (prId && !isDraft) {
-      await convertPrToDraft(prId, token);
+    if (pr.node_id && !pr.draft) {
+      await convertPrToDraft(pr.node_id, token);
       console.error(`PR #${number} was converted to draft because requirement acceptance is incomplete.`);
     }
     throw new Error(`Requirement acceptance gate failed:\n\n${failures.join('\n\n')}`);
@@ -338,7 +338,17 @@ function runSelfTest() {
       assert.ok(result.errors.some((error) => error.includes(expectedError)), `${name}: missing ${expectedError}; got ${result.errors.join('; ')}`);
     }
   }
-  console.log(`requirement-acceptance self-test: ${cases.length} cases passed`);
+
+  assert.deepEqual(
+    parseClosingIssueNumbers('Closes #12\nFixes BestNathan/nession#13\nResolves https://github.com/BestNathan/nession/issues/14', 'BestNathan', 'nession'),
+    [12, 13, 14],
+  );
+  assert.deepEqual(
+    parseClosingIssueNumbers('`Closes #20`\n> Closes #21\n```md\nCloses #22\n```\n<!-- Closes #23 -->\nCloses #24', 'BestNathan', 'nession'),
+    [24],
+  );
+
+  console.log(`requirement-acceptance self-test: ${cases.length + 2} cases passed`);
 }
 
 async function main() {
