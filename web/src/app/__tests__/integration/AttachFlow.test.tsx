@@ -75,10 +75,8 @@ vi.mock('@/app/TerminalRegion', () => ({
 vi.mock('@/app/experiences/web/FilesWebLayout', () => ({
   FilesWebLayout: () => <div data-testid="file-workspace" />,
 }));
-vi.mock('@/capabilities/env/components/EnvManager', () => ({
-  EnvManager: ({ embedded }: { embedded?: boolean }) => (
-    <div data-testid="env-manager" data-embedded={embedded ? 'true' : 'false'} />
-  ),
+vi.mock('@/app/experiences/web/EnvWebLayout', () => ({
+  EnvWebLayout: () => <div data-testid="env-workspace" />,
 }));
 vi.mock('@/product/session/components/CreateSessionDialog', () => ({
   CreateSessionDialog: ({ isOpen }: { isOpen: boolean }) =>

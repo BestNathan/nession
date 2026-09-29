@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/shared/lib/utils';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Progress } from '@/components/ui/progress';
-import { CodeMirrorEditor } from './CodeMirrorEditor';
+import { CodeMirrorEditor } from '@/platform/editor';
 import { MarkdownPreview } from './MarkdownPreview';
 import { ImageViewer } from './ImageViewer';
 import { VideoViewer } from './VideoViewer';

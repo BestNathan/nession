@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { languageIdToCodeMirrorKey } from '@/capabilities/files/model/languageIdToCodeMirror';
+import { languageIdToCodeMirrorKey } from '@/platform/editor/model/languageIdToCodeMirror';
 
 describe('languageIdToCodeMirrorKey', () => {
   it('maps typescript to ts', () => {

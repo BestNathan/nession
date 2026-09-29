@@ -183,6 +183,76 @@ test.describe('Web 1440×900', () => {
       ...FIXTURE_SCREENSHOT,
     });
   });
+
+  // #1202 — Environment as a context-first capability. Three states because
+  // they are three different claims: the read-first detail is where
+  // sensitive-value masking lives, the editor is where the dirty state lives,
+  // and the impact dialog is where an in-use save explains itself. One image
+  // cannot stand in for the others.
+  test('Workspace / Environment', async ({ page }) => {
+    await page.goto('/#/fixture/workspace?capability=env');
+    await page.getByTestId('env-profile-list').waitFor();
+    await page.getByTestId('env-profile-row-server::staging.env').click();
+    // Asserted before the shutter: the masked row is the state this baseline
+    // exists to pin, and a screenshot taken against the loading detail would
+    // pin nothing.
+    await expect(page.getByTestId('env-var-masked-API_KEY')).toBeVisible();
+    await expect(page.getByTestId('env-profile-detail')).not.toContainText(
+      'staging-secret-9f2c7d',
+    );
+
+    await expect(page).toHaveScreenshot('web-env-profile.png', {
+      fullPage: true,
+      ...FIXTURE_SCREENSHOT,
+    });
+  });
+
+  test('Workspace / Environment, dirty edit', async ({ page }) => {
+    await page.goto('/#/fixture/workspace?capability=env');
+    await page.getByTestId('env-profile-list').waitFor();
+    await page.getByTestId('env-profile-row-server::staging.env').click();
+    await page.getByTestId('env-edit').click();
+
+    await page.locator('.cm-content').click();
+    // New line at the doc end — typing straight after the click glues the
+    // text onto the last content line.
+    await page.keyboard.press('ControlOrMeta+ArrowDown');
+    await page.keyboard.press('End');
+    await page.keyboard.press('Enter');
+    await page.keyboard.type('EXTRA=1');
+    // The dirty marker is the claim, so it is what the screenshot waits for.
+    await expect(page.getByTestId('env-editor-dirty')).toBeVisible();
+    await expect(page.getByTestId('env-editor-save')).toBeEnabled();
+
+    await expect(page).toHaveScreenshot('web-env-edit-dirty.png', {
+      fullPage: true,
+      ...FIXTURE_SCREENSHOT,
+    });
+  });
+
+  test('Workspace / Environment, in-use save impact', async ({ page }) => {
+    await page.goto('/#/fixture/workspace?capability=env');
+    await page.getByTestId('env-profile-list').waitFor();
+    await page.getByTestId('env-profile-row-agent:devbox-01:prod.env').click();
+    await expect(page.getByTestId('env-profile-usage')).toContainText('api-tests');
+
+    await page.getByTestId('env-edit').click();
+    await page.locator('.cm-content').click();
+    await page.keyboard.press('ControlOrMeta+ArrowDown');
+    await page.keyboard.press('End');
+    await page.keyboard.press('Enter');
+    await page.keyboard.type('EXTRA=1');
+    await page.getByTestId('env-editor-save').click();
+
+    const dialog = page.getByRole('alertdialog');
+    await expect(dialog).toContainText('Save and update running sessions?');
+    await expect(dialog).toContainText('api-tests, deploy');
+
+    await expect(page).toHaveScreenshot('web-env-save-impact.png', {
+      fullPage: true,
+      ...FIXTURE_SCREENSHOT,
+    });
+  });
 });
 
 test.describe('Web compact 1024×768', () => {
@@ -593,6 +663,30 @@ test.describe('App 390×844', () => {
     await expect(page.getByTestId('file-row-web')).toContainText('1 item', { timeout: 10_000 });
 
     await expect(page).toHaveScreenshot('app-files-list.png', {
+      fullPage: true,
+      ...FIXTURE_SCREENSHOT,
+    });
+  });
+
+  // #1202's App half: the Environment detail pushed over the navigator. This
+  // is the screen that proves the capability navigates through the shell's
+  // depth control rather than its own chrome — the header names the profile,
+  // the dock is gone, and the masked row reads the same as on Web. Driven
+  // through the capability picker for the same reason the conversation walk
+  // is: the App reaches a capability view that way.
+  test('Workspace / Environment, pushed detail', async ({ page }) => {
+    await gotoFixtureApp(page);
+    await page.getByTestId('app-header-workspace').first().click();
+    await page.getByTestId('workspace-capability-more').click();
+    await page.getByTestId('workspace-capability-picker-env').click();
+    await page.getByTestId('env-profile-list').waitFor();
+
+    await page.getByTestId('env-profile-row-server::staging.env').click();
+    await expect(page.getByTestId('app-page-header')).toContainText('staging.env');
+    await expect(page.getByTestId('workspace-tool-bar')).toHaveCount(0);
+    await expect(page.getByTestId('env-var-masked-API_KEY')).toBeVisible();
+
+    await expect(page).toHaveScreenshot('app-env-detail.png', {
       fullPage: true,
       ...FIXTURE_SCREENSHOT,
     });
