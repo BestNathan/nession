@@ -25,5 +25,5 @@ export async function openFixtureJsonlEvents(page: Page): Promise<void> {
     await page.getByRole('treeitem', { name }).waitFor({ state: 'visible', timeout: 10_000 });
     await page.getByRole('treeitem', { name }).click();
   }
-  await expect(page.getByText('Line 1')).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator('[data-jsonl-line="1"]')).toBeVisible({ timeout: 10_000 });
 }
