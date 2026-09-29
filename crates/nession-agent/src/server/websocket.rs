@@ -1614,11 +1614,8 @@ p2p_routes! { ctx, msg_type, payload_value;
                                 // session was closed by the detach handler.
                             });
 
-                            // Spawn a second task that emits an initial
-                            // `terminal.resize` (so xterm.js can size its grid
-                            // to match the tmux pane before any output flows
-                            // in) and then forwards ongoing `%window-resize`
-                            // events on the same message type.
+                            // Spawn a second task that forwards
+                            // `%window-resize` events as `terminal.resize`.
                             //
                             // Each resize is ALSO published to the agent's
                             // resize lane so relay clients (browser → server →
@@ -1638,44 +1635,39 @@ p2p_routes! { ctx, msg_type, payload_value;
                             let session_name_resize = session_name.clone();
                             let resize_reporter = ctx.resize.clone();
                             let agent_id_resize = ctx.agent_id.to_string();
-                            // The same addressing the attach above was given,
-                            // rather than the process-wide one (#991 step 6):
-                            // a migrated operation reached from a handler
-                            // inherited from `ctx.tmux` like everything else on
-                            // this path, so an injected tmux is not bypassed by
-                            // the first query that follows the attach.
-                            let tmux_resize = ctx.tmux.tmux_dep();
                             tokio::spawn(async move {
-                                // Initial resize: query tmux for the pane's
-                                // current size and forward it as one message.
-                                // Runs inside the spawned task so the attach
-                                // OK response reaches the client first.
+                                // **No initial size announcement.** This arm
+                                // used to query the pane's size and send it, so
+                                // the attaching client would know what xterm.js
+                                // should expect. It cannot know that: the query
+                                // answers *now*, and the client is still
+                                // measuring. Measured on CI (#1187), verbatim
+                                // from a run's WebSocket capture:
                                 //
-                                // **Required** at this call site: the size is
-                                // what xterm.js is told to expect, so a session
-                                // whose size could not be read is not one to
-                                // announce a guessed one for — an 80×24 that was
-                                // never asked for would show as a real resize
-                                // and reflow nothing. The grammar is
-                                // `TmuxOps`'s; this arm is where the class is
-                                // decided (see #991 on the two policies this
-                                // query used to carry in two hand-written
-                                // copies).
-                                match tmux_resize.ops().window_size(&session_name_resize).await {
-                                    Ok((cols, rows)) => {
-                                        send_terminal_resize_msg(
-                                            &outbound_resize,
-                                            &session_name_resize,
-                                            cols,
-                                            rows,
-                                        )
-                                        .await;
-                                    }
-                                    Err(e) => warn!(
-                                        "failed to query initial window size for {}: {:#}",
-                                        session_name_resize, e
-                                    ),
-                                }
+                                //   2072.0  client → server   relay.begin {cols:124, rows:26}
+                                //   2090.1  client → agent    resize     {cols:124, rows:26}
+                                //   2146.8  agent  → client   resize     {cols:80,  rows:24}
+                                //
+                                // The backend was created at 80×24 — the
+                                // Server's default for a client that had not
+                                // measured yet — so that is what the query
+                                // returned, and it arrived *after* the client's
+                                // own fit. The client applied it (that arm
+                                // resizes xterm directly and sends nothing
+                                // back), leaving a grid of 80×24 over a pane of
+                                // 124×26, for good. Both halves were always true
+                                // of the old comment's worry — "an 80×24 that
+                                // was never asked for would show as a real
+                                // resize" — it just did not follow that
+                                // `window_size` returning `Ok` makes the answer
+                                // current by the time it is read.
+                                //
+                                // The attaching client is the one actor that
+                                // cannot need this: it is the authority on its
+                                // own viewport, and every size it will ever want
+                                // it sends itself. A *peer* reflowing the pane
+                                // is a different actor, and still arrives
+                                // through `resize_rx` below.
                                 while let Some((cols, rows)) = resize_rx.recv().await {
                                     let full_id =
                                         format!("{agent_id_resize}:{session_name_resize}");

@@ -341,8 +341,15 @@ async fn test_terminal_io_through_full_chain() {
     sink.send(WsMessage::Text(json)).await.unwrap();
 
     // Wait for attach response.  The agent may send terminal.output
-    // (scrollback capture) and terminal.resize (initial size query) before
-    // the ok response.  Read until we see ok.
+    // (scrollback capture) before the ok response.  Read until we see ok.
+    //
+    // Deliberately does not also assert that no `terminal.resize` arrives: the
+    // announcement this arm used to make (#1187) is sent from a spawned task,
+    // so it lands *after* the ok and a frame scan here cannot see it — measured
+    // by re-adding the announcement and watching this test still pass. The
+    // observable harm is the browser's grid, which is what
+    // `e2e/specs/terminal-io.spec.ts`'s `a viewport resize reaches the PTY`
+    // asserts, and that test is where the regression is pinned.
     let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
     loop {
         let response = tokio::time::timeout(Duration::from_secs(2), stream.next())
@@ -357,7 +364,7 @@ async fn test_terminal_io_through_full_chain() {
             if msg_type == agent_msg_types::OK {
                 break;
             }
-            // Skip scrollback capture and initial resize messages.
+            // Skip the scrollback capture.
         }
         if tokio::time::Instant::now() > deadline {
             panic!("timed out waiting for ok response to client.attach");
