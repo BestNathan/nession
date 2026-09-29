@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
+import { JsonTree } from '@/components/json/JsonTree';
 import { parseJsonDocument } from '../model/jsonParse';
-import { JsonValuePreview } from './JsonValuePreview';
 
 interface JsonPreviewProps {
   content: string;
@@ -24,7 +24,7 @@ export function JsonPreview({ content }: JsonPreviewProps) {
 
   return (
     <div className="overflow-y-auto h-full p-[var(--workspace-editor-pad-y)] px-[var(--workspace-editor-head-pad-x)] min-w-0">
-      <JsonValuePreview value={parsed.value} />
+      <JsonTree value={parsed.value} mode="inspector" pinRootOpen />
     </div>
   );
 }
