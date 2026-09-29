@@ -4,6 +4,13 @@ import userEvent from '@testing-library/user-event';
 import { JsonTree } from '@/components/json/JsonTree';
 
 describe('JsonTree', () => {
+  it('compact mode renders root object as one inline line', () => {
+    render(<JsonTree value={{ id: 123, name: 'abc' }} mode="compact" />);
+    expect(screen.getByText(/"id"/)).toBeInTheDocument();
+    expect(screen.getByText(/123/)).toBeInTheDocument();
+    expect(screen.queryByText(/more fields/)).not.toBeInTheDocument();
+  });
+
   it('compact mode bounds object field preview', () => {
     const value = {
       a: 1,
