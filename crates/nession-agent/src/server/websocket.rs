@@ -46,6 +46,7 @@ use nession_runtime::lane::{KeyedLane, Work};
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 use tokio::net::TcpListener;
 use tokio::sync::{mpsc, Mutex};
@@ -77,6 +78,15 @@ struct SessionPeer {
     outbound: P2pOutbound,
     /// PTY multi-client fan-out; `None` for control-mode (direct outbound).
     output_tx: Option<mpsc::Sender<OutputChunk>>,
+    /// Set by [`fan_out_peers`] when it drops this peer for a full queue.
+    ///
+    /// The forwarder's receiver ends for several reasons — the session ended,
+    /// a newer attach of the same client replaced this peer, an explicit
+    /// detach, this eviction — and only the eviction may close the connection
+    /// (#1226). The cause therefore travels with the channel instead of being
+    /// re-derived from the session map at the receiver's end, where "the peer
+    /// is gone" and "the peer was replaced" used to be indistinguishable.
+    detached_for_not_draining: Arc<AtomicBool>,
 }
 
 struct AttachedSession {
@@ -152,6 +162,11 @@ fn fan_out_peers(peers: &mut Vec<SessionPeer>, chunk: OutputChunk) -> usize {
         match tx.try_send(chunk.clone()) {
             Ok(()) => true,
             Err(mpsc::error::TrySendError::Full(_)) => {
+                // Tell the forwarder *why* its channel is ending before the
+                // drop ends it — the one cause that must reach the client as
+                // a closed connection (#1226).
+                peer.detached_for_not_draining
+                    .store(true, Ordering::Release);
                 detached += 1;
                 false
             }
@@ -206,28 +221,39 @@ async fn notify_control_changed(peers: &[SessionPeer], payload: TerminalControlC
 }
 
 /// Forward one subscriber's terminal output to this connection's sink, and —
-/// when this subscriber was detached for not draining it — close the connection.
+/// only when this subscriber was detached for not draining it — close the
+/// connection.
 ///
-/// The queue ends in two ways, and they are not the same event:
+/// The receiver ends for several reasons, and they are not the same event:
 ///
 /// * **the session ended** (the PTY or the control-mode reader closed and the
 ///   fan-out task went with it). This connection may be serving other sessions,
 ///   so nothing is closed here: the other attachments are still running, and
 ///   ending their socket because one session exited would be a bug of its own.
+/// * **the peer was replaced** — a newer `agent.attach` of the same client
+///   superseded it (`already_attached`), or the client sent `agent.detach`.
+///   The client already knows, or has a fresh forwarder of its own; closing
+///   here would take that fresh attach's connection down with no reply
+///   (#1226, where "the peer is gone" was misread as the next case).
 /// * **this subscriber was detached** for having no room ([`SUBSCRIBER_QUEUE_SLOTS`]),
-///   which is the one case where the client must be told. The session is still
-///   there — that is how the two are told apart, by asking the map — and what
-///   the client is holding is a terminal that has stopped moving with nothing
-///   coming to say so. A `Close` is the only thing this path can say it with,
-///   and the client's own reconnect is what turns it into a redrawn screen.
+///   which is the one case where the client must be told. What the client is
+///   holding is a terminal that has stopped moving with nothing coming to say
+///   so. A `Close` is the only thing this path can say it with, and the
+///   client's own reconnect is what turns it into a redrawn screen.
+///
+/// The verdict is not re-derived from the session map: `fan_out_peers` sets
+/// `detached_for_not_draining` when it evicts this subscriber, and the flag
+/// is the whole of the third case. Any state-based check has to tell "the
+/// peer is gone" apart from "a peer with the same client id is back" under
+/// one lock, and both of those are true of a replacement.
 ///
 /// It used to be one task per subscriber inline in the attach arms, twice, and
 /// the only difference between the two was which names the locals had.
 fn spawn_output_forwarder(
     mut rx: mpsc::Receiver<OutputChunk>,
     outbound: P2pOutbound,
-    sessions: Arc<SessionMapLock>,
     session_name: String,
+    detached_for_not_draining: Arc<AtomicBool>,
 ) {
     tokio::spawn(async move {
         while let Some((bytes, stream_epoch, stream_seq)) = rx.recv().await {
@@ -260,16 +286,15 @@ fn spawn_output_forwarder(
             }
         }
 
-        let detached_for_not_draining = sessions_lock(&sessions).contains_key(&session_name);
-        if !detached_for_not_draining {
-            info!("terminal output for session {session_name} ended");
+        if detached_for_not_draining.load(Ordering::Acquire) {
+            info!(
+                "session {session_name}: subscriber was detached for not draining its terminal; \
+                 closing the connection"
+            );
+            outbound.close();
             return;
         }
-        info!(
-            "session {session_name}: subscriber was detached for not draining its terminal; \
-             closing the connection"
-        );
-        outbound.close();
+        info!("terminal output for session {session_name} ended");
     });
 }
 
@@ -1376,16 +1401,24 @@ p2p_routes! { ctx, msg_type, payload_value;
                         // Session already exists: add a new subscriber.
                         let client_id = connection_client_id(ctx.client_id).await;
                         let (tx, rx) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
+                        let detached_for_not_draining = Arc::new(AtomicBool::new(false));
                         let resp = {
                             let mut guard = sessions_lock(ctx.sessions);
                             let Some(shared) = guard.get_mut(&session_name) else {
                                 return ctx.err("not_attached", "session ended during attach");
                             };
+                            // The peer this drops is *replaced*, not evicted:
+                            // its flag stays unset, so its forwarder ends
+                            // quietly instead of closing the connection this
+                            // attach is about to answer on (#1226).
                             shared.peers.retain(|p| p.client_id != client_id);
                             shared.peers.push(SessionPeer {
                                 client_id: client_id.clone(),
                                 outbound: ctx.outbound.clone(),
                                 output_tx: Some(tx),
+                                detached_for_not_draining: Arc::clone(
+                                    &detached_for_not_draining,
+                                ),
                             });
                             client_attach_response(payload.session_name.clone(), shared, &client_id)
                         };
@@ -1415,8 +1448,8 @@ p2p_routes! { ctx, msg_type, payload_value;
                         spawn_output_forwarder(
                             rx,
                             ctx.outbound.clone(),
-                            Arc::clone(ctx.sessions),
                             session_name.clone(),
+                            detached_for_not_draining,
                         );
 
                         return serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
@@ -1436,6 +1469,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                         Ok((pty_session, mut output_rx)) => {
                             let client_id = connection_client_id(ctx.client_id).await;
                             let (tx, rx) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
+                            let detached_for_not_draining = Arc::new(AtomicBool::new(false));
                             let mut control = session_terminal::SessionControlState::new();
                             control.ensure_controller(&client_id);
                             let stream = session_terminal::SessionStreamState::new();
@@ -1445,6 +1479,9 @@ p2p_routes! { ctx, msg_type, payload_value;
                                     client_id: client_id.clone(),
                                     outbound: ctx.outbound.clone(),
                                     output_tx: Some(tx),
+                                    detached_for_not_draining: Arc::clone(
+                                        &detached_for_not_draining,
+                                    ),
                                 }],
                                 control,
                                 stream,
@@ -1490,8 +1527,8 @@ p2p_routes! { ctx, msg_type, payload_value;
                             spawn_output_forwarder(
                                 rx,
                                 ctx.outbound.clone(),
-                                Arc::clone(ctx.sessions),
                                 session_name.clone(),
+                                detached_for_not_draining,
                             );
 
                             // Spawn ONE broadcast task for this session.
@@ -1581,6 +1618,11 @@ p2p_routes! { ctx, msg_type, payload_value;
                                     client_id: client_id.clone(),
                                     outbound: ctx.outbound.clone(),
                                     output_tx: None,
+                                    // Control-mode output goes straight to the
+                                    // connection's outbound, so nothing reads
+                                    // this flag here — a peer with no channel
+                                    // is never fanned out to.
+                                    detached_for_not_draining: Arc::new(AtomicBool::new(false)),
                                 }],
                                 control,
                                 stream,
@@ -3169,10 +3211,10 @@ mod tests {
     ///
     /// A detached subscriber's forwarder has exactly one thing left to do:
     /// close the connection, so the client re-attaches and is handed a redrawn
-    /// screen. This is that half, driven through the real forwarder with a
-    /// session the map still holds — which is the whole test of the map lookup
-    /// that tells "this subscriber was detached" apart from "this session
-    /// ended".
+    /// screen. This is that half, driven end to end through the production
+    /// path: `fan_out_peers` evicts the saturated subscriber, and the flag it
+    /// sets on the way out is what turns the receiver's end into the verdict
+    /// (#1226).
     ///
     /// The socket is not real here and does not need to be: what is asserted is
     /// the *verdict*, and `P2pOutbound::close` is where a verdict becomes a
@@ -3181,41 +3223,36 @@ mod tests {
     async fn a_detached_subscriber_closes_the_connection() {
         let (outbound, _rx) = P2pOutbound::new();
         let (tx, rx) = mpsc::channel::<OutputChunk>(SUBSCRIBER_QUEUE_SLOTS);
-        let (outbound_peer, _) = P2pOutbound::new();
-        let sessions: Arc<SessionMapLock> =
-            Arc::new(SessionMapLock::new(std::collections::HashMap::from([(
-                "s1".to_string(),
-                AttachedSession {
-                    backend: Arc::new(Mutex::new(Box::new(
-                        crate::tmux::pty::PtySession::attach(
-                            &crate::tmux::ops::TmuxDep::global(),
-                            "s1",
-                            80,
-                            24,
-                        )
-                        .expect("a PTY for the session under test")
-                        .0,
-                    ))),
-                    peers: vec![SessionPeer {
-                        client_id: "test-client".to_string(),
-                        outbound: outbound_peer,
-                        output_tx: None,
-                    }],
-                    control: session_terminal::SessionControlState::new(),
-                    stream: session_terminal::SessionStreamState::new(),
-                },
-            )])));
+        let detached_for_not_draining = Arc::new(AtomicBool::new(false));
+        let (peer_outbound, _) = P2pOutbound::new();
+        let mut peers = vec![SessionPeer {
+            client_id: "test-client".to_string(),
+            outbound: peer_outbound,
+            output_tx: Some(tx.clone()),
+            detached_for_not_draining: Arc::clone(&detached_for_not_draining),
+        }];
 
         spawn_output_forwarder(
             rx,
             outbound.clone(),
-            Arc::clone(&sessions),
             "s1".to_string(),
+            detached_for_not_draining,
         );
 
-        // The subscriber is detached: `fan_out` drops its sender, so the
-        // forwarder's receiver ends without the connection having ended.
+        // Saturate the subscriber queue, then let one more chunk evict it —
+        // the production trigger, not a re-enactment of it.
+        for n in 0..SUBSCRIBER_QUEUE_SLOTS {
+            tx.try_send((b"chunk".to_vec(), 1, n as u64))
+                .expect("room before the bound");
+        }
+        assert_eq!(
+            fan_out_peers(&mut peers, (b"one too many".to_vec(), 1, 0)),
+            1,
+            "the saturated subscriber is detached"
+        );
+        assert!(peers.is_empty(), "the eviction removes the peer");
         drop(tx);
+
         let closed = tokio::time::timeout(Duration::from_secs(5), async {
             while !outbound.is_closed() {
                 tokio::time::sleep(Duration::from_millis(10)).await;
@@ -3227,12 +3264,40 @@ mod tests {
             "a detached subscriber left the connection open: the client keeps a \
              terminal that has stopped moving, with nothing coming to say so"
         );
+    }
 
-        sessions_lock(&sessions)
-            .get_mut("s1")
-            .expect("the session under test")
-            .peers
-            .clear();
+    /// The #1226 half: the receiver also ends when a newer attach of the same
+    /// client *replaces* this peer, and that end must be quiet.
+    ///
+    /// Driven exactly the way the `already_attached` arm drives it: the peer's
+    /// sender is dropped with its flag never set. The old verdict — "the
+    /// session is still in the map" — closed the connection here, which is
+    /// the bug: the replacement attach's own reply then had no socket left to
+    /// arrive on.
+    #[tokio::test]
+    async fn a_superseded_forwarder_leaves_the_connection_open() {
+        let (outbound, _rx) = P2pOutbound::new();
+        let (tx, rx) = mpsc::channel::<OutputChunk>(SUBSCRIBER_QUEUE_SLOTS);
+
+        spawn_output_forwarder(
+            rx,
+            outbound.clone(),
+            "s1".to_string(),
+            Arc::new(AtomicBool::new(false)),
+        );
+
+        // `already_attached` drops the old peer's sender without setting the
+        // flag — that is the whole of "replaced, not evicted".
+        drop(tx);
+
+        // The forwarder gets its chance to misjudge, then the verdict: still
+        // open. An absent close can only be waited out.
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(
+            !outbound.is_closed(),
+            "a replaced peer's forwarder closed the connection: the attach that \
+             superseded it has no socket left to answer on (#1226)"
+        );
     }
 
     /// A terminal lane that never gets room ends the connection rather than
@@ -3263,13 +3328,11 @@ mod tests {
         );
 
         let (tx, rx) = mpsc::channel::<OutputChunk>(SUBSCRIBER_QUEUE_SLOTS);
-        let sessions: Arc<SessionMapLock> =
-            Arc::new(SessionMapLock::new(std::collections::HashMap::new()));
         spawn_output_forwarder(
             rx,
             outbound.clone(),
-            Arc::clone(&sessions),
             "s1".to_string(),
+            Arc::new(AtomicBool::new(false)),
         );
 
         tx.send((b"chunk".to_vec(), 1, 1))

@@ -239,6 +239,11 @@ check-git-diff-base:
 check-test-concurrency:
     ./scripts/check-test-concurrency.sh
 
+# Requirement acceptance validator self-test (#1237).
+# The workflow invokes the same script; rules live in one place.
+requirement-acceptance-selftest:
+    node scripts/requirement-acceptance.mjs self-test
+
 # Static check: every tmux spawn carries an explicit -S socket (runs in pre-commit)
 check-tmux-socket:
     ./scripts/check-tmux-socket.sh
