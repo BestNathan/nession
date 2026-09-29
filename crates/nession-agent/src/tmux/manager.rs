@@ -961,105 +961,6 @@ mod history_limit_tests {
 mod legacy_stage_two_tests {
     use super::*;
 
-    /// Prefix of the one-directory-per-call records the shim writes.
-    #[cfg(unix)]
-    const CALL_FILE_PREFIX: &str = "call.";
-
-    /// Name of the file inside `call.N` that holds the call's argv.
-    #[cfg(unix)]
-    const CALL_RECORD_NAME: &str = "argv";
-
-    /// Terminator the shim writes after the argv of each recorded call.
-    #[cfg(unix)]
-    const CALL_SEPARATOR: &str = "==call==";
-
-    /// A fake tmux that records its arguments — one record per call, so a
-    /// call's *boundaries* are visible — and fails the first `new-session` so
-    /// `create_session` takes its legacy stage-2 path (the one for a tmux
-    /// without `-e`, i.e. before 3.0).
-    ///
-    /// The global flags are stripped first, exactly as real tmux receives them:
-    /// a script matching on `$1` without those shifts would see `-S` (and now
-    /// `-f`) and fall through to its catch-all, "working" while testing
-    /// nothing. `-f` is a server-config path the shim does not model — real
-    /// tmux ignores it unless it is starting a server, and tolerates one that
-    /// names no file at all.
-    #[cfg(unix)]
-    fn recording_shim(dir: &std::path::Path) -> (String, PathBuf) {
-        let stage1 = dir.join("stage1-ran");
-        let path = dir.join("tmux");
-        // A child creates it; see `install_via_a_child` for why the exec'd path
-        // must not be one this process wrote (#1026).
-        crate::test_support::install_via_a_child(
-            &path,
-            // One file per call, claimed with an O_EXCL create, so two
-            // processes recording at once cannot interleave. The mechanism and
-            // the measurements are documented on `FakeTmux` in
-            // `crate::test_support`; keep this body in step with it.
-            &format!(
-                "#!/bin/sh\n\
-                 if [ \"$1\" = \"-S\" ]; then shift 2; fi\n\
-                 if [ \"$1\" = \"-f\" ]; then shift 2; fi\n\
-                 n=0\n\
-                 while true; do\n\
-                 while [ -e \"{dir}/{prefix}$n\" ]; do n=$((n + 1)); done\n\
-                 if mkdir \"{dir}/{prefix}$n\" 2>/dev/null; then break; fi\n\
-                 if [ ! -d \"{dir}/{prefix}$n\" ]; then\n\
-                 echo \"fake tmux: cannot claim {dir}/{prefix}$n\" >&2\n\
-                 exit 1\n\
-                 fi\n\
-                 n=$((n + 1))\n\
-                 done\n\
-                 printf '%s\\n' \"$@\" > \"{dir}/{prefix}$n/{record}\"\n\
-                 echo \"{sep}\" >> \"{dir}/{prefix}$n/{record}\"\n\
-                 case \"$1\" in\n\
-                   new-session)\n\
-                     if [ -f \"{stage1}\" ]; then exit 0; else : > \"{stage1}\"; exit 1; fi;;\n\
-                   *) exit 0;;\n\
-                 esac\n",
-                dir = dir.display(),
-                prefix = CALL_FILE_PREFIX,
-                record = CALL_RECORD_NAME,
-                sep = CALL_SEPARATOR,
-                stage1 = stage1.display(),
-            ),
-        )
-        .expect("install the shim");
-        (path.to_string_lossy().into_owned(), dir.to_path_buf())
-    }
-
-    /// The recorded calls, each as the list of argv entries tmux received.
-    #[cfg(unix)]
-    fn recorded_calls(dir: &std::path::Path) -> Vec<Vec<String>> {
-        let mut calls = Vec::new();
-        for n in 0.. {
-            let claimed = dir.join(format!("{CALL_FILE_PREFIX}{n}"));
-            // Indices are claimed in order by creating the directory, so the
-            // first unclaimed one means there is nothing after it either.
-            if !claimed.is_dir() {
-                break;
-            }
-            let text = match std::fs::read_to_string(claimed.join(CALL_RECORD_NAME)) {
-                Ok(text) => text,
-                // Claimed, but the argv is not on disk yet — and later indices
-                // may already be complete, so this is not where the scan ends.
-                Err(_) => continue,
-            };
-            let Some(body) = text.trim_end_matches('\n').strip_suffix(CALL_SEPARATOR) else {
-                continue;
-            };
-            let entries: Vec<String> = body
-                .trim_matches('\n')
-                .lines()
-                .map(str::to_string)
-                .collect();
-            if !entries.is_empty() {
-                calls.push(entries);
-            }
-        }
-        calls
-    }
-
     #[cfg(unix)]
     #[tokio::test]
     async fn stage_two_types_the_env_line_as_the_owners_argv() {
@@ -1074,15 +975,15 @@ mod legacy_stage_two_tests {
         // fail), splitting the line into key names (length), or swapping the
         // `-t` order (the prefix assertion).
         let dir = tempfile::tempdir().expect("tempdir");
-        let (shim, record_dir) = recording_shim(dir.path());
-        let mgr = crate::test_support::manager_with_fake_bin(&shim);
+        let fake = stage_two_fake(dir.path(), "");
+        let mgr = crate::test_support::manager_with_fake(&fake);
         let session = crate::test_support::TestSession::new("stage2-argv");
 
         mgr.create_session(session.name(), SESSION_WIDTH, SESSION_HEIGHT, "/tmp", &[])
             .await
-            .expect("against the shim, create takes its legacy stage-2 path");
+            .expect("against the fake, create takes its legacy stage-2 path");
 
-        let calls = recorded_calls(&record_dir);
+        let calls = fake.calls();
         let typed = calls
             .iter()
             .find(|args| args.first().map(String::as_str) == Some("send-keys"))

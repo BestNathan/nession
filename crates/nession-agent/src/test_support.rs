@@ -371,18 +371,6 @@ pub(crate) fn manager_with_fake(fake: &FakeTmux) -> crate::tmux::manager::Sessio
     mgr
 }
 
-/// The stringly half of [`manager_with_fake`], for a shim that is not a
-/// [`FakeTmux`] (it predates the fake or records differently). The manager
-/// keeps the process-wide socket — do not count calls against a refusing
-/// shim on this helper; the retry decision above reads that socket.
-#[cfg(unix)]
-pub(crate) fn manager_with_fake_bin(bin: &str) -> crate::tmux::manager::SessionManager {
-    let mut mgr = crate::tmux::manager::SessionManager::new();
-    mgr.with_tmux_bin(bin);
-    mgr.with_timeouts(FAKE_TIMEOUT, FAKE_TIMEOUT, FAKE_TIMEOUT);
-    mgr
-}
-
 /// The recorder is written by more than one process, so one call has to be
 /// recorded in one piece.
 ///
