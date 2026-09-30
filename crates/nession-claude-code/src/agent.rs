@@ -35,7 +35,11 @@ use crate::protocol::conversations::v1::{
 use crate::protocol::list::{ListRequestV1, ListResponseV1};
 use crate::protocol::messages::v1::{MessagesRequestV1, MessagesResponseV1, MessagesStateV1};
 use crate::protocol::read::{ReadFailureV1, ReadOkV1, ReadRequestV1, ReadResponseV1, Scope};
-use crate::protocol::{conversations, list, messages as messages_protocol, read};
+use crate::protocol::transcripts::v1::{
+    TranscriptBindingV1, TranscriptItemV1, TranscriptKindV1, TranscriptsRequestV1,
+    TranscriptsResponseV1, TranscriptsStateV1,
+};
+use crate::protocol::{conversations, list, messages as messages_protocol, read, transcripts};
 use crate::scanner;
 use crate::security;
 use crate::session_context::SessionContext;
@@ -293,6 +297,86 @@ impl ClaudeCodeAgentExtension {
         })?)
     }
 
+    /// Answer `claude-code.transcripts` (#1234).
+    ///
+    /// The conversation unit's sibling, and the same shape of answer for the
+    /// same reason: **the list is the answer**. What differs is *what* is
+    /// listed — [`conversation::transcripts_at`] includes the subagents a
+    /// session spawned, which the conversation list deliberately does not. That
+    /// is the same cwd-scoped candidate list over a wider set of files, not a
+    /// second selection mechanism.
+    async fn handle_transcripts(&self, payload: Value) -> anyhow::Result<Value> {
+        let request: TranscriptsRequestV1 = match serde_json::from_value(payload) {
+            Ok(request) => request,
+            // Answered rather than propagated, like every other decode here: a
+            // request that never gets a reply reads as a hang.
+            Err(e) => {
+                return Ok(serde_json::to_value(TranscriptsResponseV1::error(
+                    format!("bad_request: {e}"),
+                ))?)
+            }
+        };
+
+        // No host answer means cannot-say, never a guess. `Unavailable` rather
+        // than an empty list: an empty list is a claim about the cwd.
+        let Some(cwd) = self.context.session_cwd(&request.session_id).await else {
+            return Ok(serde_json::to_value(TranscriptsResponseV1::bare(
+                TranscriptsStateV1::Unavailable,
+            ))?);
+        };
+
+        let found = conversation::transcripts_at(&cwd);
+
+        // Reported only while it is exact *and current*, exactly as the
+        // conversation unit reports it: `bound_conversation` matches against
+        // this cwd's transcripts, so a binding from before the user changed
+        // directory is simply absent.
+        let binding = match self.bound_conversation(&request.session_id, &found).await {
+            Some(bound) => Some(TranscriptBindingV1 {
+                transcript_id: bound.claude_session_id.clone(),
+                activity: activity_of(
+                    self.context
+                        .session_claude_active(&request.session_id)
+                        .await,
+                    true,
+                ),
+            }),
+            None => None,
+        };
+
+        let start = match &request.cursor {
+            Some(raw) => match raw.parse::<usize>() {
+                Ok(index) if index <= found.len() => index,
+                _ => {
+                    return Ok(serde_json::to_value(TranscriptsResponseV1::error(
+                        "cursor is not a position in this list",
+                    ))?)
+                }
+            },
+            None => 0,
+        };
+
+        let limit = TranscriptsResponseV1::page_limit(request.limit) as usize;
+        let items: Vec<TranscriptItemV1> = found
+            .iter()
+            .skip(start)
+            .take(limit)
+            .map(transcript_item)
+            .collect();
+        let end = start + items.len();
+        let has_more = end < found.len();
+
+        Ok(serde_json::to_value(TranscriptsResponseV1 {
+            state: TranscriptsStateV1::Ready,
+            cwd: Some(cwd),
+            items,
+            binding,
+            next_cursor: has_more.then(|| end.to_string()),
+            has_more,
+            error: None,
+        })?)
+    }
+
     /// Answer `claude-code.messages` (#1222).
     ///
     /// One explicitly named conversation, or `not_found`. **Never a
@@ -432,6 +516,26 @@ fn conversation_item(c: &conversation::Discovered) -> ConversationItemV1 {
     }
 }
 
+/// A discovered transcript as the wire item. The provider-internal id is the
+/// item's `id` for the same reason `conversation_item` does it: inside this
+/// provider's namespace the longer name says nothing the shorter one does not.
+fn transcript_item(t: &conversation::Discovered) -> TranscriptItemV1 {
+    TranscriptItemV1 {
+        id: t.claude_session_id.clone(),
+        cwd: t.cwd.clone(),
+        kind: match t.kind {
+            conversation::TranscriptKind::Primary => TranscriptKindV1::Primary,
+            conversation::TranscriptKind::Sidechain => TranscriptKindV1::Sidechain,
+        },
+        parent_id: t.parent_id.clone(),
+        agent_id: t.agent_id.clone(),
+        title: t.title.clone(),
+        preview: t.preview.clone(),
+        created_at: t.created_at.clone(),
+        updated_at: t.updated_at.clone(),
+    }
+}
+
 /// Whether a conversation is live, from the host's activity answer and whether
 /// the Session is bound to it.
 ///
@@ -487,6 +591,7 @@ impl AgentExtension for ClaudeCodeAgentExtension {
             read::COMMAND => self.handle_read(payload).await,
             conversations::COMMAND => self.handle_conversations(payload).await,
             messages_protocol::COMMAND => self.handle_messages(payload).await,
+            transcripts::COMMAND => self.handle_transcripts(payload).await,
             other => anyhow::bail!("unknown claude_code command: {other}"),
         }
     }
@@ -543,6 +648,7 @@ mod tests {
                 read::v1::WIRE.to_string(),
                 conversations::v1::WIRE.to_string(),
                 messages_protocol::v1::WIRE.to_string(),
+                transcripts::v1::WIRE.to_string(),
             ]
         );
     }
@@ -967,6 +1073,154 @@ mod tests {
     /// unterminated last line as a record still arriving and returns nothing for
     /// it. These tests are about what the reader *returns*, so they write the
     /// terminator.
+    /// A project holding one session and the subagents it spawned.
+    fn project_with_subagents(
+        session: &str,
+        agents: &[&str],
+    ) -> (tempfile::TempDir, conversation::ProjectsRootForTest) {
+        let root = tempfile::tempdir().expect("tempdir");
+        let project = root.path().join("-work-bound");
+        std::fs::create_dir_all(&project).expect("project directory");
+        std::fs::write(
+            project.join(format!("{session}.jsonl")),
+            format!("{}\n", spoken("u1", "user", "go")),
+        )
+        .expect("write the session transcript");
+        if !agents.is_empty() {
+            let dir = project.join(session).join("subagents");
+            std::fs::create_dir_all(&dir).expect("subagents directory");
+            for agent in agents {
+                let record = serde_json::json!({
+                    "type": "assistant",
+                    "uuid": format!("a-{agent}"),
+                    "timestamp": "2026-09-25T00:00:02Z",
+                    "cwd": BOUND_CWD,
+                    "sessionId": session,
+                    "isSidechain": true,
+                    "message": {"role": "assistant", "content": "work"},
+                })
+                .to_string();
+                std::fs::write(
+                    dir.join(format!("agent-{agent}.jsonl")),
+                    format!("{record}\n"),
+                )
+                .expect("write the subagent transcript");
+            }
+        }
+        let guard = conversation::ProjectsRootForTest::set(root.path().to_path_buf());
+        (root, guard)
+    }
+
+    #[tokio::test]
+    async fn transcripts_list_the_session_and_the_subagents_it_spawned() {
+        // The difference between this unit and `claude-code.conversations`, in
+        // one assertion: the conversation list shows the session, and this one
+        // shows the session *and* what it delegated to.
+        let (_root, _guard) = project_with_subagents("aaa", &["one", "two"]);
+        let extension = ClaudeCodeAgentExtension::new(Arc::new(FixedContext::at(Some(BOUND_CWD))));
+
+        let value = extension
+            .handle_transcripts(serde_json::json!({"session_id": "agent:s"}))
+            .await
+            .unwrap();
+
+        assert_eq!(value["state"], "ready", "{value}");
+        let items = value["items"].as_array().expect("items");
+        assert_eq!(items.len(), 3, "the session and both subagents: {value}");
+        assert_eq!(
+            items.iter().filter(|i| i["kind"] == "sidechain").count(),
+            2,
+            "{value}"
+        );
+        assert_eq!(
+            items.iter().filter(|i| i["kind"] == "primary").count(),
+            1,
+            "{value}"
+        );
+        for sidechain in items.iter().filter(|i| i["kind"] == "sidechain") {
+            assert_eq!(sidechain["parent_id"], "aaa", "{sidechain}");
+            assert!(sidechain["agent_id"].is_string(), "{sidechain}");
+        }
+        assert!(
+            !value.to_string().contains("subagents"),
+            "the response leaks where the transcripts are: {value}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_host_that_cannot_name_the_cwd_answers_unavailable_not_empty() {
+        // `unavailable` is not an empty list: an empty list is a claim about the
+        // cwd, and this is the case where nothing can be claimed about it.
+        let (_root, _guard) = project_with_subagents("aaa", &["one"]);
+        let extension = ClaudeCodeAgentExtension::new(Arc::new(FixedContext::at(None)));
+
+        let value = extension
+            .handle_transcripts(serde_json::json!({"session_id": "agent:s"}))
+            .await
+            .unwrap();
+
+        assert_eq!(value["state"], "unavailable", "{value}");
+        assert!(
+            !value.as_object().is_some_and(|o| o.contains_key("items")),
+            "an unavailable answer claimed the cwd holds nothing: {value}"
+        );
+    }
+
+    #[tokio::test]
+    async fn transcripts_are_paginated_and_a_bad_cursor_is_an_error() {
+        // A 464-subagent corpus is not a page, so the list has to page — and a
+        // cursor that is not a position is an error rather than a silent first
+        // page, which would hide the caller's bug behind a plausible answer.
+        let (_root, _guard) = project_with_subagents("aaa", &["one", "two"]);
+        let extension = ClaudeCodeAgentExtension::new(Arc::new(FixedContext::at(Some(BOUND_CWD))));
+
+        let first = extension
+            .handle_transcripts(serde_json::json!({"session_id": "agent:s", "limit": 2}))
+            .await
+            .unwrap();
+        assert_eq!(first["items"].as_array().map(Vec::len), Some(2), "{first}");
+        assert_eq!(first["has_more"], true, "{first}");
+
+        let second = extension
+            .handle_transcripts(serde_json::json!({
+                "session_id": "agent:s",
+                "cursor": first["next_cursor"].clone(),
+            }))
+            .await
+            .unwrap();
+        assert_eq!(second["has_more"], false, "{second}");
+        assert_eq!(
+            second["items"].as_array().map(Vec::len),
+            Some(1),
+            "{second}"
+        );
+
+        let bad = extension
+            .handle_transcripts(serde_json::json!({"session_id": "agent:s", "cursor": "nope"}))
+            .await
+            .unwrap();
+        assert_eq!(bad["state"], "error", "{bad}");
+    }
+
+    #[tokio::test]
+    async fn a_transcripts_request_that_names_no_session_is_answered_not_propagated() {
+        // A request that never gets a reply reads to the UI as a hang.
+        let extension = ClaudeCodeAgentExtension::new(Arc::new(NoSessionContext));
+
+        let value = extension
+            .handle_transcripts(serde_json::json!({}))
+            .await
+            .unwrap();
+
+        assert_eq!(value["state"], "error", "{value}");
+        assert!(
+            value["error"]
+                .as_str()
+                .is_some_and(|e| e.starts_with("bad_request")),
+            "{value}"
+        );
+    }
+
     fn projects_with_lines(
         id: &str,
         lines: &[String],

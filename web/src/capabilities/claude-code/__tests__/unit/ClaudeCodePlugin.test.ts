@@ -21,6 +21,9 @@ const AGENT_MANIFEST: ProtocolManifest = {
     // manifest before anything is sent — an unadvertised unit would throw.
     'claude-code.conversations': { versions: [1] },
     'claude-code.messages': { versions: [1] },
+    // `#1234`: the transcript projection's collection, which is where a
+    // session's subagents are reachable. Advertised for the same reason.
+    'claude-code.transcripts': { versions: [1] },
   },
 };
 
@@ -46,6 +49,12 @@ const readReq = {
 } as const;
 
 const conversationsReq = {
+  agent_id: 'a1',
+  session_id: 'a1:work',
+  limit: 200,
+} as const;
+
+const transcriptsReq = {
   agent_id: 'a1',
   session_id: 'a1:work',
   limit: 200,
@@ -154,6 +163,22 @@ describe('ClaudeCodePlugin', () => {
       await expect(pending).resolves.toEqual(response);
     });
 
+    it('claudeCodeTranscripts forwards the whole request object', async () => {
+      // Its own unit since #1234: a transcript is not always a session, so this
+      // list carries subagents the conversation list deliberately excludes. If
+      // the request did not survive addressing, the caller would silently get
+      // whichever unit answered instead.
+      const pending = plugin.claudeCodeTranscripts(transcriptsReq);
+      expect(surface.requests[0]).toMatchObject({
+        type: 'claude-code.transcripts',
+        payload: transcriptsReq,
+      });
+
+      const response = { state: 'ready', items: [], has_more: false };
+      surface.resolveNext('claude-code.transcripts', response);
+      await expect(pending).resolves.toEqual(response);
+    });
+
     it('claudeCodeMessages forwards the whole request object, conversation_id included', async () => {
       // The id is the unit's only selection mechanism (#1222) — if it did not
       // survive addressing intact, every read would name nothing and answer
@@ -213,6 +238,9 @@ describe('ClaudeCodePlugin', () => {
         'claude-code feature is not connected',
       );
       await expect(plugin.claudeCodeMessages(messagesReq)).rejects.toThrow(
+        'claude-code feature is not connected',
+      );
+      await expect(plugin.claudeCodeTranscripts(transcriptsReq)).rejects.toThrow(
         'claude-code feature is not connected',
       );
       expect(surface.requests).toHaveLength(0);

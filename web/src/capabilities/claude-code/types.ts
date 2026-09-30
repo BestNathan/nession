@@ -34,6 +34,11 @@ import type {
   ReadRequest,
   ReadResponse,
 } from '@/generated/protocol/claude-code/read/v1';
+import type {
+  TranscriptItemV1,
+  TranscriptsRequest,
+  TranscriptsResponse,
+} from '@/generated/protocol/claude-code/transcripts/v1';
 
 /**
  * Requests, with the routing field the contract does not carry — `agent_id` is
@@ -43,12 +48,14 @@ export type ClaudeCodeListRequest = ListRequest & { agent_id: string };
 export type ClaudeCodeReadRequest = ReadRequest & { agent_id: string };
 export type ClaudeCodeConversationsRequest = ConversationsRequest & { agent_id: string };
 export type ClaudeCodeMessagesRequest = MessagesRequest & { agent_id: string };
+export type ClaudeCodeTranscriptsRequest = TranscriptsRequest & { agent_id: string };
 
 /** The capability's names for the responses. */
 export type ClaudeCodeListResponse = ListResponse;
 export type ClaudeCodeReadResponse = ReadResponse;
 export type ClaudeCodeConversationsResponse = ConversationsResponse;
 export type ClaudeCodeMessagesResponse = MessagesResponse;
+export type ClaudeCodeTranscriptsResponse = TranscriptsResponse;
 
 /**
  * The two units' state names, narrowed for callers.
@@ -64,6 +71,16 @@ export type ClaudeCodeMessagesState = MessagesResponse['state'];
 /** The conversation shape both units speak, and its liveness. */
 export type ClaudeCodeConversationItem = ConversationItemV1;
 export type ClaudeCodeConversationActivity = ConversationActivityV1;
+
+/**
+ * A transcript, which is not always a session (#1234).
+ *
+ * A session's own transcript and each subagent's are the same shape, told apart
+ * by `kind` — and a sidechain carries `parent_id`/`agent_id`, which is the whole
+ * relation without a tree. Re-exported rather than narrowed, for the same reason
+ * the states above are: a hand-kept copy of a union is a copy that drifts.
+ */
+export type ClaudeCodeTranscriptItem = TranscriptItemV1;
 
 /**
  * The two halves of `claude-code.read`'s answer.

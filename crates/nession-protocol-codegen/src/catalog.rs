@@ -406,6 +406,37 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
         },
         Unit {
             owner: "claude-code",
+            id: "claude-code.transcripts",
+            version: 1,
+            wires: &["claude-code.transcripts"],
+            decls: vec![
+                decl_of::<nession_claude_code::protocol::transcripts::v1::TranscriptsRequestV1>(cfg),
+                decl_of::<nession_claude_code::protocol::transcripts::v1::TranscriptsResponseV1>(cfg),
+                decl_of::<nession_claude_code::protocol::transcripts::v1::TranscriptsStateV1>(cfg),
+                decl_of::<nession_claude_code::protocol::transcripts::v1::TranscriptItemV1>(cfg),
+                decl_of::<nession_claude_code::protocol::transcripts::v1::TranscriptBindingV1>(cfg),
+                decl_of::<nession_claude_code::protocol::transcripts::v1::TranscriptKindV1>(cfg),
+                // Owned by `claude-code.conversations` and reused here as the
+                // binding's `activity`, so it appears in both files — the Scope
+                // precedent across list/read: generated files duplicate rather
+                // than import.
+                decl_of::<nession_claude_code::protocol::conversations::v1::ConversationActivityV1>(
+                    cfg,
+                ),
+            ],
+            request: Some((
+                "TranscriptsRequest",
+                nession_claude_code::protocol::transcripts::v1::TranscriptsRequestV1::inline,
+                schema_of::<nession_claude_code::protocol::transcripts::v1::TranscriptsRequestV1>,
+            )),
+            response: Some((
+                "TranscriptsResponse",
+                nession_claude_code::protocol::transcripts::v1::TranscriptsResponseV1::inline,
+                schema_of::<nession_claude_code::protocol::transcripts::v1::TranscriptsResponseV1>,
+            )),
+        },
+        Unit {
+            owner: "claude-code",
             id: "claude-code.messages",
             version: 1,
             wires: &["claude-code.messages"],
