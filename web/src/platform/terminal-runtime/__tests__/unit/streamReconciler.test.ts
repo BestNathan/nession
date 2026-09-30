@@ -479,6 +479,58 @@ describe('StreamReconciler', () => {
     expect(h.out).toEqual(['one', 'replay-2']);
   });
 
+  it('drops a held sequenced resize that a newer unsequenced one supersedes (#1350)', async () => {
+    const h = makeHarness();
+    live(h, 1, 'one');
+    // 2 is missing, so the recorded resize at 3 cannot be placed: it waits.
+    liveResize(h, 3, 120, 40);
+    expect(h.resizes).toEqual([]);
+    expect(h.requests).toHaveLength(1);
+    expect(h.requests[0].afterSeq).toBe(1);
+
+    // While it is held, another connection reflows the shared pane. The agent
+    // did not record that, so this frame states no position and reports the
+    // pane's size *now* — newer than the resize waiting behind the gap.
+    h.reconciler.acceptLiveResize({ cols: 100, rows: 30 });
+    expect(h.resizes).toEqual([[100, 30]]);
+
+    // The gap fills and the held resize reaches its turn.
+    h.requests[0].resolve(reply([2, 3].map((seq) => output(seq))));
+    await flushMicrotasks();
+
+    // **The older size never lands.** Committing the held resize after the
+    // level would put xterm back on the grid the pane has left, and nothing
+    // corrects it: the client resizes xterm one way and sends nothing back.
+    expect(h.resizes).toEqual([[100, 30]]);
+    expect(h.out).toEqual(['one', 'replay-2']);
+
+    // And its position is still consumed — the frame advanced the cursor
+    // without applying anything, so the timeline is not stranded one short of
+    // the frames above it.
+    live(h, 4, 'four');
+    expect(h.requests).toHaveLength(1);
+    expect(h.out).toEqual(['one', 'replay-2', 'four']);
+  });
+
+  it('applies a sequenced resize recorded after the level that superseded a held one', async () => {
+    const h = makeHarness();
+    live(h, 1, 'one');
+    liveResize(h, 3, 120, 40);
+    // The level is newer than everything already buffered, and newer than
+    // nothing else: this second requested resize is recorded after it, so it
+    // is an event the level cannot have superseded.
+    h.reconciler.acceptLiveResize({ cols: 100, rows: 30 });
+    liveResize(h, 4, 130, 50);
+
+    h.requests[0].resolve(reply([2, 3].map((seq) => output(seq))));
+    await flushMicrotasks();
+
+    expect(h.resizes).toEqual([
+      [100, 30],
+      [130, 50],
+    ]);
+  });
+
   it('passes an unsequenced resize straight through', () => {
     const h = makeHarness();
     live(h, 1, 'one');

@@ -108,7 +108,7 @@ export class StreamReconciler {
       this.sink.onOutput(frame.data, frame.bootstrap);
       return;
     }
-    this.accept(frame.streamEpoch, frame.streamSeq, () =>
+    this.accept(frame.streamEpoch, frame.streamSeq, 'output', () =>
       this.sink.onOutput(frame.data, frame.bootstrap),
     );
   }
@@ -126,21 +126,74 @@ export class StreamReconciler {
    * A resize stating no position is outside the timeline for the same reason a
    * bootstrap is: it is a size the agent did not record — a pane another
    * connection reflowed, or a resize tmux clamped — so it is a level rather
-   * than an event, and an agent predating the fields states none either. It
-   * goes straight through, which is what it did before there was anything to
-   * place.
+   * than an event, and an agent predating the fields states none either. It goes
+   * straight through, **and it takes the resizes still waiting here with it**
+   * (#1350).
+   *
+   * ## Why a level supersedes the events behind it
+   *
+   * A resize is state, not a byte stream: what counts is the last size applied,
+   * and a level reports the pane's size *now* — the agent sends it because tmux
+   * said the pane changed. Every frame still buffered arrived before it, so
+   * every buffered resize states a size the pane has already left, and
+   * committing one *after* the level was applied puts xterm back on a grid the
+   * pane no longer has. Nothing then corrects it: the client resizes xterm one
+   * way and sends nothing back, and the agent's own `%window-resize` guard has
+   * already recorded the level as the last size this client was told.
+   *
+   * So a superseded resize still commits, in its place, and applies nothing. It
+   * is not a second cursor and not a jump: the frame consumes its sequence
+   * number exactly as it would have, which is what keeps the frontier contiguous
+   * with what the agent recorded. Dropping it outright would strand the cursor
+   * one short of the frames above it and hold them until the hole-attempt limit
+   * gave up — the level decides which *size* survives, never where the timeline
+   * is.
+   *
+   * ## What this deliberately does not cover
+   *
+   * Only the frames buffered at this moment are superseded. A sequenced resize
+   * that arrives afterwards — live, or carried by a replay — is applied
+   * normally, and rightly so: it was recorded after this level was sent. Two
+   * things are outside the rule rather than decided by it:
+   *
+   * - A sequenced resize still *in flight* when the level applied. It arrives
+   *   after, so it is applied, even though it may state the older size. The
+   *   client holds no fact that orders the two — the level carries no position
+   *   and the drained frame carries no arrival time — and guessing from more
+   *   state would be the same guess with more state.
+   * - A level that is itself stale. The agent announces the size tmux reported
+   *   when the pane changed; it does not re-read the pane, so a notification
+   *   read late states a size the pane may have left. The rule would then prefer
+   *   it over a *newer* buffered resize. Nothing here can tell that apart from a
+   *   fresh level, and under the contract the frame is written to — the pane's
+   *   size now — the level is newer by construction. The fix for that case is on
+   *   the frame, not on the cursor, and #1350 records it.
    */
   acceptLiveResize(frame: LiveResizeFrame): void {
     if (this.disposed) {
       return;
     }
     if (frame.streamEpoch === undefined || frame.streamSeq === undefined) {
+      this.supersedeBufferedResizes();
       this.sink.onResize(frame.cols, frame.rows);
       return;
     }
-    this.accept(frame.streamEpoch, frame.streamSeq, () =>
+    this.accept(frame.streamEpoch, frame.streamSeq, 'resize', () =>
       this.sink.onResize(frame.cols, frame.rows),
     );
+  }
+
+  /**
+   * Mark every sequenced resize still waiting for its predecessors as
+   * superseded, so that committing it advances the cursor and changes no size
+   * (#1350). See {@link acceptLiveResize} for the rule and its boundary.
+   */
+  private supersedeBufferedResizes(): void {
+    for (const frame of this.pending.values()) {
+      if (frame.kind === 'resize') {
+        frame.superseded = true;
+      }
+    }
   }
 
   /**
@@ -204,7 +257,7 @@ export class StreamReconciler {
     return this.attemptsFor === position ? this.attempts : 0;
   }
 
-  private accept(epoch: number, seq: number, apply: () => void): void {
+  private accept(epoch: number, seq: number, kind: PendingKind, apply: () => void): void {
     if (this.disposed) {
       return;
     }
@@ -229,7 +282,7 @@ export class StreamReconciler {
       return;
     }
     if (!this.pending.has(seq)) {
-      this.pending.set(seq, { seq, apply });
+      this.pending.set(seq, { seq, kind, superseded: false, apply });
     }
     if (anchors) {
       this.anchor();
@@ -280,6 +333,8 @@ export class StreamReconciler {
       if (!this.pending.has(event.streamSeq)) {
         this.pending.set(event.streamSeq, {
           seq: event.streamSeq,
+          kind: event.kind,
+          superseded: false,
           apply: () => applyTerminalStreamEvents([event], this.handlers),
         });
       }
@@ -438,6 +493,11 @@ export class StreamReconciler {
    * a frame means exactly one thing: a gap is open ahead of the frontier. The
    * cursor is the only thing that decides what is still needed, and a frame it
    * has already passed is one the snapshot or an earlier commit covered.
+   *
+   * A superseded frame moves the cursor and applies nothing — the one place
+   * that distinction is acted on. Its position is still where the stream put it,
+   * so it is still committed; its size lost to the unsequenced resize that
+   * arrived after it (#1350, see {@link acceptLiveResize}).
    */
   private drain(): void {
     if (this.frontier !== null) {
@@ -455,7 +515,9 @@ export class StreamReconciler {
       }
       this.pending.delete(seq);
       this.frontier = seq;
-      frame.apply();
+      if (!frame.superseded) {
+        frame.apply();
+      }
     }
   }
 }
@@ -495,8 +557,24 @@ export interface StreamSink {
 
 interface PendingFrame {
   seq: number;
+  /**
+   * What this frame will do when its turn comes. The cursor places both kinds
+   * the same way, so this is not about ordering: it exists because one thing —
+   * a level resize — has to find the resizes it supersedes, and a closure says
+   * nothing about what it applies (#1350).
+   */
+  kind: PendingKind;
+  /**
+   * Set when an unsequenced resize arrived while this frame was still buffered:
+   * the pane is already at a newer size, so this frame commits without applying
+   * anything. See {@link StreamReconciler.acceptLiveResize}.
+   */
+  superseded: boolean;
   apply: () => void;
 }
+
+/** The two things a buffered frame can be. */
+type PendingKind = 'output' | 'resize';
 
 /** One recovery request, identified so its answer cannot be mistaken for another's. */
 interface Flight {
