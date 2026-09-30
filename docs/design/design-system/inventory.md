@@ -134,7 +134,7 @@ The audit separately shows whether that chain reaches shipping consumers; a corr
 
 ### Finding
 
-Typography is **converging under #1216**: chrome roles now carry size, weight, and line-height via `experience.{web,app}.typography.*` and `web/src/shared/typography/chromeRoles.ts`; raw `text-*` / local `font-*` drift remains in shadcn primitives, dialogs, and some capability edges (Phase 4 audit).
+Typography **chrome convergence (#1216 P1–P3)** is shipped on staging: Shell, navigation, capability workspace chrome, explorer/JSON tree, and capsule projections use `chromeSansRole` / `chromeMonoRole` backed by `experience.{web,app}.typography.*`. **Remaining drift (P4)** is classified, not anonymous: shadcn `components/ui/*` primitives, dialog/popover defaults, Markdown/prose and conversation bubbles, CodeMirror `workspace.editor*`, xterm metrics, and terminal workload surfaces. New chrome must use role helpers; raw `text-*` there is convergence debt, not an undecided pattern.
 
 The Primitive layer only has the shared body scale:
 
