@@ -57,7 +57,12 @@ export class StreamReconciler {
    * discarded rather than applied to a stream it no longer describes (#1303).
    */
   private generation = 0;
-  private inFlight: { generation: number; afterSeq: number } | null = null;
+  /**
+   * The recovery request currently out. Compared by identity, not by value:
+   * a request whose deadline expires must not clear — or be confused with —
+   * one issued after it.
+   */
+  private inFlight: Flight | null = null;
   /**
    * Attempts spent on the hole at {@link attemptsFor}, which is the cursor a
    * request was made from. Keyed by position so that a fill — or a jump over a
@@ -205,11 +210,18 @@ export class StreamReconciler {
    * sequence number — that is what makes a frame the replay already carries
    * safe to receive again live.
    */
-  private onReply(generation: number, afterSeq: number, reply: ResumeReply): void {
-    if (this.disposed || generation !== this.generation) {
+  private onReply(flight: Flight, reply: ResumeReply): void {
+    if (this.disposed || flight.generation !== this.generation) {
       return;
     }
-    this.inFlight = null;
+    // Only if this is still the request in flight: a reply that arrives after
+    // its own deadline already expired is applied (its events can only fill
+    // forward, never re-open what the frontier has passed) but must not clear a
+    // request issued since.
+    if (this.inFlight === flight) {
+      this.inFlight = null;
+    }
+    const afterSeq = flight.afterSeq;
     this.wantHistory = false;
     if (!reply.epochMatch) {
       // The agent is on a different stream generation than the one we asked
@@ -259,11 +271,14 @@ export class StreamReconciler {
     this.recover();
   }
 
-  private onReplyFailed(generation: number, afterSeq: number): void {
-    if (this.disposed || generation !== this.generation) {
+  private onReplyFailed(flight: Flight): void {
+    if (this.disposed || flight.generation !== this.generation) {
       return;
     }
-    this.inFlight = null;
+    if (this.inFlight === flight) {
+      this.inFlight = null;
+    }
+    const afterSeq = flight.afterSeq;
     this.noteAttempt(afterSeq);
     // A stream with no anchor has no hole to fill, only history that did not
     // come. Holding its first frames behind a request that already failed
@@ -303,11 +318,28 @@ export class StreamReconciler {
       this.abandon();
       return;
     }
-    const generation = this.generation;
-    this.inFlight = { generation, afterSeq };
+    const flight: Flight = { generation: this.generation, afterSeq };
+    this.inFlight = flight;
+    // The reconciler's own clock, not the transport's promise: an unanswered
+    // request must not hold output indefinitely. On expiry the frames in hand
+    // are committed and the hole is given up — the next frame starts a fresh
+    // attempt from wherever the stream got to.
+    const deadline = setTimeout(() => {
+      if (this.disposed || this.inFlight !== flight) {
+        return;
+      }
+      this.inFlight = null;
+      this.abandon();
+    }, RESUME_DEADLINE_MS);
     void this.resume(this.epoch, afterSeq).then(
-      (reply) => this.onReply(generation, afterSeq, reply),
-      () => this.onReplyFailed(generation, afterSeq),
+      (reply) => {
+        clearTimeout(deadline);
+        this.onReply(flight, reply);
+      },
+      () => {
+        clearTimeout(deadline);
+        this.onReplyFailed(flight);
+      },
     );
   }
 
@@ -415,6 +447,27 @@ interface PendingFrame {
   seq: number;
   apply: () => void;
 }
+
+/** One recovery request, identified so its answer cannot be mistaken for another's. */
+interface Flight {
+  generation: number;
+  afterSeq: number;
+}
+
+/**
+ * How long a recovery request may hold the frames in hand before the
+ * reconciler gives up on it.
+ *
+ * The request is a transport round trip, and the transport is allowed to be
+ * slow in ways a terminal cannot wait out: `MessageRouter.request` waits up to
+ * 15s and `WebSocketService.request` parks behind its readiness gate for as
+ * long as that, so a promise that is never answered never fails either. Waiting
+ * on it means waiting on the transport's clock — measured as a terminal frozen
+ * on its bootstrap for the whole of a 15s window (#1320). This deadline is the
+ * reconciler's own: a couple of round trips' worth, far below the transport's,
+ * and the stream continues past the hole if it expires.
+ */
+export const RESUME_DEADLINE_MS = 2_000;
 
 /**
  * How many requests a hole gets before the reconciler stops waiting for it.

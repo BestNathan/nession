@@ -1,6 +1,7 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   StreamReconciler,
+  RESUME_DEADLINE_MS,
   type ResumeReply,
 } from '@/platform/terminal-runtime/streamReconciler';
 import type { TerminalStreamEvent } from '@/platform/terminal-runtime/streamApply';
@@ -291,6 +292,60 @@ describe('StreamReconciler', () => {
     h.requests[1].resolve(reply([7, 8, 9].map((seq) => output(seq))));
     await flushMicrotasks();
     expect(h.out).toEqual(['five', 'replay-6', 'replay-7', 'replay-8', 'nine']);
+  });
+
+  it('does not hold output forever behind a request that is never answered (#1320)', async () => {
+    // The real transport can leave a request pending indefinitely:
+    // `WebSocketService.request` parks behind its readiness gate for up to 15s,
+    // and a promise that is never answered never rejects either. Output in hand
+    // must not wait on that clock — measured in CI as a terminal frozen on its
+    // bootstrap for a whole 15s window.
+    vi.useFakeTimers();
+    try {
+      const h = makeHarness();
+      live(h, 5, 'five');
+      live(h, 8, 'eight');
+      expect(h.requests).toHaveLength(1);
+      expect(h.out).toEqual(['five']);
+
+      // Nothing answers. The reconciler's own deadline gives up on the hole
+      // and commits what it holds.
+      await vi.advanceTimersByTimeAsync(RESUME_DEADLINE_MS);
+      expect(h.out).toEqual(['five', 'eight']);
+
+      // And the stream keeps flowing from there.
+      live(h, 9, 'nine');
+      expect(h.out).toEqual(['five', 'eight', 'nine']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('ignores an answer that arrives after its own deadline (#1320)', async () => {
+    vi.useFakeTimers();
+    try {
+      const h = makeHarness();
+      live(h, 5, 'five');
+      live(h, 8, 'eight');
+      await vi.advanceTimersByTimeAsync(RESUME_DEADLINE_MS);
+      expect(h.out).toEqual(['five', 'eight']);
+
+      // The parked request finally answers. Its events are behind the frontier
+      // the deadline already moved, so they are not re-applied — the frame it
+      // was holding was committed once, and stays committed once.
+      h.requests[0].resolve(reply([6, 7, 8].map((seq) => output(seq))));
+      await flushMicrotasks();
+      expect(h.out).toEqual(['five', 'eight']);
+
+      // The frontier the deadline set is contiguous with what follows, so the
+      // next frame needs no recovery at all — the abandoned hole is simply
+      // behind the stream now.
+      live(h, 9, 'nine');
+      expect(h.requests).toHaveLength(1);
+      expect(h.out).toEqual(['five', 'eight', 'nine']);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('lets frames in hand anchor a stream whose history never arrived', async () => {
