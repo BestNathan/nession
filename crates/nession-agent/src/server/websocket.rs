@@ -3225,6 +3225,7 @@ impl AgentServer {
 mod tests {
     use super::*;
     use crate::fs::ops::FileData;
+    use crate::fs::sandbox::PathSandbox;
     use crate::server::outbound::QueuedFrame;
     use crate::test_support::TestSession;
     use base64::Engine;
@@ -3680,6 +3681,147 @@ mod tests {
             next,
             stream_seq + 1,
             "the next output frame does not continue from the resize's position"
+        );
+    }
+
+    /// The fan-out waits for room on a stalled peer; the session's backend lock
+    /// is not what waits with it (#1303, review finding P2.3).
+    ///
+    /// The resize arm holds the per-session backend for the resize itself and
+    /// for nothing else. Written as a `match` on
+    /// `backend.lock().await.resize(..)`, the guard that scrutinee produces is a
+    /// *temporary of the match*: it lives until the match ends, which is after
+    /// `fan_out_resize(..).await` — and that wait is the terminal lane's stall
+    /// grace (15 s in production) for a peer that has stopped draining. Every
+    /// `terminal.input` for that session then queues behind a peer that is not
+    /// reading, which is what `AttachedSession::backend`'s separate lock exists
+    /// to keep from happening.
+    ///
+    /// **This drives the arm, not the helper.** It dispatches a real
+    /// `agent.terminal.resize` frame through the real route table, so restoring
+    /// the scrutinee form makes it fail. `the_fan_out_states_the_position_the_stream_recorded`
+    /// calls [`fan_out_resize`] directly and cannot see the handler's scoping —
+    /// which is why this one exists rather than another assertion in that one.
+    ///
+    /// The failure is bounded rather than 15 seconds long: the handler holds the
+    /// lock for the whole stall, so the lock attempt below is refused for as
+    /// long as it is given, and the assertion fails on the *bound* (1 s) instead
+    /// of on the grace.
+    #[tokio::test]
+    async fn a_stalled_fan_out_does_not_hold_the_session_backend() {
+        // A peer that cannot drain. Nothing runs its writer, so the frame it is
+        // given stays queued and holds its claim on the byte budget — one frame
+        // of the queue's own size takes the whole budget, which is what makes
+        // the fan-out's *first* send park on the budget rather than needing
+        // sixty-four frames to fill the count bound. The grace is long on
+        // purpose: the lock must be free because the handler released it, not
+        // because the stall happened to end.
+        let (peer_outbound, _peer_frames) =
+            P2pOutbound::with_terminal_grace(Duration::from_secs(30));
+        peer_outbound
+            .send_terminal(WsMessage::Text("x".repeat(outbound::OUTBOUND_BYTE_BUDGET)))
+            .await
+            .expect("the peer's queue takes one frame of its own size");
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let tmux = Arc::new(SessionManager::new());
+        let file_ops = Arc::new(FileOps::new(
+            PathSandbox::new(tmp.path()).expect("the sandbox root exists"),
+        ));
+        let (requester, _requester_frames) = P2pOutbound::new();
+        let (resize, _resize_updates) = ResizeReporter::new();
+        let client_id = Arc::new(Mutex::new(Some("controller".to_string())));
+        let sessions: Arc<SessionMapLock> =
+            Arc::new(SessionMapLock::new(std::collections::HashMap::new()));
+
+        // The one handle the assertion below needs: the same `Arc` the session
+        // map holds, taken before the map owns it.
+        let backend: Arc<Mutex<Box<dyn TmuxSession>>> =
+            Arc::new(Mutex::new(Box::new(InertBackend) as Box<dyn TmuxSession>));
+        let mut control = session_terminal::SessionControlState::new();
+        let generation = control.acquire("controller");
+        sessions_lock(&sessions).insert(
+            "s1".to_string(),
+            AttachedSession {
+                backend: Arc::clone(&backend),
+                peers: vec![SessionPeer {
+                    client_id: "stalled".to_string(),
+                    outbound: peer_outbound.clone(),
+                    output_tx: None,
+                    detached_for_not_draining: Arc::new(AtomicBool::new(false)),
+                }],
+                control,
+                stream: session_terminal::SessionStreamState::new(),
+            },
+        );
+
+        let dispatch = tokio::spawn({
+            let sessions = Arc::clone(&sessions);
+            let tmux = Arc::clone(&tmux);
+            let file_ops = Arc::clone(&file_ops);
+            let client_id = Arc::clone(&client_id);
+            let requester = requester.clone();
+            let resize = resize.clone();
+            let attach_mode = AttachMode::Plain;
+            async move {
+                let request = P2pRequest {
+                    id: "resize-1",
+                    tmux: &tmux,
+                    sessions: &sessions,
+                    client_id: &client_id,
+                    outbound: &requester,
+                    default_working_dir: "/tmp",
+                    file_ops: &file_ops,
+                    listen_address: "127.0.0.1:0",
+                    agent_id: "test-agent",
+                    attach_mode: &attach_mode,
+                    resize: &resize,
+                };
+                dispatch_p2p(
+                    request,
+                    msg_types::TERMINAL_RESIZE,
+                    serde_json::json!({
+                        "session_name": "s1",
+                        "cols": 120,
+                        "rows": 40,
+                        "control_generation": generation,
+                    }),
+                )
+                .await
+            }
+        });
+
+        // The observation that makes the assertion below about the lock rather
+        // than about timing: `awaited` is the lane's own record that a send
+        // found the queue full and waited, and it is incremented inside the
+        // fan-out — after the resize, with the peers already in hand. So the
+        // handler has entered `fan_out_resize` and is parked in it.
+        let parked = tokio::time::timeout(Duration::from_secs(10), async {
+            while peer_outbound.snapshot().awaited == 0 {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await;
+        assert!(
+            parked.is_ok(),
+            "the fan-out never reached the stalled peer, so this test is \
+             asserting nothing about a parked handler"
+        );
+        assert!(
+            !dispatch.is_finished(),
+            "the fan-out completed: the peer drained after all, and the lock \
+             was never contended"
+        );
+
+        // The property. A bounded wait, so the mutated form fails on the bound
+        // rather than after the grace.
+        let acquired = tokio::time::timeout(Duration::from_secs(1), backend.lock()).await;
+        assert!(
+            acquired.is_ok(),
+            "the session's backend is unavailable while the fan-out waits for a \
+             peer that is not draining: the guard lives to the end of the match \
+             it was taken in, so every terminal.input for this session queues \
+             behind the stall grace"
         );
     }
 
