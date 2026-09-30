@@ -10,7 +10,7 @@ env:
 
 on:
   pull_request:
-    branches: [staging]
+    branches: [staging, main]
 
 # One gate run per PR. Superseded runs are useless, so cancel them.
 concurrency:

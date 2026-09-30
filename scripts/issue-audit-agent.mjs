@@ -53,9 +53,9 @@ function extractUsage(result) {
 function estimateCost(usage) {
   const rates = {
     input: envNumber('LLM_INPUT_USD_PER_MTOK'),
-    output: envNumber(LLLM_OUTPUT_USD_PER_MTOK'),
+    output: envNumber('LLM_OUTPUT_USD_PER_MTOK'),
     cacheRead: envNumber('LLM_CACHE_READ_USD_PER_MTOK'),
-    cacheWrite: envNumber(LLLM_CACHE_WRITE_USD_PER_MTOK'),
+    cacheWrite: envNumber('LLM_CACHE_WRITE_USD_PER_MTOK'),
   };
   if (Object.values(rates).every((x) => x == null)) return { usd: null, rates };
   const usd = (
