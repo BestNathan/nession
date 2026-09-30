@@ -419,4 +419,98 @@ mod tests {
         assert_eq!(page.stats.unknown_records, 1);
         assert_eq!(page.stats.invalid_records, 1);
     }
+
+    #[test]
+    fn a_new_upstream_record_type_needs_no_new_protocol_generation() {
+        // #1234's compatibility requirement, as an assertion rather than a hope.
+        // A record type this version has never seen is carried *with its upstream
+        // name*, the page still answers, and the contract that carried it is
+        // still v1 — which is what "the subtype is data" has to mean if it means
+        // anything. If a Claude release could force a new wire generation, the
+        // `unknown` kind would not be doing its job.
+        let body = concat!(
+            r#"{"type":"assistant","uuid":"a1","message":{"role":"assistant","content":"hi"}}"#,
+            "\n",
+            r#"{"type":"quantum-entanglement-state","subtype":"collapsed","uuid":"q1"}"#,
+            "\n",
+        );
+        let page = page_of(body);
+
+        let unknown = page
+            .items
+            .iter()
+            .find_map(|item| match item {
+                TranscriptEntryV1::Unknown {
+                    upstream_type,
+                    upstream_subtype,
+                    ..
+                } => Some((upstream_type.clone(), upstream_subtype.clone())),
+                _ => None,
+            })
+            .expect("the unknown record is drawn rather than dropped");
+        assert_eq!(
+            unknown.0.as_deref(),
+            Some("quantum-entanglement-state"),
+            "the record type this version does not know was not named"
+        );
+        assert_eq!(unknown.1.as_deref(), Some("collapsed"));
+        assert_eq!(page.stats.unknown_records, 1);
+
+        let descriptor = crate::protocol::transcript_items::v1::descriptor().unwrap();
+        assert_eq!(
+            descriptor.contracts.len(),
+            1,
+            "one unknown record type produced a second contract"
+        );
+        assert_eq!(
+            descriptor.contracts[0].version,
+            nession_protocol::ContractVersion::V1,
+            "carrying an unknown record type moved the wire generation"
+        );
+    }
+
+    #[test]
+    fn session_state_records_without_a_uuid_still_get_distinct_items() {
+        // Measured, 129,829 records carry no uuid — every session-state and
+        // checkpoint record among them. Identity falls back to the record's byte
+        // position, and two such records in one page must not collide: a client
+        // keying identity reuse on the id would otherwise see one item where
+        // there were two.
+        let body = concat!(
+            r#"{"type":"ai-title","aiTitle":"one"}"#,
+            "\n",
+            r#"{"type":"ai-title","aiTitle":"two"}"#,
+            "\n",
+        );
+        let page = page_of(body);
+
+        let ids: Vec<&str> = page.items.iter().map(TranscriptEntryV1::id).collect();
+        assert_eq!(ids.len(), 2, "{:?}", page.items);
+        assert_ne!(ids[0], ids[1], "two records shared one identity: {ids:?}");
+        assert!(
+            ids.iter().all(|id| id.starts_with("offset:")),
+            "a record with no uuid did not fall back to its position: {ids:?}"
+        );
+    }
+
+    #[test]
+    fn a_partial_trailing_record_is_reported_and_the_finished_ones_still_render() {
+        // Normal while Claude is writing. The completed items still show, the
+        // read is not an error, and — the part that matters for this view — the
+        // unfinished record does not become a fabricated item.
+        let body = concat!(
+            r#"{"type":"user","uuid":"u1","message":{"role":"user","content":"one"}}"#,
+            "\n",
+            r#"{"type":"user","uuid":"u2","message":{"role":"user","content":"two"}}"#,
+            "\n",
+            r#"{"type":"user","uuid":"u3","mess"#,
+        );
+        let page = page_of(body);
+
+        assert_eq!(page.items.len(), 2, "an unfinished record became an item");
+        assert!(
+            page.partial_tail,
+            "a half-written last line must be reported"
+        );
+    }
 }
