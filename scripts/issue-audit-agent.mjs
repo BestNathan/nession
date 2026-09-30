@@ -135,7 +135,8 @@ function appendSummary(record) {
       `- Output tokens: ${usage.output_tokens}`,
       `- Cache read tokens: ${usage.cache_read_tokens}`,
       `- Cache write tokens: ${usage.cache_write_tokens}`,
-      `- Reported cost: ${record.agent.reported_cost_usd == null ? 'N/A' : `$${record.agent.reported_cost_usd.toFixed(6)}`}`,
+      `- Claude list-equivalent cost: ${record.agent.reported_cost_usd == null ? 'N/A' : `${record.agent.reported_cost_usd.toFixed(6)}`}`,
+      `- Cost basis: ${record.agent.reported_cost_basis ?? 'unknown'}`,
       `- Estimated cost: ${record.agent.estimated_cost_usd == null ? 'N/A' : `$${record.agent.estimated_cost_usd.toFixed(6)}`}`,
       `- Turns: ${record.agent.num_turns ?? 'N/A'}`,
       `- Duration: ${record.agent.duration_ms == null ? 'N/A' : `${record.agent.duration_ms} ms`}`,
@@ -200,7 +201,9 @@ function runAgent(issue) {
   try { parsed = parseClaudeJson(result.stdout); } catch {}
   if (result.status !== 0) {
     const detail = [result.stderr?.trim(), parsed?.result, result.stdout?.trim()].filter(Boolean).join('\n');
-    throw new Error(`Claude Code exited ${result.status}: ${detail || 'unknown error'}`);
+    const error = new Error(`Claude Code exited ${result.status}: ${detail || 'unknown error'}`);
+    error.claudeResult = parsed;
+    throw error;
   }
   if (!parsed) throw new Error('Claude Code succeeded but returned no parseable JSON');
   return parsed;
@@ -253,6 +256,9 @@ function main() {
     const afterIssue = fetchIssue(issueNumber);
     const after = auditIssue(afterIssue);
     const message = error instanceof Error ? error.message : String(error);
+    const failed = error && typeof error === 'object' ? error.claudeResult ?? null : null;
+    const usage = failed ? extractUsage(failed) : { input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0 };
+    const estimated = estimateCost(usage);
     writeRecord(outDir, {
       schema_version: 1,
       issue: { number: afterIssue.number, title: afterIssue.title, url: afterIssue.url },
@@ -264,13 +270,15 @@ function main() {
         model: process.env.ANTHROPIC_MODEL || 'gateway-default',
         claude_request_model: claudeRequestModel(),
         backend_mapping: 'claude-sonnet* -> deepseek-flash',
-        session_id: null,
-        num_turns: null,
-        duration_ms: null,
-        usage: { input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0 },
-        reported_cost_usd: null,
-        estimated_cost_usd: null,
-        pricing_usd_per_mtok: estimateCost({ input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0 }).rates,
+        session_id: failed?.session_id ?? failed?.sessionId ?? null,
+        num_turns: failed?.num_turns ?? failed?.numTurns ?? null,
+        duration_ms: failed?.duration_ms ?? failed?.durationMs ?? null,
+        usage,
+        reported_cost_usd: failed?.total_cost_usd != null && Number.isFinite(Number(failed.total_cost_usd)) ? Number(failed.total_cost_usd) : null,
+        reported_cost_basis: 'Claude list-equivalent from the request model; not the DeepSeek bill',
+        estimated_cost_usd: estimated.usd,
+        pricing_usd_per_mtok: estimated.rates,
+        terminal_reason: failed?.terminal_reason ?? failed?.subtype ?? null,
         error: message,
       },
       errors: after.errors,
@@ -297,6 +305,7 @@ function main() {
       duration_ms: claude.duration_ms ?? claude.durationMs ?? null,
       usage,
       reported_cost_usd: claude.total_cost_usd != null && Number.isFinite(Number(claude.total_cost_usd)) ? Number(claude.total_cost_usd) : null,
+      reported_cost_basis: 'Claude list-equivalent from the request model; not the DeepSeek bill',
       estimated_cost_usd: estimated.usd,
       pricing_usd_per_mtok: estimated.rates,
     },
