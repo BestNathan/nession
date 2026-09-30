@@ -104,6 +104,25 @@ export async function readJsonlRecordTop(page: Page, lineNumber: number): Promis
   return top as number;
 }
 
+/** Offset from the top of the JSONL scroll content — stable across scrollTop changes (#1199). */
+export async function readJsonlRecordContentTop(page: Page, lineNumber: number): Promise<number> {
+  await scrollJsonlRecordIntoView(page, lineNumber);
+  const top = await page.locator(`[data-jsonl-line="${lineNumber}"]`).first().evaluate((el) => {
+    const scroll = el.closest('[data-testid="jsonl-preview-scroll"]');
+    if (!scroll || !(scroll instanceof HTMLElement)) {
+      return null;
+    }
+    const rect = el.getBoundingClientRect();
+    if (rect.height <= 0) {
+      return null;
+    }
+    const host = scroll.getBoundingClientRect();
+    return rect.top - host.top + scroll.scrollTop;
+  });
+  expect(top, `line ${lineNumber} must be visible in scroll content`).not.toBeNull();
+  return top as number;
+}
+
 export async function openFixtureJsonlEventsWeb(page: Page): Promise<void> {
   for (const name of ['fixtures', 'events.jsonl']) {
     await page.getByRole('treeitem', { name }).waitFor({ state: 'visible', timeout: 10_000 });
