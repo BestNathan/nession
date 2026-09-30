@@ -27,25 +27,43 @@ const DEFAULT_STREAM_EVENTS: usize = 4096;
 ///    restart* cannot reproduce an epoch a client is still holding. A counter
 ///    starting at 1 does exactly that — it is the original bug, one process
 ///    later.
+/// 3. **A value a browser holds exactly.** The epoch travels to the client as a
+///    JSON number and comes back the same way, and a JavaScript number is a
+///    double: above 2^53 the representable integers are further apart than 1,
+///    so the value is rounded on the way in and the agent is then asked about a
+///    u64 no state has ever held. `epoch_match` is false for every request and
+///    a client's only way to fill a gap — `agent.terminal.stream.resume` —
+///    fails for the life of the session. The same rounding makes consecutive
+///    epochs indistinguishable to a browser, which is #1254's failure mode
+///    arriving by a different road.
 ///
 /// Only equality is ever tested (here and in the client), so the values need to
-/// be distinct rather than ordered. Seeded from wall-clock nanoseconds, which
-/// is already unique per process in any realistic deployment and costs no
-/// dependency.
+/// be distinct rather than ordered. Seeded from wall-clock **microseconds**,
+/// which stays under the limit for some hundreds of thousands of years and
+/// costs no dependency.
 static NEXT_STREAM_EPOCH: OnceLock<AtomicU64> = OnceLock::new();
+
+/// The largest integer a JavaScript number represents exactly: 2^53 - 1.
+const JS_SAFE_INTEGER: u64 = (1 << 53) - 1;
+
+/// How close to that limit a seed may sit, leaving the counter room to run
+/// before it walks into the range a browser rounds.
+const EPOCH_SEED_CEILING: u64 = JS_SAFE_INTEGER - 1_000_000;
 
 fn next_stream_epoch() -> u64 {
     NEXT_STREAM_EPOCH
         .get_or_init(|| {
             let seed = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
-                // Nanoseconds since the epoch exceed `u64` around the year
-                // 2554; the fallback is the saturation point rather than a
-                // wrap, so the value stays far from any counter's start.
-                .map_or(1, |since| {
-                    u64::try_from(since.as_nanos()).unwrap_or(u64::MAX)
+                // Microseconds since the epoch — 1.79e15 today, so the ceiling
+                // is a guard rather than a reachable state. The fallback is the
+                // ceiling, never `u64::MAX`: a seed a client cannot hold
+                // exactly is worse than one that repeats, because the first
+                // makes every resume fail and the second only risks #1254.
+                .map_or(EPOCH_SEED_CEILING, |since| {
+                    u64::try_from(since.as_micros()).unwrap_or(EPOCH_SEED_CEILING)
                 });
-            AtomicU64::new(seed)
+            AtomicU64::new(seed.min(EPOCH_SEED_CEILING))
         })
         .fetch_add(1, Ordering::Relaxed)
 }
@@ -263,6 +281,43 @@ mod tests {
             );
         }
         assert_eq!(epochs.len(), 64);
+    }
+
+    /// The third property, and the one that made every P2P resume fail: the
+    /// epoch has to survive the round trip through a browser.
+    ///
+    /// It reaches the client as a JSON number and comes back the same way, and
+    /// JavaScript holds it as a double. Nanoseconds since the epoch (~1.79e18)
+    /// are far above 2^53, so the client can only send back the nearest
+    /// representable value — a u64 no state has ever held. Every resume is then
+    /// answered `epoch_match: false` with no events, and the gap a client
+    /// reconnects with can never be filled.
+    #[test]
+    fn a_stream_epoch_survives_the_round_trip_through_a_browser() {
+        for _ in 0..64 {
+            let stream = SessionStreamState::new();
+            // Exactly what the client does with it: the epoch arrives as a JSON
+            // number, and JavaScript holds that as a double. Comparing through
+            // that value is the whole assertion — a number the double cannot
+            // hold comes back as a different integer, and the agent then
+            // refuses a cursor it never issued. Compared by bits, because the
+            // question is whether the value changed at all.
+            let wire = serde_json::to_string(&stream.epoch).expect("a u64 serialises");
+            let as_the_client_holds_it: f64 =
+                serde_json::from_str(&wire).expect("a JSON number parses as a double");
+            assert_eq!(
+                as_the_client_holds_it.to_bits(),
+                (stream.epoch as f64).to_bits(),
+                "epoch {} does not survive a JavaScript number; a client would \
+                 hand back a different u64 and every resume would be refused",
+                stream.epoch
+            );
+            assert!(
+                stream.epoch <= JS_SAFE_INTEGER,
+                "epoch {} is above 2^53-1 and cannot be represented exactly",
+                stream.epoch
+            );
+        }
     }
 
     /// The other half of the same property, and the one a plain counter gets
