@@ -26,6 +26,9 @@
   --input: oklch(0.6488 0.004 106.483);
   --ring: oklch(0.553 0.0118 261.773);
   --radius: 0.625rem;
+  --radius-control: 0.625rem;
+  --radius-surface: calc(var(--radius) * 1.6);
+  --radius-floating: calc(var(--radius) * 2);
   --radius-capsule: calc(var(--radius) * 2.2);
   --elevation-floating: 0 0 0 1px oklch(0 0 0 / 6%), 0 1px 2px oklch(0 0 0 / 6%), 0 8px 24px oklch(0 0 0 / 8%);
   --chart-1: oklch(0.2636 0.0063 258.359);
@@ -228,6 +231,9 @@
   --input: oklch(0.36 0.018 265);
   --ring: oklch(0.625 0.015 265);
   --radius: 0.625rem;
+  --radius-control: 0.625rem;
+  --radius-surface: calc(var(--radius) * 1.6);
+  --radius-floating: calc(var(--radius) * 2);
   --radius-capsule: calc(var(--radius) * 2.2);
   --elevation-floating: 0 0 0 1px oklch(1 0 0 / 8%), 0 1px 2px oklch(0 0 0 / 30%), 0 8px 24px oklch(0 0 0 / 40%);
   --chart-1: oklch(0.93 0.006 265);
@@ -313,6 +319,9 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-radius-control: var(--radius-control);
+  --color-radius-surface: var(--radius-surface);
+  --color-radius-floating: var(--radius-floating);
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);
   --color-chart-3: var(--chart-3);
