@@ -90,9 +90,13 @@ pub struct Message {
     /// rather than reading as a turn that never happened.
     pub content: Vec<MessageBlock>,
     /// Whether the record belongs to a subagent rather than to this
-    /// conversation. Measured, no record in the local corpus carries it — which
-    /// is exactly why the fact is carried explicitly instead of being inferred
-    /// from something else that happens to correlate.
+    /// conversation.
+    ///
+    /// Measured across the whole `~/.claude/projects` tree, this is the marker
+    /// on **every** record of the 464 subagent transcripts — 91,137 of them,
+    /// under `projects/<dir>/<session>/subagents/`. Those live in separate
+    /// files rather than in the parent transcript, which is why a discovery
+    /// that lists only the project level sees none of them.
     pub sidechain: bool,
 }
 

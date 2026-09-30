@@ -776,9 +776,15 @@ mod tests {
     #[test]
     fn a_sidechain_record_is_marked_rather_than_mistaken_for_the_conversation() {
         // A subagent's turn is a real fact about the session and not part of the
-        // main conversation. Measured, no record in the local corpus carries
-        // `isSidechain: true` — which is why the marker has to be carried
-        // explicitly rather than inferred from anything else.
+        // main conversation.
+        //
+        // An earlier version of this comment said no record in the local corpus
+        // carried the marker. That was wrong, and the way it was wrong is worth
+        // keeping: the measurement globbed `projects/*/*.jsonl`, which never
+        // descends into `projects/<dir>/<session>/subagents/`. Measured across
+        // the whole tree, **all 91,137** records in the 464 subagent transcripts
+        // carry `isSidechain: true` — the marker is not rare, the *files* were
+        // invisible to a discovery that only lists the project level.
         let line = r#"{"type":"assistant","uuid":"s1","isSidechain":true,"message":{"role":"assistant","content":[{"type":"text","text":"subagent"}]}}"#;
         let entries = entries_of(line);
         let [Entry::Message(message)] = entries.as_slice() else {
