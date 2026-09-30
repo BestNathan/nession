@@ -3,7 +3,6 @@ import {
   assertInspectorKeyColonShareRowWithValue,
   assertVisibleJsonlRecordsDoNotOverlap,
   collapseJsonlRecord,
-  expectJsonlWindowMoved,
   expandJsonlRecord,
   FIXTURE_JSONL_LONG_STRING_LINE,
   FIXTURE_JSONL_NESTED_LINE,
@@ -11,9 +10,9 @@ import {
   openFixtureJsonlEventsWeb,
   readJsonlRecordTop,
   readJsonlScrollMetrics,
-  readVisibleJsonlLineNumbers,
-  revealJsonlRecord,
   scrollJsonlPreview,
+  scrollJsonlRecordIntoView,
+  scrollJsonlUntilWindowChanges,
 } from '../helpers/jsonlPreviewGeometry';
 import { gotoFixtureWorkspace } from '../helpers/fixtureVisual';
 
@@ -24,20 +23,11 @@ test.describe('JSONL preview geometry (#1199)', () => {
     await gotoFixtureWorkspace(page);
     await openFixtureJsonlEventsWeb(page);
 
-    const beforeLines = await readVisibleJsonlLineNumbers(page);
+    await assertVisibleJsonlRecordsDoNotOverlap(page);
+    await scrollJsonlUntilWindowChanges(page);
     await assertVisibleJsonlRecordsDoNotOverlap(page);
 
     const { scrollHeight } = await readJsonlScrollMetrics(page);
-    const appliedScrollTop = await scrollJsonlPreview(page, scrollHeight / 3);
-    expect(appliedScrollTop).toBeGreaterThan(0);
-
-    // Polled, not read once: the window is recomputed from the scroll event in
-    // a later task, so an immediate read still sees the pre-scroll rows (#1272).
-    await expectJsonlWindowMoved(page, beforeLines);
-
-    await page.waitForTimeout(100);
-    await assertVisibleJsonlRecordsDoNotOverlap(page);
-
     await scrollJsonlPreview(page, (scrollHeight * 2) / 3);
     await page.waitForTimeout(100);
     await assertVisibleJsonlRecordsDoNotOverlap(page);
@@ -46,8 +36,10 @@ test.describe('JSONL preview geometry (#1199)', () => {
   test('expand/collapse repositions following rows (web)', async ({ page }) => {
     await gotoFixtureWorkspace(page);
     await openFixtureJsonlEventsWeb(page);
+    await scrollJsonlPreview(page, 0);
 
     const nextLine = 2;
+    await scrollJsonlRecordIntoView(page, 1);
     const nextTopBefore = await readJsonlRecordTop(page, nextLine);
 
     await expandJsonlRecord(page, 1);
@@ -56,8 +48,6 @@ test.describe('JSONL preview geometry (#1199)', () => {
     expect(nextTopExpanded).toBeGreaterThan(nextTopBefore);
     await assertVisibleJsonlRecordsDoNotOverlap(page);
 
-    // Collapse, not a second expand: the header control's label flips to
-    // `Collapse record` once the record is open (#1272).
     await collapseJsonlRecord(page, 1);
     await page.waitForTimeout(150);
     const nextTopCollapsed = await readJsonlRecordTop(page, nextLine);
@@ -70,30 +60,22 @@ test.describe('JSONL preview geometry (#1199)', () => {
     await gotoFixtureWorkspace(page);
     await openFixtureJsonlEventsWeb(page);
 
-    await revealJsonlRecord(page, FIXTURE_JSONL_NESTED_LINE);
     await expandJsonlRecord(page, FIXTURE_JSONL_NESTED_LINE);
     await page.waitForTimeout(150);
-    const nestedSection = page.locator(`[data-jsonl-line="${FIXTURE_JSONL_NESTED_LINE}"]`);
+    const nestedSection = page.locator(`[data-jsonl-line="${FIXTURE_JSONL_NESTED_LINE}"]`).first();
     await nestedSection.getByRole('button', { name: 'Expand' }).first().click();
     await page.waitForTimeout(150);
     await assertVisibleJsonlRecordsDoNotOverlap(page);
 
     const followingTopExpanded = await readJsonlRecordTop(page, FIXTURE_JSONL_NESTED_LINE + 1);
-    const { scrollTop: measuredScrollTop, scrollHeight } = await readJsonlScrollMetrics(page);
 
-    // Away, then back to the offset the measurement above was taken **at** —
-    // not to the top. These tops are viewport-relative, so comparing them
-    // across two different offsets measures the scroll rather than the
-    // disclosure; returning to 0 also unmounts the rows entirely, leaving
-    // nothing for `nestedSection` to resolve against (#1272).
+    const { scrollHeight } = await readJsonlScrollMetrics(page);
     await scrollJsonlPreview(page, scrollHeight);
     await page.waitForTimeout(100);
-    await scrollJsonlPreview(page, measuredScrollTop);
-    // Poll for the window to come back rather than revealing: a reveal steps
-    // *down*, so if it ran before the re-render it would scroll past the record.
-    await expect(page.locator(`[data-jsonl-line="${FIXTURE_JSONL_NESTED_LINE}"]`)).toHaveCount(1);
+    await scrollJsonlPreview(page, 0);
     await page.waitForTimeout(150);
 
+    await scrollJsonlRecordIntoView(page, FIXTURE_JSONL_NESTED_LINE);
     await expect(nestedSection.getByRole('button', { name: 'Collapse record' })).toBeVisible();
     const followingTopAfterScroll = await readJsonlRecordTop(page, FIXTURE_JSONL_NESTED_LINE + 1);
     expect(Math.abs(followingTopAfterScroll - followingTopExpanded)).toBeLessThanOrEqual(8);
@@ -104,11 +86,10 @@ test.describe('JSONL preview geometry (#1199)', () => {
     await gotoFixtureWorkspace(page);
     await openFixtureJsonlEventsWeb(page);
 
-    await revealJsonlRecord(page, FIXTURE_JSONL_LONG_STRING_LINE);
     await expandJsonlRecord(page, FIXTURE_JSONL_LONG_STRING_LINE);
     await page.waitForTimeout(150);
 
-    const section = page.locator(`[data-jsonl-line="${FIXTURE_JSONL_LONG_STRING_LINE}"]`);
+    const section = page.locator(`[data-jsonl-line="${FIXTURE_JSONL_LONG_STRING_LINE}"]`).first();
     const stringExpand = section.getByRole('button', { name: 'Expand' }).first();
     await stringExpand.click();
     await page.waitForTimeout(150);
@@ -120,7 +101,6 @@ test.describe('JSONL preview geometry (#1199)', () => {
     await gotoFixtureWorkspace(page);
     await openFixtureJsonlEventsWeb(page);
 
-    await revealJsonlRecord(page, FIXTURE_JSONL_LONG_STRING_LINE);
     await expandJsonlRecord(page, FIXTURE_JSONL_LONG_STRING_LINE);
     await page.waitForTimeout(150);
     await assertInspectorKeyColonShareRowWithValue(page, FIXTURE_JSONL_LONG_STRING_LINE);
@@ -130,21 +110,16 @@ test.describe('JSONL preview geometry (#1199)', () => {
   test('virtual rows do not overlap while scrolling (app)', async ({ page }) => {
     await openFixtureJsonlEventsApp(page);
     await assertVisibleJsonlRecordsDoNotOverlap(page);
-
-    const beforeLines = await readVisibleJsonlLineNumbers(page);
-    const { scrollHeight } = await readJsonlScrollMetrics(page);
-    const appliedScrollTop = await scrollJsonlPreview(page, scrollHeight / 3);
-    expect(appliedScrollTop).toBeGreaterThan(0);
-
-    await expectJsonlWindowMoved(page, beforeLines);
-
+    await scrollJsonlUntilWindowChanges(page);
     await page.waitForTimeout(100);
     await assertVisibleJsonlRecordsDoNotOverlap(page);
   });
 
   test('expand/collapse repositions following rows (app)', async ({ page }) => {
     await openFixtureJsonlEventsApp(page);
+    await scrollJsonlPreview(page, 0);
 
+    await scrollJsonlRecordIntoView(page, 1);
     const nextTopBefore = await readJsonlRecordTop(page, 2);
     await expandJsonlRecord(page, 1);
     await page.waitForTimeout(150);

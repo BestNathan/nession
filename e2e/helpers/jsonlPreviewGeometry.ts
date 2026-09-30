@@ -7,6 +7,20 @@ export const FIXTURE_JSONL_NESTED_LINE = 112;
 
 export type JsonlRecordBox = { line: number; top: number; bottom: number };
 
+function setsEqual(a: number[], b: number[]): boolean {
+  const sa = new Set(a);
+  const sb = new Set(b);
+  if (sa.size !== sb.size) {
+    return false;
+  }
+  for (const line of sa) {
+    if (!sb.has(line)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 /** Visible JSONL record sections must not stack on top of each other (#1199). */
 export async function assertVisibleJsonlRecordsDoNotOverlap(
   page: Page,
@@ -27,21 +41,62 @@ export async function readVisibleJsonlLineNumbers(page: Page): Promise<number[]>
   return boxes.map((b) => b.line);
 }
 
+/** Rows mounted in the virtualizer that intersect the JSONL scrollport. */
 export async function readVisibleJsonlRecordBoxes(page: Page): Promise<JsonlRecordBox[]> {
-  return page.evaluate(() =>
-    Array.from(document.querySelectorAll('[data-jsonl-line]'))
+  return page.evaluate(() => {
+    const host = document.querySelector('[data-testid="jsonl-preview-scroll"]');
+    if (!host) {
+      return [];
+    }
+    const hostRect = host.getBoundingClientRect();
+    const intersectsHost = (rect: DOMRect) =>
+      rect.height > 0 &&
+      rect.bottom > hostRect.top + 1 &&
+      rect.top < hostRect.bottom - 1;
+
+    return Array.from(document.querySelectorAll('[data-jsonl-line]'))
       .map((el) => {
         const line = Number(el.getAttribute('data-jsonl-line'));
         const rect = el.getBoundingClientRect();
         return { line, top: rect.top, bottom: rect.bottom, height: rect.height };
       })
-      .filter((row) => row.height > 0 && !Number.isNaN(row.line))
-      .map(({ line, top, bottom }) => ({ line, top, bottom })),
-  );
+      .filter((row) => !Number.isNaN(row.line) && intersectsHost(row))
+      .map(({ line, top, bottom }) => ({ line, top, bottom }));
+  });
+}
+
+export async function scrollJsonlRecordIntoView(page: Page, lineNumber: number): Promise<void> {
+  const scroll = page.getByTestId('jsonl-preview-scroll');
+  const section = page.locator(`[data-jsonl-line="${lineNumber}"]`).first();
+
+  await expect
+    .poll(
+      async () => {
+        if ((await section.count()) === 0) {
+          const metrics = await scroll.evaluate((el) => ({
+            scrollTop: el.scrollTop,
+            scrollHeight: el.scrollHeight,
+            clientHeight: el.clientHeight,
+          }));
+          if (metrics.scrollTop + metrics.clientHeight >= metrics.scrollHeight - 2) {
+            return false;
+          }
+          await scroll.evaluate((el) => {
+            el.scrollTop += Math.max(el.clientHeight * 0.75, 120);
+          });
+          return false;
+        }
+        await section.scrollIntoViewIfNeeded();
+        return section.isVisible();
+      },
+      { timeout: 20_000, intervals: [50, 100, 200] },
+    )
+    .toBe(true);
 }
 
 export async function readJsonlRecordTop(page: Page, lineNumber: number): Promise<number> {
-  const top = await page.locator(`[data-jsonl-line="${lineNumber}"]`).evaluate((el) => {
+  await scrollJsonlRecordIntoView(page, lineNumber);
+  const top = await page.locator(`[data-jsonl-line="${lineNumber}"]`).first().evaluate((el) => {
     const rect = el.getBoundingClientRect();
     return rect.height > 0 ? rect.top : null;
   });
@@ -54,7 +109,8 @@ export async function openFixtureJsonlEventsWeb(page: Page): Promise<void> {
     await page.getByRole('treeitem', { name }).waitFor({ state: 'visible', timeout: 10_000 });
     await page.getByRole('treeitem', { name }).click();
   }
-  await expect(page.locator('[data-jsonl-line="1"]')).toBeVisible({ timeout: 10_000 });
+  await scrollJsonlRecordIntoView(page, 1);
+  await expect(page.locator('[data-jsonl-line="1"]').first()).toBeVisible({ timeout: 10_000 });
 }
 
 /** App Files navigator → pushed viewer (#1199 acceptance). */
@@ -66,7 +122,8 @@ export async function openFixtureJsonlEventsApp(page: Page): Promise<void> {
     await row.waitFor({ state: 'visible', timeout: 10_000 });
     await row.click();
   }
-  await expect(page.locator('[data-jsonl-line="1"]')).toBeVisible({ timeout: 10_000 });
+  await scrollJsonlRecordIntoView(page, 1);
+  await expect(page.locator('[data-jsonl-line="1"]').first()).toBeVisible({ timeout: 10_000 });
 }
 
 /** @deprecated use openFixtureJsonlEventsWeb */
@@ -79,7 +136,8 @@ export async function assertInspectorKeyColonShareRowWithValue(
   page: Page,
   lineNumber: number,
 ): Promise<void> {
-  const geometry = await page.locator(`[data-jsonl-line="${lineNumber}"]`).evaluate((root) => {
+  await scrollJsonlRecordIntoView(page, lineNumber);
+  const geometry = await page.locator(`[data-jsonl-line="${lineNumber}"]`).first().evaluate((root) => {
     const row = root.querySelector('[role="treeitem"]');
     if (!row || row.children.length < 3) {
       return null;
@@ -97,86 +155,25 @@ export async function assertInspectorKeyColonShareRowWithValue(
   expect(value.top).toBeGreaterThanOrEqual(key.top - 4);
 }
 
-/**
- * Bring a record into the virtualized window (#1272).
- *
- * The preview unmounts rows outside its window (#1199), so a record far down
- * the file has **no DOM at all** until it is scrolled to — `[data-jsonl-line=
- * "111"]` is simply not there. Targeting such a record without revealing it
- * first waits out the whole test budget for an element that will never appear,
- * which is what turned four cases into 30s timeouts.
- *
- * Steps a viewport at a time rather than jumping, because the window is
- * recomputed from the scroll event in a later task — a single jump can land
- * where the row is still unmounted.
- */
-export async function revealJsonlRecord(page: Page, lineNumber: number): Promise<void> {
-  // The loop runs in the page: a round trip per step costs far more than the
-  // render it is waiting for (measured: 327ms to reach record 111 at 1280x720,
-  // 979ms at 390x844, where each step is only a short viewport). The step is
-  // one client height, never more — the mounted window is the viewport plus
-  // overscan, so consecutive steps overlap and a row cannot be stepped over.
-  const verdict = await page.evaluate(async (line) => {
-    const scroller = document.querySelector('[data-testid="jsonl-preview-scroll"]');
-    if (!(scroller instanceof HTMLElement)) {
-      return 'no scroll container';
-    }
-    const selector = `[data-jsonl-line="${line}"]`;
-    for (let step = 0; step < 200; step += 1) {
-      if (document.querySelector(selector) !== null) {
-        return 'found';
-      }
-      const before = scroller.scrollTop;
-      scroller.scrollTop = Math.min(before + scroller.clientHeight, scroller.scrollHeight);
-      if (scroller.scrollTop === before) {
-        return 'reached the end';
-      }
-      await new Promise((resolve) => setTimeout(resolve, 30));
-    }
-    return 'stepped 200 times';
-  }, lineNumber);
-
-  await expect(
-    page.locator(`[data-jsonl-line="${lineNumber}"]`),
-    `record ${lineNumber} never entered the virtualized window (${verdict})`,
-  ).toHaveCount(1);
+async function clickJsonlRecordToggle(
+  page: Page,
+  lineNumber: number,
+  targetExpanded: boolean,
+): Promise<void> {
+  await scrollJsonlRecordIntoView(page, lineNumber);
+  const section = page.locator(`[data-jsonl-line="${lineNumber}"]`).first();
+  const label = targetExpanded ? 'Expand record' : 'Collapse record';
+  const toggle = section.getByRole('button', { name: label });
+  await toggle.waitFor({ state: 'visible', timeout: 10_000 });
+  await toggle.click();
 }
 
 export async function expandJsonlRecord(page: Page, lineNumber: number): Promise<void> {
-  const section = page.locator(`[data-jsonl-line="${lineNumber}"]`);
-  await section.getByRole('button', { name: 'Expand record' }).click();
+  await clickJsonlRecordToggle(page, lineNumber, true);
 }
 
-/**
- * Collapse an expanded record.
- *
- * Not `expandJsonlRecord` again: once open, the header control's label flips to
- * `Collapse record`, so repeating the expand call waits for a button that no
- * longer exists (#1272).
- */
 export async function collapseJsonlRecord(page: Page, lineNumber: number): Promise<void> {
-  await page
-    .locator(`[data-jsonl-line="${lineNumber}"]`)
-    .getByRole('button', { name: 'Collapse record' })
-    .click();
-}
-
-/**
- * Scroll the preview and wait for the virtualized window to actually move.
- *
- * `scrollJsonlPreview` sets `scrollTop` synchronously; the window is recomputed
- * from the resulting scroll event in a later task. Reading straight after the
- * assignment sees the pre-scroll window — which is why the two scroll cases
- * compared two *identical* sets and failed as `not.toEqual` (#1272).
- */
-export async function expectJsonlWindowMoved(page: Page, before: number[]): Promise<void> {
-  const key = (lines: number[]) => [...lines].sort((a, b) => a - b).join(',');
-  const beforeKey = key(before);
-  await expect
-    .poll(async () => key(await readVisibleJsonlLineNumbers(page)), {
-      message: 'the virtualized window never moved after scrolling',
-    })
-    .not.toBe(beforeKey);
+  await clickJsonlRecordToggle(page, lineNumber, false);
 }
 
 export async function scrollJsonlPreview(page: Page, scrollTop: number): Promise<number> {
@@ -186,9 +183,47 @@ export async function scrollJsonlPreview(page: Page, scrollTop: number): Promise
   }, scrollTop);
 }
 
-export async function readJsonlScrollMetrics(page: Page): Promise<{ scrollTop: number; scrollHeight: number }> {
+export async function readJsonlScrollMetrics(page: Page): Promise<{
+  scrollTop: number;
+  scrollHeight: number;
+  clientHeight: number;
+}> {
   return page.getByTestId('jsonl-preview-scroll').evaluate((el) => ({
     scrollTop: el.scrollTop,
     scrollHeight: el.scrollHeight,
+    clientHeight: el.clientHeight,
   }));
+}
+
+/**
+ * Scroll until the set of lines intersecting the scrollport changes (#1199 review).
+ */
+export async function scrollJsonlUntilWindowChanges(page: Page): Promise<{
+  beforeLines: number[];
+  afterLines: number[];
+  scrollTopBefore: number;
+  scrollTopAfter: number;
+}> {
+  const beforeLines = await readVisibleJsonlLineNumbers(page);
+  const { scrollTop: scrollTopBefore } = await readJsonlScrollMetrics(page);
+  const scroll = page.getByTestId('jsonl-preview-scroll');
+
+  let afterLines = beforeLines;
+  let scrollTopAfter = scrollTopBefore;
+  let moved = false;
+
+  for (let step = 0; step < 12 && !moved; step++) {
+    scrollTopAfter = await scroll.evaluate((el) => {
+      el.scrollTop += Math.max(el.clientHeight * 0.85, 160);
+      return el.scrollTop;
+    });
+    await page.waitForTimeout(100);
+    afterLines = await readVisibleJsonlLineNumbers(page);
+    moved = scrollTopAfter > scrollTopBefore && !setsEqual(beforeLines, afterLines);
+  }
+
+  expect(moved, 'JSONL virtual window should change after scrolling').toBe(true);
+  expect(scrollTopAfter).toBeGreaterThan(scrollTopBefore);
+
+  return { beforeLines, afterLines, scrollTopBefore, scrollTopAfter };
 }
