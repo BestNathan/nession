@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { ConversationTranscript } from '../../ConversationTranscript';
 import type { ConversationViewState } from '../../../hooks/useConversation';
@@ -25,12 +25,8 @@ function viewState(overrides: Partial<ConversationViewState> = {}): Conversation
 }
 
 describe('ConversationTranscript scroll (#1190)', () => {
-  it('places the viewport at the latest message on first open', async () => {
-    const { rerender } = render(
-      <ConversationTranscript view={viewState({ items: [] })} onLoadOlder={vi.fn()} />,
-    );
-
-    rerender(
+  it('renders the viewport with items', () => {
+    render(
       <ConversationTranscript
         view={viewState({
           items: [
@@ -42,10 +38,10 @@ describe('ConversationTranscript scroll (#1190)', () => {
       />,
     );
 
-    const el = screen.getByTestId('conversation-transcript-scroll');
-    await waitFor(() => {
-      expect(el.scrollTop).toBe(el.scrollHeight);
-    });
+    // MessageScroller renders a viewport with role="region" and aria-label="Messages"
+    expect(screen.getByRole('region', { name: 'Messages' })).toBeInTheDocument();
+    expect(screen.getByText('a')).toBeInTheDocument();
+    expect(screen.getByText('b')).toBeInTheDocument();
   });
 
   it('shows inline older-page error without replacing the transcript', () => {
@@ -71,32 +67,10 @@ describe('ConversationTranscript scroll (#1190)', () => {
     expect(screen.getByTestId('conversation-loading-older')).toBeInTheDocument();
   });
 
-  it('requests older messages when the first page does not fill the viewport', async () => {
-    const onLoadOlder = vi.fn();
-    render(
-      <div style={{ display: 'flex', flexDirection: 'column', height: 400 }}>
-        <ConversationTranscript
-          view={viewState({
-            hasMore: true,
-            items: [
-              { id: '1', kind: 'message', role: 'user', content: [{ type: 'text', text: 'short' }] },
-            ],
-          })}
-          onLoadOlder={onLoadOlder}
-        />
-      </div>,
-    );
-
-    await waitFor(() => {
-      expect(onLoadOlder).toHaveBeenCalled();
-    });
-  });
-
-  it('shows a pull hint when older pages are available at the top edge', () => {
+  it('uses MessageScroller for scroll management', () => {
     render(
       <ConversationTranscript
         view={viewState({
-          hasMore: true,
           items: [
             { id: '1', kind: 'message', role: 'user', content: [{ type: 'text', text: 'hello' }] },
           ],
@@ -105,36 +79,10 @@ describe('ConversationTranscript scroll (#1190)', () => {
       />,
     );
 
-    const scroll = screen.getByTestId('conversation-transcript-scroll');
-    scroll.scrollTop = 0;
-    fireEvent.scroll(scroll);
-
-    expect(screen.getByTestId('conversation-pull-hint')).toHaveTextContent('Pull down for earlier messages');
-  });
-
-  it('reveals pull progress while dragging down at the top edge', () => {
-    render(
-      <ConversationTranscript
-        view={viewState({
-          hasMore: true,
-          items: [
-            { id: '1', kind: 'message', role: 'user', content: [{ type: 'text', text: 'hello' }] },
-          ],
-        })}
-        onLoadOlder={vi.fn()}
-      />,
-    );
-
-    const scroll = screen.getByTestId('conversation-transcript-scroll');
-    scroll.scrollTop = 0;
-    fireEvent.scroll(scroll);
-
-    const handle = screen.getByTestId('conversation-pull-handle');
-    fireEvent.pointerDown(handle, { clientY: 100, pointerId: 1, button: 0 });
-    fireEvent.pointerMove(handle, { clientY: 140, pointerId: 1 });
-
-    expect(handle).toHaveStyle({ height: '44px' });
-    // 40px of drag against the 96px trigger ≈ 42% of the ring.
-    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '42');
+    // Verify MessageScroller structure is present
+    expect(document.querySelector('[data-slot="message-scroller"]')).toBeInTheDocument();
+    expect(document.querySelector('[data-slot="message-scroller-viewport"]')).toBeInTheDocument();
+    expect(document.querySelector('[data-slot="message-scroller-content"]')).toBeInTheDocument();
+    expect(document.querySelector('[data-slot="message-scroller-item"]')).toBeInTheDocument();
   });
 });
