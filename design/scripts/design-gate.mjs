@@ -53,6 +53,13 @@ const FAST_COMMANDS = [
     expected: 'capsule presentation stays on generated design vocabulary',
     repair: 'route the value through capsuleStyles and design/tokens rather than adding a local metric',
   },
+  {
+    id: 'radius-ownership',
+    command: 'node scripts/check-radius-ownership.mjs',
+    owner: 'design/tokens/semantic.json + web/src/**/*.{tsx,ts}',
+    expected: 'App-owned surfaces use semantic radius tokens, not generic rounded-* utilities',
+    repair: 'replace rounded-{sm|md|lg|xl|2xl} with rounded-[var(--radius-<role>)] where <role> is control/surface/floating',
+  },
 ];
 
 const FULL_COMMANDS = [
