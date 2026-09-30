@@ -39,6 +39,9 @@ Write issue bodies in the reporter's language; keep the section headers below, p
 GitHub issue events are audited by `.github/workflows/issue-audit.yml`.
 
 - `scripts/issue-contract.mjs` is the deterministic structural contract for Bug/Requirement issue bodies and labels.
+- Cursor is the default semantic repair provider (`cursor` GitHub Environment + `CURSOR_API_KEY`); manual dispatch may explicitly select `deepseek` for comparison/rollback.
+- Cursor audits use Composer 2.5 with `fast=true` by default, verify that model capability from Cursor's model catalog, and never silently fall back to Auto or another provider.
+- Cursor receives only repository read/search built-ins; target issue mutation is exposed through harness-owned custom tools bound to the selected issue number.
 - A structurally valid issue stops before any LLM call.
 - A structurally invalid issue from an OWNER/MEMBER/COLLABORATOR may be repaired by Claude Code through the `deepseek` GitHub Environment.
 - External-author issues never unlock model credentials automatically; use the workflow's manual dispatch after review.
