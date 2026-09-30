@@ -90,9 +90,9 @@ export function SessionList({
   if (loading) {
     return (
       <div className="flex flex-col gap-2 p-2">
-        <Skeleton className="h-12 w-full rounded-lg" />
-        <Skeleton className="h-12 w-full rounded-lg" />
-        <Skeleton className="h-12 w-full rounded-lg" />
+        <Skeleton className="h-12 w-full rounded-[var(--radius-surface)]" />
+        <Skeleton className="h-12 w-full rounded-[var(--radius-surface)]" />
+        <Skeleton className="h-12 w-full rounded-[var(--radius-surface)]" />
       </div>
     );
   }
