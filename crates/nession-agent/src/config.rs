@@ -19,6 +19,13 @@ fn default_session_poll_interval() -> u64 {
     5
 }
 
+/// Default memory threshold percentage for rejecting new sessions.
+/// When memory usage exceeds this percentage of the container limit,
+/// new session creation is refused to prevent container-level OOM.
+fn default_memory_threshold_percent() -> u8 {
+    90
+}
+
 /// Default working directory for new tmux sessions.
 /// When not set, defaults to $HOME.
 fn default_working_dir() -> String {
@@ -208,6 +215,17 @@ pub struct AgentConfig {
     /// `level = "info"`, `rotation = "daily"`, `retention_days = 7`.
     #[serde(default)]
     pub logging: LoggingConfig,
+
+    /// Memory threshold percentage (0-100) for rejecting new sessions.
+    ///
+    /// When container memory usage exceeds this percentage of the cgroup limit,
+    /// new session creation is refused with a clear error message to prevent
+    /// container-level OOM (which kills every session, not just the hungry one).
+    ///
+    /// Default: 90%. Set to 100 to disable (not recommended).
+    /// Only effective when running in a cgroup v2 container with readable metrics.
+    #[serde(default = "default_memory_threshold_percent")]
+    pub memory_threshold_percent: u8,
 }
 
 impl Default for AgentConfig {
@@ -235,6 +253,7 @@ impl Default for AgentConfig {
             file_root: None,
             tmux_socket_path: None,
             logging: LoggingConfig::default(),
+            memory_threshold_percent: default_memory_threshold_percent(),
         }
     }
 }

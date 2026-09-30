@@ -196,6 +196,7 @@ pub async fn run(config: AgentConfig, ready: Readiness) -> Result<()> {
             // name are built — one tmux server, one file sandbox — and handed
             // to *both* mutating paths below (#1021).
             mutations: Arc::clone(&mutation_lane),
+            memory_threshold_percent: Some(config.memory_threshold_percent),
         },
     )
     .context("failed to create agent server")?;
@@ -238,7 +239,11 @@ pub async fn run(config: AgentConfig, ready: Readiness) -> Result<()> {
         image_tag: option_env!("IMAGE_TAG").unwrap_or("dev").to_string(),
     };
 
-    let tmux_for_client = Arc::new(SessionManager::new());
+    let tmux_for_client = {
+        let mut mgr = SessionManager::new();
+        mgr.with_memory_threshold(Some(config.memory_threshold_percent));
+        Arc::new(mgr)
+    };
 
     // Before any session can exist, and before the server connection, so a
     // standalone agent installs it too.

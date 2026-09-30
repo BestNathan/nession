@@ -22,3 +22,10 @@ default_working_dir = "/tmp/nession-e2e"
 # Can be reduced to "warn" once agent stability is confirmed.
 [logging]
 level = "info"
+
+# Memory threshold percentage (0-100) for rejecting new sessions.
+# When container memory usage exceeds this percentage of the cgroup limit,
+# new session creation is refused to prevent container-level OOM.
+# Default: 90%. Set to 100 to disable (not recommended).
+# Only effective when running in a cgroup v2 container with readable metrics.
+# memory_threshold_percent = 90
