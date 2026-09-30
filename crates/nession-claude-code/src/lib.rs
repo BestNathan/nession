@@ -1,5 +1,6 @@
 pub mod agent;
 pub mod binding;
+pub mod canonical;
 pub mod conversation;
 pub mod messages;
 pub mod plugin;
