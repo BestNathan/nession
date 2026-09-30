@@ -246,7 +246,7 @@ export const UserMessage = memo(function UserMessage({ item }: { item: MessageIt
         // survive. The surface stays the simpler of the two — the typography
         // below is narrower than Claude's, which is what makes it so.
         className={cn(
-          'max-w-prose min-w-0 rounded-lg px-3 py-2 text-sm',
+          'max-w-prose min-w-0 rounded-[var(--radius-surface)] px-3 py-2 text-sm',
           'bg-[var(--conversation-user-surface)] text-[var(--conversation-user-foreground)]',
           'prose-p:my-0 prose-pre:my-1 prose-headings:text-inherit',
         )}
@@ -327,7 +327,7 @@ export const ToolActivity = memo(function ToolActivity({ item }: { item: ToolIte
       // A tool is not a participant, so it takes the activity role rather than
       // either speaker's surface. Full width on purpose (#1120): a bubble here
       // would put it in the conversation instead of beside it.
-      className="group rounded-md bg-[var(--conversation-tool-surface)] px-3 py-2 text-[var(--conversation-tool-foreground)]"
+      className="group rounded-[var(--radius-surface)] bg-[var(--conversation-tool-surface)] px-3 py-2 text-[var(--conversation-tool-foreground)]"
     >
       <summary className={cn('flex cursor-pointer items-center gap-2', chromeSansRole('metadata'))}>
         {/* Turns as the disclosure opens. Decorative: `<details>` announces its

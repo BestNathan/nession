@@ -191,6 +191,36 @@ Work surfaces stay out of this scale deliberately: xterm reads
 both experiences), and Markdown document typography belongs to the document.
 Those are the workload's own rendering, and #1073 names them as non-goals.
 
+### Radius hierarchy (#1110)
+
+Corner radius is the 4th weakest separation cue in the visual language
+(whitespace → background → border → **radius** → elevation). It must be stated
+as a semantic hierarchy, not as arbitrary Tailwind utilities scattered across
+product surfaces.
+
+The semantic radius vocabulary is five tiers, from tightest to softest:
+
+| Token | Value | Role |
+|---|---:|---|
+| `radius-control` | 10px | Interactive controls: buttons, inputs, search fields. The base radius from primitive. |
+| `radius-surface` | 16px | Contained surfaces: panels, cards where justified. Larger than control to visually group content. |
+| `radius-floating` | 20px | Temporary elevated surfaces: Peek, popovers, inspectors. Softer corners for transient overlays. |
+| `radius-capsule` | 22px | TerminalCapsule shell. |
+| `radius.pill` | 9999px | True pill/chip geometry. |
+
+**Ownership**: radius tokens live at the Semantic layer (`design/tokens/semantic.json`),
+not Experience. Radius is not platform-specific — if the App later needs different
+values, remap at the Experience layer. The current values are shared.
+
+**Migration rule**: App-owned surfaces (not `components/ui/`) must use semantic
+radius tokens, not generic `rounded-{sm|md|lg|xl|2xl}` utilities. The design
+gate (`scripts/check-radius-ownership.mjs`) catches unowned radius literals.
+
+**Exemptions**:
+- `components/ui/*` — shadcn primitives are upstream, not Nession-owned
+- `rounded-full` — already correct (circle geometry)
+- Arbitrary values with `calc()` — layout arithmetic, not radius choice
+
 Product UI must not consume Primitive palette values directly.
 
 Web and App share Primitive, Semantic, and Domain meaning. They specialize at Experience for density, touch/pointer behavior, safe areas, and control sizing. Do not create two independent design systems.

@@ -103,7 +103,7 @@ function WorktreeRow({ worktree, ctx }: { worktree: GitWorktree; ctx: WorkspaceC
       data-current={worktree.current ? 'true' : undefined}
       title={worktree.path}
       className={cn(
-        'flex flex-col gap-0.5 rounded-md px-2 py-1.5',
+        'flex flex-col gap-0.5 rounded-[var(--radius-surface)] px-2 py-1.5',
         worktree.current && 'bg-accent text-accent-foreground',
       )}
     >

@@ -69,7 +69,7 @@ export function CapsuleHistoryPopover({
         aria-label="Command history"
         className={cn(
           capsuleIconButtonClass,
-          'inline-flex items-center justify-center rounded-lg bg-transparent hover:bg-transparent',
+          'inline-flex items-center justify-center rounded-[var(--radius-control)] bg-transparent hover:bg-transparent',
           "[&_svg:not([class*='size-'])]:size-[length:var(--icon-md)]",
           triggerClassName,
         )}
