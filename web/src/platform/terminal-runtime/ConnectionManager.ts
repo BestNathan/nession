@@ -3,6 +3,16 @@ import type { ConnectionState } from '@/platform/socket/types';
 import type { TerminalTransport } from './transport/TerminalTransport';
 import { applyTerminalStreamEvents } from './streamApply';
 
+/**
+ * Deadline for the periodic keepalive ping.
+ *
+ * Nothing is decided on the outcome, so this only bounds how long a pending
+ * keepalive may sit in the request layer before it is cleaned up — it is not a
+ * liveness deadline. The probe that *does* decide is
+ * `SessionRuntime`'s, and it carries its own, shorter one (#1233).
+ */
+const KEEPALIVE_PING_TIMEOUT_MS = 10_000;
+
 export class ConnectionManager implements TerminalTransport {
   readonly mode: 'p2p' | 'relay';
   private sessionName: string;
@@ -29,6 +39,8 @@ export class ConnectionManager implements TerminalTransport {
   private lastStreamSeq: number | null = null;
   private streamResumeInFlight = false;
   private isAttached: () => boolean;
+  /** Notified after input is handed to either transport — see `onInputSent`. */
+  private onInputSent: () => void;
 
   onStateChange: ((state: ConnectionState) => void) | null = null;
   /**
@@ -48,6 +60,7 @@ export class ConnectionManager implements TerminalTransport {
     this.agentApi = options.agentApi;
     this.serverConnection = options.serverConnection;
     this.isAttached = options.isAttached ?? (() => false);
+    this.onInputSent = options.onInputSent ?? (() => {});
 
     if (this.mode === 'p2p' && this.agentApi) {
       this.setupP2P();
@@ -91,6 +104,10 @@ export class ConnectionManager implements TerminalTransport {
     } else if (this.mode === 'relay' && this.serverConnection?.isReady()) {
       this.serverConnection.sendRelayInput(this.sessionName, data);
     }
+    // Reported for both transports, and even when the branch above threw: a
+    // refused send is exactly the case worth questioning, and the owner decides
+    // for itself whether a check is warranted right now (#1264).
+    this.onInputSent();
   }
 
   /**
@@ -203,9 +220,15 @@ export class ConnectionManager implements TerminalTransport {
     // React layer (terminalSessionStateAtom).
     this.pingTimer = setInterval(() => {
       if (this.disposed) { return; }
-      try {
-        api.ping();
-      } catch { /* transport reconnecting — the runtime reconnect budget owns recovery */ }
+      // Fire-and-forget, and deliberately not a verdict: this keeps the
+      // *agent's* watchdog fed, which is the direction the wire was built for.
+      // The reverse question — is the agent still answering? — belongs to the
+      // session runtime's liveness probe, which treats a missed pong as
+      // transport loss (#1233). Answering it here would put a recovery
+      // decision inside what this class documents itself as: pure transport.
+      void api.ping(KEEPALIVE_PING_TIMEOUT_MS).catch(() => {
+        /* the runtime's liveness probe owns recovery */
+      });
     }, 30_000);
   }
 

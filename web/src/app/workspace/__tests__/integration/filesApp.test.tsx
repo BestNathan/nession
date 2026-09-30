@@ -85,8 +85,16 @@ async function makeEditorDirty() {
   const editor = document.querySelector('.cm-editor') as HTMLElement;
   const view = EditorView.findFromDOM(editor);
   expect(view).toBeTruthy();
-  view!.focus();
-  view!.dispatch({ changes: { from: 0, insert: 'x' } });
+  // Note: no focus() call — it triggers CodeMirror's getClientRects() which
+  // doesn't exist in jsdom. dispatch() alone is enough to mark the editor dirty.
+  act(() => {
+    view!.dispatch({ changes: { from: 0, insert: 'x' } });
+  });
+  // Wait for React to process the change and update the dirty state
+  await waitFor(() => {
+    const content = document.querySelector('.cm-content');
+    expect(content?.textContent).toContain('x');
+  });
 }
 
 describe('FilesAppLayout', () => {

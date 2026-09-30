@@ -13,6 +13,16 @@ import type {
 const MAX_RECONNECT_DELAY = 30_000;
 const DEFAULT_MAX_RECONNECT_ATTEMPTS = 10;
 const DEFAULT_RECONNECT_BASE_DELAY = 1_000;
+/**
+ * Cadence of the long tail past `maxReconnectAttempts`, when the caller asked
+ * for `persistentReconnect` (#1263).
+ *
+ * Matches the attach liveness probe's interval: a route that is being kept
+ * alive on the user's behalf already questions a silent peer once every 15s, so
+ * a manual route that keeps probing on the same cadence adds no new class of
+ * background traffic.
+ */
+const PERSISTENT_RECONNECT_DELAY_MS = 15_000;
 
 function reconnectDelayMs(attempt: number, baseDelay: number): number {
   return Math.min(baseDelay * Math.pow(2, attempt), MAX_RECONNECT_DELAY);
@@ -158,6 +168,36 @@ export class WebSocketService implements PluginSurface {
     this.router.failPending(error);
     this.rejectWaiters(error);
     this.setState('disconnected');
+  }
+
+  /**
+   * The peer has stopped answering on a socket the browser still reports OPEN.
+   *
+   * **A half-open socket fires no `close`, and that is the whole problem.**
+   * `handleSocketLoss()` is the only reconnect scheduler and it is wired to
+   * `onclose`, so a peer that goes silent — a replaced pod, a dropped NAT
+   * mapping — leaves `state` at `'connected'` forever. Everything downstream
+   * reads that state: the attach gate keeps letting input through, and
+   * `sendRaw` checks only `readyState`, which is still 1, so keystrokes are
+   * written into the void with no error and no UI signal (#1233).
+   *
+   * Called by the liveness probe layered above this class; this method makes no
+   * judgement about liveness itself (see `web/CLAUDE.md` §2 — the transport is
+   * shared by the relay singleton and every P2P service, so probing belongs to
+   * the caller that knows what it is talking to).
+   *
+   * Deliberately routed through the ordinary loss path rather than a private
+   * shortcut: reconnect budget, candidate rotation and force-relay all key off
+   * the state transition this produces, so they apply unchanged.
+   */
+  reportUnresponsive(): void {
+    if (this.disposed || this.userClosed) {
+      return;
+    }
+    // `teardownSocket()` detaches `onclose` before closing, so this cannot
+    // schedule a second reconnect through the event it is about to fire.
+    this.teardownSocket();
+    this.handleSocketLoss();
   }
 
   /**
@@ -448,18 +488,35 @@ export class WebSocketService implements PluginSurface {
     const error = new Error('Connection lost');
     this.router.failPending(error);
     const maxAttempts = this.options.maxReconnectAttempts ?? DEFAULT_MAX_RECONNECT_ATTEMPTS;
-    if (this.reconnectAttempt >= maxAttempts) {
+    const spent = this.reconnectAttempt >= maxAttempts;
+
+    if (spent && this.options.persistentReconnect !== true) {
       console.error('Max reconnection attempts reached');
       this.setState('disconnected');
       this.rejectWaiters(new Error('Connection lost'));
       return;
     }
 
-    this.reconnectAttempt += 1;
+    // `reconnectAttempt` stops climbing once the budget is spent, so the fast
+    // phase stays bounded and the long tail runs on one flat delay — the fast
+    // attempts are for an endpoint that blipped, this is for a peer that is
+    // restarting or away. The state deliberately stays `reconnecting` in the
+    // tail rather than reporting a loss: `disconnected` is what tells the
+    // address policy to rotate or exhaust, and this path exists precisely
+    // because there is nothing to rotate to (#1263).
+    if (!spent) {
+      this.reconnectAttempt += 1;
+    }
     this.setState('reconnecting');
     const baseDelay = this.options.reconnectBaseDelay ?? DEFAULT_RECONNECT_BASE_DELAY;
-    const delay = reconnectDelayMs(this.reconnectAttempt - 1, baseDelay);
-    console.log(`Scheduling reconnect in ${delay}ms (attempt ${this.reconnectAttempt})`);
+    const delay = spent
+      ? PERSISTENT_RECONNECT_DELAY_MS
+      : reconnectDelayMs(this.reconnectAttempt - 1, baseDelay);
+    console.log(
+      spent
+        ? `Reconnect budget spent; still probing every ${delay}ms`
+        : `Scheduling reconnect in ${delay}ms (attempt ${this.reconnectAttempt})`,
+    );
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       if (!this.disposed && !this.userClosed) {

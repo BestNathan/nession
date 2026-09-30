@@ -25,7 +25,7 @@ interface InputComposerProps {
    * `CapsuleGhostInput`).
    */
   onFieldFocus?: () => void;
-  fieldRef?: RefObject<HTMLTextAreaElement>;
+  fieldRef?: RefObject<HTMLTextAreaElement | null>;
 }
 
 /**

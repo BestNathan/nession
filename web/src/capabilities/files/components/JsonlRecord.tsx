@@ -2,6 +2,7 @@ import { useId } from 'react';
 import { ChevronDown } from 'lucide-react';
 import { cn } from '@/shared/lib/utils';
 import { JsonTree } from '@/components/json/JsonTree';
+import { jsonlRecordBodyClass, jsonPreviewSurfaceClass } from '@/components/json/jsonTreeSyntax';
 import type { JsonlRecord as JsonlRecordModel } from '../model/jsonParse';
 
 interface JsonlRecordProps {
@@ -46,7 +47,7 @@ export function JsonlRecord({
         ) : null}
       </div>
       {record.kind === 'invalid' ? (
-        <div role="alert" className="text-sm min-w-0">
+        <div role="alert" className={cn('text-sm min-w-0', jsonPreviewSurfaceClass('border-destructive/30 bg-destructive/5'))}>
           <p className="text-destructive font-medium">Invalid JSON</p>
           <p className="text-muted-foreground font-mono text-[length:var(--workspace-editor-font-size)] mt-1">
             {record.message}
@@ -56,7 +57,9 @@ export function JsonlRecord({
           </pre>
         </div>
       ) : (
-        <JsonTree value={record.value} mode={expanded ? 'inspector' : 'compact'} pinRootOpen={expanded} />
+        <div className={jsonlRecordBodyClass(expanded)}>
+          <JsonTree value={record.value} mode={expanded ? 'inspector' : 'compact'} pinRootOpen={expanded} />
+        </div>
       )}
     </section>
   );

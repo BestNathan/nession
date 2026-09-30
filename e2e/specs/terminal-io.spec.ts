@@ -89,8 +89,19 @@ async function readScrollMode(page: import('@playwright/test').Page): Promise<st
 
 /**
  * Where the viewport is: `viewportY` from the top of the scrollback, `baseY` at
- * the bottom, and whether those are the same. The last is the fact and the
- * first two are what a "did it move" assertion needs.
+ * the bottom, and whether those are the same.
+ *
+ * `baseY` is the **bottom of the scrollback, not part of the view**: it grows
+ * every time the session produces a line, whether or not anything moved. A
+ * "did the view move" assertion therefore needs `viewportY` (the view's own
+ * position) and `following` — pinning `baseY` too asks for "output arrived" and
+ * "the buffer did not grow" at once, which is #1261.
+ *
+ * If you do compare the whole object, `toStrictEqual` rather than `toBe`: this
+ * builds a fresh object each call, so identity comparison fails on two equal
+ * readings and reports it as "serializes to the same string" — which is how the
+ * first version of the assertion below failed three times on a product that was
+ * behaving.
  */
 async function readViewport(
   page: import('@playwright/test').Page,
@@ -834,15 +845,23 @@ test.describe('Terminal I/O', () => {
     await expect
       .poll(async () => countInBuffer(page, 'BROWSING-'), { timeout: 20_000 })
       .toBeGreaterThan(echoed);
-    // `toStrictEqual`, not `toBe`: `readViewport` builds a fresh object each
-    // time, so identity comparison fails on two equal readings and reports it
-    // as "serializes to the same string" — which is how the first version of
-    // this assertion failed three times on a product that was behaving.
+    // Only the view's own position — `baseY` is deliberately not compared.
+    // The poll above waits for output to arrive, and *that event is a growth of
+    // `baseY`*; requiring it unchanged alongside "output arrived" is the
+    // contradiction that made this flake (#1261, whose recorded signature is
+    // exactly this: `viewportY` fixed, `following: false`, `baseY` 170→171).
+    // What the test is named for is that the *view* stays where it was put.
+    const after = await readViewport(page);
     expect(
-      await readViewport(page),
+      after.viewportY,
       'the viewport moved under a reader: output while browsing must not scroll ' +
         'the view',
-    ).toStrictEqual(parked);
+    ).toBe(parked.viewportY);
+    // Compared rather than pinned to `false`, so the message reads as "unchanged
+    // while output arrived" and not as a second, unrelated claim.
+    expect(after.following, 'the view stopped being parked in history').toBe(
+      parked.following,
+    );
     expect(await readScrollMode(page)).toBe('history');
 
     // And the way back: at the real bottom the terminal follows again, and the

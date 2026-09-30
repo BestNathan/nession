@@ -87,8 +87,9 @@ async fn test_attach_and_receive_output() -> Result<()> {
     create_session(guard.name()).await?;
     sleep(Duration::from_millis(300)).await;
 
-    let (mut session, mut rx, _resize_rx) =
-        ControlModeSession::attach(&TmuxDep::global(), guard.name(), 80, 24).await?;
+    let (mut session, mut rx, _resize_rx, capture) =
+        ControlModeSession::attach(&TmuxDep::global(), guard.name(), 80, 24, None).await?;
+    assert!(capture.is_none(), "no capture was requested");
 
     // Drain any startup output (initial screen redraw from refresh-client).
     let _ = drain_bytes(&mut rx, 500).await;
@@ -119,8 +120,8 @@ async fn test_resize_updates_viewport() -> Result<()> {
     create_session(guard.name()).await?;
     sleep(Duration::from_millis(300)).await;
 
-    let (mut session, _rx, _resize_rx) =
-        ControlModeSession::attach(&TmuxDep::global(), guard.name(), 80, 24).await?;
+    let (mut session, _rx, _resize_rx, _capture) =
+        ControlModeSession::attach(&TmuxDep::global(), guard.name(), 80, 24, None).await?;
 
     assert_eq!(session.viewport(), (80, 24));
 
@@ -157,10 +158,10 @@ async fn two_clients_share_one_window() -> Result<()> {
     create_session(guard.name()).await?;
     sleep(Duration::from_millis(300)).await;
 
-    let (mut client1, _rx1, _rz1) =
-        ControlModeSession::attach(&TmuxDep::global(), guard.name(), 80, 24).await?;
-    let (mut client2, _rx2, _rz2) =
-        ControlModeSession::attach(&TmuxDep::global(), guard.name(), 120, 40).await?;
+    let (mut client1, _rx1, _rz1, _cap1) =
+        ControlModeSession::attach(&TmuxDep::global(), guard.name(), 80, 24, None).await?;
+    let (mut client2, _rx2, _rz2, _cap2) =
+        ControlModeSession::attach(&TmuxDep::global(), guard.name(), 120, 40, None).await?;
     sleep(Duration::from_millis(300)).await;
 
     // client2 attached second, and `attach` resizes the window on the way in,
@@ -197,11 +198,113 @@ async fn test_close_is_idempotent() -> Result<()> {
     create_session(guard.name()).await?;
     sleep(Duration::from_millis(300)).await;
 
-    let (mut session, _rx, _resize_rx) =
-        ControlModeSession::attach(&TmuxDep::global(), guard.name(), 80, 24).await?;
+    let (mut session, _rx, _resize_rx, _capture) =
+        ControlModeSession::attach(&TmuxDep::global(), guard.name(), 80, 24, None).await?;
 
     session.close().await?;
     session.close().await?;
 
+    Ok(())
+}
+
+/// The bootstrap barrier (#1228): a producer running *across* the attach must
+/// land each of its lines **exactly once** across the capture and the live
+/// stream — the pre-#1228 shape captured from a separate tmux process, whose
+/// ordering against the control client's `%output` stream nothing constrained,
+/// so lines produced between the control attach and the capture arrived twice
+/// (measured on the e2e `terminal-io` mid-stream attach as GAP-015 twice).
+///
+/// The mechanism the assertions pin: the capture is taken on the control
+/// channel itself, so tmux's own wire order is the barrier — `%output` queued
+/// before the capture's `%begin` is inside the capture (dropped from the live
+/// stream), and output after it is not (forwarded).
+#[tokio::test]
+async fn the_bootstrap_capture_and_the_live_stream_join_exactly() -> Result<()> {
+    if cfg!(target_os = "macos") {
+        return Ok(());
+    }
+    let guard = TestSession::new("ctrl-barrier");
+    create_session(guard.name()).await?;
+    sleep(Duration::from_millis(300)).await;
+
+    // Start the producer BEFORE attaching: 60 numbered lines, 50ms apart, so
+    // production straddles the control attach and the capture.
+    let status = nession_agent::tmux::cmd::global()
+        .tokio()
+        .args([
+            "send-keys",
+            "-t",
+            guard.name(),
+            "for i in $(seq 1 60); do printf 'GAP-%03d\\n' $i; sleep 0.05; done",
+            "Enter",
+        ])
+        .status()
+        .await?;
+    assert!(status.success(), "send-keys failed: {status}");
+
+    // Let the stream get ahead of the attach: at 50ms/line, 300ms is ~6
+    // lines in the scrollback before the control client exists. Without the
+    // straddle the capture is empty of GAP lines and the test degenerates to
+    // "the live stream works" — measured: an attach that outran GAP-001 made
+    // even the barrier's drop-path invisible to a mutation.
+    sleep(Duration::from_millis(300)).await;
+
+    let (mut session, mut rx, _resize_rx, capture) =
+        ControlModeSession::attach(&TmuxDep::global(), guard.name(), 80, 24, Some(5000)).await?;
+
+    // The producer takes 3s; the deadline covers it plus attach overhead.
+    let live = drain_bytes(&mut rx, 10_000).await;
+    let live_text = String::from_utf8_lossy(&live);
+    let capture_text = String::from_utf8_lossy(
+        capture
+            .as_deref()
+            .expect("a straddled stream must yield a bootstrap capture"),
+    );
+
+    let mut seen = std::collections::HashMap::new();
+    for text in [&capture_text, &live_text] {
+        for line in text.lines() {
+            // EVERY occurrence: an escape sequence echoing the producer
+            // command (`GAP-%03d`, no digits) can share a line with real
+            // output, and taking only the first hit would skip the line's
+            // real index — measured: that, not the barrier, is what made
+            // this test's first red run report GAP-001 missing.
+            for (pos, _) in line.match_indices("GAP-") {
+                let idx = line
+                    .get(pos + 4..pos + 7)
+                    .and_then(|digits| digits.parse::<u32>().ok());
+                if let Some(idx) = idx {
+                    if (1..=60).contains(&idx) {
+                        *seen.entry(idx).or_insert(0u32) += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    for idx in 1..=60 {
+        assert_eq!(
+            seen.get(&idx).copied().unwrap_or(0),
+            1,
+            "GAP-{idx:03} must appear exactly once across capture ∪ live \
+             (pre-#1228 it could appear in both)\ncapture: {capture_text:?}\nlive: {live_text:?}"
+        );
+    }
+    // And the straddle must actually have happened: some indices in the
+    // capture, some in the live stream, or the exact-join property was never
+    // exercised.
+    let in_capture = (1..=60)
+        .filter(|i| capture_text.contains(&format!("GAP-{i:03}")))
+        .count();
+    let in_live = (1..=60)
+        .filter(|i| live_text.contains(&format!("GAP-{i:03}")))
+        .count();
+    assert!(
+        in_capture > 0 && in_live > 0,
+        "the stream must straddle the capture — capture has {in_capture} GAP lines, \
+         live has {in_live}\ncapture: {capture_text:?}"
+    );
+
+    let _ = session.close().await;
     Ok(())
 }

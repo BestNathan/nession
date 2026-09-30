@@ -49,7 +49,10 @@ function makeAgentApi(): AgentApiHarness & { unsubs: { output: ReturnType<typeof
       errorHandlers.push(cb);
       return unsubs.error;
     }),
-    ping: vi.fn(),
+    // Resolves, because the real `ping` returns a promise and the keepalive
+    // attaches a `.catch` to it: a mock returning `undefined` would throw a
+    // TypeError and pass for the wrong reason (#1233).
+    ping: vi.fn().mockResolvedValue(undefined),
   };
   return {
     api: api as unknown as TerminalAgentApi,
@@ -90,6 +93,36 @@ describe('ConnectionManager', () => {
       });
       cm.send('hello');
       expect(api.sendInput).toHaveBeenCalledWith('test', 'hello');
+      cm.dispose();
+    });
+
+    it('reports input to the owner so it can question the link (#1264)', () => {
+      const { api } = makeAgentApi();
+      const onInputSent = vi.fn();
+      const cm = new ConnectionManager({
+        mode: 'p2p', sessionName: 'test', sessionId: 'a:test', agentApi: api, ...attached,
+        onInputSent,
+      });
+      cm.send('hello');
+      // Once per send, not once per state: this is the signal the liveness
+      // check hangs off, and a missing call here leaves the whole input-side
+      // detection dead while every runtime test still passes.
+      expect(onInputSent).toHaveBeenCalledTimes(1);
+      cm.dispose();
+    });
+
+    it('does not report input it buffered rather than sent (#1264)', () => {
+      const { api } = makeAgentApi();
+      const onInputSent = vi.fn();
+      const cm = new ConnectionManager({
+        mode: 'p2p', sessionName: 'test', sessionId: 'a:test', agentApi: api,
+        isAttached: () => false,
+        onInputSent,
+      });
+      cm.send('hello');
+      // Buffered input never reached a transport, so there is no link to
+      // question — and an unattached transport is the attach budget's job.
+      expect(onInputSent).not.toHaveBeenCalled();
       cm.dispose();
     });
 

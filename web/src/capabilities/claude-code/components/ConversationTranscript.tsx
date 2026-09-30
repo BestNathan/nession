@@ -7,16 +7,22 @@ import {
   Wrench,
   X,
 } from 'lucide-react';
-import { memo, useRef, type ReactNode } from 'react';
+import { memo, useEffect, type ReactNode } from 'react';
 import { toast } from 'sonner';
+import { useMessageScrollerScrollable } from '@shadcn/react/message-scroller';
 import { Button } from '@/components/ui/button';
+import {
+  MessageScroller,
+  MessageScrollerButton,
+  MessageScrollerContent,
+  MessageScrollerItem,
+  MessageScrollerProvider,
+  MessageScrollerViewport,
+} from '@/components/ui/message-scroller';
 import { copyToClipboard } from '@/shared/lib/clipboard';
 import { cn } from '@/shared/lib/utils';
 import { Markdown } from '@/shared/markdown';
 import type { ConversationViewState } from '../hooks/useConversation';
-import { useTranscriptPullToLoad } from '../hooks/useTranscriptPullToLoad';
-import { useTranscriptScroll } from '../hooks/useTranscriptScroll';
-import { TranscriptPullToLoadIndicator } from './TranscriptPullToLoadIndicator';
 import type { ClaudeCodeMessagesResponse } from '../types';
 import { clockTime } from '../model/clockTime';
 
@@ -29,72 +35,61 @@ type Payload = NonNullable<Tool['input']>;
 /**
  * The transcript, from the newest page backwards.
  *
- * Older pagination (#1190): pull-down at the top (ring fills, then release),
- * scroll-to-top fallback, and anchor preservation on prepend.
+ * Uses shadcn MessageScroller for scroll management (#1267):
+ * - Initial scroll to bottom (defaultScrollPosition="end")
+ * - Anchor preservation on prepend (preserveScrollOnPrepend)
+ * - Auto-scroll on growth when at bottom
+ * - Jump-to-latest button
+ *
+ * Older pagination: scroll-to-top triggers older loads.
  */
 export function ConversationTranscript({
   view,
   onLoadOlder,
 }: {
   view: ConversationViewState;
-  onLoadOlder: () => void;
+  /** Starts an older-page fetch; answers synchronously whether one engaged. */
+  onLoadOlder: () => boolean;
 }) {
-  const pullHandleRef = useRef<HTMLDivElement>(null);
-  const { scrollRef, topSentinelRef, onScroll, loadOlderFromPull } = useTranscriptScroll({
-    conversationId: view.conversation?.id ?? null,
-    itemCount: view.items.length,
-    hasMore: view.hasMore,
-    loadingOlder: view.loadingOlder,
-    onLoadOlder,
-  });
+  return (
+    <MessageScrollerProvider autoScroll defaultScrollPosition="end">
+      <MessageScroller>
+        <MessageScrollerViewport preserveScrollOnPrepend>
+          <TranscriptContent view={view} onLoadOlder={onLoadOlder} />
+        </MessageScrollerViewport>
+        <MessageScrollerButton direction="end" />
+      </MessageScroller>
+    </MessageScrollerProvider>
+  );
+}
 
-  const canPullOlder =
-    view.hasMore && !view.loadingOlder && view.items.length > 0 && view.messagesState === 'ready';
-  const { pullPx, progress, isPulling, atTopEdge, syncTopEdge, pullHandleHandlers, scrollHandlers } =
-    useTranscriptPullToLoad({
-      scrollRef,
-      pullHandleRef,
-      enabled: canPullOlder,
-      onCommitLoad: loadOlderFromPull,
-    });
+/**
+ * The scrollable content: loading/error states, items, and pagination trigger.
+ */
+function TranscriptContent({
+  view,
+  onLoadOlder,
+}: {
+  view: ConversationViewState;
+  onLoadOlder: () => boolean;
+}) {
+  const scrollable = useMessageScrollerScrollable();
 
-  const handleScroll = () => {
-    syncTopEdge();
-    onScroll();
-  };
+  // Trigger older loads when near the top (start of scroll)
+  useEffect(() => {
+    if (
+      scrollable.start &&
+      view.hasMore &&
+      !view.loadingOlder &&
+      view.items.length > 0 &&
+      view.messagesState === 'ready'
+    ) {
+      onLoadOlder();
+    }
+  }, [scrollable.start, view.hasMore, view.loadingOlder, view.items.length, view.messagesState, onLoadOlder]);
 
   return (
-    <div
-      ref={scrollRef}
-      data-testid="conversation-transcript-scroll"
-      className={cn('min-h-0 flex-1 overflow-y-auto p-4 touch-pan-y', isPulling && 'touch-none overscroll-none')}
-      onScroll={handleScroll}
-      {...scrollHandlers}
-    >
-      <div
-        className={cn(!isPulling && pullPx === 0 && 'translate-y-0')}
-        style={pullPx > 0 ? { transform: `translateY(${pullPx}px)` } : undefined}
-      >
-        {canPullOlder && atTopEdge ? (
-          <div
-            ref={pullHandleRef}
-            className={cn(
-              'flex min-h-11 touch-none select-none flex-col items-center justify-end overflow-hidden transition-[height] duration-75',
-              isPulling ? 'cursor-grabbing' : 'cursor-grab',
-            )}
-            style={{ height: pullPx > 0 ? Math.max(pullPx, 44) : 44 }}
-            data-testid="conversation-pull-handle"
-            {...pullHandleHandlers}
-          >
-            {pullPx > 0 ? (
-              <TranscriptPullToLoadIndicator progress={progress} />
-            ) : (
-              <p className="pb-1 text-[10px] text-muted-foreground" data-testid="conversation-pull-hint">
-                Pull down for earlier messages
-              </p>
-            )}
-          </div>
-        ) : null}
+    <MessageScrollerContent>
       {view.loadingOlder ? (
         <p
           className="flex items-center justify-center gap-2 pb-3 text-xs text-muted-foreground"
@@ -112,24 +107,24 @@ export function ConversationTranscript({
           role="alert"
         >
           <span>{view.olderError}</span>
-          <Button variant="outline" size="xs" type="button" onClick={() => loadOlderFromPull()}>
+          <Button variant="outline" size="xs" type="button" onClick={() => onLoadOlder()}>
             Retry
           </Button>
         </div>
       ) : null}
-      <div ref={topSentinelRef} className="h-px w-full shrink-0" aria-hidden />
-      <div className="space-y-4">
-        {view.items.length === 0 ? (
-          <p className="flex items-center gap-2 text-sm text-muted-foreground">
-            <AlertCircle className="h-4 w-4" />
-            This conversation has no messages yet.
-          </p>
-        ) : (
-          view.items.map((item) => <ItemView key={item.id} item={item} />)
-        )}
-      </div>
-      </div>
-    </div>
+      {view.items.length === 0 ? (
+        <p className="flex items-center gap-2 text-sm text-muted-foreground">
+          <AlertCircle className="h-4 w-4" />
+          This conversation has no messages yet.
+        </p>
+      ) : (
+        view.items.map((item) => (
+          <MessageScrollerItem key={item.id} messageId={item.id}>
+            <ItemView item={item} />
+          </MessageScrollerItem>
+        ))
+      )}
+    </MessageScrollerContent>
   );
 }
 

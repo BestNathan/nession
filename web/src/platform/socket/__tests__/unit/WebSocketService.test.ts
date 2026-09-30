@@ -297,6 +297,85 @@ describe('WebSocketService', () => {
     expect(handshake).toHaveBeenCalledTimes(3);
   });
 
+  it('keeps probing past the budget when the route is pinned to one address (#1263)', async () => {
+    // Same exhaustion as #692 above, with the one difference that matters: this
+    // route has no next candidate, so a spent budget cannot mean "gone".
+    const handshake = vi.fn(() => new Promise<void>(() => {}));
+    const service = new WebSocketService('ws://server/ws', [], {
+      handshake,
+      maxReconnectAttempts: 2,
+      reconnectBaseDelay: 5,
+      persistentReconnect: true,
+    });
+
+    const connected = service.connect();
+    void connected.catch(() => {});
+
+    const connectAndLose = (): void => {
+      const socket = MockWebSocket.instances[MockWebSocket.instances.length - 1];
+      socket.open();
+      socket.serverClose();
+    };
+
+    connectAndLose();
+    await flushTimers(50);
+    connectAndLose();
+    await flushTimers(50);
+    connectAndLose();
+
+    // Held at the budget rather than climbing, and — the point of the test —
+    // still `reconnecting`, not settled on `disconnected`. That state is what
+    // keeps the route from being declared exhausted while it is still being
+    // attempted.
+    expect(service.reconnectAttempts).toBe(2);
+    expect(service.connectionState).toBe('reconnecting');
+
+    // Another attempt is made rather than the transport settling. Asserted on
+    // the socket the service built, not on the handshake: the handshake only
+    // runs once that socket opens (see the case above), so counting it here
+    // would be asserting the harness rather than the cadence.
+    await flushTimers(20_000);
+    expect(MockWebSocket.instances).toHaveLength(4);
+
+    // And it continues: the tail is a cadence, not one last try.
+    connectAndLose();
+    expect(service.connectionState).toBe('reconnecting');
+    await flushTimers(20_000);
+    expect(MockWebSocket.instances).toHaveLength(5);
+  });
+
+  it('settles on disconnected past the budget without persistentReconnect', async () => {
+    // The other direction, so the branch above cannot pass by never exhausting
+    // at all: the same run without the flag must still settle.
+    const handshake = vi.fn(() => new Promise<void>(() => {}));
+    const service = new WebSocketService('ws://server/ws', [], {
+      handshake,
+      maxReconnectAttempts: 2,
+      reconnectBaseDelay: 5,
+    });
+
+    const connected = service.connect();
+    void connected.catch(() => {});
+
+    const connectAndLose = (): void => {
+      const socket = MockWebSocket.instances[MockWebSocket.instances.length - 1];
+      socket.open();
+      socket.serverClose();
+    };
+
+    connectAndLose();
+    await flushTimers(50);
+    connectAndLose();
+    await flushTimers(50);
+    connectAndLose();
+
+    expect(service.reconnectAttempts).toBe(2);
+    expect(service.connectionState).toBe('disconnected');
+
+    await flushTimers(60_000);
+    expect(MockWebSocket.instances).toHaveLength(3);
+  });
+
   it('correlates handshake requests via HandshakeSurface and still dispatches pushes during the handshake', async () => {
     let verified = false;
     const handshake = vi.fn(async (surface: HandshakeSurface) => {
@@ -719,5 +798,65 @@ describe('WebSocketService', () => {
     const second = new ArrayBuffer(8);
     socket.message(second);
     expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  // `reportUnresponsive` is how a liveness probe tells the transport its peer
+  // went silent. Every assertion here is about it behaving *exactly* like a
+  // real loss: downstream recovery (reconnect budget, candidate rotation,
+  // force-relay) keys off the state transition and nothing else, so a special
+  // path would silently skip all of it (#1233).
+  describe('reportUnresponsive', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('runs the ordinary loss path, scheduling exactly one reconnect', async () => {
+      const service = new WebSocketService('ws://agent/ws', [], {
+        maxReconnectAttempts: 5,
+        reconnectBaseDelay: 5,
+      });
+      const connected = service.connect();
+      MockWebSocket.instances[0].open();
+      await connected;
+      expect(service.connectionState).toBe('connected');
+
+      service.reportUnresponsive();
+
+      // The mutation this pins: routing the teardown through the socket's own
+      // `onclose` as well. `teardownSocket()` detaches that handler precisely
+      // so the two cannot both fire — with both, this reads 2 and the caller
+      // burns reconnect budget twice as fast as the network actually failed.
+      expect(service.connectionState).toBe('reconnecting');
+      expect(service.reconnectAttempts).toBe(1);
+
+      await flushTimers(50);
+      expect(MockWebSocket.instances).toHaveLength(2);
+    });
+
+    it('leaves a socket that is already gone alone', async () => {
+      const service = new WebSocketService('ws://agent/ws', [], {
+        maxReconnectAttempts: 5,
+        reconnectBaseDelay: 5,
+      });
+      const connected = service.connect();
+      MockWebSocket.instances[0].open();
+      await connected;
+
+      service.disconnect();
+      expect(service.connectionState).toBe('disconnected');
+
+      service.reportUnresponsive();
+
+      // `disconnect()` is terminal by design; a stale probe must not resurrect
+      // the transport or add reconnect attempts to a torn-down service.
+      expect(service.connectionState).toBe('disconnected');
+      expect(service.reconnectAttempts).toBe(0);
+      await flushTimers(50);
+      expect(MockWebSocket.instances).toHaveLength(1);
+    });
   });
 });

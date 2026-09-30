@@ -339,7 +339,8 @@ export function ConversationView({
   view: ConversationViewState;
   layout: ConversationLayout;
   onSelect: (claudeSessionId: string | null) => void;
-  onLoadOlder: () => void;
+  /** Starts an older-page fetch; answers synchronously whether one engaged. */
+  onLoadOlder: () => boolean;
   onReload: () => void;
 }) {
   // The list is a place the user can return to, not a fallback: it is shown

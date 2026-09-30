@@ -85,9 +85,26 @@ test.describe('Session lifecycle', () => {
     // rendered the literal string `shell` for *every* Session, so the test was
     // asserting the defect and any Session whose shell was not the placeholder
     // would have passed it by accident. CI's session runs bash.
+    // Wait for the *report*, then assert the content — in that order, because
+    // the two are different claims and only the first is about timing.
+    //
+    // A Session created a moment ago legitimately shows `unknown`: it is the
+    // documented workload value until the agent reports the pane's foreground
+    // command (`workloadHint` is `foreground_command ?? 'unknown'`, and the
+    // design vocabulary lists `unknown` as neutral). Measured on staging: at the
+    // point this assertion used to start, the row read `unknown` and settled to
+    // `bash` 773ms later — while CI has caught the same row still `unknown` past
+    // 5s on a cold agent. So the settle is real and its duration is not
+    // something this test can predict; the old 5s budget was a guess that
+    // happened to sit inside the range (#1276). 20s is an allowance for it to
+    // finish, not a claim about any cadence — the assertion that follows is
+    // unchanged.
+    await expect(sessionRow.getByTestId('session-item-workload')).not.toHaveText('unknown', {
+      timeout: 20_000,
+    });
     await expect(
       sessionRow.getByTestId('session-item-meta'),
-    ).toContainText(`bash · ${agentLabel} ·`, { timeout: 5_000 });
+    ).toContainText(`bash · ${agentLabel} ·`);
 
     // ── Kill session ──
     // The Kill button is in the same row as the session name.  Use the

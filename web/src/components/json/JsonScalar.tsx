@@ -1,5 +1,7 @@
 import { useState } from 'react';
+import { cn } from '@/shared/lib/utils';
 import { COMPACT_STRING_CHARS, TREE_STRING_PREVIEW_CHARS, TREE_STRING_EXPAND_CHARS } from './jsonTreeLimits';
+import { jsonSyntax } from './jsonTreeSyntax';
 
 interface JsonScalarProps {
   value: string | number | boolean | null;
@@ -12,26 +14,27 @@ export function JsonScalar({ value, allowExpand = false, maxChars }: JsonScalarP
   const [expanded, setExpanded] = useState(false);
 
   if (value === null) {
-    return <span className="text-muted-foreground italic">null</span>;
+    return <span className={jsonSyntax.literal}>null</span>;
   }
   if (typeof value === 'boolean') {
-    return <span className="text-muted-foreground">{value ? 'true' : 'false'}</span>;
+    return <span className={jsonSyntax.literal}>{value ? 'true' : 'false'}</span>;
   }
   if (typeof value === 'number') {
-    return <span className="tabular-nums text-foreground">{String(value)}</span>;
+    return <span className={jsonSyntax.number}>{String(value)}</span>;
   }
 
   const limit = maxChars ?? (allowExpand ? TREE_STRING_PREVIEW_CHARS : COMPACT_STRING_CHARS);
-  const needsExpand = allowExpand && value.length > limit;
+  const truncated = value.length > limit;
   const body = expanded
     ? value.slice(0, TREE_STRING_EXPAND_CHARS)
-    : (needsExpand ? `${value.slice(0, limit)}…` : value);
+    : (truncated ? `${value.slice(0, limit)}…` : value);
+  const showExpandControl = allowExpand && truncated;
   const display = JSON.stringify(body);
 
   return (
-    <span className="break-words text-foreground min-w-0">
+    <span className={cn('break-words min-w-0', jsonSyntax.string)}>
       {display}
-      {needsExpand ? (
+      {showExpandControl ? (
         <button
           type="button"
           className="ml-1 text-[length:var(--workspace-editor-action-font-size)] text-muted-foreground hover:text-foreground"

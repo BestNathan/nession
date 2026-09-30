@@ -201,7 +201,14 @@ export function useMessages({
         return;
       }
       positions.current = withNewest(positions.current, response);
-      setMessages({
+      // Updater form on purpose: this same path runs as the 3s poll, and a
+      // whole-object write would stamp `loadingOlder: false` over an in-flight
+      // older-page fetch — killing its spinner, disarming the scroll
+      // controller's fetch guard, and letting a second pull double-fetch the
+      // same page. The older fetch owns those two fields and clears them
+      // itself.
+      setMessages((current) => ({
+        ...current,
         state: response.state,
         conversation: response.conversation ?? null,
         activity: response.activity ?? null,
@@ -210,13 +217,11 @@ export function useMessages({
         partialTail: response.partial_tail,
         skipped: response.skipped,
         loading: false,
-        loadingOlder: false,
-        olderError: null,
         error:
           response.state === 'error'
             ? (response.error ?? 'The conversation could not be read')
             : null,
-      });
+      }));
     },
     [agentId, sessionId],
   );
@@ -229,7 +234,6 @@ export function useMessages({
       setMessages((current) => ({
         ...current,
         loading: false,
-        loadingOlder: false,
         error: message(error),
       }));
     },
@@ -280,14 +284,24 @@ export function useMessages({
     void fetchNewest(conversationId, key, ++newestRequestId.current).catch(() => undefined);
   }, [conversationId, fetchNewest]);
 
-  const loadOlder = useCallback(async () => {
+  /**
+   * Fetch the page before the loaded window.
+   *
+   * Returns synchronously whether a fetch actually engaged: the scroll
+   * controller decides from that answer whether to keep its pending anchor —
+   * reading `loadingOlder` later (even one microtask later) races React's
+   * deferred flush of wheel-event renders and would disarm a fetch that is
+   * genuinely on its way. `fetchOlderPage`'s own try/catch settles every
+   * outcome, so the promise needs no handling here.
+   */
+  const loadOlder = useCallback(() => {
     const key = contextRef.current;
     const cursor = positions.current.cursor;
     if (!key || cursor === null || !agentId || !sessionId || !conversationId) {
-      return;
+      return false;
     }
     const id = ++olderRequestId.current;
-    await fetchOlderPage({
+    void fetchOlderPage({
       agentId,
       sessionId,
       conversationId,
@@ -299,6 +313,7 @@ export function useMessages({
       key,
       id,
     });
+    return true;
   }, [agentId, conversationId, sessionId]);
 
   return { messages, reload, loadOlder, poll };

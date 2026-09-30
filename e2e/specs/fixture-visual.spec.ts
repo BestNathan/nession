@@ -302,6 +302,14 @@ test.describe('Web 1440×900', () => {
       .toBeGreaterThan(expandedXterm + (expandedColumn - railWidth) * 0.9);
     await expect(xterm).toBeVisible();
 
+    // The return trip is asserted separately — see "expanding the sidebar
+    // gives the work surface its width back" in `ui-contract-assertions.spec.ts`
+    // (#1269). It is deliberately not a mirror of the assertion above:
+    // expanding has to lift a floor that collapsing never touches. `main`
+    // defaults to `min-width: auto`, so once the Terminal had rendered at the
+    // collapsed width its own grid held the column open, and the row ended up
+    // 192px past the viewport while everything in this test still passed.
+
     // Interactive-role count: one control in the rail, and it is Expand. The
     // summaries are information — present, counted, and not buttons.
     const rail = page.getByTestId('sidebar-rail');

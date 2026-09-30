@@ -72,5 +72,20 @@ export interface WebSocketServiceOptions {
   handshake?: (surface: HandshakeSurface) => Promise<void>;
   maxReconnectAttempts?: number; // default 10
   reconnectBaseDelay?: number;   // default 1_000, exp backoff, cap 30_000
+  /**
+   * Past `maxReconnectAttempts`, keep probing at a slow flat cadence instead of
+   * settling on `disconnected`.
+   *
+   * For a route pinned to one address: there is no other candidate to rotate
+   * to, so spending the budget is not the same as the endpoint being gone, and
+   * stopping there hands recovery to a manual action the user has no reason to
+   * expect (#1263). The transport also stays `reconnecting` rather than
+   * reporting a loss, which is what keeps the route's own recovery from being
+   * declared exhausted while it is still being attempted.
+   *
+   * Left off wherever rotation exists: those paths need the transport to reach
+   * `disconnected` so the address policy can pick the next candidate.
+   */
+  persistentReconnect?: boolean;
   onError?: (error: Error) => void;
 }
