@@ -829,6 +829,61 @@ async fn apply_env_snapshots(
     tmux.env().set_environment(session_name, &deduped).await
 }
 
+/// The size an attach should give the session.
+///
+/// A client that has measured its viewport says so, and its `width`/`height`
+/// are used as they always were. A client that has **not** — a page that has
+/// not laid its terminal out yet — can only send the payload's placeholder,
+/// and acting on it resizes the **shared** window to 80×24 and back: two real
+/// size changes, each of which makes an inline-drawing application repaint its
+/// screen into the scrollback the user then reads it from (#1265).
+///
+/// Inheriting the pane's current size makes the attach a no-op for the
+/// geometry, so the client's first real measurement is the only resize — and
+/// it is the size the client is about to be looking at, rather than one it
+/// never measured.
+///
+/// A read that fails keeps the placeholder. The session is very often about to
+/// be reported missing by the attach itself, and *that* is the error worth
+/// surfacing; substituting a size here would only hide which of the two
+/// happened.
+async fn resolve_attach_size(
+    tmux: &SessionManager,
+    session_name: &str,
+    payload: &ClientAttachPayload,
+) -> (u16, u16) {
+    let authoritative = payload.size_is_authoritative();
+    // The read is skipped entirely for a client that measured: its size is the
+    // instruction, and asking tmux for the current one would only be a fact
+    // nobody uses.
+    let pane = if authoritative {
+        None
+    } else {
+        tmux.tmux_dep().ops().window_size(session_name).await.ok()
+    };
+    choose_attach_size(authoritative, (payload.width, payload.height), pane)
+}
+
+/// The decision [`resolve_attach_size`] makes, separated from the tmux read so
+/// it can be tested without a server — and so the rule is one expression rather
+/// than something a reader has to reassemble from two branches.
+///
+/// `pane` is the session's current size, or `None` when it could not be read.
+/// A read that fails keeps the stated size: the session is very often about to
+/// be reported missing by the attach itself, and *that* is the error worth
+/// surfacing.
+fn choose_attach_size(
+    authoritative: bool,
+    stated: (u16, u16),
+    pane: Option<(u16, u16)>,
+) -> (u16, u16) {
+    if authoritative {
+        stated
+    } else {
+        pane.unwrap_or(stated)
+    }
+}
+
 /// Handle to a running [`AgentServer`]. Clone and keep around to request
 /// a graceful shutdown. When all handles are dropped the server keeps
 /// running until the process exits; call [`ServerHandle::shutdown`] to
@@ -1496,11 +1551,13 @@ p2p_routes! { ctx, msg_type, payload_value;
                     // The backend is handed this manager's tmux addressing rather
                     // than resolving the process-wide one, so a substituted
                     // binary reaches the attach too (#991 step 6).
+                    let (width, height) =
+                        resolve_attach_size(ctx.tmux, &session_name, &payload).await;
                     match crate::tmux::pty::PtySession::attach(
                         &ctx.tmux.tmux_dep(),
                         &session_name,
-                        payload.width,
-                        payload.height,
+                        width,
+                        height,
                     ) {
                         Ok((pty_session, mut output_rx)) => {
                             let client_id = connection_client_id(ctx.client_id).await;
@@ -1651,11 +1708,13 @@ p2p_routes! { ctx, msg_type, payload_value;
                     // the backend was not attached before it, and the history
                     // belongs to a client that has none.
                     let wants_bootstrap = payload.needs_bootstrap.unwrap_or(true);
+                    let (width, height) =
+                        resolve_attach_size(ctx.tmux, &payload.session_name, &payload).await;
                     match crate::tmux::control::ControlModeSession::attach(
                         &ctx.tmux.tmux_dep(),
                         &payload.session_name,
-                        payload.width,
-                        payload.height,
+                        width,
+                        height,
                         if wants_bootstrap {
                             Some(crate::tmux::HISTORY_LIMIT_LINES)
                         } else {
@@ -3492,6 +3551,10 @@ mod tests {
             session_name: session_name.to_string(),
             width: 80,
             height: 24,
+            // Stated, therefore authoritative: these tests mean the size they
+            // write, which is what a client predating the field says by saying
+            // nothing (#1265).
+            size_known: None,
             env_snapshots: Vec::new(),
             needs_bootstrap: None,
         };
@@ -3539,6 +3602,10 @@ mod tests {
             session_name: session_name.to_string(),
             width: 80,
             height: 24,
+            // Stated, therefore authoritative: these tests mean the size they
+            // write, which is what a client predating the field says by saying
+            // nothing (#1265).
+            size_known: None,
             env_snapshots: Vec::new(),
             needs_bootstrap: None,
         };
@@ -4185,6 +4252,10 @@ mod tests {
             session_name: session_name.to_string(),
             width: 80,
             height: 24,
+            // Stated, therefore authoritative: these tests mean the size they
+            // write, which is what a client predating the field says by saying
+            // nothing (#1265).
+            size_known: None,
             env_snapshots: Vec::new(),
             needs_bootstrap: None,
         };
@@ -4295,6 +4366,58 @@ mod tests {
         assert_eq!(p.width, 80);
         assert_eq!(p.height, 24);
         assert!(p.env_snapshots.is_empty());
+        // The placeholder's columns are still authoritative to a client that
+        // says nothing about them: absence is the *old* meaning, and every
+        // client written before `size_known` sends exactly this (#1265).
+        assert_eq!(p.size_known, None);
+        assert!(p.size_is_authoritative());
+    }
+
+    /// The one thing a client can say that changes how its size is treated.
+    ///
+    /// Without this, the field could be inverted (or read as `unwrap_or(false)`)
+    /// and every test above would still pass while an unmeasured client went
+    /// back to resizing the shared window to 80×24 (#1265).
+    #[test]
+    fn an_unmeasured_size_is_the_only_one_that_is_not_authoritative() {
+        let read = |known: Option<bool>| {
+            let mut json = serde_json::json!({"session_name": "s", "width": 120, "height": 40});
+            if let Some(known) = known {
+                json["size_known"] = serde_json::json!(known);
+            }
+            let p: ClientAttachPayload = serde_json::from_value(json).unwrap();
+            p.size_is_authoritative()
+        };
+        assert!(read(None), "absent must preserve the old meaning");
+        assert!(read(Some(true)));
+        assert!(!read(Some(false)));
+    }
+
+    /// The decision the two attach arms make, in the three cases that matter.
+    ///
+    /// `Some(false)` is what a page that has not laid its Terminal out says, and
+    /// the pane's size is what it must get: the alternative is resizing the
+    /// **shared** window to the payload's placeholder and back, which repaints
+    /// an inline-drawing application into the scrollback the user reads (#1265).
+    #[test]
+    fn an_unmeasured_attach_inherits_the_panes_size() {
+        let stated = (80, 24);
+        assert_eq!(
+            choose_attach_size(true, stated, Some((101, 31))),
+            stated,
+            "a measured client's own columns are the instruction, not the pane's"
+        );
+        assert_eq!(
+            choose_attach_size(false, stated, Some((101, 31))),
+            (101, 31),
+            "an unmeasured attach kept the placeholder instead of inheriting"
+        );
+        assert_eq!(
+            choose_attach_size(false, stated, None),
+            stated,
+            "a pane that could not be read must leave the attach its stated \
+             size — the attach's own error is the one worth surfacing"
+        );
     }
 
     #[test]

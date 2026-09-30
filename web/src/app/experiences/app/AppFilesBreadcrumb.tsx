@@ -1,5 +1,6 @@
 import { MoreHorizontal, Search } from 'lucide-react';
 import { cn } from '@/shared/lib/utils';
+import { chromeMonoRole } from '@/shared/typography/chromeRoles';
 import { Button } from '@/components/ui/button';
 
 export interface AppFilesBreadcrumbProps {
@@ -28,7 +29,7 @@ export function AppFilesBreadcrumb({
     >
       <nav
         aria-label="Directory path"
-        className="flex min-w-0 flex-1 gap-1 overflow-x-auto text-[length:var(--workspace-tree-font-size)] text-muted-foreground"
+        className={cn('flex min-w-0 flex-1 gap-1 overflow-x-auto text-muted-foreground', chromeMonoRole('secondary'))}
       >
       {segments.map((segment, index) => {
         const isLast = index === segments.length - 1;

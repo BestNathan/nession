@@ -1,6 +1,5 @@
 import { Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { cn } from '@/shared/lib/utils';
 import { secondaryAppClass, titleAppClass } from './appTypography';
 
 /**
@@ -60,7 +59,7 @@ export function AppHome({ onCreate, onBrowse, createDisabled }: AppHomeProps) {
       className="flex min-h-0 flex-1 flex-col items-center justify-center gap-[var(--shell-space-4)] px-[var(--shell-space-4)] text-center"
     >
       <div className="flex flex-col gap-[var(--shell-space-1)]">
-        <h1 className={cn('font-semibold', titleAppClass)}>
+        <h1 className={titleAppClass}>
           {APP_START_SESSION_COPY.heading}
         </h1>
         <p className={secondaryAppClass}>{APP_START_SESSION_COPY.supporting}</p>

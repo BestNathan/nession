@@ -1,4 +1,6 @@
 import type { ReactNode } from 'react';
+import { cn } from '@/shared/lib/utils';
+import { chromeSansRole } from '@/shared/typography/chromeRoles';
 
 export interface SidebarSectionHeadProps {
   /** The section's name. Sentence case; these are not eyebrow labels. */
@@ -20,7 +22,12 @@ export interface SidebarSectionHeadProps {
  */
 export function SidebarSectionHead({ label, action }: SidebarSectionHeadProps) {
   return (
-    <div className="flex shrink-0 items-center justify-between gap-[var(--shell-space-2)] whitespace-nowrap px-[var(--shell-space-2)] pt-[var(--shell-space-1)] pb-[var(--shell-section-head-pad-bottom)] text-[length:var(--shell-section-head-font-size)] text-muted-foreground">
+    <div
+      className={cn(
+        'flex shrink-0 items-center justify-between gap-[var(--shell-space-2)] whitespace-nowrap px-[var(--shell-space-2)] pt-[var(--shell-space-1)] pb-[var(--shell-section-head-pad-bottom)] text-muted-foreground',
+        chromeSansRole('secondary'),
+      )}
+    >
       <span className="truncate">{label}</span>
       {action}
     </div>

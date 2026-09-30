@@ -97,6 +97,11 @@ pub fn attach_frame(session_name: &str, cols: u16, rows: u16) -> Message<ClientA
             session_name: session_name.to_string(),
             width: cols,
             height: rows,
+            // The caller's `cols`/`rows` are a *measurement* — this process is
+            // running in the terminal they came from — so the attach acts on
+            // them. `None` states the old meaning, which is what the CLI has
+            // always done (#1265).
+            size_known: None,
             env_snapshots: Vec::new(),
             // `None` — "decide it yourself", which is the agent's own rule for
             // a backend it is not attached to yet (#321). This builder has no

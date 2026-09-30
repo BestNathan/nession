@@ -306,7 +306,7 @@ function SessionsFilterPanel({
           );
         })}
       </div>
-      <div className={cn('flex items-center gap-2 font-medium text-muted-foreground', bodyAppClass)}>
+      <div className={cn('flex items-center gap-2 text-muted-foreground', bodyAppClass)}>
         <SortButton
           label="Name"
           field="name"
@@ -475,7 +475,7 @@ function SessionsEmptyState({
       className="flex h-full flex-col items-center justify-center gap-[var(--shell-space-2)] px-[var(--shell-space-4)] text-center"
     >
       <div className="flex flex-col gap-[var(--shell-space-1)]">
-        <h2 className={cn('font-semibold', titleAppClass)}>
+        <h2 className={titleAppClass}>
           {APP_START_SESSION_COPY.heading}
         </h2>
         <p className={secondaryAppClass}>{APP_START_SESSION_COPY.supporting}</p>
@@ -571,7 +571,7 @@ function SessionsHeader({
       data-testid="app-sessions-header"
       className={cn(appHeaderBandClass, 'justify-between')}
     >
-      <h1 className={cn('min-w-0 truncate font-semibold', titleAppClass)}>
+      <h1 className={cn('min-w-0 truncate', titleAppClass)}>
         Sessions
       </h1>
       <Button

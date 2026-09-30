@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { FileBrowser, FileViewer, type FileEntry } from '@/capabilities/files';
 import type { WorkspaceContext } from '@/app/workspace/workspaceContext';
+import { cn } from '@/shared/lib/utils';
+import { chromeSansRole } from '@/shared/typography/chromeRoles';
 
 interface SelectedFile { path: string; filename: string; size: number; }
 
@@ -39,7 +41,7 @@ export function FilesWebLayout({ ctx }: { ctx: WorkspaceContext }) {
           {selected ? (
             <FileViewer key={selected.path} fileOps={ctx.fileOps} path={selected.path} filename={selected.filename} fileSize={selected.size} onClose={() => setSelected(null)} />
           ) : (
-            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">Select a file to view it.</div>
+            <div className={cn('flex h-full items-center justify-center text-muted-foreground', chromeSansRole('secondary'))}>Select a file to view it.</div>
           )}
         </div>
       </div>

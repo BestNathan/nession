@@ -9,6 +9,8 @@ import {
   useEnvironmentWorkspace,
 } from '@/capabilities/env';
 import type { WorkspaceContext } from '@/app/workspace/workspaceContext';
+import { cn } from '@/shared/lib/utils';
+import { chromeSansRole } from '@/shared/typography/chromeRoles';
 
 /**
  * Web layout (#1202): navigator ‖ Profile Detail on the same grid the Files
@@ -54,7 +56,7 @@ export function EnvWebLayout({ ctx }: { ctx: WorkspaceContext }) {
     return (
       <div
         data-testid="env-detail-empty"
-        className="flex h-full items-center justify-center px-6 text-center text-sm text-muted-foreground"
+        className={cn('flex h-full items-center justify-center px-6 text-center text-muted-foreground', chromeSansRole('secondary'))}
       >
         Select an environment to inspect its variables.
       </div>

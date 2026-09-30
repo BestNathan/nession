@@ -23,6 +23,28 @@ export const VERSION = 1;
 
 export type ClientAttachPayload = { session_name: string, width: number, height: number, 
 /**
+ * Whether `width`/`height` are this client's **measured** viewport, or the
+ * placeholder it had to send because it has not laid one out yet.
+ *
+ * A client that has not measured cannot say "no size" — the wire needs
+ * numbers — so it sends the defaults, and the agent must not read that as
+ * an instruction to make the session 80×24. The resize is not private to
+ * the client that asked for it: it moves the **shared** window, and an
+ * application that draws inline rather than on the alternate screen
+ * repaints its whole screen into the scrollback on every real size change.
+ * So a fresh page attaching with the placeholder costs two of those —
+ * one to the placeholder, one back when the client's first measurement
+ * arrives — and leaves the application's screen duplicated in the history
+ * the user scrolls through (#1265).
+ *
+ * **Absence preserves the old meaning.** `None` means "resize to
+ * `width`/`height`", which is what a client written before this field
+ * gets. `Some(false)` means the client has not measured: the agent
+ * inherits the pane's current size instead, making the attach a no-op for
+ * the geometry and the client's first real measurement the only resize.
+ */
+size_known?: boolean | null, 
+/**
  * Resolved env-file snapshots to apply via `tmux set-environment`
  * before PTY creation. Empty (default) preserves pre-env behaviour.
  */
@@ -59,6 +81,28 @@ export type EnvSource = "server" | "agent";
 
 /** The payload a caller sends. */
 export type ClientAttachCall = { session_name: string, width: number, height: number, 
+/**
+ * Whether `width`/`height` are this client's **measured** viewport, or the
+ * placeholder it had to send because it has not laid one out yet.
+ *
+ * A client that has not measured cannot say "no size" — the wire needs
+ * numbers — so it sends the defaults, and the agent must not read that as
+ * an instruction to make the session 80×24. The resize is not private to
+ * the client that asked for it: it moves the **shared** window, and an
+ * application that draws inline rather than on the alternate screen
+ * repaints its whole screen into the scrollback on every real size change.
+ * So a fresh page attaching with the placeholder costs two of those —
+ * one to the placeholder, one back when the client's first measurement
+ * arrives — and leaves the application's screen duplicated in the history
+ * the user scrolls through (#1265).
+ *
+ * **Absence preserves the old meaning.** `None` means "resize to
+ * `width`/`height`", which is what a client written before this field
+ * gets. `Some(false)` means the client has not measured: the agent
+ * inherits the pane's current size instead, making the attach a no-op for
+ * the geometry and the client's first real measurement the only resize.
+ */
+size_known?: boolean | null, 
 /**
  * Resolved env-file snapshots to apply via `tmux set-environment`
  * before PTY creation. Empty (default) preserves pre-env behaviour.

@@ -139,7 +139,15 @@ async function attachToSession(
     const size = attachOpts?.size;
     const reply = await surface.request(ATTACH_WIRE, {
       session_name: sessionName,
-      ...(size ? { width: size.cols, height: size.rows } : {}),
+      // No size is not "80x24": it is a client that has not laid its terminal
+      // out yet, and the resize is not private to it — it moves the shared
+      // window, which makes an inline-drawing application repaint into the
+      // history the user reads (#1265). Say so rather than let the payload's
+      // placeholder speak. A size the caller does have needs no flag: absent
+      // already means "authoritative".
+      ...(size
+        ? { width: size.cols, height: size.rows }
+        : { size_known: false }),
       // Sent only when the caller has an opinion. Omitting it is not the same
       // as sending `false`: absent asks the agent to decide, and the agent's
       // rule is the one an older client already gets (#321).

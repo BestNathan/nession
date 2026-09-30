@@ -99,12 +99,13 @@ derives the size from it:
 "sessionRowTitleFontSize": { "ref": "experience.web.typography.primary.size" }
 ```
 
-**A role owns size only.** Family and weight are cross-cutting — `font-medium`
-appears under every role, and monospace carries the code role
-(`workspace.editorFontSize`), the secondary role's tree (`workspace.treeFontSize`,
-which really is paths), and one slot of the metadata role's session row — so
-folding them into a role would misstate the evidence. Line-height stays with the
-block that owns it (`workspace.treeLineHeight`), not with the size role.
+**A role owns size, weight, and line-height for chrome** (#1216). Family
+(product sans vs technical mono) stays with the text's meaning at the call
+site — monospace carries paths, commands, and the session row's workload hint,
+not "developer-ish" navigation by default (#1050). Workload renderers (xterm,
+CodeMirror, Markdown document prose) keep their own metrics. Shared weight
+semantics live in `domain.typography.role.*.weight`; Experience tokens state
+size and leading.
 
 The session-row example is worth spelling out, because it used to be cited here
 the other way. Until #1050 stage 4 the whole meta line was monospace, which made

@@ -1,6 +1,7 @@
 import { X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/shared/lib/utils';
+import { primaryAppClass } from '@/app/experiences/app/appTypography';
 
 export function AppFilesSelectionTopBar({
   summary,
@@ -26,7 +27,7 @@ export function AppFilesSelectionTopBar({
       >
         <X className="size-5" aria-hidden />
       </Button>
-      <span className="min-w-0 flex-1 truncate text-center text-[length:var(--workspace-list-row-title-font-size)] font-medium text-foreground">
+      <span className={cn('min-w-0 flex-1 truncate text-center text-foreground', primaryAppClass)}>
         {summary}
       </span>
       <Button type="button" variant="ghost" size="sm" className="shrink-0" onClick={() => onSelectAll()}>

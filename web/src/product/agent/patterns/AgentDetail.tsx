@@ -4,6 +4,8 @@ import { agentDisplayName, formatRelativeTime } from '@/shared/lib/format';
 import { ConnectionStatus } from '@/product/session/patterns/ConnectionStatus';
 import type { DomainState } from '@/product/session/model/domainState';
 import type { Agent } from '@/types';
+import { cn } from '@/shared/lib/utils';
+import { chromeSansRole } from '@/shared/typography/chromeRoles';
 
 export interface AgentDetailProps {
   agent: Agent;
@@ -21,13 +23,13 @@ export function AgentDetail({ agent, state }: AgentDetailProps) {
       className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4"
     >
       <div>
-        <h2 className="text-sm font-semibold">{name}</h2>
-        <p className="text-sm text-muted-foreground">{agent.hostname}</p>
+        <h2 className={chromeSansRole('primary')}>{name}</h2>
+        <p className={cn('text-muted-foreground', chromeSansRole('secondary'))}>{agent.hostname}</p>
       </div>
 
       <ConnectionStatus state={state} />
 
-      <dl className="grid gap-2 text-sm">
+      <dl className={cn('grid gap-2', chromeSansRole('body'))}>
         <div className="flex gap-2">
           <dt className="text-muted-foreground">ID</dt>
           <dd>{agent.agent_id}</dd>

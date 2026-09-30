@@ -333,6 +333,9 @@ async fn test_terminal_io_through_full_chain() {
         session_name: session_name.to_string(),
         width: 80,
         height: 24,
+        // Stated, therefore authoritative — what a client predating the field
+        // says by saying nothing (#1265).
+        size_known: None,
         env_snapshots: Vec::new(),
         needs_bootstrap: None,
     };

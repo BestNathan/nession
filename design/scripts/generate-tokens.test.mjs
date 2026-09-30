@@ -251,7 +251,7 @@ test('production terminal.ts carries no Catppuccin Mocha leftover', () => {
 // group states its own values, and the shared pattern tokens derive from it.
 
 /** The App's chrome roles, in the order the ramp descends. */
-const APP_ROLES = ['title', 'primary', 'body', 'secondary', 'metadata', 'code'];
+const APP_ROLES = ['title', 'primary', 'body', 'secondary', 'metadata', 'caption', 'code'];
 
 /** Shared pattern tokens that must be remapped, not inherited. */
 const REMAPPED_TEXT_TOKENS = [
@@ -281,7 +281,7 @@ function cssValueIn(css, block, name) {
   return body.match(new RegExp(`--${name}: ([^;]+);`))?.[1]?.trim() ?? null;
 }
 
-test('the App states its own typography roles rather than aliasing Web\'s', () => {
+test('the App states its own typography role sizes rather than aliasing Web\'s', () => {
   const tokens = loadTokens();
   for (const role of APP_ROLES) {
     const leaf = tokens.experience?.app?.typography?.[role]?.size;
@@ -369,20 +369,29 @@ test('generated CSS carries the App scale under the App experience only', () => 
   }
 });
 
-test('the two App-only roles are declared App-only to the lint', () => {
+test('typography roles that Web does not state stay App-only for the lint', () => {
   const vars = generateLintMetadata(loadTokens()).experienceAppVars;
-  // `title` and `body` have no Web leaf, so they exist only under the App
-  // experience — and a binding that names one has to say which experience it
-  // belongs to (`nession/no-cross-experience-token`). If this list lost them
-  // the rule would stop protecting every App chrome class.
-  assert.ok(vars.includes('typography-title-size'), 'typography-title-size is not declared App-only');
-  assert.ok(vars.includes('typography-body-size'), 'typography-body-size is not declared App-only');
-  // The four shared roles also resolve at :root, so they are not App-only and
-  // a Web-side binding is not a hazard.
-  for (const role of ['primary', 'secondary', 'metadata', 'code']) {
-    assert.ok(
-      !vars.includes(`typography-${role}-size`),
-      `typography-${role}-size is declared App-only, but Web states it too`,
-    );
+  const webRoles = new Set(
+    Object.keys(loadTokens().experience?.web?.typography ?? {}).filter((k) => !k.startsWith('$')),
+  );
+  for (const role of APP_ROLES) {
+    const name = `typography-${role}-size`;
+    if (webRoles.has(role)) {
+      assert.ok(!vars.includes(name), `${name} is App-only but Web also states ${role}`);
+    } else {
+      assert.ok(vars.includes(name), `${name} is not declared App-only`);
+    }
+  }
+});
+
+test('each typography role carries weight and line-height leaves (#1216)', () => {
+  const tokens = loadTokens();
+  for (const experience of ['web', 'app']) {
+    const group = tokens.experience?.[experience]?.typography ?? {};
+    for (const [role, node] of Object.entries(group)) {
+      if (role.startsWith('$') || typeof node !== 'object') continue;
+      assert.ok(node.weight, `experience.${experience}.typography.${role}.weight is missing`);
+      assert.ok(node.lineHeight, `experience.${experience}.typography.${role}.lineHeight is missing`);
+    }
   }
 });

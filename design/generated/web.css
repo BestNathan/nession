@@ -87,10 +87,34 @@
   --conversation-code-surface: var(--muted);
   --conversation-code-foreground: var(--muted-foreground);
   --conversation-code-border: var(--border);
-  --typography-primary-size: 12.5px;
-  --typography-secondary-size: 11px;
-  --typography-metadata-size: 10px;
-  --typography-code-size: 12px;
+  --typography-role-title-weight: 600;
+  --typography-role-primary-weight: 550;
+  --typography-role-body-weight: 450;
+  --typography-role-secondary-weight: 500;
+  --typography-role-metadata-weight: 475;
+  --typography-role-caption-weight: 500;
+  --typography-role-code-weight: 475;
+  --typography-title-size: 16px;
+  --typography-title-weight: var(--typography-role-title-weight);
+  --typography-title-line-height: 1.25;
+  --typography-primary-size: 14px;
+  --typography-primary-weight: var(--typography-role-primary-weight);
+  --typography-primary-line-height: 1.3;
+  --typography-body-size: 13px;
+  --typography-body-weight: var(--typography-role-body-weight);
+  --typography-body-line-height: 1.35;
+  --typography-secondary-size: 12.5px;
+  --typography-secondary-weight: var(--typography-role-secondary-weight);
+  --typography-secondary-line-height: 1.3;
+  --typography-metadata-size: 11.5px;
+  --typography-metadata-weight: var(--typography-role-metadata-weight);
+  --typography-metadata-line-height: 1.3;
+  --typography-caption-size: 11px;
+  --typography-caption-weight: var(--typography-role-caption-weight);
+  --typography-caption-line-height: 1.3;
+  --typography-code-size: 12.5px;
+  --typography-code-weight: var(--typography-role-code-weight);
+  --typography-code-line-height: 1.35;
   --control-sm: 28px;
   --control-md: 32px;
   --control-lg: 36px;
@@ -112,14 +136,14 @@
   --shell-session-row-pad-y: 7px;
   --shell-session-row-radius: 7px;
   --shell-node-row-pad-y: 6px;
-  --shell-node-font-size: 11.5px;
-  --shell-session-row-title-font-size: 12.5px;
-  --shell-session-row-meta-font-size: 10px;
+  --shell-node-font-size: 12.5px;
+  --shell-session-row-title-font-size: 14px;
+  --shell-session-row-meta-font-size: 11.5px;
   --shell-foot-pad-y: 9px;
   --shell-foot-gap: 7px;
   --shell-status-dot-size: 5px;
-  --shell-foot-font-size: 10.5px;
-  --shell-section-head-font-size: 11px;
+  --shell-foot-font-size: 11px;
+  --shell-section-head-font-size: 12.5px;
   --shell-section-head-pad-bottom: 7px;
   --shell-section-sep-margin: 8px;
   --focus-ring-width: 2px;
@@ -189,19 +213,20 @@
   --motion-shell-ease: cubic-bezier(0.2, 0, 0, 1);
   --dock-target: 32px;
   --workspace-tree-width: 208px;
-  --workspace-tree-font-size: 11px;
+  --workspace-tree-font-size: 12.5px;
   --workspace-tree-row-radius: 5px;
   --workspace-tree-line-height: 1.85;
   --workspace-tree-row-pad-y: 1px;
   --workspace-tree-indent-step: 13px;
-  --workspace-editor-font-size: 12px;
+  --workspace-editor-font-size: 12.5px;
   --workspace-editor-line-height: 1.75;
   --workspace-editor-gutter-width: 34px;
   --workspace-editor-pad-y: 14px;
   --workspace-editor-gutter-pad-end: 14px;
+  --workspace-env-profile-title-font-size: 16px;
   --workspace-editor-head-font-size: 11.5px;
   --workspace-list-row-title-font-size: 14px;
-  --workspace-editor-action-font-size: 12px;
+  --workspace-editor-action-font-size: 13px;
   --workspace-editor-head-pad-x: 18px;
 }
 
@@ -292,6 +317,13 @@
   --conversation-code-surface: var(--muted);
   --conversation-code-foreground: var(--muted-foreground);
   --conversation-code-border: var(--border);
+  --typography-role-title-weight: 600;
+  --typography-role-primary-weight: 550;
+  --typography-role-body-weight: 450;
+  --typography-role-secondary-weight: 500;
+  --typography-role-metadata-weight: 475;
+  --typography-role-caption-weight: 500;
+  --typography-role-code-weight: 475;
 }
 
 @theme inline {
@@ -378,6 +410,13 @@
   --color-conversation-code-surface: var(--conversation-code-surface);
   --color-conversation-code-foreground: var(--conversation-code-foreground);
   --color-conversation-code-border: var(--conversation-code-border);
+  --color-typography-role-title-weight: var(--typography-role-title-weight);
+  --color-typography-role-primary-weight: var(--typography-role-primary-weight);
+  --color-typography-role-body-weight: var(--typography-role-body-weight);
+  --color-typography-role-secondary-weight: var(--typography-role-secondary-weight);
+  --color-typography-role-metadata-weight: var(--typography-role-metadata-weight);
+  --color-typography-role-caption-weight: var(--typography-role-caption-weight);
+  --color-typography-role-code-weight: var(--typography-role-code-weight);
   --spacing-control-sm: var(--control-sm);
   --spacing-control-md: var(--control-md);
   --spacing-control-lg: var(--control-lg);
@@ -457,11 +496,26 @@
 
 [data-experience="app"] {
   --typography-title-size: 17px;
+  --typography-title-weight: var(--typography-role-title-weight);
+  --typography-title-line-height: 1.2;
   --typography-primary-size: 16px;
+  --typography-primary-weight: var(--typography-role-primary-weight);
+  --typography-primary-line-height: 1.25;
   --typography-body-size: 14px;
+  --typography-body-weight: var(--typography-role-body-weight);
+  --typography-body-line-height: 1.4;
   --typography-secondary-size: 13px;
+  --typography-secondary-weight: var(--typography-role-secondary-weight);
+  --typography-secondary-line-height: 1.3;
   --typography-metadata-size: 12px;
+  --typography-metadata-weight: var(--typography-role-metadata-weight);
+  --typography-metadata-line-height: 1.25;
+  --typography-caption-size: 11.5px;
+  --typography-caption-weight: var(--typography-role-caption-weight);
+  --typography-caption-line-height: 1.3;
   --typography-code-size: 13px;
+  --typography-code-weight: var(--typography-role-code-weight);
+  --typography-code-line-height: 1.35;
   --control-sm: 44px;
   --control-md: 44px;
   --control-lg: 52px;
@@ -478,8 +532,8 @@
   --shell-session-row-title-font-size: 16px;
   --shell-session-row-meta-font-size: 12px;
   --shell-node-font-size: 13px;
-  --shell-section-head-font-size: 12px;
-  --shell-foot-font-size: 12px;
+  --shell-section-head-font-size: 13px;
+  --shell-foot-font-size: 11.5px;
   --shell-sessions-list-min-height: 30%;
   --terminal-font-size: 11.5px;
   --terminal-line-height: 1.31;
