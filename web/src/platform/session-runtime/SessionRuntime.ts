@@ -805,6 +805,11 @@ export class SessionRuntime {
     const files = this.config.createFilesApi();
     const ws = new WebSocketService(builtUrl, [files], {
       maxReconnectAttempts: this.addressPolicy.maxReconnectAttempts(),
+      // Only where there is nothing to rotate to. Every other route needs the
+      // transport to reach `disconnected` so the policy can advance a candidate
+      // or force relay; keeping those open would stall the recovery they
+      // already have (#1263).
+      persistentReconnect: this.addressPolicy.isManualRoute,
     });
     this.agentWs = ws;
     this.filesApi = files;

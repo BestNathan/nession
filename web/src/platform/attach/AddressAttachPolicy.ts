@@ -48,6 +48,17 @@ export class AddressAttachPolicy {
     return attachInfo?.mode === 'p2p' && !forcedRelay;
   }
 
+  /**
+   * Whether the address was pinned by the user rather than chosen from a plan.
+   *
+   * This is the one route with no next candidate: `onCandidateDisconnected`
+   * sends it straight to `transport-exhausted`, so a spent budget there is
+   * terminal unless the transport keeps probing by itself (#1263).
+   */
+  get isManualRoute(): boolean {
+    return this.config.manualOverride !== null;
+  }
+
   update(config: Partial<AddressAttachPolicyConfig>): AddressPolicyAction {
     const prevKey = this.planUrlsKey;
     this.config = { ...this.config, ...config };
