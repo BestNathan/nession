@@ -20,6 +20,19 @@ import {
   VERSION as MESSAGES_VERSION,
   WIRE as MESSAGES_WIRE,
 } from '@/generated/protocol/claude-code/messages/v1';
+// `#1234`: the transcript projection. Its own collection, because a transcript
+// is not always a session — a subagent's is listed here and deliberately not in
+// the conversation list.
+import {
+  PROTOCOL as TRANSCRIPT_ITEMS_PROTOCOL,
+  VERSION as TRANSCRIPT_ITEMS_VERSION,
+  WIRE as TRANSCRIPT_ITEMS_WIRE,
+} from '@/generated/protocol/claude-code/transcript-items/v1';
+import {
+  PROTOCOL as TRANSCRIPTS_PROTOCOL,
+  VERSION as TRANSCRIPTS_VERSION,
+  WIRE as TRANSCRIPTS_WIRE,
+} from '@/generated/protocol/claude-code/transcripts/v1';
 import { addressedPayload } from '@/platform/protocol';
 import type { TransportPlugin, PluginSurface } from '@/platform/socket/types';
 import type {
@@ -31,6 +44,10 @@ import type {
   ClaudeCodeMessagesResponse,
   ClaudeCodeReadRequest,
   ClaudeCodeReadResponse,
+  ClaudeCodeTranscriptItemsRequest,
+  ClaudeCodeTranscriptItemsResponse,
+  ClaudeCodeTranscriptsRequest,
+  ClaudeCodeTranscriptsResponse,
 } from './types';
 
 /**
@@ -47,6 +64,8 @@ const CONSUMER_REQUIREMENTS = {
   [READ_PROTOCOL]: [READ_VERSION],
   [CONVERSATIONS_PROTOCOL]: [CONVERSATIONS_VERSION],
   [MESSAGES_PROTOCOL]: [MESSAGES_VERSION],
+  [TRANSCRIPTS_PROTOCOL]: [TRANSCRIPTS_VERSION],
+  [TRANSCRIPT_ITEMS_PROTOCOL]: [TRANSCRIPT_ITEMS_VERSION],
 } as const satisfies Record<string, readonly number[]>;
 
 type ClaudeCodeUnit = keyof typeof CONSUMER_REQUIREMENTS;
@@ -113,6 +132,42 @@ export class ClaudeCodePlugin implements TransportPlugin {
     return this.requireConnection().request<ClaudeCodeConversationsResponse>(
       CONVERSATIONS_WIRE,
       this.addressed(CONVERSATIONS_PROTOCOL, req.agent_id, req),
+    );
+  }
+
+  /**
+   * The transcripts visible at one Nession Session's strict cwd (#1234).
+   *
+   * The conversation list's sibling, and not a replacement for it: the same
+   * upstream session is one conversation *and* one transcript, and this list
+   * additionally carries the subagents that session spawned — which is why a
+   * transcript item has a `kind`, a `parent_id` and an `agent_id`. Like
+   * `claudeCodeConversations`, this resolves nothing; opening one names an
+   * explicit id.
+   */
+  async claudeCodeTranscripts(
+    req: ClaudeCodeTranscriptsRequest,
+  ): Promise<ClaudeCodeTranscriptsResponse> {
+    return this.requireConnection().request<ClaudeCodeTranscriptsResponse>(
+      TRANSCRIPTS_WIRE,
+      this.addressed(TRANSCRIPTS_PROTOCOL, req.agent_id, req),
+    );
+  }
+
+  /**
+   * One explicitly named transcript's execution timeline, paged (#1234).
+   *
+   * `transcript_id` is the only selection mechanism — an unknown id answers
+   * `not_found`, never the binding, the newest, or the only transcript. This is
+   * also where a subagent's transcript becomes readable: its id comes from
+   * `claudeCodeTranscripts`, and nothing here would find it by itself.
+   */
+  async claudeCodeTranscriptItems(
+    req: ClaudeCodeTranscriptItemsRequest,
+  ): Promise<ClaudeCodeTranscriptItemsResponse> {
+    return this.requireConnection().request<ClaudeCodeTranscriptItemsResponse>(
+      TRANSCRIPT_ITEMS_WIRE,
+      this.addressed(TRANSCRIPT_ITEMS_PROTOCOL, req.agent_id, req),
     );
   }
 
