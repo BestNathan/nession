@@ -39,7 +39,7 @@ function CandidateRow({
         aria-current={openId === candidate.id ? 'true' : undefined}
         onClick={() => onSelect(candidate.id)}
         className={cn(
-          'flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left transition-colors',
+          'flex w-full items-start gap-2 rounded-[var(--radius-control)] px-2 py-1.5 text-left transition-colors',
           'hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
           openId === candidate.id && 'bg-accent text-accent-foreground',
         )}

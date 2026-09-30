@@ -97,7 +97,7 @@ function FileViewerToolbar({
           </Button>
         )}
         {hasPreviewRawToggle && (
-          <div className="flex items-center rounded-md bg-muted/60 p-0.5" role="group" aria-label="View mode">
+          <div className="flex items-center rounded-[var(--radius-control)] bg-muted/60 p-0.5" role="group" aria-label="View mode">
             <Button
               variant={viewMode === 'preview' ? 'secondary' : 'ghost'}
               size="sm"
