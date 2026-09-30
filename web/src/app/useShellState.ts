@@ -114,6 +114,7 @@ export function useShellState() {
     loadingSessions: data.loadingSessions,
     confirmAttach,
     onRestoreSession,
+    requestAttach,
   });
 
   return {
