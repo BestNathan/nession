@@ -76,7 +76,7 @@ export function SessionHeader({
   // while the *same* name is set in the product face on the Sessions row it was
   // chosen from — one string, two families, decided by which screen it is on.
   const title = (
-    <h1 className={cn('min-w-0 truncate font-semibold', titleAppClass)}>
+    <h1 className={cn('min-w-0 truncate', titleAppClass)}>
       {sessionName}
     </h1>
   );

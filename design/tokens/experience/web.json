@@ -1,30 +1,48 @@
 {
   "$description": "Web experience density. Emitted as CSS variables in generated web.css.",
   "typography": {
-    "$description": "Chrome typography roles (visual-language.md 'Typography hierarchy'). A role names the text's job, not the component it appears in — which is what lets the same job be one value instead of one value per component. A role owns SIZE only: family (mono vs sans) and weight are orthogonal, and the evidence says so — `font-medium` appears under every role, and mono is used for both metadata and primary. Line-height stays with the block that owns it (`workspace.treeLineHeight`), not with the size role.",
+    "$description": "Chrome typography roles (#1216). A role names the text's job and owns the coherent size / weight / leading treatment for that job at Web density. Family (product sans vs technical mono) stays with the text's meaning at the call site — a path is mono at the code role's metrics, not mono because the role is smaller. Workload renderers (xterm, CodeMirror, Markdown document prose) stay on their own surfaces.",
+    "title": {
+      "$description": "The surface's own name when Web chrome renders a page header or pushed detail title.",
+      "size": { "value": "16px" },
+      "weight": { "ref": "domain.typography.role.title.weight" },
+      "lineHeight": { "value": "1.25" }
+    },
     "primary": {
       "$description": "Work / local primary — highest within its region. Session name, active file, focused input.",
-      "size": {
-        "value": "12.5px"
-      }
+      "size": { "value": "13.5px" },
+      "weight": { "ref": "domain.typography.role.primary.weight" },
+      "lineHeight": { "value": "1.25" }
+    },
+    "body": {
+      "$description": "Ordinary readable product text and controls — button labels, menu items, filters.",
+      "size": { "value": "13px" },
+      "weight": { "ref": "domain.typography.role.body.weight" },
+      "lineHeight": { "value": "1.35" }
     },
     "secondary": {
-      "$description": "Supporting but fully readable. Section headings, tree rows.",
-      "size": {
-        "value": "11px"
-      }
+      "$description": "Supporting but fully readable. Section headings, tree rows, infrastructure rows.",
+      "size": { "value": "12px" },
+      "weight": { "ref": "domain.typography.role.secondary.weight" },
+      "lineHeight": { "value": "1.3" }
     },
     "metadata": {
-      "$description": "Quiet. Agent/location, recency, status details — never outweighs the thing it describes.",
-      "size": {
-        "value": "10px"
-      }
+      "$description": "Quiet factual context. Agent/location, recency, status details — never outweighs the thing it describes.",
+      "size": { "value": "11px" },
+      "weight": { "ref": "domain.typography.role.metadata.weight" },
+      "lineHeight": { "value": "1.25" }
+    },
+    "caption": {
+      "$description": "Lowest deliberate readable hierarchy — keyboard hints, tiny helper copy, sidebar service state.",
+      "size": { "value": "10.5px" },
+      "weight": { "ref": "domain.typography.role.caption.weight" },
+      "lineHeight": { "value": "1.3" }
     },
     "code": {
-      "$description": "Workload-specific. Code, paths, commands. The terminal keeps its own glyph rendering; this is the chrome-side code surface.",
-      "size": {
-        "value": "12px"
-      }
+      "$description": "Chrome-side technical identity — paths, commands, env keys. Not xterm/CodeMirror workload glyphs.",
+      "size": { "value": "12.5px" },
+      "weight": { "ref": "domain.typography.role.code.weight" },
+      "lineHeight": { "value": "1.35" }
     }
   },
   "control": {
@@ -106,8 +124,8 @@
       "value": "6px"
     },
     "nodeFontSize": {
-      "$description": "Agent/node row text. Product face at 11.5px: a node row is infrastructure *context* (a name and a count), and the typography rule reserves monospace for technical workload identity — \"foreground command; technical ID; path/location\" — adding that infrastructure/navigation chrome is not rendered in mono by default (#1050 stage 4). The earlier description here argued the opposite (\"a node name is infrastructure identity\") and cited `visual-language.md` for it; that document's mono role is \"terminal text, paths, commands, code\", so the citation did not support the claim. The count's alignment is carried by `tabular-nums`, which is a font feature rather than a family.",
-      "value": "11.5px"
+      "$description": "Agent/node row text — the secondary role at Web density (#1216). Product face: a node row is infrastructure context (a name and a count), not technical workload identity (#1050 stage 4).",
+      "ref": "experience.web.typography.secondary.size"
     },
     "sessionRowTitleFontSize": {
       "$owner": "pattern.session-item",
@@ -132,8 +150,8 @@
       "value": "5px"
     },
     "footFontSize": {
-      "$description": "Sidebar foot text. Product face: the foot reports a service state and a node count, which is infrastructure chrome rather than a command, an identifier or a path (#1050 stage 4). It used to be monospace \"matching the session metadata it sits under\" — the metadata it sits under is itself product text now except for the row's workload slot, so the stated reason no longer holds.",
-      "value": "10.5px"
+      "$description": "Sidebar foot text — the caption role (#1216). A service state and a node count: quiet infrastructure chrome, not session metadata.",
+      "ref": "experience.web.typography.caption.size"
     },
     "sectionHeadFontSize": {
       "$description": "Sidebar section label (Agents / Sessions) — the secondary role. Muted and below `text-xs`, so a section label never competes with the rows it names. Top padding is `shell.space-1` (4px) and the sides `shell.space-2` (8px), which is what the mockup draws.",
@@ -408,6 +426,10 @@
       "$description": "Space between the line numbers and the code. The mockup's 14px — wide enough that a number and the first glyph do not read as one token.",
       "value": "14px"
     },
+    "envProfileTitleFontSize": {
+      "$description": "Environment profile detail/editor page title — the title role (#1216). Bridges the role into workspace chrome tokens so the ref graph reaches production consumers.",
+      "ref": "experience.web.typography.title.size"
+    },
     "editorHeadFontSize": {
       "$description": "The file path above the code. Muted and below `text-xs`: it names what is open, it is not a title competing with the work.",
       "value": "11.5px"
@@ -417,8 +439,8 @@
       "value": "14px"
     },
     "editorActionFontSize": {
-      "$description": "The viewer toolbar's own controls (Edit / Save / View / Raw / close) — the `text-xs` the shared `Button size=\"sm\"` default gave them. Stated on both experiences for the same reason as `listRowTitleFontSize`: `FileViewer` is composed by both layouts, so the leaf has one consumer class and two densities (#1073).",
-      "value": "12px"
+      "$description": "The viewer toolbar's own controls (Edit / Save / View / Raw / close) — the body role (#1216). Stated on both experiences for the same reason as `listRowTitleFontSize`: `FileViewer` is composed by both layouts, so the leaf has one consumer class and two densities (#1073).",
+      "ref": "experience.web.typography.body.size"
     },
     "editorHeadPadX": {
       "$description": "Header horizontal inset. The mockup's 18px, which is wider than the shell's `space-4` — the header is inside the code surface, so it aligns to the code's own measure rather than to the pane's chrome padding.",

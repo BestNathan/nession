@@ -5,6 +5,7 @@ import {
   type CapabilityDisclosureMenuEntry,
 } from '@/product/capability/components/CapabilityDisclosureMenu';
 import { cn } from '@/shared/lib/utils';
+import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import { resolveWorkspaceCapabilities } from '@/app/workspace/capabilities';
 import {
   buildWorkspacePresentationModel,
@@ -104,8 +105,8 @@ function UnavailableCapability({ title }: { title: string }) {
       className="flex h-full min-h-0 items-center justify-center px-6 text-center"
     >
       <div className="max-w-sm space-y-1.5">
-        <p className="text-sm font-medium text-foreground">{title} is not available here</p>
-        <p className="text-xs text-muted-foreground">
+        <p className={cn('text-foreground', chromeSansRole('primary'))}>{title} is not available here</p>
+        <p className={cn('text-muted-foreground', chromeSansRole('metadata'))}>
           Choose another capability from More. Nession will keep this view stable instead of switching automatically.
         </p>
       </div>

@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { RefreshButton } from '@/components/ui/RefreshButton';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { cn } from '@/shared/lib/utils';
+import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import { shellMotionClass, shellRowControlMinClass } from '@/app/shellStyles';
 import { SidebarSectionHead } from '@/app/patterns/SidebarSectionHead';
 import type { SortDirection, SortField, StatusFilter } from '@/app/useDashboard';
@@ -144,7 +145,7 @@ export function SessionListHeader({
                   >
                     {filter.label}
                     {count !== undefined && (
-                      <span className="ml-1 rounded-full bg-background/20 px-1.5 py-0.5 text-xs">
+                      <span className={cn('ml-1 rounded-full bg-background/20 px-1.5 py-0.5', chromeSansRole('caption'))}>
                         {count}
                       </span>
                     )}
@@ -153,7 +154,7 @@ export function SessionListHeader({
               })}
             </div>
             {toggleSort ? (
-              <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+              <div className={cn('flex items-center gap-2 text-muted-foreground', chromeSansRole('body'))}>
                 <SortButton
                   label="Name"
                   field="name"

@@ -1,4 +1,6 @@
 import { useMemo, useState } from 'react';
+import { cn } from '@/shared/lib/utils';
+import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import { MoreHorizontal, Pencil } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -131,7 +133,9 @@ function DetailHeader({
     <div className="flex items-start gap-2 border-b px-4 py-3">
       <div className="min-w-0 flex-1 space-y-0.5">
         <div className="flex items-center gap-2">
-          <h2 className="truncate text-sm font-semibold">{profile.name}</h2>
+          <h2 className={cn('truncate', chromeSansRole('title'))}>
+            {profile.name}
+          </h2>
           {active ? (
             <span
               data-testid="env-profile-active"
@@ -141,7 +145,7 @@ function DetailHeader({
             </span>
           ) : null}
         </div>
-        <p className="text-xs text-muted-foreground">
+        <p className={cn('text-muted-foreground', chromeSansRole('metadata'))}>
           {profileSourceLine(profile, agents)} · {variablesLabel(profile.var_count)}
         </p>
         <UsageLine inUseBy={inUseBy} active={active} />

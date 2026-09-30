@@ -90,7 +90,7 @@ test('the pattern doc list is read from the docs tree, not hand-kept', () => {
 // the fragmentation it was meant to fix stays exactly where it was.
 test('every typography role is reached by a production consumer', () => {
   const records = new Map(buildInventory().tokens.records.map((r) => [r.id, r]));
-  const roles = ['primary', 'secondary', 'metadata', 'code'];
+  const roles = ['title', 'primary', 'body', 'secondary', 'metadata', 'caption', 'code'];
 
   for (const role of roles) {
     const id = `experience.web.typography.${role}.size`;
@@ -107,17 +107,21 @@ test('every typography role is reached by a production consumer', () => {
   }
 });
 
-test('typography roles own size only — family, weight and line-height stay out', () => {
+test('typography roles expose size, weight, and line-height leaves (#1216)', () => {
   const ids = buildInventory().tokens.records.map((r) => r.id);
   const roleIds = ids.filter((id) => id.startsWith('experience.web.typography.'));
 
   assert.ok(roleIds.length > 0);
-  // Every role leaf is a `.size`. Family (mono/sans) and weight are cross-cutting
-  // — `font-medium` appears under every role and mono is used for both metadata
-  // and primary — so folding them into a role would be wrong. Line-height belongs
-  // to the block that owns it, e.g. `workspace.treeLineHeight`.
-  for (const id of roleIds) {
-    assert.match(id, /^experience\.web\.typography\.[a-z]+\.size$/, `${id} is not a size leaf`);
+  const roles = new Set(
+    roleIds.map((id) => id.replace(/^experience\.web\.typography\./, '').replace(/\.[^.]+$/, '')),
+  );
+  for (const role of roles) {
+    for (const leaf of ['size', 'weight', 'lineHeight']) {
+      assert.ok(
+        roleIds.includes(`experience.web.typography.${role}.${leaf}`),
+        `experience.web.typography.${role}.${leaf} is missing`,
+      );
+    }
   }
 });
 
@@ -127,6 +131,7 @@ test('one role can own a size for two different components', () => {
   // A section heading and a tree row are different components with the same
   // text job. Before this, each stated 11px independently.
   assert.deepEqual(role.downstream.slice().sort(), [
+    'experience.web.shell.nodeFontSize',
     'experience.web.shell.sectionHeadFontSize',
     'experience.web.workspace.treeFontSize',
   ]);

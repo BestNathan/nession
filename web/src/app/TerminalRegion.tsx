@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { cn } from '@/shared/lib/utils';
+import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import { TerminalPane } from '@/product/terminal/TerminalPane';
 import { TerminalSurface } from '@/product/terminal/patterns/TerminalSurface';
 import type { CapsuleCapabilityContribution } from '@/app/capsulePresence';
@@ -55,7 +56,7 @@ export function TerminalRegion({
       className={cn('flex min-h-0 flex-1 flex-col', hidden && 'hidden')}
     >
       {!sessionId ? (
-        <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-muted-foreground">
+        <div className={cn('flex min-h-0 flex-1 items-center justify-center text-muted-foreground', chromeSansRole('secondary'))}>
           Select a session to open its terminal.
         </div>
       ) : (

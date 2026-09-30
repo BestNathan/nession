@@ -7,6 +7,8 @@ import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { serverApi } from '@/platform/server';
 import pkg from '../../../../package.json';
+import { cn } from '@/shared/lib/utils';
+import { chromeSansRole } from '@/shared/typography/chromeRoles';
 
 function formatUptimeCompact(seconds: number): string {
   if (seconds < 60) { return `${seconds}s`; }
@@ -87,7 +89,7 @@ export function ServerInfoMenu({ refreshKey = 0, variant = 'default' }: ServerIn
       {variant === 'default' ? (
         <div
           data-testid="server-info-inline"
-          className="hidden min-w-0 items-center gap-2 text-[11px] text-muted-foreground/70 md:flex"
+          className={cn('hidden min-w-0 items-center gap-2 text-muted-foreground/70 md:flex', chromeSansRole('metadata'))}
         >
           <span className="flex items-center gap-1">
             <Server className="h-3 w-3" />
@@ -129,12 +131,12 @@ export function ServerInfoMenu({ refreshKey = 0, variant = 'default' }: ServerIn
             <Info className="h-4 w-4" />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="min-w-60">
-            <div data-testid="server-info-details" className="space-y-1.5 px-2 py-1.5 text-xs">
+            <div data-testid="server-info-details" className={cn('space-y-1.5 px-2 py-1.5', chromeSansRole('metadata'))}>
               {details.map(({ icon, label, value }) => (
                 <p key={label} className="flex items-center gap-2 text-muted-foreground">
                   {icon}
-                  <span className="w-14 flex-shrink-0 text-muted-foreground/70">{label}</span>
-                  <span className="truncate font-medium text-foreground/90">{value}</span>
+                  <span className={cn('w-14 flex-shrink-0 text-muted-foreground/70', chromeSansRole('metadata'))}>{label}</span>
+                  <span className={cn('truncate text-foreground/90', chromeSansRole('secondary'))}>{value}</span>
                 </p>
               ))}
             </div>
