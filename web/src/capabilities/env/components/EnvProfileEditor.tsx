@@ -1,4 +1,6 @@
 import { useEffect } from 'react';
+import { cn } from '@/shared/lib/utils';
+import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -315,7 +317,9 @@ export function EnvProfileEditor({
   return (
     <div data-testid="env-profile-editor" className="flex h-full min-h-0 flex-col">
       <div className="flex items-center gap-2 border-b px-4 py-3">
-        <h2 className="truncate text-sm font-semibold">{editorTitle(target)}</h2>
+        <h2 className={cn('truncate', chromeSansRole('title'))}>
+          {editorTitle(target)}
+        </h2>
         {target.kind === 'existing' && profile ? (
           <span className="truncate text-xs text-muted-foreground">
             {profile.name} · {profileSourceLine(profile, agents)}

@@ -20,6 +20,7 @@ import {
 } from '@/components/ui/message-scroller';
 import { copyToClipboard } from '@/shared/lib/clipboard';
 import { cn } from '@/shared/lib/utils';
+import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import { Markdown } from '@/shared/markdown';
 import type { ConversationViewState } from '../hooks/useConversation';
 import type { ClaudeCodeMessagesResponse } from '../types';
@@ -209,11 +210,14 @@ function MessageFrame({
       className={cn('flex flex-col gap-1', isUser ? 'items-end' : 'items-stretch')}
     >
       <div className="flex items-baseline gap-2">
-        <span className="text-xs font-semibold text-muted-foreground">
+        <span className={cn('text-muted-foreground', chromeSansRole('metadata'))}>
           {isUser ? 'You' : 'Claude'}
         </span>
         {time ? (
-          <time dateTime={item.timestamp ?? undefined} className="text-xs text-muted-foreground">
+          <time
+            dateTime={item.timestamp ?? undefined}
+            className={cn('text-muted-foreground', chromeSansRole('metadata'))}
+          >
             {time}
           </time>
         ) : null}
@@ -325,7 +329,7 @@ export const ToolActivity = memo(function ToolActivity({ item }: { item: ToolIte
       // would put it in the conversation instead of beside it.
       className="group rounded-md bg-[var(--conversation-tool-surface)] px-3 py-2 text-[var(--conversation-tool-foreground)]"
     >
-      <summary className="flex cursor-pointer items-center gap-2 text-xs">
+      <summary className={cn('flex cursor-pointer items-center gap-2', chromeSansRole('metadata'))}>
         {/* Turns as the disclosure opens. Decorative: `<details>` announces its
             own expanded state, so a second announcement would be noise. */}
         <ChevronRight
@@ -333,7 +337,7 @@ export const ToolActivity = memo(function ToolActivity({ item }: { item: ToolIte
           className="h-3.5 w-3.5 shrink-0 transition-transform group-open:rotate-90"
         />
         <Wrench aria-hidden className="h-3.5 w-3.5 shrink-0" />
-        <span className="font-medium" data-testid="conversation-tool-name">
+        <span className={chromeSansRole('secondary')} data-testid="conversation-tool-name">
           {tool.name}
         </span>
         <span className="truncate">{tool.summary}</span>
@@ -405,12 +409,12 @@ function ToolBody({ label, payload }: { label: string; payload: Payload }) {
   return (
     <section>
       <div className="flex items-center gap-2">
-        <h4 className="text-[10px] font-semibold tracking-wide uppercase">{label}</h4>
+        <h4 className={cn('uppercase tracking-wide', chromeSansRole('caption'))}>{label}</h4>
         {payload.truncated ? (
           // Said explicitly, because a cut body is indistinguishable from a
           // short one — and the reader deciding whether they have the whole
           // answer is exactly who needs to know that they do not.
-          <span className="text-[10px] opacity-80" data-testid="conversation-tool-truncated">
+          <span className={cn(chromeSansRole('caption'), 'opacity-80')} data-testid="conversation-tool-truncated">
             truncated
           </span>
         ) : null}

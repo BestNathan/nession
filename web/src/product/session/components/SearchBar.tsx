@@ -1,6 +1,7 @@
 import { useEffect, useRef, type ReactNode } from 'react';
 import { Search } from 'lucide-react';
 import { cn } from '@/shared/lib/utils';
+import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { useDebouncedInput } from '@/product/session/hooks/useDebouncedInput';
@@ -135,7 +136,7 @@ export function SearchBar({
               >
                 {filter.label}
                 {count !== undefined && (
-                  <span className="ml-1 rounded-full bg-background/20 px-1.5 py-0.5 text-xs">
+                  <span className={cn('ml-1 rounded-full bg-background/20 px-1.5 py-0.5', chromeSansRole('caption'))}>
                     {count}
                   </span>
                 )}

@@ -1,5 +1,7 @@
 import type { RefObject } from 'react';
 import { FileList, type FileEntry, type FileOps } from '@/capabilities/files';
+import { cn } from '@/shared/lib/utils';
+import { bodyAppClass } from '@/app/experiences/app/appTypography';
 import { AppFilesBreadcrumb } from './AppFilesBreadcrumb';
 import { AppFilesDeleteDialog } from './AppFilesDeleteDialog';
 import { AppFilesFolderSheet } from './AppFilesFolderSheet';
@@ -61,7 +63,7 @@ export function AppFilesDirectoryPane({
       )}
       {handoffError ? (
         <p
-          className="px-[var(--shell-space-3)] py-2 text-sm text-destructive"
+          className={cn('px-[var(--shell-space-3)] py-2 text-destructive', bodyAppClass)}
           data-testid="files-app-handoff-error"
         >
           {handoffError}

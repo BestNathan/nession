@@ -1,5 +1,6 @@
 import { cn } from '@/shared/lib/utils';
 import { titleAppClass } from '@/app/experiences/app/appTypography';
+import { chromeMonoRole } from '@/shared/typography/chromeRoles';
 import { AppBackButton } from './AppBackButton';
 
 export interface AppPageHeaderProps {
@@ -60,7 +61,7 @@ export function AppPageHeader({ backLabel, onBack, title, technical }: AppPageHe
           Web's `text-sm` that once stood here was the primitive's desktop
           default doing a title's job. */}
       <h1
-        className={cn('min-w-0 truncate font-semibold', technical && 'font-mono', titleAppClass)}
+        className={cn('min-w-0 truncate', technical ? chromeMonoRole('title') : titleAppClass)}
       >
         {title}
       </h1>

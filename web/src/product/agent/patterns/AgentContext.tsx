@@ -1,4 +1,5 @@
 import { cn } from '@/shared/lib/utils';
+import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import type { AgentChannel, DomainState } from '@/product/session/model/domainState';
 
 function agentCopyClass(channel: AgentChannel): string {
@@ -40,14 +41,14 @@ export function AgentContext({ agentLabel, state, onOpenAgent }: AgentContextPro
     <button
       type="button"
       data-testid="agent-context"
-      className="truncate text-xs"
+      className={cn('truncate', chromeSansRole('metadata'))}
       onClick={() => onOpenAgent()}
     >
       {online ? (
         <span className="text-muted-foreground">{agentLabel}</span>
       ) : (
         <>
-          <span className="font-medium">{agentLabel}</span>
+          <span className="text-foreground">{agentLabel}</span>
           {state.agent.copy !== null && (
             <span className={cn('ml-1.5', agentCopyClass(state.agent.channel))}>
               {state.agent.copy}
