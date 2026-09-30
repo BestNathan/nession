@@ -44,11 +44,13 @@ jobs:
           cache: 'npm'
           cache-dependency-path: web/package-lock.json
       - uses: extractions/setup-just@v2
-      - name: Verify repository metrics tooling
+      - name: Verify repository tooling
         run: |
           node scripts/collect-repo-health.mjs --self-test
           node scripts/generate-repo-metrics.mjs --self-test
           node scripts/protocol-gate.mjs --json >/dev/null
+          node scripts/issue-contract.mjs self-test
+          node scripts/issue-audit-agent.mjs self-test
       - run: cd web && npm ci
       - run: just design-check full
       - run: just web-lint
