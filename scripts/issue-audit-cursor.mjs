@@ -42,11 +42,17 @@ function requestedModel() {
   };
 }
 
+function normalizeCursorSdkModule(loaded) {
+  if (loaded?.Cursor && loaded?.Agent) return loaded;
+  if (loaded?.default?.Cursor && loaded?.default?.Agent) return loaded.default;
+  throw new Error('Loaded @cursor/sdk module does not expose Cursor and Agent exports');
+}
+
 async function loadCursorSdk() {
   const root = process.env.CURSOR_SDK_ROOT;
   const requireFromRoot = createRequire(path.join(root, 'package.json'));
   const entry = requireFromRoot.resolve('@cursor/sdk');
-  return import(pathToFileURL(entry).href);
+  return normalizeCursorSdkModule(await import(pathToFileURL(entry).href));
 }
 
 function modelSelectionFromCatalog(models, requested = requestedModel()) {
@@ -275,6 +281,8 @@ async function runCursorAgent(issue, outDir) {
 }
 
 function selfTest() {
+  assert.equal(normalizeCursorSdkModule({ Cursor: {}, Agent: {} }).Cursor != null, true);
+  assert.equal(normalizeCursorSdkModule({ default: { Cursor: {}, Agent: {} } }).Agent != null, true);
   const catalog = [{ id: 'composer-2.5', parameters: [{ id: 'fast', values: [{ value: 'false' }, { value: 'true' }] }] }];
   assert.deepEqual(modelSelectionFromCatalog(catalog, { id: 'composer-2.5', fast: true }), {
     id: 'composer-2.5', params: [{ id: 'fast', value: 'true' }],
@@ -286,7 +294,7 @@ function selfTest() {
   assert.deepEqual(normalizeCost({ cost: { rawCostCents: 123, chargedCents: 45 } }), { raw_cost_usd: 1.23, charged_cost_usd: 0.45 });
   const candidate = candidateIssue({ labels: [{ name: 'in-progress' }] }, 'body', ['bug', 'web']);
   assert.deepEqual(labelNames(candidate).sort(), ['bug', 'in-progress', 'web']);
-  console.log('issue-audit-cursor self-test: 5 cases passed');
+  console.log('issue-audit-cursor self-test: 7 cases passed');
 }
 
 async function main() {
