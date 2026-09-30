@@ -155,12 +155,25 @@ export async function assertInspectorKeyColonShareRowWithValue(
   expect(value.top).toBeGreaterThanOrEqual(key.top - 4);
 }
 
-export async function expandJsonlRecord(page: Page, lineNumber: number): Promise<void> {
+async function clickJsonlRecordToggle(
+  page: Page,
+  lineNumber: number,
+  targetExpanded: boolean,
+): Promise<void> {
   await scrollJsonlRecordIntoView(page, lineNumber);
   const section = page.locator(`[data-jsonl-line="${lineNumber}"]`).first();
-  const expand = section.getByRole('button', { name: 'Expand record' });
-  await expand.waitFor({ state: 'visible', timeout: 10_000 });
-  await expand.click();
+  const label = targetExpanded ? 'Expand record' : 'Collapse record';
+  const toggle = section.getByRole('button', { name: label });
+  await toggle.waitFor({ state: 'visible', timeout: 10_000 });
+  await toggle.click();
+}
+
+export async function expandJsonlRecord(page: Page, lineNumber: number): Promise<void> {
+  await clickJsonlRecordToggle(page, lineNumber, true);
+}
+
+export async function collapseJsonlRecord(page: Page, lineNumber: number): Promise<void> {
+  await clickJsonlRecordToggle(page, lineNumber, false);
 }
 
 export async function scrollJsonlPreview(page: Page, scrollTop: number): Promise<number> {

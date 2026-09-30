@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 import {
   assertInspectorKeyColonShareRowWithValue,
   assertVisibleJsonlRecordsDoNotOverlap,
+  collapseJsonlRecord,
   expandJsonlRecord,
   FIXTURE_JSONL_LONG_STRING_LINE,
   FIXTURE_JSONL_NESTED_LINE,
@@ -35,10 +36,10 @@ test.describe('JSONL preview geometry (#1199)', () => {
   test('expand/collapse repositions following rows (web)', async ({ page }) => {
     await gotoFixtureWorkspace(page);
     await openFixtureJsonlEventsWeb(page);
+    await scrollJsonlPreview(page, 0);
 
     const nextLine = 2;
     await scrollJsonlRecordIntoView(page, 1);
-    await scrollJsonlRecordIntoView(page, nextLine);
     const nextTopBefore = await readJsonlRecordTop(page, nextLine);
 
     await expandJsonlRecord(page, 1);
@@ -47,7 +48,7 @@ test.describe('JSONL preview geometry (#1199)', () => {
     expect(nextTopExpanded).toBeGreaterThan(nextTopBefore);
     await assertVisibleJsonlRecordsDoNotOverlap(page);
 
-    await expandJsonlRecord(page, 1);
+    await collapseJsonlRecord(page, 1);
     await page.waitForTimeout(150);
     const nextTopCollapsed = await readJsonlRecordTop(page, nextLine);
     expect(nextTopCollapsed).toBeLessThanOrEqual(nextTopExpanded);
@@ -116,9 +117,9 @@ test.describe('JSONL preview geometry (#1199)', () => {
 
   test('expand/collapse repositions following rows (app)', async ({ page }) => {
     await openFixtureJsonlEventsApp(page);
+    await scrollJsonlPreview(page, 0);
 
     await scrollJsonlRecordIntoView(page, 1);
-    await scrollJsonlRecordIntoView(page, 2);
     const nextTopBefore = await readJsonlRecordTop(page, 2);
     await expandJsonlRecord(page, 1);
     await page.waitForTimeout(150);
