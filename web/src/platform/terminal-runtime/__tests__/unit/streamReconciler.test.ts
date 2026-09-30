@@ -250,30 +250,47 @@ describe('StreamReconciler', () => {
     expect(h.requests).toHaveLength(1);
   });
 
-  it('stops waiting for a hole that survives repeated attempts', async () => {
+  it('resolves a hole from its own answer, not from the next frame', async () => {
+    // Held output must never wait for output that may not come: a shell that
+    // echoed one command and went quiet would sit frozen behind the hole
+    // forever. Each answer decides — filled, or given up on.
     const h = makeHarness();
     live(h, 5, 'five');
     live(h, 8, 'eight');
     h.requests[0].reject(new Error('agent unavailable'));
     await flushMicrotasks();
-    // A failure is not an answer: the hole is still open and nothing is
-    // committed out of order.
-    expect(h.out).toEqual(['five']);
 
-    live(h, 9, 'nine');
+    // The retry is the reconciler's own, with no further frame to prompt it.
+    expect(h.requests).toHaveLength(2);
     h.requests[1].reject(new Error('agent unavailable'));
     await flushMicrotasks();
-    live(h, 10, 'ten');
+    expect(h.requests).toHaveLength(3);
     h.requests[2].reject(new Error('agent unavailable'));
     await flushMicrotasks();
 
-    // Three attempts, each triggered by a frame that could not be placed. The
-    // fourth frame gives up on the hole rather than holding it — and everything
-    // in hand is committed, in order, so the user sees output instead of a
-    // terminal that stopped at sequence 5.
-    live(h, 11, 'eleven');
+    // Three requests that moved nothing: the frame in hand is committed rather
+    // than held for a recovery that is not coming.
+    expect(h.out).toEqual(['five', 'eight']);
+    // And it stays resolved — no fourth request, nothing left pending.
+    live(h, 9, 'nine');
     expect(h.requests).toHaveLength(3);
-    expect(h.out).toEqual(['five', 'eight', 'nine', 'ten', 'eleven']);
+    expect(h.out).toEqual(['five', 'eight', 'nine']);
+  });
+
+  it('asks again when an answer fills only part of the hole', async () => {
+    const h = makeHarness();
+    live(h, 5, 'five');
+    live(h, 9, 'nine');
+    // The reply covers 6 but not 7 or 8, so the frame in hand is still stuck.
+    h.requests[0].resolve(reply([6].map((seq) => output(seq))));
+    await flushMicrotasks();
+    expect(h.out).toEqual(['five', 'replay-6']);
+    expect(h.requests).toHaveLength(2);
+    expect(h.requests[1].afterSeq).toBe(6);
+
+    h.requests[1].resolve(reply([7, 8, 9].map((seq) => output(seq))));
+    await flushMicrotasks();
+    expect(h.out).toEqual(['five', 'replay-6', 'replay-7', 'replay-8', 'nine']);
   });
 
   it('lets frames in hand anchor a stream whose history never arrived', async () => {

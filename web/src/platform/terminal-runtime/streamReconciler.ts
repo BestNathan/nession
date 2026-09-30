@@ -251,9 +251,12 @@ export class StreamReconciler {
     this.anchor();
     this.noteAttempt(afterSeq);
     this.drain();
-    if (this.attemptsAt(afterSeq) >= HOLE_ATTEMPT_LIMIT) {
-      this.abandon();
-    }
+    // An answer that left a hole open is not the end of the recovery — the
+    // request did not cover everything it was asked for, and the frames still
+    // waiting cannot place themselves. Ask again now rather than waiting for
+    // another frame to arrive: the next one may never come, and until it does
+    // the terminal is frozen on output it already holds.
+    this.recover();
   }
 
   private onReplyFailed(generation: number, afterSeq: number): void {
@@ -271,9 +274,11 @@ export class StreamReconciler {
       this.drain();
       return;
     }
-    if (this.attemptsAt(afterSeq) >= HOLE_ATTEMPT_LIMIT) {
-      this.abandon();
-    }
+    // Same reason as the answered case, and the one that matters most: a
+    // refused request is exactly when output in hand would otherwise wait for
+    // a frame that may never arrive. `recover` retries while the hole has
+    // attempts left and commits what is held once it does not.
+    this.recover();
   }
 
   /**
@@ -310,8 +315,8 @@ export class StreamReconciler {
    * Give up on the hole at the frontier and let the timeline continue after it.
    *
    * Only reached when the hole has outlasted {@link HOLE_ATTEMPT_LIMIT}
-   * attempts, each of which was triggered by output that could not be placed.
-   * The output already in hand is committed rather than held; the frames the
+   * requests, none of which moved the frontier. The output already in hand is
+   * committed rather than held; the frames the
    * agent no longer retains are lost, which is the state the stream was in
    * before this class buffered anything, minus the freeze.
    */
@@ -412,13 +417,13 @@ interface PendingFrame {
 }
 
 /**
- * How many attempts a hole gets before the reconciler stops waiting for it.
+ * How many requests a hole gets before the reconciler stops waiting for it.
  *
- * Every attempt is triggered by a frame that could not be placed, so reaching
- * the limit means output kept arriving while that many separate asks failed to
- * fill the same hole. Waiting longer then costs output that is already in hand
- * — every later frame is held behind the hole — for a recovery that is not
- * coming.
+ * Each request is a round trip, and they run back to back rather than waiting
+ * for the next frame: output must never be held behind a hole the agent is not
+ * going to fill. Reaching the limit means that many separate asks failed to
+ * move the frontier, and the frames in hand are then committed — the gap is
+ * given up rather than the output.
  */
 const HOLE_ATTEMPT_LIMIT = 3;
 
