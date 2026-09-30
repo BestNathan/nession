@@ -13,13 +13,15 @@ description: Use when troubleshooting CI/CD pipeline failures for nession, modif
 - **Release** (`release.yml`): merge to main triggers release build + deploy to production
 
 One additional governance workflow protects requirement closure:
-- **Requirement Acceptance** (`requirement-acceptance.yml`): PRs to `main` validate every closing `requirement` issue; completed requirement closure is guarded after the fact as a second safety net.
+- **Requirement Acceptance** (`requirement-acceptance.yml`): PRs to `main` validate **merge readiness** for every closing `requirement` issue; explicit `post-merge` Pending criteria may be deferred. Completed requirement closure is stricter and is guarded after the fact.
 
 ```
 Local dev → verify locally
   → branch off main → PR to staging → quality gate passes → merge to staging
-  → staging builds + deploys to staging environment → validate on staging
-  → audit what is being released → PR staging → main with every `Closes #N` → --merge
+  → staging builds + deploys to staging environment → validate `pre-merge` + `staging` criteria
+  → audit what is being released → PR staging → main with every `Closes #N` → merge-ready gate → --merge
+  → run any deferred `post-merge` criteria after their merge/deploy/observation condition becomes available
+  → only fully accepted requirements may remain closed as completed
   → version bump if warranted → release builds multi-arch images → ArgoCD syncs to production
 ```
 
@@ -339,24 +341,25 @@ The mirror-image mistake is a branch cut from `main` but targeting `staging` whi
 
 ### Issue auto-close
 
-Before a main-targeting PR may close a `requirement`, staging acceptance must be complete:
+Before a main-targeting PR may close a `requirement`, it must be **merge-ready**; merge readiness is intentionally weaker than final acceptance:
 
-1. every Success Criterion has a stable `SC-xx` id;
-2. every accepted criterion is checked `[x]`;
-3. `## Acceptance Report` contains exactly one matching row per criterion;
-4. every row is `Pass` or justified `N/A`;
-5. every accepted row carries concrete evidence.
+1. every Success Criterion has a stable `SC-xx` id and a matching Acceptance Report row;
+2. each row is staged as `pre-merge`, `staging`, or `post-merge` (legacy three-column reports are treated as `staging`);
+3. every `pre-merge` and `staging` criterion is checked `[x]`, `Pass` / justified `N/A`, and has concrete evidence;
+4. `Fail` blocks merge at every stage;
+5. an unchecked `post-merge` criterion may remain `Pending` only when its evidence already states the blocking merge/deployment/observation condition and planned verification.
 
 The **Requirement Acceptance** workflow runs `scripts/requirement-acceptance.mjs pr-gate`
-for PRs targeting `main`. If a closing requirement is incomplete, the check fails and
-the workflow **closes the PR**. Fix the requirement acceptance first, then reopen the PR;
-the `reopened` event runs the same gate again. This makes the block effective even when
-repository rulesets are disabled. Do not recreate or merge around a failed acceptance gate.
+for PRs targeting `main`. If a closing requirement is not merge-ready, the check fails and
+the workflow **closes the PR**. Fix the merge-readiness evidence first, then reopen the PR;
+the `reopened` event runs the same gate again. Do not relabel ordinary work as `post-merge`
+to bypass the gate: the stage is the earliest environment in which the criterion can honestly be proven.
 
-A second `issues: closed` guard runs the same validator. If a requirement is closed as
-completed without passing acceptance, it is reopened automatically with criterion-level
-diagnostics. `Close as not planned` is the explicit cancellation path and is not treated
-as completed acceptance.
+A second `issues: closed` guard runs **final closure** validation. Final closure never defers:
+every criterion at every stage must be checked and `Pass` / justified `N/A` with evidence.
+If a release merge auto-closes an issue while explicit `post-merge` criteria are still Pending,
+the guard reopens it with a `Post-merge acceptance pending` diagnostic; this is an expected
+continuation of acceptance, not a failed release. `Close as not planned` remains the cancellation path.
 
 This gate intentionally does **not** run on feature/fix PRs to `staging`: staging is the
 environment where browser/device/deployment criteria are often verified.

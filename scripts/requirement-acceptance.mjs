@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 
 const ACCEPTED_RESULTS = new Set(['pass', 'n/a']);
 const ALL_RESULTS = new Set(['pass', 'pending', 'fail', 'n/a']);
+const ACCEPTANCE_STAGES = new Set(['pre-merge', 'staging', 'post-merge']);
 const PLACEHOLDER_EVIDENCE = new Set([
   '', '-', 'none', 'n/a', 'na', 'pending', 'tbd', 'todo', 'implementation pending',
 ]);
@@ -100,21 +101,27 @@ function parseAcceptanceReport(section) {
 
   const tableLines = section.split('\n').map(splitMarkdownRow).filter(Boolean);
   let headerIndex = -1;
+  let staged = false;
   for (let i = 0; i < tableLines.length; i += 1) {
     const cells = tableLines[i].map((cell) => cell.toLowerCase());
+    if (cells[0] === 'criterion' && cells[1] === 'stage' && cells[2] === 'result' && cells[3] === 'evidence') {
+      headerIndex = i;
+      staged = true;
+      break;
+    }
     if (cells[0] === 'criterion' && cells[1] === 'result' && cells[2] === 'evidence') {
       headerIndex = i;
       break;
     }
   }
   if (headerIndex < 0) {
-    errors.push('Acceptance Report must contain a `| Criterion | Result | Evidence |` table');
+    errors.push('Acceptance Report must contain a `| Criterion | Stage | Result | Evidence |` table (legacy three-column reports remain supported)');
     return { rows, errors };
   }
 
   for (let i = headerIndex + 1; i < tableLines.length; i += 1) {
     const cells = tableLines[i];
-    if (cells.length < 3) continue;
+    if (cells.length < (staged ? 4 : 3)) continue;
     if (cells.every((cell) => /^:?-{3,}:?$/.test(cell))) continue;
     const id = cells[0].trim().toUpperCase();
     if (!/^SC-\d{2,}$/.test(id)) continue;
@@ -122,32 +129,66 @@ function parseAcceptanceReport(section) {
       errors.push(`duplicate Acceptance Report row for ${id}`);
       continue;
     }
-    const result = cells[1].trim();
-    const evidence = cells.slice(2).join(' | ').trim();
-    rows.set(id, { id, result, evidence });
+
+    const stage = staged ? cells[1].trim().toLowerCase() : 'staging';
+    const result = (staged ? cells[2] : cells[1]).trim();
+    const evidence = cells.slice(staged ? 3 : 2).join(' | ').trim();
+    rows.set(id, { id, stage, explicitStage: staged, result, evidence });
   }
   return { rows, errors };
 }
 
-export function validateRequirementBody(body) {
+export function validateRequirementBody(body, { mode = 'closure' } = {}) {
+  if (!new Set(['merge', 'closure']).has(mode)) {
+    throw new Error(`unsupported acceptance validation mode: ${mode}`);
+  }
+
   const success = parseSuccessCriteria(extractSection(body, 'Success Criteria'));
   const report = parseAcceptanceReport(extractSection(body, 'Acceptance Report'));
   const errors = [...success.errors, ...report.errors];
+  let deferredPostMergeCount = 0;
 
   for (const criterion of success.criteria.values()) {
     const row = report.rows.get(criterion.id);
-    if (!criterion.checked) {
-      errors.push(`${criterion.id} is not checked`);
-    }
     if (!row) {
       errors.push(`${criterion.id} has no Acceptance Report row`);
       continue;
     }
+
+    if (!ACCEPTANCE_STAGES.has(row.stage)) {
+      errors.push(`${criterion.id} has unsupported acceptance stage \`${row.stage || '(empty)'}\``);
+    }
+
     const normalizedResult = row.result.trim().toLowerCase();
     if (!ALL_RESULTS.has(normalizedResult)) {
       errors.push(`${criterion.id} has unsupported result \`${row.result || '(empty)'}\``);
-    } else if (!ACCEPTED_RESULTS.has(normalizedResult)) {
-      errors.push(`${criterion.id} result is ${row.result}; expected Pass or N/A before closure`);
+      continue;
+    }
+
+    const deferredPostMerge =
+      mode === 'merge'
+      && row.stage === 'post-merge'
+      && normalizedResult === 'pending';
+
+    if (deferredPostMerge) {
+      deferredPostMergeCount += 1;
+      if (criterion.checked) {
+        errors.push(`${criterion.id} is checked but post-merge acceptance is still Pending`);
+      }
+      if (PLACEHOLDER_EVIDENCE.has(row.evidence.trim().toLowerCase())) {
+        errors.push(`${criterion.id} post-merge Pending must describe the blocking merge/deployment/observation condition and planned verification`);
+      }
+      continue;
+    }
+
+    if (!criterion.checked) {
+      errors.push(`${criterion.id} is not checked`);
+    }
+    if (!ACCEPTED_RESULTS.has(normalizedResult)) {
+      const expectation = mode === 'merge'
+        ? 'expected Pass or N/A before merge unless this is an explicit post-merge Pending criterion'
+        : 'expected Pass or N/A before closure';
+      errors.push(`${criterion.id} result is ${row.result}; ${expectation}`);
     }
     if (PLACEHOLDER_EVIDENCE.has(row.evidence.trim().toLowerCase())) {
       errors.push(`${criterion.id} must include concrete acceptance evidence`);
@@ -164,12 +205,14 @@ export function validateRequirementBody(body) {
     ok: errors.length === 0,
     errors,
     criteriaCount: success.criteria.size,
+    deferredPostMergeCount,
   };
 }
 
-function formatErrors(issueNumber, errors) {
+function formatErrors(issueNumber, errors, context = 'acceptance') {
+  const label = context === 'merge' ? 'is not merge-ready' : 'acceptance is incomplete';
   return [
-    `Requirement #${issueNumber} acceptance is incomplete:`,
+    `Requirement #${issueNumber} ${label}:`,
     ...errors.map((error) => `- ${error}`),
   ].join('\n');
 }
@@ -260,9 +303,13 @@ async function runPrGate() {
   const requirements = await closingRequirementIssues({ owner, name, body: pr.body, token });
   const failures = [];
   for (const issue of requirements) {
-    const result = validateRequirementBody(issue.body);
-    if (!result.ok) failures.push(formatErrors(issue.number, result.errors));
-    else console.log(`Requirement #${issue.number}: ${result.criteriaCount} criteria accepted.`);
+    const result = validateRequirementBody(issue.body, { mode: 'merge' });
+    if (!result.ok) failures.push(formatErrors(issue.number, result.errors, 'merge'));
+    else if (result.deferredPostMergeCount > 0) {
+      console.log(`Requirement #${issue.number}: merge-ready with ${result.deferredPostMergeCount} deferred post-merge criterion/criteria.`);
+    } else {
+      console.log(`Requirement #${issue.number}: ${result.criteriaCount} criteria accepted before merge.`);
+    }
   }
   if (failures.length) {
     if (pr.state !== 'closed') {
@@ -288,11 +335,16 @@ async function runIssueCloseGuard() {
     return;
   }
 
-  const result = validateRequirementBody(issue.body);
+  const result = validateRequirementBody(issue.body, { mode: 'closure' });
   if (result.ok) {
     console.log(`Requirement #${issue.number}: ${result.criteriaCount} criteria accepted; closure stands.`);
     return;
   }
+
+  const mergeReadiness = validateRequirementBody(issue.body, { mode: 'merge' });
+  const deferredOnly =
+    mergeReadiness.ok
+    && mergeReadiness.deferredPostMergeCount > 0;
 
   const [owner, name] = process.env.GITHUB_REPOSITORY.split('/');
   const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
@@ -306,34 +358,54 @@ async function runIssueCloseGuard() {
     token,
     method: 'POST',
     body: {
-      body: `<!-- requirement-acceptance-guard -->\n## Requirement acceptance guard\n\nThis requirement was reopened because completed requirements must pass every Success Criterion before closure.\n\n${diagnostic}\n\nUpdate the Acceptance Report with concrete evidence, check the accepted criteria, then close it again. Use **Close as not planned** only when the requirement is intentionally cancelled rather than completed.`,
+      body: deferredOnly
+        ? `<!-- requirement-acceptance-guard -->\n## Post-merge acceptance pending\n\nThis requirement was reopened intentionally: the release was merge-ready, but ${mergeReadiness.deferredPostMergeCount} Success Criterion/Criteria are explicitly staged as **post-merge** and still Pending. Merge/release is not considered a failed acceptance; the requirement remains open until those criteria can run and are accepted.\n\n${diagnostic}\n\nRun the post-merge verification described in each pending row, record concrete evidence, check the accepted criteria, then close the requirement.`
+        : `<!-- requirement-acceptance-guard -->\n## Requirement acceptance guard\n\nThis requirement was reopened because completed requirements must pass every Success Criterion before closure.\n\n${diagnostic}\n\nUpdate the Acceptance Report with concrete evidence, check the accepted criteria, then close it again. Use **Close as not planned** only when the requirement is intentionally cancelled rather than completed.`,
     },
   });
-  console.log(`Requirement #${issue.number} reopened because acceptance is incomplete.`);
+  console.log(
+    deferredOnly
+      ? `Requirement #${issue.number} reopened for deferred post-merge acceptance.`
+      : `Requirement #${issue.number} reopened because acceptance is incomplete.`,
+  );
 }
 
 function validBody() {
-  return `### Success Criteria\n\n- [x] SC-01 works\n- [x] SC-02 behaves\n\n## Acceptance Report\n\n| Criterion | Result | Evidence |\n|---|---|---|\n| SC-01 | Pass | unit test: scripts/foo.test |\n| SC-02 | N/A | superseded by #88 after requirement amendment |`;
+  return `### Success Criteria\n\n- [x] SC-01 works\n- [x] SC-02 behaves\n\n## Acceptance Report\n\n| Criterion | Stage | Result | Evidence |\n|---|---|---|---|\n| SC-01 | pre-merge | Pass | unit test: scripts/foo.test |\n| SC-02 | staging | N/A | superseded by #88 after requirement amendment |`;
+}
+
+function validLegacyBody() {
+  return `### Success Criteria\n\n- [x] SC-01 works\n\n## Acceptance Report\n\n| Criterion | Result | Evidence |\n|---|---|---|\n| SC-01 | Pass | legacy accepted evidence |`;
+}
+
+function postMergePendingBody(evidence = 'requires production deployment; verify release smoke test after deploy') {
+  return `### Success Criteria\n\n- [x] SC-01 works before merge\n- [ ] SC-02 works after merge\n\n## Acceptance Report\n\n| Criterion | Stage | Result | Evidence |\n|---|---|---|---|\n| SC-01 | staging | Pass | staging smoke test passed |\n| SC-02 | post-merge | Pending | ${evidence} |`;
 }
 
 function runSelfTest() {
   const cases = [
-    ['valid accepted requirement', validBody(), true, null],
-    ['h2 success criteria remains supported', validBody().replace('### Success Criteria', '## Success Criteria'), true, null],
-    ['missing success criteria', '## Acceptance Report\n\n| Criterion | Result | Evidence |\n|---|---|---|', false, 'missing Success Criteria section'],
-    ['criterion without id', '## Success Criteria\n\n- [x] works\n\n## Acceptance Report\n\n| Criterion | Result | Evidence |\n|---|---|---|', false, 'missing a stable SC-xx id'],
-    ['unchecked criterion', validBody().replace('- [x] SC-01', '- [ ] SC-01'), false, 'SC-01 is not checked'],
-    ['missing report row', validBody().replace('| SC-02 | N/A | superseded by #88 after requirement amendment |', ''), false, 'SC-02 has no Acceptance Report row'],
-    ['pending result', validBody().replace('| SC-01 | Pass | unit test: scripts/foo.test |', '| SC-01 | Pending | staging verification |'), false, 'SC-01 result is Pending'],
-    ['fail result', validBody().replace('| SC-01 | Pass | unit test: scripts/foo.test |', '| SC-01 | Fail | browser regression |'), false, 'SC-01 result is Fail'],
-    ['missing evidence', validBody().replace('| SC-01 | Pass | unit test: scripts/foo.test |', '| SC-01 | Pass | - |'), false, 'SC-01 must include concrete acceptance evidence'],
-    ['unknown report criterion', `${validBody()}\n| SC-99 | Pass | ghost |`, false, 'unknown criterion SC-99'],
-    ['duplicate success id', validBody().replace('- [x] SC-02 behaves', '- [x] SC-01 duplicate'), false, 'duplicate Success Criterion id SC-01'],
-    ['duplicate report id', validBody().replace('| SC-02 | N/A | superseded by #88 after requirement amendment |', '| SC-01 | Pass | second |'), false, 'duplicate Acceptance Report row for SC-01'],
+    ['valid accepted requirement', validBody(), 'closure', true, null],
+    ['h2 success criteria remains supported', validBody().replace('### Success Criteria', '## Success Criteria'), 'closure', true, null],
+    ['legacy three-column report remains supported', validLegacyBody(), 'closure', true, null],
+    ['missing success criteria', '## Acceptance Report\n\n| Criterion | Stage | Result | Evidence |\n|---|---|---|---|', 'closure', false, 'missing Success Criteria section'],
+    ['criterion without id', '## Success Criteria\n\n- [x] works\n\n## Acceptance Report\n\n| Criterion | Stage | Result | Evidence |\n|---|---|---|---|', 'closure', false, 'missing a stable SC-xx id'],
+    ['unchecked criterion', validBody().replace('- [x] SC-01', '- [ ] SC-01'), 'closure', false, 'SC-01 is not checked'],
+    ['missing report row', validBody().replace('| SC-02 | staging | N/A | superseded by #88 after requirement amendment |', ''), 'closure', false, 'SC-02 has no Acceptance Report row'],
+    ['staging pending blocks merge', validBody().replace('| SC-01 | pre-merge | Pass | unit test: scripts/foo.test |', '| SC-01 | staging | Pending | staging verification |'), 'merge', false, 'SC-01 result is Pending'],
+    ['post-merge pending is merge-ready', postMergePendingBody(), 'merge', true, null],
+    ['post-merge pending blocks closure', postMergePendingBody(), 'closure', false, 'SC-02 is not checked'],
+    ['post-merge pending needs actionable evidence', postMergePendingBody('implementation pending'), 'merge', false, 'post-merge Pending must describe'],
+    ['post-merge fail blocks merge', postMergePendingBody().replace('| SC-02 | post-merge | Pending |', '| SC-02 | post-merge | Fail |'), 'merge', false, 'SC-02 result is Fail'],
+    ['checked post-merge pending is invalid', postMergePendingBody().replace('- [ ] SC-02', '- [x] SC-02'), 'merge', false, 'checked but post-merge acceptance is still Pending'],
+    ['invalid stage fails', validBody().replace('| SC-01 | pre-merge | Pass |', '| SC-01 | production | Pass |'), 'closure', false, 'unsupported acceptance stage'],
+    ['missing evidence', validBody().replace('| SC-01 | pre-merge | Pass | unit test: scripts/foo.test |', '| SC-01 | pre-merge | Pass | - |'), 'closure', false, 'SC-01 must include concrete acceptance evidence'],
+    ['unknown report criterion', `${validBody()}\n| SC-99 | staging | Pass | ghost |`, 'closure', false, 'unknown criterion SC-99'],
+    ['duplicate success id', validBody().replace('- [x] SC-02 behaves', '- [x] SC-01 duplicate'), 'closure', false, 'duplicate Success Criterion id SC-01'],
+    ['duplicate report id', validBody().replace('| SC-02 | staging | N/A | superseded by #88 after requirement amendment |', '| SC-01 | staging | Pass | second |'), 'closure', false, 'duplicate Acceptance Report row for SC-01'],
   ];
 
-  for (const [name, body, expectedOk, expectedError] of cases) {
-    const result = validateRequirementBody(body);
+  for (const [name, body, mode, expectedOk, expectedError] of cases) {
+    const result = validateRequirementBody(body, { mode });
     assert.equal(result.ok, expectedOk, `${name}: expected ok=${expectedOk}, got ${JSON.stringify(result)}`);
     if (expectedError) {
       assert.ok(result.errors.some((error) => error.includes(expectedError)), `${name}: missing ${expectedError}; got ${result.errors.join('; ')}`);
