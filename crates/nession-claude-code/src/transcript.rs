@@ -191,6 +191,7 @@ fn item_of(entry: &Entry, budget: &mut usize) -> TranscriptEntryV1 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::protocol::messages::v1::ToolStatusV1;
     use crate::protocol::transcript_items::v1::{ATTACHMENT_CEILING, REASONING_CEILING};
 
     /// One page of a transcript written to a temporary file.
@@ -490,6 +491,56 @@ mod tests {
         assert!(
             ids.iter().all(|id| id.starts_with("offset:")),
             "a record with no uuid did not fall back to its position: {ids:?}"
+        );
+    }
+
+    #[test]
+    fn a_tool_pair_split_across_a_page_boundary_still_resolves() {
+        // One of the shapes #1234 requires a fixture for, at the layer this
+        // stage adds. Pairing happens once, in `canonical::read`, so the
+        // conversation projection already covers the mechanism — but the
+        // transcript is a different reader of the result, and a page that drew
+        // the call without its output would read as a tool that produced
+        // nothing.
+        //
+        // The page has to *genuinely* stop between the two: a result is always
+        // newer than its call, so asking for the newest records of a short
+        // transcript puts both in one page and proves nothing. The offset below
+        // is what makes the split real.
+        let head = concat!(
+            r#"{"type":"user","uuid":"m1","message":{"role":"user","content":"go"}}"#,
+            "\n",
+            r#"{"type":"assistant","uuid":"a1","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"ls"}}]}}"#,
+            "\n",
+        );
+        let page_end = head.len() as u64;
+        let result = r#"{"type":"user","uuid":"u1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"a.rs"}]}}"#;
+        let transcript = format!("{head}{result}\n");
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("t.jsonl");
+        std::fs::write(&path, &transcript).unwrap();
+        let discovered = crate::conversation::tests_support::discovered_at(&path, "/w");
+
+        let page = read_page(&discovered, Some(page_end), 2).unwrap();
+        let tool = page
+            .items
+            .iter()
+            .find_map(|item| match item {
+                TranscriptEntryV1::Tool { tool, .. } => Some(tool),
+                _ => None,
+            })
+            .expect("the page holds the call");
+        assert_eq!(
+            tool.status,
+            ToolStatusV1::Success,
+            "a call whose result is on the next page reported {:?}",
+            tool.status
+        );
+        assert_eq!(
+            tool.output.as_ref().map(|o| o.text.as_str()),
+            Some("a.rs"),
+            "the result on the far side of the page boundary was not attached"
         );
     }
 
