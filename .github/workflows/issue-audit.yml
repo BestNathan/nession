@@ -9,6 +9,11 @@ on:
         description: Issue number to audit
         required: true
         type: string
+      simulate_missing_provider_config:
+        description: Negative-path smoke test: blank DeepSeek config before provider preflight
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -112,7 +117,9 @@ jobs:
 
   agent:
     needs: contract
-    if: needs.contract.outputs.needs_agent == 'true' && needs.contract.outputs.allow_agent == 'true'
+    if: >-
+      (needs.contract.outputs.needs_agent == 'true' && needs.contract.outputs.allow_agent == 'true') ||
+      (github.event_name == 'workflow_dispatch' && inputs.simulate_missing_provider_config == true)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: deepseek
@@ -151,8 +158,23 @@ jobs:
           node scripts/issue-audit-agent.mjs self-test
 
       - name: Verify DeepSeek gateway configuration
+        env:
+          SIMULATE_MISSING_PROVIDER_CONFIG: ${{ inputs.simulate_missing_provider_config || false }}
         run: |
           set -euo pipefail
+
+          if [[ "${SIMULATE_MISSING_PROVIDER_CONFIG}" == "true" ]]; then
+            ANTHROPIC_BASE_URL=""
+            ANTHROPIC_AUTH_TOKEN=""
+            ANTHROPIC_API_KEY=""
+            {
+              echo "## Issue Audit provider negative-path smoke"
+              echo
+              echo "- Simulated missing DeepSeek provider configuration: **yes**"
+              echo "- Expected outcome: provider preflight fails before Claude Code installation or model invocation"
+            } >> "${GITHUB_STEP_SUMMARY}"
+          fi
+
           missing=()
           [[ -n "${ANTHROPIC_BASE_URL}" ]] || missing+=("ANTHROPIC_BASE_URL")
           if [[ -z "${ANTHROPIC_AUTH_TOKEN}" && -z "${ANTHROPIC_API_KEY}" ]]; then
@@ -162,6 +184,7 @@ jobs:
             printf 'DeepSeek Environment is missing required Claude Code configuration:\n' >&2
             printf ' - %s\n' "${missing[@]}" >&2
             echo "Fix the GitHub Environment named deepseek. No direct-provider fallback is allowed." >&2
+            echo "No direct-provider fallback is configured or attempted." >&2
             exit 1
           fi
 
