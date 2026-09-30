@@ -658,6 +658,14 @@ async fn send_terminal_resize_msg(
 /// unsequenced one moves no cursor. What the guard buys is the ordinary case —
 /// one frame, and it is the one carrying the position.
 ///
+/// **The read, the send and the record are one step, and that is
+/// load-bearing.** `send_terminal_resize_msg` reaches `try_send_state`, which
+/// never waits, so no other task can land a `record_resize` between the
+/// `already_announced` read and the `note_announced_resize` below it — a send
+/// that did wait for room could let that note follow a newer recording and
+/// name a size the client is not holding, which is the wrong-record class
+/// `last_announced_resize` documents.
+///
 /// A session that is no longer in the map is not a reason to swallow the frame:
 /// the size is still true, and the map is this connection's index of what it is
 /// attached to rather than the session's own state.
