@@ -159,7 +159,7 @@ export function FileListEntryRows({
 }: FileListEntryRowsProps) {
   if (entries.length === 0) {
     return (
-      <p className="px-[var(--shell-space-3)] py-[var(--shell-space-4)] text-sm text-muted-foreground">
+      <p className={cn('px-[var(--shell-space-3)] py-[var(--shell-space-4)] text-muted-foreground', chromeSansRole('secondary'))}>
         This folder is empty.
       </p>
     );

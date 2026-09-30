@@ -326,7 +326,7 @@ describe('TerminalController', () => {
 
     const writeSpy = vi.spyOn(controller.terminal!, 'write');
     const resetSpy = vi.spyOn(controller.terminal!, 'reset');
-    transport.onOutput!(new Uint8Array([104, 105]), true);
+    transport.onOutput!(new Uint8Array([104, 105]), { requestedLines: 5000, truncated: false });
 
     // Erase display, erase scrollback, cursor home — in that order, before the
     // snapshot itself, so the history it carries is all the buffer holds.
@@ -337,6 +337,25 @@ describe('TerminalController', () => {
     expect(resetSpy).not.toHaveBeenCalled();
     writeSpy.mockRestore();
     resetSpy.mockRestore();
+    controller.detach();
+  });
+
+  it('keeps the scrollback when the snapshot the agent sent was cut short (#1305)', () => {
+    const transport = makeTransport();
+    const controller = new TerminalController(makeSession(), () => transport);
+    controller.attach(host());
+
+    const writeSpy = vi.spyOn(controller.terminal!, 'write');
+    transport.onOutput!(new Uint8Array([104, 105]), { requestedLines: 5000, truncated: true });
+
+    // Erase the display and home the cursor, but leave the scrollback: the
+    // agent's ceiling drops the *oldest* history, and this client holds up to
+    // 50k lines against a 512 KiB capture — so the snapshot cannot stand in
+    // for what `\x1b[3J` would have destroyed. The screen it *can* restore is
+    // still replaced, which is why the display wipe stays.
+    expect(writeSpy).toHaveBeenNthCalledWith(1, '\x1b[2J\x1b[H');
+    expect(writeSpy).toHaveBeenNthCalledWith(2, new Uint8Array([104, 105]), expect.any(Function));
+    writeSpy.mockRestore();
     controller.detach();
   });
 
@@ -370,7 +389,7 @@ describe('TerminalController', () => {
     controller.write('local banner');
     expect(controller.hasSessionOutput).toBe(false);
 
-    transport.onOutput!(new Uint8Array([104, 105]), true);
+    transport.onOutput!(new Uint8Array([104, 105]), { requestedLines: 5000, truncated: false });
     expect(controller.hasSessionOutput).toBe(true);
     controller.detach();
   });

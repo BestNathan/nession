@@ -1,10 +1,13 @@
 pub mod agent;
 pub mod binding;
+pub mod canonical;
 pub mod conversation;
 pub mod messages;
+pub(crate) mod payload;
 pub mod plugin;
 pub mod protocol;
 pub mod scanner;
 pub mod security;
 pub mod server;
 pub mod session_context;
+pub mod transcript;

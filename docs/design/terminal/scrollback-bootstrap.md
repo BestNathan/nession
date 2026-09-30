@@ -140,6 +140,21 @@ cursor home — and **not** `terminal.reset()`, which also leaves every mode the
 application set, including a TUI's alternate screen. With no marker there is no
 wipe, so a `stream.resume` replay and a DOM reparent keep what they had.
 
+**A snapshot the ceiling cut short replaces the screen, not the scrollback.**
+The marker carries the agent's own account of the capture —
+`TerminalBootstrapPayload { requested_lines, truncated }` — and `truncated` is
+the one case where "replaces the buffer" would destroy more than it restores.
+The ceiling drops from the **tail's** far end: a cut snapshot is newer but
+*shorter* than what a long-attached client holds, and the client's scrollback
+budget is deliberately larger than any capture the agent can send (10k lines
+mobile / 50k desktop against a 5000-line, 512 KiB ceiling). So a truncated
+snapshot gets `\x1b[2J\x1b[H` — erase display, cursor home — and keeps the
+scrollback: the screen it can authoritatively restore is replaced, and the
+history it cannot refill is not thrown away for it (#1305). This is the
+narrower rule; the general one above still holds for a complete snapshot, and
+for a client that has nothing to lose the two differ only in a scrollback they
+do not have.
+
 ## What a capture cannot carry
 
 **Private modes.** Terminal modes are state, not text attributes, and
