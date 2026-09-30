@@ -167,6 +167,7 @@ async fn start_test_agent_server() -> anyhow::Result<(
             resize,
             credentials: Arc::clone(&credentials),
             mutations: Arc::clone(&mutations),
+            memory_threshold_percent: None,
         },
     )?;
     let (handle, addr) = server.start().await?;
