@@ -7,6 +7,8 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { LoginConnectionBadge } from '@/app/LoginConnectionBadge';
 import { getRememberPreference, setRememberPreference } from './auth';
 import type { ConnectionState } from '@/platform/socket';
+import { cn } from '@/shared/lib/utils';
+import { chromeSansRole } from '@/shared/typography/chromeRoles';
 
 interface LoginPageProps {
   connectionStatus: ConnectionState;
@@ -48,8 +50,8 @@ export function LoginPage({
 
   return (
     <div className="min-h-[100dvh] flex flex-col items-center justify-center p-4">
-      <h1 className="text-3xl font-bold mb-2">Nession</h1>
-      <p className="text-muted-foreground mb-8">Distributed tmux Agent</p>
+      <h1 className={cn('mb-2', chromeSansRole('title'))}>Nession</h1>
+      <p className={cn('text-muted-foreground mb-8', chromeSansRole('secondary'))}>Distributed tmux Agent</p>
 
       <Card className="w-full max-w-md mb-6">
         <CardHeader>
@@ -95,7 +97,7 @@ export function LoginPage({
             />
             <label
               htmlFor="remember"
-              className="text-sm font-normal text-muted-foreground cursor-pointer"
+              className={cn('text-muted-foreground cursor-pointer', chromeSansRole('body'))}
             >
               Remember me
             </label>
@@ -115,7 +117,7 @@ export function LoginPage({
             </Button>
           </div>
 
-          <p className="text-sm text-muted-foreground">{HELPER_TEXT[connectionStatus]}</p>
+          <p className={cn('text-muted-foreground', chromeSansRole('secondary'))}>{HELPER_TEXT[connectionStatus]}</p>
         </CardContent>
       </Card>
 
@@ -124,7 +126,7 @@ export function LoginPage({
           <CardTitle>Features</CardTitle>
         </CardHeader>
         <CardContent>
-          <ul className="gap-2 text-sm">
+          <ul className={cn('gap-2', chromeSansRole('body'))}>
             {FEATURES.map((f) => (
               <li key={f} className="flex items-start gap-2">
                 <span className="text-muted-foreground flex-shrink-0">&#10003;</span>

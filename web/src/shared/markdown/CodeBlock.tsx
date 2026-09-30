@@ -67,7 +67,7 @@ export function CodeBlock({
       // `overflow-hidden` so the header's surface and the body's share one
       // rounded outline; the scrolling lives on the `<pre>` below, never here,
       // or the header would scroll away with the code.
-      className="my-2 min-w-0 overflow-hidden rounded-md border border-[var(--conversation-code-border)]"
+      className="my-2 min-w-0 overflow-hidden rounded-[var(--radius-surface)] border border-[var(--conversation-code-border)]"
     >
       <div className="flex items-center justify-between gap-2 bg-[var(--conversation-code-surface)] px-2 py-1">
         {/* Absent when the fence declared no language, rather than a placeholder

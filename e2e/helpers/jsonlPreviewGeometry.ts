@@ -104,6 +104,49 @@ export async function readJsonlRecordTop(page: Page, lineNumber: number): Promis
   return top as number;
 }
 
+/** Virtualizer `translateY` — scroll-content offset, not viewport position (#1199). */
+export async function readJsonlRecordVirtualStart(page: Page, lineNumber: number): Promise<number> {
+  await scrollJsonlRecordIntoView(page, lineNumber);
+  const start = await page.locator(`[data-jsonl-line="${lineNumber}"]`).first().evaluate((el) => {
+    const row = el.closest('[data-index]');
+    if (!row || !(row instanceof HTMLElement)) {
+      return null;
+    }
+    const match = /translateY\(([\d.]+)px\)/.exec(row.style.transform);
+    if (!match) {
+      return null;
+    }
+    return Number.parseFloat(match[1]);
+  });
+  expect(start, `line ${lineNumber} must have a virtual start`).not.toBeNull();
+  return start as number;
+}
+
+/** @deprecated prefer readJsonlRecordVirtualStart */
+export async function readJsonlRecordContentTop(
+  page: Page,
+  lineNumber: number,
+): Promise<number> {
+  return readJsonlRecordVirtualStart(page, lineNumber);
+}
+
+/**
+ * Walk from the top so TanStack re-measures rows after a long scroll (#1199).
+ * Estimates alone can leave later `translateY` values tens of px off until
+ * each row has been mounted once.
+ */
+export async function resyncJsonlMeasurementsThrough(page: Page, throughLine: number): Promise<void> {
+  await scrollJsonlPreview(page, 0);
+  await page.waitForTimeout(100);
+  const step = 4;
+  for (let line = 1; line <= throughLine; line += step) {
+    await scrollJsonlRecordIntoView(page, line);
+    await page.waitForTimeout(40);
+  }
+  await scrollJsonlRecordIntoView(page, throughLine);
+  await page.waitForTimeout(100);
+}
+
 export async function openFixtureJsonlEventsWeb(page: Page): Promise<void> {
   for (const name of ['fixtures', 'events.jsonl']) {
     await page.getByRole('treeitem', { name }).waitFor({ state: 'visible', timeout: 10_000 });

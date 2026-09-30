@@ -3,6 +3,7 @@ import type { ConnectionState } from '@/platform/socket/types';
 import { ConnectionStatus } from '@/product/session/patterns/ConnectionStatus';
 import { ServerInfoMenu } from '@/platform/server/components/ServerInfoMenu';
 import { resolveSessionChrome } from '@/product/session/model/sessionChrome';
+import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import type { DomainState } from '@/product/session/model/domainState';
 
 export interface SidebarFooterProps {
@@ -85,7 +86,7 @@ export function SidebarFooter({
           healthy ? 'bg-[var(--action)]' : 'bg-destructive',
         )}
       />
-      <span className="min-w-0 flex-1 truncate text-[length:var(--shell-foot-font-size)] text-muted-foreground">
+      <span className={cn('min-w-0 flex-1 truncate text-muted-foreground', chromeSansRole('caption'))}>
         {serviceLabel}
       </span>
       {domain && chrome && chrome.connection !== 'quiet' ? (

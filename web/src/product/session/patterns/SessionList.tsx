@@ -3,9 +3,11 @@ import { SearchX } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton';
 import { agentDisplayName } from '@/shared/lib/format';
+import { cn } from '@/shared/lib/utils';
 import { mapDomainState } from '@/product/session/model/domainState';
 import { SessionItem } from '@/product/session/patterns/SessionItem';
 import type { Agent, Session } from '@/types';
+import { chromeSansRole } from '@/shared/typography/chromeRoles';
 
 /**
  * A named stretch of rows, with the caller's own label above them.
@@ -90,9 +92,9 @@ export function SessionList({
   if (loading) {
     return (
       <div className="flex flex-col gap-2 p-2">
-        <Skeleton className="h-12 w-full rounded-lg" />
-        <Skeleton className="h-12 w-full rounded-lg" />
-        <Skeleton className="h-12 w-full rounded-lg" />
+        <Skeleton className="h-12 w-full rounded-[var(--radius-surface)]" />
+        <Skeleton className="h-12 w-full rounded-[var(--radius-surface)]" />
+        <Skeleton className="h-12 w-full rounded-[var(--radius-surface)]" />
       </div>
     );
   }
@@ -104,7 +106,7 @@ export function SessionList({
           {searchMissState ?? (
             <div className="flex flex-col items-center px-4 py-8 text-muted-foreground">
               <SearchX className="mb-2 size-8" />
-              <p className="text-sm">No sessions match your search</p>
+              <p className={chromeSansRole('secondary')}>No sessions match your search</p>
             </div>
           )}
         </>
@@ -113,7 +115,7 @@ export function SessionList({
     return (
       <>
         {emptyState ?? (
-          <div className="flex h-full items-center justify-center p-4 text-muted-foreground text-sm">
+          <div className={cn('flex h-full items-center justify-center p-4 text-muted-foreground', chromeSansRole('secondary'))}>
             No sessions yet. Select New Session to get started.
           </div>
         )}

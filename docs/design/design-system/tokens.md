@@ -99,12 +99,13 @@ derives the size from it:
 "sessionRowTitleFontSize": { "ref": "experience.web.typography.primary.size" }
 ```
 
-**A role owns size only.** Family and weight are cross-cutting — `font-medium`
-appears under every role, and monospace carries the code role
-(`workspace.editorFontSize`), the secondary role's tree (`workspace.treeFontSize`,
-which really is paths), and one slot of the metadata role's session row — so
-folding them into a role would misstate the evidence. Line-height stays with the
-block that owns it (`workspace.treeLineHeight`), not with the size role.
+**A role owns size, weight, and line-height for chrome** (#1216). Family
+(product sans vs technical mono) stays with the text's meaning at the call
+site — monospace carries paths, commands, and the session row's workload hint,
+not "developer-ish" navigation by default (#1050). Workload renderers (xterm,
+CodeMirror, Markdown document prose) keep their own metrics. Shared weight
+semantics live in `domain.typography.role.*.weight`; Experience tokens state
+size and leading.
 
 The session-row example is worth spelling out, because it used to be cited here
 the other way. Until #1050 stage 4 the whole meta line was monospace, which made
@@ -189,6 +190,36 @@ Work surfaces stay out of this scale deliberately: xterm reads
 `experience.app.terminal`, CodeMirror reads `workspace.editorFontSize` (12px on
 both experiences), and Markdown document typography belongs to the document.
 Those are the workload's own rendering, and #1073 names them as non-goals.
+
+### Radius hierarchy (#1110)
+
+Corner radius is the 4th weakest separation cue in the visual language
+(whitespace → background → border → **radius** → elevation). It must be stated
+as a semantic hierarchy, not as arbitrary Tailwind utilities scattered across
+product surfaces.
+
+The semantic radius vocabulary is five tiers, from tightest to softest:
+
+| Token | Value | Role |
+|---|---:|---|
+| `radius-control` | 10px | Interactive controls: buttons, inputs, search fields. The base radius from primitive. |
+| `radius-surface` | 16px | Contained surfaces: panels, cards where justified. Larger than control to visually group content. |
+| `radius-floating` | 20px | Temporary elevated surfaces: Peek, popovers, inspectors. Softer corners for transient overlays. |
+| `radius-capsule` | 22px | TerminalCapsule shell. |
+| `radius.pill` | 9999px | True pill/chip geometry. |
+
+**Ownership**: radius tokens live at the Semantic layer (`design/tokens/semantic.json`),
+not Experience. Radius is not platform-specific — if the App later needs different
+values, remap at the Experience layer. The current values are shared.
+
+**Migration rule**: App-owned surfaces (not `components/ui/`) must use semantic
+radius tokens, not generic `rounded-{sm|md|lg|xl|2xl}` utilities. The design
+gate (`scripts/check-radius-ownership.mjs`) catches unowned radius literals.
+
+**Exemptions**:
+- `components/ui/*` — shadcn primitives are upstream, not Nession-owned
+- `rounded-full` — already correct (circle geometry)
+- Arbitrary values with `calc()` — layout arithmetic, not radius choice
 
 Product UI must not consume Primitive palette values directly.
 

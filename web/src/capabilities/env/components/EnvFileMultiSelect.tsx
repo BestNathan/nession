@@ -6,6 +6,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import type { EnvFileInfo, EnvFileRef } from '@/types';
 import { refKey, toRef, sourceLabel } from '@/capabilities/env/model/envRef';
+import { chromeSansRole } from '@/shared/typography/chromeRoles';
 
 interface EnvFileMultiSelectProps {
   files: EnvFileInfo[];
@@ -63,9 +64,9 @@ export function EnvFileMultiSelect({
           disabled={disabled}
         />
       </div>
-      <ScrollArea className="h-40 rounded-md border">
+      <ScrollArea className="h-40 rounded-[var(--radius-surface)] border">
         {filtered.length === 0 ? (
-          <p className="text-xs text-muted-foreground text-center py-6">
+          <p className={cn('py-6 text-center text-muted-foreground', chromeSansRole('metadata'))}>
             {files.length === 0 ? emptyLabel : 'No files match your search'}
           </p>
         ) : (
@@ -92,11 +93,11 @@ export function EnvFileMultiSelect({
                     {isSelected && <Check className="w-3 h-3 text-primary-foreground" />}
                   </span>
                   <FileText className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
-                  <span className="flex-1 text-sm truncate">{file.name}</span>
-                  <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+                  <span className={cn('flex-1 truncate', chromeSansRole('secondary'))}>{file.name}</span>
+                  <Badge variant="outline" className={cn('px-1.5 py-0', chromeSansRole('caption'))}>
                     {sourceLabel(file)}
                   </Badge>
-                  <span className="text-[10px] text-muted-foreground w-10 text-right">
+                  <span className={cn('w-10 text-right text-muted-foreground', chromeSansRole('caption'))}>
                     {file.var_count} var{file.var_count !== 1 ? 's' : ''}
                   </span>
                 </button>
@@ -106,7 +107,7 @@ export function EnvFileMultiSelect({
         )}
       </ScrollArea>
       {selected.length > 0 && (
-        <p className="text-xs text-muted-foreground">
+        <p className={cn('text-muted-foreground', chromeSansRole('metadata'))}>
           {selected.length} file{selected.length !== 1 ? 's' : ''} selected
         </p>
       )}

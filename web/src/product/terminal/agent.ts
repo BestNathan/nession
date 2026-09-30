@@ -4,6 +4,10 @@ import {
   readControlAcquireReply,
 } from './controlPayload';
 import { parseStreamEvents } from '@/platform/terminal-runtime/streamApply';
+import {
+  decodeBootstrapMarker,
+  type TerminalBootstrap,
+} from '@/platform/terminal-runtime/bootstrap';
 import { WIRE as ATTACH_WIRE } from '@/generated/protocol/core/agent-attach/v1';
 import { WIRE as TERMINAL_INPUT_WIRE } from '@/generated/protocol/core/agent-terminal-input/v1';
 import { WIRE as TERMINAL_RESIZE_WIRE } from '@/generated/protocol/core/agent-terminal-resize/v1';
@@ -38,7 +42,7 @@ export interface TerminalOutputFrame {
   streamEpoch?: number;
   streamSeq?: number;
   /**
-   * True when this frame is the session's **history** rather than its live
+   * Present when this frame is the session's **history** rather than its live
    * output (#321).
    *
    * The distinction is the client's whole part of the bootstrap contract: a
@@ -46,11 +50,13 @@ export interface TerminalOutputFrame {
    * lets the agent re-send a session's history on every attach that needs one
    * without the client ending up with two copies of it on screen.
    *
-   * Absent on every frame a provider has ever sent, which is why the field is
-   * additive and the wire keeps its version — see
-   * `TerminalOutputPayload::bootstrap`.
+   * The payload qualifies that replacement — a snapshot a byte ceiling cut
+   * short is not a history the client may replace its buffer with (#1305).
+   *
+   * Absent on every live frame, which is why the field is additive and the
+   * wire keeps its version — see `TerminalOutputPayload::bootstrap`.
    */
-  bootstrap?: boolean;
+  bootstrap?: TerminalBootstrap;
 }
 
 export interface TerminalStreamResumeResult {
@@ -139,7 +145,15 @@ async function attachToSession(
     const size = attachOpts?.size;
     const reply = await surface.request(ATTACH_WIRE, {
       session_name: sessionName,
-      ...(size ? { width: size.cols, height: size.rows } : {}),
+      // No size is not "80x24": it is a client that has not laid its terminal
+      // out yet, and the resize is not private to it — it moves the shared
+      // window, which makes an inline-drawing application repaint into the
+      // history the user reads (#1265). Say so rather than let the payload's
+      // placeholder speak. A size the caller does have needs no flag: absent
+      // already means "authoritative".
+      ...(size
+        ? { width: size.cols, height: size.rows }
+        : { size_known: false }),
       // Sent only when the caller has an opinion. Omitting it is not the same
       // as sending `false`: absent asks the agent to decide, and the agent's
       // rule is the one an older client already gets (#321).
@@ -262,10 +276,13 @@ export function createTerminalAgentApi(surface: PluginSurface): TerminalAgentApi
             streamEpoch:
               typeof p.stream_epoch === 'number' ? p.stream_epoch : undefined,
             streamSeq: typeof p.stream_seq === 'number' ? p.stream_seq : undefined,
-            // Presence of the marker is the fact, not its contents: a provider
-            // that sends `bootstrap: {}` means the same thing as one that sends
-            // a populated payload, and the client's job is the same either way.
-            bootstrap: p.bootstrap === undefined ? undefined : true,
+            // Presence is the fact; the contents are the qualification. A
+            // snapshot the agent had to cut short is not a history the
+            // consumer may replace its buffer with, and collapsing this to a
+            // boolean — which is what it used to do — threw that away at the
+            // transport boundary, where no later layer could recover it
+            // (#1305).
+            bootstrap: decodeBootstrapMarker(p.bootstrap),
           });
         }
       });

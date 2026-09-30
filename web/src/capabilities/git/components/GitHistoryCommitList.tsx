@@ -1,4 +1,5 @@
 import { cn } from '@/shared/lib/utils';
+import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import { formatBytes } from '../state';
 import type { GitCommit } from '../types';
 
@@ -44,18 +45,21 @@ export function GitHistoryCommitList({
             data-testid="git-history-load-more"
             disabled={loadingMore}
             onClick={onLoadOlder}
-            className="mx-2 my-2 rounded-md px-2 py-1.5 text-left text-xs text-primary hover:bg-accent"
+            className={cn(
+              'mx-2 my-2 rounded-[var(--radius-control)] px-2 py-1.5 text-left text-primary hover:bg-accent',
+              chromeSansRole('metadata'),
+            )}
           >
             {loadingMore ? 'Loading older commits…' : 'Load older commits'}
           </button>
         ) : null}
         {commits.length >= limit && endOfHistory ? (
-          <p data-testid="git-history-more" className="px-2 py-2 text-xs text-muted-foreground">
+          <p data-testid="git-history-more" className={cn('px-2 py-2 text-muted-foreground', chromeSansRole('metadata'))}>
             End of history — {commits.length} commit{commits.length === 1 ? '' : 's'} loaded.
           </p>
         ) : null}
         {truncated ? (
-          <p data-testid="git-history-truncated" className="px-2 py-2 text-xs text-muted-foreground">
+          <p data-testid="git-history-truncated" className={cn('px-2 py-2 text-muted-foreground', chromeSansRole('metadata'))}>
             History truncated — {formatBytes(truncatedBytes)} not read.
           </p>
         ) : null}
@@ -84,13 +88,13 @@ function CommitRow({
       aria-current={selected ? 'true' : undefined}
       onClick={() => onSelect(commit.hash)}
       className={cn(
-        'flex flex-col gap-0.5 rounded-md px-2 py-1.5 text-left transition-colors',
+        'flex flex-col gap-0.5 rounded-[var(--radius-control)] px-2 py-1.5 text-left transition-colors',
         'hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
         selected && 'bg-accent text-accent-foreground',
       )}
     >
-      <span className="truncate text-sm">{commit.subject}</span>
-      <span className="flex items-center gap-2 text-xs text-muted-foreground">
+      <span className={cn('truncate', chromeSansRole('secondary'))}>{commit.subject}</span>
+      <span className={cn('flex items-center gap-2 text-muted-foreground', chromeSansRole('metadata'))}>
         <span className="font-mono">{commit.shortHash}</span>
         <span className="truncate">{commit.author}</span>
         <span className="shrink-0">{commit.relativeDate}</span>

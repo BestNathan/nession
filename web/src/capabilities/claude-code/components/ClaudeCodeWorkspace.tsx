@@ -9,9 +9,13 @@ import type {
   ClaudeCodeReadResponse,
 } from '../types';
 import { cn } from '@/shared/lib/utils';
+import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
 import type { WorkspaceContext } from '@/app/workspace/workspaceContext';
 import { ConversationView } from './ConversationView';
 import { useConversation } from '../hooks/useConversation';
+import { useTranscripts } from '../hooks/useTranscripts';
+import { useTranscriptItems } from '../hooks/useTranscriptItems';
+import { TranscriptView } from './TranscriptView';
 
 type Scope = 'global' | 'project';
 
@@ -30,7 +34,7 @@ type Scope = 'global' | 'project';
  * you go looking for. Both remain reachable; neither is a fallback for the
  * other.
  */
-type View = 'conversations' | 'configuration';
+type View = 'conversations' | 'transcripts' | 'configuration';
 type ConfigCategory = ClaudeCodeListResponse['categories'][number];
 type ConfigFile = ConfigCategory['files'][number];
 
@@ -186,7 +190,7 @@ function FileList({
     <div className="space-y-4 p-3" data-testid={active ? 'claude-code-file-list' : undefined}>
       {state.categories.map((category) => (
         <section key={category.name}>
-          <h2 className="mb-1 px-2 text-xs font-semibold text-muted-foreground">
+          <h2 className={cn('mb-1 px-2 uppercase tracking-wide text-muted-foreground', chromeSansRole('metadata'))}>
             {category.name}
           </h2>
           <div className="space-y-0.5">
@@ -198,7 +202,8 @@ function FileList({
                 aria-current={state.selectedFile?.path === file.path ? 'true' : undefined}
                 onClick={() => onFileClick(scope, file)}
                 className={cn(
-                  'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors',
+                  'flex w-full items-center gap-2 rounded-[var(--radius-control)] px-2 py-1.5 text-left transition-colors',
+                  chromeSansRole('secondary'),
                   'hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                   state.selectedFile?.path === file.path && 'bg-accent text-accent-foreground',
                 )}
@@ -230,14 +235,14 @@ function ScopePanel({
   if (state.loading) {
     return (
       <div className="p-4" data-testid={`claude-code-scope-${scope}`} data-scope={scope}>
-        <p className="text-sm text-muted-foreground">Loading Claude Code files...</p>
+        <p className={cn('text-muted-foreground', chromeSansRole('secondary'))}>Loading Claude Code files...</p>
       </div>
     );
   }
   if (state.error) {
     return (
       <div className="space-y-3 p-4" data-testid={`claude-code-scope-${scope}`} data-scope={scope}>
-        <p className="text-sm text-destructive" role="alert">{state.error}</p>
+        <p className={cn('text-destructive', chromeSansRole('body'))} role="alert">{state.error}</p>
         <Button
           data-testid={`claude-code-retry-${scope}`}
           variant="outline"
@@ -252,14 +257,14 @@ function ScopePanel({
   if (state.available === false) {
     return (
       <div className="p-4" data-testid={`claude-code-scope-${scope}`} data-scope={scope}>
-        <p className="text-sm text-muted-foreground">Claude Code not installed</p>
+        <p className={cn('text-muted-foreground', chromeSansRole('secondary'))}>Claude Code not installed</p>
       </div>
     );
   }
   if (state.categories.length === 0) {
     return (
       <div className="p-4" data-testid={`claude-code-scope-${scope}`} data-scope={scope}>
-        <p className="text-sm text-muted-foreground">No Claude Code files found.</p>
+        <p className={cn('text-muted-foreground', chromeSansRole('secondary'))}>No Claude Code files found.</p>
       </div>
     );
   }
@@ -284,14 +289,14 @@ function ContentPanel({
   onLoadMore: (scope: Scope) => void;
 }) {
   if (!state.selectedFile) {
-    return <p className="p-6 text-sm text-muted-foreground">Select a file to view its content.</p>;
+    return <p className={cn('p-6 text-muted-foreground', chromeSansRole('secondary'))}>Select a file to view its content.</p>;
   }
   return (
     <div className="flex min-h-0 flex-1 flex-col p-4">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-3">
         <div className="min-w-0">
-          <p className="truncate text-sm font-medium" title={state.selectedFile.path}>{state.selectedFile.path}</p>
-          <p className="text-xs text-muted-foreground">
+          <p className={cn('truncate', chromeMonoRole('code'))} title={state.selectedFile.path}>{state.selectedFile.path}</p>
+          <p className={cn('text-muted-foreground', chromeSansRole('metadata'))}>
             {state.contentType || state.selectedFile.content_type} · {formatSize(state.totalSize || state.selectedFile.size)}
           </p>
         </div>
@@ -307,9 +312,9 @@ function ContentPanel({
           </Button>
         )}
       </div>
-      {state.readLoading && <p className="py-3 text-sm text-muted-foreground">Loading content...</p>}
-      {state.readError && <p className="py-3 text-sm text-destructive" role="alert">{state.readError}</p>}
-      <pre data-testid="claude-code-content" className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap py-4 font-mono text-xs">
+      {state.readLoading && <p className={cn('py-3 text-muted-foreground', chromeSansRole('secondary'))}>Loading content...</p>}
+      {state.readError && <p className={cn('py-3 text-destructive', chromeSansRole('body'))} role="alert">{state.readError}</p>}
+      <pre data-testid="claude-code-content" className={cn('min-h-0 flex-1 overflow-auto whitespace-pre-wrap py-4', chromeMonoRole('code'))}>
         {state.content || (state.readLoading ? '' : '(empty)')}
       </pre>
     </div>
@@ -538,6 +543,21 @@ function useClaudeCodeWorkspace(ctx: WorkspaceContext) {
   const [activeScope, setActiveScope] = useState<Scope>('project');
   const conversation = useConversation({ agentId, sessionId });
 
+  // `#1234`. The transcript projection is a second first-class view over the
+  // same upstream sessions, not a debug switch on the conversation one — which
+  // is why it is a tab and not a toggle inside the conversation panel.
+  //
+  // Which transcript is open is this component's state rather than the hook's,
+  // because the list outlives the selection: switching tabs must not forget
+  // where the reader was, and the list does not depend on what is open.
+  const [openTranscript, setOpenTranscript] = useState<string | null>(null);
+  const transcripts = useTranscripts({ agentId, sessionId });
+  const transcriptItems = useTranscriptItems({
+    agentId,
+    sessionId,
+    transcriptId: openTranscript,
+  });
+
   const { contextGeneration, currentRequestKey, loadScope } = useScopeLoader({
     agentId,
     sessionId,
@@ -573,6 +593,10 @@ function useClaudeCodeWorkspace(ctx: WorkspaceContext) {
     handleFileClick,
     handleLoadMore,
     conversation,
+    transcripts,
+    transcriptItems,
+    openTranscript,
+    setOpenTranscript,
   };
 }
 
@@ -589,12 +613,16 @@ export function ClaudeCodeWorkspace({ ctx }: { ctx: WorkspaceContext }) {
     handleFileClick,
     handleLoadMore,
     conversation,
+    transcripts,
+    transcriptItems,
+    openTranscript,
+    setOpenTranscript,
   } = useClaudeCodeWorkspace(ctx);
 
   if (!agentId || !sessionId) {
     return (
       <div data-testid="claude-code-workspace" className="flex h-full min-h-0 items-center justify-center p-6">
-        <p className="text-sm text-muted-foreground">Select an agent and session to browse Claude Code files.</p>
+        <p className={cn('text-muted-foreground', chromeSansRole('secondary'))}>Select an agent and session to browse Claude Code files.</p>
       </div>
     );
   }
@@ -607,33 +635,50 @@ export function ClaudeCodeWorkspace({ ctx }: { ctx: WorkspaceContext }) {
         {showHeading ? (
           <div className="flex items-center gap-2">
             <FolderOpen className="h-4 w-4 text-muted-foreground" />
-            <h1 className="text-sm font-semibold">Claude Code</h1>
+            <h1 className={chromeSansRole('title')}>Claude Code</h1>
           </div>
         ) : null}
         <Tabs value={activeView} onValueChange={(value) => setActiveView(value as View)}>
           <TabsList>
             <TabsTrigger value="conversations">Conversations</TabsTrigger>
+            <TabsTrigger value="transcripts">Transcripts</TabsTrigger>
             <TabsTrigger value="configuration">Configuration</TabsTrigger>
           </TabsList>
         </Tabs>
       </header>
-      {activeView === 'conversations' ? (
-        <main className="flex min-h-0 flex-1 flex-col">
-          <ConversationView
-            view={conversation.view}
-            // `#1120` items 8 and 9. The mapping lives here rather than inside
-            // the view because it is the same decision `showHeading` above
-            // already makes from the same field: what the experience has room
-            // for. A viewport, not a mode — and App is the only one that has to
-            // push.
-            layout={ctx.experience === 'app' ? 'push' : 'master-detail'}
-            onSelect={conversation.select}
-            onLoadOlder={() => conversation.loadOlder()}
-            onReload={conversation.reload}
-          />
-        </main>
-      ) : (
-        <div className="flex min-h-0 flex-1 flex-col">
+      {/* Render every panel but hide the inactive ones. Conditional rendering
+          would unmount a view on tab switch, resetting its local state (showList,
+          scroll positions) and causing a visual "refresh". Keeping them mounted
+          preserves the user's position — which for Transcripts is what makes
+          switching to Configuration and back not lose the open transcript. */}
+      <main className={activeView === 'conversations' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}>
+        <ConversationView
+          view={conversation.view}
+          // `#1120` items 8 and 9. The mapping lives here rather than inside
+          // the view because it is the same decision `showHeading` above
+          // already makes from the same field: what the experience has room
+          // for. A viewport, not a mode — and App is the only one that has to
+          // push.
+          layout={ctx.experience === 'app' ? 'push' : 'master-detail'}
+          onSelect={conversation.select}
+          onLoadOlder={() => conversation.loadOlder()}
+          onReload={conversation.reload}
+        />
+      </main>
+      <main className={activeView === 'transcripts' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}>
+        <TranscriptView
+          list={transcripts.list}
+          items={transcriptItems.items}
+          open={openTranscript}
+          // The same split `ConversationView` makes from the same field: the
+          // experience decides how much room there is, and App has to push.
+          layout={ctx.experience === 'app' ? 'push' : 'master-detail'}
+          onSelect={setOpenTranscript}
+          onLoadOlder={() => transcriptItems.loadOlder()}
+          onBack={() => setOpenTranscript(null)}
+        />
+      </main>
+      <div className={activeView === 'configuration' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}>
           {/* Configuration's own sub-axis (#1120 item 7). It sits here, under
               the section that has scopes, rather than beside `Conversations` —
               which is the whole of the flattening this change undoes. */}
@@ -664,7 +709,6 @@ export function ClaudeCodeWorkspace({ ctx }: { ctx: WorkspaceContext }) {
             </main>
           </div>
         </div>
-      )}
     </div>
   );
 }

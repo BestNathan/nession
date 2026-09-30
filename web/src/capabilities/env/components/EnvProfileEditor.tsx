@@ -1,4 +1,6 @@
 import { useEffect } from 'react';
+import { cn } from '@/shared/lib/utils';
+import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -74,7 +76,7 @@ function IdentityFields({
   return (
     <div className="flex flex-wrap items-end gap-3 px-4 pt-3">
       <div className="flex min-w-40 flex-[2] flex-col gap-1.5">
-        <Label className="text-xs">Name</Label>
+        <Label className={chromeSansRole('metadata')}>Name</Label>
         <Input
           data-testid="env-editor-name"
           value={draft.name}
@@ -85,7 +87,7 @@ function IdentityFields({
         />
       </div>
       <div className="flex flex-1 flex-col gap-1.5">
-        <Label className="text-xs">Location</Label>
+        <Label className={chromeSansRole('metadata')}>Location</Label>
         <Select
           value={draft.source}
           onValueChange={(v) => v && draft.setSource(v as EnvSource)}
@@ -102,7 +104,7 @@ function IdentityFields({
       </div>
       {draft.source === 'agent' ? (
         <div className="flex flex-1 flex-col gap-1.5">
-          <Label className="text-xs">Agent</Label>
+          <Label className={chromeSansRole('metadata')}>Agent</Label>
           <Select
             value={draft.agentId}
             onValueChange={(v) => v && draft.setAgentId(v)}
@@ -158,7 +160,7 @@ function EditorBody({
   if (loadError && !draft.initialized) {
     return (
       <div className="flex flex-1 flex-col items-center gap-2 px-4 py-8 text-center">
-        <p className="text-sm text-muted-foreground">{loadError}</p>
+        <p className={cn('text-muted-foreground', chromeSansRole('secondary'))}>{loadError}</p>
         <Button size="sm" variant="outline" onClick={onRetry}>
           Retry
         </Button>
@@ -180,13 +182,13 @@ function EditorBody({
       </div>
       {warnings.length > 0 ? (
         <div className="border-t px-4 py-2" data-testid="env-editor-warnings">
-          <p className="text-xs font-medium text-warning">
+          <p className={cn('text-warning', chromeSansRole('metadata'))}>
             {warnings.length === 1
               ? '1 line will be skipped'
               : `${warnings.length} lines will be skipped`}
           </p>
           {warnings.map((w, i) => (
-            <p key={i} className="mt-0.5 font-mono text-xs text-muted-foreground">
+            <p key={i} className={cn('mt-0.5 font-mono text-muted-foreground', chromeSansRole('metadata'))}>
               {w}
             </p>
           ))}
@@ -194,7 +196,7 @@ function EditorBody({
       ) : null}
       {hasDiff ? (
         <details className="border-t px-4 py-2" data-testid="env-editor-review">
-          <summary className="cursor-pointer select-none text-xs font-medium text-muted-foreground">
+          <summary className={cn('cursor-pointer select-none text-muted-foreground', chromeSansRole('metadata'))}>
             Review changes
           </summary>
           <div className="mt-2">
@@ -315,14 +317,16 @@ export function EnvProfileEditor({
   return (
     <div data-testid="env-profile-editor" className="flex h-full min-h-0 flex-col">
       <div className="flex items-center gap-2 border-b px-4 py-3">
-        <h2 className="truncate text-sm font-semibold">{editorTitle(target)}</h2>
+        <h2 className={cn('truncate', chromeSansRole('title'))}>
+          {editorTitle(target)}
+        </h2>
         {target.kind === 'existing' && profile ? (
-          <span className="truncate text-xs text-muted-foreground">
+          <span className={cn('truncate text-muted-foreground', chromeSansRole('metadata'))}>
             {profile.name} · {profileSourceLine(profile, agents)}
           </span>
         ) : null}
         {draft.dirty ? (
-          <span data-testid="env-editor-dirty" className="shrink-0 text-xs text-muted-foreground">
+          <span data-testid="env-editor-dirty" className={cn('shrink-0 text-muted-foreground', chromeSansRole('metadata'))}>
             Unsaved changes
           </span>
         ) : null}
@@ -352,10 +356,10 @@ export function EnvProfileEditor({
         onRetry={() => void reload()}
       />
       {flow.error ? (
-        <p className="border-t px-4 py-2 text-sm text-destructive">{flow.error}</p>
+        <p className={cn('border-t px-4 py-2 text-destructive', chromeSansRole('body'))}>{flow.error}</p>
       ) : null}
       {!draft.nameValid && draft.isNew ? (
-        <p className="border-t px-4 py-2 text-xs text-muted-foreground">
+        <p className={cn('border-t px-4 py-2 text-muted-foreground', chromeSansRole('metadata'))}>
           Name the environment to save it.
         </p>
       ) : null}

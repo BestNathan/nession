@@ -39,11 +39,15 @@ describe('TerminalServerPlugin', () => {
   });
 
   describe('relay lifecycle sends', () => {
-    it('beginRelay sends client.session.relay.begin with just the session id', () => {
+    it('beginRelay without columns says so, rather than asking for 80x24', () => {
       plugin.beginRelay('sess-1');
 
+      // The payload's own default would put 80×24 on the wire, and the agent
+      // would resize the **shared** window to it and back — two repaints of an
+      // inline-drawing application into the scrollback, for a size no client
+      // ever measured (#1265).
       expect(surface.sent).toEqual([
-        { type: 'server.session.relay.begin', payload: { session_id: 'sess-1' } },
+        { type: 'server.session.relay.begin', payload: { session_id: 'sess-1', size_known: false } },
       ]);
     });
 
@@ -61,8 +65,14 @@ describe('TerminalServerPlugin', () => {
     it('beginRelay omits relay_url when absent and rows when only cols is given', () => {
       plugin.beginRelay('sess-1', { cols: 100 });
 
+      // Half a grid is not a measurement either: the agent would have to
+      // invent the other half, which is the placeholder by another route
+      // (#1265).
       expect(surface.sent).toEqual([
-        { type: 'server.session.relay.begin', payload: { session_id: 'sess-1', cols: 100 } },
+        {
+          type: 'server.session.relay.begin',
+          payload: { session_id: 'sess-1', cols: 100, size_known: false },
+        },
       ]);
     });
 
@@ -73,8 +83,11 @@ describe('TerminalServerPlugin', () => {
       plugin.beginRelay('sess-2');
 
       expect(surface.sent).toEqual([
-        { type: 'server.session.relay.begin', payload: { session_id: 'sess-1', needs_bootstrap: true } },
-        { type: 'server.session.relay.begin', payload: { session_id: 'sess-2' } },
+        {
+          type: 'server.session.relay.begin',
+          payload: { session_id: 'sess-1', size_known: false, needs_bootstrap: true },
+        },
+        { type: 'server.session.relay.begin', payload: { session_id: 'sess-2', size_known: false } },
       ]);
     });
 
@@ -136,15 +149,19 @@ describe('TerminalServerPlugin', () => {
       surface.pushMessage('agent.terminal.output', {
         session_name: 'work', data: 'aGk=', bootstrap: { requested_lines: 5000, truncated: false },
       });
+      surface.pushMessage('agent.terminal.output', {
+        session_name: 'work', data: 'aGk=', bootstrap: { requested_lines: 5000, truncated: true },
+      });
       surface.pushMessage('agent.terminal.output', { session_name: 'work', data: 'aGk=' });
 
-      // Presence is the fact, not the contents — the payload's fields are the
-      // agent's account of the snapshot, and the client's job is the same
-      // whatever they say.
-      expect(cb.mock.calls[0]?.[1]).toBe(true);
+      // Presence is the fact, and the contents are the qualification: the
+      // relay must carry both, because whether the snapshot was cut short
+      // decides whether the consumer may replace its buffer with it (#1305).
+      expect(cb.mock.calls[0]?.[1]).toEqual({ requestedLines: 5000, truncated: false });
+      expect(cb.mock.calls[1]?.[1]).toEqual({ requestedLines: 5000, truncated: true });
       // A live frame says `undefined`, which is not `false`: a consumer must be
       // able to tell "not a bootstrap" from "no marker at all" (#321).
-      expect(cb.mock.calls[1]?.[1]).toBeUndefined();
+      expect(cb.mock.calls[2]?.[1]).toBeUndefined();
     });
 
     it('preserves non-UTF-8 octets through relay decode', () => {

@@ -1,6 +1,7 @@
 import { PanelLeftOpen, Server, ListTree } from 'lucide-react';
 import { cn } from '@/shared/lib/utils';
 import { shellIconButtonClass, shellMotionClass } from '@/app/shellStyles';
+import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import type { ConnectionState } from '@/platform/socket';
 
 export interface SidebarRailProps {
@@ -85,7 +86,7 @@ export function SidebarRail({
         aria-label="Expand sidebar"
         title="Expand sidebar"
         onClick={() => onExpand()}
-        className={cn(shellIconButtonClass, 'rounded-md hover:bg-accent hover:text-accent-foreground')}
+        className={cn(shellIconButtonClass, 'rounded-[var(--radius-control)] hover:bg-accent hover:text-accent-foreground')}
       >
         <PanelLeftOpen className="size-[length:var(--icon-md)]" aria-hidden />
       </button>
@@ -101,7 +102,7 @@ export function SidebarRail({
         className="mt-[var(--shell-space-2)] flex flex-col items-center gap-[var(--shell-space-1)] py-[var(--shell-space-1)] text-muted-foreground"
       >
         <Server className="size-[length:var(--icon-md)]" aria-hidden />
-        <span aria-hidden className="text-[length:var(--shell-section-head-font-size)] tabular-nums">
+        <span aria-hidden className={cn(chromeSansRole('secondary'), 'tabular-nums')}>
           {agentCount}
         </span>
       </div>
@@ -113,7 +114,7 @@ export function SidebarRail({
         className="flex flex-col items-center gap-[var(--shell-space-1)] py-[var(--shell-space-1)] text-muted-foreground"
       >
         <ListTree className="size-[length:var(--icon-md)]" aria-hidden />
-        <span aria-hidden className="text-[length:var(--shell-section-head-font-size)] tabular-nums">
+        <span aria-hidden className={cn(chromeSansRole('secondary'), 'tabular-nums')}>
           {sessionCount}
         </span>
       </div>

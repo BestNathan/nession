@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { cn } from '@/shared/lib/utils';
 import { COMPACT_STRING_CHARS, TREE_STRING_PREVIEW_CHARS, TREE_STRING_EXPAND_CHARS } from './jsonTreeLimits';
 import { jsonSyntax } from './jsonTreeSyntax';
+import { chromeSansRole } from '@/shared/typography/chromeRoles';
 
 interface JsonScalarProps {
   value: string | number | boolean | null;
@@ -45,7 +46,7 @@ export function JsonScalar({ value, allowExpand = false, maxChars }: JsonScalarP
         </button>
       ) : null}
       {expanded && value.length > TREE_STRING_EXPAND_CHARS ? (
-        <span className="block text-muted-foreground text-[10px] mt-0.5">Truncated for display</span>
+        <span className={cn('mt-0.5 block text-muted-foreground', chromeSansRole('caption'))}>Truncated for display</span>
       ) : null}
     </span>
   );

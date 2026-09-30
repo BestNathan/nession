@@ -33,9 +33,13 @@ describe('createTerminalAgentApi', () => {
       await expect(pending).resolves.toMatchObject({ ok: true, controlRole: 'controller' });
     });
 
-    it('omits width/height when no viewport size is given', async () => {
+    it('omits width/height when no viewport size is given, and says why', async () => {
       const pending = api.attach('work');
-      expect(surface.requests[0]?.payload).toEqual({ session_name: 'work' });
+      // Columns left unsent are not "80×24": the payload's own default would
+      // put that on the wire and the agent would resize the **shared** window
+      // to it and back, repainting an inline-drawing application into the
+      // scrollback twice for a size nothing measured (#1265).
+      expect(surface.requests[0]?.payload).toEqual({ session_name: 'work', size_known: false });
       expect(surface.requests[0]?.options).toEqual({ timeoutMs: ATTACH_TIMEOUT_MS });
 
       surface.resolveNext('agent.attach', {});
@@ -123,6 +127,26 @@ describe('createTerminalAgentApi', () => {
       surface.pushMessage('agent.terminal.output', { session_name: 'work', data: 'aGk=' });
 
       expect(cb).not.toHaveBeenCalled();
+    });
+
+    it('carries the bootstrap marker with the metadata that qualifies it (#1305)', () => {
+      const cb = vi.fn();
+      api.onOutput(cb);
+
+      surface.pushMessage('agent.terminal.output', {
+        session_name: 'work',
+        data: 'aGk=',
+        bootstrap: { requested_lines: 5000, truncated: true },
+      });
+      surface.pushMessage('agent.terminal.output', { session_name: 'work', data: 'aGk=' });
+
+      // Whether the agent had to cut the snapshot short decides whether the
+      // consumer may replace its buffer with it — a fact this decode step used
+      // to throw away by collapsing the payload to `true`.
+      expect(cb.mock.calls[0]?.[0].bootstrap).toEqual({ requestedLines: 5000, truncated: true });
+      // A live frame says `undefined`, which is not a marker with no contents:
+      // absence is the only thing that means "append" (#321).
+      expect(cb.mock.calls[1]?.[0].bootstrap).toBeUndefined();
     });
   });
 

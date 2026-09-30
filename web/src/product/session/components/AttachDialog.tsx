@@ -10,6 +10,7 @@ import {
 } from 'react';
 import { Wifi, WifiOff, ChevronDown, ChevronRight } from 'lucide-react';
 import { cn } from '@/shared/lib/utils';
+import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
 import {
   Dialog,
   DialogContent,
@@ -272,7 +273,7 @@ export function AttachDialog({ isOpen, intent = 'attach', onClose, session, onCo
 
           <RendererToggle renderer={renderer} onChange={setRenderer} webglSupported={webglSupported} />
 
-          {error ? <p className="text-xs text-destructive">{error}</p> : null}
+          {error ? <p className={cn('text-destructive', chromeSansRole('metadata'))}>{error}</p> : null}
         </div>
         <DialogFooter>
           <Button type="button" variant="outline" onClick={onClose}>
@@ -449,12 +450,12 @@ function ModeToggle({ mode, onChange }: { mode: AttachMode; onChange: (m: Attach
           type="button"
           onClick={() => onChange(m.value)}
           className={cn(
-            'flex flex-col items-start rounded-md border px-3 py-2 text-left transition-colors',
+            'flex flex-col items-start rounded-[var(--radius-surface)] border px-3 py-2 text-left transition-colors',
             mode === m.value ? 'border-primary bg-primary/10' : 'border-input hover:bg-accent/50',
           )}
         >
-          <span className="text-sm font-medium">{m.label}</span>
-          <span className="text-[10px] text-muted-foreground leading-tight">{m.hint}</span>
+          <span className={chromeSansRole('body')}>{m.label}</span>
+          <span className={cn('text-muted-foreground', chromeSansRole('caption'))}>{m.hint}</span>
         </button>
       ))}
     </div>
@@ -480,13 +481,13 @@ function RendererToggle({
           onClick={() => onChange('webgl')}
           disabled={!webglSupported}
           className={cn(
-            'flex flex-col items-start rounded-md border px-3 py-2 text-left transition-colors',
+            'flex flex-col items-start rounded-[var(--radius-surface)] border px-3 py-2 text-left transition-colors',
             renderer === 'webgl' ? 'border-primary bg-primary/10' : 'border-input hover:bg-accent/50',
             !webglSupported && 'opacity-50 cursor-not-allowed',
           )}
         >
-          <span className="text-sm font-medium">WebGL</span>
-          <span className="text-[10px] text-muted-foreground leading-tight">
+          <span className={chromeSansRole('body')}>WebGL</span>
+          <span className={cn('text-muted-foreground', chromeSansRole('caption'))}>
             {webglSupported ? 'GPU-accelerated' : 'not supported'}
           </span>
         </button>
@@ -494,12 +495,12 @@ function RendererToggle({
           type="button"
           onClick={() => onChange('canvas')}
           className={cn(
-            'flex flex-col items-start rounded-md border px-3 py-2 text-left transition-colors',
+            'flex flex-col items-start rounded-[var(--radius-surface)] border px-3 py-2 text-left transition-colors',
             renderer === 'canvas' ? 'border-primary bg-primary/10' : 'border-input hover:bg-accent/50',
           )}
         >
-          <span className="text-sm font-medium">Canvas</span>
-          <span className="text-[10px] text-muted-foreground leading-tight">compatibility</span>
+          <span className={chromeSansRole('body')}>Canvas</span>
+          <span className={cn('text-muted-foreground', chromeSansRole('caption'))}>compatibility</span>
         </button>
       </div>
     </div>
@@ -551,7 +552,7 @@ function PathList({ candidates, latencyByUrl, bestUrl, measured, probing, select
           <button
             type="button"
             onClick={onRetest}
-            className="text-[10px] text-muted-foreground hover:text-foreground underline"
+            className={cn('text-muted-foreground hover:text-foreground underline', chromeSansRole('caption'))}
           >
             Re-test
           </button>
@@ -631,7 +632,7 @@ function AddressRow({ label, badge, sublabel, selected, onSelect, reachable, isC
       type="button"
       onClick={onSelect}
       className={cn(
-        'flex w-full items-center gap-2 rounded-md border px-3 py-2 text-left transition-colors',
+        'flex w-full items-center gap-2 rounded-[var(--radius-surface)] border px-3 py-2 text-left transition-colors',
         selected ? 'border-primary bg-primary/10' : 'border-input hover:bg-accent/50',
       )}
     >
@@ -655,21 +656,22 @@ function AddressRow({ label, badge, sublabel, selected, onSelect, reachable, isC
       )}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5">
-          <span className="text-sm font-medium truncate">{label}</span>
+          <span className={cn('truncate', chromeSansRole('body'))}>{label}</span>
           {badge ? (
-            <span className="text-[10px] uppercase px-1 rounded bg-muted text-muted-foreground">
+            <span className={cn('uppercase px-1 rounded bg-muted text-muted-foreground', chromeSansRole('caption'))}>
               {badge}
             </span>
           ) : null}
         </div>
-        <div className="text-[10px] text-muted-foreground truncate">{sublabel}</div>
+        <div className={cn('truncate text-muted-foreground', chromeMonoRole('caption'))}>{sublabel}</div>
       </div>
       {latencyMs !== undefined ? (
-        <span className="text-[10px] text-muted-foreground shrink-0">{latencyMs}ms</span>
+        <span className={cn('text-muted-foreground shrink-0', chromeSansRole('caption'))}>{latencyMs}ms</span>
       ) : null}
       {statusLabel ? (
         <span className={cn(
-          'text-[10px] shrink-0',
+          chromeSansRole('caption'),
+          'shrink-0',
           // Only a measured failure is destructive. The server reporting that it
           // has not probed an address is not a failure, and colouring it like one
           // is the same defect as drawing it with the offline icon.
@@ -705,12 +707,12 @@ function EnvPickerSection({
       <button
         type="button"
         onClick={toggle}
-        className="flex items-center gap-1 text-sm font-medium text-muted-foreground hover:text-foreground"
+        className={cn('flex items-center gap-1 text-muted-foreground hover:text-foreground', chromeSansRole('body'))}
       >
         {expanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
         Environment Files
         {selected.length > 0 && (
-          <span className="text-[10px] text-muted-foreground ml-1">
+          <span className={cn('text-muted-foreground ml-1', chromeSansRole('caption'))}>
             ({selected.length} selected)
           </span>
         )}

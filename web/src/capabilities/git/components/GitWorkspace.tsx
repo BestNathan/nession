@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { GitBranch, RefreshCw } from 'lucide-react';
+import { cn } from '@/shared/lib/utils';
+import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import type { WorkspaceContext } from '@/app/workspace/workspaceContext';
@@ -195,10 +197,10 @@ function GitHeader({
     <header className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b px-4 py-3">
       <GitBranch className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
       <div className="min-w-[8rem] flex-1">
-        <p data-testid="git-branch" className="truncate text-sm font-medium">
+        <p data-testid="git-branch" className={cn('truncate', chromeSansRole('primary'))}>
           {branch ?? 'Repository'}
         </p>
-        <p data-testid="git-summary" className="truncate text-xs text-muted-foreground">
+        <p data-testid="git-summary" className={cn('truncate text-muted-foreground', chromeSansRole('metadata'))}>
           {headerSummary(status, loading, worktree)}
         </p>
       </div>
@@ -292,8 +294,8 @@ function GitBody({
         className="flex h-full min-h-0 items-center justify-center px-6 text-center"
       >
         <div className="max-w-sm space-y-1.5">
-          <p className="text-sm font-medium text-foreground">{copy.title}</p>
-          {copy.detail ? <p className="text-xs text-muted-foreground">{copy.detail}</p> : null}
+          <p className={cn('text-foreground', chromeSansRole('secondary'))}>{copy.title}</p>
+          {copy.detail ? <p className={cn('text-muted-foreground', chromeSansRole('metadata'))}>{copy.detail}</p> : null}
         </div>
       </div>
     );

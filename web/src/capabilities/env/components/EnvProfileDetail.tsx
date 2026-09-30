@@ -1,4 +1,6 @@
 import { useMemo, useState } from 'react';
+import { cn } from '@/shared/lib/utils';
+import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import { MoreHorizontal, Pencil } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -55,7 +57,7 @@ function UsageLine({ inUseBy, active }: { inUseBy: string[]; active: boolean }) 
     return null;
   }
   return (
-    <p data-testid="env-profile-usage" className="text-xs text-muted-foreground">
+    <p data-testid="env-profile-usage" className={cn('text-muted-foreground', chromeSansRole('metadata'))}>
       Used by {inUseBy.length === 1 ? '1 session' : `${inUseBy.length} sessions`}
       {' · '}
       {inUseBy.join(', ')}
@@ -79,7 +81,7 @@ function SessionAction({
 }) {
   if (active && sourcedAtCreate) {
     return (
-      <span data-testid="env-sourced-at-create" className="text-xs text-muted-foreground">
+      <span data-testid="env-sourced-at-create" className={cn('text-muted-foreground', chromeSansRole('metadata'))}>
         Sourced at session creation
       </span>
     );
@@ -131,17 +133,19 @@ function DetailHeader({
     <div className="flex items-start gap-2 border-b px-4 py-3">
       <div className="min-w-0 flex-1 space-y-0.5">
         <div className="flex items-center gap-2">
-          <h2 className="truncate text-sm font-semibold">{profile.name}</h2>
+          <h2 className={cn('truncate', chromeSansRole('title'))}>
+            {profile.name}
+          </h2>
           {active ? (
             <span
               data-testid="env-profile-active"
-              className="shrink-0 text-xs text-muted-foreground"
+              className={cn('shrink-0 text-muted-foreground', chromeSansRole('metadata'))}
             >
               Active in current Session
             </span>
           ) : null}
         </div>
-        <p className="text-xs text-muted-foreground">
+        <p className={cn('text-muted-foreground', chromeSansRole('metadata'))}>
           {profileSourceLine(profile, agents)} · {variablesLabel(profile.var_count)}
         </p>
         <UsageLine inUseBy={inUseBy} active={active} />
@@ -271,7 +275,7 @@ function DetailBody({
   if (error) {
     return (
       <div className="flex flex-col items-center gap-2 px-4 py-8 text-center">
-        <p className="text-sm text-muted-foreground">{error}</p>
+        <p className={cn('text-muted-foreground', chromeSansRole('secondary'))}>{error}</p>
         <Button size="sm" variant="outline" onClick={onRetry}>
           Retry
         </Button>

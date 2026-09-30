@@ -7,9 +7,8 @@ import {
   Wrench,
   X,
 } from 'lucide-react';
-import { memo, useEffect, type ReactNode } from 'react';
+import { memo, useEffect, useRef, useState, type ReactNode } from 'react';
 import { toast } from 'sonner';
-import { useMessageScrollerScrollable } from '@shadcn/react/message-scroller';
 import { Button } from '@/components/ui/button';
 import {
   MessageScroller,
@@ -21,6 +20,7 @@ import {
 } from '@/components/ui/message-scroller';
 import { copyToClipboard } from '@/shared/lib/clipboard';
 import { cn } from '@/shared/lib/utils';
+import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import { Markdown } from '@/shared/markdown';
 import type { ConversationViewState } from '../hooks/useConversation';
 import type { ClaudeCodeMessagesResponse } from '../types';
@@ -73,12 +73,39 @@ function TranscriptContent({
   view: ConversationViewState;
   onLoadOlder: () => boolean;
 }) {
-  const scrollable = useMessageScrollerScrollable();
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [isAtTop, setIsAtTop] = useState(false);
 
-  // Trigger older loads when near the top (start of scroll)
+  // Track scroll position to detect when user is actually at the top
+  useEffect(() => {
+    const content = contentRef.current;
+    if (!content) {
+      return;
+    }
+
+    // Find the viewport (parent with data-slot="message-scroller-viewport")
+    const viewport = content.closest('[data-slot="message-scroller-viewport"]');
+    if (!viewport) {
+      return;
+    }
+
+    const handleScroll = () => {
+      // Consider "at top" when within 50px of the top
+      const atTop = (viewport as HTMLElement).scrollTop < 50;
+      setIsAtTop(atTop);
+    };
+
+    // Check initial position
+    handleScroll();
+
+    viewport.addEventListener('scroll', handleScroll, { passive: true });
+    return () => viewport.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  // Trigger older loads only when user scrolls to the top
   useEffect(() => {
     if (
-      scrollable.start &&
+      isAtTop &&
       view.hasMore &&
       !view.loadingOlder &&
       view.items.length > 0 &&
@@ -86,13 +113,13 @@ function TranscriptContent({
     ) {
       onLoadOlder();
     }
-  }, [scrollable.start, view.hasMore, view.loadingOlder, view.items.length, view.messagesState, onLoadOlder]);
+  }, [isAtTop, view.hasMore, view.loadingOlder, view.items.length, view.messagesState, onLoadOlder]);
 
   return (
-    <MessageScrollerContent>
+    <MessageScrollerContent ref={contentRef} className="px-4">
       {view.loadingOlder ? (
         <p
-          className="flex items-center justify-center gap-2 pb-3 text-xs text-muted-foreground"
+          className={cn('flex items-center justify-center gap-2 pb-3 text-muted-foreground', chromeSansRole('metadata'))}
           data-testid="conversation-loading-older"
           role="status"
         >
@@ -102,7 +129,7 @@ function TranscriptContent({
       ) : null}
       {view.olderError ? (
         <div
-          className="flex flex-wrap items-center gap-2 pb-3 text-xs text-destructive"
+          className={cn('flex flex-wrap items-center gap-2 pb-3 text-destructive', chromeSansRole('metadata'))}
           data-testid="conversation-older-error"
           role="alert"
         >
@@ -113,7 +140,7 @@ function TranscriptContent({
         </div>
       ) : null}
       {view.items.length === 0 ? (
-        <p className="flex items-center gap-2 text-sm text-muted-foreground">
+        <p className={cn('flex items-center gap-2 text-muted-foreground', chromeSansRole('secondary'))}>
           <AlertCircle className="h-4 w-4" />
           This conversation has no messages yet.
         </p>
@@ -183,11 +210,14 @@ function MessageFrame({
       className={cn('flex flex-col gap-1', isUser ? 'items-end' : 'items-stretch')}
     >
       <div className="flex items-baseline gap-2">
-        <span className="text-xs font-semibold text-muted-foreground">
+        <span className={cn('text-muted-foreground', chromeSansRole('metadata'))}>
           {isUser ? 'You' : 'Claude'}
         </span>
         {time ? (
-          <time dateTime={item.timestamp ?? undefined} className="text-xs text-muted-foreground">
+          <time
+            dateTime={item.timestamp ?? undefined}
+            className={cn('text-muted-foreground', chromeSansRole('metadata'))}
+          >
             {time}
           </time>
         ) : null}
@@ -216,7 +246,7 @@ export const UserMessage = memo(function UserMessage({ item }: { item: MessageIt
         // survive. The surface stays the simpler of the two — the typography
         // below is narrower than Claude's, which is what makes it so.
         className={cn(
-          'max-w-prose min-w-0 rounded-lg px-3 py-2 text-sm',
+          'max-w-prose min-w-0 rounded-[var(--radius-surface)] px-3 py-2 text-sm',
           'bg-[var(--conversation-user-surface)] text-[var(--conversation-user-foreground)]',
           'prose-p:my-0 prose-pre:my-1 prose-headings:text-inherit',
         )}
@@ -269,7 +299,7 @@ function UnknownActivity() {
   return (
     <p
       data-testid="conversation-unknown"
-      className="flex items-center gap-2 text-xs text-[var(--conversation-tool-foreground)]"
+      className={cn('flex items-center gap-2 text-[var(--conversation-tool-foreground)]', chromeSansRole('metadata'))}
     >
       <HelpCircle aria-hidden className="h-3.5 w-3.5 shrink-0" />
       An event this version does not show.
@@ -297,9 +327,9 @@ export const ToolActivity = memo(function ToolActivity({ item }: { item: ToolIte
       // A tool is not a participant, so it takes the activity role rather than
       // either speaker's surface. Full width on purpose (#1120): a bubble here
       // would put it in the conversation instead of beside it.
-      className="group rounded-md bg-[var(--conversation-tool-surface)] px-3 py-2 text-[var(--conversation-tool-foreground)]"
+      className="group rounded-[var(--radius-surface)] bg-[var(--conversation-tool-surface)] px-3 py-2 text-[var(--conversation-tool-foreground)]"
     >
-      <summary className="flex cursor-pointer items-center gap-2 text-xs">
+      <summary className={cn('flex cursor-pointer items-center gap-2', chromeSansRole('metadata'))}>
         {/* Turns as the disclosure opens. Decorative: `<details>` announces its
             own expanded state, so a second announcement would be noise. */}
         <ChevronRight
@@ -307,7 +337,7 @@ export const ToolActivity = memo(function ToolActivity({ item }: { item: ToolIte
           className="h-3.5 w-3.5 shrink-0 transition-transform group-open:rotate-90"
         />
         <Wrench aria-hidden className="h-3.5 w-3.5 shrink-0" />
-        <span className="font-medium" data-testid="conversation-tool-name">
+        <span className={chromeSansRole('secondary')} data-testid="conversation-tool-name">
           {tool.name}
         </span>
         <span className="truncate">{tool.summary}</span>
@@ -362,7 +392,7 @@ const STATUS = {
 export function ToolDetails({ tool }: { tool: Tool }) {
   if (!tool.input && !tool.output) {
     return (
-      <p className="pt-2 text-xs opacity-80">
+      <p className={cn('pt-2 opacity-80', chromeSansRole('caption'))}>
         {tool.status === 'running' ? 'Still running.' : 'No arguments or output were recorded.'}
       </p>
     );
@@ -379,12 +409,12 @@ function ToolBody({ label, payload }: { label: string; payload: Payload }) {
   return (
     <section>
       <div className="flex items-center gap-2">
-        <h4 className="text-[10px] font-semibold tracking-wide uppercase">{label}</h4>
+        <h4 className={cn('uppercase tracking-wide', chromeSansRole('caption'))}>{label}</h4>
         {payload.truncated ? (
           // Said explicitly, because a cut body is indistinguishable from a
           // short one — and the reader deciding whether they have the whole
           // answer is exactly who needs to know that they do not.
-          <span className="text-[10px] opacity-80" data-testid="conversation-tool-truncated">
+          <span className={cn(chromeSansRole('caption'), 'opacity-80')} data-testid="conversation-tool-truncated">
             truncated
           </span>
         ) : null}

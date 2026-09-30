@@ -1,6 +1,7 @@
 import { useRef, useState, type ChangeEvent, type DragEvent, type RefObject } from 'react';
 import { FileText, Upload } from 'lucide-react';
 import { cn } from '@/shared/lib/utils';
+import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import {
   Dialog,
   DialogContent,
@@ -69,7 +70,7 @@ function FileDropZone({
         onDragLeave={() => setDragOver(false)}
         onDrop={handleDrop}
         className={cn(
-          'flex w-full flex-col items-center justify-center gap-1 rounded-md border-2 border-dashed px-4 py-8 text-center transition-colors',
+          'flex w-full flex-col items-center justify-center gap-1 rounded-[var(--radius-control)] border-2 border-dashed px-4 py-8 text-center transition-colors',
           dragOver ? 'border-primary bg-primary/5' : 'border-border hover:bg-accent/40',
           disabled && 'pointer-events-none opacity-50',
         )}
@@ -77,16 +78,16 @@ function FileDropZone({
         {file ? (
           <>
             <FileText className="w-5 h-5 text-muted-foreground" />
-            <span className="text-sm font-medium truncate max-w-full">{file.name}</span>
-            <span className="text-xs text-muted-foreground">
+            <span className={cn('max-w-full truncate', chromeSansRole('secondary'))}>{file.name}</span>
+            <span className={cn('text-muted-foreground', chromeSansRole('metadata'))}>
               {(file.size / 1024).toFixed(1)} KB
             </span>
           </>
         ) : (
           <>
             <Upload className="w-5 h-5 text-muted-foreground" />
-            <span className="text-sm font-medium">Click to select or drag & drop</span>
-            <span className="text-xs text-muted-foreground">.env or text files</span>
+            <span className={chromeSansRole('secondary')}>Click to select or drag & drop</span>
+            <span className={cn('text-muted-foreground', chromeSansRole('metadata'))}>.env or text files</span>
           </>
         )}
       </button>
@@ -192,7 +193,7 @@ function PhaseBody({
 }) {
   if (phase === 'overwrite') {
     return (
-      <p className="text-sm" data-testid="env-import-overwrite">
+      <p className={chromeSansRole('body')} data-testid="env-import-overwrite">
         A profile named <span className="font-mono">{name}</span> already exists at this
         location. Importing replaces its contents.
       </p>
@@ -200,7 +201,7 @@ function PhaseBody({
   }
   if (phase === 'impact') {
     return (
-      <p className="text-sm" data-testid="env-import-impact">
+      <p className={chromeSansRole('body')} data-testid="env-import-impact">
         That profile is used by{' '}
         {inUseBy.length === 1 ? '1 running session' : `${inUseBy.length} running sessions`}
         {inUseBy.length > 0 ? ` (${inUseBy.join(', ')})` : ''}. Importing may re-source those
@@ -377,7 +378,7 @@ export function EnvImportDialog({ isOpen, onClose, agents, onImported }: EnvImpo
             onSource={setSource}
             onAgent={setAgentId}
           />
-          {error ? <p className="text-sm text-destructive">{error}</p> : null}
+          {error ? <p className={cn('text-destructive', chromeSansRole('body'))}>{error}</p> : null}
         </div>
         <DialogFooter>
           <ImportFooter

@@ -461,7 +461,7 @@ describe('ConversationView', () => {
 
   it('shows a read failure with a retry rather than an empty conversation', async () => {
     const user = userEvent.setup();
-    const { onReload } = renderView(state({ error: 'the transcript could not be read' }));
+    const { onReload } = renderView(state({ messagesState: 'error', error: 'the transcript could not be read' }));
 
     expect(screen.getByRole('alert')).toHaveTextContent('the transcript could not be read');
     await user.click(screen.getByRole('button', { name: 'Retry' }));

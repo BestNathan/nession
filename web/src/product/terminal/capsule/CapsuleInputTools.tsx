@@ -111,7 +111,7 @@ export function CapsuleInputTrailingActions({
           onOpenChange={onHistoryOpenChange}
           disabled={disabled}
           onSelect={onSelectHistory}
-          triggerClassName="rounded-lg"
+          triggerClassName="rounded-[var(--radius-control)]"
         />
       ) : null}
       <CapsuleInputActionButtons

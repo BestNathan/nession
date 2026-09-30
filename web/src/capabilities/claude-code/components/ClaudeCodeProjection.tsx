@@ -10,6 +10,8 @@ import type {
   ClaudeCodeListResponse,
 } from '../types';
 import { ClaudeCodePeek } from './ClaudeCodePeek';
+import { cn } from '@/shared/lib/utils';
+import { chromeSansRole } from '@/shared/typography/chromeRoles';
 
 /**
  * What Claude Code says in the Terminal.
@@ -81,8 +83,8 @@ export function ClaudeCodeProjection({
 
   return (
     <div data-testid="claude-code-signal-body" className="flex flex-col gap-1">
-      <p className="truncate text-xs font-medium text-foreground">{stateLine(state)}</p>
-      <p className="truncate text-xs text-muted-foreground">{detailLine(conversation, summary)}</p>
+      <p className={cn('truncate text-foreground', chromeSansRole('metadata'))}>{stateLine(state)}</p>
+      <p className={cn('truncate text-muted-foreground', chromeSansRole('caption'))}>{detailLine(conversation, summary)}</p>
       {onOpenWorkspace ? (
         <div className="flex justify-end">
           <button

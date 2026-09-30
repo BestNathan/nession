@@ -4,39 +4,45 @@
     "$description": "The App's own chrome type scale (#1073). The Web group's four roles are the shared vocabulary; this group is the App's *density* for them plus the two levels a phone needs and a desktop does not. The values are deliberately not refs to `experience.web.typography`: a phone is held closer and read at arm's length in short bursts, and the Web scale (12.5/11/10/12) is a desktop density that reached the App by inheritance rather than by decision — `experience.web.typography` is emitted at `:root`, so every shared shell/workspace variable the App consumed resolved to Web's numbers (#1073 \"Current mobile type inventory\"). The two groups therefore share *roles* while each states its own size, which is the model `visual-language.md` already states for Experience tokens generally. A role still owns SIZE only — family and weight stay orthogonal, so a mono path is a path at the path's size rather than a smaller string. Work surfaces are out of scope by construction: xterm reads `experience.app.terminal` and CodeMirror reads `workspace.editorFontSize`, and neither is a chrome role.\n\nThe settled ramp is 17 / 16 / 14 / 13 / 12 / 13. Each value was chosen by looking at the canonical App screens at 375x812 and 390x844 (`/#/fixture/app`) and is recorded on the role it belongs to; the ramp #1073 proposed is a range and two of its values moved once a screen was in front of them. `title` and `body` are the two roles Web has no leaf for, so they are emitted only under `[data-experience=\"app\"]`; a binding that consumes them must say which experience it belongs to (`nession/no-cross-experience-token`), which is what `web/src/app/experiences/app/appTypography.ts` exists to do.",
     "title": {
       "$description": "The page's own name: the active Session in the App header, the Workspace capability in its tool header, and a pushed detail's title. Settled at 17 by looking at the canonical App screens, not from the ramp in #1073: at the inherited `text-base` (16px) the title was the *same* size as the capsule's text field on the Terminal screen, so the page's name and the box the user types into were indistinguishable in the one place the title has the screen to itself; 17 restores a step. One step rather than several, because the title shares a 390px column with the rows below it — a 20px title would buy the page nothing and cost the Session list a line.",
-      "size": {
-        "value": "17px"
-      }
+      "size": { "value": "17px" },
+      "weight": { "ref": "domain.typography.role.title.weight" },
+      "lineHeight": { "value": "1.2" }
     },
     "primary": {
       "$description": "Work / navigation primary — the row the surface exists for: a Session name, a file name. Settled at 16 by looking: the App's own search field is pinned at 16px, because a smaller font in a focused input makes iOS Safari zoom the page and that is a platform behaviour this scale cannot design around. Web's 12.5px therefore did not just make the rows small, it made the field that *filters* the list 28% larger than the list — the inversion #1073 records as \"the search field visually dominates the Session names\". A primary role below the input floor reproduces that no matter how it is tuned, so the role sits at the floor instead: the content is never out-ranked by the control that acts on it. Verified at 375 and 390 that six Session rows and the chrome above them still fit without scrolling.",
-      "size": {
-        "value": "16px"
-      }
+      "size": { "value": "16px" },
+      "weight": { "ref": "domain.typography.role.primary.weight" },
+      "lineHeight": { "value": "1.25" }
     },
     "body": {
       "$description": "Controls and ordinary actions: New Session, Filters, the status chips, the sort row, the file-viewer's Edit/Save/View actions. A control's size follows its *job*, not the primitive it happens to be built from, and the App rendered every one of these at `Button size=\"sm\"`'s `text-xs` (12px) — smaller than the search placeholder above them and smaller than the metadata under the rows they act on, which is fine print. 14 rather than 15: at 15 a control and a Session row are within a pixel and the actions start reading as content, which is the axis the two roles exist to keep apart. Web keeps its 12px: a pointer has no reading-distance problem and the same `Button size=\"sm\"` is correct there.",
-      "size": {
-        "value": "14px"
-      }
+      "size": { "value": "14px" },
+      "weight": { "ref": "domain.typography.role.body.weight" },
+      "lineHeight": { "value": "1.4" }
     },
     "secondary": {
       "$description": "Supporting but fully readable: a node row under a section label, and the tree/list text on the Files surface. Distinct from `primary` because the App demotes infrastructure context — the Agents disclosure is one muted row until asked for, and its rows must not read as work items (the same decision `SessionList` records for filing Sessions flat). Settled at 13 by looking at the disclosure open at 375: node rows at the inherited 11.5px were the same size as the \"Agents\" label above them, so a section and its rows read as one list instead of two levels.",
-      "size": {
-        "value": "13px"
-      }
+      "size": { "value": "13px" },
+      "weight": { "ref": "domain.typography.role.secondary.weight" },
+      "lineHeight": { "value": "1.3" }
     },
     "metadata": {
-      "$description": "Quiet: agent/location, recency, counts, section labels, the footer's service state, the file-list metadata line. Settled at 12 by looking, and 12 is a floor rather than a preference: at Web's 10px the Session row's `codex · devbox-01 · 24d ago` was the hardest line on the Sessions screen to read at 375, and it is the line that tells two similarly-named Sessions apart — \"metadata never outweighs the thing it describes\" is a relationship between the two, not a licence to drop below what a phone can read at arm's length.",
-      "size": {
-        "value": "12px"
-      }
+      "$description": "Quiet: agent/location, recency, counts, section labels, the file-list metadata line. Settled at 12 by looking, and 12 is a floor rather than a preference: at Web's 10px the Session row's `codex · devbox-01 · 24d ago` was the hardest line on the Sessions screen to read at 375, and it is the line that tells two similarly-named Sessions apart — \"metadata never outweighs the thing it describes\" is a relationship between the two, not a licence to drop below what a phone can read at arm's length.",
+      "size": { "value": "12px" },
+      "weight": { "ref": "domain.typography.role.metadata.weight" },
+      "lineHeight": { "value": "1.25" }
+    },
+    "caption": {
+      "$description": "Lowest deliberate readable hierarchy on App — sidebar service state and similar quiet infrastructure copy (#1216).",
+      "size": { "value": "11.5px" },
+      "weight": { "ref": "domain.typography.role.caption.weight" },
+      "lineHeight": { "value": "1.3" }
     },
     "code": {
       "$description": "Chrome-side technical identity: the path above the tree, and the file header above the editor (the pushed detail's own title is the `title` role, also in mono). Mono does not imply smaller — the family says \"this is a path\", the size says \"this is a header\", and the two are independent (#1073 criterion 6). Settled at 13 by looking at the pushed file detail at 375: the viewer's path header at Web's 11.5px was smaller than the file-list metadata on the screen it was pushed from, so the header naming the open file was the quietest text about it. Not the code surface itself: CodeMirror and xterm keep their own metrics, and on the App the pushed detail's code stays at CodeMirror's 12px.",
-      "size": {
-        "value": "13px"
-      }
+      "size": { "value": "13px" },
+      "weight": { "ref": "domain.typography.role.code.weight" },
+      "lineHeight": { "value": "1.35" }
     }
   },
   "control": {
@@ -107,12 +113,12 @@
       "ref": "experience.app.typography.secondary.size"
     },
     "sectionHeadFontSize": {
-      "$description": "Sidebar section label on App — the metadata role. Quieter than the rows it names, which is the rule (`visual-language.md`); on App it also has to stay a step under the controls that sit in the same column.",
-      "ref": "experience.app.typography.metadata.size"
+      "$description": "Sidebar section label on App — the secondary role. Supporting but readable, and a step under the Session rows it names.",
+      "ref": "experience.app.typography.secondary.size"
     },
     "footFontSize": {
-      "$description": "Sidebar foot text — the metadata role. A service state and a node count: quiet, and still readable on a phone.",
-      "ref": "experience.app.typography.metadata.size"
+      "$description": "Sidebar foot text — the caption role (#1216). A service state and a node count: quiet infrastructure chrome.",
+      "ref": "experience.app.typography.caption.size"
     },
     "sessionsListMinHeight": {
       "$description": "How much of the App Sessions surface the Session list keeps for itself, as a share of that surface. The surface is a header band above the list and a chrome region above it, and at a short viewport (a phone held in landscape, #1057) the chrome alone can be taller than the surface — the column it replaced measured 328px of chrome at 390px tall, which left the list wrapper at exactly 0px and every Session row unreachable. A share rather than a pixel floor: the surface is 390px on one phone and 932px on another, and a length tuned to either would be wrong on the other. The chrome yields first and scrolls inside what is left, so the list holds this floor without the surface overflowing. It is deliberately not binding at the canonical portrait viewports, where the list already measures ~68% of the surface — it is the crisis floor for a short one. Measured after #1083, which moved the Agents entry and the secondary actions *inside* the scroll area rather than into fixed rows below the list: at 844×390 the list takes 193px and two rows sit fully inside it.",

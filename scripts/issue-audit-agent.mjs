@@ -105,10 +105,11 @@ Bounded audit rules:
 2. Do not try to prove a Root Cause when the reporter already says the mechanism is unknown. Use Investigation Status and keep hypotheses explicitly unverified.
 3. Repository inspection is bounded to the minimum needed to avoid inventing Location/mechanism evidence: at most 6 Read/Glob/Grep tool calls total after reading CLAUDE.md and the skill. Do not pursue a stable runtime reproduction.
 4. Prefer the reporter's existing evidence. Static code inspection should only identify relevant file:line locations and obvious working-path differences.
-5. By turn 8, stop investigating and execute the issue repair. Use gh issue edit ${issue.number} to normalize the body and add the required kind/area labels.
-6. You may optionally add one investigation-trail comment after the edit.
-7. Never modify source files. Never create/update/merge PRs. Never commit/push. Never close the issue.
-8. Finish immediately after the issue is normalized; do not continue investigating the product bug.
+5. Do not turn absence from an application-code grep into a framework-level conclusion. For example, no explicit hashchange listener in app code does not prove hash routing is absent when a router library may implement it internally. Phrase such findings as "no app-level implementation found" unless positive evidence rules the behavior out.
+6. By turn 8, stop investigating and execute the issue repair. Use gh issue edit ${issue.number} to normalize the body and add the required kind/area labels.
+7. You may optionally add one investigation-trail comment after the edit.
+8. Never modify source files. Never create/update/merge PRs. Never commit/push. Never close the issue.
+9. Finish immediately after the issue is normalized; do not continue investigating the product bug.
 
 Use only the allowed tools. You may edit/comment only issue #${issue.number}.`;
 }

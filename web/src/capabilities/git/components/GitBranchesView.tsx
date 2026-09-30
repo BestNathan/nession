@@ -1,4 +1,5 @@
 import { cn } from '@/shared/lib/utils';
+import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import { useGitBranches } from '../hooks/useGitBranches';
 import { describeUnavailable, formatBytes } from '../state';
 import { GitNotice } from './GitNotice';
@@ -52,7 +53,7 @@ export function GitBranchesView({ ctx }: { ctx: WorkspaceContext }) {
         data-state={branches.state}
         className="flex h-full min-h-0 items-center justify-center px-6 text-center"
       >
-        <p className="max-w-sm text-sm text-muted-foreground">
+        <p className={cn('max-w-sm text-muted-foreground', chromeSansRole('secondary'))}>
           {describeUnavailable(branches).title}
         </p>
       </div>
@@ -80,7 +81,7 @@ export function GitBranchesView({ ctx }: { ctx: WorkspaceContext }) {
         {rows.length >= limit ? (
           <p
             data-testid="git-branches-more"
-            className="px-2 py-2 text-xs text-muted-foreground"
+            className={cn('px-2 py-2 text-muted-foreground', chromeSansRole('metadata'))}
           >
             Showing {limit} of this repository&rsquo;s branches. The rest are not
             loaded.
@@ -89,7 +90,7 @@ export function GitBranchesView({ ctx }: { ctx: WorkspaceContext }) {
         {truncated ? (
           <p
             data-testid="git-branches-truncated"
-            className="px-2 py-2 text-xs text-muted-foreground"
+            className={cn('px-2 py-2 text-muted-foreground', chromeSansRole('metadata'))}
           >
             Branch listing truncated — {formatBytes(truncatedBytes)} not read.
           </p>
@@ -106,11 +107,11 @@ function BranchRow({ branch }: { branch: GitBranch }) {
       data-branch={branch.name}
       data-current={branch.current ? 'true' : undefined}
       className={cn(
-        'flex flex-col gap-0.5 rounded-md px-2 py-1.5',
+        'flex flex-col gap-0.5 rounded-[var(--radius-surface)] px-2 py-1.5',
         branch.current && 'bg-accent text-accent-foreground',
       )}
     >
-      <span className="flex items-center gap-1.5 text-sm">
+      <span className={cn('flex items-center gap-1.5', chromeSansRole('secondary'))}>
         {/* The marker git itself prints, in the same place it prints it, so a
             list read here and a list read in a terminal agree line for line. */}
         {branch.current ? (
@@ -143,7 +144,7 @@ function BranchTracking({ branch }: { branch: GitBranch }) {
     return (
       <span
         data-testid="git-branch-no-upstream"
-        className="truncate text-xs text-muted-foreground"
+        className={cn('truncate text-muted-foreground', chromeSansRole('metadata'))}
       >
         No upstream
       </span>
@@ -165,7 +166,7 @@ function BranchTracking({ branch }: { branch: GitBranch }) {
   return (
     <span
       data-testid="git-branch-tracking"
-      className="truncate text-xs text-muted-foreground"
+      className={cn('truncate text-muted-foreground', chromeSansRole('metadata'))}
     >
       {parts.join(' · ')}
     </span>

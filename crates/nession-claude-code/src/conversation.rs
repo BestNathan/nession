@@ -1,15 +1,17 @@
-//! Finding a Session's conversations on disk (#1005).
+//! Finding a Session's Claude sessions on disk (#1005).
 //!
-//! Two jobs, both of which exist to keep Claude Code's file format inside this
+//! Two jobs, both of which exist to keep Claude Code's *file layout* inside this
 //! crate:
 //!
 //! 1. **Discovery** — which transcripts belong to a given working directory.
 //! 2. **Page selection** — which records of one transcript a page contains.
 //!
-//! Turning those records into conversation items is [`crate::messages`]' job;
-//! the retired v1 normalization that used to live here was removed with the
-//! `claude-code.conversation` unit it served (#1222), and what survives is the
-//! half the two remaining units share.
+//! What those records *mean* is [`crate::canonical`]'s job: it adapts Claude's
+//! schema once and both projections read the result. This module deliberately
+//! stops at "here are the bytes of this page", because where a record starts is a
+//! property of the file and what it says is a property of Claude's format — and
+//! conflating the two is what used to leave every caller of this module
+//! re-implementing the second.
 //!
 //! ## Discovery matches the record's own `cwd`, never the directory name
 //!
@@ -33,33 +35,55 @@ use std::cell::RefCell;
 
 use serde_json::Value;
 
-/// Claude's record types that carry conversation.
-const MESSAGE_TYPES: [&str; 2] = ["user", "assistant"];
-
-/// Whether a record type is one that carries conversation.
-///
-/// Shared with [`crate::messages`], which asks the same question of the same
-/// open set: a type that is not a message is bookkeeping, and bookkeeping must
-/// not become a chat row.
-pub(crate) fn is_message_record(kind: &str) -> bool {
-    MESSAGE_TYPES.contains(&kind)
-}
-
 /// How much to read at a time while scanning backwards for a page boundary.
 const READ_CHUNK: u64 = 64 * 1024;
 
-/// A conversation found on disk.
+/// Whether a transcript is a session's own, or a subagent's within it.
+///
+/// Claude Code writes a session's transcript as a flat
+/// `<project>/<session-uuid>.jsonl`, and every subagent that session spawns as a
+/// separate `<project>/<session-uuid>/subagents/agent-<id>.jsonl`. Measured over
+/// `~/.claude/projects`: **464 subagent transcripts against 170 sessions**, so
+/// the second kind is not an edge case — and until this existed, discovery only
+/// listed the project level and never saw one of them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TranscriptKind {
+    /// A session's own transcript.
+    Primary,
+    /// A subagent's transcript, belonging to the session that spawned it.
+    Sidechain,
+}
+
+/// A transcript found on disk.
 ///
 /// The transcript's path is deliberately **not** part of the public shape: it
 /// is how this module reaches the file, not something a caller learns.
 #[derive(Debug, Clone)]
 pub struct Discovered {
-    /// Claude's own session id for this conversation.
+    /// The transcript's identity, opaque to a caller.
+    ///
+    /// A session's own id for a primary transcript, and `<session>/<agent>` for
+    /// a subagent's — because a subagent's *own* `sessionId` is not usable here:
+    /// measured, it is sometimes the subagent's own and sometimes the parent's,
+    /// while the path it lives at is always consistent.
     pub claude_session_id: String,
     /// The cwd the transcript itself recorded.
+    ///
+    /// **Its own, not its parent's** — for a subagent that is frequently a
+    /// subdirectory of the session's (`…/feat-session-attach-profile/web` under
+    /// a session recorded at `…/feat-session-attach-profile`). It is display
+    /// metadata: a subagent is *scoped* by its parent, which is the only scope
+    /// key that survives that difference (see [`transcripts_at`]).
     pub cwd: String,
     /// Newest timestamp seen, when the transcript carried timestamps.
     pub updated_at: Option<String>,
+    /// Oldest timestamp in the transcript's head window, when it carried one.
+    ///
+    /// The *first* record's, which the same bounded head read already has in
+    /// hand — so this costs no extra I/O. It is a transcript's start, and the
+    /// pair with `updated_at` is what lets a reader tell a ten-minute session
+    /// from a ten-hour one without opening the file.
+    pub created_at: Option<String>,
     /// Claude's own title for this conversation, when it wrote one.
     ///
     /// Read from the transcript's **last** `ai-title` record rather than its
@@ -89,6 +113,17 @@ pub struct Discovered {
     ///
     /// **Display metadata, never identity**, exactly as `title` is.
     pub preview: Option<String>,
+    /// Whether this is a session's own transcript or a subagent's.
+    pub kind: TranscriptKind,
+    /// The session this transcript belongs to, for a [`TranscriptKind::Sidechain`].
+    ///
+    /// `None` for a primary transcript — it *is* the session.
+    pub parent_id: Option<String>,
+    /// The subagent's own id, for a [`TranscriptKind::Sidechain`].
+    ///
+    /// Distinct from `parent_id` because one session spawns many subagents —
+    /// measured, up to **19** in a single session's directory.
+    pub agent_id: Option<String>,
     path: PathBuf,
 }
 
@@ -102,13 +137,13 @@ impl Discovered {
     }
 }
 
-/// Every transcript whose recorded `cwd` is exactly `cwd`.
+/// Every transcript visible at `cwd` — each session's own, and its subagents'.
 ///
 /// Sorted newest-first by the transcript's own last timestamp, which is a
 /// *listing* order and not a selection: nothing here chooses a conversation,
 /// it only orders the candidates a user is about to choose from (#1005
 /// decision 3 — no mtime heuristic).
-pub fn conversations_at(cwd: &str) -> Vec<Discovered> {
+pub fn transcripts_at(cwd: &str) -> Vec<Discovered> {
     let Some(root) = projects_dir() else {
         return Vec::new();
     };
@@ -118,24 +153,58 @@ pub fn conversations_at(cwd: &str) -> Vec<Discovered> {
 
     let mut found = Vec::new();
     for project in entries.flatten() {
-        let Ok(files) = std::fs::read_dir(project.path()) else {
+        let project_path = project.path();
+        let Ok(files) = std::fs::read_dir(&project_path) else {
             continue;
         };
+        // This project's own sessions first, because each one is what a
+        // subagent directory is reached *through*.
+        let mut sessions: Vec<Discovered> = Vec::new();
         for file in files.flatten() {
             let path = file.path();
             if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
                 continue;
             }
             if let Some(found_one) = inspect(&path, cwd) {
-                found.push(found_one);
+                sessions.push(found_one);
             }
         }
+        for session in &sessions {
+            // The directory a session's subagents live in is named after the
+            // session's own file, not after the `sessionId` inside it: measured,
+            // those agree in practice, but the file is what the directory is
+            // built from and is the identity that cannot drift.
+            let Some(stem) = session.path.file_stem().and_then(|s| s.to_str()) else {
+                continue;
+            };
+            sidechains_in(
+                &project_path.join(stem).join("subagents"),
+                stem,
+                &session.cwd,
+                &mut found,
+            );
+        }
+        found.extend(sessions);
     }
 
     // Newest first for the list. `None` timestamps sort last rather than
     // first: a transcript with no timestamp is not evidence of recency.
     found.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
     found
+}
+
+/// Only the sessions' own transcripts — what a conversation list shows.
+///
+/// A subagent's transcript is a first-class transcript and **not** a
+/// conversation: measured, one session spawns up to 19 of them, so listing them
+/// beside their session would turn a user's list of their own work into a list
+/// of the model's internal delegation. The transcript view is where they belong,
+/// and it is the one that asks for them.
+pub fn conversations_at(cwd: &str) -> Vec<Discovered> {
+    transcripts_at(cwd)
+        .into_iter()
+        .filter(|transcript| transcript.kind == TranscriptKind::Primary)
+        .collect()
 }
 
 /// `~/.claude/projects`.
@@ -185,60 +254,135 @@ impl Drop for ProjectsRootForTest {
     }
 }
 
-/// Read just enough of `path` to decide whether it is `cwd`'s conversation.
+/// Read just enough of `path` to decide whether it is `cwd`'s transcript.
 ///
 /// Only the head and tail are read — the head for `cwd` and the session id,
 /// the tail for the newest timestamp — so a directory of large transcripts does
 /// not turn into a directory of full reads.
 fn inspect(path: &Path, cwd: &str) -> Option<Discovered> {
-    let mut file = File::open(path).ok()?;
-
-    // Read through `take` rather than a fixed array plus a slice: the slice
-    // bound is the kind of thing that is correct until someone edits the
-    // constant above it.
-    let mut head = Vec::new();
-    file.by_ref().take(16 * 1024).read_to_end(&mut head).ok()?;
-    let head = String::from_utf8_lossy(&head);
-
-    let mut claude_session_id = None;
-    let mut recorded_cwd = None;
-    for line in head.lines() {
-        let Ok(record) = serde_json::from_str::<Value>(line) else {
-            // A partial final line in the head window is expected; keep going.
-            continue;
-        };
-        if claude_session_id.is_none() {
-            claude_session_id = string_field(&record, "sessionId");
-        }
-        if recorded_cwd.is_none() {
-            recorded_cwd = string_field(&record, "cwd");
-        }
-        if claude_session_id.is_some() && recorded_cwd.is_some() {
-            break;
-        }
-    }
+    let head = head_facts(path);
 
     // Strict equality, on the value the transcript recorded — see the module
     // docs for why the containing directory cannot stand in for this.
-    let recorded_cwd = recorded_cwd?;
+    let recorded_cwd = head.cwd?;
     if recorded_cwd != cwd {
         return None;
     }
     // A transcript with no session id cannot be selected or cached against, so
     // it is not a candidate. Falling back to the filename would invent an
     // identity the transcript never claimed.
-    let claude_session_id = claude_session_id?;
+    let claude_session_id = head.session_id?;
 
     let tail = tail_facts(path);
 
     Some(Discovered {
         claude_session_id,
         cwd: recorded_cwd,
+        created_at: head.created_at,
         updated_at: tail.updated_at,
         title: tail.title,
         preview: tail.preview,
+        kind: TranscriptKind::Primary,
+        parent_id: None,
+        agent_id: None,
         path: path.to_path_buf(),
     })
+}
+
+/// The first `sessionId` and `cwd` the transcript's head records.
+///
+/// A bounded head window, read through `take` rather than a fixed array plus a
+/// slice: the slice bound is the kind of thing that is correct until someone
+/// edits the constant above it.
+fn head_facts(path: &Path) -> HeadFacts {
+    let Ok(mut file) = File::open(path) else {
+        return HeadFacts::default();
+    };
+    let mut head = Vec::new();
+    if file
+        .by_ref()
+        .take(16 * 1024)
+        .read_to_end(&mut head)
+        .is_err()
+    {
+        return HeadFacts::default();
+    }
+    let head = String::from_utf8_lossy(&head);
+
+    let mut facts = HeadFacts::default();
+    for line in head.lines() {
+        let Ok(record) = serde_json::from_str::<Value>(line) else {
+            // A partial final line in the head window is expected; keep going.
+            continue;
+        };
+        if facts.session_id.is_none() {
+            facts.session_id = string_field(&record, "sessionId");
+        }
+        if facts.cwd.is_none() {
+            facts.cwd = string_field(&record, "cwd");
+        }
+        // The first *record* that carries a timestamp, which is the transcript's
+        // start. Later records are not the start, so this is never overwritten.
+        if facts.created_at.is_none() {
+            facts.created_at = string_field(&record, "timestamp");
+        }
+        if facts.session_id.is_some() && facts.cwd.is_some() && facts.created_at.is_some() {
+            break;
+        }
+    }
+    facts
+}
+
+/// What a transcript's head window says, before any of it is judged.
+#[derive(Default)]
+struct HeadFacts {
+    session_id: Option<String>,
+    cwd: Option<String>,
+    created_at: Option<String>,
+}
+
+/// Add every subagent transcript under `<project>/<session>/subagents/`.
+///
+/// Reached only from a session that already matched the cwd, which is what makes
+/// the cost proportional to the sessions that are *visible* rather than to every
+/// session on the machine.
+///
+/// The subagent's own recorded `cwd` is reported as itself and is deliberately
+/// **not** the scope key: measured, it is frequently a subdirectory of its
+/// session's, so scoping on it behind a strict comparison would hide subagents
+/// while looking correct. The session is the scope; this is display metadata.
+fn sidechains_in(dir: &Path, parent_id: &str, parent_cwd: &str, out: &mut Vec<Discovered>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        // Ordinary: most sessions never spawn a subagent.
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
+            continue;
+        }
+        let Some(agent_id) = path.file_stem().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        let head = head_facts(&path);
+        let tail = tail_facts(&path);
+        out.push(Discovered {
+            // Path-derived, not `sessionId`: a subagent's own `sessionId` is
+            // measured to be sometimes its own and sometimes its parent's,
+            // while the path it lives at is always consistent — and the path is
+            // what has to be unique for two subagents of one session.
+            claude_session_id: format!("{parent_id}/{agent_id}"),
+            cwd: head.cwd.unwrap_or_else(|| parent_cwd.to_string()),
+            created_at: head.created_at,
+            updated_at: tail.updated_at,
+            title: tail.title,
+            preview: tail.preview,
+            kind: TranscriptKind::Sidechain,
+            parent_id: Some(parent_id.to_string()),
+            agent_id: Some(agent_id.to_string()),
+            path,
+        });
+    }
 }
 
 /// What a transcript's last chunk says about it.
@@ -470,16 +614,20 @@ pub(crate) fn string_field(record: &Value, key: &str) -> Option<String> {
 /// struct itself.
 #[cfg(test)]
 pub(crate) mod tests_support {
-    use super::{Discovered, Path};
+    use super::{Discovered, Path, TranscriptKind};
 
     /// A `Discovered` pointing at `path`, without running discovery.
     pub(crate) fn discovered_at(path: &Path, cwd: &str) -> Discovered {
         Discovered {
             claude_session_id: "test-session".to_string(),
             cwd: cwd.to_string(),
+            created_at: None,
             updated_at: None,
             title: None,
             preview: None,
+            kind: TranscriptKind::Primary,
+            parent_id: None,
+            agent_id: None,
             path: path.to_path_buf(),
         }
     }
@@ -556,6 +704,179 @@ mod tests {
             .collect();
 
         assert_eq!(ids, vec!["newer.jsonl", "older.jsonl", "undated.jsonl"]);
+    }
+
+    // ---- subagent transcripts -------------------------------------------
+
+    /// A session with `agents` subagent transcripts under it, one of which may
+    /// be given a cwd of its own.
+    fn session_with_subagents(
+        project: &Path,
+        session: &str,
+        cwd: &str,
+        agents: &[(&str, Option<&str>)],
+    ) {
+        std::fs::create_dir_all(project).unwrap();
+        transcript_at(
+            project,
+            &format!("{session}.jsonl"),
+            cwd,
+            "2026-09-25T00:00:09Z",
+        );
+        if agents.is_empty() {
+            return;
+        }
+        let dir = project.join(session).join("subagents");
+        std::fs::create_dir_all(&dir).unwrap();
+        for (agent, own_cwd) in agents {
+            let recorded = own_cwd.unwrap_or(cwd);
+            std::fs::write(
+                dir.join(format!("agent-{agent}.jsonl")),
+                format!(
+                    r#"{{"type":"assistant","uuid":"a1","isSidechain":true,"timestamp":"2026-09-25T00:00:08Z","cwd":"{recorded}","sessionId":"{session}","message":{{"role":"assistant","content":"work"}}}}"#
+                ),
+            )
+            .unwrap();
+        }
+    }
+
+    #[test]
+    fn a_subagent_transcript_is_found_under_the_session_that_spawned_it() {
+        // Claude Code writes each subagent's transcript as
+        // `<project>/<session>/subagents/agent-<id>.jsonl` — measured over
+        // `~/.claude/projects`: 44 such directories holding **464** transcripts
+        // against 170 sessions, every record carrying `isSidechain: true`.
+        //
+        // Discovery listed `read_dir(project)` and stopped, so none of them was
+        // ever visible. That is why the transcript list needs a `kind` at all.
+        let root = tempfile::tempdir().unwrap();
+        let project = root.path().join("-w");
+        session_with_subagents(&project, "s1", "/w", &[("abc", None), ("def", None)]);
+
+        let _root = ProjectsRootForTest::set(root.path().to_path_buf());
+        let found = transcripts_at("/w");
+
+        let sidechains: Vec<&Discovered> = found
+            .iter()
+            .filter(|t| t.kind == TranscriptKind::Sidechain)
+            .collect();
+        assert_eq!(sidechains.len(), 2, "found: {found:?}");
+        let mut ids: Vec<&str> = sidechains
+            .iter()
+            .map(|t| t.claude_session_id.as_str())
+            .collect();
+        ids.sort_unstable();
+        assert_eq!(
+            ids,
+            vec!["s1/agent-abc", "s1/agent-def"],
+            "identity must distinguish the subagents from each other and from \
+             their session — a subagent's own `sessionId` is not usable for this"
+        );
+        for sidechain in &sidechains {
+            assert_eq!(sidechain.parent_id.as_deref(), Some("s1"));
+        }
+        assert!(
+            sidechains
+                .iter()
+                .any(|t| t.agent_id.as_deref() == Some("agent-abc")),
+            "the subagent's own id was lost: {sidechains:?}"
+        );
+    }
+
+    #[test]
+    fn a_subagent_is_scoped_by_its_session_not_by_its_own_recorded_cwd() {
+        // The rule that makes subagents reachable at all. Measured, a subagent's
+        // own `cwd` is frequently a *subdirectory* of its session's
+        // (`…/feat-session-attach-profile/web` under a session recorded at
+        // `…/feat-session-attach-profile`), so scoping on the subagent's own cwd
+        // would hide it behind a strict comparison that looks correct.
+        let root = tempfile::tempdir().unwrap();
+        let project = root.path().join("-w");
+        session_with_subagents(&project, "s1", "/w", &[("abc", Some("/w/web"))]);
+
+        let _root = ProjectsRootForTest::set(root.path().to_path_buf());
+        let found = transcripts_at("/w");
+
+        let sidechain = found
+            .iter()
+            .find(|t| t.kind == TranscriptKind::Sidechain)
+            .unwrap_or_else(|| panic!("the subagent was not found: {found:?}"));
+        assert_eq!(
+            sidechain.cwd, "/w/web",
+            "the cwd it recorded is display metadata and is reported as itself"
+        );
+    }
+
+    #[test]
+    fn a_subagent_whose_session_is_not_here_is_not_a_candidate() {
+        // Measured, 2 of 44 `subagents/` directories have no `<session>.jsonl`
+        // beside them — the session's own file is gone. A subagent is visible
+        // *through* its session, so one with no session to be visible through is
+        // not a candidate: nothing establishes the cwd it belongs to.
+        let root = tempfile::tempdir().unwrap();
+        let project = root.path().join("-w");
+        let orphan = project.join("gone").join("subagents");
+        std::fs::create_dir_all(&orphan).unwrap();
+        std::fs::write(
+            orphan.join("agent-abc.jsonl"),
+            r#"{"type":"assistant","uuid":"a1","isSidechain":true,"cwd":"/w","sessionId":"gone","message":{"role":"assistant","content":"work"}}"#,
+        )
+        .unwrap();
+
+        let _root = ProjectsRootForTest::set(root.path().to_path_buf());
+        assert!(
+            transcripts_at("/w").is_empty(),
+            "an orphaned subagent became a candidate: {:?}",
+            transcripts_at("/w")
+        );
+    }
+
+    #[test]
+    fn a_conversation_list_still_shows_only_the_sessions_own_transcripts() {
+        // The regression this split exists to prevent. One measured session
+        // spawned **19** subagents; listing them beside their session would turn
+        // a user's list of their own work into the model's internal delegation.
+        let root = tempfile::tempdir().unwrap();
+        let project = root.path().join("-w");
+        session_with_subagents(
+            &project,
+            "s1",
+            "/w",
+            &[("a", None), ("b", None), ("c", None)],
+        );
+
+        let _root = ProjectsRootForTest::set(root.path().to_path_buf());
+        let conversations = conversations_at("/w");
+
+        assert_eq!(
+            conversations.len(),
+            1,
+            "a subagent's transcript appeared in the conversation list: {conversations:?}"
+        );
+        assert_eq!(conversations[0].kind, TranscriptKind::Primary);
+        assert_eq!(conversations[0].claude_session_id, "s1.jsonl");
+    }
+
+    #[test]
+    fn transcripts_and_conversations_are_the_same_list_until_a_subagent_exists() {
+        // The two must not drift: the transcript list is the conversation list
+        // plus the subagents, and a session with none is in both identically.
+        // Otherwise the two views would disagree about which sessions exist.
+        let root = tempfile::tempdir().unwrap();
+        let project = root.path().join("-w");
+        session_with_subagents(&project, "s1", "/w", &[]);
+        transcript_at(&project, "s2.jsonl", "/w", "2026-09-25T00:00:01Z");
+
+        let _root = ProjectsRootForTest::set(root.path().to_path_buf());
+        let ids = |v: Vec<Discovered>| -> Vec<String> {
+            v.into_iter().map(|t| t.claude_session_id).collect()
+        };
+
+        assert_eq!(
+            ids(transcripts_at("/w")),
+            ids(conversations_at("/w")),
+            "the two lists disagree with no subagent in sight"
+        );
     }
 
     #[test]
@@ -837,12 +1158,16 @@ mod tests {
         Discovered {
             claude_session_id: "s".to_string(),
             cwd: "/w".to_string(),
+            created_at: None,
             updated_at: None,
             // Built directly rather than through `inspect`, so there is no tail
             // to read display metadata from. The title and preview paths have
             // their own tests.
             title: None,
             preview: None,
+            kind: TranscriptKind::Primary,
+            parent_id: None,
+            agent_id: None,
             path,
         }
     }
