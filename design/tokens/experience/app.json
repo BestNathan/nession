@@ -34,7 +34,7 @@
     },
     "caption": {
       "$description": "Lowest deliberate readable hierarchy on App — sidebar service state and similar quiet infrastructure copy (#1216).",
-      "size": { "value": "11px" },
+      "size": { "value": "11.5px" },
       "weight": { "ref": "domain.typography.role.caption.weight" },
       "lineHeight": { "value": "1.3" }
     },

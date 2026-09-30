@@ -11,7 +11,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { AgentChannel, DomainState } from '@/product/session/model/domainState';
 import type { Session } from '@/types';
-import { chromeSansRole } from '@/shared/typography/chromeRoles';
+import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
 
 function agentCopyClass(channel: AgentChannel): string {
   switch (channel) {
@@ -204,7 +204,7 @@ function SessionMetaLine({
       data-testid="session-item-meta"
       className={cn('truncate text-muted-foreground', chromeSansRole('metadata'))}
     >
-      <span data-testid="session-item-workload" className="font-mono">
+      <span data-testid="session-item-workload" className={chromeMonoRole('metadata')}>
         {workloadHint(session)}
       </span>
       {' · '}

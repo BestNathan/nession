@@ -18,16 +18,16 @@ export const typography = {
   },
   secondary: {
     size: 13,
-    weight: 450,
+    weight: 500,
     lineHeight: "1.3",
   },
   metadata: {
     size: 12,
-    weight: 450,
+    weight: 475,
     lineHeight: "1.25",
   },
   caption: {
-    size: 11,
+    size: 11.5,
     weight: 500,
     lineHeight: "1.3",
   },
@@ -65,7 +65,7 @@ export const shell = {
   sessionRowMetaFontSize: 12,
   nodeFontSize: 13,
   sectionHeadFontSize: 13,
-  footFontSize: 11,
+  footFontSize: 11.5,
   sessionsListMinHeight: "30%",
 } as const;
 export const terminal = {

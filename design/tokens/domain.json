@@ -80,10 +80,10 @@
         "weight": { "value": 450 }
       },
       "secondary": {
-        "weight": { "value": 450 }
+        "weight": { "value": 500 }
       },
       "metadata": {
-        "weight": { "value": 450 }
+        "weight": { "value": 475 }
       },
       "caption": {
         "weight": { "value": 500 }
