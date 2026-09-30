@@ -756,6 +756,60 @@ describe('SessionRuntime', () => {
       rt.dispose();
     });
 
+    it('questions the link as soon as input is sent (#1264)', async () => {
+      const rt = new SessionRuntime(makeConfig({ transportReady: true }));
+      rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
+      openWs();
+      await flushMicrotasks();
+      answerAttach();
+      await flushMicrotasks();
+      expect(rt.attachState.phase).toBe('attached');
+      const before = countPings();
+
+      // Deliberately **no** timer advance: the claim is that input asks now,
+      // not that the probe happens to fire soon. Advancing would let the
+      // interval probe answer and this would pass without the input path.
+      rt.probeLivenessNow();
+      await flushMicrotasks();
+
+      expect(countPings()).toBe(before + 1);
+      rt.dispose();
+    });
+
+    it('does not stack probes while the user keeps typing (#1264)', async () => {
+      const rt = new SessionRuntime(makeConfig({ transportReady: true }));
+      rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
+      openWs();
+      await flushMicrotasks();
+      answerAttach();
+      await flushMicrotasks();
+      const before = countPings();
+
+      // Typing is continuous; one answer at a time settles the question, and a
+      // probe per keystroke would stack deadlines on the same socket.
+      rt.probeLivenessNow();
+      rt.probeLivenessNow();
+      rt.probeLivenessNow();
+      await flushMicrotasks();
+
+      expect(countPings()).toBe(before + 1);
+      rt.dispose();
+    });
+
+    it('ignores an input-triggered probe before the session is attached (#1264)', async () => {
+      const rt = new SessionRuntime(makeConfig({ transportReady: true }));
+      const before = countPings();
+
+      // An unattached transport is already driven by the attach retry budget;
+      // probing underneath it would race a mechanism that is mid-recovery —
+      // the same reason the interval probe skips this phase.
+      rt.probeLivenessNow();
+      await flushMicrotasks();
+
+      expect(countPings()).toBe(before);
+      rt.dispose();
+    });
+
     it('asks for the history again after a transport loss, though the Terminal holds output', async () => {
       const rt = new SessionRuntime(makeConfig({
         transportReady: true,

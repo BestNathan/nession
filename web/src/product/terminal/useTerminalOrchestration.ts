@@ -74,8 +74,10 @@ function useTransportFactory(opts: {
   agentTerminalApi: TerminalAgentApi | null;
   serverConnection: RelayServerTransport;
   isAttached: () => boolean;
+  /** Asked after input is handed over — see `ConnectionOptions.onInputSent`. */
+  onInputSent: () => void;
 }) {
-  const { effectiveMode, sessionName, sessionId, agentTerminalApi, serverConnection, isAttached } = opts;
+  const { effectiveMode, sessionName, sessionId, agentTerminalApi, serverConnection, isAttached, onInputSent } = opts;
   // Holds the render-fresh factory; the callback identity stays stable while
   // the closure sees current values. The ref itself starts null — the
   // previous dummy ConnectionManager initializer was constructed and discarded
@@ -83,6 +85,8 @@ function useTransportFactory(opts: {
   const transportFactoryRef = useRef<(() => TerminalTransport) | null>(null);
   const isAttachedRef = useRef(isAttached);
   isAttachedRef.current = isAttached;
+  const onInputSentRef = useRef(onInputSent);
+  onInputSentRef.current = onInputSent;
   // The P2P transport is a pure I/O channel: ConnectionManager binds to
   // whatever agent terminal API the runtime currently owns (null while no
   // candidate is built — e.g. relay mode — making the transport inert).
@@ -94,6 +98,10 @@ function useTransportFactory(opts: {
       agentApi: effectiveMode === 'p2p' ? agentTerminalApi ?? undefined : undefined,
       serverConnection: effectiveMode === 'relay' ? serverConnection : undefined,
       isAttached: () => isAttachedRef.current(),
+      // Input is the moment a dead-but-open socket stops being invisible
+      // (#1264). Same ref pattern as `isAttached`: the transport reads the
+      // runtime as it is *now*, not as it was when this manager was built.
+      onInputSent: () => onInputSentRef.current(),
     });
   return useCallback(() => {
     const createTransport = transportFactoryRef.current;
@@ -212,6 +220,13 @@ export function useTerminalOrchestration({
     hasSessionOutput,
   });
 
+  // Declared after the runtime exists (the transport factory above only reads
+  // it when it is *called*, which is later). Keeps the input path asking the
+  // runtime that is current now, not the one that was current at construction
+  // (#1264) — the same reason `isAttachedRef` exists.
+  const runtimeRef = useRef(runtime);
+  runtimeRef.current = runtime;
+
   const { control: terminalControl, takeControl } = useTerminalControlBridge(
     sessionName,
     agentTerminalApi,
@@ -233,6 +248,7 @@ export function useTerminalOrchestration({
   const transportFactory = useTransportFactory({
     effectiveMode, sessionName, sessionId, agentTerminalApi, serverConnection: relayServer,
     isAttached: createAttachGate(() => terminalState),
+    onInputSent: () => runtimeRef.current?.probeLivenessNow(),
   });
   const [deviceProfile] = useState(() => detectProfile(window.innerWidth));
   const controller = useTerminal({

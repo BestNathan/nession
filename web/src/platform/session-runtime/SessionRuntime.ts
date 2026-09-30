@@ -169,6 +169,8 @@ export class SessionRuntime {
    * declare a dead socket the recovery is in the middle of replacing.
    */
   private livenessProbeToken = 0;
+  /** One outstanding input-triggered probe — see `probeLivenessNow`. */
+  private livenessProbeInFlight = false;
   private readonly connectionStateListeners = new Set<(state: ConnectionState) => void>();
   private readonly runtimeEventListeners = new Set<(event: SessionRuntimeEvent) => void>();
   private readonly attachOutcomeListeners = new Set<(result: AttachTransitionResult) => void>();
@@ -598,20 +600,61 @@ export class SessionRuntime {
     }
     const token = this.livenessProbeToken;
     this.livenessTimer = setInterval(() => {
-      // Only the **attached** state has the hole this fills. An unattached
-      // transport is already driven by the attach retry budget, which is
-      // working as designed — probing underneath it would tear down a socket
-      // mid-retry and race a mechanism that is mid-recovery. The state this
-      // exists for is the one where the terminal looks interactive and nothing
-      // else is watching (#1233).
-      if (this.attachState.phase !== 'attached') {
-        return;
-      }
-      const live = this.agentTerminalApi;
-      if (!live) {
-        return;
-      }
-      live.ping(P2P_PROBE_TIMEOUT_MS).catch(() => {
+      this.runLivenessProbe(token);
+    }, P2P_PROBE_INTERVAL_MS);
+  }
+
+  /**
+   * Question the link now instead of waiting for the next tick (#1264).
+   *
+   * Called when the user sends input, which is the moment the cost of a dead
+   * socket stops being invisible: a half-open transport still reports
+   * `attached`, so `ConnectionManager` keeps handing keystrokes to it and they
+   * are dropped. Detection is what turns that around — once the loss is
+   * reported, the ordinary path buffers input instead of dropping it.
+   *
+   * Same timeout as the timer, deliberately. A link slower than
+   * `P2P_PROBE_TIMEOUT_MS` already trips the interval probe today, so firing
+   * the same check earlier adds no failure class; shortening the deadline would
+   * be the version that starts tearing down live-but-slow links, which is a
+   * much worse trade than a slightly wider detection window.
+   */
+  probeLivenessNow(): void {
+    if (this.attachState.phase !== 'attached') {
+      return;
+    }
+    // At most one outstanding probe. Typing is continuous and a probe per
+    // keystroke would both flood the request layer and stack deadlines on the
+    // same socket — the question is "is the link alive", and one answer at a
+    // time settles it.
+    if (this.livenessProbeInFlight) {
+      return;
+    }
+    this.livenessProbeInFlight = true;
+    this.runLivenessProbe(this.livenessProbeToken, () => {
+      this.livenessProbeInFlight = false;
+    });
+  }
+
+  private runLivenessProbe(token: number, onSettled?: () => void): void {
+    // Only the **attached** state has the hole this fills. An unattached
+    // transport is already driven by the attach retry budget, which is
+    // working as designed — probing underneath it would tear down a socket
+    // mid-retry and race a mechanism that is mid-recovery. The state this
+    // exists for is the one where the terminal looks interactive and nothing
+    // else is watching (#1233).
+    if (this.attachState.phase !== 'attached') {
+      onSettled?.();
+      return;
+    }
+    const live = this.agentTerminalApi;
+    if (!live) {
+      onSettled?.();
+      return;
+    }
+    live
+      .ping(P2P_PROBE_TIMEOUT_MS)
+      .catch(() => {
         // Disarmed, or the transport was swapped while this ping was in
         // flight: either way the deadline that just expired belongs to a
         // socket that is already being replaced, and acting on it would
@@ -620,8 +663,10 @@ export class SessionRuntime {
           return;
         }
         this.agentWs?.reportUnresponsive();
+      })
+      .finally(() => {
+        onSettled?.();
       });
-    }, P2P_PROBE_INTERVAL_MS);
   }
 
   private stopLivenessProbe(): void {
