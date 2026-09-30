@@ -766,6 +766,10 @@ pub struct AgentServerContext {
     /// context rather than being built here is the fix: this object used to mint
     /// its own, which is precisely why the two paths could interleave.
     pub mutations: Arc<KeyedLane<ResourceKey>>,
+    /// Memory threshold percentage (0-100) for rejecting new sessions.
+    /// Passed to the `SessionManager` so `create_session` can check memory
+    /// pressure before starting a new tmux session.
+    pub memory_threshold_percent: Option<u8>,
 }
 
 pub struct AgentServer {
@@ -2537,8 +2541,11 @@ impl AgentServer {
             .context("failed to create file sandbox")?;
         let file_ops = Arc::new(crate::fs::ops::FileOps::new(sandbox));
 
+        let mut tmux_manager = SessionManager::new();
+        tmux_manager.with_memory_threshold(context.memory_threshold_percent);
+
         Ok(Self {
-            tmux_manager: SessionManager::new(),
+            tmux_manager,
             file_ops,
             mutations: context.mutations,
             shutdown_tx,
@@ -3113,6 +3120,7 @@ mod tests {
                 resize,
                 credentials: Arc::clone(&credentials),
                 mutations: crate::execution::mutation_scheduler(),
+                memory_threshold_percent: None,
             },
         )
         .expect("server creation should succeed");
@@ -3227,6 +3235,7 @@ mod tests {
                 resize,
                 credentials: Arc::new(P2pCredentials::new()),
                 mutations: crate::execution::mutation_scheduler(),
+                memory_threshold_percent: None,
             },
         )
         .unwrap();
