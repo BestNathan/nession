@@ -27,6 +27,7 @@ export function useDeepLink(opts: {
     attachOpts?: { persistProfile?: boolean },
   ) => void;
   onRestoreSession: (session: Session) => void;
+  requestAttach: (session: Session) => void;
 }) {
   const {
     sessions,
@@ -34,6 +35,7 @@ export function useDeepLink(opts: {
     loadingSessions,
     confirmAttach,
     onRestoreSession,
+    requestAttach,
   } = opts;
 
   const navigate = useNavigate();
@@ -87,14 +89,28 @@ export function useDeepLink(opts: {
   });
 
   useEffect(() => {
-    if (!sessionIdFromUrl || sessionId !== sessionIdFromUrl) {
+    if (!sessionIdFromUrl) {
       return;
     }
-    const session = sessions.find((s) => s.session_id === sessionIdFromUrl);
-    if (session) {
-      onRestoreSession(session);
+    // Already attached to the URL session - just sync UI selection
+    if (sessionId === sessionIdFromUrl) {
+      const session = sessions.find((s) => s.session_id === sessionIdFromUrl);
+      if (session) {
+        onRestoreSession(session);
+      }
+      return;
     }
-  }, [sessionIdFromUrl, sessionId, sessions, onRestoreSession]);
+    // URL points to a different session than what we're attached to
+    // If we're already attached to SOME session (sessionId is non-empty), trigger a switch
+    // If we're not attached (sessionId is empty), useDeepLinkRestore handles the initial attach
+    if (sessionId) {
+      const session = sessions.find((s) => s.session_id === sessionIdFromUrl);
+      if (session) {
+        onRestoreSession(session);
+        requestAttach(session);
+      }
+    }
+  }, [sessionIdFromUrl, sessionId, sessions, onRestoreSession, requestAttach]);
 
   // While the config dialog is open (stale profile), do not sit on the
   // restore spinner behind it — the user must resolve the dialog first.
