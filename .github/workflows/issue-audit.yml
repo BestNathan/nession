@@ -9,8 +9,16 @@ on:
         description: Issue number to audit
         required: true
         type: string
+      provider:
+        description: Issue Audit Agent provider
+        required: true
+        default: cursor
+        type: choice
+        options:
+          - cursor
+          - deepseek
       simulate_missing_provider_config:
-        description: 'Negative-path smoke test: blank DeepSeek config before provider preflight'
+        description: 'Negative-path smoke test: blank selected provider config before preflight'
         required: false
         default: false
         type: boolean
@@ -32,6 +40,7 @@ jobs:
       issue_number: ${{ steps.target.outputs.issue_number }}
       needs_agent: ${{ steps.contract.outputs.needs_agent }}
       allow_agent: ${{ steps.target.outputs.allow_agent }}
+      provider: ${{ steps.target.outputs.provider }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -39,20 +48,23 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - name: Resolve issue and trust boundary
+      - name: Resolve issue, trust boundary, and provider
         id: target
         env:
           EVENT_NAME: ${{ github.event_name }}
           EVENT_ISSUE: ${{ github.event.issue.number }}
           EVENT_ASSOCIATION: ${{ github.event.issue.author_association }}
           INPUT_ISSUE: ${{ inputs.issue_number }}
+          INPUT_PROVIDER: ${{ inputs.provider }}
         run: |
           set -euo pipefail
           if [[ "${EVENT_NAME}" == "workflow_dispatch" ]]; then
             issue_number="${INPUT_ISSUE}"
             allow_agent=true
+            provider="${INPUT_PROVIDER:-cursor}"
           else
             issue_number="${EVENT_ISSUE}"
+            provider=cursor
             case "${EVENT_ASSOCIATION}" in
               OWNER|MEMBER|COLLABORATOR) allow_agent=true ;;
               *) allow_agent=false ;;
@@ -63,9 +75,14 @@ jobs:
             echo "Invalid issue number: ${issue_number}" >&2
             exit 1
           fi
+          case "${provider}" in
+            cursor|deepseek) ;;
+            *) echo "Unsupported Issue Audit provider: ${provider}" >&2; exit 1 ;;
+          esac
 
           echo "issue_number=${issue_number}" >> "${GITHUB_OUTPUT}"
           echo "allow_agent=${allow_agent}" >> "${GITHUB_OUTPUT}"
+          echo "provider=${provider}" >> "${GITHUB_OUTPUT}"
 
       - name: Self-test Issue Contract
         run: node scripts/issue-contract.mjs self-test
@@ -76,6 +93,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ISSUE_NUMBER: ${{ steps.target.outputs.issue_number }}
           ALLOW_AGENT: ${{ steps.target.outputs.allow_agent }}
+          PROVIDER: ${{ steps.target.outputs.provider }}
         run: |
           set +e
           node scripts/issue-contract.mjs github "${ISSUE_NUMBER}" "${RUNNER_TEMP}/issue-contract.json"
@@ -89,8 +107,9 @@ jobs:
                 echo "## Issue Audit"
                 echo
                 echo "- Issue: #${ISSUE_NUMBER}"
+                echo "- Provider: ${PROVIDER}"
                 echo "- Deterministic contract: **pass**"
-                echo "- Claude invoked: no"
+                echo "- Agent invoked: no"
               } >> "${GITHUB_STEP_SUMMARY}"
               ;;
             2)
@@ -99,6 +118,7 @@ jobs:
                 echo "## Issue Audit"
                 echo
                 echo "- Issue: #${ISSUE_NUMBER}"
+                echo "- Provider: ${PROVIDER}"
                 echo "- Deterministic contract: **needs repair**"
                 echo "- Automatic Agent authorized: ${ALLOW_AGENT}"
                 if [[ "${ALLOW_AGENT}" != "true" ]]; then
@@ -122,7 +142,7 @@ jobs:
       (github.event_name == 'workflow_dispatch' && inputs.simulate_missing_provider_config == true)
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    environment: deepseek
+    environment: ${{ needs.contract.outputs.provider }}
     permissions:
       contents: read
       issues: write
@@ -131,8 +151,15 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       ISSUE_NUMBER: ${{ needs.contract.outputs.issue_number }}
+      ISSUE_AUDIT_PROVIDER: ${{ needs.contract.outputs.provider }}
       ISSUE_AUDIT_ALLOW_AGENT: 'true'
       ISSUE_AUDIT_TRIGGER: ${{ github.event_name }}
+
+      CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
+      CURSOR_MODEL: ${{ vars.CURSOR_MODEL || 'composer-2.5' }}
+      CURSOR_MODEL_FAST: ${{ vars.CURSOR_MODEL_FAST || 'true' }}
+      CURSOR_SDK_VERSION: ${{ vars.CURSOR_SDK_VERSION || 'latest' }}
+
       ISSUE_AUDIT_MAX_TURNS: ${{ vars.ISSUE_AUDIT_MAX_TURNS || '20' }}
       ISSUE_AUDIT_CLAUDE_MODEL: ${{ vars.ISSUE_AUDIT_CLAUDE_MODEL || 'claude-sonnet-5' }}
       ANTHROPIC_BASE_URL: ${{ vars.ANTHROPIC_BASE_URL || secrets.ANTHROPIC_BASE_URL }}
@@ -156,53 +183,89 @@ jobs:
         run: |
           node scripts/issue-contract.mjs self-test
           node scripts/issue-audit-agent.mjs self-test
+          node scripts/issue-audit-cursor.mjs self-test
 
-      - name: Verify DeepSeek gateway configuration
+      - name: Verify selected provider configuration
         env:
           SIMULATE_MISSING_PROVIDER_CONFIG: ${{ inputs.simulate_missing_provider_config || false }}
         run: |
           set -euo pipefail
 
           if [[ "${SIMULATE_MISSING_PROVIDER_CONFIG}" == "true" ]]; then
-            ANTHROPIC_BASE_URL=""
-            ANTHROPIC_AUTH_TOKEN=""
-            ANTHROPIC_API_KEY=""
+            if [[ "${ISSUE_AUDIT_PROVIDER}" == "cursor" ]]; then
+              CURSOR_API_KEY=""
+            else
+              ANTHROPIC_BASE_URL=""
+              ANTHROPIC_AUTH_TOKEN=""
+              ANTHROPIC_API_KEY=""
+            fi
             {
               echo "## Issue Audit provider negative-path smoke"
               echo
-              echo "- Simulated missing DeepSeek provider configuration: **yes**"
-              echo "- Expected outcome: provider preflight fails before Claude Code installation or model invocation"
+              echo "- Provider: ${ISSUE_AUDIT_PROVIDER}"
+              echo "- Simulated missing provider configuration: **yes**"
+              echo "- Expected outcome: provider preflight fails before provider runtime installation or model invocation"
             } >> "${GITHUB_STEP_SUMMARY}"
           fi
 
-          missing=()
-          [[ -n "${ANTHROPIC_BASE_URL}" ]] || missing+=("ANTHROPIC_BASE_URL")
-          if [[ -z "${ANTHROPIC_AUTH_TOKEN}" && -z "${ANTHROPIC_API_KEY}" ]]; then
-            missing+=("ANTHROPIC_AUTH_TOKEN or ANTHROPIC_API_KEY")
-          fi
-          if (( ${#missing[@]} > 0 )); then
-            printf 'DeepSeek Environment is missing required Claude Code configuration:\n' >&2
-            printf ' - %s\n' "${missing[@]}" >&2
-            echo "Fix the GitHub Environment named deepseek. No direct-provider fallback is allowed." >&2
-            echo "No direct-provider fallback is configured or attempted." >&2
-            exit 1
-          fi
+          case "${ISSUE_AUDIT_PROVIDER}" in
+            cursor)
+              if [[ -z "${CURSOR_API_KEY}" ]]; then
+                echo 'Cursor Environment is missing required configuration: CURSOR_API_KEY' >&2
+                echo 'Fix the GitHub Environment named cursor. No provider fallback is configured or attempted.' >&2
+                exit 1
+              fi
+              ;;
+            deepseek)
+              missing=()
+              [[ -n "${ANTHROPIC_BASE_URL}" ]] || missing+=("ANTHROPIC_BASE_URL")
+              if [[ -z "${ANTHROPIC_AUTH_TOKEN}" && -z "${ANTHROPIC_API_KEY}" ]]; then
+                missing+=("ANTHROPIC_AUTH_TOKEN or ANTHROPIC_API_KEY")
+              fi
+              if (( ${#missing[@]} > 0 )); then
+                printf 'DeepSeek Environment is missing required Claude Code configuration:\n' >&2
+                printf ' - %s\n' "${missing[@]}" >&2
+                echo 'Fix the GitHub Environment named deepseek. No provider fallback is configured or attempted.' >&2
+                exit 1
+              fi
+              ;;
+          esac
 
-      - name: Install Claude Code
+      - name: Install selected provider runtime
+        run: |
+          set -euo pipefail
+          case "${ISSUE_AUDIT_PROVIDER}" in
+            cursor)
+              sdk_root="${RUNNER_TEMP}/cursor-sdk"
+              mkdir -p "${sdk_root}"
+              npm install --prefix "${sdk_root}" "@cursor/sdk@${CURSOR_SDK_VERSION}"
+              echo "CURSOR_SDK_ROOT=${sdk_root}" >> "${GITHUB_ENV}"
+              ;;
+            deepseek)
+              npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION:-latest}"
+              claude --version
+              ;;
+          esac
         env:
           CLAUDE_CODE_VERSION: ${{ vars.CLAUDE_CODE_VERSION || 'latest' }}
-        run: |
-          npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
-          claude --version
 
       - name: Audit and repair issue
-        run: node scripts/issue-audit-agent.mjs "${ISSUE_NUMBER}" "${RUNNER_TEMP}/issue-audit"
+        run: |
+          set -euo pipefail
+          case "${ISSUE_AUDIT_PROVIDER}" in
+            cursor)
+              node scripts/issue-audit-cursor.mjs "${ISSUE_NUMBER}" "${RUNNER_TEMP}/issue-audit"
+              ;;
+            deepseek)
+              node scripts/issue-audit-agent.mjs "${ISSUE_NUMBER}" "${RUNNER_TEMP}/issue-audit"
+              ;;
+          esac
 
       - name: Upload issue audit usage
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: issue-audit-${{ needs.contract.outputs.issue_number }}-${{ github.run_id }}
+          name: issue-audit-${{ needs.contract.outputs.provider }}-${{ needs.contract.outputs.issue_number }}-${{ github.run_id }}
           path: ${{ runner.temp }}/issue-audit/*.json
           if-no-files-found: warn
           retention-days: 30
