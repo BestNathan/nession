@@ -240,6 +240,11 @@ async fn notify_control_changed(peers: &[SessionPeer], payload: TerminalControlC
 /// same condition; the connection ends, and the client's reconnect redraws a
 /// screen whose cursor is anchored again.
 ///
+/// **One peer's verdict is not the others'.** A stalled peer is closed and the
+/// loop carries on, the way [`fan_out_peers`] carries output past a subscriber
+/// it evicted: the frame states a position, and a peer that is still draining
+/// needs it whether or not another one has stopped.
+///
 /// Called with the peers cloned out from under the session map, so the waits
 /// above happen with that lock released.
 async fn fan_out_resize(
@@ -271,11 +276,13 @@ async fn fan_out_resize(
             .await
         {
             Ok(()) => {}
-            Err(OutboundError::Stalled) => {
-                peer.outbound.close();
-                return;
-            }
-            Err(_) => return,
+            // This peer has stopped draining: its connection ends, and the
+            // frame still goes to the peers behind it. `Stalled` says something
+            // about *this* socket, not about the session or the event.
+            Err(OutboundError::Stalled) => peer.outbound.close(),
+            // `Closed`: this connection already ended, and this frame is not
+            // why. Nothing to announce to it, nothing to announce about it.
+            Err(_) => {}
         }
     }
 }
@@ -602,7 +609,8 @@ pub(crate) fn extract_session_name(session_id: &str) -> String {
 /// stream position to state, and the frame says so by omitting both fields
 /// (#1303). The resize a client *asked* for comes back on the terminal lane from
 /// [`fan_out_resize`], carrying the position it was recorded at, and this path
-/// stays quiet for it — see the caller's `already_recorded` guard.
+/// goes quiet for it — see [`announce_window_resize`], its caller's guard, for
+/// the interleaving on which that guard cannot see the recording yet.
 async fn send_terminal_resize_msg(
     outbound: &P2pOutbound,
     session_name: &str,
@@ -629,6 +637,60 @@ async fn send_terminal_resize_msg(
         outbound.try_send_state(WsMessage::Text(json)),
         Err(OutboundError::Closed)
     )
+}
+
+/// Announce one `%window-resize` echo on this connection — unless the client was
+/// already told this exact size (#1303).
+///
+/// The pane echoing back the size a client just asked for has *usually* been
+/// announced to that client already: it was recorded, and the fan-out carried it
+/// out with the position it was recorded at. Sending the unsequenced frame as
+/// well would make the one resize a client did ask for the one resize it
+/// receives *without* a position — which its cursor can only read as "outside
+/// the timeline".
+///
+/// **Usually, not always, and the gap is not closable here.** The caller is a
+/// task of its own, and `%window-resize` reaches it with no ordering against the
+/// resize arm's `record_resize`: on an interleaving where the echo is read
+/// before the recording lands, the requesting client gets the size twice —
+/// unsequenced, then sequenced. That is harmless rather than merely tolerated:
+/// the two frames state the same size, so applying both is idempotent, and the
+/// unsequenced one moves no cursor. What the guard buys is the ordinary case —
+/// one frame, and it is the one carrying the position.
+///
+/// A session that is no longer in the map is not a reason to swallow the frame:
+/// the size is still true, and the map is this connection's index of what it is
+/// attached to rather than the session's own state.
+///
+/// Returns `false` once the connection is over, the caller's signal to stop
+/// reading the pane's resizes.
+async fn announce_window_resize(
+    sessions: &SessionMapLock,
+    outbound: &P2pOutbound,
+    session_name: &str,
+    cols: u16,
+    rows: u16,
+) -> bool {
+    // `None` is not equal to any size, so a resize nobody announced — a peer's
+    // own connection reflowing the shared window, or the first one this session
+    // ever sees — still arrives here, unsequenced and correct.
+    let already_announced = sessions_lock(sessions)
+        .get(session_name)
+        .is_some_and(|s| s.stream.already_announced(cols, rows));
+    if already_announced {
+        return true;
+    }
+    if !send_terminal_resize_msg(outbound, session_name, cols, rows).await {
+        return false;
+    }
+    // The guard reads the size the client was *last* told, so this path has to
+    // say what it told it — otherwise a size announced here is a size the guard
+    // still thinks the client has not seen, and the next real change back to it
+    // is swallowed. See `SessionStreamState::note_announced_resize`.
+    if let Some(session) = sessions_lock(sessions).get_mut(session_name) {
+        session.stream.note_announced_resize(cols, rows);
+    }
+    true
 }
 
 /// Take `session`'s history from a separate tmux process — the capture for
@@ -1993,28 +2055,8 @@ p2p_routes! { ctx, msg_type, payload_value;
                                     let full_id =
                                         format!("{agent_id_resize}:{session_name_resize}");
                                     resize_reporter.publish(&full_id, cols, rows);
-                                    // The pane echoing back the size a client
-                                    // just asked for is the event that client
-                                    // already has: it was recorded, and it went
-                                    // out carrying the position it was recorded
-                                    // at. Sending the unsequenced frame as well
-                                    // would make the one resize a client did ask
-                                    // for the one resize it receives *without* a
-                                    // position — which its cursor can only read
-                                    // as "outside the timeline" (#1303).
-                                    //
-                                    // `None` is not equal to any size, so a
-                                    // resize nobody recorded — a peer's own
-                                    // connection reflowing the shared window, or
-                                    // the first one this session ever sees — still
-                                    // arrives here, unsequenced and correct.
-                                    let already_recorded = sessions_lock(&sessions_resize)
-                                        .get(&session_name_resize)
-                                        .is_some_and(|s| s.stream.already_recorded(cols, rows));
-                                    if already_recorded {
-                                        continue;
-                                    }
-                                    if !send_terminal_resize_msg(
+                                    if !announce_window_resize(
+                                        &sessions_resize,
                                         &outbound_resize,
                                         &session_name_resize,
                                         cols,
@@ -2277,12 +2319,21 @@ p2p_routes! { ctx, msg_type, payload_value;
                         );
                     }
                     Some((_, true, backend)) => {
-                        match backend
-                            .lock()
-                            .await
-                            .resize(payload.cols, payload.rows)
-                            .await
-                        {
+                        // **The backend guard does not outlive this block, and
+                        // that is the point of writing it as one.** In a `match`
+                        // scrutinee the temporary guard `backend.lock().await`
+                        // produces is dropped at the end of the whole `match`,
+                        // not before the arms — so the fan-out below would run
+                        // holding the session's backend lock, and every
+                        // `terminal.input` for this session would queue behind
+                        // a peer that is not draining (the wait has the lane's
+                        // stall grace as its ceiling). Scoped, the lock is held
+                        // for the resize itself, which is all it is for.
+                        let resized = {
+                            let mut backend = backend.lock().await;
+                            backend.resize(payload.cols, payload.rows).await
+                        };
+                        match resized {
                             Ok(_) => {
                                 // **One critical section for the position.**
                                 // The seq the event is recorded at and the seq
@@ -2292,11 +2343,12 @@ p2p_routes! { ctx, msg_type, payload_value;
                                 // what makes the recorded event and the
                                 // broadcast event the same event (#1303).
                                 //
-                                // The sends happen after the guard drops: the
-                                // terminal lane waits for room, and holding the
-                                // connection's session map across that wait is
-                                // what `AttachedSession::backend`'s own lock
-                                // exists to avoid.
+                                // Both guards are released before the sends:
+                                // the terminal lane waits for room, and holding
+                                // either the connection's session map or the
+                                // session's backend across that wait is what
+                                // `AttachedSession::backend`'s own lock exists
+                                // to avoid.
                                 let fan_out = {
                                     let mut sessions = sessions_lock(ctx.sessions);
                                     sessions.get_mut(&payload.session_name).map(|session| {
@@ -3572,10 +3624,17 @@ mod tests {
     /// the gap to close before delivering past it waits for a
     /// `agent.terminal.stream.resume` round trip with the terminal frozen.
     ///
-    /// Red without the fan-out: nothing is received at all, which is the state
-    /// the agent was in — the resize was recorded and no frame ever said so.
+    /// **What this test does not pin, and what does.** It calls [`fan_out_resize`]
+    /// directly, so deleting the resize arm's call to it leaves this test green.
+    /// The *wiring* — that the arm records and fans out as one act — is pinned
+    /// by the integration test
+    /// `a_resize_is_delivered_with_its_position_and_output_continues_from_it`
+    /// (`tests/integration/server.rs`), which drives the real wire and goes red
+    /// without that call. What is pinned here is the frame: the position it
+    /// states is the one the stream recorded, so the recorded event and the
+    /// broadcast event are one event rather than two adjacent ones.
     #[tokio::test]
-    async fn a_resize_is_fanned_out_at_the_position_it_was_recorded() {
+    async fn the_fan_out_states_the_position_the_stream_recorded() {
         let mut stream = session_terminal::SessionStreamState::new();
         let epoch = stream.epoch;
         let (peer_a, mut rx_a) = test_peer("a");
@@ -3616,8 +3675,8 @@ mod tests {
         );
     }
 
-    /// What the `%window-resize` guard asks before it stays quiet: has this
-    /// stream already announced a resize of exactly this size (#1303)?
+    /// What the `%window-resize` guard asks before it stays quiet: is this the
+    /// size this connection **last announced** to its client (#1303)?
     ///
     /// The pane reports back the size it was given, and the client that asked
     /// for the resize has already been told about it — *with* its position, by
@@ -3625,36 +3684,193 @@ mod tests {
     /// twice, and the second copy is the only unsequenced resize that client
     /// sees, which its cursor can only read as outside the timeline.
     ///
-    /// The sizes here are the whole of the decision, and the `0×0` case is the
-    /// one that makes it a decision rather than a formality: an empty stream
-    /// must answer `false` for it, so "nothing recorded" cannot be written as
-    /// "the last resize was 0×0".
+    /// **It compares against the last size *announced*, and the mutation this
+    /// pins is comparing against the last size *recorded*.** That one is sticky
+    /// — only `record_resize` writes it — so every size this connection had ever
+    /// asked for was suppressed for the life of the connection. The `124×26` at
+    /// the end of this test is that bug: recorded first, moved away from by
+    /// another connection, and then genuinely back, with this connection's
+    /// client still holding `96×20` and no frame to say otherwise.
+    ///
+    /// The `0×0` case is what makes the empty answer a decision rather than a
+    /// formality: nothing announced must answer `false` for it, so "nothing
+    /// announced" cannot be written as "the last announcement was 0×0".
     #[test]
-    fn only_the_resize_the_stream_recorded_is_already_announced() {
+    fn only_the_size_announced_last_is_already_announced() {
         let mut stream = session_terminal::SessionStreamState::new();
         assert!(
-            !stream.already_recorded(120, 40),
+            !stream.already_announced(120, 40),
             "an empty stream has announced nothing"
         );
         assert!(
-            !stream.already_recorded(0, 0),
+            !stream.already_announced(0, 0),
             "0x0 is a size a PTY can be given, not the absence of a resize"
         );
 
-        let (_, seq) = stream.record_resize("s1", 120, 40);
+        let (_, seq) = stream.record_resize("s1", 124, 26);
         assert!(
-            stream.already_recorded(120, 40),
-            "the pane echoing back the size just recorded is the same event"
+            stream.already_announced(124, 26),
+            "the pane echoing back the size just announced is the same fact twice"
         );
         assert!(
-            !stream.already_recorded(132, 43),
-            "a size nobody recorded is a new event and still has to go out"
+            !stream.already_announced(132, 43),
+            "a size nobody announced is new and still has to go out"
         );
         assert!(
-            !stream.already_recorded(40, 120),
-            "the size is a pair: a transposed one was never recorded"
+            !stream.already_announced(26, 124),
+            "the size is a pair: a transposed one was never announced"
         );
         assert_eq!(seq, 1, "the resize consumed the stream's first number");
+
+        // Another connection reflowed the shared window and this connection
+        // announced it on the `%window-resize` path — without a position. The
+        // client's grid is 96×20 now.
+        stream.note_announced_resize(96, 20);
+        // Now the window comes back to the size this connection recorded first.
+        // It is news: the client is holding 96×20, only this path can say
+        // otherwise, and the client resizes xterm one way and sends nothing
+        // back — so a suppressed frame is a client left rendering 96 columns
+        // into a 124-column pane, with nothing to correct it.
+        assert!(
+            !stream.already_announced(124, 26),
+            "a size the client was moved away from and back to is not already \
+             announced; suppressing it is the sticky-record bug"
+        );
+        assert!(
+            stream.already_announced(96, 20),
+            "a size announced without a position is still one the client was told"
+        );
+    }
+
+    /// One peer's verdict is not the others' (#1303).
+    ///
+    /// The mutation this pins is the early `return` the fan-out used to take on
+    /// a peer it could not send to: with a peer whose connection is already over
+    /// in front of it, the loop stopped there, and the peers behind it — still
+    /// attached to the same session — were never told the position at all. The
+    /// frame states where the resize sits in the stream, and that is as true for
+    /// the second peer as it was for the first.
+    #[tokio::test]
+    async fn a_dead_peer_does_not_stop_the_fan_out() {
+        let (dead, dead_rx) = test_peer("dead");
+        // This connection is over: nothing is draining its outbound queue.
+        drop(dead_rx);
+        let (live, mut live_rx) = test_peer("live");
+        let peers = vec![dead, live];
+
+        let mut stream = session_terminal::SessionStreamState::new();
+        let (stream_epoch, stream_seq) = stream.record_resize("s1", 120, 40);
+        fan_out_resize(&peers, "s1", 120, 40, stream_epoch, stream_seq).await;
+
+        let msg = decode_frame(
+            live_rx
+                .try_recv()
+                .expect("the peer behind the dead one was never told"),
+        );
+        assert_eq!(
+            (msg.payload.stream_epoch, msg.payload.stream_seq),
+            (Some(stream_epoch), Some(stream_seq)),
+            "the frame that reached the live peer lost the position it carries"
+        );
+    }
+
+    /// A backend the `%window-resize` path never touches.
+    ///
+    /// That path reads and writes the session's *stream*, and reaches tmux for
+    /// nothing; a fixture that spun up a real session to sit in the map unread
+    /// would be paying processes for a field nothing looks at.
+    struct InertBackend;
+
+    #[async_trait::async_trait]
+    impl TmuxSession for InertBackend {
+        async fn write_input(&mut self, _data: &[u8]) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        async fn resize(&mut self, _cols: u16, _rows: u16) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        fn viewport(&self) -> (u16, u16) {
+            (80, 24)
+        }
+
+        fn session_name(&self) -> &str {
+            "inert"
+        }
+
+        async fn close(&mut self) -> anyhow::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// One attached session for the `%window-resize` tests: the stream under
+    /// test, no peers (this path sends on the connection's own outbound, not to
+    /// peers), and a backend nothing reads.
+    fn attached_with(stream: session_terminal::SessionStreamState) -> AttachedSession {
+        AttachedSession {
+            backend: Arc::new(Mutex::new(Box::new(InertBackend) as Box<dyn TmuxSession>)),
+            peers: Vec::new(),
+            control: session_terminal::SessionControlState::new(),
+            stream,
+        }
+    }
+
+    /// The call site's half of the guard: a size the window left and came back
+    /// to is announced again (#1303).
+    ///
+    /// `only_the_size_announced_last_is_already_announced` pins what the guard
+    /// *asks*. This pins that the `%window-resize` path *answers* it — that the
+    /// announcement it just made becomes the size the guard compares against —
+    /// which is the half the wire got wrong: without it the comparison stays on
+    /// the size this connection recorded long ago, and every size the window
+    /// returns to after a peer moved it away is swallowed, leaving the client
+    /// rendering the size in between with nothing to correct it.
+    #[tokio::test]
+    async fn a_window_that_returns_to_a_size_announces_it_again() {
+        let (outbound, mut frames) = P2pOutbound::new();
+        let sessions = SessionMapLock::new(std::collections::HashMap::new());
+        let mut stream = session_terminal::SessionStreamState::new();
+        // The state the guard used to stay stuck on: this connection asked for
+        // 124×26, the arm recorded it, and the fan-out told the client so.
+        stream.record_resize("s1", 124, 26);
+        sessions_lock(&sessions).insert("s1".to_string(), attached_with(stream));
+
+        assert!(
+            announce_window_resize(&sessions, &outbound, "s1", 96, 20).await,
+            "the connection is usable"
+        );
+        let frame = decode_frame(frames.try_recv().expect("the 96×20 echo was not announced"));
+        assert_eq!(
+            (
+                frame.payload.cols,
+                frame.payload.rows,
+                frame.payload.stream_epoch,
+                frame.payload.stream_seq,
+            ),
+            (96, 20, None, None),
+            "the %window-resize path states a size and no position"
+        );
+
+        assert!(announce_window_resize(&sessions, &outbound, "s1", 124, 26).await);
+        let frame = decode_frame(
+            frames
+                .try_recv()
+                .expect("the window came back to 124×26 and the client was never told"),
+        );
+        assert_eq!(
+            (frame.payload.cols, frame.payload.rows),
+            (124, 26),
+            "the size the window returned to is the one that had to go out"
+        );
+
+        // And the size just announced is the one the guard now compares against,
+        // so the pane repeating it is the duplicate the guard exists to stop.
+        assert!(announce_window_resize(&sessions, &outbound, "s1", 124, 26).await);
+        assert!(
+            frames.try_recv().is_err(),
+            "the size the client was just told went out a second time"
+        );
     }
 
     /// The #1226 half: the receiver also ends when a newer attach of the same

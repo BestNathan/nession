@@ -40,13 +40,22 @@ fn a_resize_carries_both_dimensions() {
 }
 
 /// The same property [`a_frame_without_a_bootstrap_is_unchanged_on_the_wire`]
-/// pins for output, for the field #1303 added to the resize — and the whole of
-/// what "additive-optional, so no new Contract Version" means.
+/// pins for output, for the fields #1303 added to the resize — and the whole of
+/// what "additive-optional, so no new Contract Version" means: a resize that
+/// states no position is byte-for-byte the frame this contract produced before
+/// the fields existed.
 ///
-/// It is the same attribute pair, so it is the same claim: a resize that states
-/// no position is byte-for-byte the frame this contract produced before the
-/// fields existed. Drop either half and the claim goes with it — an old reader
-/// meets a `null` it never had to tolerate, or a new writer emits one.
+/// **The half of the attribute pair this pins is serialization.** With
+/// `skip_serializing_if` in place, a `None` is not written at all — and without
+/// it this test fails on the `null` in the output, which is the point of
+/// asserting against a literal. The `default` half — a frame from before the
+/// fields existed still deserializing — is *not* exercised here, because this
+/// test only serializes; measured, deleting `#[serde(default)]` leaves every
+/// test in this module green. That half is pinned by the generated bindings,
+/// which `just check-codegen` holds to the contracts: without the attribute the
+/// fields stop being optional for a consumer that omits them
+/// (`stream_epoch: number | null` where the contract says
+/// `stream_epoch?: number | null`).
 ///
 /// Asserted against a literal rather than a round trip, because a round trip
 /// passes for any self-consistent shape.

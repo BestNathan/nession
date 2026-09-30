@@ -64,12 +64,14 @@ export interface TerminalOutputFrame {
  * (#1303).
  *
  * The position is optional and **its absence is meaningful**: absent means the
- * frame has no position — a relay frame, or an agent that predates the fields —
- * which is not the same as position 0. The agent states one only on the
- * fan-out of a resize it recorded, and it records every resize it applies. So
- * a client that took absence for "the head of the stream" would place a resize
- * it cannot order against a timeline it knows nothing about; a client that
- * reads it as "outside the timeline" is right, and gets the size either way.
+ * frame has no position — the agent announces a size it did not record (its
+ * `%window-resize` path: another connection reflowed the shared pane, or a
+ * requested resize was clamped), or the agent predates the fields — which is
+ * not the same as position 0. The agent states one only on the fan-out of a
+ * resize it recorded, and it records every resize it applies. So a client that
+ * took absence for "the head of the stream" would place a resize it cannot
+ * order against a timeline it knows nothing about; a client that reads it as
+ * "outside the timeline" is right, and gets the size either way.
  */
 export interface TerminalResizeFrame {
   cols: number;

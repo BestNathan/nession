@@ -32,11 +32,12 @@ pub struct TerminalResizePayload {
     ///
     /// Present when the frame is the agent's own recording of the resize — the
     /// live fan-out to every attached client. **Absent means "no position"**,
-    /// not position 0: relay frames carry none (the Server forwards a size
-    /// update it did not sequence) and an agent predating this field sends
-    /// none. A consumer that reads absence as 0 would place a resize it cannot
-    /// order at the head of its timeline, which is worse than treating the
-    /// frame as outside the timeline altogether.
+    /// not position 0: the relay path states none at all, because a resize
+    /// reaches a relayed client through the Server's own size-only
+    /// `terminal.resize` broadcast rather than through this one, and an agent
+    /// predating this field sends none. A consumer that reads absence as 0
+    /// would place a resize it cannot order at the head of its timeline, which
+    /// is worse than treating the frame as outside the timeline altogether.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stream_epoch: Option<u64>,
     /// The sequence number this resize consumed, under the rule `stream_epoch`

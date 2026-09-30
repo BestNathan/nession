@@ -139,19 +139,33 @@ pub struct SessionStreamState {
     next_seq: u64,
     events: VecDeque<TerminalStreamEventPayload>,
     max_events: usize,
-    /// The size of the last resize this stream recorded, if it has recorded one
-    /// (#1303).
+    /// The last size this connection **announced** to its client, by either
+    /// path, if it has announced one (#1303).
     ///
-    /// It exists so a resize that has *already* been sequenced and fanned out is
-    /// not announced a second time, unsequenced, by the `%window-resize` path:
-    /// the pane echoing back the size a client just asked for is the same event,
-    /// and a client that took both would take one size change for two.
+    /// It exists so the `%window-resize` path does not announce a second time,
+    /// and without a position, a size the client has just been told about: the
+    /// pane echoing back the size a client asked for is the same event, and it
+    /// has already gone out carrying the position it was recorded at.
     ///
-    /// Read per **connection**, which is what makes the guard the right one: a
-    /// connection that did not ask for this resize still hears about it from its
-    /// own `%window-resize`, and one that did hears about it from the fan-out
-    /// instead. See `websocket.rs`'s resize arm.
-    last_resize: Option<(u16, u16)>,
+    /// **The last size *announced*, not the last size *recorded*, and the
+    /// difference is a bug this field used to have.** A record is a historical
+    /// fact and it is sticky: comparing against the recorded size suppressed
+    /// every size this connection had ever asked for, for the life of the
+    /// connection. So when a *peer* moved the shared window away to 96×20 and
+    /// something moved it back to 124×26, the `%window-resize` for 124×26 still
+    /// matched the record from the start, and the client was never told — it
+    /// kept rendering 96 columns into a 124-column pane, and nothing
+    /// self-corrects (the client resizes xterm one way and sends nothing back).
+    /// What decides the guard is what the client is holding *now*: the last size
+    /// this connection handed it, whichever path carried it.
+    ///
+    /// Written by [`Self::record_resize`] (the sequenced fan-out) and by
+    /// [`Self::note_announced_resize`] (the unsequenced `%window-resize` send),
+    /// and read by [`Self::already_announced`]. Read per **connection**, which
+    /// is what makes the guard the right one: a connection that did not ask for
+    /// a resize hears about it from its own `%window-resize`, and one that did
+    /// hears about it from the fan-out instead.
+    last_announced_resize: Option<(u16, u16)>,
 }
 
 impl SessionStreamState {
@@ -164,7 +178,7 @@ impl SessionStreamState {
             next_seq: 0,
             events: VecDeque::new(),
             max_events: DEFAULT_STREAM_EVENTS,
-            last_resize: None,
+            last_announced_resize: None,
         }
     }
 
@@ -188,7 +202,7 @@ impl SessionStreamState {
     pub fn record_resize(&mut self, session_name: &str, cols: u16, rows: u16) -> (u64, u64) {
         self.next_seq = self.next_seq.saturating_add(1);
         let seq = self.next_seq;
-        self.last_resize = Some((cols, rows));
+        self.last_announced_resize = Some((cols, rows));
         let event = TerminalStreamEventPayload::Resize {
             session_name: session_name.to_string(),
             stream_epoch: self.epoch,
@@ -200,18 +214,43 @@ impl SessionStreamState {
         (self.epoch, seq)
     }
 
-    /// Whether a resize of this size is one this stream has **already** recorded
-    /// and fanned out, so a second announcement of it would be a second event
-    /// where there was one (#1303).
+    /// Whether this connection has already announced exactly this size to its
+    /// client — so announcing it again would be the same fact, twice (#1303).
     ///
-    /// Written as a comparison against the record rather than as
+    /// It answers about the **last** size announced, not about any size ever
+    /// recorded: a size this connection asked for, and has since been moved
+    /// away from, is a size the client is not holding, and the resize that
+    /// returns to it is news. See [`Self::last_announced_resize`].
+    ///
+    /// Written as a comparison against that record rather than as
     /// `unwrap_or_default()`, which is the tempting simplification and a real
-    /// bug: it makes "no resize recorded" indistinguishable from "the last
-    /// resize was 0×0", and a 0×0 resize is a size a PTY can legitimately be
-    /// given. The unrecorded case must answer `false` for every size, including
+    /// bug: it makes "nothing announced yet" indistinguishable from "the last
+    /// announcement was 0×0", and a 0×0 resize is a size a PTY can legitimately
+    /// be given. The empty case must answer `false` for every size, including
     /// that one.
-    pub fn already_recorded(&self, cols: u16, rows: u16) -> bool {
-        self.last_resize == Some((cols, rows))
+    pub fn already_announced(&self, cols: u16, rows: u16) -> bool {
+        self.last_announced_resize == Some((cols, rows))
+    }
+
+    /// Note that the **unsequenced** `%window-resize` path announced this size
+    /// (#1303).
+    ///
+    /// The other writer of [`Self::last_announced_resize`] is `record_resize`,
+    /// on the sequenced fan-out. Both paths have to write it, and that is not
+    /// symmetric bookkeeping: the guard compares against the size the client was
+    /// *last* told, so a path that tells the client a size without recording it
+    /// leaves the guard comparing against a stale one — the same shape of bug
+    /// the guard exists to avoid, arriving from the other side (a size the
+    /// client is holding, announced a second time, which then hides the next
+    /// real change back to it).
+    ///
+    /// Called after the send was handed to the outbound queue rather than
+    /// before, so the record names a frame that exists. That lane may still drop
+    /// it for want of room (`try_send_state` is the level lane), and the record
+    /// is written either way: what this exists to suppress is repeating a level
+    /// the client was told, not to keep a byte ledger of what it received.
+    pub fn note_announced_resize(&mut self, cols: u16, rows: u16) {
+        self.last_announced_resize = Some((cols, rows));
     }
 
     pub fn events_since(

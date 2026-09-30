@@ -407,23 +407,16 @@ describe('ConnectionManager', () => {
 
     /**
      * A resize the agent recorded is an event in the session's stream, so it
-     * goes through the cursor like output does (#1303).
-     *
-     * The mutation this pins is the one that was shipping: calling
-     * `this.onResize?.(...)` directly for every resize. Then the resize is
-     * applied *outside* the timeline — it is visible, and the number it
-     * consumed is not — so the client's cursor stays one behind and the next
-     * live output frame looks like a gap. Measured on the wire before the fix:
-     * the agent recorded `resize seq=1`, no frame said so, and the following
-     * `output seq=2` was separated from a seeded cursor of 0 by a hole only a
-     * `stream.resume` round trip could fill.
-     */
-    /**
-     * A resize the agent recorded is an event in the session's stream, so it
      * waits for the numbers below it like any other (#1303).
      *
-     * Measured against the behaviour this replaced: the resize used to go
-     * straight to `onResize`, so it was applied while the cursor stayed put.
+     * The mutation this pins is the one that was shipping: routing every
+     * resize straight to `this.onResize?.(...)`. Then the resize is applied
+     * while the cursor stays put — it is visible, and the number it consumed
+     * is not — so the next live output frame reads as the far side of a gap.
+     * Measured on the wire before the fix: the agent recorded `resize seq=1`,
+     * no frame said so, and the following `output seq=2` was separated from a
+     * seeded cursor of 0 by a hole only a `stream.resume` round trip could
+     * fill.
      */
     it('holds a recorded resize whose predecessor has not arrived', () => {
       const { api, outputHandlers, resizeHandlers } = makeAgentApi();

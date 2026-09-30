@@ -482,8 +482,9 @@ describe('StreamReconciler', () => {
   it('passes an unsequenced resize straight through', () => {
     const h = makeHarness();
     live(h, 1, 'one');
-    // No position: a relay frame, or an agent predating the fields. It is not
-    // an event in the timeline, so it is applied at once and moves nothing.
+    // No position: a size the agent did not record (its `%window-resize`
+    // path), or an agent predating the fields. It is not an event in the
+    // timeline, so it is applied at once and moves nothing.
     h.reconciler.acceptLiveResize({ cols: 100, rows: 30 });
 
     expect(h.resizes).toEqual([[100, 30]]);

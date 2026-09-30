@@ -124,9 +124,11 @@ export class StreamReconciler {
    * and two cursors over one sequence are two answers to "what is next".
    *
    * A resize stating no position is outside the timeline for the same reason a
-   * bootstrap is: relay frames never carried sequence numbers, and an agent
-   * predating the fields states none. It goes straight through, which is what
-   * it did before there was anything to place.
+   * bootstrap is: it is a size the agent did not record — a pane another
+   * connection reflowed, or a resize tmux clamped — so it is a level rather
+   * than an event, and an agent predating the fields states none either. It
+   * goes straight through, which is what it did before there was anything to
+   * place.
    */
   acceptLiveResize(frame: LiveResizeFrame): void {
     if (this.disposed) {
