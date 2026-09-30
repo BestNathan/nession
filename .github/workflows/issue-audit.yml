@@ -10,7 +10,7 @@ on:
         required: true
         type: string
       simulate_missing_provider_config:
-        description: Negative-path smoke test: blank DeepSeek config before provider preflight
+        description: 'Negative-path smoke test: blank DeepSeek config before provider preflight'
         required: false
         default: false
         type: boolean
