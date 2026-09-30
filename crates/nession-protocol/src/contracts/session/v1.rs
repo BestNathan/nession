@@ -519,6 +519,25 @@ pub struct ClientRelayBeginPayload {
     /// yourself", preserving the old behaviour exactly.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub needs_bootstrap: Option<bool>,
+    /// Whether `cols`/`rows` are the browser's **measured** viewport, or the
+    /// 80×24 placeholder its own default put there (#1265).
+    ///
+    /// The tolerance above is real — the Terminal can mount before it has
+    /// measured anything — but the fallback it produces is not harmless. The
+    /// attach resizes the **shared** window, and an application drawing inline
+    /// rather than on the alternate screen repaints its screen into the
+    /// scrollback on every real size change, so a fresh page costs two of them
+    /// (to 80×24, and back when the browser's first measurement arrives) and
+    /// leaves the application's screen duplicated in the history the user
+    /// scrolls through.
+    ///
+    /// **Absence preserves the old meaning.** `None` and `Some(true)` both mean
+    /// "these columns are the browser's own", which is what a client written
+    /// before this field gets; `Some(false)` says the browser has not measured,
+    /// and the Server forwards that to the agent, which inherits the pane's
+    /// current size instead of forcing one nobody chose.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size_known: Option<bool>,
 }
 
 fn default_cols() -> u16 {
@@ -613,6 +632,27 @@ pub struct ClientAttachPayload {
     pub width: u16,
     #[serde(default = "default_height")]
     pub height: u16,
+    /// Whether `width`/`height` are this client's **measured** viewport, or the
+    /// placeholder it had to send because it has not laid one out yet.
+    ///
+    /// A client that has not measured cannot say "no size" — the wire needs
+    /// numbers — so it sends the defaults, and the agent must not read that as
+    /// an instruction to make the session 80×24. The resize is not private to
+    /// the client that asked for it: it moves the **shared** window, and an
+    /// application that draws inline rather than on the alternate screen
+    /// repaints its whole screen into the scrollback on every real size change.
+    /// So a fresh page attaching with the placeholder costs two of those —
+    /// one to the placeholder, one back when the client's first measurement
+    /// arrives — and leaves the application's screen duplicated in the history
+    /// the user scrolls through (#1265).
+    ///
+    /// **Absence preserves the old meaning.** `None` means "resize to
+    /// `width`/`height`", which is what a client written before this field
+    /// gets. `Some(false)` means the client has not measured: the agent
+    /// inherits the pane's current size instead, making the attach a no-op for
+    /// the geometry and the client's first real measurement the only resize.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size_known: Option<bool>,
     /// Resolved env-file snapshots to apply via `tmux set-environment`
     /// before PTY creation. Empty (default) preserves pre-env behaviour.
     #[serde(default)]
@@ -632,6 +672,18 @@ pub struct ClientAttachPayload {
     /// before this field would get.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub needs_bootstrap: Option<bool>,
+}
+
+impl ClientAttachPayload {
+    /// Whether this payload's `width`/`height` may be acted on.
+    ///
+    /// The resolution lives beside the field that defines it, so "absence
+    /// preserves the old meaning" cannot be spelled differently at each attach
+    /// arm — and so a reader asking "what does a missing size mean" has one
+    /// place to land.
+    pub fn size_is_authoritative(&self) -> bool {
+        self.size_known.unwrap_or(true)
+    }
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]

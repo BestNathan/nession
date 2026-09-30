@@ -7,9 +7,8 @@ import {
   Wrench,
   X,
 } from 'lucide-react';
-import { memo, useEffect, type ReactNode } from 'react';
+import { memo, useEffect, useRef, useState, type ReactNode } from 'react';
 import { toast } from 'sonner';
-import { useMessageScrollerScrollable } from '@shadcn/react/message-scroller';
 import { Button } from '@/components/ui/button';
 import {
   MessageScroller,
@@ -74,12 +73,39 @@ function TranscriptContent({
   view: ConversationViewState;
   onLoadOlder: () => boolean;
 }) {
-  const scrollable = useMessageScrollerScrollable();
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [isAtTop, setIsAtTop] = useState(false);
 
-  // Trigger older loads when near the top (start of scroll)
+  // Track scroll position to detect when user is actually at the top
+  useEffect(() => {
+    const content = contentRef.current;
+    if (!content) {
+      return;
+    }
+
+    // Find the viewport (parent with data-slot="message-scroller-viewport")
+    const viewport = content.closest('[data-slot="message-scroller-viewport"]');
+    if (!viewport) {
+      return;
+    }
+
+    const handleScroll = () => {
+      // Consider "at top" when within 50px of the top
+      const atTop = (viewport as HTMLElement).scrollTop < 50;
+      setIsAtTop(atTop);
+    };
+
+    // Check initial position
+    handleScroll();
+
+    viewport.addEventListener('scroll', handleScroll, { passive: true });
+    return () => viewport.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  // Trigger older loads only when user scrolls to the top
   useEffect(() => {
     if (
-      scrollable.start &&
+      isAtTop &&
       view.hasMore &&
       !view.loadingOlder &&
       view.items.length > 0 &&
@@ -87,10 +113,10 @@ function TranscriptContent({
     ) {
       onLoadOlder();
     }
-  }, [scrollable.start, view.hasMore, view.loadingOlder, view.items.length, view.messagesState, onLoadOlder]);
+  }, [isAtTop, view.hasMore, view.loadingOlder, view.items.length, view.messagesState, onLoadOlder]);
 
   return (
-    <MessageScrollerContent>
+    <MessageScrollerContent ref={contentRef} className="px-4">
       {view.loadingOlder ? (
         <p
           className="flex items-center justify-center gap-2 pb-3 text-xs text-muted-foreground"

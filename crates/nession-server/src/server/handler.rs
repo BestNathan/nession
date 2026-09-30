@@ -66,6 +66,13 @@ pub enum HandlerAction {
         cols: u16,
         /// Terminal rows for the initial tmux resize (from browser viewport).
         rows: u16,
+        /// Whether `cols`/`rows` are the browser's own measurement, forwarded
+        /// verbatim into the `agent.attach` the Server builds. `Some(false)`
+        /// tells the agent the browser has not laid a terminal out yet, so the
+        /// shared window must keep its size rather than take the placeholder
+        /// (#1265). `None` preserves the behaviour of a client that predates
+        /// the question.
+        size_known: Option<bool>,
         /// The browser's answer to whether the relay should open with a
         /// bootstrap (#321), forwarded verbatim into the `agent.attach` the
         /// Server builds. `None` leaves the agent to decide.
@@ -1653,6 +1660,11 @@ impl ConnectionHandler {
                 relay_url: None,
                 cols: 80,
                 rows: 24,
+                // Restates the serde default like the two above it: absent is
+                // the old meaning, "these columns are the browser's own". The
+                // literal is unreachable anyway — an unparseable payload has no
+                // `session_id` to split, so it is refused before any attach.
+                size_known: None,
                 // An unparseable payload has no opinion to forward; the agent's
                 // own rule is what a caller that says nothing already gets.
                 needs_bootstrap: None,
@@ -1807,7 +1819,9 @@ impl ConnectionHandler {
         // Terminal dimensions from the browser viewport (via ResizeObserver).
         // The 80×24 fallback for a browser that has not measured anything yet
         // lives on the type now, so a caller that omits them and a caller that
-        // sends them cannot disagree about the default.
+        // sends them cannot disagree about the default — and `size_known` is
+        // what keeps that fallback from being *acted on* as if the browser had
+        // chosen it (#1265).
         let cols = payload.cols;
         let rows = payload.rows;
 
@@ -1819,6 +1833,7 @@ impl ConnectionHandler {
             env_snapshots: Vec::new(),
             cols,
             rows,
+            size_known: payload.size_known,
             needs_bootstrap: payload.needs_bootstrap,
         })
     }
@@ -6054,12 +6069,18 @@ mod tests {
                 env_snapshots,
                 cols: _,
                 rows: _,
+                size_known,
                 needs_bootstrap,
             } => {
                 assert!(!agent_ws_urls.is_empty(), "expected at least one relay URL");
                 assert!(agent_ws_urls[0].contains("1.2.3.4"));
                 assert_eq!(session_name, "dev");
                 assert!(env_snapshots.is_empty());
+                // The same rule as `needs_bootstrap` below, one field earlier:
+                // this payload said nothing about whether the browser had
+                // measured a viewport, and saying nothing has always meant the
+                // columns are the browser's own (#1265).
+                assert_eq!(size_known, None);
                 // This payload said nothing about bootstrap (#321), and the
                 // difference between `None` and `Some(false)` is the whole
                 // point of the field: absent leaves the agent to decide, which
