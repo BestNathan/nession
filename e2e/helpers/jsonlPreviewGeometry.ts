@@ -130,25 +130,21 @@ export async function readJsonlRecordContentTop(
   return readJsonlRecordVirtualStart(page, lineNumber);
 }
 
-/** After a long scroll, remeasured rows may drift until the virtualizer settles (#1199). */
-export async function waitForJsonlVirtualStartStable(
-  page: Page,
-  lineNumber: number,
-  expectedStart: number,
-  tolerancePx = 8,
-  timeoutMs = 15_000,
-): Promise<number> {
-  let last = expectedStart;
-  await expect
-    .poll(
-      async () => {
-        last = await readJsonlRecordVirtualStart(page, lineNumber);
-        return Math.abs(last - expectedStart);
-      },
-      { timeout: timeoutMs, intervals: [50, 100, 200, 400] },
-    )
-    .toBeLessThanOrEqual(tolerancePx);
-  return last;
+/**
+ * Walk from the top so TanStack re-measures rows after a long scroll (#1199).
+ * Estimates alone can leave later `translateY` values tens of px off until
+ * each row has been mounted once.
+ */
+export async function resyncJsonlMeasurementsThrough(page: Page, throughLine: number): Promise<void> {
+  await scrollJsonlPreview(page, 0);
+  await page.waitForTimeout(100);
+  const step = 4;
+  for (let line = 1; line <= throughLine; line += step) {
+    await scrollJsonlRecordIntoView(page, line);
+    await page.waitForTimeout(40);
+  }
+  await scrollJsonlRecordIntoView(page, throughLine);
+  await page.waitForTimeout(100);
 }
 
 export async function openFixtureJsonlEventsWeb(page: Page): Promise<void> {

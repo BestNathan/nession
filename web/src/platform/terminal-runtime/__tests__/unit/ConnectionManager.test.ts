@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ConnectionManager } from '@/platform/terminal-runtime/ConnectionManager';
 import type { AgentError, TerminalAgentApi } from '@/product/terminal';
 import type { ResumeReply } from '@/platform/terminal-runtime/streamReconciler';
+import type { TerminalBootstrap } from '@/platform/terminal-runtime/bootstrap';
 import type { ConnectionState } from '@/platform/socket/types';
 import type { RelayServerTransport } from '@/platform/attach/relayServerConnection';
 
@@ -42,13 +43,13 @@ function replayOf(frames: Record<number, string>): ResumeReply {
 
 interface AgentApiHarness {
   api: TerminalAgentApi;
-  outputHandlers: Array<(frame: { data: Uint8Array; streamEpoch?: number; streamSeq?: number; bootstrap?: boolean }) => void>;
+  outputHandlers: Array<(frame: { data: Uint8Array; streamEpoch?: number; streamSeq?: number; bootstrap?: TerminalBootstrap }) => void>;
   resizeHandlers: Array<(cols: number, rows: number) => void>;
   errorHandlers: Array<(error: AgentError) => void>;
 }
 
 function makeAgentApi(): AgentApiHarness & { unsubs: { output: ReturnType<typeof vi.fn>; resize: ReturnType<typeof vi.fn>; error: ReturnType<typeof vi.fn> } } {
-  const outputHandlers: Array<(frame: { data: Uint8Array; streamEpoch?: number; streamSeq?: number; bootstrap?: boolean }) => void> = [];
+  const outputHandlers: Array<(frame: { data: Uint8Array; streamEpoch?: number; streamSeq?: number; bootstrap?: TerminalBootstrap }) => void> = [];
   const resizeHandlers: Array<(cols: number, rows: number) => void> = [];
   const errorHandlers: Array<(error: AgentError) => void> = [];
   const unsubs = {
@@ -375,7 +376,7 @@ describe('ConnectionManager', () => {
       cm.dispose();
     });
 
-    it('carries the bootstrap marker through to onOutput', () => {
+    it('carries the bootstrap marker through to onOutput, metadata included', () => {
       const { api, outputHandlers } = makeAgentApi();
       const cm = new ConnectionManager({
         mode: 'p2p', sessionName: 'test', sessionId: 'a:test', agentApi: api, ...attached,
@@ -384,8 +385,10 @@ describe('ConnectionManager', () => {
       cm.onOutput = onOutput;
 
       const bytes = new Uint8Array([104, 105]);
-      outputHandlers[0]?.({ data: bytes, bootstrap: true });
-      expect(onOutput).toHaveBeenCalledWith(bytes, true);
+      // The transport hands on what the agent said about the snapshot, not a
+      // boolean — the consumer's decision depends on it (#1305).
+      outputHandlers[0]?.({ data: bytes, bootstrap: { requestedLines: 5000, truncated: true } });
+      expect(onOutput).toHaveBeenCalledWith(bytes, { requestedLines: 5000, truncated: true });
       cm.dispose();
     });
 

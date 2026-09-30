@@ -3,6 +3,7 @@ import {
   type StreamApplyHandlers,
   type TerminalStreamEvent,
 } from './streamApply';
+import type { TerminalBootstrap } from './bootstrap';
 
 /**
  * Ordered stream reconciler — the single owner of the terminal stream cursor
@@ -427,7 +428,7 @@ export interface LiveFrame {
   data: Uint8Array;
   streamEpoch?: number;
   streamSeq?: number;
-  bootstrap?: boolean;
+  bootstrap?: TerminalBootstrap;
 }
 
 /** The part of `agent.terminal.stream.resume`'s reply the cursor depends on. */
@@ -439,7 +440,7 @@ export interface ResumeReply {
 
 /** Where committed frames go — the consumer's write path. */
 export interface StreamSink {
-  onOutput: (data: Uint8Array, bootstrap?: boolean) => void;
+  onOutput: (data: Uint8Array, bootstrap?: TerminalBootstrap) => void;
   onResize: (cols: number, rows: number) => void;
 }
 

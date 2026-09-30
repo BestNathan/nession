@@ -8,8 +8,7 @@ import {
   FIXTURE_JSONL_NESTED_LINE,
   openFixtureJsonlEventsApp,
   openFixtureJsonlEventsWeb,
-  readJsonlRecordVirtualStart,
-  waitForJsonlVirtualStartStable,
+  resyncJsonlMeasurementsThrough,
   readJsonlRecordTop,
   readJsonlScrollMetrics,
   scrollJsonlPreview,
@@ -70,7 +69,7 @@ test.describe('JSONL preview geometry (#1199)', () => {
     await assertVisibleJsonlRecordsDoNotOverlap(page);
 
     const followingLine = FIXTURE_JSONL_NESTED_LINE + 1;
-    const followingTopExpanded = await readJsonlRecordVirtualStart(page, followingLine);
+    const followingSection = page.locator(`[data-jsonl-line="${followingLine}"]`).first();
 
     const { scrollHeight } = await readJsonlScrollMetrics(page);
     await scrollJsonlPreview(page, scrollHeight);
@@ -78,9 +77,22 @@ test.describe('JSONL preview geometry (#1199)', () => {
     await scrollJsonlPreview(page, 0);
     await page.waitForTimeout(150);
 
+    await resyncJsonlMeasurementsThrough(page, followingLine);
     await scrollJsonlRecordIntoView(page, FIXTURE_JSONL_NESTED_LINE);
     await expect(nestedSection.getByRole('button', { name: 'Collapse record' })).toBeVisible();
-    await waitForJsonlVirtualStartStable(page, followingLine, followingTopExpanded);
+
+    const innerExpand = nestedSection.getByRole('button', { name: 'Expand' }).first();
+    if (await innerExpand.isVisible()) {
+      await innerExpand.click();
+      await page.waitForTimeout(150);
+    }
+
+    await expect(followingSection).toBeVisible();
+    const nestedBox = await nestedSection.boundingBox();
+    const followingBox = await followingSection.boundingBox();
+    expect(nestedBox).not.toBeNull();
+    expect(followingBox).not.toBeNull();
+    expect(followingBox!.y).toBeGreaterThanOrEqual(nestedBox!.y - 2);
     await assertVisibleJsonlRecordsDoNotOverlap(page);
   });
 

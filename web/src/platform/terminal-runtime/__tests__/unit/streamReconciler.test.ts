@@ -214,7 +214,10 @@ describe('StreamReconciler', () => {
     // A bootstrap snapshot is deliberately outside the stream (#321) — giving
     // it a sequence number would put it inside the replay window — and relay
     // frames never had one. Neither may be buffered or dropped by the cursor.
-    h.reconciler.acceptLive({ data: new TextEncoder().encode('snapshot'), bootstrap: true });
+    h.reconciler.acceptLive({
+      data: new TextEncoder().encode('snapshot'),
+      bootstrap: { requestedLines: 5000, truncated: false },
+    });
     h.reconciler.acceptLive({ data: new TextEncoder().encode('relay') });
     expect(h.out).toEqual(['snapshot', 'relay']);
     expect(h.requests).toHaveLength(0);
