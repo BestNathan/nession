@@ -115,7 +115,7 @@ function TranscriptContent({
   }, [isAtTop, view.hasMore, view.loadingOlder, view.items.length, view.messagesState, onLoadOlder]);
 
   return (
-    <MessageScrollerContent ref={contentRef}>
+    <MessageScrollerContent ref={contentRef} className="px-4">
       {view.loadingOlder ? (
         <p
           className="flex items-center justify-center gap-2 pb-3 text-xs text-muted-foreground"
