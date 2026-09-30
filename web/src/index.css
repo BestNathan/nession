@@ -164,11 +164,6 @@ html {
   color: var(--foreground);
 }
 
-.shell :focus-visible {
-  outline: var(--focus-ring-width) solid var(--ring);
-  outline-offset: var(--focus-ring-offset);
-}
-
 /* Terminal capsule — occlusion band. Same colour as the terminal itself (the
    terminal sits on the canvas), so scrolled lines are hidden without a seam. */
 [data-terminal-capsule-host] {
