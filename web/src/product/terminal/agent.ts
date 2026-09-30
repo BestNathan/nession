@@ -59,6 +59,25 @@ export interface TerminalOutputFrame {
   bootstrap?: TerminalBootstrap;
 }
 
+/**
+ * A `terminal.resize` from the agent, in the direction the agent records it
+ * (#1303).
+ *
+ * The position is optional and **its absence is meaningful**: absent means the
+ * frame has no position — a relay frame, or an agent that predates the fields —
+ * which is not the same as position 0. The agent states one only on the
+ * fan-out of a resize it recorded, and it records every resize it applies. So
+ * a client that took absence for "the head of the stream" would place a resize
+ * it cannot order against a timeline it knows nothing about; a client that
+ * reads it as "outside the timeline" is right, and gets the size either way.
+ */
+export interface TerminalResizeFrame {
+  cols: number;
+  rows: number;
+  streamEpoch?: number;
+  streamSeq?: number;
+}
+
 export interface TerminalStreamResumeResult {
   streamEpoch: number;
   epochMatch: boolean;
@@ -111,8 +130,15 @@ export interface TerminalAgentApi {
     streamEpoch: number,
     afterSeq: number,
   ): Promise<TerminalStreamResumeResult>;
-  /** Subscribe to terminal resize frames from the agent. */
-  onResize(cb: (cols: number, rows: number) => void): () => void;
+  /**
+   * Subscribe to terminal resize frames from the agent.
+   *
+   * The frame may or may not carry a stream position — see
+   * {@link TerminalResizeFrame} — and the two cases are not interchangeable:
+   * one is an event in the session's timeline and the other is a size update
+   * from outside it.
+   */
+  onResize(cb: (frame: TerminalResizeFrame) => void): () => void;
   /**
    * Subscribe to uncorrelated agent `error` frames (see {@link AgentError}).
    * Errors that ack a request (e.g. `client.attach`) are consumed by the
@@ -303,10 +329,23 @@ export function createTerminalAgentApi(surface: PluginSurface): TerminalAgentApi
       };
     },
 
-    onResize: (cb: (cols: number, rows: number) => void): (() => void) => {
+    onResize: (cb) => {
       return surface.subscribe(TERMINAL_RESIZE_WIRE, (payload) => {
-        const { cols, rows } = payload as { cols: number; rows: number };
-        cb(cols, rows);
+        const p = payload as {
+          cols: number;
+          rows: number;
+          stream_epoch?: unknown;
+          stream_seq?: unknown;
+        };
+        cb({
+          cols: p.cols,
+          rows: p.rows,
+          // Passed through as it arrived: undefined stays undefined, because
+          // "no position" and "position zero" are different facts and the
+          // consumer below decides on the difference (#1303).
+          streamEpoch: typeof p.stream_epoch === 'number' ? p.stream_epoch : undefined,
+          streamSeq: typeof p.stream_seq === 'number' ? p.stream_seq : undefined,
+        });
       });
     },
 

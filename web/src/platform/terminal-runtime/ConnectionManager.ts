@@ -210,9 +210,16 @@ export class ConnectionManager implements TerminalTransport {
       this.reconciler.acceptLive(frame);
     });
 
-    this.p2pUnsubResize = api.onResize((cols: number, rows: number) => {
+    this.p2pUnsubResize = api.onResize((frame) => {
       if (!this.disposed) {
-        this.onResize?.(cols, rows);
+        // Through the reconciler, and not straight to `onResize`, when the
+        // agent stated a position: a recorded resize consumed a sequence
+        // number, so it is an event the cursor has to place — hold it if the
+        // numbers below it are missing, commit it in order if they are not
+        // (#1303). A frame with no position is not an event in the timeline and
+        // passes straight through, which the reconciler is the single place to
+        // decide — the alternative is two answers to "is this in the stream".
+        this.reconciler.acceptLiveResize(frame);
       }
     });
 

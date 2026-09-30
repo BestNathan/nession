@@ -230,6 +230,12 @@ pub fn build_terminal_resize_message(session_name: &str, cols: u16, rows: u16) -
         cols,
         rows,
         control_generation: None,
+        // A client asks; it does not record. The agent assigns the position
+        // when it records the resize, and states it back on the fan-out
+        // (#1303) — so the one direction that never has a position to send is
+        // this one.
+        stream_epoch: None,
+        stream_seq: None,
     };
     let msg = proto_msg(wire::AGENT_TERMINAL_RESIZE, payload);
     serde_json::to_string(&msg).unwrap_or_else(|_| String::new())

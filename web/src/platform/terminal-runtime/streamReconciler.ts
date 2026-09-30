@@ -114,6 +114,34 @@ export class StreamReconciler {
   }
 
   /**
+   * A resize from the live transport — a timeline item in its own right (#1303).
+   *
+   * The agent records a resize in the session's stream and consumes a sequence
+   * number for it, exactly as it does for output. So a resize that states a
+   * position is placed by the same cursor as everything else: held when the
+   * numbers below it are missing, committed in order when they are not. It is
+   * deliberately *not* a second cursor — output and resize share one sequence,
+   * and two cursors over one sequence are two answers to "what is next".
+   *
+   * A resize stating no position is outside the timeline for the same reason a
+   * bootstrap is: relay frames never carried sequence numbers, and an agent
+   * predating the fields states none. It goes straight through, which is what
+   * it did before there was anything to place.
+   */
+  acceptLiveResize(frame: LiveResizeFrame): void {
+    if (this.disposed) {
+      return;
+    }
+    if (frame.streamEpoch === undefined || frame.streamSeq === undefined) {
+      this.sink.onResize(frame.cols, frame.rows);
+      return;
+    }
+    this.accept(frame.streamEpoch, frame.streamSeq, () =>
+      this.sink.onResize(frame.cols, frame.rows),
+    );
+  }
+
+  /**
    * Seed the cursor from an attach response's stream position (#1094).
    *
    * The snapshot the client just rendered ends at this position, so the cursor
@@ -435,6 +463,19 @@ export interface LiveFrame {
   streamEpoch?: number;
   streamSeq?: number;
   bootstrap?: TerminalBootstrap;
+}
+
+/**
+ * A resize from the live transport, with the stream position the agent
+ * recorded it at when it has one. Structurally what the agent API hands over —
+ * see {@link StreamReconciler.acceptLiveResize} for what the absence of a
+ * position means.
+ */
+export interface LiveResizeFrame {
+  cols: number;
+  rows: number;
+  streamEpoch?: number;
+  streamSeq?: number;
 }
 
 /** The part of `agent.terminal.stream.resume`'s reply the cursor depends on. */

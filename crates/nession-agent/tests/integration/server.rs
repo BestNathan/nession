@@ -15,6 +15,7 @@ use nession_agent::server::websocket::{
     msg_types, new_message, AgentServer, AgentServerContext, ClientAttachPayload,
     ClientAttachResponse, ClientDetachPayload, ClientDetachResponse, OkPayload,
     SessionCreatePayload, SessionCreateResponse, SessionKillPayload, SessionKillResponse,
+    TerminalInputPayload, TerminalResizePayload,
 };
 use nession_agent::tmux::manager::SessionManager;
 use nession_agent::tmux::ops::TmuxDep;
@@ -808,6 +809,212 @@ async fn integration_terminal_io_flow() {
     handle.shutdown().await.ok();
 
     assert!(got_hello, "expected terminal output containing 'hello'");
+}
+
+/// A resize reaches the client **live and carrying its position**, and the
+/// output that follows continues from that position with nothing missing
+/// (#1303).
+///
+/// The defect is invisible to any assertion about the size: the agent recorded
+/// the resize and consumed a sequence number, and no frame ever said which one.
+/// So every client's timeline had a hole where the resize was, and — because a
+/// client resizes immediately after attaching — the first live output frame was
+/// always on the far side of it. A client that waits for the gap to close before
+/// delivering past it waits for an `agent.terminal.stream.resume` round trip,
+/// with its terminal frozen until that answers.
+///
+/// **Plain attach mode, deliberately.** It has no `%window-resize` channel at
+/// all (that is control mode's), so the fan-out is the only live resize that
+/// exists here and nothing else in this test can be the thing that delivered
+/// the frame. Red before the fan-out: no `agent.terminal.resize` frame arrives
+/// at all.
+#[tokio::test]
+async fn a_resize_is_delivered_with_its_position_and_output_continues_from_it() -> anyhow::Result<()>
+{
+    let (addr, handle, credentials) = start_server(0).await.unwrap();
+
+    let tmux = SessionManager::new();
+    let session = TestSession::new("resize-seq");
+    let session_name = session.name().to_string();
+    tmux.create_session(&session_name, 80, 24, "/tmp", &[])
+        .await
+        .unwrap();
+
+    let (mut sink, mut stream) = connect_for(&credentials, addr, &session_name)
+        .await
+        .unwrap();
+
+    let attach = ClientAttachPayload {
+        session_name: session_name.to_string(),
+        width: 80,
+        height: 24,
+        size_known: None,
+        // The history is not what is under test, and a snapshot would only put
+        // more frames between the assertions.
+        env_snapshots: Vec::new(),
+        needs_bootstrap: Some(false),
+    };
+    let req = new_message(msg_types::CLIENT_ATTACH, attach);
+    let resp: nession_agent::server::websocket::Message<ClientAttachResponse> =
+        round_trip(&mut sink, &mut stream, &req).await.unwrap();
+    assert_eq!(resp.msg_type, msg_types::OK);
+    let attached_epoch = resp
+        .payload
+        .stream_epoch
+        .expect("the attach names the stream its snapshot was taken at");
+
+    // Every position the client is *told*, gathered across the whole test: a
+    // frame the agent logged but never sent is exactly what the defect was, so
+    // what is asserted is what arrived, not what was recorded.
+    let mut output_seqs: Vec<u64> = Vec::new();
+    let mut resize_position: Option<(u64, u64)> = None;
+
+    let resize = new_message(
+        msg_types::TERMINAL_RESIZE,
+        TerminalResizePayload {
+            session_name: session_name.to_string(),
+            cols: 120,
+            rows: 40,
+            control_generation: resp.payload.control_generation,
+            // A client asks; it has no position to state.
+            stream_epoch: None,
+            stream_seq: None,
+        },
+    );
+    let resize_id = resize.id.clone();
+    sink.send(WsMessage::Text(serde_json::to_string(&resize)?))
+        .await?;
+
+    // Read until the fan-out and the ok have both arrived. The fan-out goes out
+    // on the terminal lane, awaited, *before* the reply is built — so its
+    // arriving first is a fact about the agent rather than a race this test
+    // happens to win.
+    let resize_deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    let mut acked = false;
+    while !(acked && resize_position.is_some()) && tokio::time::Instant::now() < resize_deadline {
+        let Some(frame) = next_frame_within(&mut stream, Duration::from_secs(5)).await? else {
+            break;
+        };
+        match frame.get("msg_type").and_then(|v| v.as_str()) {
+            Some(msg_types::TERMINAL_RESIZE) => {
+                let payload = frame.get("payload").cloned().unwrap_or_default();
+                let epoch = payload
+                    .get("stream_epoch")
+                    .and_then(serde_json::Value::as_u64);
+                let seq = payload
+                    .get("stream_seq")
+                    .and_then(serde_json::Value::as_u64);
+                assert_eq!(
+                    (
+                        payload.get("cols").and_then(serde_json::Value::as_u64),
+                        payload.get("rows").and_then(serde_json::Value::as_u64)
+                    ),
+                    (Some(120), Some(40)),
+                    "the live resize frame lost the size it exists to carry"
+                );
+                assert!(
+                    epoch.is_some() && seq.is_some(),
+                    "the live resize frame carries no position: the sequence it \
+                     consumed is a hole in every client's timeline"
+                );
+                resize_position = Some((epoch.unwrap(), seq.unwrap()));
+                if frame.get("id").and_then(|v| v.as_str()) == Some(resize_id.as_str()) {
+                    acked = true;
+                }
+            }
+            Some(msg_types::TERMINAL_OUTPUT) => {
+                if let Some(seq) = frame
+                    .get("payload")
+                    .and_then(|p| p.get("stream_seq"))
+                    .and_then(serde_json::Value::as_u64)
+                {
+                    output_seqs.push(seq);
+                }
+            }
+            _ => {
+                if frame.get("id").and_then(|v| v.as_str()) == Some(resize_id.as_str()) {
+                    acked = true;
+                }
+            }
+        }
+    }
+
+    let (resize_epoch, resize_seq) = resize_position.expect(
+        "the agent recorded the resize and never fanned it out: every client's \
+         cursor skips the number it consumed",
+    );
+    assert_eq!(
+        resize_epoch, attached_epoch,
+        "the resize was recorded in a different stream than the attach named"
+    );
+    assert!(acked, "the resize got no reply");
+
+    // Now make the session talk, and look for the first output *above* the
+    // resize's position.
+    use base64::Engine;
+    let input = base64::engine::general_purpose::STANDARD.encode(b"echo GAPCHECK\n");
+    let payload = TerminalInputPayload {
+        session_name: session_name.to_string(),
+        data: input,
+        control_generation: resp.payload.control_generation,
+    };
+    let req = new_message(msg_types::TERMINAL_INPUT, payload);
+    let input_id = req.id.clone();
+    sink.send(WsMessage::Text(serde_json::to_string(&req)?))
+        .await?;
+
+    let output_deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    let mut saw_marker = false;
+    while tokio::time::Instant::now() < output_deadline {
+        let Some(frame) = next_frame_within(&mut stream, Duration::from_secs(5)).await? else {
+            break;
+        };
+        match frame.get("msg_type").and_then(|v| v.as_str()) {
+            Some(msg_types::TERMINAL_OUTPUT) => {
+                let payload = frame.get("payload").cloned().unwrap_or_default();
+                if let Some(seq) = payload
+                    .get("stream_seq")
+                    .and_then(serde_json::Value::as_u64)
+                {
+                    output_seqs.push(seq);
+                }
+                if let Some(b64) = payload.get("data").and_then(|v| v.as_str()) {
+                    let decoded = base64::engine::general_purpose::STANDARD.decode(b64)?;
+                    if String::from_utf8_lossy(&decoded).contains("GAPCHECK") {
+                        saw_marker = true;
+                        break;
+                    }
+                }
+            }
+            _ => {
+                if frame.get("id").and_then(|v| v.as_str()) == Some(input_id.as_str()) {
+                    // The input was acked; the echo is still on its way.
+                }
+            }
+        }
+    }
+
+    let first_above = output_seqs
+        .iter()
+        .copied()
+        .filter(|seq| *seq > resize_seq)
+        .min();
+    assert_eq!(
+        first_above,
+        Some(resize_seq + 1),
+        "the client is holding a hole between the resize at {resize_seq} and the \
+         output above it (positions it saw: {output_seqs:?}); a client that waits \
+         for that hole cannot deliver past it, which is the stall this fixes"
+    );
+    assert!(
+        saw_marker,
+        "the session produced no output at all, so contiguity above the resize \
+         was never exercised"
+    );
+
+    tmux.kill_session(&session_name).await.ok();
+    handle.shutdown().await.ok();
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------

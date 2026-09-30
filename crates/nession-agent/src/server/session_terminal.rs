@@ -139,6 +139,19 @@ pub struct SessionStreamState {
     next_seq: u64,
     events: VecDeque<TerminalStreamEventPayload>,
     max_events: usize,
+    /// The size of the last resize this stream recorded, if it has recorded one
+    /// (#1303).
+    ///
+    /// It exists so a resize that has *already* been sequenced and fanned out is
+    /// not announced a second time, unsequenced, by the `%window-resize` path:
+    /// the pane echoing back the size a client just asked for is the same event,
+    /// and a client that took both would take one size change for two.
+    ///
+    /// Read per **connection**, which is what makes the guard the right one: a
+    /// connection that did not ask for this resize still hears about it from its
+    /// own `%window-resize`, and one that did hears about it from the fan-out
+    /// instead. See `websocket.rs`'s resize arm.
+    last_resize: Option<(u16, u16)>,
 }
 
 impl SessionStreamState {
@@ -151,6 +164,7 @@ impl SessionStreamState {
             next_seq: 0,
             events: VecDeque::new(),
             max_events: DEFAULT_STREAM_EVENTS,
+            last_resize: None,
         }
     }
 
@@ -174,6 +188,7 @@ impl SessionStreamState {
     pub fn record_resize(&mut self, session_name: &str, cols: u16, rows: u16) -> (u64, u64) {
         self.next_seq = self.next_seq.saturating_add(1);
         let seq = self.next_seq;
+        self.last_resize = Some((cols, rows));
         let event = TerminalStreamEventPayload::Resize {
             session_name: session_name.to_string(),
             stream_epoch: self.epoch,
@@ -183,6 +198,20 @@ impl SessionStreamState {
         };
         self.push_event(event);
         (self.epoch, seq)
+    }
+
+    /// Whether a resize of this size is one this stream has **already** recorded
+    /// and fanned out, so a second announcement of it would be a second event
+    /// where there was one (#1303).
+    ///
+    /// Written as a comparison against the record rather than as
+    /// `unwrap_or_default()`, which is the tempting simplification and a real
+    /// bug: it makes "no resize recorded" indistinguishable from "the last
+    /// resize was 0×0", and a 0×0 resize is a size a PTY can legitimately be
+    /// given. The unrecorded case must answer `false` for every size, including
+    /// that one.
+    pub fn already_recorded(&self, cols: u16, rows: u16) -> bool {
+        self.last_resize == Some((cols, rows))
     }
 
     pub fn events_since(

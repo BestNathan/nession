@@ -21,12 +21,62 @@ export const VERSION = 1;
 
 // ── Shapes ──
 
-export type TerminalResizePayload = { session_name: string, cols: number, rows: number, control_generation?: number | null, };
+export type TerminalResizePayload = { session_name: string, cols: number, rows: number, control_generation?: number | null, 
+/**
+ * Where the resize sits in the session's stream (#1303).
+ *
+ * A resize is an event **in** the timeline, not beside it: the agent
+ * records it and consumes a sequence number, exactly as it does for
+ * output. So a client that is not told the number has a hole in its
+ * timeline, and the only thing that can fill it is an
+ * `agent.terminal.stream.resume` round trip — which is why a resize used
+ * to be the one event every client's cursor skipped over.
+ *
+ * Present when the frame is the agent's own recording of the resize — the
+ * live fan-out to every attached client. **Absent means "no position"**,
+ * not position 0: relay frames carry none (the Server forwards a size
+ * update it did not sequence) and an agent predating this field sends
+ * none. A consumer that reads absence as 0 would place a resize it cannot
+ * order at the head of its timeline, which is worse than treating the
+ * frame as outside the timeline altogether.
+ */
+stream_epoch?: number | null, 
+/**
+ * The sequence number this resize consumed, under the rule `stream_epoch`
+ * states: absent means the frame has no position, not that it is position
+ * zero.
+ */
+stream_seq?: number | null, };
 
 // ── Operations ──
 
 /** The payload a caller sends. */
-export type TerminalResizeCall = { session_name: string, cols: number, rows: number, control_generation?: number | null, };
+export type TerminalResizeCall = { session_name: string, cols: number, rows: number, control_generation?: number | null, 
+/**
+ * Where the resize sits in the session's stream (#1303).
+ *
+ * A resize is an event **in** the timeline, not beside it: the agent
+ * records it and consumes a sequence number, exactly as it does for
+ * output. So a client that is not told the number has a hole in its
+ * timeline, and the only thing that can fill it is an
+ * `agent.terminal.stream.resume` round trip — which is why a resize used
+ * to be the one event every client's cursor skipped over.
+ *
+ * Present when the frame is the agent's own recording of the resize — the
+ * live fan-out to every attached client. **Absent means "no position"**,
+ * not position 0: relay frames carry none (the Server forwards a size
+ * update it did not sequence) and an agent predating this field sends
+ * none. A consumer that reads absence as 0 would place a resize it cannot
+ * order at the head of its timeline, which is worse than treating the
+ * frame as outside the timeline altogether.
+ */
+stream_epoch?: number | null, 
+/**
+ * The sequence number this resize consumed, under the rule `stream_epoch`
+ * states: absent means the frame has no position, not that it is position
+ * zero.
+ */
+stream_seq?: number | null, };
 
 /**
  * No response alias: the catalog declares no response shape for this unit.

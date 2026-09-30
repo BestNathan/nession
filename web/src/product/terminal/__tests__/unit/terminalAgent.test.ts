@@ -157,7 +157,35 @@ describe('createTerminalAgentApi', () => {
 
       surface.pushMessage('agent.terminal.resize', { session_name: 'work', cols: 150, rows: 50 });
 
-      expect(cb).toHaveBeenCalledWith(150, 50);
+      // No position on the wire stays no position here: `undefined`, not 0.
+      // The two mean different things to the consumer's cursor — see
+      // `TerminalResizeFrame` (#1303).
+      expect(cb).toHaveBeenCalledWith({
+        cols: 150,
+        rows: 50,
+        streamEpoch: undefined,
+        streamSeq: undefined,
+      });
+    });
+
+    it('carries the stream position of a resize the agent recorded (#1303)', () => {
+      const cb = vi.fn();
+      api.onResize(cb);
+
+      surface.pushMessage('agent.terminal.resize', {
+        session_name: 'work',
+        cols: 150,
+        rows: 50,
+        stream_epoch: 1_700_000_000_000_000,
+        stream_seq: 3,
+      });
+
+      expect(cb).toHaveBeenCalledWith({
+        cols: 150,
+        rows: 50,
+        streamEpoch: 1_700_000_000_000_000,
+        streamSeq: 3,
+      });
     });
 
     it('stops delivering after unsubscribe', () => {

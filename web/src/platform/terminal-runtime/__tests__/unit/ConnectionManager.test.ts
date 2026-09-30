@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ConnectionManager } from '@/platform/terminal-runtime/ConnectionManager';
-import type { AgentError, TerminalAgentApi } from '@/product/terminal';
+import type { AgentError, TerminalAgentApi, TerminalResizeFrame } from '@/product/terminal';
 import type { ResumeReply } from '@/platform/terminal-runtime/streamReconciler';
 import type { TerminalBootstrap } from '@/platform/terminal-runtime/bootstrap';
 import type { ConnectionState } from '@/platform/socket/types';
@@ -44,13 +44,13 @@ function replayOf(frames: Record<number, string>): ResumeReply {
 interface AgentApiHarness {
   api: TerminalAgentApi;
   outputHandlers: Array<(frame: { data: Uint8Array; streamEpoch?: number; streamSeq?: number; bootstrap?: TerminalBootstrap }) => void>;
-  resizeHandlers: Array<(cols: number, rows: number) => void>;
+  resizeHandlers: Array<(frame: TerminalResizeFrame) => void>;
   errorHandlers: Array<(error: AgentError) => void>;
 }
 
 function makeAgentApi(): AgentApiHarness & { unsubs: { output: ReturnType<typeof vi.fn>; resize: ReturnType<typeof vi.fn>; error: ReturnType<typeof vi.fn> } } {
   const outputHandlers: Array<(frame: { data: Uint8Array; streamEpoch?: number; streamSeq?: number; bootstrap?: TerminalBootstrap }) => void> = [];
-  const resizeHandlers: Array<(cols: number, rows: number) => void> = [];
+  const resizeHandlers: Array<(frame: TerminalResizeFrame) => void> = [];
   const errorHandlers: Array<(error: AgentError) => void> = [];
   const unsubs = {
     output: vi.fn(() => {}),
@@ -69,7 +69,7 @@ function makeAgentApi(): AgentApiHarness & { unsubs: { output: ReturnType<typeof
       outputHandlers.push(cb);
       return unsubs.output;
     }),
-    onResize: vi.fn((cb: (cols: number, rows: number) => void) => {
+    onResize: vi.fn((cb: (frame: TerminalResizeFrame) => void) => {
       resizeHandlers.push(cb);
       return unsubs.resize;
     }),
@@ -400,8 +400,73 @@ describe('ConnectionManager', () => {
       const onResize = vi.fn();
       cm.onResize = onResize;
 
-      resizeHandlers[0]?.(120, 40);
+      resizeHandlers[0]?.({ cols: 120, rows: 40 });
       expect(onResize).toHaveBeenCalledWith(120, 40);
+      cm.dispose();
+    });
+
+    /**
+     * A resize the agent recorded is an event in the session's stream, so it
+     * goes through the cursor like output does (#1303).
+     *
+     * The mutation this pins is the one that was shipping: calling
+     * `this.onResize?.(...)` directly for every resize. Then the resize is
+     * applied *outside* the timeline — it is visible, and the number it
+     * consumed is not — so the client's cursor stays one behind and the next
+     * live output frame looks like a gap. Measured on the wire before the fix:
+     * the agent recorded `resize seq=1`, no frame said so, and the following
+     * `output seq=2` was separated from a seeded cursor of 0 by a hole only a
+     * `stream.resume` round trip could fill.
+     */
+    /**
+     * A resize the agent recorded is an event in the session's stream, so it
+     * waits for the numbers below it like any other (#1303).
+     *
+     * Measured against the behaviour this replaced: the resize used to go
+     * straight to `onResize`, so it was applied while the cursor stayed put.
+     */
+    it('holds a recorded resize whose predecessor has not arrived', () => {
+      const { api, outputHandlers, resizeHandlers } = makeAgentApi();
+      const cm = new ConnectionManager({
+        mode: 'p2p', sessionName: 'test', sessionId: 'sess-1', agentApi: api, ...attached,
+      });
+      const onResize = vi.fn();
+      cm.onResize = onResize;
+
+      // An output frame at 1 anchors the timeline at 0.
+      outputHandlers[0]?.({ data: new Uint8Array([1]), streamEpoch: 1, streamSeq: 1 });
+
+      // Recorded at 3 with 2 missing: out-of-band routing would show it here.
+      resizeHandlers[0]?.({ cols: 120, rows: 40, streamEpoch: 1, streamSeq: 3 });
+      expect(onResize).not.toHaveBeenCalled();
+      cm.dispose();
+    });
+
+    /**
+     * And when the numbers *are* contiguous, the resize is delivered and the
+     * cursor moves with it — which is the defect the fan-out exists to close.
+     *
+     * Without this, the resize consumed a sequence number silently: the cursor
+     * stayed one behind, and the next live output frame looked like a gap the
+     * client could only fill with a `stream.resume` round trip.
+     */
+    it('delivers a recorded resize and leaves the cursor contiguous behind it', () => {
+      const { api, outputHandlers, resizeHandlers } = makeAgentApi();
+      const cm = new ConnectionManager({
+        mode: 'p2p', sessionName: 'test', sessionId: 'sess-1', agentApi: api, ...attached,
+      });
+      const onResize = vi.fn();
+      const onOutput = vi.fn();
+      cm.onResize = onResize;
+      cm.onOutput = onOutput;
+
+      outputHandlers[0]?.({ data: new Uint8Array([1]), streamEpoch: 1, streamSeq: 1 });
+      resizeHandlers[0]?.({ cols: 120, rows: 40, streamEpoch: 1, streamSeq: 2 });
+      outputHandlers[0]?.({ data: new Uint8Array([3]), streamEpoch: 1, streamSeq: 3 });
+
+      expect(onResize).toHaveBeenCalledWith(120, 40);
+      expect(onOutput).toHaveBeenCalledTimes(2);
+      expect(api.resumeStream).not.toHaveBeenCalled();
       cm.dispose();
     });
 
@@ -521,7 +586,7 @@ describe('ConnectionManager', () => {
 
       cm.dispose();
       outputHandlers[0]?.({ data: new Uint8Array([1]) });
-      resizeHandlers[0]?.(80, 24);
+      resizeHandlers[0]?.({ cols: 80, rows: 24 });
       errorHandlers[0]?.({ message: 'boom', notAttached: false });
       expect(onOutput).not.toHaveBeenCalled();
       expect(onResize).not.toHaveBeenCalled();

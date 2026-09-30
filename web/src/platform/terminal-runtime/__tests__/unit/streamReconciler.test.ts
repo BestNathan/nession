@@ -54,6 +54,15 @@ function output(seq: number, epoch = 1): TerminalStreamEvent {
   return { kind: 'output', streamEpoch: epoch, streamSeq: seq, data: btoa(`replay-${seq}`) };
 }
 
+/**
+ * A live resize at `seq` on stream 1 — what the agent's fan-out sends for a
+ * resize it recorded. Every test here works within one epoch, and the frame
+ * without a position is built inline where it is the thing under test.
+ */
+function liveResize(h: Harness, seq: number, cols = 120, rows = 40): void {
+  h.reconciler.acceptLiveResize({ cols, rows, streamEpoch: 1, streamSeq: seq });
+}
+
 function reply(events: TerminalStreamEvent[], streamEpoch = 1): ResumeReply {
   return { streamEpoch, epochMatch: true, events };
 }
@@ -429,5 +438,60 @@ describe('StreamReconciler', () => {
     await flushMicrotasks();
     expect(h.out).toEqual([]);
     expect(h.requests).toHaveLength(0);
+  });
+
+  // ── Resizes are timeline items too (#1303) ────────────────────────────────
+
+  it('advances the cursor over a sequenced resize: output 1, resize 2, output 3', () => {
+    const h = makeHarness();
+    live(h, 1, 'one');
+    liveResize(h, 2);
+    live(h, 3, 'three');
+
+    // **`requests` is the assertion that matters.** The agent consumes a
+    // sequence number for the resize, so a reconciler that applied the resize
+    // out of band would leave the cursor at 1 and read output 3 as a stream
+    // one behind — one resume round trip, and `three` withheld until it
+    // answered. Nothing held and nothing asked for is only true if the resize
+    // moved the same cursor output moves.
+    expect(h.requests).toHaveLength(0);
+    expect(h.resizes).toEqual([[120, 40]]);
+    expect(h.out).toEqual(['one', 'three']);
+  });
+
+  it('holds a resize whose predecessor is missing, exactly as it holds output', async () => {
+    const h = makeHarness();
+    live(h, 1, 'one');
+    // 2 is missing: the resize cannot be placed, and applying it anyway would
+    // be the out-of-band behaviour this replaced.
+    liveResize(h, 3);
+
+    expect(h.resizes).toEqual([]);
+    expect(h.requests).toHaveLength(1);
+    expect(h.requests[0].afterSeq).toBe(1);
+
+    h.requests[0].resolve(reply([2, 3].map((seq) => output(seq))));
+    await flushMicrotasks();
+    // The replay answers with an output at 2 and an *output* at 3; the live
+    // resize already holds that number, and first write wins — so the resize is
+    // what gets applied at 3, once, and the replay's copy of 3 is discarded.
+    expect(h.resizes).toEqual([[120, 40]]);
+    expect(h.out).toEqual(['one', 'replay-2']);
+  });
+
+  it('passes an unsequenced resize straight through', () => {
+    const h = makeHarness();
+    live(h, 1, 'one');
+    // No position: a relay frame, or an agent predating the fields. It is not
+    // an event in the timeline, so it is applied at once and moves nothing.
+    h.reconciler.acceptLiveResize({ cols: 100, rows: 30 });
+
+    expect(h.resizes).toEqual([[100, 30]]);
+    expect(h.requests).toHaveLength(0);
+
+    // And it consumed no number: the very next output frame is contiguous.
+    live(h, 2, 'two');
+    expect(h.requests).toHaveLength(0);
+    expect(h.out).toEqual(['one', 'two']);
   });
 });
