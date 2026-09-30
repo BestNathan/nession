@@ -153,7 +153,7 @@ function CapabilityDock({
             data-capability-presence={item.presence.level}
             onClick={() => onToolChange(item.snapshot.id)}
             className={cn(
-              'relative flex size-[length:var(--dock-target)] shrink-0 items-center justify-center rounded-[var(--radius-md)] transition-colors duration-[var(--motion-shell-duration)] ease-[var(--motion-shell-ease)]',
+              'relative flex size-[length:var(--dock-target)] shrink-0 items-center justify-center rounded-[var(--radius-control)] transition-colors duration-[var(--motion-shell-duration)] ease-[var(--motion-shell-ease)]',
               isActive ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
             )}
           >
@@ -190,7 +190,7 @@ function CapabilityDock({
               aria-label="More workspace capabilities"
               title="More workspace capabilities"
               data-testid="workspace-capability-more"
-              className="flex size-[length:var(--dock-target)] shrink-0 items-center justify-center rounded-[var(--radius-md)] text-muted-foreground transition-colors duration-[var(--motion-shell-duration)] ease-[var(--motion-shell-ease)] hover:text-foreground"
+              className="flex size-[length:var(--dock-target)] shrink-0 items-center justify-center rounded-[var(--radius-control)] text-muted-foreground transition-colors duration-[var(--motion-shell-duration)] ease-[var(--motion-shell-ease)] hover:text-foreground"
             >
               <Plus className="size-[length:var(--icon-md)]" aria-hidden />
             </button>

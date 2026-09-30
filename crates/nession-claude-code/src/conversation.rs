@@ -1,15 +1,17 @@
-//! Finding a Session's conversations on disk (#1005).
+//! Finding a Session's Claude sessions on disk (#1005).
 //!
-//! Two jobs, both of which exist to keep Claude Code's file format inside this
+//! Two jobs, both of which exist to keep Claude Code's *file layout* inside this
 //! crate:
 //!
 //! 1. **Discovery** — which transcripts belong to a given working directory.
 //! 2. **Page selection** — which records of one transcript a page contains.
 //!
-//! Turning those records into conversation items is [`crate::messages`]' job;
-//! the retired v1 normalization that used to live here was removed with the
-//! `claude-code.conversation` unit it served (#1222), and what survives is the
-//! half the two remaining units share.
+//! What those records *mean* is [`crate::canonical`]'s job: it adapts Claude's
+//! schema once and both projections read the result. This module deliberately
+//! stops at "here are the bytes of this page", because where a record starts is a
+//! property of the file and what it says is a property of Claude's format — and
+//! conflating the two is what used to leave every caller of this module
+//! re-implementing the second.
 //!
 //! ## Discovery matches the record's own `cwd`, never the directory name
 //!
@@ -32,18 +34,6 @@ use std::path::{Path, PathBuf};
 use std::cell::RefCell;
 
 use serde_json::Value;
-
-/// Claude's record types that carry conversation.
-const MESSAGE_TYPES: [&str; 2] = ["user", "assistant"];
-
-/// Whether a record type is one that carries conversation.
-///
-/// Shared with [`crate::messages`], which asks the same question of the same
-/// open set: a type that is not a message is bookkeeping, and bookkeeping must
-/// not become a chat row.
-pub(crate) fn is_message_record(kind: &str) -> bool {
-    MESSAGE_TYPES.contains(&kind)
-}
 
 /// How much to read at a time while scanning backwards for a page boundary.
 const READ_CHUNK: u64 = 64 * 1024;

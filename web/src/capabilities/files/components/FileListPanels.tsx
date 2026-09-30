@@ -118,7 +118,7 @@ function FileListRow({
       {selectionMode ? (
         <span
           className={cn(
-            'flex size-5 shrink-0 items-center justify-center rounded-sm border border-border',
+            'flex size-5 shrink-0 items-center justify-center rounded-[var(--radius-control)] border border-border',
             selected && 'border-primary bg-primary text-primary-foreground',
           )}
           aria-hidden

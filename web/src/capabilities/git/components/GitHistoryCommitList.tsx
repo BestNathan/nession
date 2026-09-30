@@ -46,7 +46,7 @@ export function GitHistoryCommitList({
             disabled={loadingMore}
             onClick={onLoadOlder}
             className={cn(
-              'mx-2 my-2 rounded-md px-2 py-1.5 text-left text-primary hover:bg-accent',
+              'mx-2 my-2 rounded-[var(--radius-control)] px-2 py-1.5 text-left text-primary hover:bg-accent',
               chromeSansRole('metadata'),
             )}
           >
@@ -88,7 +88,7 @@ function CommitRow({
       aria-current={selected ? 'true' : undefined}
       onClick={() => onSelect(commit.hash)}
       className={cn(
-        'flex flex-col gap-0.5 rounded-md px-2 py-1.5 text-left transition-colors',
+        'flex flex-col gap-0.5 rounded-[var(--radius-control)] px-2 py-1.5 text-left transition-colors',
         'hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
         selected && 'bg-accent text-accent-foreground',
       )}
