@@ -7,6 +7,21 @@ import type { ClaudeCodeTranscriptItem } from '../types';
 import type { TranscriptItemsState } from '../hooks/useTranscriptItems';
 import type { TranscriptsListState } from '../hooks/useTranscripts';
 
+/**
+ * What to call a transcript in the list.
+ *
+ * Claude titles a session but never a subagent — `ai-title` is a session-level
+ * record — so the fallback is what sidechains actually get. The provider's id
+ * for one is path-shaped, `<session-uuid>/agent-<id>`, and behind `truncate`
+ * the tail that distinguishes one subagent from another is the first thing
+ * lost, leaving rows that read alike. `agent_id` is on the contract for
+ * precisely that job ("the subagent's own id, for a sidechain"), so it is the
+ * fallback before the id; a primary transcript has none and keeps its id.
+ */
+function labelOf(transcript: ClaudeCodeTranscriptItem): string {
+  return transcript.title ?? transcript.agent_id ?? transcript.id;
+}
+
 function TranscriptList({
   list,
   onSelect,
@@ -49,7 +64,7 @@ function TranscriptList({
             >
               <div className="flex items-center gap-2">
                 <span className={cn('truncate font-medium', chromeSansRole('secondary'))}>
-                  {transcript.title ?? transcript.id}
+                  {labelOf(transcript)}
                 </span>
                 {transcript.kind === 'sidechain' ? (
                   // Said in words, not only in styling: a subagent's transcript

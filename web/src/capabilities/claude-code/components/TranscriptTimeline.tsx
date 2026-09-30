@@ -113,15 +113,38 @@ function hasDetail(entry: Entry): boolean {
   return bodyOf(entry) !== null;
 }
 
+/**
+ * Whether a body this entry drew was cut to its ceiling.
+ *
+ * Asked of every kind that carries a bounded body, not only of tools. The
+ * bodies that actually reach their ceiling are the other kinds — reasoning
+ * measured to 126 KB and an attachment to 1.2 MB, both cut to 8 KB — so a rule
+ * that only watched tools would leave the reader of a 1.2 MB attachment looking
+ * at 8 KB with nothing to say it was 8 KB *of* something.
+ */
+function bodyWasCut(entry: Entry): boolean {
+  switch (entry.kind) {
+    case 'tool':
+      return Boolean(entry.tool.input?.truncated || entry.tool.output?.truncated);
+    case 'reasoning':
+      return entry.text.truncated;
+    case 'attachment':
+      return entry.payload?.truncated === true;
+    default:
+      return false;
+  }
+}
+
 /** The state a row carries on its collapsed line, if any. */
 function statusOf(entry: Entry): string | null {
-  if (entry.kind !== 'tool') {
-    return null;
+  const parts: string[] = [];
+  if (entry.kind === 'tool') {
+    parts.push(entry.tool.status);
   }
-  if (entry.tool.output?.truncated || entry.tool.input?.truncated) {
-    return `${entry.tool.status} · truncated`;
+  if (bodyWasCut(entry)) {
+    parts.push('truncated');
   }
-  return entry.tool.status;
+  return parts.length > 0 ? parts.join(' · ') : null;
 }
 
 function Row({ entry }: { entry: Entry }) {
@@ -171,7 +194,18 @@ function Row({ entry }: { entry: Entry }) {
           <CollapsibleContent>
             <pre
               className={cn(
-                'mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded border border-border/50 bg-muted/40 p-2',
+                // `wrap-anywhere` rather than `break-words`, and the difference
+                // is not cosmetic. `overflow-wrap: break-word` does **not**
+                // reduce an element's min-content width, so the unbroken token
+                // in a real tool body (base64, a long path) sized this box to
+                // its full text instead of wrapping: measured, a 1.9 KB body
+                // grew the timeline to 6004px inside a 992px pane. Nothing
+                // looked broken, because the shell clips — the body was simply
+                // unreadable past the edge. `anywhere` *is* counted in
+                // min-content, so the token wraps and the box stays in its
+                // pane. Not `break-all`, which would also fix the sizing but
+                // breaks ordinary prose mid-word; this body is often reasoning.
+                'mt-2 max-h-64 overflow-auto whitespace-pre-wrap wrap-anywhere rounded border border-border/50 bg-muted/40 p-2',
                 chromeMonoRole('metadata'),
               )}
               data-testid="transcript-detail"
