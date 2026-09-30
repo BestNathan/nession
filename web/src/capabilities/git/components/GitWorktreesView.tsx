@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/shared/lib/utils';
+import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import { canOpenWorktreeAsSession } from '../worktreeGate';
 import { useGitWorktrees } from '../hooks/useGitWorktrees';
 import { basename, describeUnavailable, formatBytes } from '../state';
@@ -52,7 +53,7 @@ export function GitWorktreesView({ ctx }: { ctx: WorkspaceContext }) {
         data-state={worktrees.state}
         className="flex h-full min-h-0 items-center justify-center px-6 text-center"
       >
-        <p className="max-w-sm text-sm text-muted-foreground">
+        <p className={cn('max-w-sm text-muted-foreground', chromeSansRole('secondary'))}>
           {describeUnavailable(worktrees).title}
         </p>
       </div>
@@ -81,7 +82,7 @@ export function GitWorktreesView({ ctx }: { ctx: WorkspaceContext }) {
         {truncated ? (
           <p
             data-testid="git-worktrees-truncated"
-            className="px-2 py-2 text-xs text-muted-foreground"
+            className={cn('px-2 py-2 text-muted-foreground', chromeSansRole('metadata'))}
           >
             Worktree listing truncated — {formatBytes(truncatedBytes)} not read.
           </p>
@@ -107,7 +108,7 @@ function WorktreeRow({ worktree, ctx }: { worktree: GitWorktree; ctx: WorkspaceC
         worktree.current && 'bg-accent text-accent-foreground',
       )}
     >
-      <span className="flex items-center gap-1.5 text-sm">
+      <span className={cn('flex items-center gap-1.5', chromeSansRole('secondary'))}>
         {worktree.current ? (
           <span
             data-testid="git-worktree-current"
@@ -119,13 +120,13 @@ function WorktreeRow({ worktree, ctx }: { worktree: GitWorktree; ctx: WorkspaceC
         ) : null}
         <span className="truncate">{basename(worktree.path)}</span>
       </span>
-      <span className="truncate text-xs text-muted-foreground">
+      <span className={cn('truncate text-muted-foreground', chromeSansRole('metadata'))}>
         {describeWorktree(worktree)}
       </span>
       {worktree.locked !== undefined ? (
         <span
           data-testid="git-worktree-locked"
-          className="truncate text-xs text-muted-foreground"
+          className={cn('truncate text-muted-foreground', chromeSansRole('metadata'))}
         >
           Locked{worktree.locked ? ` — ${worktree.locked}` : ''}
         </span>
@@ -137,7 +138,7 @@ function WorktreeRow({ worktree, ctx }: { worktree: GitWorktree; ctx: WorkspaceC
           size="sm"
           data-testid="git-worktree-open-session"
           disabled={opening}
-          className="mt-1 h-7 w-fit text-xs"
+          className={cn('mt-1 h-7 w-fit', chromeSansRole('metadata'))}
           onClick={() => {
             setOpening(true);
             void ctx.openWorktreeSession?.(worktree).finally(() => setOpening(false));
@@ -147,14 +148,14 @@ function WorktreeRow({ worktree, ctx }: { worktree: GitWorktree; ctx: WorkspaceC
         </Button>
       ) : null}
       {!openable.ok && !worktree.current ? (
-        <span className="text-xs text-muted-foreground">{openable.reason}</span>
+        <span className={cn('text-muted-foreground', chromeSansRole('metadata'))}>{openable.reason}</span>
       ) : null}
       {worktree.prunable !== undefined ? (
         // Said out loud because the alternative is a row naming a directory
         // that is not there, which reads as a place the user could go.
         <span
           data-testid="git-worktree-prunable"
-          className="truncate text-xs text-muted-foreground"
+          className={cn('truncate text-muted-foreground', chromeSansRole('metadata'))}
         >
           The directory is gone — git still holds this entry until it is pruned.
         </span>

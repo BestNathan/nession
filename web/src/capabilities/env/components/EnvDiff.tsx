@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { cn } from '@/shared/lib/utils';
+import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
 
 interface EnvDiffProps {
   original: string;
@@ -56,12 +57,12 @@ export function EnvDiff({ original, modified }: EnvDiffProps) {
 
   if (original === modified) {
     return (
-      <p className="text-xs text-muted-foreground text-center py-2">No changes detected</p>
+      <p className={cn('py-2 text-center text-muted-foreground', chromeSansRole('metadata'))}>No changes detected</p>
     );
   }
 
   return (
-    <div className="rounded-md border divide-y divide-border font-mono text-xs max-h-48 overflow-y-auto">
+    <div className={cn('max-h-48 overflow-y-auto divide-y divide-border rounded-md border font-mono', chromeMonoRole('code'))}>
       {diff.map((line, i) => (
         <div
           key={i}

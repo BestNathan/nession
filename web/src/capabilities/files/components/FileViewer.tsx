@@ -85,7 +85,7 @@ function FileViewerToolbar({
             open. */}
         <span className="truncate">{path || filename}</span>
         {forceReadOnly && (
-          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-[10px]">
+          <span className={cn('inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-muted-foreground', chromeSansRole('caption'))}>
             <Lock className="h-2.5 w-2.5" /> Read-only
           </span>
         )}
@@ -166,7 +166,7 @@ function FileViewerContent({
   // Chunked progress view — shown while a large file is being downloaded in chunks.
   const chunkedProgressView = (
     <div className="flex flex-col items-center justify-center h-full gap-3 p-6">
-      <p className="text-sm text-muted-foreground">
+      <p className={cn('text-muted-foreground', chromeSansRole('secondary'))}>
         Loading… {formatSize(loadedBytes)} / {formatSize(totalBytes)}
       </p>
       <Progress value={totalBytes > 0 ? (loadedBytes / totalBytes) * 100 : 0} className="w-64" />
@@ -193,7 +193,7 @@ function FileViewerContent({
             <Skeleton className="h-4 w-1/2" />
           </div>
         ) : error ? (
-          <div className="flex flex-col items-center justify-center h-full gap-2 p-3 text-sm">
+          <div className={cn('flex h-full flex-col items-center justify-center gap-2 p-3', chromeSansRole('secondary'))}>
             <p className="text-destructive">{error}</p>
             <Button variant="outline" size="sm" onClick={onRetry}>Retry</Button>
           </div>
@@ -231,12 +231,12 @@ function FileViewerContent({
   return (
     <div className="flex-1 min-h-0 flex flex-col">
       {showSuggestion && (
-        <div className="flex items-center gap-2 px-3 py-1.5 text-xs border-b bg-muted border-border text-muted-foreground">
+        <div className={cn('flex items-center gap-2 border-b border-border bg-muted px-3 py-1.5 text-muted-foreground', chromeSansRole('metadata'))}>
           <Info className="h-3.5 w-3.5 shrink-0" />
           <span>This file looks like Markdown</span>
           <button
             onClick={onSuggestionPreview}
-            className="ml-auto px-2 py-0.5 rounded text-xs bg-primary text-primary-foreground hover:bg-primary/80"
+            className={cn('ml-auto rounded bg-primary px-2 py-0.5 text-primary-foreground hover:bg-primary/80', chromeSansRole('metadata'))}
           >
             Preview
           </button>
@@ -257,7 +257,7 @@ function FileViewerContent({
             <Skeleton className="h-4 w-1/2" />
           </div>
         ) : error ? (
-          <div className="flex flex-col items-center justify-center h-full gap-2 p-3 text-sm">
+          <div className={cn('flex h-full flex-col items-center justify-center gap-2 p-3', chromeSansRole('secondary'))}>
             <p className="text-destructive">{error}</p>
             <Button variant="outline" size="sm" onClick={onRetry}>Retry</Button>
           </div>

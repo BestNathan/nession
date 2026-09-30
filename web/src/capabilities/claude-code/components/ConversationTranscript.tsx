@@ -119,7 +119,7 @@ function TranscriptContent({
     <MessageScrollerContent ref={contentRef} className="px-4">
       {view.loadingOlder ? (
         <p
-          className="flex items-center justify-center gap-2 pb-3 text-xs text-muted-foreground"
+          className={cn('flex items-center justify-center gap-2 pb-3 text-muted-foreground', chromeSansRole('metadata'))}
           data-testid="conversation-loading-older"
           role="status"
         >
@@ -129,7 +129,7 @@ function TranscriptContent({
       ) : null}
       {view.olderError ? (
         <div
-          className="flex flex-wrap items-center gap-2 pb-3 text-xs text-destructive"
+          className={cn('flex flex-wrap items-center gap-2 pb-3 text-destructive', chromeSansRole('metadata'))}
           data-testid="conversation-older-error"
           role="alert"
         >
@@ -140,7 +140,7 @@ function TranscriptContent({
         </div>
       ) : null}
       {view.items.length === 0 ? (
-        <p className="flex items-center gap-2 text-sm text-muted-foreground">
+        <p className={cn('flex items-center gap-2 text-muted-foreground', chromeSansRole('secondary'))}>
           <AlertCircle className="h-4 w-4" />
           This conversation has no messages yet.
         </p>
@@ -299,7 +299,7 @@ function UnknownActivity() {
   return (
     <p
       data-testid="conversation-unknown"
-      className="flex items-center gap-2 text-xs text-[var(--conversation-tool-foreground)]"
+      className={cn('flex items-center gap-2 text-[var(--conversation-tool-foreground)]', chromeSansRole('metadata'))}
     >
       <HelpCircle aria-hidden className="h-3.5 w-3.5 shrink-0" />
       An event this version does not show.
@@ -392,7 +392,7 @@ const STATUS = {
 export function ToolDetails({ tool }: { tool: Tool }) {
   if (!tool.input && !tool.output) {
     return (
-      <p className="pt-2 text-xs opacity-80">
+      <p className={cn('pt-2 opacity-80', chromeSansRole('caption'))}>
         {tool.status === 'running' ? 'Still running.' : 'No arguments or output were recorded.'}
       </p>
     );
