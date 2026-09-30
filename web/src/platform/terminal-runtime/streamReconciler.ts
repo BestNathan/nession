@@ -178,11 +178,17 @@ export class StreamReconciler {
     if (this.disposed) {
       return;
     }
-    // The very first frame of a connection has nothing to be ordered against,
-    // so it anchors the timeline (see `anchor`). An epoch *change* does not:
-    // the new generation has history of its own worth asking for, and the
-    // frame waits for it rather than becoming the timeline's start.
-    const anchors = this.epoch === null;
+    // A frame with nothing to be ordered against anchors the timeline (see
+    // `anchor`) rather than waiting for a history fetch to place it. That is
+    // the first frame of a connection, and it is also every frame after a
+    // reply that refused the epoch the client asked about: the agent answers
+    // `epochMatch: false` with **no events**, so a frame held for that fetch is
+    // held for one that cannot fill it — measured in CI as a terminal that
+    // showed its bootstrap and then nothing at all, for as long as the test
+    // ran (#1320). The fetch is still asked for below; anything it returns for
+    // a position the frontier has not passed is applied, and the rest is a
+    // duplicate by construction.
+    const anchors = this.epoch === null || this.frontier === null;
     if (anchors || epoch !== this.epoch) {
       this.reset(epoch);
     }
