@@ -472,12 +472,15 @@ gh pr merge <PR-NUMBER> --auto --merge
 
 **Auto-merge to staging is safe** — staging is the integration environment. The quality gate ensures correctness. Human validation happens on staging before the staging → main merge.
 
+**Acceptance is criterion-staged, not one global boolean.** Before a release PR may merge, run every `pre-merge` and `staging` criterion and record Pass/N/A evidence. A criterion may remain Pending only when its Acceptance Report stage is explicitly `post-merge` and its evidence states the merge/deploy/observation condition plus the planned verification. `Implementation Complete` / `Mergeable` are not `Accepted`.
+
 **After staging validation**, release `staging` → `main`, and bump if warranted:
 
 ```bash
-# 1. Audit what ships, then open the release PR with every Closes line
+# 1. Audit what ships and each Requirement's Acceptance Report, then open the release PR
 gh pr list --state merged --base staging --limit 20
 gh pr create --base main --head staging --title "chore: release (staging → main)" --body "..."
+# acceptance-pr-gate requires pre-merge/staging criteria to pass; explicit post-merge Pending may remain
 gh pr merge <PR-NUMBER> --merge      # MUST be --merge
 
 # 2. Version bump, only if this release warrants one (in a worktree)

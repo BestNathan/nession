@@ -30,8 +30,9 @@ Write issue bodies in the reporter's language; keep the section headers below, p
 - `bug` is lowercase. Never create `BUG`.
 - `Closes #N` belongs only in the `staging → main` release PR body.
 - Every Requirement Success Criterion uses a stable ID: `SC-01`, `SC-02`, ... . IDs survive wording edits so implementation, staging verification and release acceptance can refer to the same criterion.
+- Every Success Criterion has an acceptance **Stage**: `pre-merge`, `staging`, or `post-merge`. Choose the earliest stage where the criterion can be honestly verified; never mark something `post-merge` merely to bypass a merge gate.
 - A checked criterion means **accepted**, not merely implemented. Do not change `[ ]` to `[x]` until the criterion has an explicit acceptance conclusion and concrete evidence.
-- Every Requirement issue carries an `## Acceptance Report` with exactly one row per Success Criterion. New requirements start at `Pending`; completed closure requires every criterion to be `Pass` or justified `N/A` with evidence.
+- Every Requirement issue carries an `## Acceptance Report` with exactly one row per Success Criterion. New requirements start at `Pending`. Merge readiness may defer only explicit `post-merge` Pending rows with actionable verification evidence; completed closure still requires every criterion to be `Pass` or justified `N/A` with evidence.
 - `Close as not planned` is the cancellation path. It does not claim the implementation met the requirement and therefore does not require acceptance.
 
 ## Automated Issue Audit
@@ -80,16 +81,18 @@ Success Criteria MUST be rendered as stable checklist IDs:
 
 ## Acceptance Report
 
-| Criterion | Result | Evidence |
-|---|---|---|
-| SC-01 | Pending | implementation pending |
-| SC-02 | Pending | implementation pending |
+| Criterion | Stage | Result | Evidence |
+|---|---|---|---|
+| SC-01 | pre-merge | Pending | implementation pending |
+| SC-02 | staging | Pending | implementation pending |
 
-Create exactly one Pending row for every Success Criterion. During staging
-verification, replace Pending with Pass / Fail / justified N/A and replace the
-placeholder with concrete evidence (test, workflow run, screenshot/PR comment,
-staging observation, or other auditable proof). Only Pass / justified N/A rows
-may be checked `[x]`.
+Create exactly one Pending row for every Success Criterion and classify the earliest honest verification stage:
+
+- `pre-merge`: unit/integration/static/local verification can prove it before merge;
+- `staging`: requires the deployed staging environment; it must pass before release to `main`;
+- `post-merge`: cannot be proven until the relevant merge/deployment/observation window exists.
+
+Replace Pending with Pass / Fail / justified N/A once the criterion is actually verified and replace the placeholder with concrete evidence (test, workflow run, screenshot/PR comment, environment observation, or other auditable proof). Only Pass / justified N/A rows may be checked `[x]`. A `post-merge` row may remain unchecked + Pending when merging, but its evidence must already state the blocking event/environment and the planned verification.
 
 ## Product alignment
 
@@ -147,10 +150,7 @@ gh issue comment [N] --repo BestNathan/nession --body "[change discussion]"
 
 Update specification Status as it moves: Draft → In Discussion → Approved.
 
-Acceptance is a separate lifecycle dimension. After implementation reaches staging,
-verify every Success Criterion, update its Acceptance Report row, and only then check
-the criterion. A requirement is ready for completed closure only when every criterion
-is checked and every row is Pass or justified N/A with concrete evidence.
+Acceptance is a separate lifecycle dimension. After implementation, evaluate every Success Criterion at its declared Stage and update its Acceptance Report row only when that stage is runnable. Before merge, all `pre-merge` and `staging` criteria must be accepted; explicit `post-merge` criteria may remain Pending with actionable evidence describing what they are waiting for and how they will be verified. A requirement is ready for completed closure only when **every** criterion at every stage is checked and every row is Pass or justified N/A with concrete evidence.
 
 ---
 
@@ -288,7 +288,7 @@ Missing label? Create it now. Never drop a label to save a command.
 
 # Lifecycle
 
-**Requirement:** Draft → In Discussion → Approved → **claimed (`in-progress`)** → implementation → staging verification → **Acceptance Passed** → release → Closed. Specification Status lives in the body; acceptance lives in the Success Criteria + Acceptance Report. The feature PR may merge to staging while acceptance is still Pending; completed closure may not happen until acceptance passes.
+**Requirement:** Draft → In Discussion → Approved → **claimed (`in-progress`)** → implementation → pre-merge verification → staging verification → **Mergeable** (only explicit post-merge criteria may remain Pending) → release/merge → post-merge verification → **Acceptance Passed** → Closed. Specification Status lives in the body; acceptance lives in the Success Criteria + Acceptance Report. Merge readiness and final acceptance are different states; completed closure may not happen until every stage passes.
 
 **Bug:** Filed with analysis → on confirmation, one edit updates the body *and* narrows the labels → **claimed (`in-progress`)** → fix PR references it → claim released → closed by the release PR's `Closes #N`.
 
