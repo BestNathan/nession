@@ -77,6 +77,13 @@ pub struct Discovered {
     pub cwd: String,
     /// Newest timestamp seen, when the transcript carried timestamps.
     pub updated_at: Option<String>,
+    /// Oldest timestamp in the transcript's head window, when it carried one.
+    ///
+    /// The *first* record's, which the same bounded head read already has in
+    /// hand — so this costs no extra I/O. It is a transcript's start, and the
+    /// pair with `updated_at` is what lets a reader tell a ten-minute session
+    /// from a ten-hour one without opening the file.
+    pub created_at: Option<String>,
     /// Claude's own title for this conversation, when it wrote one.
     ///
     /// Read from the transcript's **last** `ai-title` record rather than its
@@ -253,24 +260,25 @@ impl Drop for ProjectsRootForTest {
 /// the tail for the newest timestamp — so a directory of large transcripts does
 /// not turn into a directory of full reads.
 fn inspect(path: &Path, cwd: &str) -> Option<Discovered> {
-    let (claude_session_id, recorded_cwd) = head_facts(path);
+    let head = head_facts(path);
 
     // Strict equality, on the value the transcript recorded — see the module
     // docs for why the containing directory cannot stand in for this.
-    let recorded_cwd = recorded_cwd?;
+    let recorded_cwd = head.cwd?;
     if recorded_cwd != cwd {
         return None;
     }
     // A transcript with no session id cannot be selected or cached against, so
     // it is not a candidate. Falling back to the filename would invent an
     // identity the transcript never claimed.
-    let claude_session_id = claude_session_id?;
+    let claude_session_id = head.session_id?;
 
     let tail = tail_facts(path);
 
     Some(Discovered {
         claude_session_id,
         cwd: recorded_cwd,
+        created_at: head.created_at,
         updated_at: tail.updated_at,
         title: tail.title,
         preview: tail.preview,
@@ -286,9 +294,9 @@ fn inspect(path: &Path, cwd: &str) -> Option<Discovered> {
 /// A bounded head window, read through `take` rather than a fixed array plus a
 /// slice: the slice bound is the kind of thing that is correct until someone
 /// edits the constant above it.
-fn head_facts(path: &Path) -> (Option<String>, Option<String>) {
+fn head_facts(path: &Path) -> HeadFacts {
     let Ok(mut file) = File::open(path) else {
-        return (None, None);
+        return HeadFacts::default();
     };
     let mut head = Vec::new();
     if file
@@ -297,28 +305,40 @@ fn head_facts(path: &Path) -> (Option<String>, Option<String>) {
         .read_to_end(&mut head)
         .is_err()
     {
-        return (None, None);
+        return HeadFacts::default();
     }
     let head = String::from_utf8_lossy(&head);
 
-    let mut session_id = None;
-    let mut cwd = None;
+    let mut facts = HeadFacts::default();
     for line in head.lines() {
         let Ok(record) = serde_json::from_str::<Value>(line) else {
             // A partial final line in the head window is expected; keep going.
             continue;
         };
-        if session_id.is_none() {
-            session_id = string_field(&record, "sessionId");
+        if facts.session_id.is_none() {
+            facts.session_id = string_field(&record, "sessionId");
         }
-        if cwd.is_none() {
-            cwd = string_field(&record, "cwd");
+        if facts.cwd.is_none() {
+            facts.cwd = string_field(&record, "cwd");
         }
-        if session_id.is_some() && cwd.is_some() {
+        // The first *record* that carries a timestamp, which is the transcript's
+        // start. Later records are not the start, so this is never overwritten.
+        if facts.created_at.is_none() {
+            facts.created_at = string_field(&record, "timestamp");
+        }
+        if facts.session_id.is_some() && facts.cwd.is_some() && facts.created_at.is_some() {
             break;
         }
     }
-    (session_id, cwd)
+    facts
+}
+
+/// What a transcript's head window says, before any of it is judged.
+#[derive(Default)]
+struct HeadFacts {
+    session_id: Option<String>,
+    cwd: Option<String>,
+    created_at: Option<String>,
 }
 
 /// Add every subagent transcript under `<project>/<session>/subagents/`.
@@ -344,7 +364,7 @@ fn sidechains_in(dir: &Path, parent_id: &str, parent_cwd: &str, out: &mut Vec<Di
         let Some(agent_id) = path.file_stem().and_then(|s| s.to_str()) else {
             continue;
         };
-        let (_, own_cwd) = head_facts(&path);
+        let head = head_facts(&path);
         let tail = tail_facts(&path);
         out.push(Discovered {
             // Path-derived, not `sessionId`: a subagent's own `sessionId` is
@@ -352,7 +372,8 @@ fn sidechains_in(dir: &Path, parent_id: &str, parent_cwd: &str, out: &mut Vec<Di
             // while the path it lives at is always consistent — and the path is
             // what has to be unique for two subagents of one session.
             claude_session_id: format!("{parent_id}/{agent_id}"),
-            cwd: own_cwd.unwrap_or_else(|| parent_cwd.to_string()),
+            cwd: head.cwd.unwrap_or_else(|| parent_cwd.to_string()),
+            created_at: head.created_at,
             updated_at: tail.updated_at,
             title: tail.title,
             preview: tail.preview,
@@ -600,6 +621,7 @@ pub(crate) mod tests_support {
         Discovered {
             claude_session_id: "test-session".to_string(),
             cwd: cwd.to_string(),
+            created_at: None,
             updated_at: None,
             title: None,
             preview: None,
@@ -1136,6 +1158,7 @@ mod tests {
         Discovered {
             claude_session_id: "s".to_string(),
             cwd: "/w".to_string(),
+            created_at: None,
             updated_at: None,
             // Built directly rather than through `inspect`, so there is no tail
             // to read display metadata from. The title and preview paths have
