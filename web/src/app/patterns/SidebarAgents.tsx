@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { cn } from '@/shared/lib/utils';
+import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import { agentDisplayName } from '@/shared/lib/format';
 import { SidebarSectionHead } from '@/app/patterns/SidebarSectionHead';
 import type { Agent } from '@/types';
@@ -93,7 +94,8 @@ export function SidebarAgents({
               data-agent-active={active ? 'true' : undefined}
               title={`${agentDisplayName(agent)} — ${online ? 'online' : agent.status}`}
               className={cn(
-                'flex w-full items-center gap-[var(--shell-space-2)] rounded-[var(--shell-session-row-radius)] px-[var(--shell-space-2)] py-[var(--shell-node-row-pad-y)] text-[length:var(--shell-node-font-size)]',
+                'flex w-full items-center gap-[var(--shell-space-2)] rounded-[var(--shell-session-row-radius)] px-[var(--shell-space-2)] py-[var(--shell-node-row-pad-y)]',
+                chromeSansRole('secondary'),
                 active ? 'text-foreground' : 'text-[color:var(--text-secondary)]',
               )}
             >

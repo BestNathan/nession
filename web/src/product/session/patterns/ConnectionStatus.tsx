@@ -1,4 +1,5 @@
 import { cn } from '@/shared/lib/utils';
+import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import type {
   AgentChannel,
   AttachmentChannel,
@@ -63,7 +64,7 @@ export function ConnectionStatus({
   return (
     <div
       data-testid="connection-status"
-      className="truncate flex min-w-0 items-center gap-1 text-xs"
+      className={cn('truncate flex min-w-0 items-center gap-1', chromeSansRole('caption'))}
     >
       {includeAgent ? (
         <>

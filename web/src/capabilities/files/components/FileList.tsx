@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { FileOps, FileEntry } from '@/capabilities/files';
+import { cn } from '@/shared/lib/utils';
+import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import {
   FileListEntryRows,
   FileListErrorPanel,
@@ -117,7 +119,10 @@ export function FileList({
     >
       {atRoot && workspaceContextLine ? (
         <p
-          className="px-[var(--shell-space-3)] pt-[var(--shell-space-1)] text-[length:var(--workspace-tree-font-size)] text-muted-foreground"
+          className={cn(
+            'px-[var(--shell-space-3)] pt-[var(--shell-space-1)] text-muted-foreground',
+            chromeSansRole('secondary'),
+          )}
           data-testid="files-app-root-context"
         >
           {workspaceContextLine}

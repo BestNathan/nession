@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { useIncomingCapabilityFocus } from '@/app/useIncomingCapabilityFocus';
 import { useShellMainFocusTooling } from '@/app/useShellMainFocusTooling';
 import { cn } from '@/shared/lib/utils';
+import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import type { FileOps } from '@/capabilities/files';
 import type { DomainState } from '@/product/session/model/domainState';
 import { AppHome } from '@/app/experiences/app/AppHome';
@@ -134,7 +135,7 @@ function NoSessionSurface({
   return (
     <div
       data-testid="session-empty-state"
-      className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 text-sm text-muted-foreground"
+      className={cn('flex min-h-0 flex-1 flex-col items-center justify-center gap-2 text-muted-foreground', chromeSansRole('secondary'))}
     >
       <p>Select a session to start working</p>
     </div>

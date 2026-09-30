@@ -9,6 +9,7 @@ import { previewLine } from '../model/previewLine';
 import { dateBucket, type DateBucket } from '../model/dateBucket';
 import { ConversationTranscript } from './ConversationTranscript';
 import { cn } from '@/shared/lib/utils';
+import { chromeSansRole } from '@/shared/typography/chromeRoles';
 
 type Candidate = ClaudeCodeConversationItem;
 
@@ -57,7 +58,7 @@ function CandidateRow({
             selection still speaks it. */}
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span
-            className="truncate text-sm font-medium"
+            className={cn('truncate', chromeSansRole('primary'))}
             title={candidate.id}
             data-testid="conversation-candidate-title"
           >
@@ -68,14 +69,16 @@ function CandidateRow({
               title and time rather than reserving a blank second line. */}
           {preview ? (
             <span
-              className="truncate text-xs text-muted-foreground"
+              className={cn('truncate text-muted-foreground', chromeSansRole('secondary'))}
               data-testid="conversation-candidate-preview"
             >
               {preview}
             </span>
           ) : null}
         </span>
-        {time ? <span className="shrink-0 text-xs text-muted-foreground">{time}</span> : null}
+        {time ? (
+          <span className={cn('shrink-0 text-muted-foreground', chromeSansRole('metadata'))}>{time}</span>
+        ) : null}
       </button>
     </li>
   );
@@ -129,7 +132,7 @@ function CandidateList({
         return (
           <section key={bucket}>
             <h3
-              className="px-2 pb-1 text-xs font-semibold text-muted-foreground"
+              className={cn('px-2 pb-1 uppercase tracking-wide text-muted-foreground', chromeSansRole('metadata'))}
               data-testid="conversation-bucket"
             >
               {BUCKET_LABELS[bucket]}
@@ -155,7 +158,7 @@ function StateNotice({
   children: ReactNode;
 }) {
   return (
-    <p className="p-6 text-sm text-muted-foreground" data-testid={testId}>
+    <p className={cn('p-6 text-muted-foreground', chromeSansRole('secondary'))} data-testid={testId}>
       {children}
     </p>
   );
@@ -251,7 +254,7 @@ function ConversationList({
   return (
     <div className="space-y-3 p-4" data-testid="conversation-list">
       <div className="flex items-center justify-between gap-3">
-        <h2 className="text-xs font-semibold text-muted-foreground">
+        <h2 className={cn('uppercase tracking-wide text-muted-foreground', chromeSansRole('metadata'))}>
           Conversations in this directory
         </h2>
         {open && onBack ? (
@@ -261,7 +264,7 @@ function ConversationList({
         ) : null}
       </div>
       {candidates.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No conversations to choose from.</p>
+        <p className={cn('text-muted-foreground', chromeSansRole('secondary'))}>No conversations to choose from.</p>
       ) : (
         <CandidateList candidates={candidates} openId={open} onSelect={onOpen} />
       )}
@@ -285,10 +288,10 @@ function ConversationHeader({
         {/* The label comes from the `messages` response itself — its
             `conversation` is the full item shape (#1222), so the header needs
             no join into the list by id, and the two can never disagree. */}
-        <p className="truncate text-sm font-medium" title={view.conversation?.id}>
+        <p className={cn('truncate', chromeSansRole('primary'))} title={view.conversation?.id}>
           {conversationLabel(view.conversation)}
         </p>
-        <p className="flex items-center gap-2 text-xs text-muted-foreground">
+        <p className={cn('flex items-center gap-2 text-muted-foreground', chromeSansRole('metadata'))}>
           {/* The provider's own word. `inactive` is a real, readable
               conversation whose Claude has finished (#1005 criterion 4) —
               saying so is the difference between "not live" and "broken" —
@@ -372,7 +375,7 @@ export function ConversationView({
   if (view.error) {
     return (
       <div className="space-y-3 p-6" data-testid="conversation-error">
-        <p className="text-sm text-destructive" role="alert">{view.error}</p>
+        <p className={cn(chromeSansRole('secondary'), 'text-destructive')} role="alert">{view.error}</p>
         <Button variant="outline" size="sm" onClick={() => onReload()}>
           Retry
         </Button>
@@ -454,7 +457,7 @@ export function ConversationView({
   if (view.messagesState === 'not_found' || view.messagesState === 'unavailable') {
     return (
       <div className="space-y-3 p-6" data-testid="conversation-missing">
-        <p className="text-sm text-muted-foreground">
+        <p className={cn('text-muted-foreground', chromeSansRole('secondary'))}>
           That conversation is no longer in this Session&rsquo;s directory.
         </p>
         <Button variant="outline" size="sm" onClick={() => setShowList(true)}>

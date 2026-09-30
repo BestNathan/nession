@@ -134,7 +134,7 @@ The audit separately shows whether that chain reaches shipping consumers; a corr
 
 ### Finding
 
-Typography is **partially covered but fragmented**.
+Typography is **converging under #1216**: chrome roles now carry size, weight, and line-height via `experience.{web,app}.typography.*` and `web/src/shared/typography/chromeRoles.ts`; raw `text-*` / local `font-*` drift remains in shadcn primitives, dialogs, and some capability edges (Phase 4 audit).
 
 The Primitive layer only has the shared body scale:
 
