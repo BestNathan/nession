@@ -3,6 +3,8 @@ import { observeElementRect as defaultObserveElementRect, useVirtualizer } from 
 import { parseJsonlRecords, type JsonlRecord } from '../model/jsonParse';
 import { JsonlRecord as JsonlRecordRow } from './JsonlRecord';
 import { readScrollportHeight, syncJsonlScrollportHeight } from './jsonlScrollport';
+import { cn } from '@/shared/lib/utils';
+import { chromeSansRole } from '@/shared/typography/chromeRoles';
 
 /** Bootstrap only — real height comes from measureElement + ResizeObserver (#1199 review). */
 const ESTIMATE_BEFORE_MEASURE_PX = 96;
@@ -67,7 +69,7 @@ export function JsonlPreview({ content }: JsonlPreviewProps) {
 
   if (records.length === 0) {
     return (
-      <div className="p-[var(--workspace-editor-pad-y)] px-[var(--workspace-editor-head-pad-x)] text-sm text-muted-foreground">
+      <div className={cn('p-[var(--workspace-editor-pad-y)] px-[var(--workspace-editor-head-pad-x)] text-muted-foreground', chromeSansRole('secondary'))}>
         No JSONL records in this file.
       </div>
     );

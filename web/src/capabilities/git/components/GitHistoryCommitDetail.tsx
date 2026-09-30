@@ -1,4 +1,5 @@
 import { cn } from '@/shared/lib/utils';
+import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import { describeUnavailable, formatBytes } from '../state';
 import type { GitCommitChangedFile, GitCommitResponse } from '../types';
 
@@ -19,28 +20,28 @@ export function GitHistoryCommitDetail({
 }) {
   if (!oid) {
     return (
-      <p data-testid="git-commit-empty" className="p-4 text-sm text-muted-foreground">
+      <p data-testid="git-commit-empty" className={cn('p-4 text-muted-foreground', chromeSansRole('secondary'))}>
         Select a commit to see its details and changed files.
       </p>
     );
   }
   if (loading) {
     return (
-      <p data-testid="git-commit-loading" className="p-4 text-sm text-muted-foreground">
+      <p data-testid="git-commit-loading" className={cn('p-4 text-muted-foreground', chromeSansRole('secondary'))}>
         Reading commit…
       </p>
     );
   }
   if (error) {
     return (
-      <p data-testid="git-commit-error" className="p-4 text-sm text-destructive">
+      <p data-testid="git-commit-error" className={cn('p-4 text-destructive', chromeSansRole('body'))}>
         {error}
       </p>
     );
   }
   if (!detail || detail.state !== 'ok') {
     return (
-      <p data-testid="git-commit-unavailable" className="p-4 text-sm text-muted-foreground">
+      <p data-testid="git-commit-unavailable" className={cn('p-4 text-muted-foreground', chromeSansRole('secondary'))}>
         {detail ? describeUnavailable(detail).title : 'Commit unavailable.'}
       </p>
     );
@@ -49,16 +50,16 @@ export function GitHistoryCommitDetail({
   const c = detail.commit;
   return (
     <div data-testid="git-commit-detail" className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
-      <p className="text-sm font-medium">{c.subject}</p>
+      <p className={chromeSansRole('secondary')}>{c.subject}</p>
       {c.body ? (
-        <pre className="whitespace-pre-wrap text-xs text-muted-foreground">{c.body}</pre>
+        <pre className={cn('whitespace-pre-wrap text-muted-foreground', chromeSansRole('metadata'))}>{c.body}</pre>
       ) : null}
       {c.messageTruncated ? (
-        <p className="text-xs text-muted-foreground">
+        <p className={cn('text-muted-foreground', chromeSansRole('metadata'))}>
           Message truncated — {formatBytes(c.messageTruncatedBytes)} not read.
         </p>
       ) : null}
-      <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 text-xs">
+      <dl className={cn('grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1', chromeSansRole('metadata'))}>
         <dt className="text-muted-foreground">Commit</dt>
         <dd className="truncate font-mono" title={c.oid}>
           {c.oid}
@@ -83,7 +84,7 @@ export function GitHistoryCommitDetail({
         ) : null}
       </dl>
       <div>
-        <p className="mb-1 text-xs font-medium text-muted-foreground">Changed files</p>
+        <p className={cn('mb-1 text-muted-foreground', chromeSansRole('metadata'))}>Changed files</p>
         <ul data-testid="git-commit-files" className="flex flex-col gap-0.5">
           {c.files.map((file) => (
             <ChangedFileRow
@@ -95,7 +96,7 @@ export function GitHistoryCommitDetail({
           ))}
         </ul>
         {c.filesTruncated ? (
-          <p className="mt-2 text-xs text-muted-foreground">
+          <p className={cn('mt-2 text-muted-foreground', chromeSansRole('metadata'))}>
             File list truncated — {formatBytes(c.filesTruncatedBytes)} not read.
           </p>
         ) : null}
@@ -122,7 +123,8 @@ function ChangedFileRow({
         data-path={file.path}
         onClick={() => onSelect()}
         className={cn(
-          'w-full rounded px-2 py-1 text-left text-xs hover:bg-accent',
+          'w-full rounded px-2 py-1 text-left hover:bg-accent',
+          chromeSansRole('metadata'),
           selected && 'bg-accent',
         )}
       >

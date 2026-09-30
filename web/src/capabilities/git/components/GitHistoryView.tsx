@@ -10,6 +10,8 @@ import { GitDiffView } from './GitDiffView';
 import { GitHistoryCommitDetail } from './GitHistoryCommitDetail';
 import { GitHistoryCommitList } from './GitHistoryCommitList';
 import type { WorkspaceContext } from '@/app/workspace/workspaceContext';
+import { cn } from '@/shared/lib/utils';
+import { chromeSansRole } from '@/shared/typography/chromeRoles';
 
 export function GitHistoryView({ ctx }: { ctx: WorkspaceContext }) {
   const agentId = ctx.agent?.agent_id;
@@ -74,7 +76,7 @@ export function GitHistoryView({ ctx }: { ctx: WorkspaceContext }) {
         data-state={history.state}
         className="flex h-full min-h-0 items-center justify-center px-6 text-center"
       >
-        <p className="max-w-sm text-sm text-muted-foreground">
+        <p className={cn('max-w-sm text-muted-foreground', chromeSansRole('secondary'))}>
           {describeUnavailable(history).title}
         </p>
       </div>

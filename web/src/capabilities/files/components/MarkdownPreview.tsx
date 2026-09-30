@@ -4,6 +4,8 @@ import { Component, type ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { Info } from 'lucide-react';
 import { getRehypePlugins, getRemarkPlugins, getRemarkRehypeOptions } from '@/shared/markdown';
+import { cn } from '@/shared/lib/utils';
+import { chromeSansRole } from '@/shared/typography/chromeRoles';
 
 /** Props for MarkdownPreview */
 interface MarkdownPreviewProps {
@@ -35,11 +37,12 @@ export class MarkdownErrorBoundary extends Component<ErrorBoundaryProps, ErrorBo
   render() {
     if (this.state.hasError) {
       return (
-        <div className="flex flex-col items-center justify-center h-full gap-3 p-4 text-sm text-muted-foreground">
+        <div className={cn('flex h-full flex-col items-center justify-center gap-3 p-4 text-muted-foreground', chromeSansRole('secondary'))}>
           <p>Preview unavailable</p>
           <button
+            type="button"
             onClick={this.props.onFallback}
-            className="px-3 py-1.5 text-xs rounded bg-secondary hover:bg-secondary/80 text-secondary-foreground"
+            className={cn('rounded bg-secondary px-3 py-1.5 text-secondary-foreground hover:bg-secondary/80', chromeSansRole('metadata'))}
           >
             Show raw
           </button>
@@ -69,7 +72,7 @@ export function MarkdownPreview({ content, filename }: MarkdownPreviewProps) {
     <MarkdownErrorBoundary onFallback={handleErrorFallback}>
       <div className="markdown-preview overflow-y-auto h-full p-4 text-sm leading-relaxed">
         {isLargeFile && (
-          <div className="flex items-center gap-2 px-3 py-2 mb-3 text-xs rounded border bg-muted border-border text-muted-foreground">
+          <div className={cn('mb-3 flex items-center gap-2 rounded border border-border bg-muted px-3 py-2 text-muted-foreground', chromeSansRole('metadata'))}>
             <Info className="h-3.5 w-3.5 shrink-0" />
             <span>Large file — rendering may be slow</span>
           </div>

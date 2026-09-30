@@ -2,6 +2,8 @@ import { useMemo } from 'react';
 import { JsonTree } from '@/components/json/JsonTree';
 import { jsonPreviewSurfaceClass } from '@/components/json/jsonTreeSyntax';
 import { parseJsonDocument } from '../model/jsonParse';
+import { cn } from '@/shared/lib/utils';
+import { chromeSansRole } from '@/shared/typography/chromeRoles';
 
 interface JsonPreviewProps {
   content: string;
@@ -13,12 +15,15 @@ export function JsonPreview({ content }: JsonPreviewProps) {
   if (!parsed.ok) {
     return (
       <div
-        className="flex flex-col gap-2 p-[var(--workspace-editor-pad-y)] px-[var(--workspace-editor-head-pad-x)] text-sm"
+        className={cn(
+          'flex flex-col gap-2 p-[var(--workspace-editor-pad-y)] px-[var(--workspace-editor-head-pad-x)]',
+          chromeSansRole('secondary'),
+        )}
         role="alert"
       >
-        <p className="font-medium text-foreground">Invalid JSON</p>
+        <p className={cn('text-foreground', chromeSansRole('secondary'))}>Invalid JSON</p>
         <p className="text-muted-foreground font-mono text-[length:var(--workspace-editor-font-size)]">{parsed.message}</p>
-        <p className="text-muted-foreground text-xs">Switch to Raw to view or edit the source.</p>
+        <p className={cn('text-muted-foreground', chromeSansRole('metadata'))}>Switch to Raw to view or edit the source.</p>
       </div>
     );
   }

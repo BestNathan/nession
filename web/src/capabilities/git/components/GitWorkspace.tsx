@@ -294,8 +294,8 @@ function GitBody({
         className="flex h-full min-h-0 items-center justify-center px-6 text-center"
       >
         <div className="max-w-sm space-y-1.5">
-          <p className="text-sm font-medium text-foreground">{copy.title}</p>
-          {copy.detail ? <p className="text-xs text-muted-foreground">{copy.detail}</p> : null}
+          <p className={cn('text-foreground', chromeSansRole('secondary'))}>{copy.title}</p>
+          {copy.detail ? <p className={cn('text-muted-foreground', chromeSansRole('metadata'))}>{copy.detail}</p> : null}
         </div>
       </div>
     );

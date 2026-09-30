@@ -1,4 +1,5 @@
 import { cn } from '@/shared/lib/utils';
+import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
 import { classifyDiffLine, formatBytes } from '../state';
 import type { GitDiffResponse } from '../types';
 
@@ -36,28 +37,28 @@ export function GitDiffView({
 }) {
   if (loading) {
     return (
-      <p data-testid="git-diff-loading" className="p-4 text-sm text-muted-foreground">
+      <p data-testid="git-diff-loading" className={cn('p-4 text-muted-foreground', chromeSansRole('secondary'))}>
         Loading diff…
       </p>
     );
   }
   if (error) {
     return (
-      <p data-testid="git-diff-error" role="alert" className="p-4 text-sm text-destructive">
+      <p data-testid="git-diff-error" role="alert" className={cn('p-4 text-destructive', chromeSansRole('body'))}>
         {error}
       </p>
     );
   }
   if (!response) {
     return (
-      <p data-testid="git-diff-empty" className="p-4 text-sm text-muted-foreground">
+      <p data-testid="git-diff-empty" className={cn('p-4 text-muted-foreground', chromeSansRole('secondary'))}>
         Select a changed file to see what changed in it.
       </p>
     );
   }
   if (response.state !== 'ok') {
     return (
-      <p data-testid="git-diff-unavailable" className="p-4 text-sm text-muted-foreground">
+      <p data-testid="git-diff-unavailable" className={cn('p-4 text-muted-foreground', chromeSansRole('secondary'))}>
         {response.message ?? 'This file’s diff is not available.'}
       </p>
     );
@@ -67,21 +68,21 @@ export function GitDiffView({
   return (
     <div data-testid="git-diff" className="flex min-h-0 flex-1 flex-col">
       <div className="shrink-0 border-b px-4 py-2">
-        <p className="truncate text-sm font-medium" title={diff.path}>
+        <p className={cn('truncate', chromeMonoRole('code'))} title={diff.path}>
           {diff.path}
         </p>
         {diff.binary ? (
-          <p className="text-xs text-muted-foreground">Binary file — no line diff to show</p>
+          <p className={cn('text-muted-foreground', chromeSansRole('metadata'))}>Binary file — no line diff to show</p>
         ) : null}
         {diff.truncated ? (
-          <p data-testid="git-diff-truncated" className="text-xs text-muted-foreground">
+          <p data-testid="git-diff-truncated" className={cn('text-muted-foreground', chromeSansRole('metadata'))}>
             Diff truncated: {formatBytes(diff.truncated_bytes)} left out of a large change.
           </p>
         ) : null}
       </div>
       <pre
         data-testid="git-diff-body"
-        className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap py-2 font-mono text-xs"
+        className={cn('min-h-0 flex-1 overflow-auto whitespace-pre-wrap py-2 font-mono', chromeMonoRole('code'))}
       >
         {diff.text === '' ? (
           <span className="block px-4 text-muted-foreground">

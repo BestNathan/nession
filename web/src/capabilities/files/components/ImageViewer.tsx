@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react';
 import { ZoomIn, ZoomOut, Maximize, Minimize } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/shared/lib/utils';
+import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
 
 export interface ImageViewerProps {
   blobUrl: string;
@@ -19,10 +20,10 @@ export function ImageViewer({ blobUrl, filename }: ImageViewerProps) {
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between px-2 py-1 border-b flex-shrink-0">
-        <span className="text-xs font-medium text-foreground truncate max-w-[200px]">
+        <span className={cn('max-w-[200px] truncate text-foreground', chromeSansRole('metadata'))}>
           {filename}
         </span>
-        <span className="text-xs text-muted-foreground">{Math.round(scale * 100)}%</span>
+        <span className={cn('text-muted-foreground', chromeSansRole('metadata'))}>{Math.round(scale * 100)}%</span>
       </div>
       <div className="flex-1 min-h-0 overflow-auto flex items-center justify-center bg-inverse/20">
         <img
@@ -40,7 +41,7 @@ export function ImageViewer({ blobUrl, filename }: ImageViewerProps) {
           <ZoomOut className="h-3.5 w-3.5" />
         </Button>
         <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { setScale(1); }} aria-label="Reset zoom">
-          <span className="text-xs font-mono">{Math.round(scale * 100)}%</span>
+          <span className={chromeMonoRole('metadata')}>{Math.round(scale * 100)}%</span>
         </Button>
         <Button variant="ghost" size="icon" className="h-7 w-7" onClick={zoomIn} aria-label="Zoom in">
           <ZoomIn className="h-3.5 w-3.5" />
