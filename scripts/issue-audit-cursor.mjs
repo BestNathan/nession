@@ -234,9 +234,10 @@ async function runCursorAgent(issue, outDir) {
     apiKey: process.env.CURSOR_API_KEY,
     name: `nession-issue-audit-${issue.number}`,
     model: selection,
-    tools: ['read', 'grep', 'glob', 'ls'],
+    tools: ['read', 'grep', 'glob', 'ls', 'mcp'],
     local: {
       cwd: process.cwd(),
+      settingSources: [],
       store,
       customTools,
     },
@@ -245,8 +246,12 @@ async function runCursorAgent(issue, outDir) {
   try {
     const run = await agent.send(promptFor(issue, audit));
     let turns = 0;
+    let availableTools = [];
+    const toolCalls = [];
     for await (const event of run.stream()) {
       if (event.type === 'usage') turns += 1;
+      if (event.type === 'system' && Array.isArray(event.tools)) availableTools = event.tools;
+      if (event.type === 'tool_call' && event.status === 'running') toolCalls.push(event.name);
     }
     const result = await run.wait();
     let billed = null;
@@ -261,6 +266,9 @@ async function runCursorAgent(issue, outDir) {
       run_id: result.id ?? run.id ?? null,
       request_id: result.requestId ?? run.requestId ?? null,
       turns,
+      available_tools: availableTools,
+      tool_calls: toolCalls,
+      final_text: typeof result.result === 'string' ? result.result.slice(0, 4000) : null,
       duration_ms: result.durationMs ?? run.durationMs ?? null,
       usage,
       raw_cost_usd: cost.raw_cost_usd,
@@ -283,6 +291,9 @@ async function runCursorAgent(issue, outDir) {
 function selfTest() {
   assert.equal(normalizeCursorSdkModule({ Cursor: {}, Agent: {} }).Cursor != null, true);
   assert.equal(normalizeCursorSdkModule({ default: { Cursor: {}, Agent: {} } }).Agent != null, true);
+  const restrictedTools = ['read', 'grep', 'glob', 'ls', 'mcp'];
+  assert.equal(restrictedTools.includes('mcp'), true);
+  assert.equal(restrictedTools.includes('shell'), false);
   const catalog = [{ id: 'composer-2.5', parameters: [{ id: 'fast', values: [{ value: 'false' }, { value: 'true' }] }] }];
   assert.deepEqual(modelSelectionFromCatalog(catalog, { id: 'composer-2.5', fast: true }), {
     id: 'composer-2.5', params: [{ id: 'fast', value: 'true' }],
@@ -294,7 +305,7 @@ function selfTest() {
   assert.deepEqual(normalizeCost({ cost: { rawCostCents: 123, chargedCents: 45 } }), { raw_cost_usd: 1.23, charged_cost_usd: 0.45 });
   const candidate = candidateIssue({ labels: [{ name: 'in-progress' }] }, 'body', ['bug', 'web']);
   assert.deepEqual(labelNames(candidate).sort(), ['bug', 'in-progress', 'web']);
-  console.log('issue-audit-cursor self-test: 7 cases passed');
+  console.log('issue-audit-cursor self-test: 9 cases passed');
 }
 
 async function main() {
