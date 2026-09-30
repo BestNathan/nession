@@ -128,6 +128,26 @@ describe('createTerminalAgentApi', () => {
 
       expect(cb).not.toHaveBeenCalled();
     });
+
+    it('carries the bootstrap marker with the metadata that qualifies it (#1305)', () => {
+      const cb = vi.fn();
+      api.onOutput(cb);
+
+      surface.pushMessage('agent.terminal.output', {
+        session_name: 'work',
+        data: 'aGk=',
+        bootstrap: { requested_lines: 5000, truncated: true },
+      });
+      surface.pushMessage('agent.terminal.output', { session_name: 'work', data: 'aGk=' });
+
+      // Whether the agent had to cut the snapshot short decides whether the
+      // consumer may replace its buffer with it — a fact this decode step used
+      // to throw away by collapsing the payload to `true`.
+      expect(cb.mock.calls[0]?.[0].bootstrap).toEqual({ requestedLines: 5000, truncated: true });
+      // A live frame says `undefined`, which is not a marker with no contents:
+      // absence is the only thing that means "append" (#321).
+      expect(cb.mock.calls[1]?.[0].bootstrap).toBeUndefined();
+    });
   });
 
   describe('onResize', () => {

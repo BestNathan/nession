@@ -9,6 +9,7 @@ import type {
   TerminalStatus,
 } from '../types';
 import type { TerminalTransport } from '../transport/TerminalTransport';
+import type { TerminalBootstrap } from '../bootstrap';
 import { InputRouter } from '../input/InputRouter';
 import { InputSourceManager } from '../input/InputSourceManager';
 import { TerminalInputHandler } from '../input/TerminalInputHandler';
@@ -27,11 +28,28 @@ import { gridFor } from '../grid';
 import type { FontSizeManager } from '../FontSizeManager';
 
 /**
- * What replaces a buffer when a bootstrap arrives (#321): erase the display,
- * erase the scrollback, home the cursor. Deliberately not `terminal.reset()`,
- * which also resets modes — see {@link TerminalController.hasSessionOutput}.
+ * What replaces a buffer when a **complete** bootstrap arrives (#321): erase
+ * the display, erase the scrollback, home the cursor. Deliberately not
+ * `terminal.reset()`, which also resets modes — see
+ * {@link TerminalController.hasSessionOutput}.
  */
 const BOOTSTRAP_BUFFER_RESET = '\x1b[2J\x1b[3J\x1b[H';
+
+/**
+ * What a **truncated** bootstrap gets instead (#1305): erase the display and
+ * home the cursor, but leave the scrollback alone.
+ *
+ * The agent's byte ceiling drops the *oldest* history, so a truncated snapshot
+ * is newer but shorter than what a long-attached client already holds — its
+ * scrollback budget is 10k lines (mobile) / 50k (desktop)
+ * (`DeviceProfile.PROFILES`) against the agent's 5000-line, 512 KiB capture.
+ * Erasing the scrollback for a snapshot that cannot refill it destroys context
+ * the client is configured to keep, so the one thing the snapshot *can*
+ * restore — the current screen — is what gets replaced. `\x1b[2J` erases the
+ * viewport and leaves the scrollback; `\x1b[3J` is the half that would not
+ * come back.
+ */
+const BOOTSTRAP_SCREEN_RESET = '\x1b[2J\x1b[H';
 
 export interface TerminalControllerEvents {
   onTransportReady?: (ready: boolean) => void;
@@ -213,7 +231,7 @@ export class TerminalController {
     this.teardownTransport();
     const transport = this.transportFactory();
     this.transport = transport;
-    transport.onOutput = (data: Uint8Array, bootstrap?: boolean) => {
+    transport.onOutput = (data: Uint8Array, bootstrap?: TerminalBootstrap) => {
       // A bootstrap is the session's history, not more output: it **replaces**
       // this buffer instead of appending to it, which is the whole reason the
       // agent can re-send history on every attach that needs one without the
@@ -224,8 +242,12 @@ export class TerminalController {
       // alternate screen of a TUI whose pane this snapshot came from. Erase
       // display, erase scrollback, cursor home: the three things a replaced
       // buffer needs, and nothing else.
+      //
+      // A snapshot the agent had to cut short is the one case that does not get
+      // the third one — it is not a history that can stand in for what the
+      // client already has (#1305).
       if (bootstrap) {
-        terminal.write(BOOTSTRAP_BUFFER_RESET);
+        terminal.write(bootstrap.truncated ? BOOTSTRAP_SCREEN_RESET : BOOTSTRAP_BUFFER_RESET);
       }
       const follow = this.capsuleOcclusionScroll?.snapshotFollowing() ?? false;
       terminal.write(data, () => {

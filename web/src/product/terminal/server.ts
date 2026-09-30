@@ -1,4 +1,8 @@
 import { decodeTerminalData, encodeBase64 } from './base64';
+import {
+  decodeBootstrapMarker,
+  type TerminalBootstrap,
+} from '@/platform/terminal-runtime/bootstrap';
 import { WIRE as RELAY_BEGIN_WIRE } from '@/generated/protocol/core/server-session-relay-begin/v1';
 import { WIRE as RELAY_END_WIRE } from '@/generated/protocol/core/server-session-relay-end/v1';
 import { WIRE as TERMINAL_INPUT_WIRE } from '@/generated/protocol/core/agent-terminal-input/v1';
@@ -10,14 +14,16 @@ import type { TransportPlugin, PluginSurface } from '@/platform/socket/types';
 import type { RelayBeginOptions } from '@/platform/attach/relayServerConnection';
 
 /**
- * A relay output frame. `bootstrap` is true when the bytes are the session's
- * **history** rather than its live output (#321) — the marker the agent sets on
- * the snapshot it sends an attaching client. It travels the relay unchanged
- * because the Server forwards the agent's `agent.terminal.output` payload
- * frame-for-frame; the only reason it needs naming here is that this callback
- * takes bytes rather than a frame.
+ * A relay output frame. `bootstrap` is present when the bytes are the
+ * session's **history** rather than its live output (#321) — the marker the
+ * agent sets on the snapshot it sends an attaching client. It travels the
+ * relay unchanged because the Server forwards the agent's
+ * `agent.terminal.output` payload frame-for-frame; the only reason it needs
+ * naming here is that this callback takes bytes rather than a frame. The
+ * marker carries the agent's metadata about the snapshot, including whether a
+ * byte ceiling cut it short (#1305).
  */
-type RelayOutputCallback = (data: Uint8Array, bootstrap?: boolean) => void;
+type RelayOutputCallback = (data: Uint8Array, bootstrap?: TerminalBootstrap) => void;
 type RelayResizeCallback = (cols: number, rows: number) => void;
 
 /** One registration, tagged with the install generation that created it. */
@@ -174,9 +180,10 @@ export class TerminalServerPlugin implements TransportPlugin, TerminalServerApi 
       data = new TextEncoder().encode(rawData);
     }
 
-    // Presence of the marker is the fact, not its contents — the same reading
-    // the P2P path in ./agent gives it.
-    const bootstrap = payload.bootstrap === undefined ? undefined : true;
+    // Presence is the fact, the contents qualify it — the same reading the P2P
+    // path in ./agent gives it, through the same decoder, so the two transports
+    // cannot drift on what a bootstrap means (#1305).
+    const bootstrap = decodeBootstrapMarker(payload.bootstrap);
 
     const callbacks = this.outputCallbacks.get(sessionId);
     if (callbacks) {
