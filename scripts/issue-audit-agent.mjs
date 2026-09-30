@@ -118,7 +118,7 @@ function appendSummary(record) {
     lines.push(
       `- DeepSeek configured model: \`${record.agent.model ?? 'unknown'}\``,
       `- Claude request model: \`${record.agent.claude_request_model ?? 'unknown'}\``,
-      `- Backend mapping: \`${record.agent.backend_mapping ?? 'unknown'}\`,
+      `- Backend mapping: \`${record.agent.backend_mapping ?? 'unknown'}\``,
       `- Session: \`${record.agent.session_id ?? 'unknown'}\``,
       `- Input tokens: ${usage.input_tokens}`,
       `- Output tokens: ${usage.output_tokens}`,
