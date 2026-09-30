@@ -6,7 +6,14 @@
 //!   list/v1
 //!   messages/v1
 //!   read/v1
+//!   transcript_items/v1
+//!   transcripts/v1
 //! ```
+//!
+//! The directory is spelled with an underscore and the unit id is not
+//! (`transcript-items`), because one is a Rust module path and the other is a
+//! `ProtocolId` — which refuses underscores. The wire takes the id, so the two
+//! legitimately differ here and only here.
 //!
 //! A directory per Protocol Unit, a file per contract version — the same layout
 //! `nession-git` uses, for the reason recorded there: a v2 goes beside `v1.rs`
