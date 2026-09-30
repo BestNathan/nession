@@ -93,15 +93,41 @@ function parseAcceptanceReport(body) {
   const errors = [];
   const rows = new Map();
   if (section == null) return { rows, errors: ['missing Acceptance Report section'] };
+
   const table = section.split('\n').map(splitMarkdownRow).filter(Boolean);
-  const header = table.findIndex((cells) => cells.slice(0, 3).map((x) => x.toLowerCase()).join('|') === 'criterion|result|evidence');
-  if (header < 0) return { rows, errors: ['Acceptance Report must contain Criterion / Result / Evidence table'] };
+  let header = -1;
+  let staged = false;
+  for (let i = 0; i < table.length; i += 1) {
+    const normalized = table[i].map((x) => x.toLowerCase());
+    if (normalized.slice(0, 4).join('|') === 'criterion|stage|result|evidence') {
+      header = i;
+      staged = true;
+      break;
+    }
+    if (normalized.slice(0, 3).join('|') === 'criterion|result|evidence') {
+      header = i;
+      break;
+    }
+  }
+  if (header < 0) {
+    return {
+      rows,
+      errors: ['Acceptance Report must contain Criterion / Stage / Result / Evidence table (legacy Criterion / Result / Evidence remains supported)'],
+    };
+  }
+
   for (const cells of table.slice(header + 1)) {
-    if (cells.length < 3 || cells.every((cell) => /^:?-{3,}:?$/.test(cell))) continue;
+    if (cells.length < (staged ? 4 : 3) || cells.every((cell) => /^:?-{3,}:?$/.test(cell))) continue;
     const id = cells[0].trim().toUpperCase();
     if (!/^SC-\d{2,}$/.test(id)) continue;
-    if (rows.has(id)) errors.push(`duplicate Acceptance Report row for ${id}`);
-    else rows.set(id, { result: cells[1].trim().toLowerCase(), evidence: cells.slice(2).join(' | ').trim() });
+    if (rows.has(id)) {
+      errors.push(`duplicate Acceptance Report row for ${id}`);
+      continue;
+    }
+    const stage = staged ? cells[1].trim().toLowerCase() : 'staging';
+    const result = (staged ? cells[2] : cells[1]).trim().toLowerCase();
+    const evidence = cells.slice(staged ? 3 : 2).join(' | ').trim();
+    rows.set(id, { stage, result, evidence, explicitStage: staged });
   }
   return { rows, errors };
 }
@@ -155,6 +181,7 @@ function validateRequirement(issue, errors) {
   for (const id of success.ids) if (!report.rows.has(id)) errors.push(`${id} has no Acceptance Report row`);
   for (const id of report.rows.keys()) if (!success.ids.includes(id)) errors.push(`Acceptance Report contains unknown criterion ${id}`);
   for (const [id, row] of report.rows) {
+    if (!new Set(['pre-merge', 'staging', 'post-merge']).has(row.stage)) errors.push(`${id} has unsupported Acceptance stage ${row.stage || '(empty)'}`);
     if (!new Set(['pending', 'pass', 'fail', 'n/a']).has(row.result)) errors.push(`${id} has unsupported Acceptance result ${row.result || '(empty)'}`);
     if (!row.evidence) errors.push(`${id} has empty Acceptance evidence`);
   }
@@ -195,7 +222,7 @@ function validRequirement() {
     number: 2,
     title: 'Requirement: audit issues',
     labels: [{ name: 'requirement' }, { name: 'ci' }],
-    body: `## Requirements: audit issues\n\n### Success Criteria\n\n- [ ] SC-01 validates issues\n- [ ] SC-02 reports usage\n\n## Acceptance Report\n\n| Criterion | Result | Evidence |\n|---|---|---|\n| SC-01 | Pending | implementation pending |\n| SC-02 | Pending | implementation pending |\n\n## Product alignment\n\n- [x] aligned\n\n---\n**Status:** Approved`,
+    body: `## Requirements: audit issues\n\n### Success Criteria\n\n- [ ] SC-01 validates issues\n- [ ] SC-02 reports usage\n\n## Acceptance Report\n\n| Criterion | Stage | Result | Evidence |\n|---|---|---|---|\n| SC-01 | pre-merge | Pending | implementation pending |\n| SC-02 | staging | Pending | implementation pending |\n\n## Product alignment\n\n- [x] aligned\n\n---\n**Status:** Approved`,
   };
 }
 
@@ -209,9 +236,22 @@ function selfTest() {
   const requirement = validRequirement();
   assert.equal(auditIssue(requirement).ok, true);
   assert.ok(auditIssue({ ...requirement, body: requirement.body.replace('SC-02 reports usage', 'reports usage') }).errors.some((x) => x.includes('stable SC-xx')));
-  assert.ok(auditIssue({ ...requirement, body: requirement.body.replace('| SC-02 | Pending | implementation pending |', '') }).errors.some((x) => x.includes('SC-02 has no Acceptance')));
+  assert.ok(auditIssue({ ...requirement, body: requirement.body.replace('| SC-02 | staging | Pending | implementation pending |', '') }).errors.some((x) => x.includes('SC-02 has no Acceptance')));
   assert.ok(auditIssue({ ...requirement, labels: [{ name: 'requirement' }] }).errors.some((x) => x.includes('area label')));
-  console.log('issue-contract self-test: 8 cases passed');
+  const legacyRequirement = {
+    ...requirement,
+    body: requirement.body
+      .replace('| Criterion | Stage | Result | Evidence |', '| Criterion | Result | Evidence |')
+      .replace('|---|---|---|---|', '|---|---|---|')
+      .replace('| SC-01 | pre-merge | Pending | implementation pending |', '| SC-01 | Pending | implementation pending |')
+      .replace('| SC-02 | staging | Pending | implementation pending |', '| SC-02 | Pending | implementation pending |'),
+  };
+  assert.equal(auditIssue(legacyRequirement).ok, true);
+  assert.ok(
+    auditIssue({ ...requirement, body: requirement.body.replace('| SC-01 | pre-merge |', '| SC-01 | production |') })
+      .errors.some((x) => x.includes('unsupported Acceptance stage')),
+  );
+  console.log('issue-contract self-test: 10 cases passed');
 }
 
 function writeResult(result, outputPath) {
