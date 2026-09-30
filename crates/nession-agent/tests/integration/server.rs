@@ -810,6 +810,246 @@ async fn integration_terminal_io_flow() {
     assert!(got_hello, "expected terminal output containing 'hello'");
 }
 
+/// A resize the agent records reaches the client at the position it was
+/// recorded at (#1303).
+///
+/// `record_resize` consumes a sequence number. Before this, the frame that
+/// reported the resize carried no position and the agent sent nothing else for
+/// it, so a client's cursor — contiguous by construction — had a hole exactly
+/// where the stream log had an event. Every attach paid for it twice over: a
+/// client fits its terminal and resizes on the way in, so the hole sat between
+/// the attach's seeded cursor and the first output frame, and the round trip
+/// that closed it returned the very resize the client had already applied.
+///
+/// Three places read a stream position and all three have to agree: what the
+/// **attach** seeded, what the agent **broadcast**, and what the log **reports**
+/// to a resume. A frame whose position is not the log's would have the client
+/// filter its own replay as a duplicate; a frame with no position at all is the
+/// hole. So this asserts the position exists, that it is the log's, and that
+/// the log it is being placed in has no gaps.
+#[tokio::test]
+async fn a_recorded_resize_reaches_the_client_at_its_stream_position() {
+    let (addr, handle, credentials) = start_server(19087).await.unwrap();
+
+    let tmux = SessionManager::new();
+    let session = TestSession::new("resize-seq");
+    let session_name = session.name().to_string();
+    tmux.create_session(&session_name, 80, 24, "/tmp", &[])
+        .await
+        .unwrap();
+
+    let (mut sink, mut stream) = connect_for(&credentials, addr, &session_name)
+        .await
+        .unwrap();
+
+    let attach = ClientAttachPayload {
+        session_name: session_name.to_string(),
+        width: 80,
+        height: 24,
+        size_known: None,
+        env_snapshots: Vec::new(),
+        // No history: this test counts stream positions, and a bootstrap is
+        // outside the timeline by construction — the agent gives it no
+        // position precisely so it cannot be taken for an event in the stream.
+        needs_bootstrap: Some(false),
+    };
+    let req = new_message(msg_types::CLIENT_ATTACH, attach);
+    let attached: nession_agent::server::websocket::Message<ClientAttachResponse> =
+        round_trip(&mut sink, &mut stream, &req).await.unwrap();
+    let seeded_epoch = attached
+        .payload
+        .stream_epoch
+        .expect("the attach seeds an epoch");
+    let seeded_cursor = attached
+        .payload
+        .stream_cursor
+        .expect("the attach seeds a cursor");
+
+    // The resize is what consumes the position this test is about; the input
+    // that follows is what would be held behind it if a client had to recover
+    // the hole with a round trip.
+    let resize = nession_agent::server::websocket::TerminalResizePayload {
+        session_name: session_name.to_string(),
+        cols: 100,
+        rows: 30,
+        control_generation: None,
+        stream_epoch: None,
+        stream_seq: None,
+    };
+    let req = new_message(msg_types::TERMINAL_RESIZE, resize);
+    let resize_id = req.id.clone();
+    sink.send(WsMessage::Text(serde_json::to_string(&req).unwrap()))
+        .await
+        .unwrap();
+
+    use base64::Engine;
+    let input = base64::engine::general_purpose::STANDARD.encode(b"echo resize-seq\n");
+    let req = new_message(
+        msg_types::TERMINAL_INPUT,
+        nession_agent::server::websocket::TerminalInputPayload {
+            session_name: session_name.to_string(),
+            data: input,
+            control_generation: None,
+        },
+    );
+    sink.send(WsMessage::Text(serde_json::to_string(&req).unwrap()))
+        .await
+        .unwrap();
+
+    // Drain until the resize has been both answered and broadcast and the
+    // stream has moved past it. Everything the connection delivers carries a
+    // position, so what arrives is also what a client would have to account
+    // for.
+    let mut acked = false;
+    let mut broadcast = None;
+    let mut delivered: Vec<u64> = Vec::new();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while tokio::time::Instant::now() < deadline {
+        let Some(frame) = next_frame_within(&mut stream, Duration::from_secs(2))
+            .await
+            .unwrap()
+        else {
+            break;
+        };
+        if frame.get("id").and_then(serde_json::Value::as_str) == Some(resize_id.as_str()) {
+            acked = true;
+        }
+        let payload = frame.get("payload");
+        match frame.get("msg_type").and_then(serde_json::Value::as_str) {
+            Some(t) if t == msg_types::TERMINAL_RESIZE => broadcast = Some(frame),
+            Some(t) if t == msg_types::TERMINAL_OUTPUT => {
+                if let Some(seq) = payload
+                    .and_then(|p| p.get("stream_seq"))
+                    .and_then(serde_json::Value::as_u64)
+                {
+                    delivered.push(seq);
+                }
+            }
+            _ => {}
+        }
+        if acked && broadcast.is_some() && !delivered.is_empty() {
+            break;
+        }
+    }
+
+    assert!(acked, "the resize request was never answered");
+    let frame = broadcast.expect("the recorded resize was never broadcast to the client");
+    let payload = frame.get("payload").expect("a resize frame has a payload");
+    let epoch = payload
+        .get("stream_epoch")
+        .and_then(serde_json::Value::as_u64)
+        .expect(
+            "the broadcast resize carries no stream_epoch: it consumed a sequence number, \
+             so a client can only account for it as a hole (#1303)",
+        );
+    let seq = payload
+        .get("stream_seq")
+        .and_then(serde_json::Value::as_u64)
+        .expect(
+            "the broadcast resize carries no stream_seq: the position it was recorded at is \
+             exactly what the client's cursor needs (#1303)",
+        );
+    assert_eq!(
+        epoch, seeded_epoch,
+        "the broadcast resize is on a different epoch than the attach that seeded the cursor"
+    );
+    assert!(
+        seq > seeded_cursor,
+        "the resize reports seq {seq}, which the seeded cursor {seeded_cursor} has already passed"
+    );
+    assert_eq!(
+        payload.get("cols").and_then(serde_json::Value::as_u64),
+        Some(100),
+        "the broadcast carries the size that was asked for"
+    );
+
+    // And it is the log's position, not merely *a* position: the events after
+    // the seeded cursor are contiguous, and the one at this sequence number is
+    // the same resize. Read as raw JSON because that is what the client reads —
+    // the assertion is about the wire, not about a Rust type agreeing with
+    // itself.
+    let resume = new_message(
+        msg_types::TERMINAL_STREAM_RESUME,
+        nession_agent::server::websocket::TerminalStreamResumePayload {
+            session_name: session_name.to_string(),
+            stream_epoch: seeded_epoch,
+            after_seq: seeded_cursor,
+        },
+    );
+    let reply: nession_agent::server::websocket::Message<serde_json::Value> =
+        round_trip(&mut sink, &mut stream, &resume).await.unwrap();
+    assert_eq!(
+        reply
+            .payload
+            .get("epoch_match")
+            .and_then(serde_json::Value::as_bool),
+        Some(true),
+        "the log refused the epoch the attach itself seeded"
+    );
+    let events = reply
+        .payload
+        .get("events")
+        .and_then(|v| v.as_array())
+        .expect("a resume reply carries its events");
+    let log: Vec<u64> = events
+        .iter()
+        .filter_map(|event| event.get("stream_seq").and_then(serde_json::Value::as_u64))
+        .collect();
+    assert!(
+        !log.is_empty(),
+        "the log has nothing after the seeded cursor"
+    );
+    assert_eq!(
+        log,
+        (seeded_cursor + 1..=seeded_cursor + log.len() as u64).collect::<Vec<u64>>(),
+        "the log is not contiguous from the cursor the attach seeded, so no client can \
+         advance past it without a round trip"
+    );
+    let logged_resize = events
+        .iter()
+        .find(|event| event.get("stream_seq").and_then(serde_json::Value::as_u64) == Some(seq))
+        .expect("seq {seq} is in the log");
+    assert_eq!(
+        (
+            logged_resize
+                .get("kind")
+                .and_then(serde_json::Value::as_str),
+            logged_resize
+                .get("cols")
+                .and_then(serde_json::Value::as_u64),
+        ),
+        (Some("resize"), Some(100)),
+        "the position the resize was broadcast at holds something else in the log: a client \
+         would take the live frame for a duplicate and drop it"
+    );
+
+    // The stream positions that reached the client live are a subset of the
+    // log's and have no gaps of their own — the property the whole change
+    // exists for.
+    let mut live = delivered.clone();
+    live.push(seq);
+    live.sort_unstable();
+    assert_eq!(
+        live,
+        (live[0]..=live[live.len() - 1]).collect::<Vec<u64>>(),
+        "the positions delivered live have a gap: {live:?}"
+    );
+    assert!(
+        live.iter().all(|s| log.contains(s)),
+        "a position delivered live ({live:?}) is not in the log ({log:?})"
+    );
+
+    let detach = ClientDetachPayload {
+        session_name: session_name.to_string(),
+    };
+    let req = new_message(msg_types::CLIENT_DETACH, detach);
+    let _: nession_agent::server::websocket::Message<serde_json::Value> =
+        round_trip(&mut sink, &mut stream, &req).await.unwrap();
+
+    tmux.kill_session(&session_name).await.ok();
+    handle.shutdown().await.ok();
+}
+
 // ---------------------------------------------------------------------------
 // Web UI compatibility handlers
 // ---------------------------------------------------------------------------

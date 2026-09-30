@@ -239,6 +239,59 @@ describe('StreamReconciler', () => {
     expect(h.out).toEqual(['five', 'seven']);
   });
 
+  it('holds a recorded resize in the timeline instead of applying it out of turn (#1303)', async () => {
+    // A resize the agent recorded consumed a sequence number, so it is an
+    // event like any other: applying it on arrival would leave its own
+    // position unaccounted for, and the next live frame would be held behind a
+    // hole the client had already been given the contents of.
+    const h = makeHarness();
+    live(h, 5, 'five');
+
+    // The resize is recorded at 6 and arrives before anything fills the gap
+    // ahead of it.
+    h.reconciler.acceptLiveResize({ cols: 120, rows: 40, streamEpoch: 1, streamSeq: 8 });
+    expect(h.resizes).toEqual([]);
+    expect(h.requests).toHaveLength(1);
+
+    // The answer carries the resize the agent logged at 6 — the same event, so
+    // the frame that arrived live is the copy that gets applied, and it is
+    // applied in its place rather than twice.
+    h.requests[0].resolve(
+      reply([
+        { kind: 'resize', streamEpoch: 1, streamSeq: 6, cols: 100, rows: 30 },
+        output(7),
+      ]),
+    );
+    await flushMicrotasks();
+
+    expect(h.resizes).toEqual([[100, 30], [120, 40]]);
+    expect(h.out).toEqual(['five', 'replay-7']);
+  });
+
+  it('advances the cursor through a recorded resize that arrives first (#1303)', async () => {
+    // The attach case this change exists for: a client fits its terminal and
+    // resizes on the way in, so the first thing the agent records is a resize
+    // at `seeded cursor + 1`. Delivered live with its position, it takes that
+    // slot, and the first output frame after it needs no recovery at all.
+    //
+    // The discriminator is the request count, not the resize: applying the
+    // frame on arrival would show the same size on screen and leave the
+    // position unaccounted for, so the assertion that can fail is the one about
+    // what the *cursor* did.
+    const h = makeHarness();
+    h.reconciler.seed(1, 0);
+    h.requests[0].resolve(reply([]));
+    await flushMicrotasks();
+    expect(h.requests).toHaveLength(1);
+
+    h.reconciler.acceptLiveResize({ cols: 120, rows: 40, streamEpoch: 1, streamSeq: 1 });
+    expect(h.resizes).toEqual([[120, 40]]);
+
+    live(h, 2, 'prompt');
+    expect(h.out).toEqual(['prompt']);
+    expect(h.requests).toHaveLength(1);
+  });
+
   it('continues past a hole the agent no longer retains', async () => {
     // The agent's ring buffer evicted 6..10 before the resume was answered, so
     // its answer starts at 11. Waiting for 6 would hold 12 and every frame

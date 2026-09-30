@@ -210,10 +210,26 @@ export class ConnectionManager implements TerminalTransport {
       this.reconciler.acceptLive(frame);
     });
 
-    this.p2pUnsubResize = api.onResize((cols: number, rows: number) => {
-      if (!this.disposed) {
-        this.onResize?.(cols, rows);
+    this.p2pUnsubResize = api.onResize((frame) => {
+      if (this.disposed) {
+        return;
       }
+      // A resize the agent recorded consumed a sequence number, so it belongs
+      // in the timeline and only the reconciler may apply it: applying it here
+      // would leave its sequence unaccounted for and hold the next live frame
+      // behind a round trip (#1303). A resize with no position — the
+      // `%window-resize` echo — never had one to account for and goes straight
+      // through, which is what every resize did before this.
+      if (frame.streamEpoch !== undefined && frame.streamSeq !== undefined) {
+        this.reconciler.acceptLiveResize({
+          cols: frame.cols,
+          rows: frame.rows,
+          streamEpoch: frame.streamEpoch,
+          streamSeq: frame.streamSeq,
+        });
+        return;
+      }
+      this.onResize?.(frame.cols, frame.rows);
     });
 
     this.p2pUnsubError = api.onError((err) => {
