@@ -105,9 +105,11 @@ export class StreamReconciler {
       return;
     }
     if (frame.streamEpoch === undefined || frame.streamSeq === undefined) {
+      diag('frame/unsequenced', { bytes: frame.data.length, bootstrap: frame.bootstrap !== undefined });
       this.sink.onOutput(frame.data, frame.bootstrap);
       return;
     }
+    diag('frame', { epoch: frame.streamEpoch, seq: frame.streamSeq, frontier: this.frontier });
     this.accept(frame.streamEpoch, frame.streamSeq, () =>
       this.sink.onOutput(frame.data, frame.bootstrap),
     );
@@ -223,6 +225,14 @@ export class StreamReconciler {
       this.inFlight = null;
     }
     const afterSeq = flight.afterSeq;
+    diag('recover/reply', {
+      afterSeq,
+      epochMatch: reply.epochMatch,
+      events: reply.events.length,
+      firstSeq: reply.events.length > 0 ? lowestSeqAbove(reply.events, afterSeq) : null,
+      frontier: this.frontier,
+      pending: this.pending.size,
+    });
     this.wantHistory = false;
     if (!reply.epochMatch) {
       // The agent is on a different stream generation than the one we asked
@@ -280,6 +290,7 @@ export class StreamReconciler {
       this.inFlight = null;
     }
     const afterSeq = flight.afterSeq;
+    diag('recover/rejected', { afterSeq, pending: this.pending.size });
     this.noteAttempt(afterSeq);
     // A stream with no anchor has no hole to fill, only history that did not
     // come. Holding its first frames behind a request that already failed
@@ -321,6 +332,12 @@ export class StreamReconciler {
     }
     const flight: Flight = { generation: this.generation, afterSeq };
     this.inFlight = flight;
+    diag('recover/issue', {
+      epoch: this.epoch,
+      afterSeq,
+      pending: this.pending.size,
+      wantHistory: this.wantHistory,
+    });
     // The reconciler's own clock, not the transport's promise: an unanswered
     // request must not hold output indefinitely. On expiry the frames in hand
     // are committed and the hole is given up — the next frame starts a fresh
@@ -330,6 +347,7 @@ export class StreamReconciler {
         return;
       }
       this.inFlight = null;
+      diag('recover/deadline', { afterSeq, pending: this.pending.size });
       this.abandon();
     }, RESUME_DEADLINE_MS);
     void this.resume(this.epoch, afterSeq).then(
@@ -469,6 +487,19 @@ interface Flight {
  * and the stream continues past the hole if it expires.
  */
 export const RESUME_DEADLINE_MS = 2_000;
+
+/**
+ * TEMPORARY diagnostic for #1320 — remove before merging.
+ *
+ * The CI artifacts cannot tell "a resume was issued and never answered" from
+ * "the frames never arrived", and the two need different fixes. These lines
+ * ride the browser console, which the Playwright trace records, so one CI run
+ * settles it. Deliberately no payload bytes: this is about positions, not
+ * content.
+ */
+function diag(event: string, detail: Record<string, unknown>): void {
+  console.log(`[stream-reconciler] ${event} ${JSON.stringify(detail)}`);
+}
 
 /**
  * How many requests a hole gets before the reconciler stops waiting for it.

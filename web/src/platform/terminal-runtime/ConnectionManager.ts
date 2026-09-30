@@ -105,6 +105,9 @@ export class ConnectionManager implements TerminalTransport {
 
   /** Send input unconditionally — used by send() once the session is attached. */
   private sendRaw(data: string): void {
+    // TEMPORARY diagnostic for #1320 — remove before merging. Length only:
+    // this is about whether input left the browser, never about its content.
+    console.log(`[terminal-input] send mode=${this.mode} bytes=${data.length}`);
     if (this.mode === 'p2p' && this.agentApi) {
       // The underlying socket may be mid-reconnect or disposed — the agent
       // transport refuses with a throw ('WebSocket not connected' /
@@ -268,7 +271,15 @@ export class ConnectionManager implements TerminalTransport {
     if (this.mode !== 'p2p' || !api) {
       return Promise.reject(new Error('terminal stream resume is P2P-only'));
     }
-    return api.resumeStream(this.sessionName, epoch, afterSeq);
+    // TEMPORARY diagnostic for #1320 — remove before merging. The reconciler
+    // logs what it does with an answer; this logs whether one ever came.
+    console.log(`[stream-resume] issue epoch=${epoch} after=${afterSeq}`);
+    const reply = api.resumeStream(this.sessionName, epoch, afterSeq);
+    void reply.then(
+      () => console.log(`[stream-resume] reply epoch=${epoch} after=${afterSeq}`),
+      (e: unknown) => console.log(`[stream-resume] reject epoch=${epoch} after=${afterSeq} ${String(e)}`),
+    );
+    return reply;
   }
 
   private setupRelay(): void {
