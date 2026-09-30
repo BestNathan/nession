@@ -24,6 +24,7 @@ const AGENT_MANIFEST: ProtocolManifest = {
     // `#1234`: the transcript projection's collection, which is where a
     // session's subagents are reachable. Advertised for the same reason.
     'claude-code.transcripts': { versions: [1] },
+    'claude-code.transcript-items': { versions: [1] },
   },
 };
 
@@ -57,6 +58,13 @@ const conversationsReq = {
 const transcriptsReq = {
   agent_id: 'a1',
   session_id: 'a1:work',
+  limit: 200,
+} as const;
+
+const transcriptItemsReq = {
+  agent_id: 'a1',
+  session_id: 'a1:work',
+  transcript_id: 's1/agent-a',
   limit: 200,
 } as const;
 
@@ -179,6 +187,21 @@ describe('ClaudeCodePlugin', () => {
       await expect(pending).resolves.toEqual(response);
     });
 
+    it('claudeCodeTranscriptItems forwards the whole request object, transcript_id included', async () => {
+      // Both ids have to survive addressing: the session scopes the read and the
+      // transcript names it, and this is the unit where a subagent's transcript
+      // is reachable at all (#1234).
+      const pending = plugin.claudeCodeTranscriptItems(transcriptItemsReq);
+      expect(surface.requests[0]).toMatchObject({
+        type: 'claude-code.transcript-items',
+        payload: transcriptItemsReq,
+      });
+
+      const response = { state: 'ready', items: [], has_more: false, partial_tail: false };
+      surface.resolveNext('claude-code.transcript-items', response);
+      await expect(pending).resolves.toEqual(response);
+    });
+
     it('claudeCodeMessages forwards the whole request object, conversation_id included', async () => {
       // The id is the unit's only selection mechanism (#1222) — if it did not
       // survive addressing intact, every read would name nothing and answer
@@ -241,6 +264,9 @@ describe('ClaudeCodePlugin', () => {
         'claude-code feature is not connected',
       );
       await expect(plugin.claudeCodeTranscripts(transcriptsReq)).rejects.toThrow(
+        'claude-code feature is not connected',
+      );
+      await expect(plugin.claudeCodeTranscriptItems(transcriptItemsReq)).rejects.toThrow(
         'claude-code feature is not connected',
       );
       expect(surface.requests).toHaveLength(0);

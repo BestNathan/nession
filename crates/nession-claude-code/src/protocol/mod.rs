@@ -85,6 +85,7 @@ pub fn descriptors() -> Result<Vec<ProtocolDescriptor>, IdentityError> {
         conversations::descriptor()?,
         messages::descriptor()?,
         transcripts::descriptor()?,
+        transcript_items::descriptor()?,
     ])
 }
 
@@ -100,12 +101,13 @@ pub(crate) fn v1_descriptor(id: &str, wire: &str) -> Result<ProtocolDescriptor, 
 mod tests {
     use super::*;
 
-    const EXPECTED_IDS: [&str; 5] = [
+    const EXPECTED_IDS: [&str; 6] = [
         "claude-code.list",
         "claude-code.read",
         "claude-code.conversations",
         "claude-code.messages",
         "claude-code.transcripts",
+        "claude-code.transcript-items",
     ];
 
     #[test]

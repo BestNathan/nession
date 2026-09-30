@@ -35,6 +35,11 @@ import type {
   ReadResponse,
 } from '@/generated/protocol/claude-code/read/v1';
 import type {
+  TranscriptEntryV1,
+  TranscriptItemsRequest,
+  TranscriptItemsResponse,
+} from '@/generated/protocol/claude-code/transcript-items/v1';
+import type {
   TranscriptItemV1,
   TranscriptsRequest,
   TranscriptsResponse,
@@ -49,6 +54,7 @@ export type ClaudeCodeReadRequest = ReadRequest & { agent_id: string };
 export type ClaudeCodeConversationsRequest = ConversationsRequest & { agent_id: string };
 export type ClaudeCodeMessagesRequest = MessagesRequest & { agent_id: string };
 export type ClaudeCodeTranscriptsRequest = TranscriptsRequest & { agent_id: string };
+export type ClaudeCodeTranscriptItemsRequest = TranscriptItemsRequest & { agent_id: string };
 
 /** The capability's names for the responses. */
 export type ClaudeCodeListResponse = ListResponse;
@@ -56,6 +62,7 @@ export type ClaudeCodeReadResponse = ReadResponse;
 export type ClaudeCodeConversationsResponse = ConversationsResponse;
 export type ClaudeCodeMessagesResponse = MessagesResponse;
 export type ClaudeCodeTranscriptsResponse = TranscriptsResponse;
+export type ClaudeCodeTranscriptItemsResponse = TranscriptItemsResponse;
 
 /**
  * The two units' state names, narrowed for callers.
@@ -81,6 +88,15 @@ export type ClaudeCodeConversationActivity = ConversationActivityV1;
  * the states above are: a hand-kept copy of a union is a copy that drifts.
  */
 export type ClaudeCodeTranscriptItem = TranscriptItemV1;
+
+/**
+ * One item of a transcript's execution timeline (#1234).
+ *
+ * Seven broad kinds, and the name inside each is upstream data rather than a
+ * Nession enum — so a Claude release that adds a record type is a new string
+ * here, and `unknown` is the kind that carries it.
+ */
+export type ClaudeCodeTranscriptEntry = TranscriptEntryV1;
 
 /**
  * The two halves of `claude-code.read`'s answer.

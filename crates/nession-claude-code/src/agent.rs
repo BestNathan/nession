@@ -35,14 +35,21 @@ use crate::protocol::conversations::v1::{
 use crate::protocol::list::{ListRequestV1, ListResponseV1};
 use crate::protocol::messages::v1::{MessagesRequestV1, MessagesResponseV1, MessagesStateV1};
 use crate::protocol::read::{ReadFailureV1, ReadOkV1, ReadRequestV1, ReadResponseV1, Scope};
+use crate::protocol::transcript_items::v1::{
+    TranscriptItemsRequestV1, TranscriptItemsResponseV1, TranscriptItemsStateV1,
+    TranscriptParseStatsV1,
+};
 use crate::protocol::transcripts::v1::{
     TranscriptBindingV1, TranscriptItemV1, TranscriptKindV1, TranscriptsRequestV1,
     TranscriptsResponseV1, TranscriptsStateV1,
 };
-use crate::protocol::{conversations, list, messages as messages_protocol, read, transcripts};
+use crate::protocol::{
+    conversations, list, messages as messages_protocol, read, transcript_items, transcripts,
+};
 use crate::scanner;
 use crate::security;
 use crate::session_context::SessionContext;
+use crate::transcript;
 
 /// The one place a `Value` becomes a contract.
 ///
@@ -377,6 +384,107 @@ impl ClaudeCodeAgentExtension {
         })?)
     }
 
+    /// Answer `claude-code.transcript-items` (#1234).
+    ///
+    /// One explicitly named transcript, or `not_found` — the same ban on
+    /// substitution the message unit applies, and for the same reason: the
+    /// caller named one, and handing them the binding's, the newest, or the only
+    /// transcript answers a question they did not ask, with no way to notice.
+    ///
+    /// The id is looked up among `transcripts_at`, so a subagent's transcript is
+    /// readable by its own id and not only through its session.
+    async fn handle_transcript_items(&self, payload: Value) -> anyhow::Result<Value> {
+        let request: TranscriptItemsRequestV1 = match serde_json::from_value(payload) {
+            Ok(request) => request,
+            Err(e) => {
+                return Ok(serde_json::to_value(TranscriptItemsResponseV1::error(
+                    format!("bad_request: {e}"),
+                ))?)
+            }
+        };
+
+        let Some(cwd) = self.context.session_cwd(&request.session_id).await else {
+            return Ok(serde_json::to_value(TranscriptItemsResponseV1::bare(
+                TranscriptItemsStateV1::Unavailable,
+            ))?);
+        };
+
+        let found = conversation::transcripts_at(&cwd);
+        let Some(chosen) = found
+            .iter()
+            .find(|t| t.claude_session_id == request.transcript_id)
+            .cloned()
+        else {
+            // Not an error: the transcript can have been deleted, or the
+            // Session's cwd can have changed between listing and selecting. It
+            // is simply not here, and nothing else stands in for it.
+            return Ok(serde_json::to_value(TranscriptItemsResponseV1::bare(
+                TranscriptItemsStateV1::NotFound,
+            ))?);
+        };
+
+        let offset = match &request.cursor {
+            Some(raw) => match raw.parse::<u64>() {
+                Ok(offset) => offset,
+                Err(_) => {
+                    return Ok(serde_json::to_value(TranscriptItemsResponseV1::error(
+                        "cursor is not a position in this transcript",
+                    ))?)
+                }
+            },
+            // `u64::MAX` is "the end of the file", which the reader clamps.
+            None => u64::MAX,
+        };
+
+        let limit = TranscriptItemsResponseV1::page_limit(request.limit);
+        let page = match read_transcript_page_blocking(chosen.clone(), offset, limit).await {
+            Ok(page) => page,
+            Err(ReadFailure::Read(e)) => {
+                debug!("claude-code transcript read failed: {e}");
+                return Ok(serde_json::to_value(TranscriptItemsResponseV1::error(
+                    "the transcript could not be read",
+                ))?);
+            }
+            Err(ReadFailure::Task(e)) => {
+                debug!("claude-code transcript read task failed: {e}");
+                return Ok(serde_json::to_value(TranscriptItemsResponseV1::error(
+                    "the transcript read did not complete",
+                ))?);
+            }
+        };
+
+        // Live only while the Session is bound to *this* transcript, exactly as
+        // the message unit reports it.
+        let is_bound = self
+            .bound_conversation(&request.session_id, &found)
+            .await
+            .is_some_and(|b| b.claude_session_id == chosen.claude_session_id);
+        let activity = activity_of(
+            self.context
+                .session_claude_active(&request.session_id)
+                .await,
+            is_bound,
+        );
+
+        Ok(serde_json::to_value(TranscriptItemsResponseV1 {
+            state: TranscriptItemsStateV1::Ready,
+            transcript: Some(transcript_item(&chosen)),
+            activity: Some(activity),
+            items: page.items,
+            next_cursor: page.next_offset.map(|offset| offset.to_string()),
+            has_more: page.has_more,
+            partial_tail: page.partial_tail,
+            stats: Some(TranscriptParseStatsV1 {
+                raw_records: page.stats.raw_records,
+                recognized_records: page.stats.recognized_records,
+                metadata_absorbed: page.stats.metadata_absorbed,
+                unknown_records: page.stats.unknown_records,
+                invalid_records: page.stats.invalid_records,
+            }),
+            error: None,
+        })?)
+    }
+
     /// Answer `claude-code.messages` (#1222).
     ///
     /// One explicitly named conversation, or `not_found`. **Never a
@@ -516,6 +624,23 @@ fn conversation_item(c: &conversation::Discovered) -> ConversationItemV1 {
     }
 }
 
+/// Read a transcript page off the async worker.
+///
+/// The sibling of `read_page_blocking`, and separate for the same reason the two
+/// projections are: same I/O discipline, different answer.
+async fn read_transcript_page_blocking(
+    conversation: conversation::Discovered,
+    offset: u64,
+    limit: u32,
+) -> Result<transcript::TranscriptPage, ReadFailure> {
+    tokio::task::spawn_blocking(move || {
+        transcript::read_page(&conversation, Some(offset), limit as usize)
+    })
+    .await
+    .map_err(ReadFailure::Task)?
+    .map_err(ReadFailure::Read)
+}
+
 /// A discovered transcript as the wire item. The provider-internal id is the
 /// item's `id` for the same reason `conversation_item` does it: inside this
 /// provider's namespace the longer name says nothing the shorter one does not.
@@ -592,6 +717,7 @@ impl AgentExtension for ClaudeCodeAgentExtension {
             conversations::COMMAND => self.handle_conversations(payload).await,
             messages_protocol::COMMAND => self.handle_messages(payload).await,
             transcripts::COMMAND => self.handle_transcripts(payload).await,
+            transcript_items::COMMAND => self.handle_transcript_items(payload).await,
             other => anyhow::bail!("unknown claude_code command: {other}"),
         }
     }
@@ -649,6 +775,7 @@ mod tests {
                 conversations::v1::WIRE.to_string(),
                 messages_protocol::v1::WIRE.to_string(),
                 transcripts::v1::WIRE.to_string(),
+                transcript_items::v1::WIRE.to_string(),
             ]
         );
     }
@@ -1073,6 +1200,172 @@ mod tests {
     /// unterminated last line as a record still arriving and returns nothing for
     /// it. These tests are about what the reader *returns*, so they write the
     /// terminator.
+    #[tokio::test]
+    async fn a_subagents_transcript_is_readable_by_its_own_id() {
+        // The capability the split exists for: before #1234 these transcripts
+        // were not discoverable, so there was no id to ask for.
+        let (_root, _guard) = project_with_subagents("aaa", &["one"]);
+        let extension = ClaudeCodeAgentExtension::new(Arc::new(FixedContext::at(Some(BOUND_CWD))));
+
+        let listed = extension
+            .handle_transcripts(serde_json::json!({"session_id": "agent:s"}))
+            .await
+            .unwrap();
+        let sidechain_id = listed["items"]
+            .as_array()
+            .and_then(|items| items.iter().find(|i| i["kind"] == "sidechain"))
+            .and_then(|i| i["id"].as_str())
+            .expect("a sidechain is listed")
+            .to_string();
+
+        let value = extension
+            .handle_transcript_items(serde_json::json!({
+                "session_id": "agent:s",
+                "transcript_id": sidechain_id,
+            }))
+            .await
+            .unwrap();
+
+        assert_eq!(value["state"], "ready", "{value}");
+        assert_eq!(value["transcript"]["kind"], "sidechain", "{value}");
+        assert_eq!(value["transcript"]["parent_id"], "aaa", "{value}");
+        assert!(
+            value["items"].as_array().is_some_and(|i| !i.is_empty()),
+            "the subagent's own turn was not read: {value}"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_transcript_view_draws_what_the_conversation_hides() {
+        // #1234's "reasoning hidden in Conversation but visible in Transcript",
+        // asserted against one transcript through both handlers. This is the
+        // whole reason there is one canonical reader and two projections rather
+        // than two readers: same page, same classification, different policy.
+        let thinking = serde_json::json!({
+            "type": "assistant",
+            "uuid": "a1",
+            "timestamp": "2026-09-25T00:00:02Z",
+            "cwd": BOUND_CWD,
+            "sessionId": "aaa",
+            "message": {"role": "assistant", "content": [
+                {"type": "thinking", "thinking": "weighing the options"},
+                {"type": "text", "text": "the answer"},
+            ]},
+        })
+        .to_string();
+        let attachment = serde_json::json!({
+            "type": "attachment",
+            "uuid": "att1",
+            "timestamp": "2026-09-25T00:00:03Z",
+            "cwd": BOUND_CWD,
+            "sessionId": "aaa",
+            "attachment": {"type": "hook_success"},
+        })
+        .to_string();
+        let (_root, _guard) =
+            projects_with_lines("aaa", &[spoken("u1", "user", "go"), thinking, attachment]);
+        let extension = ClaudeCodeAgentExtension::new(Arc::new(FixedContext::at(Some(BOUND_CWD))));
+        // The two units name the same thing differently on purpose — one speaks
+        // of conversations, the other of transcripts — so the same id is asked
+        // for under each unit's own field name.
+        let conversation = extension
+            .handle_messages(serde_json::json!({"session_id": "agent:s", "conversation_id": "aaa"}))
+            .await
+            .unwrap();
+        let transcript = extension
+            .handle_transcript_items(
+                serde_json::json!({"session_id": "agent:s", "transcript_id": "aaa"}),
+            )
+            .await
+            .unwrap();
+
+        let conversation_kinds: Vec<&str> = conversation["items"]
+            .as_array()
+            .expect("items")
+            .iter()
+            .filter_map(|i| i["kind"].as_str())
+            .collect();
+        let transcript_kinds: Vec<&str> = transcript["items"]
+            .as_array()
+            .expect("items")
+            .iter()
+            .filter_map(|i| i["kind"].as_str())
+            .collect();
+
+        assert!(
+            !conversation_kinds.contains(&"reasoning")
+                && !conversation_kinds.contains(&"attachment"),
+            "the conversation drew what it is supposed to hide: {conversation_kinds:?}"
+        );
+        assert!(
+            transcript_kinds.contains(&"reasoning"),
+            "reasoning was parsed and not drawn: {transcript_kinds:?}"
+        );
+        assert!(
+            transcript_kinds.contains(&"attachment"),
+            "the attachment was not drawn: {transcript_kinds:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_unknown_transcript_id_is_not_found_and_names_no_substitute() {
+        // The substitution ban. A project with one visible transcript, asked for
+        // a different id, must not answer with the one it has.
+        let (_root, _guard) = project_with_subagents("aaa", &["one"]);
+        let extension = ClaudeCodeAgentExtension::new(Arc::new(FixedContext::at(Some(BOUND_CWD))));
+
+        let value = extension
+            .handle_transcript_items(serde_json::json!({
+                "session_id": "agent:s",
+                "transcript_id": "not-a-transcript",
+            }))
+            .await
+            .unwrap();
+
+        assert_eq!(value["state"], "not_found", "{value}");
+        assert!(
+            !value
+                .as_object()
+                .is_some_and(|o| o.contains_key("transcript")),
+            "an id that was not asked for was handed back: {value}"
+        );
+        assert!(
+            !value.as_object().is_some_and(|o| o.contains_key("stats")),
+            "a not_found claimed a parse result: {value}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_transcript_page_carries_its_parse_accounting() {
+        // The transcript view's answer to "is this everything?", and the reason
+        // it does not reuse the conversation's single `skipped` count.
+        let unknown = r#"{"type":"quantum-entanglement-state","uuid":"q1"}"#.to_string();
+        let (_root, _guard) = projects_with_lines("aaa", &[spoken("u1", "user", "go"), unknown]);
+        let extension = ClaudeCodeAgentExtension::new(Arc::new(FixedContext::at(Some(BOUND_CWD))));
+
+        let value = extension
+            .handle_transcript_items(serde_json::json!({
+                "session_id": "agent:s",
+                "transcript_id": "aaa",
+            }))
+            .await
+            .unwrap();
+
+        assert_eq!(value["state"], "ready", "{value}");
+        let stats = &value["stats"];
+        assert_eq!(stats["raw_records"], 2, "{value}");
+        assert_eq!(stats["recognized_records"], 1, "{value}");
+        assert_eq!(
+            stats["unknown_records"], 1,
+            "a record this version cannot model was not accounted: {value}"
+        );
+        assert_eq!(
+            value["items"].as_array().map(Vec::len),
+            Some(2),
+            "the unknown record is still drawn, with its upstream name: {value}"
+        );
+    }
+
     /// A project holding one session and the subagents it spawned.
     fn project_with_subagents(
         session: &str,

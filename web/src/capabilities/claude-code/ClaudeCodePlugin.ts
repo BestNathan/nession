@@ -24,6 +24,11 @@ import {
 // is not always a session — a subagent's is listed here and deliberately not in
 // the conversation list.
 import {
+  PROTOCOL as TRANSCRIPT_ITEMS_PROTOCOL,
+  VERSION as TRANSCRIPT_ITEMS_VERSION,
+  WIRE as TRANSCRIPT_ITEMS_WIRE,
+} from '@/generated/protocol/claude-code/transcript-items/v1';
+import {
   PROTOCOL as TRANSCRIPTS_PROTOCOL,
   VERSION as TRANSCRIPTS_VERSION,
   WIRE as TRANSCRIPTS_WIRE,
@@ -39,6 +44,8 @@ import type {
   ClaudeCodeMessagesResponse,
   ClaudeCodeReadRequest,
   ClaudeCodeReadResponse,
+  ClaudeCodeTranscriptItemsRequest,
+  ClaudeCodeTranscriptItemsResponse,
   ClaudeCodeTranscriptsRequest,
   ClaudeCodeTranscriptsResponse,
 } from './types';
@@ -58,6 +65,7 @@ const CONSUMER_REQUIREMENTS = {
   [CONVERSATIONS_PROTOCOL]: [CONVERSATIONS_VERSION],
   [MESSAGES_PROTOCOL]: [MESSAGES_VERSION],
   [TRANSCRIPTS_PROTOCOL]: [TRANSCRIPTS_VERSION],
+  [TRANSCRIPT_ITEMS_PROTOCOL]: [TRANSCRIPT_ITEMS_VERSION],
 } as const satisfies Record<string, readonly number[]>;
 
 type ClaudeCodeUnit = keyof typeof CONSUMER_REQUIREMENTS;
@@ -143,6 +151,23 @@ export class ClaudeCodePlugin implements TransportPlugin {
     return this.requireConnection().request<ClaudeCodeTranscriptsResponse>(
       TRANSCRIPTS_WIRE,
       this.addressed(TRANSCRIPTS_PROTOCOL, req.agent_id, req),
+    );
+  }
+
+  /**
+   * One explicitly named transcript's execution timeline, paged (#1234).
+   *
+   * `transcript_id` is the only selection mechanism — an unknown id answers
+   * `not_found`, never the binding, the newest, or the only transcript. This is
+   * also where a subagent's transcript becomes readable: its id comes from
+   * `claudeCodeTranscripts`, and nothing here would find it by itself.
+   */
+  async claudeCodeTranscriptItems(
+    req: ClaudeCodeTranscriptItemsRequest,
+  ): Promise<ClaudeCodeTranscriptItemsResponse> {
+    return this.requireConnection().request<ClaudeCodeTranscriptItemsResponse>(
+      TRANSCRIPT_ITEMS_WIRE,
+      this.addressed(TRANSCRIPT_ITEMS_PROTOCOL, req.agent_id, req),
     );
   }
 
