@@ -9,7 +9,7 @@ import {
   openFixtureJsonlEventsApp,
   openFixtureJsonlEventsWeb,
   readJsonlRecordVirtualStart,
-  waitForJsonlVirtualStartStable,
+  resyncJsonlMeasurementsThrough,
   readJsonlRecordTop,
   readJsonlScrollMetrics,
   scrollJsonlPreview,
@@ -78,9 +78,11 @@ test.describe('JSONL preview geometry (#1199)', () => {
     await scrollJsonlPreview(page, 0);
     await page.waitForTimeout(150);
 
+    await resyncJsonlMeasurementsThrough(page, followingLine);
     await scrollJsonlRecordIntoView(page, FIXTURE_JSONL_NESTED_LINE);
     await expect(nestedSection.getByRole('button', { name: 'Collapse record' })).toBeVisible();
-    await waitForJsonlVirtualStartStable(page, followingLine, followingTopExpanded);
+    const followingTopAfterScroll = await readJsonlRecordVirtualStart(page, followingLine);
+    expect(Math.abs(followingTopAfterScroll - followingTopExpanded)).toBeLessThanOrEqual(8);
     await assertVisibleJsonlRecordsDoNotOverlap(page);
   });
 
