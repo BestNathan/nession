@@ -149,15 +149,19 @@ describe('TerminalServerPlugin', () => {
       surface.pushMessage('agent.terminal.output', {
         session_name: 'work', data: 'aGk=', bootstrap: { requested_lines: 5000, truncated: false },
       });
+      surface.pushMessage('agent.terminal.output', {
+        session_name: 'work', data: 'aGk=', bootstrap: { requested_lines: 5000, truncated: true },
+      });
       surface.pushMessage('agent.terminal.output', { session_name: 'work', data: 'aGk=' });
 
-      // Presence is the fact, not the contents — the payload's fields are the
-      // agent's account of the snapshot, and the client's job is the same
-      // whatever they say.
-      expect(cb.mock.calls[0]?.[1]).toBe(true);
+      // Presence is the fact, and the contents are the qualification: the
+      // relay must carry both, because whether the snapshot was cut short
+      // decides whether the consumer may replace its buffer with it (#1305).
+      expect(cb.mock.calls[0]?.[1]).toEqual({ requestedLines: 5000, truncated: false });
+      expect(cb.mock.calls[1]?.[1]).toEqual({ requestedLines: 5000, truncated: true });
       // A live frame says `undefined`, which is not `false`: a consumer must be
       // able to tell "not a bootstrap" from "no marker at all" (#321).
-      expect(cb.mock.calls[1]?.[1]).toBeUndefined();
+      expect(cb.mock.calls[2]?.[1]).toBeUndefined();
     });
 
     it('preserves non-UTF-8 octets through relay decode', () => {
