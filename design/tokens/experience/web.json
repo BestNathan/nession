@@ -10,9 +10,9 @@
     },
     "primary": {
       "$description": "Work / local primary — highest within its region. Session name, active file, focused input.",
-      "size": { "value": "13.5px" },
+      "size": { "value": "14px" },
       "weight": { "ref": "domain.typography.role.primary.weight" },
-      "lineHeight": { "value": "1.25" }
+      "lineHeight": { "value": "1.3" }
     },
     "body": {
       "$description": "Ordinary readable product text and controls — button labels, menu items, filters.",
@@ -22,19 +22,19 @@
     },
     "secondary": {
       "$description": "Supporting but fully readable. Section headings, tree rows, infrastructure rows.",
-      "size": { "value": "12px" },
+      "size": { "value": "12.5px" },
       "weight": { "ref": "domain.typography.role.secondary.weight" },
       "lineHeight": { "value": "1.3" }
     },
     "metadata": {
       "$description": "Quiet factual context. Agent/location, recency, status details — never outweighs the thing it describes.",
-      "size": { "value": "11px" },
+      "size": { "value": "11.5px" },
       "weight": { "ref": "domain.typography.role.metadata.weight" },
-      "lineHeight": { "value": "1.25" }
+      "lineHeight": { "value": "1.3" }
     },
     "caption": {
       "$description": "Lowest deliberate readable hierarchy — keyboard hints, tiny helper copy, sidebar service state.",
-      "size": { "value": "10.5px" },
+      "size": { "value": "11px" },
       "weight": { "ref": "domain.typography.role.caption.weight" },
       "lineHeight": { "value": "1.3" }
     },
