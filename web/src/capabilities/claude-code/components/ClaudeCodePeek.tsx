@@ -6,6 +6,7 @@ import { stateLine } from '../model/stateLine';
 import type { ConversationSummary } from './ClaudeCodeProjection';
 import { ConversationOverlay } from './ConversationOverlay';
 import { cn } from '@/shared/lib/utils';
+import { chromeSansRole } from '@/shared/typography/chromeRoles';
 
 /**
  * How many candidates the Peek lists before the Workspace takes over.
@@ -57,11 +58,11 @@ export function ClaudeCodePeek({
 
   return (
     <div data-testid="claude-code-peek-body" className="flex flex-col gap-2">
-      <p className="truncate text-xs font-medium text-foreground">{stateLine(state)}</p>
+      <p className={cn('truncate text-foreground', chromeSansRole('metadata'))}>{stateLine(state)}</p>
 
       {conversation.title !== null ? (
         <p
-          className="truncate text-xs text-muted-foreground"
+          className={cn('truncate text-muted-foreground', chromeSansRole('caption'))}
           data-testid="claude-code-peek-conversation"
         >
           {conversation.title}
@@ -69,7 +70,7 @@ export function ClaudeCodePeek({
         </p>
       ) : recent.length > 0 ? (
         <>
-          <p className="text-xs text-muted-foreground" data-testid="claude-code-peek-count">
+          <p className={cn('text-muted-foreground', chromeSansRole('caption'))} data-testid="claude-code-peek-count">
             {conversation.candidates.length} conversations in this directory
           </p>
           <ul className="flex flex-col" data-testid="claude-code-peek-candidates">
@@ -82,7 +83,8 @@ export function ClaudeCodePeek({
                   // host's footer and into the capability that made the row.
                   onClick={() => onOpenWorkspace?.(candidate.id)}
                   className={cn(
-                    'w-full truncate rounded text-left text-xs text-muted-foreground',
+                    'w-full truncate rounded text-left text-muted-foreground',
+                    chromeSansRole('caption'),
                     'transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                   )}
                 >
@@ -93,7 +95,7 @@ export function ClaudeCodePeek({
           </ul>
         </>
       ) : (
-        <p className="text-xs text-muted-foreground" data-testid="claude-code-peek-none">
+        <p className={cn('text-muted-foreground', chromeSansRole('caption'))} data-testid="claude-code-peek-none">
           No conversation in this Session&rsquo;s directory
         </p>
       )}

@@ -9,6 +9,7 @@ import {
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
 import { cn } from '@/shared/lib/utils';
+import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
 
 import type { ResolvedDecorations } from '../decorations/resolveDecorations';
 import type { ExplorerNode } from '../types';
@@ -60,12 +61,12 @@ function ExplorerNodeRenameRow({
             onRenameCancel?.();
           }
         }}
-        className="h-6 text-xs flex-1"
+        className={cn('h-6 flex-1', chromeSansRole('body'))}
       />
-      <Button size="sm" className="h-6 text-xs" onClick={() => onRenameSubmit?.()}>
+      <Button size="sm" className={cn('h-6', chromeSansRole('body'))} onClick={() => onRenameSubmit?.()}>
         Rename
       </Button>
-      <Button size="sm" variant="ghost" className="h-6 text-xs" onClick={() => onRenameCancel?.()}>
+      <Button size="sm" variant="ghost" className={cn('h-6', chromeSansRole('body'))} onClick={() => onRenameCancel?.()}>
         Cancel
       </Button>
     </div>
@@ -108,7 +109,8 @@ export function ExplorerNodeRenderer({
           onClick={() => onActivate()}
           title={decorations.tooltip}
           className={cn(
-            'flex w-full items-center gap-[var(--shell-space-1)] rounded-[var(--workspace-tree-row-radius)] px-[var(--shell-space-2)] py-[var(--workspace-tree-row-pad-y)] font-mono text-[length:var(--workspace-tree-font-size)] leading-[var(--workspace-tree-line-height)] transition-colors text-left cursor-default hover:bg-muted/60',
+            'flex w-full items-center gap-[var(--shell-space-1)] rounded-[var(--workspace-tree-row-radius)] px-[var(--shell-space-2)] py-[var(--workspace-tree-row-pad-y)] transition-colors text-left cursor-default hover:bg-muted/60',
+            chromeMonoRole('secondary'),
             decorations.className,
           )}
         >
@@ -120,12 +122,12 @@ export function ExplorerNodeRenderer({
             </span>
           ))}
           {decorations.badge !== undefined && (
-            <span className="px-1 rounded bg-muted text-muted-foreground text-[9px] leading-tight mr-1 flex-shrink-0">
+            <span className={cn('mr-1 flex-shrink-0 rounded bg-muted px-1 text-muted-foreground', chromeSansRole('caption'))}>
               {decorations.badge}
             </span>
           )}
           {isBinary && node.kind === 'file' && (
-            <span className="px-1 rounded bg-muted text-muted-foreground text-[9px] leading-tight mr-1 flex-shrink-0">
+            <span className={cn('mr-1 flex-shrink-0 rounded bg-muted px-1 text-muted-foreground', chromeSansRole('caption'))}>
               BIN
             </span>
           )}

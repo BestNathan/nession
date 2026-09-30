@@ -1,4 +1,6 @@
 import { capsulePeekActionClass } from '@/shared/lib/peekActionClass';
+import { cn } from '@/shared/lib/utils';
+import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import { useGitStatus } from '../hooks/useGitStatus';
 import {
   changeLetter,
@@ -49,13 +51,13 @@ export function GitProjection({
   // is where someone can act on them (`capability-emergence.md`: a Signal is
   // "the smallest identifying state needed").
   if (loading) {
-    return <p className="text-xs text-muted-foreground">Reading repository…</p>;
+    return <p className={cn('text-muted-foreground', chromeSansRole('caption'))}>Reading repository…</p>;
   }
   if (error || !status) {
-    return <p className="text-xs text-muted-foreground">{error ?? 'Repository unavailable'}</p>;
+    return <p className={cn('text-muted-foreground', chromeSansRole('caption'))}>{error ?? 'Repository unavailable'}</p>;
   }
   if (status.state !== 'ok') {
-    return <p className="text-xs text-muted-foreground">{describeUnavailable(status).title}</p>;
+    return <p className={cn('text-muted-foreground', chromeSansRole('caption'))}>{describeUnavailable(status).title}</p>;
   }
 
   return depth === 'signal' ? (
@@ -84,8 +86,8 @@ function GitSignalBody({ status, root }: { status: GitStatus; root: string }) {
 
   return (
     <div data-testid="git-signal-body" className="flex flex-col gap-0.5">
-      <p className="truncate text-xs font-medium text-foreground">{identity}</p>
-      <p className="truncate text-xs text-muted-foreground">{describeStatus(status)}</p>
+      <p className={cn('truncate text-foreground', chromeSansRole('metadata'))}>{identity}</p>
+      <p className={cn('truncate text-muted-foreground', chromeSansRole('caption'))}>{describeStatus(status)}</p>
     </div>
   );
 }
@@ -128,13 +130,13 @@ function GitPeekBody({
   return (
     <div data-testid="git-peek-body" className="flex flex-col gap-2">
       <div className="flex flex-col gap-0.5">
-        <p className="truncate text-xs text-muted-foreground">
+        <p className={cn('truncate text-muted-foreground', chromeSansRole('caption'))}>
           {status.detached ? 'Detached HEAD' : status.branch}
           {worktree ? ` · worktree: ${worktree}` : ''}
         </p>
-        <p className="truncate text-xs text-foreground">{describeStatus(status)}</p>
+        <p className={cn('truncate text-foreground', chromeSansRole('metadata'))}>{describeStatus(status)}</p>
         {status.modified.length > 0 ? (
-          <p className="truncate text-xs text-muted-foreground">
+          <p className={cn('truncate text-muted-foreground', chromeSansRole('caption'))}>
             {staged} staged · {unstaged} unstaged
           </p>
         ) : null}
@@ -150,7 +152,10 @@ function GitPeekBody({
                 data-path={row.path}
                 title={row.path}
                 onClick={() => onFocusChange?.(row.path)}
-                className="flex w-full items-center gap-1.5 rounded px-1 py-0.5 text-left text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className={cn(
+                  'flex w-full items-center gap-1.5 rounded px-1 py-0.5 text-left text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                  chromeSansRole('caption'),
+                )}
               >
                 <span className="w-3 shrink-0 font-mono">
                   {row.kind === 'untracked' ? '?' : changeLetter(row.kind)}
@@ -162,7 +167,7 @@ function GitPeekBody({
         </ul>
       ) : null}
       {rest > 0 ? (
-        <p data-testid="git-peek-more" className="text-xs text-muted-foreground">
+        <p data-testid="git-peek-more" className={cn('text-muted-foreground', chromeSansRole('caption'))}>
           and {rest} more
         </p>
       ) : null}

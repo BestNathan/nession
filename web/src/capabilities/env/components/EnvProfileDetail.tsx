@@ -57,7 +57,7 @@ function UsageLine({ inUseBy, active }: { inUseBy: string[]; active: boolean }) 
     return null;
   }
   return (
-    <p data-testid="env-profile-usage" className="text-xs text-muted-foreground">
+    <p data-testid="env-profile-usage" className={cn('text-muted-foreground', chromeSansRole('metadata'))}>
       Used by {inUseBy.length === 1 ? '1 session' : `${inUseBy.length} sessions`}
       {' · '}
       {inUseBy.join(', ')}
@@ -81,7 +81,7 @@ function SessionAction({
 }) {
   if (active && sourcedAtCreate) {
     return (
-      <span data-testid="env-sourced-at-create" className="text-xs text-muted-foreground">
+      <span data-testid="env-sourced-at-create" className={cn('text-muted-foreground', chromeSansRole('metadata'))}>
         Sourced at session creation
       </span>
     );
@@ -139,7 +139,7 @@ function DetailHeader({
           {active ? (
             <span
               data-testid="env-profile-active"
-              className="shrink-0 text-xs text-muted-foreground"
+              className={cn('shrink-0 text-muted-foreground', chromeSansRole('metadata'))}
             >
               Active in current Session
             </span>
@@ -275,7 +275,7 @@ function DetailBody({
   if (error) {
     return (
       <div className="flex flex-col items-center gap-2 px-4 py-8 text-center">
-        <p className="text-sm text-muted-foreground">{error}</p>
+        <p className={cn('text-muted-foreground', chromeSansRole('secondary'))}>{error}</p>
         <Button size="sm" variant="outline" onClick={onRetry}>
           Retry
         </Button>

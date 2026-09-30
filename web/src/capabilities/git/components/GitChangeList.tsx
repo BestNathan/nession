@@ -1,5 +1,6 @@
 import { FileText } from 'lucide-react';
 import { cn } from '@/shared/lib/utils';
+import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import { isSelectable, type GitRow } from '../state';
 
 const GROUPS = ['Conflicts', 'Modified', 'Untracked'] as const;
@@ -44,7 +45,7 @@ export function GitChangeList({
         }
         return (
           <section key={title} data-testid={`git-group-${title.toLowerCase()}`}>
-            <h2 className="mb-1 px-2 text-xs font-semibold text-muted-foreground">
+            <h2 className={cn('mb-1 px-2 uppercase tracking-wide text-muted-foreground', chromeSansRole('metadata'))}>
               {title} ({group.length})
             </h2>
             <div className="space-y-0.5">
@@ -83,11 +84,11 @@ function GitRowItem({
         data-testid={`git-row-${row.kind}`}
         data-path={row.path}
         title={rowTitle(row)}
-        className="flex items-center gap-2 px-2 py-1.5 text-sm"
+        className={cn('flex items-center gap-2 px-2 py-1.5', chromeSansRole('secondary'))}
       >
         <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
         <span className="truncate text-muted-foreground">{row.path}</span>
-        {label ? <span className="shrink-0 text-xs text-muted-foreground">{label}</span> : null}
+        {label ? <span className={cn('shrink-0 text-muted-foreground', chromeSansRole('metadata'))}>{label}</span> : null}
       </div>
     );
   }
@@ -102,14 +103,15 @@ function GitRowItem({
       aria-current={selected ? 'true' : undefined}
       onClick={() => onSelect(row.path)}
       className={cn(
-        'flex w-full items-center gap-2 rounded-[var(--radius-control)] px-2 py-1.5 text-left text-sm transition-colors',
+        'flex w-full items-center gap-2 rounded-[var(--radius-control)] px-2 py-1.5 text-left transition-colors',
+        chromeSansRole('secondary'),
         'hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
         selected && 'bg-accent text-accent-foreground',
       )}
     >
       <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
       <span className="truncate">{row.path}</span>
-      {label ? <span className="shrink-0 text-xs text-muted-foreground">{label}</span> : null}
+      {label ? <span className={cn('shrink-0 text-muted-foreground', chromeSansRole('metadata'))}>{label}</span> : null}
     </button>
   );
 }

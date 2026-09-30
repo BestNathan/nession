@@ -13,6 +13,7 @@ import {
 import type { Agent, EnvFileInfo } from '@/types';
 import { refKey } from '@/capabilities/env/model/envRef';
 import { profileLocation, profileMetaLine } from '@/capabilities/env/model/profile';
+import { chromeSansRole } from '@/shared/typography/chromeRoles';
 
 export interface EnvironmentNavigatorProps {
   profiles: EnvFileInfo[];
@@ -62,13 +63,13 @@ function EnvironmentRow({
       )}
     >
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-sm font-medium">{profile.name}</span>
-        <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+        <span className={cn('block truncate', chromeSansRole('primary'))}>{profile.name}</span>
+        <span className={cn('mt-0.5 block truncate text-muted-foreground', chromeSansRole('metadata'))}>
           {profileMetaLine(profile, agents)}
         </span>
       </span>
       {active ? (
-        <span className="shrink-0 text-xs text-muted-foreground">Active</span>
+        <span className={cn('shrink-0 text-muted-foreground', chromeSansRole('metadata'))}>Active</span>
       ) : null}
     </button>
   );
@@ -102,7 +103,7 @@ function NavigatorBody(props: EnvironmentNavigatorProps & { query: string }) {
   if (error && profiles.length === 0) {
     return (
       <div className="flex flex-col items-center gap-2 px-4 py-8 text-center">
-        <p className="text-sm text-muted-foreground">{error}</p>
+        <p className={cn('text-muted-foreground', chromeSansRole('secondary'))}>{error}</p>
         <Button size="sm" variant="outline" onClick={props.onRetry}>
           Retry
         </Button>
@@ -117,8 +118,8 @@ function NavigatorBody(props: EnvironmentNavigatorProps & { query: string }) {
         className="flex flex-col items-center gap-3 px-4 py-10 text-center"
       >
         <div className="space-y-1">
-          <p className="text-sm font-medium">No environments yet</p>
-          <p className="text-xs text-muted-foreground">
+          <p className={chromeSansRole('primary')}>No environments yet</p>
+          <p className={cn('text-muted-foreground', chromeSansRole('secondary'))}>
             Create or import an environment profile for this workspace.
           </p>
         </div>
@@ -136,7 +137,7 @@ function NavigatorBody(props: EnvironmentNavigatorProps & { query: string }) {
 
   if (filtered.length === 0) {
     return (
-      <p className="px-4 py-8 text-center text-sm text-muted-foreground">
+      <p className={cn('px-4 py-8 text-center text-muted-foreground', chromeSansRole('secondary'))}>
         No environments match &ldquo;{query.trim()}&rdquo;
       </p>
     );
@@ -224,7 +225,7 @@ export function EnvironmentNavigator(props: EnvironmentNavigatorProps) {
       {props.hasSession ? (
         <p
           data-testid="env-session-summary"
-          className="border-b px-3 py-1.5 text-xs text-muted-foreground"
+          className={cn('border-b px-3 py-1.5 text-muted-foreground', chromeSansRole('metadata'))}
         >
           {activeNames.length > 0
             ? `Current Session · ${activeNames.join(', ')}`
