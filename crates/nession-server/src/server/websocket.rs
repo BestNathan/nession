@@ -552,6 +552,7 @@ where
                 env_snapshots,
                 cols,
                 rows,
+                size_known,
                 needs_bootstrap,
             } => {
                 let outcome = relay_bidirectional_via_channel(
@@ -563,6 +564,7 @@ where
                         env_snapshots: &env_snapshots,
                         cols,
                         rows,
+                        size_known,
                         needs_bootstrap,
                     },
                 )
@@ -737,6 +739,11 @@ struct RelayRequest<'a> {
     cols: u16,
     /// Terminal rows for the initial tmux resize.
     rows: u16,
+    /// Whether those columns are the browser's own measurement, forwarded
+    /// verbatim for the same reason as `needs_bootstrap`: only the client knows
+    /// whether it has laid a terminal out yet, and `Some(false)` tells the agent
+    /// not to resize the shared window to the placeholder (#1265).
+    size_known: Option<bool>,
     /// The browser's bootstrap answer (#321), forwarded verbatim. Whether a
     /// client needs the session's history is a fact about *that client's*
     /// terminal, which only the client has — so the Server does not read it.
@@ -771,6 +778,7 @@ where
         env_snapshots,
         cols,
         rows,
+        size_known,
         needs_bootstrap,
     } = request;
 
@@ -841,6 +849,17 @@ where
         "height": rows,
         "env_snapshots": env_snapshots,
     });
+    if let Some(size_known) = size_known {
+        // Same shape, and the same reason, as `needs_bootstrap` below: absent
+        // rather than null, because an older agent has never seen this key and
+        // absence is what preserves the meaning it already had.
+        if let Some(object) = attach_payload.as_object_mut() {
+            object.insert(
+                "size_known".to_string(),
+                serde_json::Value::Bool(size_known),
+            );
+        }
+    }
     if let Some(needs_bootstrap) = needs_bootstrap {
         // `as_object_mut`, not `[…]`: the payload is a literal built three
         // lines up, so indexing it is a panic waiting for someone to edit that

@@ -80,13 +80,13 @@ export function MarkdownPreview({ content, filename }: MarkdownPreviewProps) {
           prose-p:text-foreground/85 prose-p:leading-relaxed
           prose-a:text-action prose-a:no-underline hover:prose-a:underline
           prose-code:text-foreground/80 prose-code:bg-muted/60 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-xs prose-code:font-normal
-          prose-pre:bg-muted/70 prose-pre:rounded-lg prose-pre:shadow-sm
+          prose-pre:bg-muted/70 prose-pre:rounded-[var(--radius-surface)] prose-pre:shadow-sm
           prose-blockquote:border-l-2 prose-blockquote:border-border prose-blockquote:pl-3 prose-blockquote:text-muted-foreground prose-blockquote:not-italic
-          prose-table:border prose-table:border-border prose-table:rounded-lg prose-table:overflow-hidden
+          prose-table:border prose-table:border-border prose-table:rounded-[var(--radius-surface)] prose-table:overflow-hidden
           prose-th:border prose-th:border-border prose-th:bg-muted/40 prose-th:px-3 prose-th:py-2 prose-th:text-xs prose-th:font-medium
           prose-td:border prose-td:border-border prose-td:px-3 prose-td:py-2 prose-td:text-xs
           prose-hr:border-border
-          prose-img:rounded-lg
+          prose-img:rounded-[var(--radius-surface)]
           prose-li:marker:text-muted-foreground prose-li:my-0.5
           prose-strong:text-foreground/90
         ">

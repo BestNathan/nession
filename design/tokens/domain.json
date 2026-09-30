@@ -66,5 +66,31 @@
       "foreground": { "ref": "semantic.muted-foreground" },
       "border": { "ref": "semantic.border" }
     }
+  },
+  "typography": {
+    "$description": "Shared semantic typography decisions (#1216). Size and leading remain Experience-specific; weight is shared unless browser evidence requires an Experience override.",
+    "role": {
+      "title": {
+        "weight": { "value": 600 }
+      },
+      "primary": {
+        "weight": { "value": 550 }
+      },
+      "body": {
+        "weight": { "value": 450 }
+      },
+      "secondary": {
+        "weight": { "value": 500 }
+      },
+      "metadata": {
+        "weight": { "value": 475 }
+      },
+      "caption": {
+        "weight": { "value": 500 }
+      },
+      "code": {
+        "weight": { "value": 475 }
+      }
+    }
   }
 }

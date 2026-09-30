@@ -86,7 +86,7 @@ function CollapseControl({ onCollapse }: { onCollapse: () => void }) {
       aria-label="Collapse sidebar"
       title="Collapse sidebar"
       onClick={onCollapse}
-      className={cn(shellIconButtonClass, 'rounded-md hover:bg-accent hover:text-accent-foreground')}
+      className={cn(shellIconButtonClass, 'rounded-[var(--radius-control)] hover:bg-accent hover:text-accent-foreground')}
     >
       <PanelLeftClose className="size-[length:var(--icon-md)]" aria-hidden />
     </button>

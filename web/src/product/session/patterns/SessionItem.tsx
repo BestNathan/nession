@@ -11,6 +11,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { AgentChannel, DomainState } from '@/product/session/model/domainState';
 import type { Session } from '@/types';
+import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
 
 function agentCopyClass(channel: AgentChannel): string {
   switch (channel) {
@@ -201,9 +202,9 @@ function SessionMetaLine({
   return (
     <span
       data-testid="session-item-meta"
-      className="truncate text-[length:var(--shell-session-row-meta-font-size)] leading-4 text-muted-foreground"
+      className={cn('truncate text-muted-foreground', chromeSansRole('metadata'))}
     >
-      <span data-testid="session-item-workload" className="font-mono">
+      <span data-testid="session-item-workload" className={chromeMonoRole('metadata')}>
         {workloadHint(session)}
       </span>
       {' · '}
@@ -277,8 +278,9 @@ export function SessionItem({
             `white-space: nowrap` on both for the same reason. */}
         <span
           className={cn(
-            'truncate text-[length:var(--shell-session-row-title-font-size)] leading-5',
-            selected ? 'font-medium text-foreground' : 'text-[color:var(--text-secondary)]',
+            'truncate',
+            chromeSansRole('primary'),
+            selected ? 'text-foreground' : 'text-[color:var(--text-secondary)]',
           )}
         >
           {session.session_name}
@@ -292,10 +294,7 @@ export function SessionItem({
           /* Product text too: continuity state about infrastructure, and the
              degraded reading of the agent slot two lines up. */
           <span
-            className={cn(
-              'truncate text-[length:var(--shell-session-row-meta-font-size)] leading-4',
-              agentCopyClass(domain.agent.channel),
-            )}
+            className={cn('truncate', chromeSansRole('metadata'), agentCopyClass(domain.agent.channel))}
           >
             {domain.agent.copy}
           </span>

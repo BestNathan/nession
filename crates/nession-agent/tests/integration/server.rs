@@ -306,6 +306,10 @@ async fn integration_client_attach_creates_pty() {
         session_name: session_name.to_string(),
         width: 80,
         height: 24,
+        // These tests state a size they mean, so it is authoritative — the
+        // same thing a client predating the field says by saying nothing
+        // (#1265).
+        size_known: None,
         env_snapshots: Vec::new(),
         needs_bootstrap: None,
     };
@@ -368,6 +372,7 @@ async fn a_second_attach_on_the_same_connection_is_answered() {
                 session_name: session_name.to_string(),
                 width: 80,
                 height: 24,
+                size_known: None,
                 env_snapshots: Vec::new(),
                 // The history is not what is under test, and asking for it
                 // would only give the misjudged close a longer window.
@@ -484,6 +489,10 @@ async fn a_plain_first_attach_sends_the_history_it_was_asked_for() {
         session_name: session_name.to_string(),
         width: 80,
         height: 24,
+        // These tests state a size they mean, so it is authoritative — the
+        // same thing a client predating the field says by saying nothing
+        // (#1265).
+        size_known: None,
         env_snapshots: Vec::new(),
         needs_bootstrap: None,
     };
@@ -619,6 +628,10 @@ async fn integration_terminal_io_flow() {
         session_name: session_name.to_string(),
         width: 80,
         height: 24,
+        // These tests state a size they mean, so it is authoritative — the
+        // same thing a client predating the field says by saying nothing
+        // (#1265).
+        size_known: None,
         env_snapshots: Vec::new(),
         needs_bootstrap: None,
     };

@@ -61,7 +61,7 @@ export function EnvDiff({ original, modified }: EnvDiffProps) {
   }
 
   return (
-    <div className="rounded-md border divide-y divide-border font-mono text-xs max-h-48 overflow-y-auto">
+    <div className="rounded-[var(--radius-surface)] border divide-y divide-border font-mono text-xs max-h-48 overflow-y-auto">
       {diff.map((line, i) => (
         <div
           key={i}

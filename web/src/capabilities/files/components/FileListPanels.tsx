@@ -5,6 +5,7 @@ import { formatSize } from '@/shared/lib/format';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import type { FileEntry } from '@/capabilities/files';
+import { chromeSansRole } from '@/shared/typography/chromeRoles';
 
 const LONG_PRESS_MS = 400;
 
@@ -15,10 +16,10 @@ export function FileListErrorPanel({ message, onRetry }: { message: string; onRe
       data-testid="files-app-list"
     >
       <div>
-        <p className="text-[length:var(--workspace-list-row-title-font-size)] font-medium text-foreground">
+        <p className={cn(chromeSansRole('primary'), 'text-foreground')}>
           Couldn&apos;t load files
         </p>
-        <p className="mt-1 text-sm text-muted-foreground">{message}</p>
+        <p className={cn('mt-1 text-muted-foreground', chromeSansRole('secondary'))}>{message}</p>
       </div>
       <Button type="button" variant="outline" size="sm" className="self-start" onClick={onRetry}>
         Retry
@@ -117,7 +118,7 @@ function FileListRow({
       {selectionMode ? (
         <span
           className={cn(
-            'flex size-5 shrink-0 items-center justify-center rounded-sm border border-border',
+            'flex size-5 shrink-0 items-center justify-center rounded-[var(--radius-control)] border border-border',
             selected && 'border-primary bg-primary text-primary-foreground',
           )}
           aria-hidden
@@ -131,10 +132,10 @@ function FileListRow({
         <FileIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
       )}
       <span className="flex min-w-0 flex-1 flex-col">
-        <span className="truncate text-[length:var(--workspace-list-row-title-font-size)] text-foreground">
+        <span className={cn('truncate text-foreground', chromeSansRole('primary'))}>
           {entry.name}
         </span>
-        <span className="truncate text-[length:var(--workspace-tree-font-size)] text-muted-foreground">
+        <span className={cn('truncate text-muted-foreground', chromeSansRole('secondary'))}>
           {meta}
         </span>
       </span>

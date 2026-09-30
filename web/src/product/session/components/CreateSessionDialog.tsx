@@ -17,6 +17,8 @@ import {
 } from '@/components/ui/select';
 import type { Agent, EnvFileInfo, EnvFileRef } from '@/types';
 import { agentDisplayName } from '@/shared/lib/format';
+import { cn } from '@/shared/lib/utils';
+import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import { EnvFileMultiSelect, envApi } from '@/capabilities/env';
 import { sessionsApi } from '@/product/session';
 import { useDialogReset } from '@/shared/hooks/useDialogReset';
@@ -182,7 +184,7 @@ export function CreateSessionDialog({
               emptyLabel="No env files — create one in Env Files"
             />
           </div>
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          {error && <p className={cn('text-destructive', chromeSansRole('body'))}>{error}</p>}
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose} disabled={loading}>
               Cancel

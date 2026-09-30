@@ -24,6 +24,7 @@ import { type JsonPreviewKind, type ViewerType } from '../model/viewerRegistry';
 import { formatSize } from '@/shared/lib/format';
 import { useFileViewer, type ViewMode } from '../hooks/useFileViewer';
 import type { FileOps } from '@/capabilities/files';
+import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
 
 export interface FileViewerProps {
   fileOps: FileOps;
@@ -67,7 +68,7 @@ interface FileViewerToolbarProps {
  * on. The leaf exists on both experiences so this one class keeps working in
  * the Web layout, which composes the same viewer.
  */
-const fileViewerActionClass = 'text-[length:var(--workspace-editor-action-font-size)]';
+const fileViewerActionClass = chromeSansRole('body');
 
 function FileViewerToolbar({
   path, filename, isDirty, isText, isReadOnly, saving, hasPreviewRawToggle, viewMode, forceReadOnly, onSave, onEditToggle, onSetViewMode, onCloseClick,
@@ -77,7 +78,7 @@ function FileViewerToolbar({
 
   return (
     <div className="flex flex-shrink-0 items-center justify-between gap-[var(--shell-space-2)] border-b border-border/60 px-[var(--workspace-editor-head-pad-x)] py-[var(--shell-space-1)]">
-      <div className="flex min-w-0 items-center gap-[var(--shell-space-2)] font-mono text-[length:var(--workspace-editor-head-font-size)] text-muted-foreground">
+      <div className={cn('flex min-w-0 items-center gap-[var(--shell-space-2)] text-muted-foreground', chromeMonoRole('code'))}>
         {/* The path, not the basename. The mockup's head reads
             `web/src/platform/terminal-runtime/ThemeManager.ts` — with a tree beside
             it, a bare filename does not say which of several `index.css` is
@@ -97,7 +98,7 @@ function FileViewerToolbar({
           </Button>
         )}
         {hasPreviewRawToggle && (
-          <div className="flex items-center rounded-md bg-muted/60 p-0.5" role="group" aria-label="View mode">
+          <div className="flex items-center rounded-[var(--radius-control)] bg-muted/60 p-0.5" role="group" aria-label="View mode">
             <Button
               variant={viewMode === 'preview' ? 'secondary' : 'ghost'}
               size="sm"

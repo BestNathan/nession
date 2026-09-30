@@ -63,7 +63,7 @@ export function EnvFileMultiSelect({
           disabled={disabled}
         />
       </div>
-      <ScrollArea className="h-40 rounded-md border">
+      <ScrollArea className="h-40 rounded-[var(--radius-surface)] border">
         {filtered.length === 0 ? (
           <p className="text-xs text-muted-foreground text-center py-6">
             {files.length === 0 ? emptyLabel : 'No files match your search'}

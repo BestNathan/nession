@@ -101,7 +101,7 @@ function JsonExpandableDisclosureRow({
         tabIndex={propertyKey === undefined ? 0 : -1}
         className={cn(
           jsonKvRowGridClass,
-          'rounded-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+          'rounded-[var(--radius-control)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
         )}
         onKeyDown={onKeyDown}
       >

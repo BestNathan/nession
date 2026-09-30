@@ -14,6 +14,8 @@ import { Label } from '@/components/ui/label';
 import type { Session } from '@/types';
 import { sessionsApi } from '@/product/session';
 import { useDialogReset } from '@/shared/hooks/useDialogReset';
+import { cn } from '@/shared/lib/utils';
+import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
 
 interface KillConfirmDialogProps {
   isOpen: boolean;
@@ -80,9 +82,9 @@ export function KillConfirmDialog({
         </AlertDialogHeader>
 
         <div className="space-y-2">
-          <Label htmlFor="kill-confirm-name" className="text-sm font-normal">
+          <Label htmlFor="kill-confirm-name" className={chromeSansRole('body')}>
             Type{' '}
-            <span className="font-mono font-medium text-foreground select-all">
+            <span className={cn(chromeMonoRole('primary'), 'text-foreground select-all')}>
               {session.session_name}
             </span>{' '}
             to confirm
@@ -106,13 +108,13 @@ export function KillConfirmDialog({
             aria-invalid={confirmName.length > 0 && !nameMatches}
           />
           {confirmName.length > 0 && !nameMatches && (
-            <p className="text-xs text-muted-foreground">
+            <p className={cn('text-muted-foreground', chromeSansRole('metadata'))}>
               Name doesn&apos;t match yet.
             </p>
           )}
         </div>
 
-        {error && <p className="text-sm text-destructive">{error}</p>}
+        {error && <p className={cn('text-destructive', chromeSansRole('body'))}>{error}</p>}
 
         <AlertDialogFooter>
           <AlertDialogCancel disabled={loading}>Cancel</AlertDialogCancel>

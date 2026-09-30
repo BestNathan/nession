@@ -3,21 +3,38 @@
 export const typography = {
   title: {
     size: 17,
+    weight: 600,
+    lineHeight: "1.2",
   },
   primary: {
     size: 16,
+    weight: 550,
+    lineHeight: "1.25",
   },
   body: {
     size: 14,
+    weight: 450,
+    lineHeight: "1.4",
   },
   secondary: {
     size: 13,
+    weight: 500,
+    lineHeight: "1.3",
   },
   metadata: {
     size: 12,
+    weight: 475,
+    lineHeight: "1.25",
+  },
+  caption: {
+    size: 11.5,
+    weight: 500,
+    lineHeight: "1.3",
   },
   code: {
     size: 13,
+    weight: 475,
+    lineHeight: "1.35",
   },
 } as const;
 export const control = {
@@ -47,8 +64,8 @@ export const shell = {
   sessionRowTitleFontSize: 16,
   sessionRowMetaFontSize: 12,
   nodeFontSize: 13,
-  sectionHeadFontSize: 12,
-  footFontSize: 12,
+  sectionHeadFontSize: 13,
+  footFontSize: 11.5,
   sessionsListMinHeight: "30%",
 } as const;
 export const terminal = {

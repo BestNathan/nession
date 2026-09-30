@@ -198,7 +198,7 @@ function FileList({
                 aria-current={state.selectedFile?.path === file.path ? 'true' : undefined}
                 onClick={() => onFileClick(scope, file)}
                 className={cn(
-                  'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors',
+                  'flex w-full items-center gap-2 rounded-[var(--radius-control)] px-2 py-1.5 text-left text-sm transition-colors',
                   'hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                   state.selectedFile?.path === file.path && 'bg-accent text-accent-foreground',
                 )}
@@ -617,23 +617,25 @@ export function ClaudeCodeWorkspace({ ctx }: { ctx: WorkspaceContext }) {
           </TabsList>
         </Tabs>
       </header>
-      {activeView === 'conversations' ? (
-        <main className="flex min-h-0 flex-1 flex-col">
-          <ConversationView
-            view={conversation.view}
-            // `#1120` items 8 and 9. The mapping lives here rather than inside
-            // the view because it is the same decision `showHeading` above
-            // already makes from the same field: what the experience has room
-            // for. A viewport, not a mode — and App is the only one that has to
-            // push.
-            layout={ctx.experience === 'app' ? 'push' : 'master-detail'}
-            onSelect={conversation.select}
-            onLoadOlder={() => conversation.loadOlder()}
-            onReload={conversation.reload}
-          />
-        </main>
-      ) : (
-        <div className="flex min-h-0 flex-1 flex-col">
+      {/* Render both panels but hide the inactive one. Conditional rendering
+          would unmount ConversationView on tab switch, resetting its local
+          state (showList, scroll positions) and causing a visual "refresh".
+          Keeping both mounted preserves the user's position. */}
+      <main className={activeView === 'conversations' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}>
+        <ConversationView
+          view={conversation.view}
+          // `#1120` items 8 and 9. The mapping lives here rather than inside
+          // the view because it is the same decision `showHeading` above
+          // already makes from the same field: what the experience has room
+          // for. A viewport, not a mode — and App is the only one that has to
+          // push.
+          layout={ctx.experience === 'app' ? 'push' : 'master-detail'}
+          onSelect={conversation.select}
+          onLoadOlder={() => conversation.loadOlder()}
+          onReload={conversation.reload}
+        />
+      </main>
+      <div className={activeView === 'configuration' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}>
           {/* Configuration's own sub-axis (#1120 item 7). It sits here, under
               the section that has scopes, rather than beside `Conversations` —
               which is the whole of the flattening this change undoes. */}
@@ -664,7 +666,6 @@ export function ClaudeCodeWorkspace({ ctx }: { ctx: WorkspaceContext }) {
             </main>
           </div>
         </div>
-      )}
     </div>
   );
 }

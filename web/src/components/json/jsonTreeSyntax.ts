@@ -13,7 +13,7 @@ export const jsonSyntax = {
 
 export function jsonPreviewSurfaceClass(className?: string) {
   return cn(
-    'min-w-0 rounded-md border border-[var(--conversation-code-border)]',
+    'min-w-0 rounded-[var(--radius-surface)] border border-[var(--conversation-code-border)]',
     'bg-[var(--conversation-code-surface)]/50',
     'px-[var(--shell-space-2)] py-[var(--shell-space-1)]',
     className,

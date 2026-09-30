@@ -6,6 +6,8 @@ import { ShellDialogs } from '@/app/ShellDialogs';
 import { WorkspaceRegion } from '@/app/WorkspaceRegion';
 import { useShellState } from '@/app/useShellState';
 import type { ConnectionState } from '@/platform/socket';
+import { cn } from '@/shared/lib/utils';
+import { chromeSansRole } from '@/shared/typography/chromeRoles';
 
 export interface ShellProps {
   connectionStatus: ConnectionState;
@@ -54,7 +56,7 @@ export function Shell({ connectionStatus }: ShellProps) {
         {data.error ? (
           <div
             data-testid="shell-error"
-            className="flex shrink-0 items-center gap-2 bg-destructive/10 px-3 py-2 text-destructive text-sm"
+            className={cn('flex shrink-0 items-center gap-2 bg-destructive/10 px-3 py-2 text-destructive', chromeSansRole('body'))}
           >
             <span className="min-w-0 flex-1">{data.error}</span>
             <Tooltip>
@@ -79,7 +81,7 @@ export function Shell({ connectionStatus }: ShellProps) {
         {state.isRestoringDeepLink ? (
           <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3">
             <Loader2 className="size-8 animate-spin text-muted-foreground" />
-            <p className="text-sm text-muted-foreground">Restoring terminal session…</p>
+            <p className={cn('text-muted-foreground', chromeSansRole('secondary'))}>Restoring terminal session…</p>
           </div>
         ) : (
           <WorkspaceRegion

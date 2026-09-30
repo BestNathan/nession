@@ -63,7 +63,27 @@ cols: number, rows: number,
  * predates the field, which serialises nothing) means "decide it
  * yourself", preserving the old behaviour exactly.
  */
-needs_bootstrap?: boolean | null, };
+needs_bootstrap?: boolean | null, 
+/**
+ * Whether `cols`/`rows` are the browser's **measured** viewport, or the
+ * 80×24 placeholder its own default put there (#1265).
+ *
+ * The tolerance above is real — the Terminal can mount before it has
+ * measured anything — but the fallback it produces is not harmless. The
+ * attach resizes the **shared** window, and an application drawing inline
+ * rather than on the alternate screen repaints its screen into the
+ * scrollback on every real size change, so a fresh page costs two of them
+ * (to 80×24, and back when the browser's first measurement arrives) and
+ * leaves the application's screen duplicated in the history the user
+ * scrolls through.
+ *
+ * **Absence preserves the old meaning.** `None` and `Some(true)` both mean
+ * "these columns are the browser's own", which is what a client written
+ * before this field gets; `Some(false)` says the browser has not measured,
+ * and the Server forwards that to the agent, which inherits the pane's
+ * current size instead of forcing one nobody chose.
+ */
+size_known?: boolean | null, };
 export type SessionRefusal = { 
 /**
  * Always `"error"` today. A string rather than an enum because nothing
@@ -117,7 +137,27 @@ cols: number, rows: number,
  * predates the field, which serialises nothing) means "decide it
  * yourself", preserving the old behaviour exactly.
  */
-needs_bootstrap?: boolean | null, };
+needs_bootstrap?: boolean | null, 
+/**
+ * Whether `cols`/`rows` are the browser's **measured** viewport, or the
+ * 80×24 placeholder its own default put there (#1265).
+ *
+ * The tolerance above is real — the Terminal can mount before it has
+ * measured anything — but the fallback it produces is not harmless. The
+ * attach resizes the **shared** window, and an application drawing inline
+ * rather than on the alternate screen repaints its screen into the
+ * scrollback on every real size change, so a fresh page costs two of them
+ * (to 80×24, and back when the browser's first measurement arrives) and
+ * leaves the application's screen duplicated in the history the user
+ * scrolls through.
+ *
+ * **Absence preserves the old meaning.** `None` and `Some(true)` both mean
+ * "these columns are the browser's own", which is what a client written
+ * before this field gets; `Some(false)` says the browser has not measured,
+ * and the Server forwards that to the agent, which inherits the pane's
+ * current size instead of forcing one nobody chose.
+ */
+size_known?: boolean | null, };
 
 /** The payload the provider answers with. */
 export type ClientRelayBeginReply = { 

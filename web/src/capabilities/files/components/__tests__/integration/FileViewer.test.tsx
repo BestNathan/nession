@@ -286,11 +286,11 @@ Run the deploy script.
     render(<FileViewer fileOps={ops} path="/test/readme.md" filename="readme.md" onClose={vi.fn()} />);
 
     const raw = await screen.findByRole('button', { name: /Raw/ });
-    expect(raw.className).toContain('text-[length:var(--workspace-editor-action-font-size)]');
+    expect(raw.className).toContain('var(--typography-body-size)');
     expect(raw.className).not.toMatch(/(^|\s)text-xs(\s|$)/);
 
     const close = screen.getByRole('button', { name: 'Close file' });
-    expect(close.className).toContain('text-[length:var(--workspace-editor-action-font-size)]');
+    expect(close.className).toContain('var(--typography-body-size)');
     expect(close.className).not.toMatch(/(^|\s)text-xs(\s|$)/);
   });
 });

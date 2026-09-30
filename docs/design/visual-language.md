@@ -180,9 +180,9 @@ Rules:
 - metadata never outweighs the thing it describes;
 - monospace communicates code/terminal identity, not decoration;
 - Web and App share semantic roles while Experience tokens may change sizes/hit areas;
-- the first four roles are stated in the token layer as `typography.{primary,secondary,metadata,code}` (see [tokens.md](design-system/tokens.md#typography-roles)) — a role names the text's job, so use the role rather than a component-local size;
+- chrome roles are stated in the token layer as `typography.{title,primary,body,secondary,metadata,caption,code}` with size, weight, and line-height per Experience (see [tokens.md](design-system/tokens.md#typography-roles)) — a role names the text's job, so use the role rather than component-local size/weight/leading literals;
 - the scale is per Experience, not per component, and each Experience states its own sizes: `experience.web.typography` carries the roles Web consumes, `experience.app.typography` carries the App's (#1073). A role is *not* a promise that both Experiences resolve it to one number — it is a promise that both are naming the same job;
-- `pageTitle` and `body` have no Web leaf today because the Web shell renders no page header and has no App-style control set; an Experience may state a role the other does not consume, but neither may invent a size in a component instead;
+- Web and App may consume different subsets of the same role vocabulary; neither may invent typography in a component when a role already names the job (#1216);
 - controls take the body/control role rather than a size inherited from the primitive that rendered them, so a secondary action does not silently become a smaller text level;
 - terminal glyph rendering remains owned by the terminal surface rather than chrome typography, and document typography belongs to the document.
 
