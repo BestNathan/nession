@@ -65,6 +65,7 @@ pub mod conversations;
 pub mod list;
 pub mod messages;
 pub mod read;
+pub mod transcript_items;
 pub mod transcripts;
 
 use nession_protocol::{ContractDescriptor, ContractVersion, IdentityError, ProtocolDescriptor};

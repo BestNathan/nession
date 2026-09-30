@@ -174,6 +174,13 @@ pub struct Attachment {
     /// them (`hook_success` alone is 53,542 records). A string, for the same
     /// reason a `system` subtype is.
     pub attachment_type: String,
+    /// What the record carried, when it carried a body.
+    ///
+    /// Unbounded here for the same reason every other payload is: how much may
+    /// travel is a property of a client's contract, and measured, the largest
+    /// attachment is 1.2 MB — so a projection that did not bound this would
+    /// carry more than a whole page is allowed to.
+    pub payload: Option<Payload>,
 }
 
 /// Which family of runtime fact an event is.

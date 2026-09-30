@@ -129,6 +129,7 @@ pub(crate) fn adapt(line: &str, offset: u64) -> Adapted {
                 id,
                 timestamp,
                 attachment_type,
+                payload: record.get("attachment").map(json_payload),
             }))
         }
         // The `type` alone says nothing here — every one of these is `system` —
