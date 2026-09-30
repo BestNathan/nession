@@ -127,6 +127,7 @@ jobs:
       ISSUE_AUDIT_ALLOW_AGENT: 'true'
       ISSUE_AUDIT_TRIGGER: ${{ github.event_name }}
       ISSUE_AUDIT_MAX_TURNS: ${{ vars.ISSUE_AUDIT_MAX_TURNS || '12' }}
+      ISSUE_AUDIT_CLAUDE_MODEL: ${{ vars.ISSUE_AUDIT_CLAUDE_MODEL || 'claude-sonnet-5' }}
       ANTHROPIC_BASE_URL: ${{ vars.ANTHROPIC_BASE_URL || secrets.ANTHROPIC_BASE_URL }}
       ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

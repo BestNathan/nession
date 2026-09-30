@@ -116,7 +116,9 @@ function appendSummary(record) {
   ];
   if (record.agent?.invoked) {
     lines.push(
-      `- Model: \`${record.agent.model ?? 'unknown'}\``,
+      `- DeepSeek configured model: \`${record.agent.model ?? 'unknown'}\``,
+      `- Claude request model: \`${record.agent.claude_request_model ?? 'unknown'}\``,
+      `- Backend mapping: \`${record.agent.backend_mapping ?? 'unknown'}\``,
       `- Session: \`${record.agent.session_id ?? 'unknown'}\``,
       `- Input tokens: ${usage.input_tokens}`,
       `- Output tokens: ${usage.output_tokens}`,
@@ -140,15 +142,19 @@ function writeRecord(outDir, record) {
   return file;
 }
 
+function claudeRequestModel() {
+  return process.env.ISSUE_AUDIT_CLAUDE_MODEL || 'claude-sonnet-5';
+}
+
 function buildClaudeArgs(issue, audit, allowed, disallowed) {
-  // DeepSeek's official Claude Code integration expects its custom model name
-  // to be supplied through ANTHROPIC_MODEL. Passing deepseek-* via --model
-  // makes Claude Code validate it as an Anthropic model before the request
-  // reaches the Anthropic-compatible gateway.
+  // Claude Code print/SDK mode validates model identifiers before sending the
+  // request. Use a Claude-native Sonnet id that Claude Code recognizes; the
+  // DeepSeek Anthropic gateway maps claude-sonnet* requests to deepseek-flash.
   return [
     '-p', promptFor(issue, audit),
     '--output-format', 'json',
     '--max-turns', process.env.ISSUE_AUDIT_MAX_TURNS || '12',
+    '--model', claudeRequestModel(),
     '--allowedTools', allowed,
     '--disallowedTools', disallowed,
   ];
@@ -169,14 +175,25 @@ function runAgent(issue) {
     'Bash(rm:*)', 'Bash(curl:*)', 'Bash(wget:*)',
   ].join(',');
   const audit = auditIssue(issue);
+  const requestModel = claudeRequestModel();
   const result = spawnSync('claude', buildClaudeArgs(issue, audit, allowed, disallowed), {
     encoding: 'utf8',
-    env: { ...process.env, DISABLE_AUTOUPDATER: '1' },
+    env: {
+      ...process.env,
+      DISABLE_AUTOUPDATER: '1',
+      ANTHROPIC_MODEL: requestModel,
+      ANTHROPIC_DEFAULT_SONNET_MODEL: requestModel,
+    },
     maxBuffer: 20 * 1024 * 1024,
   });
   if (result.error) throw result.error;
-  const parsed = parseClaudeJson(result.stdout);
-  if (result.status !== 0) throw new Error(`Claude Code exited ${result.status}: ${result.stderr || parsed?.result || 'unknown error'}`);
+  let parsed = null;
+  try { parsed = parseClaudeJson(result.stdout); } catch {}
+  if (result.status !== 0) {
+    const detail = [result.stderr?.trim(), parsed?.result, result.stdout?.trim()].filter(Boolean).join('\n');
+    throw new Error(`Claude Code exited ${result.status}: ${detail || 'unknown error'}`);
+  }
+  if (!parsed) throw new Error('Claude Code succeeded but returned no parseable JSON');
   return parsed;
 }
 
@@ -188,8 +205,12 @@ function selfTest() {
   assert.deepEqual(extractUsage(sample), { input_tokens: 10, output_tokens: 4, cache_read_tokens: 20, cache_write_tokens: 3 });
   const modelUsage = { modelUsage: { deepseek: { inputTokens: 7, outputTokens: 2, cacheReadInputTokens: 5, cacheCreationInputTokens: 1 } } };
   assert.deepEqual(extractUsage(modelUsage), { input_tokens: 7, output_tokens: 2, cache_read_tokens: 5, cache_write_tokens: 1 });
+  const previous = process.env.ISSUE_AUDIT_CLAUDE_MODEL;
+  process.env.ISSUE_AUDIT_CLAUDE_MODEL = 'claude-sonnet-5';
   const args = buildClaudeArgs({ number: 1 }, { errors: [] }, 'Read', 'Edit');
-  assert.equal(args.includes('--model'), false);
+  assert.equal(args[args.indexOf('--model') + 1], 'claude-sonnet-5');
+  if (previous == null) delete process.env.ISSUE_AUDIT_CLAUDE_MODEL;
+  else process.env.ISSUE_AUDIT_CLAUDE_MODEL = previous;
   console.log('issue-audit-agent self-test: 3 cases passed');
 }
 
@@ -231,7 +252,9 @@ function main() {
       agent: {
         invoked: true,
         provider: 'deepseek',
-        model: process.env.ANTHROPIC_MODEL || process.env.ANTHROPIC_DEFAULT_SONNET_MODEL || 'gateway-default',
+        model: process.env.ANTHROPIC_MODEL || 'gateway-default',
+        claude_request_model: claudeRequestModel(),
+        backend_mapping: 'claude-sonnet* -> deepseek-flash',
         session_id: null,
         num_turns: null,
         duration_ms: null,
@@ -257,7 +280,9 @@ function main() {
     agent: {
       invoked: true,
       provider: 'deepseek',
-      model: process.env.ANTHROPIC_MODEL || process.env.ANTHROPIC_DEFAULT_SONNET_MODEL || 'gateway-default',
+      model: process.env.ANTHROPIC_MODEL || 'gateway-default',
+      claude_request_model: claudeRequestModel(),
+      backend_mapping: 'claude-sonnet* -> deepseek-flash',
       session_id: claude.session_id ?? claude.sessionId ?? null,
       num_turns: claude.num_turns ?? claude.numTurns ?? null,
       duration_ms: claude.duration_ms ?? claude.durationMs ?? null,
