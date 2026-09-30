@@ -9,7 +9,7 @@ import {
 } from 'lucide-react';
 import { memo, useEffect, type ReactNode } from 'react';
 import { toast } from 'sonner';
-import { useMessageScrollerScrollable } from '@shadcn/react/message-scroller';
+import { useMessageScrollerVisibility } from '@shadcn/react/message-scroller';
 import { Button } from '@/components/ui/button';
 import {
   MessageScroller,
@@ -73,12 +73,16 @@ function TranscriptContent({
   view: ConversationViewState;
   onLoadOlder: () => boolean;
 }) {
-  const scrollable = useMessageScrollerScrollable();
+  const visibility = useMessageScrollerVisibility();
 
-  // Trigger older loads when near the top (start of scroll)
+  // Check if the first item is visible (meaning we're at the top)
+  const firstItemId = view.items[0]?.id;
+  const isFirstItemVisible = firstItemId && visibility.visibleMessageIds.includes(firstItemId);
+
+  // Trigger older loads when the first item becomes visible
   useEffect(() => {
     if (
-      scrollable.start &&
+      isFirstItemVisible &&
       view.hasMore &&
       !view.loadingOlder &&
       view.items.length > 0 &&
@@ -86,7 +90,7 @@ function TranscriptContent({
     ) {
       onLoadOlder();
     }
-  }, [scrollable.start, view.hasMore, view.loadingOlder, view.items.length, view.messagesState, onLoadOlder]);
+  }, [isFirstItemVisible, view.hasMore, view.loadingOlder, view.items.length, view.messagesState, onLoadOlder]);
 
   return (
     <MessageScrollerContent>
