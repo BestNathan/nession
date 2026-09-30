@@ -34,6 +34,19 @@ Write issue bodies in the reporter's language; keep the section headers below, p
 - Every Requirement issue carries an `## Acceptance Report` with exactly one row per Success Criterion. New requirements start at `Pending`; completed closure requires every criterion to be `Pass` or justified `N/A` with evidence.
 - `Close as not planned` is the cancellation path. It does not claim the implementation met the requirement and therefore does not require acceptance.
 
+## Automated Issue Audit
+
+GitHub issue events are audited by `.github/workflows/issue-audit.yml`.
+
+- `scripts/issue-contract.mjs` is the deterministic structural contract for Bug/Requirement issue bodies and labels.
+- A structurally valid issue stops before any LLM call.
+- A structurally invalid issue from an OWNER/MEMBER/COLLABORATOR may be repaired by Claude Code through the `deepseek` GitHub Environment.
+- External-author issues never unlock model credentials automatically; use the workflow's manual dispatch after review.
+- The audit agent must read this skill, may only repair the target issue, and must never implement code, push/merge, or close the issue.
+- Each LLM invocation records token/cost telemetry as an Actions artifact and step summary.
+
+Keep this skill and the deterministic contract aligned. A format change is incomplete until both are updated and their self-tests pass.
+
 ---
 
 # Requirement path
