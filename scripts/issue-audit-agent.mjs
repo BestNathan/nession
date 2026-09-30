@@ -150,7 +150,7 @@ function runAgent(issue) {
     'Bash(gh issue list:*)',
   ].join(',');
   const disallowed = [
-    'Edit', 'Write', 'NotebookEdit', 'WebFetch', 'WebSearch',
+    'Edit', 'Write', 'NotebookEdit', 'WebFetch', 'WebSearch', 'mcp__playwright__*',
     'Bash(git:*)', 'Bash(gh pr:*)', 'Bash(gh api:*)',
     'Bash(rm:*)', 'Bash(curl:*)', 'Bash(wget:*)',
   ].join(',');
