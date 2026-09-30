@@ -135,7 +135,193 @@ function appendSummary(record) {
       `- Output tokens: ${usage.output_tokens}`,
       `- Cache read tokens: ${usage.cache_read_tokens}`,
       `- Cache write tokens: ${usage.cache_write_tokens}`,
-      `- Claude list-equivalent cost: ${record.agent.reported_cost_usd == null ? 'N/A' : `${record.agent.reported_cost_usd.toFixed(6)}`}`,
+      `- Claude list-equivalent cost: ${record.agent.reported_cost_usd == null ? 'N/A' : '
+      `- Cost basis: ${record.agent.reported_cost_basis ?? 'unknown'}`,
+      `- Estimated cost: ${record.agent.estimated_cost_usd == null ? 'N/A' : `$${record.agent.estimated_cost_usd.toFixed(6)}`}`,
+      `- Turns: ${record.agent.num_turns ?? 'N/A'}`,
+      `- Duration: ${record.agent.duration_ms == null ? 'N/A' : `${record.agent.duration_ms} ms`}`,
+    );
+  }
+  if (record.errors?.length) lines.push('', '### Remaining contract findings', '', ...record.errors.map((e) => `- ${e}`));
+  fs.appendFileSync(file, `${lines.join('\n')}\n`);
+}
+
+function writeRecord(outDir, record) {
+  fs.mkdirSync(outDir, { recursive: true });
+  const file = path.join(outDir, `issue-${record.issue.number}-usage.json`);
+  fs.writeFileSync(file, `${JSON.stringify(record, null, 2)}\n`);
+  appendSummary(record);
+  return file;
+}
+
+function claudeRequestModel() {
+  return process.env.ISSUE_AUDIT_CLAUDE_MODEL || 'claude-sonnet-5';
+}
+
+function buildClaudeArgs(issue, audit, allowed, disallowed) {
+  // Claude Code print/SDK mode validates model identifiers before sending the
+  // request. Use a Claude-native Sonnet id that Claude Code recognizes; the
+  // DeepSeek Anthropic gateway maps claude-sonnet* requests to deepseek-flash.
+  return [
+    '-p', promptFor(issue, audit),
+    '--output-format', 'json',
+    '--max-turns', process.env.ISSUE_AUDIT_MAX_TURNS || '20',
+    '--model', claudeRequestModel(),
+    '--allowedTools', allowed,
+    '--disallowedTools', disallowed,
+  ];
+}
+
+function runAgent(issue) {
+  ensureProviderConfig();
+  const allowed = [
+    'Read', 'Glob', 'Grep',
+    `Bash(gh issue edit ${issue.number}:*)`,
+    `Bash(gh issue comment ${issue.number}:*)`,
+  ].join(',');
+  const disallowed = [
+    'Edit', 'Write', 'NotebookEdit', 'WebFetch', 'WebSearch', 'mcp__playwright__*',
+    'Bash(git:*)', 'Bash(gh pr:*)', 'Bash(gh api:*)',
+    'Bash(rm:*)', 'Bash(curl:*)', 'Bash(wget:*)',
+  ].join(',');
+  const audit = auditIssue(issue);
+  const requestModel = claudeRequestModel();
+  const result = spawnSync('claude', buildClaudeArgs(issue, audit, allowed, disallowed), {
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      DISABLE_AUTOUPDATER: '1',
+      ANTHROPIC_MODEL: requestModel,
+      ANTHROPIC_DEFAULT_SONNET_MODEL: requestModel,
+    },
+    maxBuffer: 20 * 1024 * 1024,
+  });
+  if (result.error) throw result.error;
+  let parsed = null;
+  try { parsed = parseClaudeJson(result.stdout); } catch {}
+  if (result.status !== 0) {
+    const detail = [result.stderr?.trim(), parsed?.result, result.stdout?.trim()].filter(Boolean).join('\n');
+    const error = new Error(`Claude Code exited ${result.status}: ${detail || 'unknown error'}`);
+    error.claudeResult = parsed;
+    throw error;
+  }
+  if (!parsed) throw new Error('Claude Code succeeded but returned no parseable JSON');
+  return parsed;
+}
+
+function selfTest() {
+  const sample = {
+    usage: { input_tokens: 10, output_tokens: 4, cache_read_input_tokens: 20, cache_creation_input_tokens: 3 },
+    total_cost_usd: 0.01, session_id: 's1', num_turns: 2, duration_ms: 100,
+  };
+  assert.deepEqual(extractUsage(sample), { input_tokens: 10, output_tokens: 4, cache_read_tokens: 20, cache_write_tokens: 3 });
+  const modelUsage = { modelUsage: { deepseek: { inputTokens: 7, outputTokens: 2, cacheReadInputTokens: 5, cacheCreationInputTokens: 1 } } };
+  assert.deepEqual(extractUsage(modelUsage), { input_tokens: 7, output_tokens: 2, cache_read_tokens: 5, cache_write_tokens: 1 });
+  const previous = process.env.ISSUE_AUDIT_CLAUDE_MODEL;
+  process.env.ISSUE_AUDIT_CLAUDE_MODEL = 'claude-sonnet-5';
+  const args = buildClaudeArgs({ number: 1 }, { errors: [] }, 'Read', 'Edit');
+  assert.equal(args[args.indexOf('--model') + 1], 'claude-sonnet-5');
+  if (previous == null) delete process.env.ISSUE_AUDIT_CLAUDE_MODEL;
+  else process.env.ISSUE_AUDIT_CLAUDE_MODEL = previous;
+  console.log('issue-audit-agent self-test: 3 cases passed');
+}
+
+function main() {
+  if (process.argv[2] === 'self-test') return selfTest();
+  const issueNumber = Number(process.argv[2]);
+  const outDir = process.argv[3] || process.env.RUNNER_TEMP || '.issue-audit';
+  if (!Number.isInteger(issueNumber) || issueNumber <= 0) throw new Error('issue number is required');
+  const trigger = process.env.ISSUE_AUDIT_TRIGGER || process.env.GITHUB_EVENT_NAME || 'manual';
+  const issue = fetchIssue(issueNumber);
+  if (String(issue.state).toUpperCase() !== 'OPEN') {
+    writeRecord(outDir, { schema_version: 1, issue: { number: issue.number, title: issue.title, url: issue.url }, trigger, result: 'skipped-closed', agent: { invoked: false }, errors: [] });
+    return;
+  }
+
+  const before = auditIssue(issue);
+  if (before.ok) {
+    writeRecord(outDir, { schema_version: 1, issue: { number: issue.number, title: issue.title, url: issue.url }, trigger, result: 'contract-pass', agent: { invoked: false }, errors: [] });
+    return;
+  }
+
+  if (process.env.ISSUE_AUDIT_ALLOW_AGENT !== 'true') {
+    writeRecord(outDir, { schema_version: 1, issue: { number: issue.number, title: issue.title, url: issue.url }, trigger, result: 'agent-not-authorized', agent: { invoked: false }, errors: before.errors });
+    return;
+  }
+
+  let claude;
+  try {
+    claude = runAgent(issue);
+  } catch (error) {
+    const afterIssue = fetchIssue(issueNumber);
+    const after = auditIssue(afterIssue);
+    const message = error instanceof Error ? error.message : String(error);
+    const failed = error && typeof error === 'object' ? error.claudeResult ?? null : null;
+    const usage = failed ? extractUsage(failed) : { input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0 };
+    const estimated = estimateCost(usage);
+    writeRecord(outDir, {
+      schema_version: 1,
+      issue: { number: afterIssue.number, title: afterIssue.title, url: afterIssue.url },
+      trigger,
+      result: 'agent-error',
+      agent: {
+        invoked: true,
+        provider: 'deepseek',
+        model: process.env.ANTHROPIC_MODEL || 'gateway-default',
+        claude_request_model: claudeRequestModel(),
+        backend_mapping: 'claude-sonnet* -> deepseek-flash',
+        session_id: failed?.session_id ?? failed?.sessionId ?? null,
+        num_turns: failed?.num_turns ?? failed?.numTurns ?? null,
+        duration_ms: failed?.duration_ms ?? failed?.durationMs ?? null,
+        usage,
+        reported_cost_usd: failed?.total_cost_usd != null && Number.isFinite(Number(failed.total_cost_usd)) ? Number(failed.total_cost_usd) : null,
+        reported_cost_basis: 'Claude list-equivalent from the request model; not the DeepSeek bill',
+        estimated_cost_usd: estimated.usd,
+        pricing_usd_per_mtok: estimated.rates,
+        terminal_reason: failed?.terminal_reason ?? failed?.subtype ?? null,
+        error: message,
+      },
+      errors: after.errors,
+    });
+    throw error;
+  }
+  const usage = extractUsage(claude);
+  const estimated = estimateCost(usage);
+  const afterIssue = fetchIssue(issueNumber);
+  const after = auditIssue(afterIssue);
+  const record = {
+    schema_version: 1,
+    issue: { number: afterIssue.number, title: afterIssue.title, url: afterIssue.url },
+    trigger,
+    result: after.ok ? 'repaired' : 'contract-fail',
+    agent: {
+      invoked: true,
+      provider: 'deepseek',
+      model: process.env.ANTHROPIC_MODEL || 'gateway-default',
+      claude_request_model: claudeRequestModel(),
+      backend_mapping: 'claude-sonnet* -> deepseek-flash',
+      session_id: claude.session_id ?? claude.sessionId ?? null,
+      num_turns: claude.num_turns ?? claude.numTurns ?? null,
+      duration_ms: claude.duration_ms ?? claude.durationMs ?? null,
+      usage,
+      reported_cost_usd: claude.total_cost_usd != null && Number.isFinite(Number(claude.total_cost_usd)) ? Number(claude.total_cost_usd) : null,
+      reported_cost_basis: 'Claude list-equivalent from the request model; not the DeepSeek bill',
+      estimated_cost_usd: estimated.usd,
+      pricing_usd_per_mtok: estimated.rates,
+    },
+    errors: after.errors,
+  };
+  writeRecord(outDir, record);
+  if (!after.ok) process.exitCode = 2;
+}
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+  try { main(); } catch (error) {
+    console.error(error instanceof Error ? error.stack ?? error.message : error);
+    process.exitCode = 1;
+  }
+}
+ + record.agent.reported_cost_usd.toFixed(6)}`,
       `- Cost basis: ${record.agent.reported_cost_basis ?? 'unknown'}`,
       `- Estimated cost: ${record.agent.estimated_cost_usd == null ? 'N/A' : `$${record.agent.estimated_cost_usd.toFixed(6)}`}`,
       `- Turns: ${record.agent.num_turns ?? 'N/A'}`,
