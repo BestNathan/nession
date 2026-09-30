@@ -128,4 +128,60 @@ describe('fixture transcript surface', () => {
       fixtureTranscriptsSurface('?transcripts=nonsense').request('claude-code.transcripts', {}),
     ).rejects.toThrow('does not model ?transcripts=nonsense');
   });
+
+  it('answers every scenario it names on both halves, not just the one that renders first', async () => {
+    // The scenario list is the fixture's own contract, and it is easy to model
+    // one half of a scenario and not the other: the two halves live in two
+    // functions and the list is what the view asks for first, so a gap there
+    // hides the scenario behind an error screen rather than failing loudly.
+    const scenarios = ['ready', 'unbound', 'none', 'unavailable', 'partial'];
+    for (const scenario of scenarios) {
+      const scoped = fixtureTranscriptsSurface(`?transcripts=${scenario}`);
+      const list = await scoped.request<TranscriptsResponse>('claude-code.transcripts', {});
+      expect(list.state, `?transcripts=${scenario} list`).toBeTruthy();
+
+      const timeline = await scoped.request<TranscriptItemsResponse>(
+        'claude-code.transcript-items',
+        { transcript_id: 'a1b2c3d4-0000-4000-8000-000000000001' },
+      );
+      expect(timeline.state, `?transcripts=${scenario} timeline`).toBeTruthy();
+    }
+  });
+
+  it('models a cut body that could actually overflow, not a stub', async () => {
+    // The fixture carries a `truncated` body so a client cannot forget the flag
+    // exists — but a stub carries the flag and still proves nothing about the
+    // layout: a body with no unbroken run long enough to overflow cannot fail a
+    // wrapping rule, so a client that dropped `break-words` would look
+    // identical. Measured, the real thing is a 1.2 MB tail cut at 8 KB, so the
+    // fixture has to be awkward in the same way.
+    const response = await surface.request<TranscriptItemsResponse>(
+      'claude-code.transcript-items',
+      { transcript_id: 'a1b2c3d4-0000-4000-8000-000000000001' },
+    );
+    const cut = (response.items ?? []).find(
+      (entry) => entry.kind === 'attachment' && entry.payload?.truncated,
+    );
+    expect(cut, 'no truncated attachment in the timeline').toBeTruthy();
+    const text = cut?.kind === 'attachment' ? (cut.payload?.text ?? '') : '';
+
+    const longestRun = Math.max(...text.split(/\s+/).map((run) => run.length));
+    expect(longestRun, 'no unbroken run long enough to overflow a pane').toBeGreaterThan(200);
+    expect(text.length, 'body too short to be worth a ceiling').toBeGreaterThan(1000);
+  });
+
+  it('models the partial tail as a timeline fact, with the list still intact', async () => {
+    const partial = fixtureTranscriptsSurface('?transcripts=partial');
+    const list = await partial.request<TranscriptsResponse>('claude-code.transcripts', {});
+    // A partial tail is a fact about a transcript's *content* — the file ended
+    // mid-record — not about which transcripts exist, so the list is unchanged.
+    expect(list.state).toBe('ready');
+    expect((list.items ?? []).length).toBeGreaterThan(0);
+
+    const timeline = await partial.request<TranscriptItemsResponse>(
+      'claude-code.transcript-items',
+      { transcript_id: 'a1b2c3d4-0000-4000-8000-000000000001' },
+    );
+    expect(timeline.partial_tail).toBe(true);
+  });
 });

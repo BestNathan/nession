@@ -11,6 +11,7 @@ import {
   type TranscriptItemsResponse,
 } from '@/generated/protocol/claude-code/transcript-items/v1';
 import { FIXTURE_AGENTS } from './fixtureData';
+import { fixtureConversationSurface } from './fixtureConversation';
 
 /**
  * The transcript half of the fixture's Claude Code capability (#1234).
@@ -64,7 +65,13 @@ function transcriptItemsForScenario(scenario: string): TranscriptsResponse | und
   };
 
   switch (scenario) {
+    // `partial` shares this list on purpose: a partial tail is a fact about one
+    // transcript's *content* — the file ended mid-record — not about which
+    // transcripts exist, so only the timeline differs. Modelled on both halves
+    // deliberately: the list is what the view asks for first, so a scenario
+    // answered only further down would be reachable only behind an error screen.
     case 'ready':
+    case 'partial':
       return {
         state: 'ready',
         cwd: '/work/nession',
@@ -96,6 +103,23 @@ function transcriptItemsForScenario(scenario: string): TranscriptsResponse | und
  * unknown records entirely, so a fixture that produced only messages and tools
  * would let the whole timeline render as a conversation and still pass.
  */
+/**
+ * A body of the size the ceiling exists for, cut the way the wire cuts one.
+ *
+ * Measured, the largest attachment in a real transcript is 1.2 MB and the wire
+ * bounds it at 8 KB — so `truncated` is a flag about a body nobody reads in
+ * full. A stub would carry the flag and prove nothing: a body with no unbroken
+ * run long enough to overflow cannot fail a wrapping rule, so a client that
+ * dropped `break-words` would photograph identically.
+ */
+function cutAttachmentBody(): string {
+  const lines = Array.from({ length: 40 }, (_, i) => `[hook] step ${i} completed`);
+  // One unbroken token, the shape that actually overflows: real bodies carry
+  // base64 payloads and long paths, which have no whitespace to break at.
+  const unbroken = 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9'.repeat(24);
+  return [...lines, unbroken, '[hook] output cut at the 8 KB ceiling'].join('\n');
+}
+
 function timelineItems(): TranscriptEntryV1[] {
   return [
     {
@@ -186,7 +210,7 @@ function timelineItems(): TranscriptEntryV1[] {
       // Cut and marked, which is what the wire does with the measured 1.2 MB
       // tail — a fixture that only ever showed whole bodies would let a client
       // forget the flag exists.
-      payload: { text: 'hook output…', kind: 'text', truncated: true },
+      payload: { text: cutAttachmentBody(), kind: 'text', truncated: true },
     },
   ];
 }
@@ -274,12 +298,22 @@ function timelineForScenario(
 }
 
 /**
- * The fixture's Claude Code transcript surface.
+ * The fixture's Claude Code surface: the transcript units, over the
+ * conversation ones.
+ *
+ * **Composed rather than installed alongside**, because a `TransportPlugin`
+ * holds exactly *one* surface per route — installing a transcript-only surface
+ * would silently take the conversation wires with it, and the routes that draw a
+ * conversation would stop answering. The conversation surface is built first and
+ * answers the four units it owns; this one answers the two newer ones and
+ * delegates everything else, so a route gets the whole capability from one
+ * install.
  *
  * `search` is the route's query string, so a route parameter names the input the
  * provider is in rather than the screen it draws.
  */
 export function fixtureTranscriptsSurface(search: string): PluginSurface {
+  const conversation = fixtureConversationSurface(search);
   const scenario = new URLSearchParams(search).get('transcripts') ?? 'ready';
 
   // The same directory the conversation and git surfaces publish, built from the
@@ -318,9 +352,12 @@ export function fixtureTranscriptsSurface(search: string): PluginSurface {
         }
         return Promise.resolve(response as T);
       }
-      return Promise.reject(
-        new Error(`fixture transcript surface does not answer ${type}`),
-      );
+      // Everything else belongs to the conversation surface — delegation
+      // rather than rejection, so one install answers the whole capability.
+      // not-protocol: `type` is this surface's *input*, not a wire chosen here;
+      // the wire it names was resolved by the caller, and the surface that owns
+      // it answers it one frame down.
+      return conversation.request<T>(type, payload);
     },
     send(): void {},
     subscribe(): () => void {
