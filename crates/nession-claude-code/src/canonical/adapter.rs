@@ -537,6 +537,12 @@ fn result_body(content: Option<&Value>) -> String {
 /// local-command output, 81 ordinary prose). A classifier reading the text would
 /// hide the first along with the third, and losing a message the user wrote is a
 /// worse failure than showing a line of bookkeeping.
+///
+/// For the 243 records with no provenance field that begin with runtime wrappers
+/// (`[Request interrupted`, `<local-command-stdout>`, `<bash-input>`, `<bash-stdout>`),
+/// the content is matched by text prefix as a last resort. This is deliberate:
+/// a user message that happens to begin with these wrappers would be misclassified,
+/// but the measured corpus shows these wrappers are exclusive to runtime output.
 pub(crate) fn message_source(record: &Value, kind: &str) -> MessageSource {
     if kind == "assistant" {
         return MessageSource::Assistant;
@@ -548,7 +554,46 @@ pub(crate) fn message_source(record: &Value, kind: &str) -> MessageSource {
     if is_system_turn(record) {
         return MessageSource::System;
     }
+    // Last resort: check if the content begins with a runtime wrapper.
+    // This handles the 243 records with no provenance field that are still
+    // runtime output rather than human turns.
+    if let Some(content_text) = extract_message_text(record) {
+        if is_runtime_content(&content_text) {
+            return MessageSource::System;
+        }
+    }
     MessageSource::Human
+}
+
+/// Extract the text content from a message record for prefix matching.
+///
+/// Returns the concatenated text from either a string-bodied message or the
+/// text blocks of an array-bodied message. Returns `None` if the message has
+/// no text content or the content shape is not understood.
+fn extract_message_text(record: &Value) -> Option<String> {
+    let body = record.get("message")?;
+    let content = body.get("content")?;
+    match content {
+        Value::String(text) => Some(text.clone()),
+        Value::Array(blocks) => {
+            let texts: Vec<String> = blocks
+                .iter()
+                .filter_map(|block| {
+                    if string_field(block, "type").as_deref() == Some("text") {
+                        string_field(block, "text")
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            if texts.is_empty() {
+                None
+            } else {
+                Some(texts.join(""))
+            }
+        }
+        _ => None,
+    }
 }
 
 /// Whether the runtime, rather than a human, produced this turn.
@@ -560,6 +605,11 @@ pub(crate) fn message_source(record: &Value, kind: &str) -> MessageSource {
 /// case is the odd one out — another Nession session spoke, which is neither
 /// this human nor this runtime — and is kept with the system turns because it is
 /// equally not the user's own voice.
+///
+/// A further 243 records carry no provenance field at all but begin with
+/// runtime wrappers: `[Request interrupted` (181), `<local-command-stdout>`
+/// (59), `<bash-input>` (2), `<bash-stdout>` (1). These are matched by text
+/// prefix as a last resort, with explicit tests per wrapper.
 fn is_system_turn(record: &Value) -> bool {
     if string_field(record, "promptSource").as_deref() == Some("system") {
         return true;
@@ -576,6 +626,22 @@ fn is_system_turn(record: &Value) -> bool {
         string_field(record, "turnOrigin").as_deref(),
         Some("task_notification" | "scheduled" | "peer")
     )
+}
+
+/// Whether the message content is a runtime marker or command output rather
+/// than a human-authored turn.
+///
+/// 243 measured `type=user` records carry no provenance field but begin with
+/// a runtime wrapper. These are not human turns, and classifying them as such
+/// would show them as "You: [Request interrupted...]" or "You: <local-command-stdout>...",
+/// which is misleading. The wrappers are literal and appear at the start of
+/// `message.content`.
+fn is_runtime_content(text: &str) -> bool {
+    let trimmed = text.trim_start();
+    trimmed.starts_with("[Request interrupted")
+        || trimmed.starts_with("<local-command-stdout>")
+        || trimmed.starts_with("<bash-input>")
+        || trimmed.starts_with("<bash-stdout>")
 }
 
 #[cfg(test)]
@@ -684,6 +750,86 @@ mod tests {
             };
             assert_eq!(message.source, MessageSource::System, "{record}");
         }
+    }
+
+    #[test]
+    fn a_request_interrupted_marker_is_a_system_turn() {
+        // 181 measured records carry no provenance field but begin with
+        // `[Request interrupted`. These are runtime markers, not human turns.
+        let line = r#"{"type":"user","uuid":"i1","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user for tool use]"}]}}"#;
+        let entries = entries_of(line);
+        let [Entry::Message(message)] = entries.as_slice() else {
+            panic!("expected one message, got {entries:?}");
+        };
+        assert_eq!(
+            message.source,
+            MessageSource::System,
+            "interruption marker was modelled as a human turn"
+        );
+    }
+
+    #[test]
+    fn local_command_output_is_a_system_turn() {
+        // 59 measured records carry no provenance field but begin with
+        // `<local-command-stdout>`. These are command outputs, not human turns.
+        let line = r#"{"type":"user","uuid":"c1","message":{"role":"user","content":[{"type":"text","text":"<local-command-stdout>\noutput here\n</local-command-stdout>"}]}}"#;
+        let entries = entries_of(line);
+        let [Entry::Message(message)] = entries.as_slice() else {
+            panic!("expected one message, got {entries:?}");
+        };
+        assert_eq!(
+            message.source,
+            MessageSource::System,
+            "command output was modelled as a human turn"
+        );
+    }
+
+    #[test]
+    fn bash_input_is_a_system_turn() {
+        // 2 measured records carry no provenance field but begin with
+        // `<bash-input>`. These are command inputs, not human turns.
+        let line = r#"{"type":"user","uuid":"b1","message":{"role":"user","content":[{"type":"text","text":"<bash-input>ls -la</bash-input>"}]}}"#;
+        let entries = entries_of(line);
+        let [Entry::Message(message)] = entries.as_slice() else {
+            panic!("expected one message, got {entries:?}");
+        };
+        assert_eq!(
+            message.source,
+            MessageSource::System,
+            "bash input was modelled as a human turn"
+        );
+    }
+
+    #[test]
+    fn bash_output_is_a_system_turn() {
+        // 1 measured record carries no provenance field but begins with
+        // `<bash-stdout>`. This is command output, not a human turn.
+        let line = r#"{"type":"user","uuid":"b2","message":{"role":"user","content":[{"type":"text","text":"<bash-stdout>file1\nfile2</bash-stdout>"}]}}"#;
+        let entries = entries_of(line);
+        let [Entry::Message(message)] = entries.as_slice() else {
+            panic!("expected one message, got {entries:?}");
+        };
+        assert_eq!(
+            message.source,
+            MessageSource::System,
+            "bash output was modelled as a human turn"
+        );
+    }
+
+    #[test]
+    fn a_command_name_prefix_stays_human() {
+        // 185 measured records begin with `<command-name>` and are slash
+        // commands the user typed. These ARE human turns, not runtime output.
+        let line = r#"{"type":"user","uuid":"cmd1","message":{"role":"user","content":[{"type":"text","text":"<command-name>/help</command-name>"}]}}"#;
+        let entries = entries_of(line);
+        let [Entry::Message(message)] = entries.as_slice() else {
+            panic!("expected one message, got {entries:?}");
+        };
+        assert_eq!(
+            message.source,
+            MessageSource::Human,
+            "slash command was misclassified as system output"
+        );
     }
 
     #[test]
