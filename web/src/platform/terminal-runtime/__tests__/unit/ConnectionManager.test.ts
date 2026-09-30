@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ConnectionManager } from '@/platform/terminal-runtime/ConnectionManager';
-import type { AgentError, TerminalAgentApi } from '@/product/terminal';
+import type { AgentError, TerminalAgentApi, TerminalResizeFrame } from '@/product/terminal';
 import type { ResumeReply } from '@/platform/terminal-runtime/streamReconciler';
 import type { TerminalBootstrap } from '@/platform/terminal-runtime/bootstrap';
 import type { ConnectionState } from '@/platform/socket/types';
@@ -44,13 +44,13 @@ function replayOf(frames: Record<number, string>): ResumeReply {
 interface AgentApiHarness {
   api: TerminalAgentApi;
   outputHandlers: Array<(frame: { data: Uint8Array; streamEpoch?: number; streamSeq?: number; bootstrap?: TerminalBootstrap }) => void>;
-  resizeHandlers: Array<(cols: number, rows: number) => void>;
+  resizeHandlers: Array<(frame: TerminalResizeFrame) => void>;
   errorHandlers: Array<(error: AgentError) => void>;
 }
 
 function makeAgentApi(): AgentApiHarness & { unsubs: { output: ReturnType<typeof vi.fn>; resize: ReturnType<typeof vi.fn>; error: ReturnType<typeof vi.fn> } } {
   const outputHandlers: Array<(frame: { data: Uint8Array; streamEpoch?: number; streamSeq?: number; bootstrap?: TerminalBootstrap }) => void> = [];
-  const resizeHandlers: Array<(cols: number, rows: number) => void> = [];
+  const resizeHandlers: Array<(frame: TerminalResizeFrame) => void> = [];
   const errorHandlers: Array<(error: AgentError) => void> = [];
   const unsubs = {
     output: vi.fn(() => {}),
@@ -69,7 +69,7 @@ function makeAgentApi(): AgentApiHarness & { unsubs: { output: ReturnType<typeof
       outputHandlers.push(cb);
       return unsubs.output;
     }),
-    onResize: vi.fn((cb: (cols: number, rows: number) => void) => {
+    onResize: vi.fn((cb: (frame: TerminalResizeFrame) => void) => {
       resizeHandlers.push(cb);
       return unsubs.resize;
     }),
@@ -392,7 +392,7 @@ describe('ConnectionManager', () => {
       cm.dispose();
     });
 
-    it('routes agent resize frames to onResize', () => {
+    it('routes a level resize frame straight to onResize', () => {
       const { api, resizeHandlers } = makeAgentApi();
       const cm = new ConnectionManager({
         mode: 'p2p', sessionName: 'test', sessionId: 'sess-1', agentApi: api, ...attached,
@@ -400,8 +400,32 @@ describe('ConnectionManager', () => {
       const onResize = vi.fn();
       cm.onResize = onResize;
 
-      resizeHandlers[0]?.(120, 40);
+      // No stream position: a `%window-resize` echo, which never had one to
+      // account for and is applied on arrival exactly as it always was (#1303).
+      resizeHandlers[0]?.({ cols: 120, rows: 40 });
       expect(onResize).toHaveBeenCalledWith(120, 40);
+      cm.dispose();
+    });
+
+    it('does not apply a recorded resize until its place in the timeline arrives (#1303)', () => {
+      // A resize the agent recorded consumed a sequence number. Applying it
+      // here would show the right size and leave its position unaccounted for,
+      // so the next live frame would be held behind a hole the client had
+      // already been handed the contents of. It waits for its slot instead.
+      const { api, resizeHandlers } = makeAgentApi();
+      const cm = new ConnectionManager({
+        mode: 'p2p', sessionName: 'test', sessionId: 'sess-1', agentApi: api, ...attached,
+      });
+      const onResize = vi.fn();
+      cm.onResize = onResize;
+      // Seeded at 4, so the resize at 6 has 5 missing ahead of it — a real
+      // gap, which is the only state in which "not yet" is distinguishable
+      // from "never".
+      cm.seedStreamCursor(1, 4);
+
+      resizeHandlers[0]?.({ cols: 120, rows: 40, streamEpoch: 1, streamSeq: 6 });
+      expect(onResize).not.toHaveBeenCalled();
+
       cm.dispose();
     });
 
@@ -521,7 +545,7 @@ describe('ConnectionManager', () => {
 
       cm.dispose();
       outputHandlers[0]?.({ data: new Uint8Array([1]) });
-      resizeHandlers[0]?.(80, 24);
+      resizeHandlers[0]?.({ cols: 80, rows: 24 });
       errorHandlers[0]?.({ message: 'boom', notAttached: false });
       expect(onOutput).not.toHaveBeenCalled();
       expect(onResize).not.toHaveBeenCalled();

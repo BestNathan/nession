@@ -114,6 +114,26 @@ export class StreamReconciler {
   }
 
   /**
+   * A resize that is an **event in the stream** — one the agent recorded, and
+   * so one that consumed a sequence number (#1303).
+   *
+   * It takes the same path as a live output frame, which is the whole point:
+   * the agent's stream log holds the resize at that position, so a client that
+   * skipped it would see a hole where the log has an event, and the next live
+   * frame would be held behind a resume round trip that returns this same
+   * resize. A resize carrying no position — the `%window-resize` echo, or any
+   * relay frame — is not this method's: it goes straight to the sink, exactly
+   * as it did before the agent gave resizes a position.
+   */
+  acceptLiveResize(frame: LiveResizeFrame): void {
+    if (this.disposed) {
+      return;
+    }
+    const { streamEpoch, streamSeq, cols, rows } = frame;
+    this.accept(streamEpoch, streamSeq, () => this.sink.onResize(cols, rows));
+  }
+
+  /**
    * Seed the cursor from an attach response's stream position (#1094).
    *
    * The snapshot the client just rendered ends at this position, so the cursor
@@ -435,6 +455,21 @@ export interface LiveFrame {
   streamEpoch?: number;
   streamSeq?: number;
   bootstrap?: TerminalBootstrap;
+}
+
+/**
+ * A live resize that carries its place in the timeline (#1303).
+ *
+ * Both fields are required, unlike {@link LiveFrame}'s: a resize either has a
+ * position the agent recorded it at, or it is a level that never enters this
+ * class — there is no third case, and accepting a half-position would mean
+ * guessing one.
+ */
+export interface LiveResizeFrame {
+  cols: number;
+  rows: number;
+  streamEpoch: number;
+  streamSeq: number;
 }
 
 /** The part of `agent.terminal.stream.resume`'s reply the cursor depends on. */

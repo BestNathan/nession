@@ -524,6 +524,32 @@ pub(crate) fn extract_session_name(session_id: &str) -> String {
         .unwrap_or_else(|| session_id.to_string())
 }
 
+/// The wire frame for a `terminal.resize`, carrying the stream position it was
+/// recorded at when it has one (#1303).
+///
+/// `position` is the whole distinction the payload's two stream fields draw: a
+/// resize that **consumed a sequence number** is an event in the session's
+/// timeline and must reach the client as one, while a resize that only reports
+/// a size is a **level** and carries no position — which is byte-for-byte the
+/// frame this produced before those fields existed.
+fn terminal_resize_frame(
+    session_name: &str,
+    cols: u16,
+    rows: u16,
+    position: Option<(u64, u64)>,
+) -> Option<String> {
+    let payload = TerminalResizePayload {
+        session_name: session_name.to_string(),
+        cols,
+        rows,
+        control_generation: None,
+        stream_epoch: position.map(|(epoch, _)| epoch),
+        stream_seq: position.map(|(_, seq)| seq),
+    };
+    let msg = new_message(msg_types::TERMINAL_RESIZE, payload);
+    serde_json::to_string(&msg).ok()
+}
+
 /// Send a single `terminal.resize` message on this connection's outbound path.
 /// Returns `true` while the connection is usable, `false` once it is over.
 ///
@@ -533,26 +559,60 @@ pub(crate) fn extract_session_name(session_id: &str) -> String {
 /// size when its viewport moves or when it re-attaches. `Saturated` is therefore
 /// not a failure — the connection is still good — which is why only `Closed`
 /// stops the caller.
+///
+/// **Levels only.** A resize the agent *recorded* consumed a sequence number,
+/// and dropping that frame is what opens the hole #1303 is about — so the
+/// recorded one goes through [`send_recorded_resize_msg`] instead, which is the
+/// same frame on the lane that does not drop.
 async fn send_terminal_resize_msg(
     outbound: &P2pOutbound,
     session_name: &str,
     cols: u16,
     rows: u16,
 ) -> bool {
-    let payload = TerminalResizePayload {
-        session_name: session_name.to_string(),
-        cols,
-        rows,
-        control_generation: None,
-    };
-    let msg = new_message(msg_types::TERMINAL_RESIZE, payload);
-    let Ok(json) = serde_json::to_string(&msg) else {
+    let Some(json) = terminal_resize_frame(session_name, cols, rows, None) else {
         return true;
     };
     !matches!(
         outbound.try_send_state(WsMessage::Text(json)),
         Err(OutboundError::Closed)
     )
+}
+
+/// Send the resize the agent just recorded, so the sequence number it consumed
+/// reaches the client that has to account for it (#1303).
+///
+/// `record_resize` bumps `next_seq`, and the client's cursor is contiguous by
+/// construction: every sequence number has to arrive, in order, or the next
+/// live frame is held until a resume round trip fills the hole. Not sending one
+/// was therefore not a lost frame but a **guaranteed** hole — measured as one
+/// per attach, because the client fits its terminal and resizes on the way in,
+/// so the hole sat at seq 1 between the attach's seeded cursor and the first
+/// output frame.
+///
+/// The **terminal lane** rather than the level lane, for the reason above: a
+/// dropped event is a hole, and [`P2pOutbound::send_terminal`] is the only lane
+/// that never silently drops. A stall is not acted on here — the reply this
+/// handler writes immediately afterwards is the verdict on a peer that stopped
+/// draining, and it is the reader that ends the connection on a failed write
+/// (`Routed::serve`).
+async fn send_recorded_resize_msg(
+    outbound: &P2pOutbound,
+    session_name: &str,
+    cols: u16,
+    rows: u16,
+    position: (u64, u64),
+) {
+    let Some(json) = terminal_resize_frame(session_name, cols, rows, Some(position)) else {
+        return;
+    };
+    if outbound.send_terminal(WsMessage::Text(json)).await.is_err() {
+        debug!(
+            "session {session_name}: the resize at seq {} did not reach a peer that stopped \
+             draining; the reply that follows carries the verdict",
+            position.1
+        );
+    }
 }
 
 /// Take `session`'s history from a separate tmux process — the capture for
@@ -2186,14 +2246,34 @@ p2p_routes! { ctx, msg_type, payload_value;
                             .await
                         {
                             Ok(_) => {
-                                if let Some(session) =
-                                    sessions_lock(ctx.sessions).get_mut(&payload.session_name)
-                                {
-                                    session.stream.record_resize(
+                                // Recording and delivering are one step, and
+                                // the lock is released between them so the
+                                // frame's lane is not waited on with the
+                                // session map held: `record_resize` consumes a
+                                // sequence number, and a number the client
+                                // never receives is a hole it can only close
+                                // with a round trip (#1303). The session may
+                                // have ended across the resize's own `await`,
+                                // in which case nothing was recorded and there
+                                // is no position to report.
+                                let recorded = sessions_lock(ctx.sessions)
+                                    .get_mut(&payload.session_name)
+                                    .map(|session| {
+                                        session.stream.record_resize(
+                                            &payload.session_name,
+                                            payload.cols,
+                                            payload.rows,
+                                        )
+                                    });
+                                if let Some(position) = recorded {
+                                    send_recorded_resize_msg(
+                                        ctx.outbound,
                                         &payload.session_name,
                                         payload.cols,
                                         payload.rows,
-                                    );
+                                        position,
+                                    )
+                                    .await;
                                 }
                                 serde_json::to_string(&make_ok(ctx.id, "ok"))
                                     .unwrap_or_default()
@@ -4696,6 +4776,8 @@ mod tests {
             cols: 120,
             rows: 40,
             control_generation: None,
+            stream_epoch: None,
+            stream_seq: None,
         };
         let req = new_message(msg_types::TERMINAL_RESIZE, resize_payload);
         let resp: Message<ErrorPayload> = send_and_receive(&mut sink, &mut stream, &req).await;
@@ -4704,6 +4786,45 @@ mod tests {
         assert_eq!(resp.payload.code, "not_attached");
 
         handle.shutdown().await.ok();
+    }
+
+    /// A resize that consumed no sequence number must stay **byte-identical**
+    /// to the frame this produced before resizes could carry a position
+    /// (#1303).
+    ///
+    /// Every `%window-resize` echo and every frame the Server forwards is a
+    /// level, and `terminal_resize_frame` is the one place either is built. The
+    /// property is not free: emitting `"stream_epoch":null` for them would hand
+    /// an older reader a null it has to tolerate, which is exactly what the
+    /// payload's `skip_serializing_if` pair exists to prevent — and it is
+    /// asserted against the descriptor rather than against a round trip,
+    /// because a round trip passes for any self-consistent shape.
+    #[test]
+    fn a_level_resize_frame_carries_no_position() {
+        let json = terminal_resize_frame("work", 80, 24, None).expect("a resize frame serialises");
+        let frame: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let payload = frame.get("payload").expect("the frame carries a payload");
+        assert!(
+            payload.get("stream_epoch").is_none() && payload.get("stream_seq").is_none(),
+            "a level resize emitted a stream position: {json}"
+        );
+
+        let json =
+            terminal_resize_frame("work", 80, 24, Some((7, 9))).expect("a resize frame serialises");
+        let frame: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let payload = frame.get("payload").expect("the frame carries a payload");
+        assert_eq!(
+            payload
+                .get("stream_epoch")
+                .and_then(serde_json::Value::as_u64),
+            Some(7)
+        );
+        assert_eq!(
+            payload
+                .get("stream_seq")
+                .and_then(serde_json::Value::as_u64),
+            Some(9)
+        );
     }
 
     #[tokio::test]
