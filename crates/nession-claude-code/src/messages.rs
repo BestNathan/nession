@@ -34,10 +34,10 @@
 
 use crate::canonical::{read_page as read_canonical, CanonicalPage, Entry, MessageSource};
 use crate::conversation::Discovered;
+use crate::payload::{spend, truncate_chars};
 use crate::protocol::messages::v1::{
-    MessageContentV1, MessageItemV1, MessageRoleV1, PayloadKindV1, PayloadV1, ToolActivityV1,
-    ToolStatusV1, PAGE_PAYLOAD_BUDGET, TOOL_INPUT_CEILING, TOOL_OUTPUT_CEILING,
-    TOOL_SUMMARY_CEILING,
+    MessageContentV1, MessageItemV1, MessageRoleV1, ToolActivityV1, ToolStatusV1,
+    PAGE_PAYLOAD_BUDGET, TOOL_INPUT_CEILING, TOOL_OUTPUT_CEILING, TOOL_SUMMARY_CEILING,
 };
 
 /// One page of a conversation's normalized timeline.
@@ -176,58 +176,10 @@ fn item_of(entry: &Entry, budget: &mut usize) -> Option<MessageItemV1> {
     }
 }
 
-/// A canonical payload as a wire body, cut to what the page can still afford.
-///
-/// **The body is always present, even at zero budget** — emptied and marked
-/// truncated rather than dropped. Dropping it would make "this response could
-/// not carry it" indistinguishable from "the transcript did not record it",
-/// which are the two things `skip_serializing_if` on the field is there to tell
-/// apart.
-fn spend(budget: &mut usize, payload: &crate::canonical::Payload, ceiling: usize) -> PayloadV1 {
-    let allowed = ceiling.min(*budget);
-    let (text, cut) = truncate_bytes(&payload.text, allowed);
-    *budget = budget.saturating_sub(text.len());
-    PayloadV1 {
-        text,
-        kind: if payload.is_json {
-            PayloadKindV1::Json
-        } else {
-            PayloadKindV1::Text
-        },
-        truncated: payload.truncated || cut,
-    }
-}
-
-/// Cut `s` to at most `max` **bytes**, on a character boundary.
-///
-/// Bytes rather than characters because the ceilings are about how much travels
-/// on the wire, and a character count does not bound that — a run of CJK text is
-/// three bytes per character. Cutting mid-character would produce a string the
-/// client cannot decode, so the cut walks back to the nearest boundary.
-fn truncate_bytes(s: &str, max: usize) -> (String, bool) {
-    if s.len() <= max {
-        return (s.to_string(), false);
-    }
-    let mut cut = max;
-    while cut > 0 && !s.is_char_boundary(cut) {
-        cut -= 1;
-    }
-    (s[..cut].to_string(), true)
-}
-
-/// Cut `s` to at most `max` characters, saying so when it does.
-fn truncate_chars(s: &str, max: usize) -> String {
-    if s.chars().count() <= max {
-        return s.to_string();
-    }
-    let kept: String = s.chars().take(max).collect();
-    format!("{kept}…")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::messages::v1::{MessagesResponseV1, MessagesStateV1};
+    use crate::protocol::messages::v1::{MessagesResponseV1, MessagesStateV1, PayloadKindV1};
     use serde_json::Value;
 
     fn page_of(transcript: &str) -> MessagesPage {
@@ -814,17 +766,6 @@ mod tests {
             .count();
         assert!(cut > 0, "nothing was marked truncated, so nothing was cut");
         assert_eq!(tools(&page).len(), 20, "a tool was dropped rather than cut");
-    }
-
-    #[test]
-    fn a_cut_stops_on_a_character_boundary() {
-        // Three-byte characters: a byte-bounded cut that ignored boundaries
-        // would produce a string the client cannot decode.
-        let s = "中".repeat(100);
-        let (cut, truncated) = truncate_bytes(&s, 10);
-        assert!(truncated);
-        assert_eq!(cut.len(), 9, "cut mid-character: {cut:?}");
-        assert_eq!(cut, "中中中");
     }
 
     #[test]

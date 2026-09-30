@@ -90,9 +90,13 @@ pub struct Message {
     /// rather than reading as a turn that never happened.
     pub content: Vec<MessageBlock>,
     /// Whether the record belongs to a subagent rather than to this
-    /// conversation. Measured, no record in the local corpus carries it — which
-    /// is exactly why the fact is carried explicitly instead of being inferred
-    /// from something else that happens to correlate.
+    /// conversation.
+    ///
+    /// Measured across the whole `~/.claude/projects` tree, this is the marker
+    /// on **every** record of the 464 subagent transcripts — 91,137 of them,
+    /// under `projects/<dir>/<session>/subagents/`. Those live in separate
+    /// files rather than in the parent transcript, which is why a discovery
+    /// that lists only the project level sees none of them.
     pub sidechain: bool,
 }
 
@@ -170,6 +174,13 @@ pub struct Attachment {
     /// them (`hook_success` alone is 53,542 records). A string, for the same
     /// reason a `system` subtype is.
     pub attachment_type: String,
+    /// What the record carried, when it carried a body.
+    ///
+    /// Unbounded here for the same reason every other payload is: how much may
+    /// travel is a property of a client's contract, and measured, the largest
+    /// attachment is 1.2 MB — so a projection that did not bound this would
+    /// carry more than a whole page is allowed to.
+    pub payload: Option<Payload>,
 }
 
 /// Which family of runtime fact an event is.
