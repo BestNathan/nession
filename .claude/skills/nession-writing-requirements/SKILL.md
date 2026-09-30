@@ -44,6 +44,8 @@ GitHub issue events are audited by `.github/workflows/issue-audit.yml`.
 - External-author issues never unlock model credentials automatically; use the workflow's manual dispatch after review.
 - The audit agent must read this skill, may only repair the target issue, and must never implement code, push/merge, or close the issue.
 - Each LLM invocation records token/cost telemetry as an Actions artifact and step summary.
+- **Existing-issue audit mode is bounded normalization, not a restart of B0/B1.** The issue already exists, so do not dedupe it again or spend the run trying to prove an unconfirmed root cause. Preserve the reporter's evidence, use **Investigation Status** when mechanism is unverified, inspect only enough static code to provide honest Location / hypothesis context, then repair the issue.
+- Runtime reproduction, broad end-to-end tracing, and deeper hypothesis testing belong to the later bug investigation/fix workflow; the audit agent must not consume its whole turn budget doing that work.
 
 Keep this skill and the deterministic contract aligned. A format change is incomplete until both are updated and their self-tests pass.
 
