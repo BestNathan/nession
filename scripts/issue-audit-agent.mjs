@@ -140,6 +140,20 @@ function writeRecord(outDir, record) {
   return file;
 }
 
+function buildClaudeArgs(issue, audit, allowed, disallowed) {
+  // DeepSeek's official Claude Code integration expects its custom model name
+  // to be supplied through ANTHROPIC_MODEL. Passing deepseek-* via --model
+  // makes Claude Code validate it as an Anthropic model before the request
+  // reaches the Anthropic-compatible gateway.
+  return [
+    '-p', promptFor(issue, audit),
+    '--output-format', 'json',
+    '--max-turns', process.env.ISSUE_AUDIT_MAX_TURNS || '12',
+    '--allowedTools', allowed,
+    '--disallowedTools', disallowed,
+  ];
+}
+
 function runAgent(issue) {
   ensureProviderConfig();
   const allowed = [
@@ -155,15 +169,7 @@ function runAgent(issue) {
     'Bash(rm:*)', 'Bash(curl:*)', 'Bash(wget:*)',
   ].join(',');
   const audit = auditIssue(issue);
-  const model = process.env.ANTHROPIC_MODEL || process.env.ANTHROPIC_DEFAULT_SONNET_MODEL;
-  const result = spawnSync('claude', [
-    '-p', promptFor(issue, audit),
-    '--output-format', 'json',
-    '--max-turns', process.env.ISSUE_AUDIT_MAX_TURNS || '12',
-    ...(model ? ['--model', model] : []),
-    '--allowedTools', allowed,
-    '--disallowedTools', disallowed,
-  ], {
+  const result = spawnSync('claude', buildClaudeArgs(issue, audit, allowed, disallowed), {
     encoding: 'utf8',
     env: { ...process.env, DISABLE_AUTOUPDATER: '1' },
     maxBuffer: 20 * 1024 * 1024,
@@ -182,7 +188,9 @@ function selfTest() {
   assert.deepEqual(extractUsage(sample), { input_tokens: 10, output_tokens: 4, cache_read_tokens: 20, cache_write_tokens: 3 });
   const modelUsage = { modelUsage: { deepseek: { inputTokens: 7, outputTokens: 2, cacheReadInputTokens: 5, cacheCreationInputTokens: 1 } } };
   assert.deepEqual(extractUsage(modelUsage), { input_tokens: 7, output_tokens: 2, cache_read_tokens: 5, cache_write_tokens: 1 });
-  console.log('issue-audit-agent self-test: 2 cases passed');
+  const args = buildClaudeArgs({ number: 1 }, { errors: [] }, 'Read', 'Edit');
+  assert.equal(args.includes('--model'), false);
+  console.log('issue-audit-agent self-test: 3 cases passed');
 }
 
 function main() {
@@ -208,7 +216,35 @@ function main() {
     return;
   }
 
-  const claude = runAgent(issue);
+  let claude;
+  try {
+    claude = runAgent(issue);
+  } catch (error) {
+    const afterIssue = fetchIssue(issueNumber);
+    const after = auditIssue(afterIssue);
+    const message = error instanceof Error ? error.message : String(error);
+    writeRecord(outDir, {
+      schema_version: 1,
+      issue: { number: afterIssue.number, title: afterIssue.title, url: afterIssue.url },
+      trigger,
+      result: 'agent-error',
+      agent: {
+        invoked: true,
+        provider: 'deepseek',
+        model: process.env.ANTHROPIC_MODEL || process.env.ANTHROPIC_DEFAULT_SONNET_MODEL || 'gateway-default',
+        session_id: null,
+        num_turns: null,
+        duration_ms: null,
+        usage: { input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0 },
+        reported_cost_usd: null,
+        estimated_cost_usd: null,
+        pricing_usd_per_mtok: estimateCost({ input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0 }).rates,
+        error: message,
+      },
+      errors: after.errors,
+    });
+    throw error;
+  }
   const usage = extractUsage(claude);
   const estimated = estimateCost(usage);
   const afterIssue = fetchIssue(issueNumber);
