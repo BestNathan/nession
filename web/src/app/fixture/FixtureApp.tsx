@@ -15,7 +15,7 @@ import { envApi } from '@/capabilities/env';
 import { gitApi } from '@/capabilities/git';
 import { fixtureAgents } from './fixtureAgents';
 import { fixtureConnection } from './fixtureConnection';
-import { fixtureConversationSurface } from './fixtureConversation';
+import { fixtureTranscriptsSurface } from './fixtureTranscripts';
 import { fixtureEnvSurface } from './fixtureEnv';
 import { fixtureFileOps } from './fixtureFileOps';
 import { fixtureGitSurface } from './fixtureGit';
@@ -66,7 +66,7 @@ export function FixtureApp() {
   // lifetime like the git stub above; the scenario is the route's input, so it
   // is read once at mount rather than tracked, because a fixture route does not
   // change its query without a reload.
-  useEffect(() => claudeCodeApi.install(fixtureConversationSurface(search)), [search]);
+  useEffect(() => claudeCodeApi.install(fixtureTranscriptsSurface(search)), [search]);
 
   // The Environment stub, for the same reachability reason (#1202): the App's
   // Environment navigator/pushed detail can only be captured if the route can
