@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ConnectionManager } from '@/platform/terminal-runtime/ConnectionManager';
 import type { AgentError, TerminalAgentApi } from '@/product/terminal';
+import type { ResumeReply } from '@/platform/terminal-runtime/streamReconciler';
 import type { ConnectionState } from '@/platform/socket/types';
 import type { RelayServerTransport } from '@/platform/attach/relayServerConnection';
 
@@ -11,6 +12,32 @@ async function flushMicrotasks(): Promise<void> {
   for (let i = 0; i < 10; i += 1) {
     await Promise.resolve();
   }
+}
+
+/** A resume answer the test releases by hand, so the interleaving is stated. */
+function deferredReply(): {
+  promise: Promise<ResumeReply>;
+  resolve: (reply: ResumeReply) => void;
+} {
+  let resolve!: (reply: ResumeReply) => void;
+  const promise = new Promise<ResumeReply>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
+/** A replay answer carrying `seq -> text` for the frames it covers. */
+function replayOf(frames: Record<number, string>): ResumeReply {
+  return {
+    streamEpoch: 1,
+    epochMatch: true,
+    events: Object.entries(frames).map(([seq, text]) => ({
+      kind: 'output' as const,
+      streamEpoch: 1,
+      streamSeq: Number(seq),
+      data: btoa(text),
+    })),
+  };
 }
 
 interface AgentApiHarness {
@@ -227,6 +254,86 @@ describe('ConnectionManager', () => {
       // `frame-8` exactly once: the replay's copy, not the replay's plus a
       // second live delivery.
       expect(received).toEqual(['five', 'frame-6', 'frame-7', 'frame-8']);
+      cm.dispose();
+    });
+
+    it('does not lose the frames a concurrent live frame jumped over (#1303)', async () => {
+      // The sequence from the issue. The second live frame used to find the
+      // first frame's resume in flight, skip its own gap recovery, and commit
+      // itself over the gap; the resume then answered 6,7,8,9 and was filtered
+      // against the cursor that second frame had already advanced, so 6, 7 and
+      // 8 were dropped with nothing left to ask for them.
+      const { api, outputHandlers } = makeAgentApi();
+      const received: string[] = [];
+      const cm = new ConnectionManager({
+        mode: 'p2p', sessionName: 'test', sessionId: 'a:test', agentApi: api, ...attached,
+      });
+      cm.onOutput = (data) => received.push(new TextDecoder().decode(data));
+
+      const reply = deferredReply();
+      (api.resumeStream as ReturnType<typeof vi.fn>).mockReturnValue(reply.promise);
+
+      outputHandlers[0]({ data: new TextEncoder().encode('five'), streamEpoch: 1, streamSeq: 5 });
+      outputHandlers[0]({ data: new TextEncoder().encode('eight'), streamEpoch: 1, streamSeq: 8 });
+      expect(api.resumeStream).toHaveBeenCalledTimes(1);
+      // Asked for from the last frame actually committed, not from the frame
+      // that happened to notice the gap.
+      expect((api.resumeStream as ReturnType<typeof vi.fn>).mock.calls[0]).toEqual(['test', 1, 5]);
+
+      // The second frame that skips the gap joins the recovery in flight: one
+      // request, and nothing on screen ahead of the frames it is missing.
+      outputHandlers[0]({ data: new TextEncoder().encode('nine'), streamEpoch: 1, streamSeq: 9 });
+      expect(api.resumeStream).toHaveBeenCalledTimes(1);
+      expect(received).toEqual(['five']);
+
+      // The replay carries 8 and 9 as well; the copies already held live are
+      // the ones delivered, so nothing is written twice.
+      reply.resolve(replayOf({ 6: 'six', 7: 'seven', 8: 'replay-8', 9: 'replay-9' }));
+      await flushMicrotasks();
+
+      expect(received).toEqual(['five', 'six', 'seven', 'eight', 'nine']);
+      cm.dispose();
+    });
+
+    it('discards a gap replay that lands after the transport was disposed (#1303)', async () => {
+      // A resume is in flight across a transport rewire or teardown; its answer
+      // describes a stream nobody is listening to any more.
+      const { api, outputHandlers } = makeAgentApi();
+      const received: string[] = [];
+      const cm = new ConnectionManager({
+        mode: 'p2p', sessionName: 'test', sessionId: 'a:test', agentApi: api, ...attached,
+      });
+      cm.onOutput = (data) => received.push(new TextDecoder().decode(data));
+
+      const reply = deferredReply();
+      (api.resumeStream as ReturnType<typeof vi.fn>).mockReturnValue(reply.promise);
+
+      outputHandlers[0]({ data: new TextEncoder().encode('five'), streamEpoch: 1, streamSeq: 5 });
+      outputHandlers[0]({ data: new TextEncoder().encode('eight'), streamEpoch: 1, streamSeq: 8 });
+      cm.dispose();
+
+      reply.resolve(replayOf({ 6: 'six', 7: 'seven', 8: 'eight' }));
+      await flushMicrotasks();
+
+      expect(received).toEqual(['five']);
+    });
+
+    it('does not start a second recovery while one is in flight', async () => {
+      const { api, outputHandlers } = makeAgentApi();
+      const cm = new ConnectionManager({
+        mode: 'p2p', sessionName: 'test', sessionId: 'a:test', agentApi: api, ...attached,
+      });
+      const reply = deferredReply();
+      (api.resumeStream as ReturnType<typeof vi.fn>).mockReturnValue(reply.promise);
+
+      outputHandlers[0]({ data: new TextEncoder().encode('five'), streamEpoch: 1, streamSeq: 5 });
+      outputHandlers[0]({ data: new TextEncoder().encode('eight'), streamEpoch: 1, streamSeq: 8 });
+      outputHandlers[0]({ data: new TextEncoder().encode('nine'), streamEpoch: 1, streamSeq: 9 });
+      outputHandlers[0]({ data: new TextEncoder().encode('ten'), streamEpoch: 1, streamSeq: 10 });
+
+      // Overlapping requests would race their answers against each other and
+      // duplicate the replay payload for no gain.
+      expect(api.resumeStream).toHaveBeenCalledTimes(1);
       cm.dispose();
     });
 

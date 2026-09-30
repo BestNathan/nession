@@ -1,7 +1,7 @@
 import type { ConnectionOptions } from './types';
 import type { ConnectionState } from '@/platform/socket/types';
 import type { TerminalTransport } from './transport/TerminalTransport';
-import { applyTerminalStreamEvents } from './streamApply';
+import { StreamReconciler, type ResumeReply } from './streamReconciler';
 
 /**
  * Deadline for the periodic keepalive ping.
@@ -35,9 +35,13 @@ export class ConnectionManager implements TerminalTransport {
    * flushAllOutbound once the agent acks client.attach.
    */
   private pendingResize: { cols: number; rows: number } | null = null;
-  private streamEpoch: number | null = null;
-  private lastStreamSeq: number | null = null;
-  private streamResumeInFlight = false;
+  /**
+   * Owns the stream cursor and the order frames are applied in (#1303). This
+   * class moves bytes and never decides what is next in the timeline: a live
+   * frame and a replay answer are handed to the same reconciler, which is the
+   * only writer of the cursor.
+   */
+  private readonly reconciler: StreamReconciler;
   private isAttached: () => boolean;
   /** Notified after input is handed to either transport — see `onInputSent`. */
   private onInputSent: () => void;
@@ -61,6 +65,13 @@ export class ConnectionManager implements TerminalTransport {
     this.serverConnection = options.serverConnection;
     this.isAttached = options.isAttached ?? (() => false);
     this.onInputSent = options.onInputSent ?? (() => {});
+    this.reconciler = new StreamReconciler(
+      (epoch, afterSeq) => this.resumeStream(epoch, afterSeq),
+      {
+        onOutput: (data, bootstrap) => this.onOutput?.(data, bootstrap),
+        onResize: (cols, rows) => this.onResize?.(cols, rows),
+      },
+    );
 
     if (this.mode === 'p2p' && this.agentApi) {
       this.setupP2P();
@@ -169,6 +180,7 @@ export class ConnectionManager implements TerminalTransport {
 
   dispose(): void {
     this.disposed = true;
+    this.reconciler.dispose();
     if (this.pingTimer) { clearInterval(this.pingTimer); this.pingTimer = null; }
     this.p2pUnsubOutput?.();
     this.p2pUnsubResize?.();
@@ -190,9 +202,10 @@ export class ConnectionManager implements TerminalTransport {
       if (this.disposed) {
         return;
       }
-      void this.handleStreamFrame(frame.streamEpoch, frame.streamSeq, () => {
-        this.onOutput?.(frame.data, frame.bootstrap);
-      });
+      // Synchronous on purpose: the reconciler places the frame in the
+      // timeline before the next one can arrive, so two frames can never be
+      // in flight against the same cursor (#1303).
+      this.reconciler.acceptLive(frame);
     });
 
     this.p2pUnsubResize = api.onResize((cols: number, rows: number) => {
@@ -234,115 +247,26 @@ export class ConnectionManager implements TerminalTransport {
 
   /** Seed stream cursor after attach (late joiner / reconnect #1094). */
   seedStreamCursor(streamEpoch: number | undefined, streamCursor: number | undefined): void {
-    if (streamEpoch === undefined) {
-      return;
-    }
-    // Never move the cursor backwards within one epoch. A live frame can
-    // already have advanced it past the cursor the attach response carries, and
-    // regressing it makes the gap fetch below re-apply output that has already
-    // been written — the duplication measured as `out seq=1` delivered twice
-    // (#1148). Across an epoch change the sequences are not comparable, so the
-    // seed wins there.
-    const sameEpoch = this.streamEpoch === streamEpoch;
-    this.streamEpoch = streamEpoch;
-    const seed = streamCursor ?? null;
-    this.lastStreamSeq =
-      sameEpoch && this.lastStreamSeq !== null && seed !== null
-        ? Math.max(this.lastStreamSeq, seed)
-        : seed;
-    if (this.mode === 'p2p' && this.agentApi && this.lastStreamSeq !== null) {
-      void this.fetchStreamGap(this.lastStreamSeq);
-    }
+    this.reconciler.seed(streamEpoch, streamCursor);
   }
 
-  private async handleStreamFrame(
-    streamEpoch: number | undefined,
-    streamSeq: number | undefined,
-    deliver: () => void,
-  ): Promise<void> {
-    if (streamEpoch === undefined || streamSeq === undefined) {
-      deliver();
-      return;
+  /**
+   * Ask the agent for the events after a cursor (#1094), on the reconciler's
+   * behalf — it decides when a replay is worth asking for and what to do with
+   * the answer.
+   *
+   * Only P2P has a stream to resume: relay frames carry no sequence numbers, so
+   * nothing on that path ever asks. A refusal is a rejection rather than an
+   * empty answer, because the reconciler reads "no events after your cursor"
+   * as a cursor that is up to date, and a request that never happened must not
+   * look like one that did.
+   */
+  private resumeStream(epoch: number, afterSeq: number): Promise<ResumeReply> {
+    const api = this.agentApi;
+    if (this.mode !== 'p2p' || !api) {
+      return Promise.reject(new Error('terminal stream resume is P2P-only'));
     }
-    if (this.streamEpoch === null) {
-      this.streamEpoch = streamEpoch;
-      this.lastStreamSeq = streamSeq;
-      deliver();
-      return;
-    }
-    if (streamEpoch !== this.streamEpoch) {
-      this.streamEpoch = streamEpoch;
-      this.lastStreamSeq = null;
-      await this.fetchStreamGap(0);
-    } else if (this.lastStreamSeq !== null && streamSeq > this.lastStreamSeq + 1) {
-      await this.fetchStreamGap(this.lastStreamSeq);
-    }
-    // A replay walks the agent's log with no upper bound — `events_since`
-    // returns every event after the cursor, INCLUDING the frame arriving right
-    // now. Delivering it again writes the same bytes to the terminal twice,
-    // which is what doubled P2P output: xterm answered each DA/OSC query twice
-    // because it received each query twice (#1148). Relay never hit this,
-    // because `fetchStreamGap` only runs in P2P.
-    //
-    // The cursor the replay left behind is the arbiter, and it suppresses the
-    // frame only when the replay genuinely reached it — if the log was capped
-    // and did not contain this frame, `lastStreamSeq` stays behind it and the
-    // live delivery is the only copy.
-    if (this.lastStreamSeq !== null && streamSeq <= this.lastStreamSeq) {
-      return;
-    }
-    this.lastStreamSeq = streamSeq;
-    deliver();
-  }
-
-  private async fetchStreamGap(afterSeq: number): Promise<void> {
-    if (
-      this.disposed ||
-      this.streamResumeInFlight ||
-      this.mode !== 'p2p' ||
-      !this.agentApi ||
-      this.streamEpoch === null
-    ) {
-      return;
-    }
-    this.streamResumeInFlight = true;
-    try {
-      const result = await this.agentApi.resumeStream(
-        this.sessionName,
-        this.streamEpoch,
-        afterSeq,
-      );
-      if (!result.epochMatch) {
-        this.streamEpoch = result.streamEpoch;
-        this.lastStreamSeq = null;
-      }
-      // A replay must not re-apply what has already been delivered. This is the
-      // other half of the guard in `handleStreamFrame`: there, a live frame the
-      // replay already carried is dropped; here, a replayed event the live
-      // stream already delivered is dropped. Without this half a replay asked
-      // for from a stale cursor re-applies the stream on top of itself, and the
-      // seed path asks with `after_seq: 0` — measured as `out seq=1` delivered
-      // twice and `out seq=5..8` delivered once live and again from the replay
-      // (#1148). Every duplicated byte reached xterm twice, so xterm answered
-      // each terminal-capability query twice.
-      const deliveredUpTo = this.lastStreamSeq;
-      const fresh =
-        deliveredUpTo === null
-          ? result.events
-          : result.events.filter((event) => event.streamSeq > deliveredUpTo);
-      applyTerminalStreamEvents(fresh, {
-        onOutput: (data) => this.onOutput?.(data),
-        onResize: (cols, rows) => this.onResize?.(cols, rows),
-      });
-      const last = fresh.length > 0 ? fresh[fresh.length - 1] : undefined;
-      if (last) {
-        this.lastStreamSeq = last.streamSeq;
-      }
-    } catch {
-      /* gap recovery is best-effort; live stream continues */
-    } finally {
-      this.streamResumeInFlight = false;
-    }
+    return api.resumeStream(this.sessionName, epoch, afterSeq);
   }
 
   private setupRelay(): void {
