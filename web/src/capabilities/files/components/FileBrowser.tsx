@@ -20,6 +20,7 @@ import {
   AlertDialogCancel,
 } from '@/components/ui/alert-dialog';
 import { cn } from '@/shared/lib/utils';
+import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import { useExplorerFileBrowser } from '../hooks/useExplorerFileBrowser';
 import type { FileOps, FileEntry } from '@/capabilities/files';
 import { Explorer } from '@/platform/explorer/Explorer';
@@ -105,11 +106,11 @@ export function FileBrowser({
                 browser.newEntryForm.reset();
               }
             }}
-            className="h-7 text-xs"
+            className={cn('h-7', chromeSansRole('metadata'))}
           />
           <Button
             size="sm"
-            className="h-7 text-xs"
+            className={cn('h-7', chromeSansRole('metadata'))}
             onClick={() => {
               if (browser.newEntryForm.showNewFile) {
                 browser.handleCreateFile();
@@ -123,7 +124,7 @@ export function FileBrowser({
           <Button
             size="sm"
             variant="ghost"
-            className="h-7 text-xs"
+            className={cn('h-7', chromeSansRole('metadata'))}
             onClick={() => browser.newEntryForm.reset()}
           >
             Cancel

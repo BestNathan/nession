@@ -4,6 +4,8 @@ import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { MASKED_VALUE, isSensitiveKey } from '@/capabilities/env/model/sensitive';
+import { cn } from '@/shared/lib/utils';
+import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
 
 /** Below this count a filter field would be chrome in search of a problem. */
 const SEARCH_THRESHOLD = 6;
@@ -32,10 +34,10 @@ function VariableRow({
       data-testid={`env-var-row-${key}`}
       className="flex items-start gap-2 px-3 py-1.5"
     >
-      <span className="min-w-0 flex-[2] truncate pt-0.5 font-mono text-xs text-foreground">
+      <span className={cn('min-w-0 flex-[2] truncate pt-0.5 font-mono text-foreground', chromeMonoRole('code'))}>
         {key}
       </span>
-      <span className="min-w-0 flex-[3] break-all pt-0.5 font-mono text-xs">
+      <span className={cn('min-w-0 flex-[3] break-all pt-0.5 font-mono', chromeMonoRole('code'))}>
         {empty ? (
           <span className="italic text-muted-foreground">(empty)</span>
         ) : masked ? (
@@ -140,7 +142,7 @@ export function EnvVariablesView({
           <button
             type="button"
             data-testid="env-reveal-all"
-            className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+            className={cn('text-muted-foreground underline-offset-2 hover:text-foreground hover:underline', chromeSansRole('metadata'))}
             onClick={() => setRevealed(new Set(sensitiveKeys))}
           >
             Reveal sensitive values
@@ -150,7 +152,7 @@ export function EnvVariablesView({
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         {filtered.length === 0 ? (
-          <p className="px-4 py-8 text-center text-sm text-muted-foreground">
+          <p className={cn('px-4 py-8 text-center text-muted-foreground', chromeSansRole('secondary'))}>
             No variables match &ldquo;{query.trim()}&rdquo;
           </p>
         ) : (
@@ -169,11 +171,11 @@ export function EnvVariablesView({
 
       {warnings.length > 0 ? (
         <div className="border-t px-3 py-2" data-testid="env-var-warnings">
-          <p className="text-xs font-medium text-warning">
+          <p className={cn('text-warning', chromeSansRole('metadata'))}>
             {warnings.length === 1 ? '1 line skipped' : `${warnings.length} lines skipped`}
           </p>
           {warnings.map((w, i) => (
-            <p key={i} className="mt-0.5 font-mono text-xs text-muted-foreground">
+            <p key={i} className={cn('mt-0.5 font-mono text-muted-foreground', chromeMonoRole('code'))}>
               {w}
             </p>
           ))}

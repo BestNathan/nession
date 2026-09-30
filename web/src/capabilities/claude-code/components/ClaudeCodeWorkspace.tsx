@@ -9,6 +9,7 @@ import type {
   ClaudeCodeReadResponse,
 } from '../types';
 import { cn } from '@/shared/lib/utils';
+import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
 import type { WorkspaceContext } from '@/app/workspace/workspaceContext';
 import { ConversationView } from './ConversationView';
 import { useConversation } from '../hooks/useConversation';
@@ -186,7 +187,7 @@ function FileList({
     <div className="space-y-4 p-3" data-testid={active ? 'claude-code-file-list' : undefined}>
       {state.categories.map((category) => (
         <section key={category.name}>
-          <h2 className="mb-1 px-2 text-xs font-semibold text-muted-foreground">
+          <h2 className={cn('mb-1 px-2 uppercase tracking-wide text-muted-foreground', chromeSansRole('metadata'))}>
             {category.name}
           </h2>
           <div className="space-y-0.5">
@@ -198,7 +199,8 @@ function FileList({
                 aria-current={state.selectedFile?.path === file.path ? 'true' : undefined}
                 onClick={() => onFileClick(scope, file)}
                 className={cn(
-                  'flex w-full items-center gap-2 rounded-[var(--radius-control)] px-2 py-1.5 text-left text-sm transition-colors',
+                  'flex w-full items-center gap-2 rounded-[var(--radius-control)] px-2 py-1.5 text-left transition-colors',
+                  chromeSansRole('secondary'),
                   'hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                   state.selectedFile?.path === file.path && 'bg-accent text-accent-foreground',
                 )}
@@ -230,14 +232,14 @@ function ScopePanel({
   if (state.loading) {
     return (
       <div className="p-4" data-testid={`claude-code-scope-${scope}`} data-scope={scope}>
-        <p className="text-sm text-muted-foreground">Loading Claude Code files...</p>
+        <p className={cn('text-muted-foreground', chromeSansRole('secondary'))}>Loading Claude Code files...</p>
       </div>
     );
   }
   if (state.error) {
     return (
       <div className="space-y-3 p-4" data-testid={`claude-code-scope-${scope}`} data-scope={scope}>
-        <p className="text-sm text-destructive" role="alert">{state.error}</p>
+        <p className={cn('text-destructive', chromeSansRole('body'))} role="alert">{state.error}</p>
         <Button
           data-testid={`claude-code-retry-${scope}`}
           variant="outline"
@@ -252,14 +254,14 @@ function ScopePanel({
   if (state.available === false) {
     return (
       <div className="p-4" data-testid={`claude-code-scope-${scope}`} data-scope={scope}>
-        <p className="text-sm text-muted-foreground">Claude Code not installed</p>
+        <p className={cn('text-muted-foreground', chromeSansRole('secondary'))}>Claude Code not installed</p>
       </div>
     );
   }
   if (state.categories.length === 0) {
     return (
       <div className="p-4" data-testid={`claude-code-scope-${scope}`} data-scope={scope}>
-        <p className="text-sm text-muted-foreground">No Claude Code files found.</p>
+        <p className={cn('text-muted-foreground', chromeSansRole('secondary'))}>No Claude Code files found.</p>
       </div>
     );
   }
@@ -284,14 +286,14 @@ function ContentPanel({
   onLoadMore: (scope: Scope) => void;
 }) {
   if (!state.selectedFile) {
-    return <p className="p-6 text-sm text-muted-foreground">Select a file to view its content.</p>;
+    return <p className={cn('p-6 text-muted-foreground', chromeSansRole('secondary'))}>Select a file to view its content.</p>;
   }
   return (
     <div className="flex min-h-0 flex-1 flex-col p-4">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-3">
         <div className="min-w-0">
-          <p className="truncate text-sm font-medium" title={state.selectedFile.path}>{state.selectedFile.path}</p>
-          <p className="text-xs text-muted-foreground">
+          <p className={cn('truncate', chromeMonoRole('code'))} title={state.selectedFile.path}>{state.selectedFile.path}</p>
+          <p className={cn('text-muted-foreground', chromeSansRole('metadata'))}>
             {state.contentType || state.selectedFile.content_type} · {formatSize(state.totalSize || state.selectedFile.size)}
           </p>
         </div>
@@ -307,9 +309,9 @@ function ContentPanel({
           </Button>
         )}
       </div>
-      {state.readLoading && <p className="py-3 text-sm text-muted-foreground">Loading content...</p>}
-      {state.readError && <p className="py-3 text-sm text-destructive" role="alert">{state.readError}</p>}
-      <pre data-testid="claude-code-content" className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap py-4 font-mono text-xs">
+      {state.readLoading && <p className={cn('py-3 text-muted-foreground', chromeSansRole('secondary'))}>Loading content...</p>}
+      {state.readError && <p className={cn('py-3 text-destructive', chromeSansRole('body'))} role="alert">{state.readError}</p>}
+      <pre data-testid="claude-code-content" className={cn('min-h-0 flex-1 overflow-auto whitespace-pre-wrap py-4', chromeMonoRole('code'))}>
         {state.content || (state.readLoading ? '' : '(empty)')}
       </pre>
     </div>
@@ -594,7 +596,7 @@ export function ClaudeCodeWorkspace({ ctx }: { ctx: WorkspaceContext }) {
   if (!agentId || !sessionId) {
     return (
       <div data-testid="claude-code-workspace" className="flex h-full min-h-0 items-center justify-center p-6">
-        <p className="text-sm text-muted-foreground">Select an agent and session to browse Claude Code files.</p>
+        <p className={cn('text-muted-foreground', chromeSansRole('secondary'))}>Select an agent and session to browse Claude Code files.</p>
       </div>
     );
   }
@@ -607,7 +609,7 @@ export function ClaudeCodeWorkspace({ ctx }: { ctx: WorkspaceContext }) {
         {showHeading ? (
           <div className="flex items-center gap-2">
             <FolderOpen className="h-4 w-4 text-muted-foreground" />
-            <h1 className="text-sm font-semibold">Claude Code</h1>
+            <h1 className={chromeSansRole('title')}>Claude Code</h1>
           </div>
         ) : null}
         <Tabs value={activeView} onValueChange={(value) => setActiveView(value as View)}>
