@@ -297,6 +297,26 @@ describe('StreamReconciler', () => {
     expect(h.out).toEqual(['five', 'replay-6', 'replay-7', 'replay-8', 'nine']);
   });
 
+  it('shows output the agent refuses to give the cursor for (#1320)', async () => {
+    // The sequence CI logged, in order: the seed asks for history, the agent
+    // answers `epochMatch: false` with no events, and then live frames arrive
+    // for a timeline that has no anchor. They used to be buffered waiting for
+    // a history fetch that the agent had already refused to give — and each
+    // later refusal discarded them — so the terminal never showed anything
+    // after its bootstrap.
+    const h = makeHarness();
+    h.reconciler.seed(1, 0);
+    h.requests[0].resolve({ streamEpoch: 1, epochMatch: false, events: [] });
+    await flushMicrotasks();
+
+    live(h, 2, 'two');
+    live(h, 3, 'three');
+
+    // Frames the agent is broadcasting are the live truth about the timeline,
+    // whatever it says about a cursor: they are shown, in order, immediately.
+    expect(h.out).toEqual(['two', 'three']);
+  });
+
   it('does not hold output forever behind a request that is never answered (#1320)', async () => {
     // The real transport can leave a request pending indefinitely:
     // `WebSocketService.request` parks behind its readiness gate for up to 15s,
@@ -365,7 +385,7 @@ describe('StreamReconciler', () => {
     expect(h.out).toEqual(['five', 'new-one']);
   });
 
-  it('adopts the epoch a mismatched reply reports', async () => {
+  it('adopts the epoch a mismatched reply reports, and shows what follows', async () => {
     const h = makeHarness();
     live(h, 5, 'five');
     live(h, 8, 'eight');
@@ -376,10 +396,12 @@ describe('StreamReconciler', () => {
     await flushMicrotasks();
     expect(h.out).toEqual(['five']);
 
+    // A frame for the epoch it named is the timeline's live truth. It anchors
+    // rather than waiting for a history fetch — that fetch is the one that was
+    // just refused — so it is shown at once and needs no request of its own.
     live(h, 1, 'seven-one', 7);
-    expect(h.requests).toHaveLength(2);
-    expect(h.requests[1].epoch).toBe(7);
-    expect(h.requests[1].afterSeq).toBe(0);
+    expect(h.requests).toHaveLength(1);
+    expect(h.out).toEqual(['five', 'seven-one']);
   });
 
   it('does not ask for history when nothing is waiting on it', () => {
