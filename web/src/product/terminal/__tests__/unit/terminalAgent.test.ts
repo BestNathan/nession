@@ -33,9 +33,13 @@ describe('createTerminalAgentApi', () => {
       await expect(pending).resolves.toMatchObject({ ok: true, controlRole: 'controller' });
     });
 
-    it('omits width/height when no viewport size is given', async () => {
+    it('omits width/height when no viewport size is given, and says why', async () => {
       const pending = api.attach('work');
-      expect(surface.requests[0]?.payload).toEqual({ session_name: 'work' });
+      // Columns left unsent are not "80×24": the payload's own default would
+      // put that on the wire and the agent would resize the **shared** window
+      // to it and back, repainting an inline-drawing application into the
+      // scrollback twice for a size nothing measured (#1265).
+      expect(surface.requests[0]?.payload).toEqual({ session_name: 'work', size_known: false });
       expect(surface.requests[0]?.options).toEqual({ timeoutMs: ATTACH_TIMEOUT_MS });
 
       surface.resolveNext('agent.attach', {});
