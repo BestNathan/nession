@@ -13,6 +13,9 @@ import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles'
 import type { WorkspaceContext } from '@/app/workspace/workspaceContext';
 import { ConversationView } from './ConversationView';
 import { useConversation } from '../hooks/useConversation';
+import { useTranscripts } from '../hooks/useTranscripts';
+import { useTranscriptItems } from '../hooks/useTranscriptItems';
+import { TranscriptView } from './TranscriptView';
 
 type Scope = 'global' | 'project';
 
@@ -31,7 +34,7 @@ type Scope = 'global' | 'project';
  * you go looking for. Both remain reachable; neither is a fallback for the
  * other.
  */
-type View = 'conversations' | 'configuration';
+type View = 'conversations' | 'transcripts' | 'configuration';
 type ConfigCategory = ClaudeCodeListResponse['categories'][number];
 type ConfigFile = ConfigCategory['files'][number];
 
@@ -540,6 +543,21 @@ function useClaudeCodeWorkspace(ctx: WorkspaceContext) {
   const [activeScope, setActiveScope] = useState<Scope>('project');
   const conversation = useConversation({ agentId, sessionId });
 
+  // `#1234`. The transcript projection is a second first-class view over the
+  // same upstream sessions, not a debug switch on the conversation one — which
+  // is why it is a tab and not a toggle inside the conversation panel.
+  //
+  // Which transcript is open is this component's state rather than the hook's,
+  // because the list outlives the selection: switching tabs must not forget
+  // where the reader was, and the list does not depend on what is open.
+  const [openTranscript, setOpenTranscript] = useState<string | null>(null);
+  const transcripts = useTranscripts({ agentId, sessionId });
+  const transcriptItems = useTranscriptItems({
+    agentId,
+    sessionId,
+    transcriptId: openTranscript,
+  });
+
   const { contextGeneration, currentRequestKey, loadScope } = useScopeLoader({
     agentId,
     sessionId,
@@ -575,6 +593,10 @@ function useClaudeCodeWorkspace(ctx: WorkspaceContext) {
     handleFileClick,
     handleLoadMore,
     conversation,
+    transcripts,
+    transcriptItems,
+    openTranscript,
+    setOpenTranscript,
   };
 }
 
@@ -591,6 +613,10 @@ export function ClaudeCodeWorkspace({ ctx }: { ctx: WorkspaceContext }) {
     handleFileClick,
     handleLoadMore,
     conversation,
+    transcripts,
+    transcriptItems,
+    openTranscript,
+    setOpenTranscript,
   } = useClaudeCodeWorkspace(ctx);
 
   if (!agentId || !sessionId) {
@@ -615,14 +641,16 @@ export function ClaudeCodeWorkspace({ ctx }: { ctx: WorkspaceContext }) {
         <Tabs value={activeView} onValueChange={(value) => setActiveView(value as View)}>
           <TabsList>
             <TabsTrigger value="conversations">Conversations</TabsTrigger>
+            <TabsTrigger value="transcripts">Transcripts</TabsTrigger>
             <TabsTrigger value="configuration">Configuration</TabsTrigger>
           </TabsList>
         </Tabs>
       </header>
-      {/* Render both panels but hide the inactive one. Conditional rendering
-          would unmount ConversationView on tab switch, resetting its local
-          state (showList, scroll positions) and causing a visual "refresh".
-          Keeping both mounted preserves the user's position. */}
+      {/* Render every panel but hide the inactive ones. Conditional rendering
+          would unmount a view on tab switch, resetting its local state (showList,
+          scroll positions) and causing a visual "refresh". Keeping them mounted
+          preserves the user's position — which for Transcripts is what makes
+          switching to Configuration and back not lose the open transcript. */}
       <main className={activeView === 'conversations' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}>
         <ConversationView
           view={conversation.view}
@@ -635,6 +663,19 @@ export function ClaudeCodeWorkspace({ ctx }: { ctx: WorkspaceContext }) {
           onSelect={conversation.select}
           onLoadOlder={() => conversation.loadOlder()}
           onReload={conversation.reload}
+        />
+      </main>
+      <main className={activeView === 'transcripts' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}>
+        <TranscriptView
+          list={transcripts.list}
+          items={transcriptItems.items}
+          open={openTranscript}
+          // The same split `ConversationView` makes from the same field: the
+          // experience decides how much room there is, and App has to push.
+          layout={ctx.experience === 'app' ? 'push' : 'master-detail'}
+          onSelect={setOpenTranscript}
+          onLoadOlder={() => transcriptItems.loadOlder()}
+          onBack={() => setOpenTranscript(null)}
         />
       </main>
       <div className={activeView === 'configuration' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}>

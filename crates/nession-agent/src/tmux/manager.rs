@@ -132,6 +132,9 @@ pub struct SessionManager {
     list_timeout: Duration,
     kill_timeout: Duration,
     create_timeout: Duration,
+    /// Memory threshold percentage (0-100) for rejecting new sessions.
+    /// `None` means use the default (90%). See [`crate::memory::check_memory_pressure`].
+    memory_threshold_percent: Option<u8>,
 }
 
 impl SessionManager {
@@ -144,6 +147,7 @@ impl SessionManager {
             list_timeout: TMUX_LIST_TIMEOUT,
             kill_timeout: TMUX_KILL_TIMEOUT,
             create_timeout: TMUX_CREATE_TIMEOUT,
+            memory_threshold_percent: None,
         }
     }
 
@@ -212,6 +216,19 @@ impl SessionManager {
         self.list_timeout = list;
         self.kill_timeout = kill;
         self.create_timeout = create;
+        self
+    }
+
+    /// Set the memory threshold percentage for rejecting new sessions.
+    ///
+    /// When container memory usage exceeds this percentage of the cgroup limit,
+    /// `create_session` refuses to create a new session and returns an error.
+    /// Pass `None` to use the default (90%).
+    ///
+    /// This is a runtime configuration, not a test seam — it is called by the
+    /// agent runtime after loading [`AgentConfig`](crate::config::AgentConfig).
+    pub fn with_memory_threshold(&mut self, threshold: Option<u8>) -> &mut Self {
+        self.memory_threshold_percent = threshold;
         self
     }
 
@@ -343,6 +360,11 @@ impl SessionManager {
         working_dir: &str,
         env: &[(String, String)],
     ) -> Result<()> {
+        // Check memory pressure before creating a new session.
+        // This prevents container-level OOM by refusing new sessions when
+        // memory usage is too high, rather than letting the entire container die.
+        crate::memory::check_memory_pressure(self.memory_threshold_percent)?;
+
         match tokio::time::timeout(
             self.create_timeout,
             self.create_session_impl(name, width, height, working_dir, env),

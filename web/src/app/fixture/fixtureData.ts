@@ -31,6 +31,13 @@ const FIXTURE_MANIFEST: ProtocolManifest = {
     // plus the exact binding, and one explicitly named conversation's timeline.
     'claude-code.conversations': { versions: [1], wire: ['claude-code.conversations'] },
     'claude-code.messages': { versions: [1], wire: ['claude-code.messages'] },
+    // `#1234`: the transcript projection. Advertised here as well as answered
+    // below, because a wire lives in two places — the manifest an agent
+    // advertises and the surface that answers it — and `addressed()` resolves
+    // against the manifest *before* anything is sent. Updating one without the
+    // other leaves a route that looks wired and answers nothing.
+    'claude-code.transcripts': { versions: [1], wire: ['claude-code.transcripts'] },
+    'claude-code.transcript-items': { versions: [1], wire: ['claude-code.transcript-items'] },
   },
 };
 

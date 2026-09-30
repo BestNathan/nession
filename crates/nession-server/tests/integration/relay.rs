@@ -137,6 +137,7 @@ async fn start_agent(
             resize,
             credentials: Arc::clone(&credentials),
             mutations: Arc::clone(&mutations),
+            memory_threshold_percent: None,
         },
     )?;
 
