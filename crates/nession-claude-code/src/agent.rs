@@ -1,9 +1,10 @@
 //! The Claude Code extension on the agent side: the erased dispatcher boundary
 //! for this provider (`#678`).
 //!
-//! Handles `claude-code.list`, `claude-code.read`, `claude-code.conversations`
-//! and `claude-code.messages`, relayed from the server via CommandBroker. Each
-//! operation decodes its typed request once and answers with the contract's
+//! Handles `claude-code.list`, `claude-code.read`, `claude-code.conversations`,
+//! `claude-code.messages`, `claude-code.transcripts` and
+//! `claude-code.transcript-items`, relayed from the server via CommandBroker.
+//! Each operation decodes its typed request once and answers with the contract's
 //! typed response, so `Value` lives only at the dispatcher edge — the same
 //! shape `nession-git` uses, for the same reason.
 //!
