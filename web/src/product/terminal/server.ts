@@ -123,6 +123,15 @@ export class TerminalServerPlugin implements TransportPlugin, TerminalServerApi 
     if (opts?.rows !== undefined) {
       payload.rows = opts.rows;
     }
+    // Columns left unsent are not "80×24" — they are a Terminal that has not
+    // been laid out yet, and the payload's own default would otherwise be
+    // acted on: the attach resizes the **shared** window to the placeholder
+    // and back, and an application drawing inline repaints its screen into
+    // the scrollback on each of those, leaving a duplicate the user finds by
+    // scrolling (#1265). This is what says the columns were not measured.
+    if (opts?.cols === undefined || opts?.rows === undefined) {
+      payload.size_known = false;
+    }
     // Sent only when the caller has an opinion — omitted asks the agent to
     // decide, which is what a caller that says nothing has always got (#321).
     if (opts?.needsBootstrap !== undefined) {
