@@ -14,7 +14,7 @@ import type { CapabilityId } from '@/product/capability';
 import { claudeCodeApi } from '@/capabilities/claude-code';
 import { envApi } from '@/capabilities/env';
 import { gitApi } from '@/capabilities/git';
-import { fixtureConversationSurface } from './fixtureConversation';
+import { fixtureTranscriptsSurface } from './fixtureTranscripts';
 import { fixtureEnvSurface } from './fixtureEnv';
 import { fixtureFileOps } from './fixtureFileOps';
 import { fixtureGitSurface } from './fixtureGit';
@@ -130,7 +130,7 @@ function installEnvSurface(search: string): () => void {
  * `#/fixture/workspace?capability=claude-code` is how a spec gets there.
  */
 function installConversationSurface(search: string): () => void {
-  return claudeCodeApi.install(fixtureConversationSurface(search));
+  return claudeCodeApi.install(fixtureTranscriptsSurface(search));
 }
 
 

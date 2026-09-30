@@ -1489,6 +1489,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                         let client_id = connection_client_id(ctx.client_id).await;
                         let (tx, rx) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
                         let detached_for_not_draining = Arc::new(AtomicBool::new(false));
+                        let wants_bootstrap = payload.needs_bootstrap.unwrap_or(false);
                         let resp = {
                             let mut guard = sessions_lock(ctx.sessions);
                             let Some(shared) = guard.get_mut(&session_name) else {
@@ -1499,10 +1500,20 @@ p2p_routes! { ctx, msg_type, payload_value;
                             // quietly instead of closing the connection this
                             // attach is about to answer on (#1226).
                             shared.peers.retain(|p| p.client_id != client_id);
+                            // When a bootstrap is coming, leave `output_tx` unset
+                            // until the snapshot is on the wire. The broadcast
+                            // task is already running and would otherwise queue
+                            // live bytes that the capture also covers — the
+                            // duplicate window #1228 measured on subsequent attach
+                            // (#321 SC4).
                             shared.peers.push(SessionPeer {
                                 client_id: client_id.clone(),
                                 outbound: ctx.outbound.clone(),
-                                output_tx: Some(tx),
+                                output_tx: if wants_bootstrap {
+                                    None
+                                } else {
+                                    Some(tx.clone())
+                                },
                                 detached_for_not_draining: Arc::clone(
                                     &detached_for_not_draining,
                                 ),
@@ -1522,7 +1533,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                         // on screen) and of one whose xterm was rebuilt (it
                         // holds nothing). Absent means "the backend is attached,
                         // so no" — the behaviour an older client already has.
-                        if payload.needs_bootstrap.unwrap_or(false) {
+                        if wants_bootstrap {
                             let bootstrap_tmux = ctx.tmux.tmux_dep();
                             let capture = capture_for_bootstrap(
                                 &bootstrap_tmux,
@@ -1537,6 +1548,18 @@ p2p_routes! { ctx, msg_type, payload_value;
                                     "bootstrap_stalled",
                                     "the client stalled while its history was being sent",
                                 );
+                            }
+                            {
+                                let mut guard = sessions_lock(ctx.sessions);
+                                if let Some(shared) = guard.get_mut(&session_name) {
+                                    if let Some(peer) = shared
+                                        .peers
+                                        .iter_mut()
+                                        .find(|p| p.client_id == client_id)
+                                    {
+                                        peer.output_tx = Some(tx);
+                                    }
+                                }
                             }
                         }
 

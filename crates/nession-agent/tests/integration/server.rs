@@ -423,6 +423,120 @@ async fn a_second_attach_on_the_same_connection_is_answered() {
     handle.shutdown().await.ok();
 }
 
+/// #321 SC4: Plain PTY `already_attached` must deliver a marked bootstrap on
+/// the wire before the attach answer when the client asks for one.
+#[tokio::test]
+async fn a_plain_second_attach_sends_bootstrap_before_ok_when_asked() {
+    let (addr, handle, credentials) = start_server(0).await.unwrap();
+
+    let tmux = SessionManager::new();
+    let session = TestSession::new("plain-sub");
+    let session_name = session.name().to_string();
+    tmux.create_session(&session_name, 80, 24, "/tmp", &[])
+        .await
+        .unwrap();
+
+    let (mut sink, mut stream) = connect_for(&credentials, addr, &session_name)
+        .await
+        .unwrap();
+
+    let first = new_message(
+        msg_types::CLIENT_ATTACH,
+        ClientAttachPayload {
+            session_name: session_name.clone(),
+            width: 80,
+            height: 24,
+            size_known: None,
+            env_snapshots: Vec::new(),
+            needs_bootstrap: Some(false),
+        },
+    );
+    let resp: nession_agent::server::websocket::Message<ClientAttachResponse> =
+        round_trip(&mut sink, &mut stream, &first).await.unwrap();
+    assert_eq!(resp.msg_type, msg_types::OK);
+
+    let marker = "PLAIN-SUB-MARKER";
+    TmuxDep::global()
+        .ops()
+        .send_keys(&session_name, &format!("echo {marker}\n"))
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(400)).await;
+
+    // Drop anything the first attach's forwarder still had on the socket, so
+    // only the second attach's ordering is under test.
+    while let Ok(Some(Ok(WsMessage::Text(_)))) =
+        tokio::time::timeout(Duration::from_millis(150), stream.next()).await
+    {}
+
+    let second = new_message(
+        msg_types::CLIENT_ATTACH,
+        ClientAttachPayload {
+            session_name: session_name.clone(),
+            width: 80,
+            height: 24,
+            size_known: None,
+            env_snapshots: Vec::new(),
+            needs_bootstrap: Some(true),
+        },
+    );
+    sink.send(WsMessage::Text(serde_json::to_string(&second).unwrap()))
+        .await
+        .unwrap();
+
+    let mut bootstrap: Option<serde_json::Value> = None;
+    let mut live_before_bootstrap = false;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(8);
+    loop {
+        let frame = tokio::time::timeout(Duration::from_secs(2), stream.next())
+            .await
+            .expect("timeout waiting for the second attach response")
+            .expect("stream ended")
+            .expect("error reading the second attach response");
+        let WsMessage::Text(text) = frame else {
+            continue;
+        };
+        let parsed: serde_json::Value = serde_json::from_str(&text).unwrap();
+        match parsed["msg_type"].as_str().unwrap_or("") {
+            msg_types::OK => break,
+            msg_types::TERMINAL_OUTPUT => {
+                if parsed["payload"].get("bootstrap").is_some() {
+                    bootstrap = Some(parsed["payload"].clone());
+                } else if bootstrap.is_none() {
+                    live_before_bootstrap = true;
+                }
+            }
+            _ => {}
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "timed out waiting for ok, bootstrap={bootstrap:?}"
+        );
+    }
+
+    assert!(
+        !live_before_bootstrap,
+        "unmarked live output reached the client before its bootstrap (#321 SC4)"
+    );
+    let bootstrap = bootstrap.expect("the second attach sent no bootstrap");
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(
+            bootstrap["data"]
+                .as_str()
+                .expect("bootstrap data is base64"),
+        )
+        .expect("bootstrap payload is valid base64");
+    assert!(
+        String::from_utf8_lossy(&bytes).contains(marker),
+        "bootstrap did not carry live-produced context: {:?}",
+        String::from_utf8_lossy(&bytes)
+    );
+
+    tmux.kill_session(&session_name).await.ok();
+    handle.shutdown().await.ok();
+}
+
 #[tokio::test]
 async fn a_plain_first_attach_sends_the_history_it_was_asked_for() {
     // #321 S6, plus the mode restoration of #1096 criterion 13. The Plain arm's
@@ -458,11 +572,15 @@ async fn a_plain_first_attach_sends_the_history_it_was_asked_for() {
         .await
         .unwrap();
 
+    // Give the pane a moment to run the setup line before polling flags — under
+    // parallel coverage runs the 5 s deadline alone was too tight (#321 push).
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
     // Waited on the *flags*, not on the marker: the mode is what the wait is
     // for, and asking tmux for it is the same query the bootstrap under test
     // makes — so a wrong reading here fails here rather than as a mysterious
     // wire assertion below.
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
     loop {
         let flags = TmuxDep::global()
             .ops()
