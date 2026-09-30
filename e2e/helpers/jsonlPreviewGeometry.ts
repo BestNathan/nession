@@ -104,6 +104,53 @@ export async function readJsonlRecordTop(page: Page, lineNumber: number): Promis
   return top as number;
 }
 
+/** Virtualizer `translateY` — scroll-content offset, not viewport position (#1199). */
+export async function readJsonlRecordVirtualStart(page: Page, lineNumber: number): Promise<number> {
+  await scrollJsonlRecordIntoView(page, lineNumber);
+  const start = await page.locator(`[data-jsonl-line="${lineNumber}"]`).first().evaluate((el) => {
+    const row = el.closest('[data-index]');
+    if (!row || !(row instanceof HTMLElement)) {
+      return null;
+    }
+    const match = /translateY\(([\d.]+)px\)/.exec(row.style.transform);
+    if (!match) {
+      return null;
+    }
+    return Number.parseFloat(match[1]);
+  });
+  expect(start, `line ${lineNumber} must have a virtual start`).not.toBeNull();
+  return start as number;
+}
+
+/** @deprecated prefer readJsonlRecordVirtualStart */
+export async function readJsonlRecordContentTop(
+  page: Page,
+  lineNumber: number,
+): Promise<number> {
+  return readJsonlRecordVirtualStart(page, lineNumber);
+}
+
+/** After a long scroll, remeasured rows may drift until the virtualizer settles (#1199). */
+export async function waitForJsonlVirtualStartStable(
+  page: Page,
+  lineNumber: number,
+  expectedStart: number,
+  tolerancePx = 8,
+  timeoutMs = 15_000,
+): Promise<number> {
+  let last = expectedStart;
+  await expect
+    .poll(
+      async () => {
+        last = await readJsonlRecordVirtualStart(page, lineNumber);
+        return Math.abs(last - expectedStart);
+      },
+      { timeout: timeoutMs, intervals: [50, 100, 200, 400] },
+    )
+    .toBeLessThanOrEqual(tolerancePx);
+  return last;
+}
+
 export async function openFixtureJsonlEventsWeb(page: Page): Promise<void> {
   for (const name of ['fixtures', 'events.jsonl']) {
     await page.getByRole('treeitem', { name }).waitFor({ state: 'visible', timeout: 10_000 });

@@ -348,7 +348,7 @@ function ListStateGuard({
   if (view.listState === 'error' && view.conversations.length === 0) {
     return (
       <div className="space-y-3 p-6" data-testid="conversation-error">
-        <p className="text-sm text-destructive" role="alert">
+        <p className={cn('text-destructive', chromeSansRole('body'))} role="alert">
           {view.error ?? 'The conversations could not be listed'}
         </p>
         <Button variant="outline" size="sm" onClick={() => onReload()}>
@@ -410,7 +410,7 @@ function MasterDetailPane({
   if (view.messagesState === 'error') {
     return (
       <div className="space-y-3 p-6" data-testid="conversation-messages-error">
-        <p className="text-sm text-destructive" role="alert">
+        <p className={cn('text-destructive', chromeSansRole('body'))} role="alert">
           {view.error ?? 'The conversation could not be loaded'}
         </p>
         <Button variant="outline" size="sm" onClick={() => onReload()}>
@@ -458,7 +458,7 @@ function PushDetailView({
   if (view.messagesState === 'not_found' || view.messagesState === 'unavailable') {
     return (
       <div className="space-y-3 p-6" data-testid="conversation-missing">
-        <p className="text-sm text-muted-foreground">
+        <p className={cn('text-muted-foreground', chromeSansRole('secondary'))}>
           That conversation is no longer in this Session&rsquo;s directory.
         </p>
         <Button variant="outline" size="sm" onClick={onShowList}>
@@ -473,7 +473,7 @@ function PushDetailView({
       <div className="flex min-h-0 flex-1 flex-col" data-testid="conversation-open">
         <ConversationHeader view={view} onShowList={onShowList} />
         <div className="space-y-3 p-6" data-testid="conversation-messages-error">
-          <p className="text-sm text-destructive" role="alert">
+          <p className={cn('text-destructive', chromeSansRole('body'))} role="alert">
             {view.error ?? 'The conversation could not be loaded'}
           </p>
           <Button variant="outline" size="sm" onClick={() => onReload()}>

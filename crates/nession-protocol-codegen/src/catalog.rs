@@ -406,6 +406,72 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
         },
         Unit {
             owner: "claude-code",
+            id: "claude-code.transcripts",
+            version: 1,
+            wires: &["claude-code.transcripts"],
+            decls: vec![
+                decl_of::<nession_claude_code::protocol::transcripts::v1::TranscriptsRequestV1>(cfg),
+                decl_of::<nession_claude_code::protocol::transcripts::v1::TranscriptsResponseV1>(cfg),
+                decl_of::<nession_claude_code::protocol::transcripts::v1::TranscriptsStateV1>(cfg),
+                decl_of::<nession_claude_code::protocol::transcripts::v1::TranscriptItemV1>(cfg),
+                decl_of::<nession_claude_code::protocol::transcripts::v1::TranscriptBindingV1>(cfg),
+                decl_of::<nession_claude_code::protocol::transcripts::v1::TranscriptKindV1>(cfg),
+                // Owned by `claude-code.conversations` and reused here as the
+                // binding's `activity`, so it appears in both files — the Scope
+                // precedent across list/read: generated files duplicate rather
+                // than import.
+                decl_of::<nession_claude_code::protocol::conversations::v1::ConversationActivityV1>(
+                    cfg,
+                ),
+            ],
+            request: Some((
+                "TranscriptsRequest",
+                nession_claude_code::protocol::transcripts::v1::TranscriptsRequestV1::inline,
+                schema_of::<nession_claude_code::protocol::transcripts::v1::TranscriptsRequestV1>,
+            )),
+            response: Some((
+                "TranscriptsResponse",
+                nession_claude_code::protocol::transcripts::v1::TranscriptsResponseV1::inline,
+                schema_of::<nession_claude_code::protocol::transcripts::v1::TranscriptsResponseV1>,
+            )),
+        },
+        Unit {
+            owner: "claude-code",
+            id: "claude-code.transcript-items",
+            version: 1,
+            wires: &["claude-code.transcript-items"],
+            decls: vec![
+                decl_of::<nession_claude_code::protocol::transcript_items::v1::TranscriptItemsRequestV1>(cfg),
+                decl_of::<nession_claude_code::protocol::transcript_items::v1::TranscriptItemsResponseV1>(cfg),
+                decl_of::<nession_claude_code::protocol::transcript_items::v1::TranscriptItemsStateV1>(cfg),
+                decl_of::<nession_claude_code::protocol::transcript_items::v1::TranscriptEntryV1>(cfg),
+                decl_of::<nession_claude_code::protocol::transcript_items::v1::MessageSourceV1>(cfg),
+                decl_of::<nession_claude_code::protocol::transcript_items::v1::EventCategoryV1>(cfg),
+                decl_of::<nession_claude_code::protocol::transcript_items::v1::TranscriptParseStatsV1>(cfg),
+                // Owned elsewhere and reused here — the `Scope` precedent across
+                // list/read: generated files duplicate rather than import.
+                decl_of::<nession_claude_code::protocol::messages::v1::ToolActivityV1>(cfg),
+                decl_of::<nession_claude_code::protocol::messages::v1::ToolStatusV1>(cfg),
+                decl_of::<nession_claude_code::protocol::messages::v1::MessageContentV1>(cfg),
+                decl_of::<nession_claude_code::protocol::messages::v1::PayloadV1>(cfg),
+                decl_of::<nession_claude_code::protocol::messages::v1::PayloadKindV1>(cfg),
+                decl_of::<nession_claude_code::protocol::transcripts::v1::TranscriptItemV1>(cfg),
+                decl_of::<nession_claude_code::protocol::transcripts::v1::TranscriptKindV1>(cfg),
+                decl_of::<nession_claude_code::protocol::conversations::v1::ConversationActivityV1>(cfg),
+            ],
+            request: Some((
+                "TranscriptItemsRequest",
+                nession_claude_code::protocol::transcript_items::v1::TranscriptItemsRequestV1::inline,
+                schema_of::<nession_claude_code::protocol::transcript_items::v1::TranscriptItemsRequestV1>,
+            )),
+            response: Some((
+                "TranscriptItemsResponse",
+                nession_claude_code::protocol::transcript_items::v1::TranscriptItemsResponseV1::inline,
+                schema_of::<nession_claude_code::protocol::transcript_items::v1::TranscriptItemsResponseV1>,
+            )),
+        },
+        Unit {
+            owner: "claude-code",
             id: "claude-code.messages",
             version: 1,
             wires: &["claude-code.messages"],

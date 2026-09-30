@@ -1,60 +1,44 @@
-//! Normalizing a transcript into `claude-code.messages` items (#1167, renamed
-//! for #1222).
+//! The **conversation projection**: what a reader sees of a transcript (#1234).
 //!
-//! This was the retired `claude-code.conversation` unit's v2 engine; the model
-//! is unchanged, only the unit it serves has a name of its own now. It sits
-//! beside [`crate::conversation`], which owns discovery — finding which
-//! transcripts belong to a cwd — while this module owns what one transcript
-//! *means*.
+//! This module does not read Claude's JSONL and does not know a Claude field
+//! name. [`crate::canonical`] reads the file once and says what is in it; this
+//! decides what of that a person reading a conversation should see, and how much
+//! of it one response may carry.
 //!
-//! ## Tool pairing is the whole job, and it spans pages
+//! ## What it draws, and what it deliberately does not
 //!
-//! A `tool_use` block and its `tool_result` are different records, so a tool
-//! cannot report what it produced unless `tool_use.id` is paired with
-//! `tool_result.tool_use_id` and one activity item is rendered per *call*.
+//! A conversation is optimized for reading, not for completeness. A human or
+//! assistant turn is a row; a tool call is one row paired with its result; and
+//! reasoning, attachments, runtime events and session state are **facts the
+//! transcript has and this view does not draw**. They are not missing — the
+//! transcript projection shows them — and the distinction between "understood and
+//! not drawn" and "could not be read" is what [`MessagesPage::skipped`] means.
 //!
-//! The pairing cannot live in a per-record function. Pages are read backwards
-//! from the end of an append-only file, so a call can be the last record of one
-//! page while its result is the first record of the next — a per-line normalizer
-//! sees each half alone and can only ever call both halves orphans. So the page
-//! is selected first (by [`crate::conversation::select_records`], shared with
-//! discovery) and then **scanned forward** past its own end for the results it
-//! is missing.
+//! Two source kinds are also not drawn: a subagent's turns, which belong to a
+//! sidechain rather than to this conversation, and turns the runtime produced
+//! rather than a human (`MessageSource::System`, `MessageSource::Synthetic`).
+//! The second is a correctness rule and not a display preference: `type: "user"`
+//! is an envelope that carries injected context and background-task
+//! notifications, and rendering those as things the user said is simply wrong
+//! about who spoke.
 //!
-//! The scan is bounded, and the bound is measured rather than guessed: over 1180
-//! real tool calls the gap between a call and its result was min 1, p50 2, p90 7,
-//! p99 12, max **17** records (max 51 KB). [`PAIR_SCAN_MAX_BYTES`] is an order of
-//! magnitude over the p99, so in practice the scan resolves everything and stops
-//! early on the "every call answered" condition rather than on the cap.
+//! ## Payload bounds are this layer's job
 //!
-//! When it *does* stop at the cap with calls outstanding, those calls report
-//! [`ToolStatusV1::Unknown`] — not `Running`. "We did not look far enough" and
-//! "it is still going" are different facts, and a provider that presents the
-//! first as the second is making a claim it cannot support.
+//! The ceilings are properties of *this contract* — how much one response may
+//! carry — so they are applied here and not in the canonical layer, whose job is
+//! to report what the transcript says. A tool body is bounded three times over:
+//! [`TOOL_SUMMARY_CEILING`] on the collapsed line, [`TOOL_INPUT_CEILING`] /
+//! [`TOOL_OUTPUT_CEILING`] on one body, and [`PAGE_PAYLOAD_BUDGET`] on the page,
+//! because 200 tools at the per-body ceiling is 3.2 MB and no single-item limit
+//! prevents that.
 
-use std::collections::{HashMap, HashSet};
-use std::fs::File;
-use std::io::{Read, Seek, SeekFrom};
-
-use serde_json::Value;
-
-use crate::conversation::{select_records, string_field, Discovered};
+use crate::canonical::{read_page as read_canonical, CanonicalPage, Entry, MessageSource};
+use crate::conversation::Discovered;
+use crate::payload::{spend, truncate_chars};
 use crate::protocol::messages::v1::{
-    MessageContentV1, MessageItemV1, MessageRoleV1, PayloadKindV1, PayloadV1, ToolActivityV1,
-    ToolStatusV1, PAGE_PAYLOAD_BUDGET, TOOL_INPUT_CEILING, TOOL_OUTPUT_CEILING,
-    TOOL_SUMMARY_CEILING,
+    MessageContentV1, MessageItemV1, MessageRoleV1, ToolActivityV1, ToolStatusV1,
+    PAGE_PAYLOAD_BUDGET, TOOL_INPUT_CEILING, TOOL_OUTPUT_CEILING, TOOL_SUMMARY_CEILING,
 };
-
-/// How far past a page's end the pairing scan will look.
-///
-/// See the module docs: measured p99 is 12 records / 21 KB, so 64 records and
-/// 256 KiB leave room for an order-of-magnitude outlier before a call is
-/// reported as unknown rather than answered.
-const PAIR_SCAN_MAX_RECORDS: usize = 64;
-const PAIR_SCAN_MAX_BYTES: u64 = 256 * 1024;
-
-/// How much to read at a time while scanning forward.
-const READ_CHUNK: u64 = 32 * 1024;
 
 /// One page of a conversation's normalized timeline.
 #[derive(Debug, Clone, Default)]
@@ -65,36 +49,9 @@ pub struct MessagesPage {
     pub has_more: bool,
     /// The file ended mid-record. Normal for a transcript being appended to.
     pub partial_tail: bool,
-    /// Records this module did not model.
+    /// Records the reader could not model — the only sense in which this view is
+    /// incomplete. A record it understood and did not draw is not counted here.
     pub skipped: u64,
-}
-
-/// What a `tool_result` record said, before it is attached to its call.
-#[derive(Debug, Clone)]
-struct ResultFact {
-    is_error: bool,
-    body: String,
-}
-
-/// A tool call waiting for its result.
-#[derive(Debug, Clone)]
-struct PendingCall {
-    /// The item's id.
-    id: String,
-    timestamp: Option<String>,
-    call_id: String,
-    name: String,
-    summary: String,
-    /// Already cut to the per-body ceiling; the page budget is applied later,
-    /// because it is a property of the page and not of the call.
-    input: Option<PayloadV1>,
-}
-
-/// Something a page is made of, in document order.
-#[derive(Debug)]
-enum Slot {
-    Item(MessageItemV1),
-    Call(PendingCall),
 }
 
 /// A page of `claude-code.messages` items for one conversation.
@@ -103,580 +60,127 @@ pub fn read_page(
     end_offset: Option<u64>,
     limit: usize,
 ) -> std::io::Result<MessagesPage> {
-    let mut file = File::open(conversation.path())?;
-    let file_len = file.metadata()?.len();
-    let end = end_offset.unwrap_or(file_len).min(file_len);
-    let selected = select_records(&mut file, file_len, end, limit)?;
-
-    let mut slots: Vec<Slot> = Vec::new();
-    let mut skipped = 0u64;
-    for (_, line) in &selected.records {
-        match normalize_record(line) {
-            Record::Slots(record_slots) => slots.extend(record_slots),
-            Record::Silent => {}
-            Record::Unrecognised => skipped += 1,
-        }
-    }
-
-    let wanted: HashSet<String> = slots
-        .iter()
-        .filter_map(|slot| match slot {
-            Slot::Call(call) => Some(call.call_id.clone()),
-            Slot::Item(_) => None,
-        })
-        .collect();
-
-    // **The page answers its own calls first.** A call and its result are
-    // adjacent records, so on the newest page — the one that ends at EOF —
-    // every pair is inside the page and the forward scan below finds nothing.
-    // Skipping this pass is what makes a completed tool read as still running.
-    let mut results: HashMap<String, ResultFact> = HashMap::new();
-    let mut outstanding = wanted.len();
-    for (_, line) in &selected.records {
-        collect_results(line, &wanted, &mut results, &mut outstanding);
-        if outstanding == 0 {
-            break;
-        }
-    }
-
-    // Then whatever is left, from beyond the page. `end` is where the page
-    // stops, so everything from there on is strictly newer;
-    // `scan_for_results` returns immediately at EOF, which is what makes an
-    // in-flight call on the newest page `Running` without a special case.
-    //
-    // Only the *unanswered* ids are asked for, so a page that resolved
-    // everything itself does no I/O at all — and, more importantly, does not
-    // report `hit_cap` from a scan that had nothing to find.
-    let unresolved: HashSet<String> = wanted
-        .into_iter()
-        .filter(|call_id| !results.contains_key(call_id))
-        .collect();
-    let mut scan = scan_for_results(&mut file, end, file_len, unresolved)?;
-    scan.results.extend(results);
-
-    Ok(MessagesPage {
-        items: materialize(slots, &scan),
-        next_offset: selected.next_offset,
-        has_more: selected.has_more,
-        partial_tail: selected.partial_tail,
-        skipped,
-    })
+    let page = read_canonical(conversation, end_offset, limit)?;
+    Ok(project(&page))
 }
 
-/// Turn the page's slots into items, attaching results and bounding the bodies.
+/// Draw a canonical page as a conversation.
 ///
 /// The page budget is spent in document order, so the degradation is
 /// deterministic and a reader scrolling up sees the same tools cut every time —
 /// not whichever ones happened to be materialized first.
-fn materialize(slots: Vec<Slot>, scan: &ScanOutcome) -> Vec<MessageItemV1> {
+fn project(page: &CanonicalPage) -> MessagesPage {
     let mut budget = PAGE_PAYLOAD_BUDGET;
+    let items = page
+        .entries
+        .iter()
+        .filter_map(|entry| item_of(entry, &mut budget))
+        .collect();
 
-    slots
-        .into_iter()
-        .map(|slot| match slot {
-            Slot::Item(item) => item,
-            Slot::Call(call) => {
-                let fact = scan.results.get(&call.call_id);
-                let status = match fact {
-                    Some(fact) if fact.is_error => ToolStatusV1::Error,
-                    Some(_) => ToolStatusV1::Success,
-                    // No result, and the scan did not stop early: the call is
-                    // simply the newest thing written.
-                    None if !scan.hit_cap => ToolStatusV1::Running,
-                    // No result, and the scan gave up. Deliberately not
-                    // `Running` — see the module docs.
-                    None => ToolStatusV1::Unknown,
-                };
+    MessagesPage {
+        items,
+        next_offset: page.next_offset,
+        has_more: page.has_more,
+        partial_tail: page.partial_tail,
+        skipped: page.stats.unread(),
+    }
+}
 
-                let input = call
-                    .input
-                    .map(|payload| spend(&mut budget, payload, TOOL_INPUT_CEILING));
-                let output = fact.map(|fact| {
-                    spend(
-                        &mut budget,
-                        PayloadV1 {
-                            text: fact.body.clone(),
-                            kind: PayloadKindV1::Text,
-                            truncated: false,
-                        },
-                        TOOL_OUTPUT_CEILING,
-                    )
-                });
-
-                MessageItemV1::Tool {
-                    id: call.id,
-                    timestamp: call.timestamp,
-                    tool: ToolActivityV1 {
-                        call_id: call.call_id,
-                        name: call.name,
-                        status,
-                        summary: call.summary,
-                        input,
-                        output,
-                    },
-                }
+/// One canonical entry as a conversation row, or `None` when this view does not
+/// draw it.
+fn item_of(entry: &Entry, budget: &mut usize) -> Option<MessageItemV1> {
+    match entry {
+        Entry::Message(message) => {
+            // A subagent's turns are a different conversation's, and a turn the
+            // runtime produced is not something a person said. Neither is drawn
+            // here; both are facts the transcript view has.
+            if message.sidechain {
+                return None;
             }
-        })
-        .collect()
-}
-
-/// Cut one payload to what the page can still afford.
-///
-/// **The body is always present, even at zero budget** — emptied and marked
-/// truncated rather than dropped. Dropping it would make "this response could
-/// not carry it" indistinguishable from "the transcript did not record it",
-/// which are the two things `skip_serializing_if` on the field is there to tell
-/// apart.
-fn spend(budget: &mut usize, mut payload: PayloadV1, ceiling: usize) -> PayloadV1 {
-    let allowed = ceiling.min(*budget);
-    let (text, cut) = truncate_bytes(&payload.text, allowed);
-    *budget = budget.saturating_sub(text.len());
-    payload.text = text;
-    // Truncated if either limit cut it: the per-body ceiling or the page.
-    payload.truncated = payload.truncated || cut;
-    payload
-}
-
-/// Cut `s` to at most `max` **bytes**, on a character boundary.
-///
-/// Bytes rather than characters because the ceilings are about how much travels
-/// on the wire, and a character count does not bound that — a run of CJK text is
-/// three bytes per character. Cutting mid-character would produce a string the
-/// client cannot decode, so the cut walks back to the nearest boundary.
-fn truncate_bytes(s: &str, max: usize) -> (String, bool) {
-    if s.len() <= max {
-        return (s.to_string(), false);
-    }
-    let mut cut = max;
-    while cut > 0 && !s.is_char_boundary(cut) {
-        cut -= 1;
-    }
-    (s[..cut].to_string(), true)
-}
-
-/// What the forward scan found, and whether it stopped early.
-struct ScanOutcome {
-    results: HashMap<String, ResultFact>,
-    /// The scan hit a cap with calls still unanswered. The difference between
-    /// this and reaching EOF is the difference between `Unknown` and `Running`.
-    hit_cap: bool,
-}
-
-/// Read forward from `from`, collecting results for the calls the page named.
-///
-/// Stops at the first of: every wanted call answered, `PAIR_SCAN_MAX_RECORDS`
-/// parsed, `PAIR_SCAN_MAX_BYTES` read, or the end of the file.
-///
-/// The early stop is what keeps this cheap in the common case — a page whose
-/// calls are all answered by the next record reads one chunk, not 256 KiB.
-fn scan_for_results(
-    file: &mut File,
-    from: u64,
-    file_len: u64,
-    wanted: HashSet<String>,
-) -> std::io::Result<ScanOutcome> {
-    let mut results: HashMap<String, ResultFact> = HashMap::new();
-    if wanted.is_empty() || from >= file_len {
-        // Nothing to look for, or the page already reaches the end of the file.
-        // Either way there is nothing newer to find, which is `Running` and not
-        // `Unknown` — hence `hit_cap: false`.
-        return Ok(ScanOutcome {
-            results,
-            hit_cap: false,
-        });
-    }
-
-    let mut cursor = from;
-    let mut read_bytes = 0u64;
-    let mut parsed = 0usize;
-    let mut outstanding = wanted.len();
-    let mut carry = String::new();
-
-    while cursor < file_len {
-        let span = READ_CHUNK.min(file_len - cursor);
-        let mut buf = vec![
-            0u8;
-            usize::try_from(span).map_err(|_| {
-                std::io::Error::new(std::io::ErrorKind::InvalidData, "scan chunk too large")
-            })?
-        ];
-        file.seek(SeekFrom::Start(cursor))?;
-        file.read_exact(&mut buf)?;
-        cursor += span;
-        read_bytes += span;
-
-        carry.push_str(&String::from_utf8_lossy(&buf));
-
-        // A record is one line, and the tail after the last newline is kept
-        // back because it may be a record split across two reads — a
-        // half-parsed `tool_result` is worse than none.
-        //
-        // The same pop handles the clean case: a chunk ending on a newline
-        // leaves the empty string after it, which carries as nothing.
-        let mut lines: Vec<&str> = carry.split('\n').collect();
-        let tail = lines.pop().unwrap_or("").to_string();
-
-        for line in lines {
-            if line.trim().is_empty() {
-                continue;
-            }
-            parsed += 1;
-            collect_results(line, &wanted, &mut results, &mut outstanding);
-            // Both of these are checked *inside* the record loop, not after the
-            // chunk. A chunk is 32 KiB and can hold hundreds of small records,
-            // so a cap tested once per chunk is a cap on how much is read and
-            // not on how far the scan looks — it would be exceeded by whatever
-            // happened to fit, which is exactly the unboundedness the cap is
-            // there to prevent.
-            if outstanding == 0 {
-                return Ok(ScanOutcome {
-                    results,
-                    hit_cap: false,
+            let role = match message.source {
+                MessageSource::Human => MessageRoleV1::User,
+                MessageSource::Assistant => MessageRoleV1::Assistant,
+                MessageSource::Synthetic | MessageSource::System => return None,
+            };
+            // A turn whose every block was unmodelled is a marker and not a
+            // turn: a hole the reader cannot see is worse than a line saying
+            // something was there.
+            if message
+                .content
+                .iter()
+                .all(|block| matches!(block, crate::canonical::MessageBlock::Unknown))
+            {
+                return Some(MessageItemV1::Unknown {
+                    id: message.id.clone(),
+                    timestamp: message.timestamp.clone(),
                 });
             }
-            if parsed >= PAIR_SCAN_MAX_RECORDS {
-                return Ok(ScanOutcome {
-                    results,
-                    hit_cap: true,
-                });
-            }
-        }
-        carry = tail;
-
-        if read_bytes >= PAIR_SCAN_MAX_BYTES {
-            return Ok(ScanOutcome {
-                results,
-                hit_cap: true,
-            });
-        }
-    }
-
-    // Ran out of file rather than out of budget: whatever is still unanswered
-    // has simply not been written yet.
-    Ok(ScanOutcome {
-        results,
-        hit_cap: false,
-    })
-}
-
-/// Pull any `tool_result` blocks out of one record that answer a wanted call.
-fn collect_results(
-    line: &str,
-    wanted: &HashSet<String>,
-    results: &mut HashMap<String, ResultFact>,
-    outstanding: &mut usize,
-) {
-    let Ok(record) = serde_json::from_str::<Value>(line) else {
-        return;
-    };
-    let Some(blocks) = record
-        .get("message")
-        .and_then(|message| message.get("content"))
-        .and_then(Value::as_array)
-    else {
-        return;
-    };
-    for block in blocks {
-        if string_field(block, "type").as_deref() != Some("tool_result") {
-            continue;
-        }
-        let Some(call_id) = string_field(block, "tool_use_id") else {
-            continue;
-        };
-        if !wanted.contains(&call_id) || results.contains_key(&call_id) {
-            continue;
-        }
-        results.insert(
-            call_id,
-            ResultFact {
-                is_error: block
-                    .get("is_error")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false),
-                body: result_body(block.get("content")),
-            },
-        );
-        *outstanding = outstanding.saturating_sub(1);
-    }
-}
-
-/// The text of a `tool_result`'s `content`.
-///
-/// Two shapes occur, as in a message's own `content`: a plain string, or a list
-/// of blocks each carrying `text`. Both are flattened to text. A result that is
-/// neither yields nothing rather than a serialized blob — the summary line still
-/// says the call happened, and inventing a rendering of an unmodelled shape is
-/// how a transcript starts showing things that were not said.
-fn result_body(content: Option<&Value>) -> String {
-    match content {
-        Some(Value::String(text)) => text.clone(),
-        Some(Value::Array(blocks)) => blocks
-            .iter()
-            .filter_map(|block| string_field(block, "text"))
-            .collect::<Vec<String>>()
-            .join("\n"),
-        _ => String::new(),
-    }
-}
-
-/// What one transcript record contributed to the page.
-///
-/// Three outcomes rather than two, because "understood and rendered as part of
-/// something else" is not "not understood". `skipped` is what a client shows as
-/// "some events were not displayed", so counting a paired `tool_result` there
-/// would tell the user data was dropped when it is on screen inside the call it
-/// belongs to.
-enum Record {
-    /// Rows to render.
-    Slots(Vec<Slot>),
-    /// A conversation record the reader understood and did not render on its own:
-    /// a `tool_result` belongs to its call, and a record of only `thinking` was
-    /// deliberately folded away. **Not** counted as skipped.
-    Silent,
-    /// A record this version does not model — bookkeeping, a subagent's turn, a
-    /// message shape it cannot read. Counted, so a client can say the
-    /// conversation is partial rather than presenting a hole as the whole.
-    Unrecognised,
-}
-
-/// Turn one transcript record into the slots it contributes.
-fn normalize_record(line: &str) -> Record {
-    let Ok(record) = serde_json::from_str::<Value>(line) else {
-        return Record::Unrecognised;
-    };
-    let Some(kind) = string_field(&record, "type") else {
-        return Record::Unrecognised;
-    };
-    if !crate::conversation::is_message_record(&kind) {
-        return Record::Unrecognised;
-    }
-    // A subagent's records are not the main conversation.
-    if record.get("isSidechain").and_then(Value::as_bool) == Some(true) {
-        return Record::Unrecognised;
-    }
-
-    let Some(message) = record.get("message") else {
-        return Record::Unrecognised;
-    };
-    let id = string_field(&record, "uuid").unwrap_or_default();
-    let timestamp = string_field(&record, "timestamp");
-    let role = if kind == "assistant" {
-        MessageRoleV1::Assistant
-    } else {
-        MessageRoleV1::User
-    };
-
-    // `content` is either a plain string or a block list, and both occur — a
-    // measured transcript had 62 string-bodied user turns, so accepting only the
-    // list shape would drop real messages while looking like it worked.
-    if let Some(text) = message.get("content").and_then(Value::as_str) {
-        if text.trim().is_empty() {
-            return Record::Silent;
-        }
-        return Record::Slots(vec![Slot::Item(MessageItemV1::Message {
-            id,
-            timestamp,
-            role,
-            content: vec![MessageContentV1::Text {
-                text: text.to_string(),
-            }],
-        })]);
-    }
-
-    let Some(blocks) = message.get("content").and_then(Value::as_array) else {
-        return Record::Unrecognised;
-    };
-
-    let mut slots: Vec<Slot> = Vec::new();
-    // Consecutive prose merges into one message, so a turn that wrote two
-    // paragraphs is one bubble rather than two. A tool call ends the run: the
-    // activity is *between* the prose on either side of it, which is the order
-    // the blocks are in and the order a reader expects.
-    let mut prose: Vec<MessageContentV1> = Vec::new();
-    let mut prose_starts_at: Option<usize> = None;
-    let mut unmodelled = 0usize;
-    // Whether anything a reader could use came out of this record. Distinct
-    // from "produced no slots": a record of nothing but `tool_result` blocks
-    // produces no slots and is not unreadable, it is paired.
-    let mut readable = 0usize;
-
-    let flush =
-        |slots: &mut Vec<Slot>, prose: &mut Vec<MessageContentV1>, at: &mut Option<usize>| {
-            if prose.is_empty() {
-                return;
-            }
-            let first = at.take().unwrap_or(0);
-            slots.push(Slot::Item(MessageItemV1::Message {
-                id: item_id(&id, first),
-                timestamp: timestamp.clone(),
+            let content = message
+                .content
+                .iter()
+                .map(|block| match block {
+                    crate::canonical::MessageBlock::Text { text } => {
+                        MessageContentV1::Text { text: text.clone() }
+                    }
+                    crate::canonical::MessageBlock::Unknown => MessageContentV1::Unknown,
+                })
+                .collect();
+            Some(MessageItemV1::Message {
+                id: message.id.clone(),
+                timestamp: message.timestamp.clone(),
                 role,
-                content: std::mem::take(prose),
-            }));
-        };
-
-    for (index, block) in blocks.iter().enumerate() {
-        match string_field(block, "type").as_deref() {
-            Some("text") => {
-                let Some(text) = string_field(block, "text") else {
-                    continue;
-                };
-                if text.trim().is_empty() {
-                    continue;
-                }
-                if prose_starts_at.is_none() {
-                    prose_starts_at = Some(index);
-                }
-                readable += 1;
-                prose.push(MessageContentV1::Text { text });
-            }
-            Some("tool_use") => {
-                flush(&mut slots, &mut prose, &mut prose_starts_at);
-                readable += 1;
-                let name = string_field(block, "name").unwrap_or_else(|| "tool".to_string());
-                let input = block.get("input");
-                slots.push(Slot::Call(PendingCall {
-                    id: item_id(&id, index),
-                    timestamp: timestamp.clone(),
-                    call_id: string_field(block, "id").unwrap_or_default(),
-                    summary: tool_summary(&name, input),
-                    input: input.map(|input| PayloadV1 {
-                        text: serde_json::to_string_pretty(input).unwrap_or_default(),
-                        kind: PayloadKindV1::Json,
-                        truncated: false,
-                    }),
-                    name,
-                }));
-            }
-            // `thinking` is folded away — it is model reasoning, not a turn, and
-            // it is the largest block type in a measured transcript (650 blocks
-            // against 355 `text`), so showing it would bury the conversation it
-            // reasons about.
-            //
-            // `tool_result` is not a row either: it pairs with the call it
-            // answers, and rendering both doubles the tool noise.
-            Some("thinking") | Some("tool_result") => {}
-            // Anything else is a block type this version does not model. The
-            // position is kept rather than the content, so a message that
-            // carried one does not read as if it had not.
-            _ => {
-                unmodelled += 1;
-                if prose_starts_at.is_none() {
-                    prose_starts_at = Some(index);
-                }
-                prose.push(MessageContentV1::Unknown);
-            }
+                content,
+            })
         }
-    }
-    flush(&mut slots, &mut prose, &mut prose_starts_at);
-
-    if readable > 0 {
-        return Record::Slots(slots);
-    }
-    // Nothing readable came out. A record that was *all* unmodelled still
-    // happened, and a hole the user cannot see is worse than a line saying
-    // something was there — so it becomes the `Unknown` item rather than a
-    // message whose entire body is an "unreadable" marker.
-    //
-    // The two are genuinely different states, which is why both exist: a
-    // message containing an unmodelled block *beside* readable ones is a
-    // partially-readable turn and keeps its bubble, while a record with nothing
-    // readable in it is a marker and not a turn at all.
-    if unmodelled > 0 {
-        return Record::Slots(vec![Slot::Item(MessageItemV1::Unknown { id, timestamp })]);
-    }
-    // Understood, and nothing to draw: a `tool_result` awaiting its call, or a
-    // record of nothing but `thinking`. Neither is an event the client failed to
-    // show.
-    Record::Silent
-}
-
-/// The item id for the block at `index` of record `id`.
-///
-/// The first block keeps the bare record uuid, as v1 did, so the common case
-/// reads as the record it came from. Later blocks are suffixed with their index,
-/// which is what keeps two `Bash` calls in one turn from colliding on a React
-/// key — and stable across polls, because the index is a property of the
-/// transcript rather than of the page.
-fn item_id(record_id: &str, index: usize) -> String {
-    if index == 0 {
-        record_id.to_string()
-    } else {
-        format!("{record_id}#{index}")
-    }
-}
-
-/// A bounded, single-line description of a tool call.
-///
-/// Specialized by name where a tool has an argument that *is* the call — a
-/// `Read` is its path, a `Bash` is its command — and generic otherwise, so a
-/// tool Claude adds next month reads as its own best argument rather than as
-/// nothing. The specialization lives here rather than in the contract because
-/// Claude's tool set is open: a client that knew these names would be a client
-/// that breaks when the set changes.
-fn tool_summary(name: &str, input: Option<&Value>) -> String {
-    let described = input
-        .and_then(|input| specialized(name, input))
-        .unwrap_or_else(|| generic(input));
-    truncate_chars(&collapse_whitespace(&described), TOOL_SUMMARY_CEILING)
-}
-
-/// The argument that best stands for the call, for the tools that have one.
-fn specialized(name: &str, input: &Value) -> Option<String> {
-    // Every arm reads a different key, and a missing key falls through to the
-    // generic description rather than producing an empty summary.
-    let key = match name {
-        "Read" | "Edit" | "Write" | "NotebookEdit" => ["file_path", "notebook_path"].as_slice(),
-        "Bash" => ["command", "description"].as_slice(),
-        "Glob" | "Grep" => ["pattern"].as_slice(),
-        "WebFetch" | "WebSearch" => ["url", "query"].as_slice(),
-        "Task" | "Agent" => ["description", "prompt"].as_slice(),
-        _ => return None,
-    };
-    key.iter()
-        .find_map(|key| input.get(key).and_then(Value::as_str))
-        .map(str::to_string)
-}
-
-/// What to say about a tool this version does not know by name.
-fn generic(input: Option<&Value>) -> String {
-    let Some(input) = input else {
-        return String::new();
-    };
-    match input {
-        Value::Object(map) => {
-            // The keys, not the values: a value could be a whole file, and the
-            // summary is a line in a collapsed row.
-            let mut keys: Vec<&str> = map.keys().map(String::as_str).collect();
-            keys.sort_unstable();
-            keys.join(", ")
+        Entry::ToolCall(call) => {
+            let status = match call.status {
+                crate::canonical::ToolStatus::Running => ToolStatusV1::Running,
+                crate::canonical::ToolStatus::Success => ToolStatusV1::Success,
+                crate::canonical::ToolStatus::Error => ToolStatusV1::Error,
+                crate::canonical::ToolStatus::Unknown => ToolStatusV1::Unknown,
+            };
+            let input = call
+                .input
+                .as_ref()
+                .map(|payload| spend(budget, payload, TOOL_INPUT_CEILING));
+            let output = call
+                .output
+                .as_ref()
+                .map(|payload| spend(budget, payload, TOOL_OUTPUT_CEILING));
+            Some(MessageItemV1::Tool {
+                id: call.id.clone(),
+                timestamp: call.timestamp.clone(),
+                tool: ToolActivityV1 {
+                    call_id: call.call_id.clone(),
+                    name: call.name.clone(),
+                    status,
+                    summary: truncate_chars(&call.summary, TOOL_SUMMARY_CEILING),
+                    input,
+                    output,
+                },
+            })
         }
-        Value::String(s) => s.clone(),
-        other => other.to_string(),
+        // Understood, and not this view's to draw. The transcript projection
+        // shows all four; the conversation folds session state into its header
+        // and leaves the rest to the surface that exists for completeness.
+        //
+        // `Entry::Unknown` is in here too: the reader could not model the
+        // record, and this view's answer is to say so in `skipped` rather than
+        // to put a row it cannot describe in front of someone reading a
+        // conversation.
+        Entry::Reasoning(_)
+        | Entry::Attachment(_)
+        | Entry::Runtime(_)
+        | Entry::Metadata(_)
+        | Entry::Unknown(_) => None,
     }
-}
-
-/// Collapse runs of whitespace to single spaces.
-///
-/// A `Bash` command is routinely several lines, and the summary is one line in a
-/// collapsed row — a summary that carried newlines would either wrap the row or
-/// be clipped by CSS, and neither says what the command was.
-fn collapse_whitespace(s: &str) -> String {
-    s.split_whitespace().collect::<Vec<&str>>().join(" ")
-}
-
-/// Cut `s` to at most `max` characters, saying so when it does.
-fn truncate_chars(s: &str, max: usize) -> String {
-    if s.chars().count() <= max {
-        return s.to_string();
-    }
-    let kept: String = s.chars().take(max).collect();
-    format!("{kept}…")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::messages::v1::{MessagesResponseV1, MessagesStateV1};
+    use crate::protocol::messages::v1::{MessagesResponseV1, MessagesStateV1, PayloadKindV1};
+    use serde_json::Value;
 
     fn page_of(transcript: &str) -> MessagesPage {
         page_of_limited(transcript, 100)
@@ -881,6 +385,10 @@ mod tests {
         // call, so only a page that stops before the result can have one beyond
         // the scan. That is also the shape this is really about — a reader who
         // scrolled back into a long conversation.
+        //
+        // The scan and its cap live in `canonical::read` now, so what this pins
+        // is that the distinction survives the projection: `Unknown` is not
+        // flattened into `Running` on the way to the wire.
         let head = format!(
             "{}\n{}\n",
             message("m1", "user", Value::String("go".into())),
@@ -889,7 +397,7 @@ mod tests {
         let page_end = head.len() as u64;
 
         let mut tail = String::new();
-        for i in 0..(PAIR_SCAN_MAX_RECORDS + 10) {
+        for i in 0..(crate::canonical::read::PAIR_SCAN_MAX_RECORDS + 10) {
             tail.push_str(&message(
                 &format!("filler{i}"),
                 "assistant",
@@ -1039,64 +547,173 @@ mod tests {
     }
 
     #[test]
-    fn a_bookkeeping_record_is_still_not_a_message() {
-        for line in [
-            r#"{"type":"attachment","uuid":"a","cwd":"/w"}"#,
-            r#"{"type":"ai-title","aiTitle":"x"}"#,
-            r#"{"type":"last-prompt","lastPrompt":"hi"}"#,
-            r#"{"type":"queue-operation","operation":"x"}"#,
-            "not json at all",
+    fn a_sidechain_record_is_left_out() {
+        // A subagent's turn is a fact about the session and not a row in this
+        // conversation. Which source *kind* it is, and that it is a sidechain at
+        // all, is settled below in `canonical::adapter`; what is asserted here is
+        // that this view does not draw it.
+        let record = r#"{"type":"assistant","uuid":"a1","isSidechain":true,"message":{"role":"assistant","content":[{"type":"text","text":"subagent"}]}}"#;
+        let page = page_of(&join(&[record.to_string()]));
+        assert!(
+            page.items.is_empty(),
+            "a subagent's turn became a row: {:?}",
+            page.items
+        );
+    }
+
+    #[test]
+    fn a_meta_user_record_is_not_a_human_turn() {
+        // Measured over 170 real transcripts / 58,350 `type=user` records: **700**
+        // carry `isMeta: true` alongside text content, and this normalizer never
+        // read the flag — so every one of them rendered as a turn the user had
+        // typed.
+        //
+        // `isMeta` is Claude Code's own statement that it wrote the record as
+        // context for the model rather than reading it from a human. It is a
+        // fact about the record's *origin*, which is exactly why it is read from
+        // the record instead of being recognized in the message text.
+        let record = r#"{"type":"user","uuid":"m1","isMeta":true,"message":{"role":"user","content":[{"type":"text","text":"Caveat: the messages below were generated by the user while running local commands"}]}}"#;
+        let page = page_of(&join(&[record.to_string()]));
+
+        assert!(
+            page.items.is_empty(),
+            "an injected meta record rendered as a human turn: {:?}",
+            page.items
+        );
+    }
+
+    #[test]
+    fn a_notification_user_record_is_not_a_human_turn() {
+        // 1,499 measured records arrive as `type=user` because a background task
+        // finished, and Claude Code declares that origin — `origin.kind:
+        // "task-notification"`, with `promptSource: "system"`. The declaration is
+        // what this reads; the text is not, for the reason the counter-test
+        // below records.
+        let record = r#"{"type":"user","uuid":"n1","promptSource":"system","origin":{"kind":"task-notification"},"message":{"role":"user","content":[{"type":"text","text":"<task-notification>Background command completed</task-notification>"}]}}"#;
+        let page = page_of(&join(&[record.to_string()]));
+
+        assert!(
+            page.items.is_empty(),
+            "a task notification rendered as a human turn: {:?}",
+            page.items
+        );
+    }
+
+    #[test]
+    fn a_user_record_without_a_declared_origin_is_still_a_human_turn() {
+        // The counter-test to the two above, and the reason they classify on a
+        // *declared* origin rather than on the text.
+        //
+        // 509 measured text-bearing `type=user` records carry no provenance field
+        // at all, and they are not one class: 185 are slash-command expansions a
+        // human typed, 181 are interruption markers, 59 are local-command output,
+        // 81 are ordinary prose. Nothing in the record separates the first from
+        // the third, so a classifier reading the text would hide real turns — and
+        // losing a user's own message is a worse failure than showing one line of
+        // bookkeeping. An undeclared record therefore stays human.
+        //
+        // The declared-human markers are in here too: they are the ones a stricter
+        // reading would be tempted to drop along with the notifications they share
+        // fields with (`promptSource` is carried by both).
+        for record in [
+            r#"{"type":"user","uuid":"u1","message":{"role":"user","content":[{"type":"text","text":"typed with no provenance fields"}]}}"#,
+            r#"{"type":"user","uuid":"u2","promptSource":"typed","origin":{"kind":"human"},"message":{"role":"user","content":[{"type":"text","text":"declared human"}]}}"#,
+            r#"{"type":"user","uuid":"u3","promptSource":"queued","origin":{"kind":"human"},"message":{"role":"user","content":[{"type":"text","text":"queued while Claude was working"}]}}"#,
+            r#"{"type":"user","uuid":"u4","promptSource":"suggestion_accepted","origin":{"kind":"human"},"turnOrigin":"human","message":{"role":"user","content":[{"type":"text","text":"accepted suggestion"}]}}"#,
         ] {
+            let page = page_of(&join(&[record.to_string()]));
+            assert_eq!(page.items.len(), 1, "a human turn was hidden: {record}");
             assert!(
-                matches!(normalize_record(line), Record::Unrecognised),
-                "a bookkeeping record became conversation: {line}"
+                matches!(
+                    page.items[0],
+                    MessageItemV1::Message {
+                        role: MessageRoleV1::User,
+                        ..
+                    }
+                ),
+                "a human turn stopped being a user message: {:?}",
+                page.items[0]
             );
         }
     }
 
     #[test]
-    fn a_sidechain_record_is_left_out() {
-        let record = r#"{"type":"assistant","uuid":"a1","isSidechain":true,"message":{"role":"assistant","content":[{"type":"text","text":"subagent"}]}}"#;
-        assert!(matches!(normalize_record(record), Record::Unrecognised));
-    }
-
-    #[test]
-    fn a_paired_tool_result_is_silent_rather_than_unrecognised() {
-        // The distinction `skipped` turns on. A result the reader understood and
-        // attached to its call is not an event that failed to display — counting
-        // it would make a conversation whose every tool rendered report that
-        // half its records were dropped.
-        let record = r#"{"type":"user","uuid":"u1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"output"}]}}"#;
-        assert!(
-            matches!(normalize_record(record), Record::Silent),
-            "a paired result was counted as an unread record"
-        );
-    }
-
-    #[test]
     fn a_tool_result_is_never_a_row_even_when_it_carries_text() {
-        let record = r#"{"type":"user","uuid":"u1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"output"}]}}"#;
-        assert!(
-            !matches!(normalize_record(record), Record::Slots(_)),
-            "a tool result became a transcript row"
-        );
+        // It belongs to its call, and rendering both would double the tool noise.
+        // End to end rather than at the adapter, because what a reader sees is
+        // the assertion: the page shows the call and not a second row.
+        let page = page_of(&join(&[
+            call("t1", "Bash", serde_json::json!({"command": "ls"})),
+            result("t1", "\"output\"", false),
+        ]));
+
+        assert_eq!(page.items.len(), 1, "the result became a second row");
+        let items = page
+            .items
+            .iter()
+            .filter(|item| matches!(item, MessageItemV1::Message { .. }))
+            .count();
+        assert_eq!(items, 0, "the result became a message row");
     }
 
     #[test]
     fn skipped_counts_only_what_was_not_understood() {
-        // End to end, because that is where it is shown: one bookkeeping record
-        // around a rendered pair must report one skipped, not three.
+        // End to end, because that is where it is shown. The number turns on
+        // telling two things apart: a record the reader *understood and did not
+        // draw* — a paired `tool_result`, an `ai-title` — and a record it could
+        // not read at all.
+        //
+        // Measured, the distinction is the whole number. In the newest
+        // 50-record window of 134 real transcripts the median page carries **25**
+        // records that are neither user nor assistant (max 40, and 58 of the 134
+        // are over half), and every one of them was counted here. A conversation
+        // was therefore announcing that half of itself had been dropped when
+        // nothing had.
         let page = page_of(&join(&[
             r#"{"type":"ai-title","aiTitle":"x"}"#.to_string(),
+            r#"{"type":"quantum-entanglement-state","uuid":"q1"}"#.to_string(),
             call("t1", "Bash", serde_json::json!({"command": "ls"})),
             result("t1", "\"a.rs\"", false),
         ]));
 
         assert_eq!(
             page.skipped, 1,
-            "the paired result and the rendered call were counted as dropped"
+            "only the unreadable record is a record the reader could not read"
         );
         assert_eq!(tools(&page).len(), 1);
+    }
+
+    #[test]
+    fn the_records_a_real_page_is_mostly_made_of_are_understood_not_dropped() {
+        // Every type here is one measured in a real corpus (170 transcripts /
+        // 387,851 records), and together they are the bulk of what a page holds:
+        // `attachment` alone is 69,729 records, `queue-operation` 5,424,
+        // `file-history-*` 5,891, `system` 4,381.
+        //
+        // None of them is a conversation row, and none of them is a record the
+        // reader failed to read. They are two different facts.
+        let page = page_of(&join(&[
+            r#"{"type":"attachment","uuid":"a1","attachment":{"type":"hook_success"}}"#.to_string(),
+            r#"{"type":"system","uuid":"s1","subtype":"turn_duration","durationMs":4200}"#
+                .to_string(),
+            r#"{"type":"mode","mode":"plan"}"#.to_string(),
+            r#"{"type":"permission-mode","permissionMode":"plan"}"#.to_string(),
+            r#"{"type":"queue-operation","operation":"enqueue"}"#.to_string(),
+            r#"{"type":"file-history-snapshot","uuid":"f1","snapshot":{}}"#.to_string(),
+            r#"{"type":"pr-link","prNumber":1301,"prUrl":"https://example.invalid/1301"}"#
+                .to_string(),
+            r#"{"type":"agent-name","agentName":"explore"}"#.to_string(),
+        ]));
+
+        assert_eq!(
+            page.skipped, 0,
+            "a record the reader understood was reported as one it could not read"
+        );
+        assert!(
+            page.items.is_empty(),
+            "one of these became a conversation row: {:?}",
+            page.items
+        );
     }
 
     #[test]
@@ -1149,17 +766,6 @@ mod tests {
             .count();
         assert!(cut > 0, "nothing was marked truncated, so nothing was cut");
         assert_eq!(tools(&page).len(), 20, "a tool was dropped rather than cut");
-    }
-
-    #[test]
-    fn a_cut_stops_on_a_character_boundary() {
-        // Three-byte characters: a byte-bounded cut that ignored boundaries
-        // would produce a string the client cannot decode.
-        let s = "中".repeat(100);
-        let (cut, truncated) = truncate_bytes(&s, 10);
-        assert!(truncated);
-        assert_eq!(cut.len(), 9, "cut mid-character: {cut:?}");
-        assert_eq!(cut, "中中中");
     }
 
     #[test]

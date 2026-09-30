@@ -8,6 +8,8 @@ import type { JsonPreviewKind } from '../model/viewerRegistry';
 import { MarkdownPreview } from './MarkdownPreview';
 import { JsonPreview } from './JsonPreview';
 import { JsonlPreview } from './JsonlPreview';
+import { cn } from '@/shared/lib/utils';
+import { chromeSansRole } from '@/shared/typography/chromeRoles';
 
 interface StructuredTextPreviewProps {
   filename: string;
@@ -32,7 +34,7 @@ function ChunkedProgress({ loadedBytes, totalBytes, onCancelLoad }: {
 }) {
   return (
     <div className="flex flex-col items-center justify-center h-full gap-3 p-6">
-      <p className="text-sm text-muted-foreground">
+      <p className={cn('text-muted-foreground', chromeSansRole('secondary'))}>
         Loading… {formatSize(loadedBytes)} / {formatSize(totalBytes)}
       </p>
       <Progress value={totalBytes > 0 ? (loadedBytes / totalBytes) * 100 : 0} className="w-64" />
@@ -43,7 +45,7 @@ function ChunkedProgress({ loadedBytes, totalBytes, onCancelLoad }: {
 
 function LoadError({ error, onRetry }: { error: string; onRetry: () => void }) {
   return (
-    <div className="flex flex-col items-center justify-center h-full gap-2 p-3 text-sm">
+    <div className={cn('flex h-full flex-col items-center justify-center gap-2 p-3', chromeSansRole('secondary'))}>
       <p className="text-destructive">{error}</p>
       <Button variant="outline" size="sm" onClick={onRetry}>Retry</Button>
     </div>
@@ -94,7 +96,7 @@ export function StructuredTextPreview({
   return (
     <div className="flex-1 min-h-0 flex flex-col">
       {isDirty && originalContent !== content && (
-        <div className="flex items-center gap-2 px-3 py-1.5 text-xs border-b bg-warning/10 border-warning/30 text-warning-foreground">
+        <div className={cn('flex items-center gap-2 border-b border-warning/30 bg-warning/10 px-3 py-1.5 text-warning-foreground', chromeSansRole('metadata'))}>
           <Info className="h-3 w-3 shrink-0" />
           <span>Preview shows the saved version. Save to update preview.</span>
         </div>

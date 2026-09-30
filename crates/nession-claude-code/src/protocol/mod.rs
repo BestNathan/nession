@@ -6,7 +6,14 @@
 //!   list/v1
 //!   messages/v1
 //!   read/v1
+//!   transcript_items/v1
+//!   transcripts/v1
 //! ```
+//!
+//! The directory is spelled with an underscore and the unit id is not
+//! (`transcript-items`), because one is a Rust module path and the other is a
+//! `ProtocolId` — which refuses underscores. The wire takes the id, so the two
+//! legitimately differ here and only here.
 //!
 //! A directory per Protocol Unit, a file per contract version — the same layout
 //! `nession-git` uses, for the reason recorded there: a v2 goes beside `v1.rs`
@@ -65,6 +72,8 @@ pub mod conversations;
 pub mod list;
 pub mod messages;
 pub mod read;
+pub mod transcript_items;
+pub mod transcripts;
 
 use nession_protocol::{ContractDescriptor, ContractVersion, IdentityError, ProtocolDescriptor};
 
@@ -82,6 +91,8 @@ pub fn descriptors() -> Result<Vec<ProtocolDescriptor>, IdentityError> {
         read::descriptor()?,
         conversations::descriptor()?,
         messages::descriptor()?,
+        transcripts::descriptor()?,
+        transcript_items::descriptor()?,
     ])
 }
 
@@ -97,11 +108,13 @@ pub(crate) fn v1_descriptor(id: &str, wire: &str) -> Result<ProtocolDescriptor, 
 mod tests {
     use super::*;
 
-    const EXPECTED_IDS: [&str; 4] = [
+    const EXPECTED_IDS: [&str; 6] = [
         "claude-code.list",
         "claude-code.read",
         "claude-code.conversations",
         "claude-code.messages",
+        "claude-code.transcripts",
+        "claude-code.transcript-items",
     ];
 
     #[test]

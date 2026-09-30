@@ -1,3 +1,6 @@
+import { cn } from '@/shared/lib/utils';
+import { chromeSansRole } from '@/shared/typography/chromeRoles';
+
 export interface PdfViewerProps {
   blobUrl: string;
   filename: string;
@@ -7,7 +10,7 @@ export function PdfViewer({ blobUrl, filename }: PdfViewerProps) {
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center px-2 py-1 border-b flex-shrink-0">
-        <span className="text-xs font-medium text-foreground truncate max-w-[200px]">
+        <span className={cn('max-w-[200px] truncate text-foreground', chromeSansRole('metadata'))}>
           {filename}
         </span>
       </div>

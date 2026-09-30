@@ -1,4 +1,6 @@
 import type { ReactNode } from 'react';
+import { cn } from '@/shared/lib/utils';
+import { chromeSansRole } from '@/shared/typography/chromeRoles';
 
 /**
  * The panel a git section shows when it has no list to show.
@@ -29,9 +31,10 @@ export function GitNotice({
     >
       <p
         role={destructive ? 'alert' : undefined}
-        className={
-          destructive ? 'text-sm text-destructive' : 'text-sm text-muted-foreground'
-        }
+        className={cn(
+          destructive ? 'text-destructive' : 'text-muted-foreground',
+          chromeSansRole(destructive ? 'body' : 'secondary'),
+        )}
       >
         {children}
       </p>

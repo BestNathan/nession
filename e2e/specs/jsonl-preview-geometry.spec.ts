@@ -8,6 +8,8 @@ import {
   FIXTURE_JSONL_NESTED_LINE,
   openFixtureJsonlEventsApp,
   openFixtureJsonlEventsWeb,
+  readJsonlRecordVirtualStart,
+  waitForJsonlVirtualStartStable,
   readJsonlRecordTop,
   readJsonlScrollMetrics,
   scrollJsonlPreview,
@@ -67,7 +69,8 @@ test.describe('JSONL preview geometry (#1199)', () => {
     await page.waitForTimeout(150);
     await assertVisibleJsonlRecordsDoNotOverlap(page);
 
-    const followingTopExpanded = await readJsonlRecordTop(page, FIXTURE_JSONL_NESTED_LINE + 1);
+    const followingLine = FIXTURE_JSONL_NESTED_LINE + 1;
+    const followingTopExpanded = await readJsonlRecordVirtualStart(page, followingLine);
 
     const { scrollHeight } = await readJsonlScrollMetrics(page);
     await scrollJsonlPreview(page, scrollHeight);
@@ -77,8 +80,7 @@ test.describe('JSONL preview geometry (#1199)', () => {
 
     await scrollJsonlRecordIntoView(page, FIXTURE_JSONL_NESTED_LINE);
     await expect(nestedSection.getByRole('button', { name: 'Collapse record' })).toBeVisible();
-    const followingTopAfterScroll = await readJsonlRecordTop(page, FIXTURE_JSONL_NESTED_LINE + 1);
-    expect(Math.abs(followingTopAfterScroll - followingTopExpanded)).toBeLessThanOrEqual(8);
+    await waitForJsonlVirtualStartStable(page, followingLine, followingTopExpanded);
     await assertVisibleJsonlRecordsDoNotOverlap(page);
   });
 
