@@ -17,6 +17,16 @@ export interface ConnectionOptions {
   relayUrl?: string | null;
   /** When false, input/resize is buffered until attach completes. */
   isAttached?: () => boolean;
+  /**
+   * Called after input has been handed to the transport.
+   *
+   * The transport cannot tell a delivered keystroke from one written into a
+   * half-open socket, so input is the moment to ask the owner whether the link
+   * is still there (#1264). Wiring this to a liveness check is what keeps the
+   * window in which keystrokes are dropped from running to the probe's whole
+   * interval; leaving it unwired keeps the previous behaviour exactly.
+   */
+  onInputSent?: () => void;
 }
 
 /** Device class for responsive rendering. */

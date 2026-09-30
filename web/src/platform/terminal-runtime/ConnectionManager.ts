@@ -39,6 +39,8 @@ export class ConnectionManager implements TerminalTransport {
   private lastStreamSeq: number | null = null;
   private streamResumeInFlight = false;
   private isAttached: () => boolean;
+  /** Notified after input is handed to either transport — see `onInputSent`. */
+  private onInputSent: () => void;
 
   onStateChange: ((state: ConnectionState) => void) | null = null;
   /**
@@ -58,6 +60,7 @@ export class ConnectionManager implements TerminalTransport {
     this.agentApi = options.agentApi;
     this.serverConnection = options.serverConnection;
     this.isAttached = options.isAttached ?? (() => false);
+    this.onInputSent = options.onInputSent ?? (() => {});
 
     if (this.mode === 'p2p' && this.agentApi) {
       this.setupP2P();
@@ -101,6 +104,10 @@ export class ConnectionManager implements TerminalTransport {
     } else if (this.mode === 'relay' && this.serverConnection?.isReady()) {
       this.serverConnection.sendRelayInput(this.sessionName, data);
     }
+    // Reported for both transports, and even when the branch above threw: a
+    // refused send is exactly the case worth questioning, and the owner decides
+    // for itself whether a check is warranted right now (#1264).
+    this.onInputSent();
   }
 
   /**
