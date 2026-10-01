@@ -6,6 +6,41 @@ interface PushedSession {
 }
 
 /**
+ * Say which fault the counts describe, because they need different fixes.
+ *
+ * The first version of this message had only two branches and got the common
+ * case wrong: with sockets attached and zero frames it blamed the agent, when
+ * the cause was the watcher not being on the socket the app talks over. A
+ * diagnostic that names the wrong leg is worse than one that names none — it
+ * sends the reader somewhere the fault is not.
+ */
+function diagnosis(sockets: number, frames: number, lists: number): string {
+  if (sockets === 0) {
+    return (
+      'No socket was reported at all, so the watcher attached after the app had ' +
+      'already opened its own and watched nothing.'
+    );
+  }
+  if (frames === 0) {
+    return (
+      'Sockets were reported but not one frame arrived on any of them, so the ' +
+      'watcher is not attached to the socket the app actually talks over. ' +
+      'Still an attachment problem — not the agent, and not the renderer.'
+    );
+  }
+  if (lists === 0) {
+    return (
+      'Frames arrived but none carried a session list, so the watcher is ' +
+      'reading the wrong shape of message rather than the wrong socket.'
+    );
+  }
+  return (
+    'Session lists arrived and none carried a command for this Session, so ' +
+    'this is the agent/server leg rather than the renderer.'
+  );
+}
+
+/**
  * Observe the Session lists the server sends, so a spec can wait for the
  * *report* instead of for a rendering latency (#1326).
  *
@@ -87,12 +122,7 @@ export function watchSessionReports(page: Page): {
           message:
             `no session list carrying a foreground command for ${sessionName} ` +
             `reached the page (saw ${seen()}). ` +
-            (sockets === 0
-              ? 'Zero sockets means the watcher attached after the app had ' +
-                'already opened its own — it must be installed before the ' +
-                'navigation that opens it, or it watches nothing.'
-              : 'Sockets were seen, so this is the agent/server leg rather than ' +
-                'the renderer: check that the agent reported the pane command.'),
+            diagnosis(sockets, frames, lists),
           timeout: 15_000,
         })
         .not.toBeNull();

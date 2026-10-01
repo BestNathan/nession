@@ -17,9 +17,18 @@ import { watchSessionReports } from '../helpers/sessionReport';
  * sockets, so that mistake says so instead of blaming the agent.
  */
 const test = base.extend<{ reports: ReturnType<typeof watchSessionReports> }>({
-  reports: async ({ page }, use) => {
-    await use(watchSessionReports(page));
-  },
+  // `auto: true` is the whole mechanism, not a convenience. Playwright sets up
+  // **automatic** fixtures before `beforeEach`, and non-automatic ones lazily —
+  // a fixture only the test body needs is set up *after* the hook, which here
+  // means after `goto`, which means after the socket exists. Written without
+  // `auto`, this reads as correct and watches nothing; that is what the third
+  // CI run measured (3 sockets seen, 0 frames on any of them).
+  reports: [
+    async ({ page }, use) => {
+      await use(watchSessionReports(page));
+    },
+    { auto: true },
+  ],
 });
 
 // CI-gated like terminal-io.spec.ts: drives a real tmux-backed agent, which the
