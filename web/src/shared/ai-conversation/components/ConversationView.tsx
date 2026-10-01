@@ -239,7 +239,11 @@ export function ConversationView({
       className="grid h-full min-h-0 grid-cols-[minmax(0,18rem)_minmax(14rem,1fr)]"
       data-testid="conversation-master-detail"
     >
-      <div className="min-h-0 overflow-auto border-r p-2">
+      {/* `conversation-list` is the column, not the list component inside it —
+          the name the e2e specs use to mean "the conversations a reader can
+          choose from are on screen". It moved with the surface into the shared
+          layer and had to keep meaning the same thing. */}
+      <div className="min-h-0 overflow-auto border-r p-2" data-testid="conversation-list">
         {listIsBlocked(snapshot) ? (
           <ListStateGuard snapshot={snapshot} onReload={onReload} />
         ) : (
@@ -303,7 +307,7 @@ function PushLayout({
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="conversation-push">
       {showList ? (
-        <div className="min-h-0 flex-1 overflow-auto p-2">
+        <div className="min-h-0 flex-1 overflow-auto p-2" data-testid="conversation-list">
           {listBlocked ? (
             <ListStateGuard snapshot={snapshot} onReload={onReload} />
           ) : (
