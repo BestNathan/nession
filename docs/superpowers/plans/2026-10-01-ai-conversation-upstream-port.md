@@ -25,6 +25,24 @@ at the repository root only. So the per-file header Nession adds is a **local
 requirement**, not an upstream one, and `THIRD_PARTY_NOTICES.md` is where the
 register lives.
 
+### ⚠ Two premises in the requirement that the source contradicts
+
+The requirement quotes two example rows as the baseline to port. **Neither is
+OpenClaw's output**, and a port that reproduces them would be reproducing the
+requirement's illustration rather than the upstream behaviour it asks to adopt.
+
+| The requirement says | The source actually does |
+|---|---|
+| `⌄ Read files · Searched code · Ran commands ✓` | `summarizeToolGroup` emits **count-prefixed nouns in a fixed key order** — `3 reads · 2 searches · 1 command` — composed from `{commands, reads, edits, writes, searches, fetches, other}`. There is **no `✓`**: the check icon exists in the icon set but is used nowhere in a tool row. Success is conveyed by the *absence* of a failure span; only failures and skips are labelled. |
+| `› Bash   cargo test -p nession   ✓` | The row renders `$` + the command (`$ cargo test -p nession`). The tool **name** (`Bash`) is not row text at all — it is the icon's `aria-label`/`title`. The chevron is `›`-shaped but carries no tool name. |
+
+This matters beyond cosmetics: it decides **where the strings come from**. The
+port must author its own summary text (SC-17/SC-18 ask for the upstream
+*hierarchy and interaction*, not its copy), and the requirement's own examples
+are therefore not a spec for the summary line. Recording it here because the
+alternative is an implementer quietly building "Searched code" and a reviewer
+checking it against the issue rather than against the source.
+
 A sparse checkout of either is enough; neither needs a full clone:
 
 ```bash
@@ -76,6 +94,90 @@ while the turn is still open, and when it ended aborted or errored.
 | fold state | always open | collapsed |
 | tail | none | actions + usage |
 | column end | running indicator | nothing |
+
+## 1b. What OpenClaw contributes: grouping and the reserved disclosure row
+
+OpenClaw is **Lit, not React** — all four chat components are lit-html render
+functions returning templates, and its disclosure state lives in DOM attributes
+(`aria-expanded`, `.is-open`, `?hidden`) rather than in a model. So the port
+translates its state/layout/interaction *contracts* into React rather than
+copying JSX, which is what the requirement asks for ("将其 state/layout/
+interaction contract 翻译成 React").
+
+### Grouping
+
+Four passes, and the important one is the first. **There is no time window
+anywhere** — grouping is by role, run identity, sender and structural boundary
+only. A message merges into the current group only while role matches, run id
+matches (for assistant/tool), the user-turn identity matches, the reply target
+matches, and the assistant "kind" (commentary vs final answer) matches; any one
+failing flushes the group.
+
+The load-bearing detail is **the group key is anchored to the first message's
+key** (`group:${role}:${first.key}`). Appending a message mutates the array and
+leaves the identity alone, which is the whole reason a growing group does not
+remount — the same property the shared runtime already provides for items
+(#1363 SC-07), applied one level up.
+
+A second pass coalesces contiguous live parts sharing `runId` **and**
+`boundaryId` into **one** stream run, rendered as one assistant group with one
+avatar and one footer — "a reply that arrives as several stream segments renders
+under a single avatar/footer instead of flashing a separate avatar+bubble per
+segment." While only the indicator is present there is **no avatar**, and the
+message column is inset by the avatar gutter so the reply lands exactly where
+the indicator was.
+
+### The reserved disclosure row (the trick worth porting literally)
+
+The footer row that carries sender, timestamp and actions is never unmounted and
+never `display:none`. It reserves its height and animates only opacity:
+
+```css
+.chat-group-footer {
+  min-height: var(--chat-footer-row);        /* 24px — reserved whether or not content paints */
+  opacity: var(--chat-footer-disclosure-opacity, 0);
+  pointer-events: var(--chat-footer-disclosure-pointer-events, none);
+  transition: opacity 120ms ease-out;
+}
+.chat-group:hover .chat-group-footer,
+.chat-group:focus-within .chat-group-footer { opacity: 1; pointer-events: auto; }
+```
+
+A streaming group renders `emptyGroupFooter` — the same reserved row,
+`aria-hidden` — before any footer content exists, so the footer's arrival does
+not move anything either.
+
+Two things the port must not lose:
+
+1. **`:focus-within`, not `:focus`** — a keyboard user tabbing *into* the row
+   must keep it visible.
+2. **Upstream's bare `:hover` is wrapped in `@media (hover: hover)` by a build
+   guard.** A port that copies the selector without the wrapper gives touch
+   devices sticky hover; this is the one place where copying the source
+   faithfully reproduces a bug the source does not have.
+
+### Touch
+
+Four cooperating mechanisms, and the port needs all four to satisfy SC-18's
+"touch/no-hover 下关键操作必须直接可达":
+
+1. On no-hover environments the disclosure variables default to **visible**
+   (`--chat-footer-disclosure-opacity: 1`), and the transcript opts back out
+   into one-at-a-time tap disclosure via a `.chat-group--meta-revealed` class.
+2. The tap handler clears every revealed group in the transcript and toggles the
+   tapped one, bailing out when the target is an interactive element or the user
+   has a text selection.
+3. A **44px** hit area grown *upward* into the group (never into the turn gap)
+   via a `::before`, with `margin-inline: 10px` so neighbouring targets stay
+   distinct — and real content controls win hit-testing over that extension.
+4. The **newest** assistant turn's footer never hides on touch at all.
+
+### Truncation
+
+`TOOL_OUTPUT_PREVIEW_CHARS = 8000`: an output longer than that is truncated in
+the collapsed body with an explicit way to see the rest. Nession already states
+truncation in words (`conversation-tool-truncated`); the port keeps that and
+adopts the 8000-char cap as the point where the ladder starts.
 
 ## 2. Density (upstream values, verified)
 
