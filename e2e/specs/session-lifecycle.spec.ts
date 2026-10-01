@@ -103,12 +103,13 @@ test.describe('Session lifecycle', () => {
     // 20s. The settle is real and its duration is not something this spec can
     // predict — which is exactly why it no longer predicts it.
     //
-    // The wait is now on the **push that carries the command**, not on the
-    // rendered row (#1326). That splits the two claims this comment always said
-    // were different: if the report never arrives, the wait fails and *says*
-    // that — it is the agent/server leg — and the assertion below is left to be
-    // about the renderer, which is the only leg this spec owns. `20s` used to
-    // be a guess at a rendering latency; the ceiling now sits on the report.
+    // The wait is now on the **session list that carries the command**, not on
+    // the rendered row (#1326). That splits the two claims this comment always
+    // said were different: if the report never arrives, the wait fails and
+    // *says* that — it is the agent/server leg — and the assertion below is
+    // left to be about the renderer, which is the only leg this spec owns.
+    // `20s` used to be a guess at a rendering latency; the ceiling now sits on
+    // the report.
     //
     // `sessionReport.ts` carries the reasoning, including why this is still a
     // timeout and why that is not the same thing as a duration allowance.
