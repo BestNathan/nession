@@ -16,6 +16,12 @@ pub enum ControlMessage {
     /// 布局变化: %layout-change <window_id> <layout> <flags> <active_pane>
     LayoutChange { window_id: String, layout: String },
     /// 窗口尺寸变化: %window-resize @<window_id> <cols> <rows>
+    ///
+    /// **Parsed for a tmux that emits it; the pinned 3.6b does not.**
+    /// `grep -c '%window-resize'` on the 3.6b binary is 0 and a live control
+    /// client resized underneath receives no such line — the size arrives in
+    /// [`ControlMessage::LayoutChange`] instead, which is why the router reads
+    /// both. Kept rather than deleted so a newer tmux costs nothing.
     WindowResize {
         window_id: String,
         cols: u16,
@@ -116,6 +122,43 @@ fn parse_layout_change(line: &str) -> Option<ControlMessage> {
         window_id: window_id.to_string(),
         layout: layout.to_string(),
     })
+}
+
+/// The window's size, read out of a `%layout-change` layout string (#1349).
+///
+/// A layout is `<checksum>,<WxH>,<X>,<Y>` for a leaf, and
+/// `<checksum>,<WxH>,<X>,<Y>{<child>,<child>}` for a container — so the
+/// **first** `WxH` in the string is the window's own, and the children's (inside
+/// the braces) come after it. Scanning in order and taking the first match is
+/// therefore the whole parse, and it is the same answer for one pane and for
+/// twenty.
+///
+/// This exists because `%window-resize` is not a signal tmux 3.6b produces at
+/// all — measured, see `docs/`/the issue — while `%layout-change` *is* emitted
+/// for a size change and carries this string. Parsing it costs nothing; the
+/// alternative the issue considered, querying the pane on every layout change,
+/// is a tmux round trip per event.
+///
+/// `None` when nothing in the string looks like a size, which is the honest
+/// answer for a layout this function does not recognise: the caller emits no
+/// resize rather than inventing one.
+pub fn layout_size(layout: &str) -> Option<(u16, u16)> {
+    for field in layout.split(',') {
+        // `WxH`, and nothing else: a checksum is hex and has no `x`, and the
+        // `,X,Y` fields are bare numbers. `{`/`}` are stripped rather than
+        // matched around, because a container's first child shares the field
+        // with its parent's offset (`0{40x24` and the like) — and that child is
+        // a *pane* size, which must not be mistaken for the window's. It cannot
+        // be: the window's own `WxH` always precedes it.
+        let field = field.split(['{', '}']).next().unwrap_or(field);
+        let Some((w, h)) = field.split_once('x') else {
+            continue;
+        };
+        if let (Ok(w), Ok(h)) = (w.parse::<u16>(), h.parse::<u16>()) {
+            return Some((w, h));
+        }
+    }
+    None
 }
 
 fn parse_window_resize(line: &str) -> Option<ControlMessage> {
@@ -249,6 +292,44 @@ mod tests {
             Some(ControlMessage::LayoutChange { window_id, layout })
             if window_id == "@0" && layout == "b25d,80x24,0,0,0"
         ));
+    }
+
+    /// The layout string IS the size signal on tmux 3.6b, which emits no
+    /// `%window-resize` at all (#1349). The format, verbatim from a live 3.6b
+    /// `resize-window` to 100x30.
+    #[test]
+    fn layout_size_reads_the_window_out_of_a_layout_string() {
+        assert_eq!(layout_size("a87d,100x30,0,0,0"), Some((100, 30)));
+        assert_eq!(layout_size("b25d,80x24,0,0,0"), Some((80, 24)));
+    }
+
+    /// A container carries its children's sizes too, and a child is a *pane* —
+    /// reporting one as the window would size every client to a fragment of the
+    /// pane it is looking at. The window's own `WxH` always comes first, which
+    /// is what makes "the first match" the right rule rather than a lucky one.
+    #[test]
+    fn layout_size_prefers_the_window_over_the_panes_inside_it() {
+        // Two panes side by side in an 80-wide window.
+        assert_eq!(
+            layout_size("a87d,80x24,0,0{40x24,0,0,0,39x24,41,0,1}"),
+            Some((80, 24))
+        );
+        // Stacked: the children keep the full width but half the height.
+        assert_eq!(
+            layout_size("c0de,120x40,0,0[120x20,0,0,0,120x19,0,21,1]"),
+            Some((120, 40))
+        );
+    }
+
+    /// Anything unrecognised answers `None`, so the caller emits no resize
+    /// rather than inventing one — the failure that cannot be noticed is the
+    /// one that moves a client to a size nobody asked for.
+    #[test]
+    fn layout_size_is_none_when_there_is_no_size_to_read() {
+        assert_eq!(layout_size(""), None);
+        assert_eq!(layout_size("a87d"), None);
+        assert_eq!(layout_size("a87d,0,0,0"), None);
+        assert_eq!(layout_size("not-a-layout"), None);
     }
 
     #[test]

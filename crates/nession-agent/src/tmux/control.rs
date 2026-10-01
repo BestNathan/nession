@@ -5,9 +5,18 @@
 //!
 //! Terminal size (cols/rows) is bidirectional: the client tells tmux its
 //! desired size on attach and when the browser window resizes; tmux confirms
-//! the new size via `%window-resize` events, which the agent broadcasts to
-//! all attached clients. Last writer wins — the most recent resize sets
+//! the new size on the control channel, and the agent broadcasts it to all
+//! attached clients. Last writer wins — the most recent resize sets
 //! the size for everyone.
+//!
+//! **The confirmation is a `%layout-change`, not a `%window-resize`.** This
+//! module said the latter for as long as it existed and it was never true of
+//! the tmux the image pins: 3.6b emits no `%window-resize` at all (measured
+//! 2026-10-01 — a control client attached and resized underneath printed
+//! `%layout-change @0 a87d,100x30,0,0,0` and nothing else). Everything here
+//! used to depend on that line, including the resize-lane publish, so a peer
+//! reflowing the shared window reached no other client (#1349).
+//! [`ControlMessage::WindowResize`] is still routed for a tmux that sends it.
 //!
 //! **That is a decision, not an accident.**
 //! `2026-08-15-viewport-fit-terminal-migration-design.md` §2 chose it
@@ -113,7 +122,8 @@ impl ControlModeSession {
     /// Returns `(session, output_receiver, resize_receiver, capture)`. The
     /// output receiver yields raw ANSI byte chunks ready to forward to
     /// xterm.js. The resize receiver yields `(cols, rows)` pairs each time
-    /// tmux emits a `%window-resize` event so the caller can propagate the
+    /// the window's size changes — see the module docs for which notification
+    /// that actually is — so the caller can propagate the
     /// new size to clients (e.g. as a `terminal.resize` message). When the
     /// tmux subprocess exits (or the reader task drops the senders), both
     /// receivers close.
@@ -408,7 +418,8 @@ enum BarrierDecision {
 enum Effect {
     /// Bytes for the live output stream.
     Live(Vec<u8>),
-    /// A `%window-resize` notification.
+    /// The window's size changed — from either notification, see the module
+    /// docs.
     Resize(u16, u16),
     /// tmux's welcome pair completed; the capture command may be written.
     WelcomeDone,
@@ -470,6 +481,10 @@ struct ControlRouter {
     /// The capture was skipped or its buffer overflowed: the eventual
     /// response block (if one still arrives) is generic.
     capture_abandoned: bool,
+    /// The last size this router reported, so the next report of the same size
+    /// is not a report (#1349). `None` until one has been seen, which every
+    /// first size is news against.
+    reported_size: Option<(u16, u16)>,
 }
 
 impl ControlRouter {
@@ -481,7 +496,25 @@ impl ControlRouter {
             capture_lines: Vec::new(),
             phase: BarrierPhase::Buffering,
             capture_abandoned: false,
+            reported_size: None,
         }
+    }
+
+    /// Note a window size, answering whether it is news.
+    ///
+    /// A layout change is not always a *size* change — splitting a pane emits
+    /// one too — and tmux 3.6b emits **two** `%layout-change` lines for a single
+    /// `resize-window` (measured). Neither is a second resize, and what a
+    /// consumer of [`Effect::Resize`] needs is how big the window is, so saying
+    /// it twice says nothing more. The size is the whole of the dedupe; there is
+    /// no per-session state to keep downstream because there is none to keep
+    /// here.
+    fn note_size(&mut self, cols: u16, rows: u16) -> bool {
+        if self.reported_size == Some((cols, rows)) {
+            return false;
+        }
+        self.reported_size = Some((cols, rows));
+        true
     }
 
     /// Consume one line as it arrived on the control channel.
@@ -513,11 +546,31 @@ impl ControlRouter {
                 self.route_output(unescape_tmux_data(&data), &mut effects);
             }
             Some(ControlMessage::WindowResize { cols, rows, .. }) => {
-                effects.push(Effect::Resize(cols, rows));
+                if self.note_size(cols, rows) {
+                    effects.push(Effect::Resize(cols, rows));
+                }
+            }
+            // **The signal tmux actually sends.** `%window-resize` is not
+            // emitted by 3.6b at all — the arm above is kept for a tmux that
+            // does, but on the pinned runtime every window size change arrives
+            // here instead, and the layout string carries the size (measured:
+            // `resize-window` to 100x30 produced `%layout-change @0
+            // a87d,100x30,0,0,0`, and no `%window-resize`). Ignoring this is why
+            // a peer reflowing the shared window reached no other client
+            // (#1349).
+            //
+            // `note_size` is the dedupe — see its doc: a layout change is not
+            // always a size change, and 3.6b sends two lines for one resize.
+            Some(ControlMessage::LayoutChange { layout, .. }) => {
+                if let Some((cols, rows)) = crate::tmux::parser::layout_size(&layout) {
+                    if self.note_size(cols, rows) {
+                        effects.push(Effect::Resize(cols, rows));
+                    }
+                }
             }
             Some(ControlMessage::Exit) => effects.push(Effect::Exit),
-            // Stray %end/%error with no open block, session/layout
-            // notifications, unknown lines — all ignored, as before #1228.
+            // Stray %end/%error with no open block, session notifications,
+            // unknown lines — all ignored, as before #1228.
             _ => {}
         }
         effects
@@ -551,7 +604,9 @@ impl ControlRouter {
                 self.route_output(unescape_tmux_data(&data), effects);
             }
             Some(ControlMessage::WindowResize { cols, rows, .. }) => {
-                effects.push(Effect::Resize(cols, rows));
+                if self.note_size(cols, rows) {
+                    effects.push(Effect::Resize(cols, rows));
+                }
             }
             Some(ControlMessage::Exit) => effects.push(Effect::Exit),
             // Session/layout notifications keep their pre-#1228 treatment
@@ -1066,6 +1121,65 @@ mod tests {
             router.route("%begin 200 9 1\n", true);
             let effects = router.route("%end 200 9 1\n", true);
             assert_eq!(resolved(&effects), Some(&Some(Vec::new())));
+        }
+
+        /// **The path that actually fires on the pinned tmux** (#1349).
+        /// `%window-resize` is not emitted by 3.6b at all, so a peer reflowing
+        /// the shared window reached no other client until this arm stopped
+        /// ignoring `%layout-change`.
+        #[test]
+        fn a_layout_change_reports_the_window_size() {
+            let mut router = ControlRouter::new();
+            welcome(&mut router);
+            let effects = router.route(
+                "%layout-change @0 a87d,100x30,0,0,0 a87d,100x30,0,0,0 *\n",
+                true,
+            );
+            assert_eq!(effects, vec![Effect::Resize(100, 30)]);
+        }
+
+        /// A layout change is not always a *size* change, and 3.6b sends **two**
+        /// lines for one `resize-window` (measured). Reporting the second would
+        /// be telling every client to resize to the size it already has.
+        #[test]
+        fn the_same_size_twice_is_reported_once() {
+            let mut router = ControlRouter::new();
+            welcome(&mut router);
+            assert_eq!(
+                router.route(
+                    "%layout-change @0 a87d,100x30,0,0,0 a87d,100x30,0,0,0 *\n",
+                    true
+                ),
+                vec![Effect::Resize(100, 30)]
+            );
+            assert_eq!(
+                router.route(
+                    "%layout-change @0 a87d,100x30,0,0,0 a87d,100x30,0,0,0 *\n",
+                    true
+                ),
+                Vec::new()
+            );
+            // A different size is news again — the dedupe is about repetition,
+            // not about reporting once per session.
+            assert_eq!(
+                router.route(
+                    "%layout-change @0 b25d,80x24,0,0,0 b25d,80x24,0,0,0 *\n",
+                    true
+                ),
+                vec![Effect::Resize(80, 24)]
+            );
+        }
+
+        /// A pane split moves no client, so a layout change with no readable
+        /// size must produce nothing rather than a guess.
+        #[test]
+        fn a_layout_change_with_no_size_reports_nothing() {
+            let mut router = ControlRouter::new();
+            welcome(&mut router);
+            assert_eq!(
+                router.route("%layout-change @0 nonsense nonsense *\n", true),
+                Vec::new()
+            );
         }
 
         #[test]

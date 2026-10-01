@@ -524,6 +524,32 @@ pub(crate) fn extract_session_name(session_id: &str) -> String {
         .unwrap_or_else(|| session_id.to_string())
 }
 
+/// The wire frame for a `terminal.resize`, carrying the stream position it was
+/// recorded at when it has one (#1303).
+///
+/// `position` is the whole distinction the payload's two stream fields draw: a
+/// resize that **consumed a sequence number** is an event in the session's
+/// timeline and must reach the client as one, while a resize that only reports
+/// a size is a **level** and carries no position — which is byte-for-byte the
+/// frame this produced before those fields existed.
+fn terminal_resize_frame(
+    session_name: &str,
+    cols: u16,
+    rows: u16,
+    position: Option<(u64, u64)>,
+) -> Option<String> {
+    let payload = TerminalResizePayload {
+        session_name: session_name.to_string(),
+        cols,
+        rows,
+        control_generation: None,
+        stream_epoch: position.map(|(epoch, _)| epoch),
+        stream_seq: position.map(|(_, seq)| seq),
+    };
+    let msg = new_message(msg_types::TERMINAL_RESIZE, payload);
+    serde_json::to_string(&msg).ok()
+}
+
 /// Send a single `terminal.resize` message on this connection's outbound path.
 /// Returns `true` while the connection is usable, `false` once it is over.
 ///
@@ -533,26 +559,60 @@ pub(crate) fn extract_session_name(session_id: &str) -> String {
 /// size when its viewport moves or when it re-attaches. `Saturated` is therefore
 /// not a failure — the connection is still good — which is why only `Closed`
 /// stops the caller.
+///
+/// **Levels only.** A resize the agent *recorded* consumed a sequence number,
+/// and dropping that frame is what opens the hole #1303 is about — so the
+/// recorded one goes through [`send_recorded_resize_msg`] instead, which is the
+/// same frame on the lane that does not drop.
 async fn send_terminal_resize_msg(
     outbound: &P2pOutbound,
     session_name: &str,
     cols: u16,
     rows: u16,
 ) -> bool {
-    let payload = TerminalResizePayload {
-        session_name: session_name.to_string(),
-        cols,
-        rows,
-        control_generation: None,
-    };
-    let msg = new_message(msg_types::TERMINAL_RESIZE, payload);
-    let Ok(json) = serde_json::to_string(&msg) else {
+    let Some(json) = terminal_resize_frame(session_name, cols, rows, None) else {
         return true;
     };
     !matches!(
         outbound.try_send_state(WsMessage::Text(json)),
         Err(OutboundError::Closed)
     )
+}
+
+/// Send the resize the agent just recorded, so the sequence number it consumed
+/// reaches the client that has to account for it (#1303).
+///
+/// `record_resize` bumps `next_seq`, and the client's cursor is contiguous by
+/// construction: every sequence number has to arrive, in order, or the next
+/// live frame is held until a resume round trip fills the hole. Not sending one
+/// was therefore not a lost frame but a **guaranteed** hole — measured as one
+/// per attach, because the client fits its terminal and resizes on the way in,
+/// so the hole sat at seq 1 between the attach's seeded cursor and the first
+/// output frame.
+///
+/// The **terminal lane** rather than the level lane, for the reason above: a
+/// dropped event is a hole, and [`P2pOutbound::send_terminal`] is the only lane
+/// that never silently drops. A stall is not acted on here — the reply this
+/// handler writes immediately afterwards is the verdict on a peer that stopped
+/// draining, and it is the reader that ends the connection on a failed write
+/// (`Routed::serve`).
+async fn send_recorded_resize_msg(
+    outbound: &P2pOutbound,
+    session_name: &str,
+    cols: u16,
+    rows: u16,
+    position: (u64, u64),
+) {
+    let Some(json) = terminal_resize_frame(session_name, cols, rows, Some(position)) else {
+        return;
+    };
+    if outbound.send_terminal(WsMessage::Text(json)).await.is_err() {
+        debug!(
+            "session {session_name}: the resize at seq {} did not reach a peer that stopped \
+             draining; the reply that follows carries the verdict",
+            position.1
+        );
+    }
 }
 
 /// Take `session`'s history from a separate tmux process — the capture for
@@ -940,9 +1000,9 @@ pub(crate) struct P2pRequest<'a> {
     /// value would move it out of `handle_request` for every arm that still
     /// names the local directly.
     attach_mode: &'a AttachMode,
-    /// The agent's resize lane, which this socket publishes
-    /// `%window-resize` events into (`#961-D`). See
-    /// [`crate::server::resize`].
+    /// The agent's resize lane, which this socket publishes the control
+    /// channel's size changes into (`#961-D`; `crate::tmux::control` says which
+    /// notification those actually are). See [`crate::server::resize`].
     resize: &'a ResizeReporter,
 }
 
@@ -1858,8 +1918,8 @@ p2p_routes! { ctx, msg_type, payload_value;
                                 // session was closed by the detach handler.
                             });
 
-                            // Spawn a second task that forwards
-                            // `%window-resize` events as `terminal.resize`.
+                            // Spawn a second task that forwards the window's
+                            // size changes as `terminal.resize`.
                             //
                             // Each resize is ALSO published to the agent's
                             // resize lane so relay clients (browser → server →
@@ -2179,21 +2239,48 @@ p2p_routes! { ctx, msg_type, payload_value;
                         );
                     }
                     Some((_, true, backend)) => {
-                        match backend
-                            .lock()
-                            .await
-                            .resize(payload.cols, payload.rows)
-                            .await
-                        {
+                        // The guard is scoped here rather than written as the
+                        // `match` scrutinee, because a scrutinee's temporaries
+                        // live until the end of the **whole match** — so
+                        // `match backend.lock().await.resize(..).await` would
+                        // hold this session's backend across the fan-out below,
+                        // and `send_terminal` waits out the stall grace. A peer
+                        // that stopped draining would then park every other
+                        // operation that takes this backend (#1352). What the
+                        // lock is for is the backend's own I/O and nothing else:
+                        // see `AttachedSession::backend`.
+                        let resized = {
+                            let mut backend = backend.lock().await;
+                            backend.resize(payload.cols, payload.rows).await
+                        };
+                        match resized {
                             Ok(_) => {
-                                if let Some(session) =
-                                    sessions_lock(ctx.sessions).get_mut(&payload.session_name)
-                                {
-                                    session.stream.record_resize(
+                                // `record_resize` consumes a sequence number,
+                                // and a number the client never receives is a
+                                // hole it can only close with a round trip, so
+                                // the frame below carries that position (#1303).
+                                // The session may have ended across the
+                                // resize's own `await`, in which case nothing
+                                // was recorded and there is no position to
+                                // report.
+                                let recorded = sessions_lock(ctx.sessions)
+                                    .get_mut(&payload.session_name)
+                                    .map(|session| {
+                                        session.stream.record_resize(
+                                            &payload.session_name,
+                                            payload.cols,
+                                            payload.rows,
+                                        )
+                                    });
+                                if let Some(position) = recorded {
+                                    send_recorded_resize_msg(
+                                        ctx.outbound,
                                         &payload.session_name,
                                         payload.cols,
                                         payload.rows,
-                                    );
+                                        position,
+                                    )
+                                    .await;
                                 }
                                 serde_json::to_string(&make_ok(ctx.id, "ok"))
                                     .unwrap_or_default()
@@ -4696,6 +4783,8 @@ mod tests {
             cols: 120,
             rows: 40,
             control_generation: None,
+            stream_epoch: None,
+            stream_seq: None,
         };
         let req = new_message(msg_types::TERMINAL_RESIZE, resize_payload);
         let resp: Message<ErrorPayload> = send_and_receive(&mut sink, &mut stream, &req).await;
@@ -4704,6 +4793,182 @@ mod tests {
         assert_eq!(resp.payload.code, "not_attached");
 
         handle.shutdown().await.ok();
+    }
+
+    /// A resize must not hold this session's backend while its fan-out waits for
+    /// room (#1352).
+    ///
+    /// A `match` scrutinee's temporaries live to the end of the **whole match**,
+    /// so writing the resize as the scrutinee —
+    /// `match backend.lock().await.resize(..).await { Ok(_) => { ..await.. } }` —
+    /// keeps the guard alive across `send_recorded_resize_msg`, and
+    /// `send_terminal` waits out the stall grace. A peer that has stopped
+    /// draining then parks the session's backend for that whole window, which is
+    /// the opposite of what `AttachedSession::backend` documents the lock is for.
+    ///
+    /// **The assertion is the lock, not the code shape.** `charge` clamps a frame
+    /// to the byte budget, so one oversized frame on the connection's outbound is
+    /// enough to leave no room for the next send; the fan-out then parks, and the
+    /// test asks for the backend and fails if it does not get it. Scoping the
+    /// guard is the only thing that makes it available.
+    ///
+    /// Two preconditions keep this from passing vacuously: the fan-out must
+    /// actually have had to wait (`awaited` rose — a timeout would otherwise be
+    /// indistinguishable from a handler that returned early), and the dispatch
+    /// must still be running when the lock is asked for.
+    #[tokio::test]
+    async fn a_stalled_fan_out_does_not_hold_the_session_backend() {
+        use crate::server::outbound::OUTBOUND_BYTE_BUDGET;
+        use crate::tmux::session::TmuxSession;
+
+        /// Only `resize` is reached; the rest exist because the arm holds a
+        /// `Box<dyn TmuxSession>`.
+        struct Resizing;
+        #[async_trait::async_trait]
+        impl TmuxSession for Resizing {
+            async fn write_input(&mut self, _data: &[u8]) -> anyhow::Result<()> {
+                Ok(())
+            }
+            async fn resize(&mut self, _cols: u16, _rows: u16) -> anyhow::Result<()> {
+                Ok(())
+            }
+            fn viewport(&self) -> (u16, u16) {
+                (80, 24)
+            }
+            fn session_name(&self) -> &str {
+                "resize-lock"
+            }
+            async fn close(&mut self) -> anyhow::Result<()> {
+                Ok(())
+            }
+        }
+
+        const SESSION: &str = "resize-lock";
+        let client_id = "test-client".to_string();
+
+        let backend: Arc<Mutex<Box<dyn TmuxSession>>> = Arc::new(Mutex::new(Box::new(Resizing)));
+        let mut control = session_terminal::SessionControlState::new();
+        control.ensure_controller(&client_id);
+        let sessions: Arc<SessionMapLock> = Arc::new(SessionMapLock::new(
+            [(
+                SESSION.to_string(),
+                AttachedSession {
+                    backend: Arc::clone(&backend),
+                    peers: Vec::new(),
+                    control,
+                    stream: session_terminal::SessionStreamState::new(),
+                },
+            )]
+            .into_iter()
+            .collect(),
+        ));
+
+        // The connection's outbound, with nothing draining it. One frame at the
+        // byte budget's own size takes the whole budget (`charge` clamps to it),
+        // so the fan-out's send has no room and waits.
+        let (outbound, _outbound_rx) = P2pOutbound::new();
+        outbound
+            .try_send_state(WsMessage::Text("x".repeat(OUTBOUND_BYTE_BUDGET)))
+            .expect("the first frame fits the budget it is about to exhaust");
+
+        let tmux = Arc::new(SessionManager::new());
+        let file_ops = Arc::new(crate::fs::ops::FileOps::new(
+            crate::fs::sandbox::PathSandbox::new("/tmp").expect("a sandbox root"),
+        ));
+        let (resize, _resize_updates) = ResizeReporter::new();
+        let client: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(Some(client_id.clone())));
+        let attach_mode = AttachMode::Plain;
+        let probe = outbound.clone();
+        let payload = serde_json::json!({
+            "session_name": SESSION,
+            "cols": 100,
+            "rows": 30,
+        });
+
+        // Through the real routing table, not a copy of the arm: a helper called
+        // directly would leave the arm's own wiring — which is where the guard
+        // is taken — unpinned.
+        let dispatch = tokio::spawn(async move {
+            let ctx = P2pRequest {
+                id: "resize-1",
+                tmux: &tmux,
+                sessions: &sessions,
+                client_id: &client,
+                outbound: &outbound,
+                default_working_dir: "/tmp",
+                file_ops: &file_ops,
+                listen_address: "127.0.0.1:0",
+                agent_id: "test-agent",
+                attach_mode: &attach_mode,
+                resize: &resize,
+            };
+            dispatch_p2p(ctx, msg_types::TERMINAL_RESIZE, payload).await
+        });
+
+        let parked = tokio::time::timeout(Duration::from_secs(5), async {
+            while probe.snapshot().awaited == 0 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await;
+        assert!(
+            parked.is_ok(),
+            "the fan-out never had to wait, so nothing was asserted: the \
+             connection's outbound still had room for the resize frame"
+        );
+        assert!(
+            !dispatch.is_finished(),
+            "the handler returned before the fan-out parked, so nothing was asserted"
+        );
+
+        let free = tokio::time::timeout(Duration::from_secs(1), backend.lock()).await;
+        dispatch.abort();
+        assert!(
+            free.is_ok(),
+            "the session's backend is unavailable while the fan-out waits for a peer that is \
+             not draining: the guard lives to the end of the match it was taken in, so every \
+             other operation on this session queues behind the stall grace"
+        );
+    }
+
+    /// A resize that consumed no sequence number must stay **byte-identical**
+    /// to the frame this produced before resizes could carry a position
+    /// (#1303).
+    ///
+    /// Every size the control channel reports is a level, and so is every frame
+    /// the Server rebroadcasts to a relay client — `terminal_resize_frame` is
+    /// the one place either is built. The
+    /// property is not free: emitting `"stream_epoch":null` for them would hand
+    /// an older reader a null it has to tolerate, which is exactly what the
+    /// payload's `skip_serializing_if` pair exists to prevent — and it is
+    /// asserted against the descriptor rather than against a round trip,
+    /// because a round trip passes for any self-consistent shape.
+    #[test]
+    fn a_level_resize_frame_carries_no_position() {
+        let json = terminal_resize_frame("work", 80, 24, None).expect("a resize frame serialises");
+        let frame: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let payload = frame.get("payload").expect("the frame carries a payload");
+        assert!(
+            payload.get("stream_epoch").is_none() && payload.get("stream_seq").is_none(),
+            "a level resize emitted a stream position: {json}"
+        );
+
+        let json =
+            terminal_resize_frame("work", 80, 24, Some((7, 9))).expect("a resize frame serialises");
+        let frame: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let payload = frame.get("payload").expect("the frame carries a payload");
+        assert_eq!(
+            payload
+                .get("stream_epoch")
+                .and_then(serde_json::Value::as_u64),
+            Some(7)
+        );
+        assert_eq!(
+            payload
+                .get("stream_seq")
+                .and_then(serde_json::Value::as_u64),
+            Some(9)
+        );
     }
 
     #[tokio::test]

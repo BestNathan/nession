@@ -21,6 +21,27 @@ pub struct TerminalResizePayload {
     pub rows: u16,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub control_generation: Option<u64>,
+    /// Monotonic stream identity (#1094), present when this resize is an
+    /// **event in the session's stream** rather than a size the client is being
+    /// told about (#1303).
+    ///
+    /// A resize the agent records consumes a sequence number, and a sequence
+    /// number the client never receives is a hole in a cursor that is
+    /// contiguous by construction: the next live frame after it is held until
+    /// a resume round trip fills it. So the frame that reports a recorded
+    /// resize carries the position it was recorded at, and the client places it
+    /// in the timeline like any other event.
+    ///
+    /// Absent means the frame is only a **level**: a size change tmux reported
+    /// on a path that records nothing (the `%window-resize` echo), or a relay
+    /// frame forwarded through the Server, which carries no sequence numbers at
+    /// all. A client applies those directly, exactly as it did before this
+    /// field existed — which is what keeps the addition backward compatible in
+    /// both directions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stream_epoch: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stream_seq: Option<u64>,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]

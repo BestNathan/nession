@@ -39,6 +39,56 @@ fn a_resize_carries_both_dimensions() {
     );
 }
 
+/// The same back-compat property `terminal.output`'s absent `bootstrap` rests
+/// on, for the two fields #1303 added: a resize that carries no stream position
+/// is **byte-identical** to the frame this contract produced before they
+/// existed.
+///
+/// Both directions matter here and neither is free. An old *reader* must not
+/// see a null it has to tolerate, and an old *writer* — the CLI's
+/// `terminal.resize`, and a tmux `%window-resize` echo — must keep producing a
+/// frame today's agent accepts.
+///
+/// Asserted against a literal rather than against a round-trip, because a
+/// round-trip passes for any self-consistent shape.
+#[test]
+fn a_resize_without_a_stream_position_is_unchanged_on_the_wire() {
+    let msg = TerminalResizePayload {
+        session_name: "work".to_string(),
+        cols: 120,
+        rows: 40,
+        control_generation: None,
+        stream_epoch: None,
+        stream_seq: None,
+    };
+    assert_eq!(
+        serde_json::to_string(&msg).unwrap(),
+        r#"{"session_name":"work","cols":120,"rows":40}"#
+    );
+}
+
+/// And when the position is present, both halves of it survive — an epoch
+/// without its sequence, or the reverse, is not something a client could place
+/// in a timeline.
+#[test]
+fn a_recorded_resize_carries_the_position_it_was_recorded_at() {
+    let msg = TerminalResizePayload {
+        session_name: "work".to_string(),
+        cols: 120,
+        rows: 40,
+        control_generation: None,
+        stream_epoch: Some(1_790_771_445_798_089),
+        stream_seq: Some(7),
+    };
+    let json = serde_json::to_string(&msg).unwrap();
+    assert!(json.contains(r#""stream_seq":7"#), "wire shape: {json}");
+
+    let back: TerminalResizePayload = serde_json::from_str(&json).unwrap();
+    assert_eq!(back.stream_epoch, Some(1_790_771_445_798_089));
+    assert_eq!(back.stream_seq, Some(7));
+    assert_eq!((back.cols, back.rows), (120, 40));
+}
+
 #[test]
 fn terminal_output_mirrors_input() {
     // Same shape as `terminal.input` on purpose: the two directions of one

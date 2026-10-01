@@ -54,6 +54,16 @@ function output(seq: number, epoch = 1): TerminalStreamEvent {
   return { kind: 'output', streamEpoch: epoch, streamSeq: seq, data: btoa(`replay-${seq}`) };
 }
 
+/**
+ * A live resize at `seq` on stream 1 — what the agent's fan-out sends for a
+ * resize it recorded. Every test here works within one epoch; the level lane,
+ * which states no position at all, is `acceptLevelResize` and is called
+ * directly where it is the thing under test.
+ */
+function liveResize(h: Harness, seq: number, cols = 120, rows = 40): void {
+  h.reconciler.acceptLiveResize({ cols, rows, streamEpoch: 1, streamSeq: seq });
+}
+
 function reply(events: TerminalStreamEvent[], streamEpoch = 1): ResumeReply {
   return { streamEpoch, epochMatch: true, events };
 }
@@ -237,6 +247,111 @@ describe('StreamReconciler', () => {
 
     expect(h.resizes).toEqual([[120, 40]]);
     expect(h.out).toEqual(['five', 'seven']);
+  });
+
+  it('holds a recorded resize in the timeline instead of applying it out of turn (#1303)', async () => {
+    // A resize the agent recorded consumed a sequence number, so it is an
+    // event like any other: applying it on arrival would leave its own
+    // position unaccounted for, and the next live frame would be held behind a
+    // hole the client had already been given the contents of.
+    const h = makeHarness();
+    live(h, 5, 'five');
+
+    // The resize is recorded at 6 and arrives before anything fills the gap
+    // ahead of it.
+    h.reconciler.acceptLiveResize({ cols: 120, rows: 40, streamEpoch: 1, streamSeq: 8 });
+    expect(h.resizes).toEqual([]);
+    expect(h.requests).toHaveLength(1);
+
+    // The answer carries the resize the agent logged at 6 — the same event, so
+    // the frame that arrived live is the copy that gets applied, and it is
+    // applied in its place rather than twice.
+    h.requests[0].resolve(
+      reply([
+        { kind: 'resize', streamEpoch: 1, streamSeq: 6, cols: 100, rows: 30 },
+        output(7),
+      ]),
+    );
+    await flushMicrotasks();
+
+    expect(h.resizes).toEqual([[100, 30], [120, 40]]);
+    expect(h.out).toEqual(['five', 'replay-7']);
+  });
+
+  it('advances the cursor through a recorded resize that arrives first (#1303)', async () => {
+    // The attach case this change exists for: a client fits its terminal and
+    // resizes on the way in, so the first thing the agent records is a resize
+    // at `seeded cursor + 1`. Delivered live with its position, it takes that
+    // slot, and the first output frame after it needs no recovery at all.
+    //
+    // The discriminator is the request count, not the resize: applying the
+    // frame on arrival would show the same size on screen and leave the
+    // position unaccounted for, so the assertion that can fail is the one about
+    // what the *cursor* did.
+    const h = makeHarness();
+    h.reconciler.seed(1, 0);
+    h.requests[0].resolve(reply([]));
+    await flushMicrotasks();
+    expect(h.requests).toHaveLength(1);
+
+    h.reconciler.acceptLiveResize({ cols: 120, rows: 40, streamEpoch: 1, streamSeq: 1 });
+    expect(h.resizes).toEqual([[120, 40]]);
+
+    live(h, 2, 'prompt');
+    expect(h.out).toEqual(['prompt']);
+    expect(h.requests).toHaveLength(1);
+  });
+
+  it('lets a newer unsequenced resize supersede a held sequenced one (#1350)', async () => {
+    const h = makeHarness();
+    live(h, 1, 'one');
+    // 2 is missing, so the recorded resize at 3 cannot be placed: it waits.
+    liveResize(h, 3);
+    expect(h.resizes).toEqual([]);
+    expect(h.requests).toHaveLength(1);
+    expect(h.requests[0].afterSeq).toBe(1);
+
+    // While it is held, another connection reflows the shared pane. The agent
+    // did not record that, so this frame states no position and reports the
+    // pane's size *now* — newer than the resize waiting behind the gap.
+    h.reconciler.acceptLevelResize(100, 30);
+    expect(h.resizes).toEqual([[100, 30]]);
+
+    // The gap fills and the held resize reaches its turn.
+    h.requests[0].resolve(reply([output(2), output(3)]));
+    await flushMicrotasks();
+
+    // **The older size never lands.** Committing the held resize after the
+    // level would put xterm back on the grid the pane has left, and nothing
+    // corrects it: the client resizes xterm one way and sends nothing back.
+    expect(h.resizes).toEqual([[100, 30]]);
+    expect(h.out).toEqual(['one', 'replay-2']);
+
+    // And its position is still consumed — the frame advanced the cursor
+    // without applying anything, so the timeline is not stranded one short of
+    // the frames above it.
+    live(h, 4, 'four');
+    expect(h.requests).toHaveLength(1);
+    expect(h.out).toEqual(['one', 'replay-2', 'four']);
+  });
+
+  it('applies a sequenced resize recorded after the level that superseded a held one', async () => {
+    const h = makeHarness();
+    live(h, 1, 'one');
+    liveResize(h, 3);
+    // The level is newer than everything already buffered, and newer than
+    // nothing else: this second recorded resize arrives after it, so it is an
+    // event the level cannot have superseded.
+    h.reconciler.acceptLevelResize(100, 30);
+    liveResize(h, 4, 130, 50);
+
+    h.requests[0].resolve(reply([output(2), output(3)]));
+    await flushMicrotasks();
+
+    expect(h.resizes).toEqual([
+      [100, 30],
+      [130, 50],
+    ]);
   });
 
   it('continues past a hole the agent no longer retains', async () => {

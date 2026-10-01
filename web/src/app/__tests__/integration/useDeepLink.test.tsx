@@ -40,6 +40,7 @@ function wrapper(initialEntry: string) {
 describe('useDeepLink', () => {
   const confirmAttach = vi.fn();
   const onRestoreSession = vi.fn();
+  const requestAttach = vi.fn();
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -53,6 +54,7 @@ describe('useDeepLink', () => {
         loadingSessions: false,
         confirmAttach,
         onRestoreSession,
+        requestAttach,
       }),
       { wrapper: wrapper('/terminal/a1%3As1') },
     );
@@ -69,6 +71,7 @@ describe('useDeepLink', () => {
         loadingSessions: false,
         confirmAttach,
         onRestoreSession,
+        requestAttach,
       }),
       { wrapper: wrapper('/terminal/a1%3As1') },
     );
@@ -102,12 +105,49 @@ describe('useDeepLink', () => {
         loadingSessions: false,
         confirmAttach,
         onRestoreSession,
+        requestAttach,
       }),
       { wrapper: SyncWrapper },
     );
 
     await waitFor(() => {
       expect(onRestoreSession).toHaveBeenCalledWith(makeSession());
+    });
+  });
+
+  it('switches to URL session when already attached to a different session', async () => {
+    const store = createStore();
+    store.set(sessionIdAtom, 'a1:s1'); // Already attached to s1
+
+    const session2 = makeSession('a1:s2');
+
+    function SyncWrapper({ children }: { children: ReactNode }) {
+      return (
+        <Provider store={store}>
+          <MemoryRouter initialEntries={['/terminal/a1%3As2']}> {/* URL points to s2 */}
+            {children}
+          </MemoryRouter>
+        </Provider>
+      );
+    }
+
+    renderHook(
+      () => useDeepLink({
+        sessions: [makeSession(), session2],
+        sessionsLoaded: true,
+        loadingSessions: false,
+        confirmAttach,
+        onRestoreSession,
+        requestAttach,
+      }),
+      { wrapper: SyncWrapper },
+    );
+
+    await waitFor(() => {
+      // Should sync UI selection
+      expect(onRestoreSession).toHaveBeenCalledWith(session2);
+      // Should trigger attach flow to the new session
+      expect(requestAttach).toHaveBeenCalledWith(session2);
     });
   });
 });
