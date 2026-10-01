@@ -460,17 +460,44 @@ export class StreamReconciler {
   /**
    * Give up on the hole at the frontier and let the timeline continue after it.
    *
-   * Only reached when the hole has outlasted {@link HOLE_ATTEMPT_LIMIT}
-   * requests, none of which moved the frontier. The output already in hand is
-   * committed rather than held; the frames the
-   * agent no longer retains are lost, which is the state the stream was in
-   * before this class buffered anything, minus the freeze.
+   * Reached two ways, and both mean the same thing: the hole has outlasted
+   * {@link HOLE_ATTEMPT_LIMIT} requests, none of which moved the frontier, or
+   * one request has held the frames in hand for {@link RESUME_DEADLINE_MS}
+   * without answering. The output already in hand is committed rather than
+   * held; the frames the agent no longer retains are lost, which is the state
+   * the stream was in before this class buffered anything, minus the freeze.
+   *
+   * ## Why this states the loss, exactly as a stated truncation does
+   *
+   * A fill is visible to the consumer: the events arrive and the buffer is
+   * whole. Giving up is not. The frontier moves over the missing stretch, the
+   * frames above it commit, and the buffer *looks* continuous — while the
+   * consumer's copy of the session is missing output that happened. That is
+   * the same defect #1304 exists to remove, one layer down: an unanswered or
+   * slow request is not proof of eviction, so the agent may still hold the
+   * missing events, and only the consumer can ask for the snapshot that
+   * repairs a hole (#321). Left unstated, the repair is never asked for.
+   *
+   * The skip itself stays — holding output for a fill that may never come is
+   * the freeze this class exists to prevent. Only the silence was wrong.
+   *
+   * Nothing is stated when no frame is committed over a gap. A request that
+   * was only ever for history — a seeded cursor, nothing buffered — moves no
+   * frontier when it is given up on: the buffer is where the snapshot left it,
+   * and the first later frame that cannot be placed reaches this path with a
+   * hole to state. Saying otherwise would send the consumer after a bootstrap
+   * that repaints a buffer with nothing missing from it. See {@link skipHole}.
    */
   private abandon(): void {
     this.attemptsFor = -1;
     this.attempts = 0;
     this.wantHistory = false;
     if (this.pending.size > 0) {
+      // Frames in hand are always a hole at this point: `drain` commits
+      // contiguously and runs after every frame is buffered, so a frame still
+      // pending is never adjacent to the frontier — the frame under it is the
+      // one that never arrived.
+      this.sink.onStreamTruncated();
       this.skipHole(lowestPendingSeq(this.pending));
     }
   }
@@ -593,15 +620,24 @@ export interface StreamSink {
   onOutput: (data: Uint8Array, bootstrap?: TerminalBootstrap) => void;
   onResize: (cols: number, rows: number) => void;
   /**
-   * A replay answer that is **not** the whole stretch it was asked for: the
-   * agent's retained window begins above the cursor, so the events in between
-   * are gone and no later request can return them (#1304).
+   * The consumer's buffer now has a hole in it that no later request can
+   * fill (#1304).
    *
-   * Delivered because the consumer's buffer now has a hole in it, and a hole is
-   * repaired by a snapshot rather than by more replay — the same repair a lost
-   * transport needs (#321). This is a statement about the buffer, not a frame:
-   * nothing was applied and no position moved, so a consumer that ignores it
-   * keeps exactly the old behaviour.
+   * Two states establish that, and they are the two ways the reconciler stops
+   * waiting for a stretch of output: the agent states that its retained window
+   * begins above the cursor (so the events in between are gone for good), or
+   * the reconciler gives up on a hole it is still holding frames for —
+   * {@link StreamReconciler}'s own deadline, or the attempt limit — because
+   * holding them for a fill that has not come is the freeze this class exists
+   * to prevent. The second is not a claim that the events are unrecoverable:
+   * an unanswered request is not proof of eviction. It is a claim about the
+   * buffer, which is the one the consumer acts on.
+   *
+   * Delivered because a hole is repaired by a snapshot rather than by more
+   * replay — the same repair a lost transport needs (#321). This is a
+   * statement about the buffer, not a frame: nothing was applied and no
+   * position moved, so a consumer that ignores it keeps exactly the old
+   * behaviour.
    */
   onStreamTruncated: () => void;
 }

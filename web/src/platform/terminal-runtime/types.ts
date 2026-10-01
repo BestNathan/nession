@@ -28,9 +28,10 @@ export interface ConnectionOptions {
    */
   onInputSent?: () => void;
   /**
-   * Called when a replay answer was not the whole stretch it was asked for
-   * (#1304) — the agent's retained window has passed this client's cursor, so
-   * the buffer now has a hole that no later replay can fill.
+   * Called when the stream reported that the consumer's buffer now has a hole
+   * in it (#1304): the agent's retained window has passed this client's
+   * cursor, or the reconciler gave up on a hole it was holding frames for and
+   * committed them over it. Either way no later replay fills it.
    *
    * Same kind of wiring point as {@link onInputSent}: it is a fact for the
    * owner of the session, not something the transport acts on. The repair is a

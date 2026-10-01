@@ -77,8 +77,8 @@ function useTransportFactory(opts: {
   /** Asked after input is handed over — see `ConnectionOptions.onInputSent`. */
   onInputSent: () => void;
   /**
-   * Asked when a replay answer was not the whole stretch it was asked for —
-   * see `ConnectionOptions.onStreamTruncated` (#1304).
+   * Asked when the stream leaves the buffer with a hole no later replay can
+   * fill — see `ConnectionOptions.onStreamTruncated` (#1304).
    */
   onStreamTruncated: () => void;
 }) {

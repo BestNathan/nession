@@ -339,9 +339,9 @@ export class SessionRuntime {
 
   /**
    * The stream reported that replay cannot reach back to this client's cursor
-   * (#1304): the agent's retained window has evicted the events in between, so
-   * the buffer this Terminal holds has a hole in it that no later replay can
-   * fill.
+   * (#1304): the agent's retained window has passed it, or a hole was given up
+   * on and the frames in hand committed over it. Either way the buffer this
+   * Terminal holds has a hole in it that no later replay can fill.
    *
    * It is the same fact a lost transport leaves behind — "my buffer may not be
    * complete" — and it takes the same repair, which is why it sets the same

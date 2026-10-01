@@ -126,9 +126,74 @@ function makeRelayServerConnection(initialState: ConnectionState = 'disconnected
   } satisfies RelayServerHandle & { emit(state: ConnectionState): void };
 }
 
+/** Ids already answered, so a helper cannot settle the same request twice. */
+let answeredIds = new Set<string>();
+
+/** How many `control.ping` requests have gone out on any tracked ws. */
+function countPings(): number {
+  let count = 0;
+  for (const ws of wsInstances) {
+    for (const call of ws.send.mock.calls) {
+      try {
+        if (JSON.parse(String(call[0])).msg_type === 'control.ping') {
+          count += 1;
+        }
+      } catch {
+        // non-JSON (binary) frame — ignore
+      }
+    }
+  }
+  return count;
+}
+
+/**
+ * Reply to every tracked request of `type` that has not been answered yet.
+ *
+ * Tracked by id rather than "always the first": answering an already-settled
+ * request is a no-op, so a helper that re-answered the oldest ping would leave
+ * every later one to time out and would make a healthy transport look dead.
+ */
+function answerPending(type: string, replyType: string): number {
+  let answered = 0;
+  for (const ws of wsInstances) {
+    for (const call of ws.send.mock.calls) {
+      let parsed: { msg_type?: string; id?: string };
+      try {
+        parsed = JSON.parse(String(call[0]));
+      } catch {
+        continue;
+      }
+      if (parsed.msg_type !== type || !parsed.id || answeredIds.has(parsed.id)) {
+        continue;
+      }
+      answeredIds.add(parsed.id);
+      // The agent answers as `make_response(&self.id, …)` — the reply
+      // carries the request's own id, which is what the request layer
+      // matches on. Reproducing that is the point: a reply with a different
+      // id would prove nothing about correlation.
+      ws.onmessage?.({
+        data: JSON.stringify({ msg_type: replyType, id: parsed.id, payload: {} }),
+      } as MessageEvent);
+      answered += 1;
+    }
+  }
+  return answered;
+}
+
+/** Ack every pending `agent.attach`: the difference between a runtime that
+ * reaches `attached` and one that sits in `connecting` until it times out. */
+function answerAttach(): number {
+  return answerPending('agent.attach', 'ok');
+}
+
+function answerPings(): number {
+  return answerPending('control.ping', 'control.pong');
+}
+
 describe('SessionRuntime', () => {
   beforeEach(() => {
     wsInstances = [];
+    answeredIds = new Set();
     vi.stubGlobal('WebSocket', class {
       static CONNECTING = 0;
       static OPEN = 1;
@@ -533,9 +598,13 @@ describe('SessionRuntime', () => {
       // this buffer's life. The repair is the same snapshot a transport loss
       // asks for, which is why it is the same flag.
       //
-      // Reached without any loss: the attach timeout is what drives the second
-      // `client.attach`, so the flag is visible on a runtime that has been
-      // attached the whole time.
+      // No ack is sent for this attach — `openWs()` only opens the socket — so
+      // the runtime never reaches `attached` here, and it is the *first
+      // attach timing out* that drives the second `client.attach` (the same
+      // setup the sibling timeout test asserts as `phase === 'connecting'`).
+      // What this pins is the part that holds on that path too: a flag set
+      // between two attempts reaches the next request. The production shape —
+      // attached, then truncated, then a later attach — is the test below.
       vi.useFakeTimers();
       const rt = new SessionRuntime(makeConfig({
         transportReady: true,
@@ -554,6 +623,54 @@ describe('SessionRuntime', () => {
       expect(clientAttachBootstrapFlags()).toEqual([false, true]);
       rt.dispose();
       vi.useRealTimers();
+    });
+
+    it('holds the stream\'s hole across the next attach, and clears it once repaired (#1304)', async () => {
+      // The production shape the test above cannot reach: a runtime that is
+      // *attached* when the stream reports a hole, and stays attached — the
+      // repair is deferred to the next attach by design (a snapshot cannot be
+      // asked for on a live transport), so the flag has to survive the whole
+      // interval between the two. A route switch stands in for that interval:
+      // a fresh transport for the same session, and no loss, so nothing but
+      // the truncation is setting the flag.
+      const rt = new SessionRuntime(makeConfig({
+        transportReady: true,
+        hasSessionOutput: () => true,
+      }));
+      rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
+      openWs();
+      await flushMicrotasks();
+      answerAttach();
+      await flushMicrotasks();
+
+      // Attached, holding output, nothing lost: no history requested.
+      expect(rt.attachState.phase).toBe('attached');
+      expect(clientAttachBootstrapFlags()).toEqual([false]);
+
+      rt.noteStreamTruncated();
+
+      rt.updateContext({ routeIntentEpoch: 1 });
+      openWs();
+      await flushMicrotasks();
+
+      // The hole is still there, and this attach is where the repair is asked
+      // for: `hasSessionOutput()` still says `true`, and only the flag the
+      // stream set can say the buffer is incomplete rather than non-empty.
+      expect(clientAttachBootstrapFlags()).toEqual([false, true]);
+
+      // This attach's bootstrap repairs the buffer, which is what clears the
+      // flag. The clear is unobservable from the attach that performs it —
+      // only from one that follows, and only because that one must *not* ask.
+      answerAttach();
+      await flushMicrotasks();
+      expect(rt.attachState.phase).toBe('attached');
+
+      rt.updateContext({ routeIntentEpoch: 2 });
+      openWs();
+      await flushMicrotasks();
+
+      expect(clientAttachBootstrapFlags()).toEqual([false, true, false]);
+      rt.dispose();
     });
 
     it('re-sends client.attach automatically after each attach timeout until the budget is exhausted (auto route)', async () => {
@@ -658,71 +775,7 @@ describe('SessionRuntime', () => {
    * it not firing when the peer is fine.
    */
   describe('P2P liveness probe (#1233)', () => {
-    /** Ids already answered, so a helper cannot settle the same request twice. */
-    let answeredIds = new Set<string>();
-
-    /** How many `control.ping` requests have gone out on any tracked ws. */
-    function countPings(): number {
-      let count = 0;
-      for (const ws of wsInstances) {
-        for (const call of ws.send.mock.calls) {
-          try {
-            if (JSON.parse(String(call[0])).msg_type === 'control.ping') {
-              count += 1;
-            }
-          } catch {
-            // non-JSON (binary) frame — ignore
-          }
-        }
-      }
-      return count;
-    }
-
-    /**
-     * Reply to every tracked request of `type` that has not been answered yet.
-     *
-     * Tracked by id rather than "always the first": answering an already-settled
-     * request is a no-op, so a helper that re-answered the oldest ping would
-     * leave every later one to time out and would make a healthy transport look
-     * dead.
-     */
-    function answerPending(type: string, replyType: string): number {
-      let answered = 0;
-      for (const ws of wsInstances) {
-        for (const call of ws.send.mock.calls) {
-          let parsed: { msg_type?: string; id?: string };
-          try {
-            parsed = JSON.parse(String(call[0]));
-          } catch {
-            continue;
-          }
-          if (parsed.msg_type !== type || !parsed.id || answeredIds.has(parsed.id)) {
-            continue;
-          }
-          answeredIds.add(parsed.id);
-          // The agent answers as `make_response(&self.id, …)` — the reply
-          // carries the request's own id, which is what the request layer
-          // matches on. Reproducing that is the point: a reply with a different
-          // id would prove nothing about correlation.
-          ws.onmessage?.({
-            data: JSON.stringify({ msg_type: replyType, id: parsed.id, payload: {} }),
-          } as MessageEvent);
-          answered += 1;
-        }
-      }
-      return answered;
-    }
-
-    function answerAttach(): number {
-      return answerPending('agent.attach', 'ok');
-    }
-
-    function answerPings(): number {
-      return answerPending('control.ping', 'control.pong');
-    }
-
     beforeEach(() => {
-      answeredIds = new Set();
       vi.useFakeTimers();
     });
 
@@ -877,15 +930,14 @@ describe('SessionRuntime', () => {
       rt.dispose();
     });
 
-    // NOT COVERED, deliberately: that the flag is *cleared* on a successful
-    // attach. It matters — left set, every later attach would ask for a
-    // bootstrap, and a bootstrap replaces the buffer, so the user would see a
-    // full-screen repaint on every attach. But no assertion here can catch
-    // dropping the clear: the clear is only observable on an attach that
-    // follows a loss and is *not* itself preceded by one, and this harness has
-    // no way to start a second attach (re-dispatching `SESSION_SELECTED` is a
-    // no-op — measured, `clientAttachBootstrapFlags()` comes back `[]`).
-    // Stated rather than papered over with an assertion that cannot fail.
+    // The flag being *cleared* on a successful attach used to be listed here
+    // as uncovered — an assertion that could not fail, since this harness had
+    // no way to start a second attach. It is covered now, by the route-switch
+    // sequence in `holds the stream's hole across the next attach, and clears
+    // it once repaired (#1304)` above: the third attach there is one that
+    // follows a repair and must not ask. Not separately asserted: the same
+    // clear on a loss-driven re-attach — the line is the same one, and it now
+    // has a failing mutation behind it.
 
     // NOTE: there is deliberately no "stops probing once disposed" test here.
     // One was written and then deleted: removing `stopLivenessProbe()` from

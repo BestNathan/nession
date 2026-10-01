@@ -47,8 +47,8 @@ export class ConnectionManager implements TerminalTransport {
   /** Notified after input is handed to either transport — see `onInputSent`. */
   private onInputSent: () => void;
   /**
-   * Notified when a replay answer states that its window has passed this
-   * client's cursor — see `ConnectionOptions.onStreamTruncated` (#1304).
+   * Notified when the stream leaves the consumer's buffer with a hole no later
+   * replay can fill — see `ConnectionOptions.onStreamTruncated` (#1304).
    */
   private onStreamTruncated: () => void;
 
@@ -78,10 +78,10 @@ export class ConnectionManager implements TerminalTransport {
       {
         onOutput: (data, bootstrap) => this.onOutput?.(data, bootstrap),
         onResize: (cols, rows) => this.onResize?.(cols, rows),
-        // Only the reconciler can tell an answer that is whole from one whose
-        // beginning the agent has evicted, and only this class holds the
-        // session's owner. It carries the fact up; what repair that implies is
-        // not the transport's decision (#1304).
+        // Only the reconciler can tell a buffer that is whole from one with a
+        // stretch given up on, and only this class holds the session's owner.
+        // It carries the fact up; what repair that implies is not the
+        // transport's decision (#1304).
         onStreamTruncated: () => this.onStreamTruncated(),
       },
     );

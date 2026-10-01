@@ -516,10 +516,88 @@ describe('StreamReconciler', () => {
     // Three requests that moved nothing: the frame in hand is committed rather
     // than held for a recovery that is not coming.
     expect(h.out).toEqual(['five', 'eight']);
+    // Giving up is a loss the consumer cannot see — the cursor moved over the
+    // missing stretch and the buffer looks whole — so it is stated, exactly as
+    // a truncation the agent reports is (#1304).
+    expect(h.truncated).toBe(1);
     // And it stays resolved — no fourth request, nothing left pending.
     live(h, 9, 'nine');
     expect(h.requests).toHaveLength(3);
     expect(h.out).toEqual(['five', 'eight', 'nine']);
+  });
+
+  it('states the loss when a hole is given up on (#1304)', async () => {
+    // The deadline is the other way a hole is abandoned, and the one a live
+    // transport reaches without the agent saying anything: the reconciler's own
+    // 2s is far below the transport's request timeout, so a single slow round
+    // trip is enough. Unanswered is not evicted — the agent may still hold
+    // 6 and 7 — so the events that are dropped here are recoverable output,
+    // and only the consumer can ask for the snapshot that repairs the buffer
+    // it now holds a hole in (#321). It cannot ask for a hole it is not told
+    // about.
+    vi.useFakeTimers();
+    try {
+      const h = makeHarness();
+      live(h, 5, 'five');
+      live(h, 8, 'eight');
+      expect(h.truncated).toBe(0);
+
+      await vi.advanceTimersByTimeAsync(RESUME_DEADLINE_MS);
+
+      expect(h.truncated).toBe(1);
+      // The skip itself is unchanged: output in hand is committed rather than
+      // held for an answer that is not coming.
+      expect(h.out).toEqual(['five', 'eight']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('states nothing when a hole was filled before its request gave up', async () => {
+    // Giving up is not itself a loss, and the notice must not be stated as if
+    // it were: what is stated is a hole the frames in hand were committed
+    // over. Here live frames fill the hole while the request is still out, so
+    // `drain` commits the frame the request was holding for and the deadline
+    // expires with nothing skipped — a notice now would send the consumer
+    // after a bootstrap that repaints a buffer which is complete.
+    vi.useFakeTimers();
+    try {
+      const h = makeHarness();
+      live(h, 5, 'five');
+      live(h, 9, 'nine');
+      // The frames the request was waiting for arrive live, so the frontier
+      // reaches `nine` on its own before the deadline does.
+      live(h, 6, 'six');
+      live(h, 7, 'seven');
+      live(h, 8, 'eight');
+
+      await vi.advanceTimersByTimeAsync(RESUME_DEADLINE_MS);
+
+      expect(h.truncated).toBe(0);
+      expect(h.out).toEqual(['five', 'six', 'seven', 'eight', 'nine']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('states nothing when a request for history alone is given up on', async () => {
+    // The other way to give something up with nothing skipped: a seeded cursor
+    // asks for the events after a snapshot the client is holding, and no frame
+    // is ever buffered to be committed over a gap. The buffer is exactly where
+    // the snapshot left it, so there is no hole in it — and the first later
+    // frame that cannot be placed reaches the same path with one to state.
+    const h = makeHarness();
+    h.reconciler.seed(1, 0);
+    expect(h.requests).toHaveLength(1);
+
+    for (let i = 0; i < 3; i += 1) {
+      h.requests[i].reject(new Error('agent unavailable'));
+      await flushMicrotasks();
+    }
+
+    expect(h.requests).toHaveLength(3);
+    expect(h.truncated).toBe(0);
+    expect(h.out).toEqual([]);
   });
 
   it('asks again when an answer fills only part of the hole', async () => {
