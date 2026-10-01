@@ -817,6 +817,48 @@ describe('ConnectionManager', () => {
       cm.dispose();
     });
 
+    /**
+     * SC-07's last leg. Session, input epoch and control generation are named
+     * in `InputIdentity`, and the runtime/transport generation is the odd one
+     * out: it is not a field, because the queue *belongs* to a generation
+     * rather than being tagged by one. A `ConnectionManager` owns its queue, so
+     * a new generation starts empty and cannot flush what the previous one was
+     * still holding.
+     *
+     * The binding is by ownership, and that is deliberate rather than a
+     * shortcut. A transport *swap* inside one generation keeps its queue — a
+     * P2P client that falls back to the relay is still the same runtime against
+     * the same agent holding the same epoch, so those bytes are still this
+     * session's to send and throwing them away would discard input the user
+     * really typed. What must never happen is the reverse: a queue that
+     * outlives its generation. That is what this pins, and the mutation is
+     * hoisting `pendingInput` into a module- or session-keyed singleton, at
+     * which point the second generation flushes the first's bytes.
+     */
+    it('does not let a new runtime generation deliver what the previous one held', () => {
+      const first = seeded({ appliedThrough: 0 });
+      first.cm.send('a');
+      vi.mocked(first.harness.api.sendInput).mockClear();
+
+      // A reattach builds a new generation over the same session: a fresh
+      // transport and, here, a fresh queue.
+      const second = seeded({ appliedThrough: 0 });
+      second.cm.flushInputBuffer();
+      expect(second.harness.api.sendInput).not.toHaveBeenCalled();
+
+      // The first still holds its own, so this is two independent queues
+      // rather than two empty ones.
+      first.cm.flushInputBuffer();
+      expect(first.harness.api.sendInput).toHaveBeenCalledWith('test', 'a', {
+        inputEpoch: 7,
+        seqStart: 1,
+        seqEnd: 1,
+      });
+
+      first.cm.dispose();
+      second.cm.dispose();
+    });
+
     /** An acknowledgement for another run is not this queue's to apply. */
     it('ignores an acknowledgement for another epoch', () => {
       const { harness, cm } = seeded({ inputEpoch: 7 });
