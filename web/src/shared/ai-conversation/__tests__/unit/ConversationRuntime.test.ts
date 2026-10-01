@@ -406,7 +406,7 @@ describe('ConversationRuntime — state the surface draws', () => {
     expect(runtime.getSnapshot()).toBe(runtime.getSnapshot())
   })
 
-  it('stops after disposal', async () => {
+  it('stops polling and fetching after disposal', async () => {
     const { runtime, adapter, clock } = setup()
     runtime.setContext('a:s1')
     await flush()
@@ -414,10 +414,28 @@ describe('ConversationRuntime — state the surface draws', () => {
 
     runtime.dispose()
     clock.tick()
-    runtime.setContext('a:s2')
     await flush()
 
     expect(clock.armed()).toBe(0)
     expect(adapter.calls.filter((call) => call.kind === 'read').length).toBe(readsBefore)
+  })
+
+  it('re-arms when it is pointed at a context again', async () => {
+    const { runtime, clock } = setup()
+    runtime.setContext('a:s1')
+    await flush()
+
+    // `dispose` means "stop everything now", not "this instance is finished
+    // with". React's StrictMode mounts, unmounts and mounts again, so the hook
+    // that owns a runtime disposes in its cleanup and points it at a context on
+    // the next run — and the second mount must get a working runtime.
+    runtime.dispose()
+    runtime.setContext('a:s2')
+    await flush()
+
+    expect(runtime.getSnapshot().openId).toBe('c1')
+    // Fully re-armed, refresh included: this conversation is active, so the
+    // re-armed runtime polls it just as a fresh one would.
+    expect(clock.armed()).toBe(1)
   })
 })

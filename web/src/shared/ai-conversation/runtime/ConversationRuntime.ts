@@ -248,9 +248,12 @@ export class ConversationRuntime<Context> {
    * old one survives, not the items, not either cursor, not the binding.
    */
   setContext(context: Context | null): void {
-    if (this.disposed) {
-      return
-    }
+    // Re-arms a disposed runtime. `dispose` means "stop everything now", not
+    // "this instance is finished with": React's StrictMode mounts, unmounts and
+    // mounts again, so a hook that disposes in its cleanup would hand a dead
+    // runtime to the second mount. Pointing a runtime at a context is exactly
+    // the statement that it should be working again.
+    this.disposed = false
     this.context = context
     this.contextKey = context === null ? null : this.adapter.contextKey(context)
     this.newestGeneration += 1

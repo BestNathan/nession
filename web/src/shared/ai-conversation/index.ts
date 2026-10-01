@@ -62,6 +62,8 @@ export type { ConversationPositions } from './runtime/pagination'
 export { reusing } from './runtime/reconcile'
 
 export { useConversationSnapshot } from './runtime/useConversationSnapshot'
+export { useAIConversation } from './runtime/useAIConversation'
+export type { AIConversationHandle } from './runtime/useAIConversation'
 
 export {
   AssistantMessage,
