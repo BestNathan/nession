@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { waitForShell } from '../helpers/shell';
+import { watchSessionReports } from '../helpers/sessionReport';
 
 // CI-gated like terminal-io.spec.ts: drives a real tmux-backed agent, which the
 // e2e webServer stack only provides in CI. The historical blocker ("terminal
@@ -24,6 +25,10 @@ test.describe('Session lifecycle', () => {
     // The sidebar is always present; there is no drawer opener to click (#748).
     const createButton = page.getByTestId('create-session');
     await expect(createButton).toBeEnabled({ timeout: 60_000 });
+
+    // Watch the pushes from here on, before the Session exists, so no report
+    // can be missed between the click and the assertion (#1326).
+    const reports = watchSessionReports(page);
 
     // ── Create session ──
     await createButton.click();
@@ -84,27 +89,40 @@ test.describe('Session lifecycle', () => {
     // assertion read `shell ·` until #958, which pinned a placeholder: the row
     // rendered the literal string `shell` for *every* Session, so the test was
     // asserting the defect and any Session whose shell was not the placeholder
-    // would have passed it by accident. CI's session runs bash.
+    // would have passed it by accident.
+    //
     // Wait for the *report*, then assert the content — in that order, because
     // the two are different claims and only the first is about timing.
     //
     // A Session created a moment ago legitimately shows `unknown`: it is the
     // documented workload value until the agent reports the pane's foreground
     // command (`workloadHint` is `foreground_command ?? 'unknown'`, and the
-    // design vocabulary lists `unknown` as neutral). Measured on staging: at the
-    // point this assertion used to start, the row read `unknown` and settled to
-    // `bash` 773ms later — while CI has caught the same row still `unknown` past
-    // 5s on a cold agent. So the settle is real and its duration is not
-    // something this test can predict; the old 5s budget was a guess that
-    // happened to sit inside the range (#1276). 20s is an allowance for it to
-    // finish, not a claim about any cadence — the assertion that follows is
-    // unchanged.
-    await expect(sessionRow.getByTestId('session-item-workload')).not.toHaveText('unknown', {
-      timeout: 20_000,
-    });
+    // design vocabulary lists `unknown` as neutral). Measured on staging, the
+    // row read `unknown` and settled to `bash` 773ms later; CI has caught the
+    // same row still `unknown` past 5s on a cold agent, and #1326 caught it past
+    // 20s. The settle is real and its duration is not something this spec can
+    // predict — which is exactly why it no longer predicts it.
+    //
+    // The wait is now on the **push that carries the command**, not on the
+    // rendered row (#1326). That splits the two claims this comment always said
+    // were different: if the report never arrives, the wait fails and *says*
+    // that — it is the agent/server leg — and the assertion below is left to be
+    // about the renderer, which is the only leg this spec owns. `20s` used to
+    // be a guess at a rendering latency; the ceiling now sits on the report.
+    //
+    // `sessionReport.ts` carries the reasoning, including why this is still a
+    // timeout and why that is not the same thing as a duration allowance.
+    const reportedCommand = await reports.waitForCommand(SESSION_NAME);
+
+    // Asserted against what the server reported rather than against the literal
+    // `bash`, which is a pin on the environment rather than on the row: the
+    // claim is that the slot shows the Session's command. #958's placeholder is
+    // still caught, because it rendered `shell` for *every* Session and the
+    // agent does not report that here.
+    await expect(sessionRow.getByTestId('session-item-workload')).toHaveText(reportedCommand);
     await expect(
       sessionRow.getByTestId('session-item-meta'),
-    ).toContainText(`bash · ${agentLabel} ·`);
+    ).toContainText(`${reportedCommand} · ${agentLabel} ·`);
 
     // ── Kill session ──
     // The Kill button is in the same row as the session name.  Use the
