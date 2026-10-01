@@ -94,7 +94,7 @@ Bounded audit rules:
 3. Repository inspection is bounded to the minimum needed to avoid inventing Location/mechanism evidence. Do not pursue runtime reproduction.
 4. Prefer reporter evidence. Static inspection should identify only relevant file:line locations and obvious working-path differences.
 5. Do not turn absence from an application-code grep into a framework-level conclusion. Phrase it as "no app-level implementation found" unless positive evidence rules behavior out.
-6. Repair the issue promptly. Use update_target_issue exactly once when the normalized body and contract labels are ready.
+6. Repair the issue promptly. Use update_target_issue exactly once when the normalized title, body, and contract labels are ready. The title must satisfy the selected kind contract (for example, Requirement: ... or Bug: ...).
 7. You may optionally call comment_target_issue once with a concise investigation trail.
 8. Never modify repository files. You have no repository-write or shell tool. Never create/update/merge PRs, commit/push, or close the issue.
 9. Finish immediately after the target issue is normalized.
@@ -102,38 +102,43 @@ Bounded audit rules:
 The target-bound tools cannot edit any other issue. Do not ask for a different issue number.`;
 }
 
-function candidateIssue(issue, body, contractLabels) {
+function candidateIssue(issue, title, body, contractLabels) {
   const preserved = labelNames(issue).filter((name) => !CONTRACT_LABELS.has(name));
   const labels = [...new Set([...preserved, ...contractLabels])];
-  return { ...issue, body, labels: labels.map((name) => ({ name })) };
+  return { ...issue, title: title.trim(), body, labels: labels.map((name) => ({ name })) };
 }
 
 function createCustomTools(issue) {
   const repo = process.env.GITHUB_REPOSITORY;
   return {
     update_target_issue: {
-      description: 'Replace the target issue body and its contract kind/area labels. The target issue number is fixed by the harness.',
+      description: 'Replace the target issue title/body and its contract kind/area labels. The target issue number is fixed by the harness.',
       inputSchema: {
         type: 'object',
         properties: {
+          title: { type: 'string', minLength: 1 },
           body: { type: 'string', minLength: 1 },
           labels: { type: 'array', items: { type: 'string' }, minItems: 2, uniqueItems: true },
         },
-        required: ['body', 'labels'],
+        required: ['title', 'body', 'labels'],
         additionalProperties: false,
       },
-      async execute({ body, labels }) {
+      async execute({ title, body, labels }) {
+        if (typeof title !== 'string' || !title.trim()) {
+          throw new Error('title must be a non-empty string');
+        }
         if (!Array.isArray(labels) || labels.some((label) => !CONTRACT_LABELS.has(label))) {
           throw new Error(`labels must contain only Issue Contract labels: ${[...CONTRACT_LABELS].join(', ')}`);
         }
-        const candidate = candidateIssue(issue, body, labels);
+        const normalizedTitle = title.trim();
+        const candidate = candidateIssue(issue, normalizedTitle, body, labels);
         const audit = auditIssue(candidate);
         if (!audit.ok) throw new Error(`candidate issue does not pass deterministic contract: ${audit.errors.join('; ')}`);
 
         const currentContract = labelNames(issue).filter((name) => CONTRACT_LABELS.has(name));
         const remove = currentContract.filter((name) => !labels.includes(name));
         const add = labels.filter((name) => !currentContract.includes(name));
-        const args = ['issue', 'edit', String(issue.number), '--repo', repo, '--body-file', '-'];
+        const args = ['issue', 'edit', String(issue.number), '--repo', repo, '--title', normalizedTitle, '--body-file', '-'];
         if (add.length) args.push('--add-label', add.join(','));
         if (remove.length) args.push('--remove-label', remove.join(','));
         execFileSync('gh', args, { input: body, encoding: 'utf8', env: process.env });
@@ -303,9 +308,10 @@ function selfTest() {
     input_tokens: 1, output_tokens: 2, cache_read_tokens: 3, cache_write_tokens: 4, reasoning_tokens: null, total_tokens: 10,
   });
   assert.deepEqual(normalizeCost({ cost: { rawCostCents: 123, chargedCents: 45 } }), { raw_cost_usd: 1.23, charged_cost_usd: 0.45 });
-  const candidate = candidateIssue({ labels: [{ name: 'in-progress' }] }, 'body', ['bug', 'web']);
+  const candidate = candidateIssue({ labels: [{ name: 'in-progress' }] }, 'Bug: example', 'body', ['bug', 'web']);
+  assert.equal(candidate.title, 'Bug: example');
   assert.deepEqual(labelNames(candidate).sort(), ['bug', 'in-progress', 'web']);
-  console.log('issue-audit-cursor self-test: 9 cases passed');
+  console.log('issue-audit-cursor self-test: 10 cases passed');
 }
 
 async function main() {
