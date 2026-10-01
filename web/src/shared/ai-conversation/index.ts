@@ -61,3 +61,11 @@ export type { ConversationPositions } from './runtime/pagination'
 export { reusing } from './runtime/reconcile'
 
 export { useConversationSnapshot } from './runtime/useConversationSnapshot'
+
+export {
+  AssistantMessage,
+  ConversationMessage,
+  UserMessage,
+} from './components/ConversationMessage'
+export { ToolActivity, UnknownActivity } from './components/ToolActivity'
+export { isStreaming } from './components/streaming'

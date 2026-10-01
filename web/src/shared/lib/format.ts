@@ -24,6 +24,31 @@ export function formatAbsoluteTime(iso: string): string {
   return new Date(iso).toLocaleString();
 }
 
+/**
+ * A transcript record's own timestamp, as a clock time (#1120).
+ *
+ * Short on purpose: the reading order is the transcript's order, so the time is
+ * orientation rather than information. Anything unparseable is dropped rather
+ * than shown raw — an RFC 3339 string in the middle of a sentence is worse than
+ * no time at all.
+ *
+ * Lives here rather than with the transcript that used to own it, because
+ * `#1363` moved the transcript into the shared layer and a provider must not
+ * carry a formatter the shared renderer cannot reach. `capabilities/claude-code`
+ * keeps its `clockTime` name as a delegation, so the two can never disagree
+ * about what `10:06` means.
+ */
+export function formatClockTime(timestamp: string | null | undefined): string | null {
+  if (!timestamp) {
+    return null;
+  }
+  const at = new Date(timestamp);
+  if (Number.isNaN(at.getTime())) {
+    return null;
+  }
+  return at.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+}
+
 export function getStatusVariant(status: Agent['status']): 'default' | 'secondary' | 'outline' {
   switch (status) {
     case 'online':
