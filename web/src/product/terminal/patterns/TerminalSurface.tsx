@@ -9,6 +9,7 @@ import type { CapsuleCapabilityContribution } from '@/app/capsulePresence';
 import type { TerminalController } from '@/platform/terminal-runtime/controller/TerminalController';
 import type { TerminalSemanticKey } from '@/platform/terminal-runtime/interaction/TerminalInteractionController';
 import type { TerminalControlState } from '@/product/terminal/state/terminalControl';
+import type { InputDrop } from '@/platform/terminal-runtime/inputQueue';
 import { Button } from '@/components/ui/button';
 
 export interface TerminalSurfaceProps {
@@ -40,12 +41,46 @@ export interface TerminalSurfaceProps {
   /** P2P control lease (#1095). Omit in relay until server forwards attach metadata. */
   terminalControl?: TerminalControlState;
   onTakeControl?: () => void;
+  /** Input this Session lost rather than delivered (#1307 SC-09), if any. */
+  inputDrop?: InputDrop | null;
+  onDismissInputDrop?: () => void;
   /**
    * The shell's surface-navigation action beside the capsule — on Web, "Open
    * Workspace" (#1204). The surface owns no navigation; it hands the node to
    * the capsule's dock region, which owns the geometry.
    */
   surfaceAction?: ReactNode;
+}
+
+/**
+ * What the surface says about input that will never arrive (#1307 SC-09).
+ *
+ * One sentence, and it is a statement rather than a question, because the
+ * client cannot answer the question. That inability *is* the delivery-unknown
+ * state: an agent that restarted cannot say whether the input in flight when
+ * it died reached the PTY, so those bytes may already have run, and a user who
+ * assumes they did not is a user who runs them a second time.
+ *
+ * `epoch` is therefore the case that must not be silent, and the others are
+ * losses the client *can* account for — the requirement's "discard with
+ * explicit UX" rather than three more kinds of silence. **None of them offers
+ * a re-send**, and that is deliberate on both halves: the bytes were discarded
+ * rather than stored (SC-15 keeps input contents out of durable state), and
+ * re-sending input that may already have run is the automatic replay the
+ * requirement forbids. What is left is the smallest useful thing — telling the
+ * user what is uncertain, and getting out of the way.
+ */
+function inputDropNotice(drop: InputDrop): string {
+  switch (drop.reason) {
+    case 'epoch':
+      return 'Some input may not have reached the session — check before re-running it.';
+    case 'age':
+      return 'Input was discarded before it could be delivered — it waited too long.';
+    case 'bound':
+      return 'Input was not sent — too much was already waiting.';
+    case 'generation':
+      return 'Input was discarded — another client took control.';
+  }
 }
 
 /**
@@ -62,6 +97,8 @@ export function TerminalSurface({
   experience,
   terminalControl,
   onTakeControl,
+  inputDrop = null,
+  onDismissInputDrop,
   surfaceAction,
 }: TerminalSurfaceProps) {
 
@@ -98,6 +135,23 @@ export function TerminalSurface({
         )}
         {children}
       </div>
+      {inputDrop ? (
+        <div
+          className="flex shrink-0 items-center justify-between gap-3 border-t border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground"
+          data-testid="terminal-input-drop"
+          role="status"
+        >
+          <span>{inputDropNotice(inputDrop)}</span>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={() => onDismissInputDrop?.()}
+          >
+            Dismiss
+          </Button>
+        </div>
+      ) : null}
       {terminalControl?.role === 'observer' ? (
         <div
           className="flex shrink-0 items-center justify-between gap-3 border-t border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground"

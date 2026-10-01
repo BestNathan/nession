@@ -1,5 +1,6 @@
 import type { TerminalAgentApi } from '@/product/terminal';
 import type { RelayServerTransport } from '@/platform/attach/relayServerConnection';
+import type { InputDrop } from './inputQueue';
 
 /** Banner state surfaced to the React layer for UI rendering. */
 export type ReconnectBanner = 'none' | 'reconnecting' | 'failed';
@@ -40,6 +41,18 @@ export interface ConnectionOptions {
    * exactly.
    */
   onStreamTruncated?: () => void;
+  /**
+   * Called when input the user typed is lost rather than delivered (#1307
+   * SC-09), with what was lost and why.
+   *
+   * The third of the same kind of wiring point, and the one the requirement
+   * says must be *visible*: the transport decides that bytes cannot be
+   * delivered and records the decision, but "the user typed this and it will
+   * never arrive" is not a transport conclusion — what a person is told about
+   * it is the product's. Reporting it upward is all this does; leaving it
+   * unwired keeps every silence the previous behaviour had.
+   */
+  onInputDrop?: (drop: InputDrop) => void;
 }
 
 /** Device class for responsive rendering. */

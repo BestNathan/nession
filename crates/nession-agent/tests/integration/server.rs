@@ -12,9 +12,10 @@ use futures_util::{SinkExt, StreamExt};
 use nession_agent::config::AttachMode;
 use nession_agent::p2p_credentials::P2pCredentials;
 use nession_agent::server::websocket::{
-    msg_types, new_message, AgentServer, AgentServerContext, ClientAttachPayload,
-    ClientAttachResponse, ClientDetachPayload, ClientDetachResponse, OkPayload,
-    SessionCreatePayload, SessionCreateResponse, SessionKillPayload, SessionKillResponse,
+    msg_types, new_message, AgentServer, AgentServerContext, AuthResponsePayload,
+    ClientAttachPayload, ClientAttachResponse, ClientAuthPayload, ClientDetachPayload,
+    ClientDetachResponse, OkPayload, SessionCreatePayload, SessionCreateResponse,
+    SessionKillPayload, SessionKillResponse,
 };
 use nession_agent::tmux::manager::SessionManager;
 use nession_agent::tmux::ops::TmuxDep;
@@ -2696,6 +2697,14 @@ struct SequencedSession {
     stream: WsStream,
     session_name: String,
     epoch: u64,
+    /// The lease generation this attach was told, which is the one a client
+    /// that later goes stale is still holding.
+    control_generation: u64,
+    /// Kept so a second client can be dialled onto the same session, which is
+    /// the only way to make one an observer: the lease goes to whoever attaches
+    /// first, so a peer needs a peer.
+    addr: SocketAddr,
+    credentials: Arc<P2pCredentials>,
     /// The file the session's shell appends to, and the only thing these tests
     /// assert on that the PTY produced.
     witness: std::path::PathBuf,
@@ -2720,6 +2729,12 @@ impl SequencedSession {
         tmux.create_session(&session_name, 80, 24, "/tmp", &[])
             .await?;
         let (mut sink, mut stream) = connect_for(&credentials, addr, &session_name).await?;
+        authenticate(
+            &mut sink,
+            &mut stream,
+            &format!("{session_name}-controller"),
+        )
+        .await?;
         let reply: nession_agent::server::websocket::Message<ClientAttachResponse> =
             round_trip(&mut sink, &mut stream, &attach_to(&session_name)).await?;
         let epoch = reply.payload.input_epoch.ok_or_else(|| {
@@ -2737,11 +2752,33 @@ impl SequencedSession {
             stream,
             session_name,
             epoch,
+            control_generation: reply.payload.control_generation.ok_or_else(|| {
+                anyhow::anyhow!("an attach must state the lease generation it is granting")
+            })?,
+            addr,
+            credentials,
             witness,
             handle,
             _session: session,
             _dir: dir,
         })
+    }
+
+    /// A second, distinctly-named connection to this session, not yet attached.
+    ///
+    /// The first connection stays open, so the lease it took stays taken and
+    /// whoever dials here is an observer — provided it is a different client,
+    /// which is what the name is for.
+    async fn dial(&self) -> anyhow::Result<(WsSink, WsStream)> {
+        let (mut sink, mut stream) =
+            connect_for(&self.credentials, self.addr, &self.session_name).await?;
+        authenticate(
+            &mut sink,
+            &mut stream,
+            &format!("{}-observer", self.session_name),
+        )
+        .await?;
+        Ok((sink, stream))
     }
 
     /// The command that appends `line` to the witness file.
@@ -2796,6 +2833,33 @@ impl SequencedSession {
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
     }
+}
+
+/// Name this connection, before it attaches.
+///
+/// A connection that never authenticates is `unknown-client`, and two of those
+/// are the *same client* as far as the lease is concerned — so a second dial
+/// would silently hold the first one's lease and every observer test would pass
+/// by being the wrong test. Naming each dial is what makes "two clients" true.
+async fn authenticate(
+    sink: &mut WsSink,
+    stream: &mut WsStream,
+    client_id: &str,
+) -> anyhow::Result<()> {
+    let req = new_message(
+        msg_types::CLIENT_AUTH,
+        ClientAuthPayload {
+            auth_token: String::new(),
+            client_id: Some(client_id.to_string()),
+        },
+    );
+    let reply: nession_agent::server::websocket::Message<AuthResponsePayload> =
+        round_trip(sink, stream, &req).await?;
+    anyhow::ensure!(
+        reply.payload.client_id.as_deref() == Some(client_id),
+        "the agent assigned a different client id than the one presented"
+    );
+    Ok(())
 }
 
 /// The attach frame every test in this section opens with.
@@ -3064,6 +3128,134 @@ async fn integration_an_unsequenced_sender_still_writes() {
         .await
         .unwrap();
     assert_eq!(ack.applied_through, 1);
+
+    session.handle.shutdown().await.ok();
+}
+
+/// A second dial on one session gets its own lease, not the first client's.
+///
+/// **Characterisation, not aspiration**, and it is pinned because it is
+/// surprising and because the shape of the SC-10 test below depends on it. The
+/// P2P session map is per-connection, so a second connection builds its own
+/// `AttachedSession` with its own `SessionControlState` — there is no second
+/// peer for the first client to be an observer *of*, and the reply says
+/// `controller`. #1095's observer role is therefore decided on the client on
+/// this path and nowhere else, which is why the client half of SC-10 is tested
+/// in the web suite.
+///
+/// If that map ever becomes shared, the premise the requirement's wording
+/// assumes comes back — and this is the test the change lands on.
+#[tokio::test]
+async fn integration_a_second_dial_gets_its_own_lease() {
+    let session = SequencedSession::start("second-dial").await.unwrap();
+    let (mut sink, mut stream) = session.dial().await.unwrap();
+    let reply: nession_agent::server::websocket::Message<ClientAttachResponse> =
+        round_trip(&mut sink, &mut stream, &attach_to(&session.session_name))
+            .await
+            .unwrap();
+    assert_eq!(
+        reply.payload.control_role.as_deref(),
+        Some("controller"),
+        "a P2P attach builds its own lease, so the second dial is its own controller"
+    );
+
+    session.handle.shutdown().await.ok();
+}
+
+/// Input carrying a lease the agent has moved past is refused, and never
+/// reaches the PTY (SC-10).
+///
+/// `authorize_mutation` on the `agent.terminal.input` arm is the one guard in
+/// this tree a client cannot decline to run: it lives in the process that owns
+/// the PTY, so a client whose queue never learned the lease moved — or whose
+/// transport replayed what it was holding — is refused rather than obeyed. It
+/// had no test at all before this one.
+///
+/// **Why this shape, and not "a second client is an observer".** That is what
+/// the requirement's wording suggests, and it is not reachable here: the P2P
+/// session map is per-connection, so a second dial on the same session builds
+/// its own `AttachedSession` with its own `SessionControlState`, and its attach
+/// reply says `controller`. The observer the client-side machinery gates on
+/// (#1095) is decided on the client and nowhere else on this path — the web
+/// suite's SC-10 tests cover that half. What the agent can refuse, and what a
+/// stale client actually meets, is a generation it is no longer on.
+///
+/// The refusal is asserted **by name**. A silently dropped frame and a refused
+/// one look identical to the sender, and the difference is the whole of the
+/// client's recovery: `not_controller` is what tells it to stop retrying.
+///
+/// The witness is the file, so "the bytes never reached the PTY" is a fact this
+/// process reads rather than a frame it trusts — and the same command under the
+/// generation the agent *is* on follows, so an empty witness is a refusal
+/// rather than a session where nothing could be written at all.
+///
+/// The mutation is removing the `authorize_mutation` check from the
+/// `agent.terminal.input` arm: the witness then reads `stale\ncurrent\n`.
+#[tokio::test]
+async fn integration_input_from_a_stale_lease_is_refused_without_writing() {
+    let mut session = SequencedSession::start("input-stale-lease").await.unwrap();
+    let epoch = session.epoch;
+    let held = session.control_generation;
+
+    // The lease moves on without this client: another client takes it, or this
+    // one hands it back and takes it again. Either way the generation the
+    // client is holding is no longer the one the agent is on.
+    let acquired: nession_agent::server::websocket::Message<
+        nession_agent::server::websocket::TerminalControlAcquireResponse,
+    > = round_trip(
+        &mut session.sink,
+        &mut session.stream,
+        &new_message(
+            msg_types::TERMINAL_CONTROL_ACQUIRE,
+            nession_agent::server::websocket::TerminalControlAcquirePayload {
+                session_name: session.session_name.clone(),
+            },
+        ),
+    )
+    .await
+    .unwrap();
+    assert!(
+        acquired.payload.generation > held,
+        "the acquire must move the lease past the generation the client holds"
+    );
+
+    use base64::Engine;
+    let stale = new_message(
+        msg_types::TERMINAL_INPUT,
+        nession_agent::server::websocket::TerminalInputPayload {
+            session_name: session.session_name.clone(),
+            data: base64::engine::general_purpose::STANDARD
+                .encode(session.append("stale").as_bytes()),
+            control_generation: Some(held),
+            input_epoch: Some(epoch),
+            seq_start: Some(1),
+            seq_end: Some(1),
+        },
+    );
+    let refused: nession_agent::server::websocket::Message<serde_json::Value> =
+        round_trip(&mut session.sink, &mut session.stream, &stale)
+            .await
+            .unwrap();
+    assert_eq!(refused.msg_type, msg_types::ERROR);
+    assert_eq!(
+        refused.payload["code"], "not_controller",
+        "the refusal must name the lease, not the session"
+    );
+
+    // The same command under the generation the agent is actually on, so the
+    // assertion below is about the refusal rather than about a frame that could
+    // never have been written. The refused frame moved no cursor, so this one
+    // still starts at 1.
+    let ack = session
+        .send(epoch, 1, 1, &session.append("current"))
+        .await
+        .unwrap();
+    assert_eq!(ack.applied_through, 1);
+    assert_eq!(
+        session.witness_lines(1).await,
+        "current\n",
+        "the refused frame's bytes reached the PTY"
+    );
 
     session.handle.shutdown().await.ok();
 }

@@ -1,6 +1,10 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import { TerminalSurface } from '@/product/terminal/patterns/TerminalSurface';
+import userEvent from '@testing-library/user-event';
+import {
+  TerminalSurface,
+  type TerminalSurfaceProps,
+} from '@/product/terminal/patterns/TerminalSurface';
 
 /**
  * Answers "yes, desktop" — deliberately, and it is load-bearing.
@@ -23,12 +27,16 @@ vi.mock('@/product/terminal/hooks/useCommandHistory', () => ({
   }),
 }));
 
-function renderSurface(experience: 'web' | 'app') {
+function renderSurface(
+  experience: 'web' | 'app',
+  props: Partial<Pick<TerminalSurfaceProps, 'inputDrop' | 'onDismissInputDrop'>> = {},
+) {
   return render(
     <TerminalSurface
       experience={experience}
       inputDisabled={false}
       controller={null}
+      {...props}
     >
       <div data-testid="terminal-viewport-slot" />
     </TerminalSurface>,
@@ -68,5 +76,71 @@ describe('TerminalSurface', () => {
 
     renderSurface('web');
     expect(screen.getByTestId('capsule-history-trigger')).toBeInTheDocument();
+  });
+});
+
+/**
+ * #1307 SC-09 — the one user-visible surface this requirement adds.
+ *
+ * The requirement's constraint on it is "quiet by default, present only when a
+ * decision is owed", so the absent case is asserted first and deliberately:
+ * a notice that renders empty is a notice that occupies the surface forever,
+ * and the shipping rule in this tree is "absent, not empty".
+ */
+describe('input that will never arrive (#1307 SC-09)', () => {
+  it('says nothing when nothing has been lost', () => {
+    renderSurface('web');
+
+    expect(screen.queryByTestId('terminal-input-drop')).toBeNull();
+  });
+
+  it('states the uncertainty an epoch change leaves behind', () => {
+    // The case the whole state exists for. The agent that could say whether
+    // these bytes reached the PTY is gone, and its answer died with it, so the
+    // surface says what is unknown rather than a fact it does not have — a
+    // user who reads silence here is a user who re-runs a command that may
+    // already have run.
+    renderSurface('web', { inputDrop: { reason: 'epoch', chunks: 1, at: 0 } });
+
+    expect(screen.getByTestId('terminal-input-drop')).toHaveTextContent(
+      'Some input may not have reached the session — check before re-running it.',
+    );
+  });
+
+  it('accounts for the losses the client can explain', () => {
+    // The other three are losses the client *can* account for, which is what
+    // makes silence the wrong answer for them too — the requirement asks for
+    // "discard with explicit UX", not for three more ways to say nothing.
+    const explained: Array<[Parameters<typeof renderSurface>[1], string]> = [
+      [{ inputDrop: { reason: 'age', chunks: 2, at: 0 } }, 'it waited too long'],
+      [{ inputDrop: { reason: 'bound', chunks: 1, at: 0 } }, 'too much was already waiting'],
+      [{ inputDrop: { reason: 'generation', chunks: 1, at: 0 } }, 'another client took control'],
+    ];
+
+    for (const [props, phrase] of explained) {
+      const view = renderSurface('web', props);
+      expect(screen.getByTestId('terminal-input-drop')).toHaveTextContent(phrase);
+      view.unmount();
+    }
+  });
+
+  it('offers the decision and nothing else, and offers it once', async () => {
+    // No re-send, and that is the design rather than an omission: the bytes
+    // were discarded rather than kept (SC-15 keeps input contents out of
+    // durable state) and re-sending input that may already have run is the
+    // automatic replay the requirement forbids. So the strip carries exactly
+    // one action, and it is the user's own decision to put it away.
+    const onDismissInputDrop = vi.fn();
+    renderSurface('web', {
+      inputDrop: { reason: 'epoch', chunks: 1, at: 0 },
+      onDismissInputDrop,
+    });
+
+    const strip = screen.getByTestId('terminal-input-drop');
+    const actions = strip.querySelectorAll('button');
+    expect(actions).toHaveLength(1);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
+    expect(onDismissInputDrop).toHaveBeenCalledTimes(1);
   });
 });

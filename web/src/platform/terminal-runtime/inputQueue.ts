@@ -120,6 +120,15 @@ export class PendingInputQueue {
   private cursor = 0;
   private drop: InputDrop | null = null;
   private dropped = 0;
+  /**
+   * Told when input is lost, at the moment it is lost (#1307 SC-09).
+   *
+   * `lastDrop` cannot serve this on its own: it says what the most recent loss
+   * was, not that there has been one since the reader last looked, so a reader
+   * polling it either repeats itself or misses a loss between two polls. The
+   * layer that shows the user a loss needs the edge, and this is the edge.
+   */
+  onDrop: ((drop: InputDrop) => void) | null = null;
 
   constructor(bounds: InputQueueBounds, now: () => number = () => Date.now()) {
     this.bounds = bounds;
@@ -329,6 +338,7 @@ export class PendingInputQueue {
   private record(reason: InputDropReason, chunks: number): void {
     this.drop = { reason, chunks, at: this.now() };
     this.dropped += chunks;
+    this.onDrop?.(this.drop);
   }
 }
 

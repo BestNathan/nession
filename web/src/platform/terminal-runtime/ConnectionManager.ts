@@ -3,7 +3,7 @@ import type { ConnectionState } from '@/platform/socket/types';
 import type { TerminalTransport, TerminalInputSeed } from './transport/TerminalTransport';
 import { StreamReconciler, type ResumeReply } from './streamReconciler';
 import type { TerminalBootstrap } from './bootstrap';
-import { PendingInputQueue, type InputQueueBounds } from './inputQueue';
+import { PendingInputQueue, type InputDrop, type InputQueueBounds } from './inputQueue';
 
 /**
  * How much typed-ahead input this client will hold for a session (#1307).
@@ -95,6 +95,11 @@ export class ConnectionManager implements TerminalTransport {
    * replay can fill — see `ConnectionOptions.onStreamTruncated` (#1304).
    */
   private onStreamTruncated: () => void;
+  /**
+   * Notified when input is lost rather than delivered — see
+   * `ConnectionOptions.onInputDrop` (#1307 SC-09).
+   */
+  private onInputDrop: (drop: InputDrop) => void;
 
   onStateChange: ((state: ConnectionState) => void) | null = null;
   /**
@@ -117,6 +122,12 @@ export class ConnectionManager implements TerminalTransport {
     this.isAttached = options.isAttached ?? (() => false);
     this.onInputSent = options.onInputSent ?? (() => {});
     this.onStreamTruncated = options.onStreamTruncated ?? (() => {});
+    this.onInputDrop = options.onInputDrop ?? (() => {});
+    // The queue owns *what* is lost; this is the wire from its record to the
+    // layer that decides what the user is told (#1307 SC-09). Set here rather
+    // than passed in, because the queue is built here and nothing above it
+    // should have to know the queue exists to hear about a loss.
+    this.pendingInput.onDrop = (drop) => this.onInputDrop(drop);
     this.reconciler = new StreamReconciler(
       (epoch, afterSeq) => this.resumeStream(epoch, afterSeq),
       {
@@ -149,6 +160,22 @@ export class ConnectionManager implements TerminalTransport {
    */
   send(data: string): void {
     if (this.disposed) { return; }
+    // A client without the lease does not get to number input at all (#1307
+    // SC-10). The capability refuses an observer's `sendInput` as well, but it
+    // refuses it *after* this point, and a chunk accepted here is not inert
+    // until then: it holds a position, and the positions above the cursor are a
+    // contiguous run the agent reads as a gap the moment one of them is missing
+    // or out of order. So an observer's keystroke is not merely late — it is a
+    // hole the client's own real input is then numbered across, which the agent
+    // refuses for every chunk that follows. Refusing here means the queue never
+    // holds bytes this client has no right to send.
+    //
+    // Asked of the capability rather than mirrored, because the lease has one
+    // owner and a second copy of "who holds it" is a second answer that can
+    // drift from the first. P2P only, like the rest of the role gate: the relay
+    // path binds no agent capability, and `observerReadOnly` in the
+    // orchestration is P2P-only for the same reason.
+    if (this.agentApi?.getControlState(this.sessionName).role === 'observer') { return; }
     // Refused at a bound: the input never reaches the transport, so there is
     // nothing to hand over and nothing to question the link about. The drop is
     // recorded on the queue for whoever reports it.
