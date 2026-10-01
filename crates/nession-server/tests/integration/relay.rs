@@ -241,6 +241,36 @@ async fn send_and_recv(
     }
 }
 
+/// Read relay frames until one carries `want`, skipping everything else.
+///
+/// Separate from [`send_and_recv`] because this one is looking for an
+/// **unsolicited** frame: an acknowledgement is a notification with no request
+/// to pair against, so there is no id to match — only the wire name.
+async fn await_wire(
+    stream: &mut futures_util::stream::SplitStream<
+        tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
+    >,
+    want: &str,
+) -> Option<serde_json::Value> {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while tokio::time::Instant::now() < deadline {
+        match tokio::time::timeout(Duration::from_millis(500), stream.next()).await {
+            Ok(Some(Ok(WsMessage::Text(text)))) => {
+                let parsed: serde_json::Value = serde_json::from_str(&text).unwrap_or_default();
+                if parsed.get("msg_type").and_then(serde_json::Value::as_str) == Some(want) {
+                    return Some(parsed);
+                }
+            }
+            Ok(Some(Ok(_))) => continue,
+            Ok(Some(Err(_))) | Ok(None) => return None,
+            Err(_) => continue,
+        }
+    }
+    None
+}
+
 // ============================================================================
 // Relay Mode Integration Tests
 // ============================================================================
@@ -419,4 +449,169 @@ async fn relay_attach_and_terminal_io() {
         got_output,
         "expected terminal.output containing 'RELAY_TEST_MARKER'"
     );
+}
+
+/// #1307 SC-13: the relay carries the agent's input acknowledgement back to
+/// the browser.
+///
+/// The requirement's brief says to *check* this rather than assume it, and the
+/// answer is not visible from either side alone: `notify_input_ack` sends the
+/// notification to every `SessionPeer`, and the relay's `agent.attach`
+/// connection is one; the Server's agent→client loop forwards every agent frame
+/// through `send_terminal` with no `msg_type` filter. Both halves had to be
+/// measured together, because a client whose queue never drains is a client
+/// that re-sends everything it ever typed until the TTL throws it away.
+///
+/// The epoch is deliberately wrong on the first frame. `next_epoch()` is seeded
+/// from wall-clock **microseconds** (~1.79e15), so a frame naming epoch 1 can
+/// never be that session's run — the agent refuses it, writes nothing, and
+/// answers with its real epoch and a cursor still at 0. That reply is the
+/// measurement: it proves the frame reached the agent *and* that the answer
+/// came back. The second frame uses the epoch the first one revealed, so it is
+/// applied, and the cursor reaching 1 is what says the bytes reached the PTY.
+#[tokio::test]
+async fn relay_carries_the_input_ack_to_the_browser() {
+    let session_name = unique_session_name("relay-ack");
+
+    SessionManager::new().kill_session(&session_name).await.ok();
+
+    let (server_addr, server_handle, _db_dir) = start_server("test-token").await.unwrap();
+    let (agent_addr, agent_handle, agent_credentials, agent_mutations) =
+        start_agent("relay-ack-agent").await.unwrap();
+
+    let tmux = SessionManager::new();
+    tmux.create_session(&session_name, 80, 24, "/tmp", &[])
+        .await
+        .expect("create tmux session");
+
+    let client_handle = register_agent(
+        server_addr,
+        "relay-ack-agent",
+        "test-token",
+        agent_addr.port(),
+        Arc::clone(&agent_credentials),
+        Arc::clone(&agent_mutations),
+    )
+    .await
+    .unwrap();
+
+    let heartbeat = HeartbeatLoop::new(client_handle.clone(), SessionManager::new(), 1);
+    let heartbeat_shutdown = heartbeat.shutdown_handle();
+    tokio::spawn(async move {
+        let _ = heartbeat.run().await;
+    });
+
+    let watcher = SessionWatcher::new(client_handle.clone(), SessionManager::new(), 1);
+    let watcher_shutdown = watcher.shutdown_handle();
+    tokio::spawn(async move {
+        let _ = watcher.run().await;
+    });
+
+    tokio::time::sleep(Duration::from_millis(2000)).await;
+
+    let url = format!("ws://{server_addr}");
+    let (ws, _) = connect_async(&url).await.expect("client connect");
+    let (mut sink, mut stream) = ws.split();
+
+    let auth_req = msg(
+        "server.auth",
+        "auth-1",
+        serde_json::json!({ "auth_token": "test-token" }),
+    );
+    send_and_recv(&mut sink, &mut stream, &auth_req)
+        .await
+        .unwrap();
+
+    let session_id = format!("relay-ack-agent:{session_name}");
+    let attach_req = msg(
+        "server.session.attach",
+        "attach-1",
+        serde_json::json!({ "session_id": session_id, "preferred_mode": "relay" }),
+    );
+    let attach_resp = send_and_recv(&mut sink, &mut stream, &attach_req)
+        .await
+        .unwrap();
+    assert_eq!(
+        attach_resp["payload"]["status"], "success",
+        "attach failed: {attach_resp}"
+    );
+
+    let begin_req = msg(
+        "server.session.relay.begin",
+        "begin-1",
+        serde_json::json!({ "session_id": session_id }),
+    );
+    sink.send(WsMessage::Text(begin_req.to_string()))
+        .await
+        .expect("send begin");
+
+    // A frame naming an epoch this session cannot be in. It is refused, and
+    // the refusal is still an acknowledgement — the one that tells us what the
+    // real epoch is.
+    let probe = msg(
+        "agent.terminal.input",
+        "input-probe",
+        serde_json::json!({
+            "session_name": session_name,
+            "data": base64::engine::general_purpose::STANDARD.encode("echo RELAY_ACK_MARKER\n"),
+            "input_epoch": 1,
+            "seq_start": 1,
+            "seq_end": 1,
+        }),
+    );
+    sink.send(WsMessage::Text(probe.to_string()))
+        .await
+        .expect("send probe input");
+
+    let refused_ack = await_wire(&mut stream, "agent.terminal.input.ack")
+        .await
+        .expect("the relay must carry the agent's input acknowledgement to the browser");
+
+    assert_eq!(
+        refused_ack["payload"]["session_name"], session_name,
+        "the acknowledgement names the session it is about: {refused_ack}"
+    );
+    assert_eq!(
+        refused_ack["payload"]["applied_through"], 0,
+        "a frame from another epoch writes nothing, so the cursor does not move: {refused_ack}"
+    );
+    let epoch = refused_ack["payload"]["input_epoch"]
+        .as_u64()
+        .expect("the agent states the epoch it is actually in");
+
+    // Now the same bytes at the position the agent just stated.
+    let applied = msg(
+        "agent.terminal.input",
+        "input-1",
+        serde_json::json!({
+            "session_name": session_name,
+            "data": base64::engine::general_purpose::STANDARD.encode("echo RELAY_ACK_MARKER\n"),
+            "input_epoch": epoch,
+            "seq_start": 1,
+            "seq_end": 1,
+        }),
+    );
+    sink.send(WsMessage::Text(applied.to_string()))
+        .await
+        .expect("send sequenced input");
+
+    let applied_ack = await_wire(&mut stream, "agent.terminal.input.ack")
+        .await
+        .expect("the applied frame is acknowledged too");
+
+    assert_eq!(
+        applied_ack["payload"]["input_epoch"], epoch,
+        "the acknowledgement is about the run the frame named: {applied_ack}"
+    );
+    assert_eq!(
+        applied_ack["payload"]["applied_through"], 1,
+        "ACK means the bytes reached the PTY, and the cursor says so: {applied_ack}"
+    );
+
+    heartbeat_shutdown.shutdown().await.ok();
+    watcher_shutdown.shutdown().await.ok();
+    tmux.kill_session(&session_name).await.ok();
+    client_handle.shutdown().await.ok();
+    agent_handle.shutdown().await.ok();
+    server_handle.abort();
 }
