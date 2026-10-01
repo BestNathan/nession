@@ -1000,9 +1000,9 @@ pub(crate) struct P2pRequest<'a> {
     /// value would move it out of `handle_request` for every arm that still
     /// names the local directly.
     attach_mode: &'a AttachMode,
-    /// The agent's resize lane, which this socket publishes
-    /// `%window-resize` events into (`#961-D`). See
-    /// [`crate::server::resize`].
+    /// The agent's resize lane, which this socket publishes the control
+    /// channel's size changes into (`#961-D`; `crate::tmux::control` says which
+    /// notification those actually are). See [`crate::server::resize`].
     resize: &'a ResizeReporter,
 }
 
@@ -1918,8 +1918,8 @@ p2p_routes! { ctx, msg_type, payload_value;
                                 // session was closed by the detach handler.
                             });
 
-                            // Spawn a second task that forwards
-                            // `%window-resize` events as `terminal.resize`.
+                            // Spawn a second task that forwards the window's
+                            // size changes as `terminal.resize`.
                             //
                             // Each resize is ALSO published to the agent's
                             // resize lane so relay clients (browser → server →
@@ -4935,8 +4935,9 @@ mod tests {
     /// to the frame this produced before resizes could carry a position
     /// (#1303).
     ///
-    /// Every `%window-resize` echo and every frame the Server forwards is a
-    /// level, and `terminal_resize_frame` is the one place either is built. The
+    /// Every size the control channel reports is a level, and so is every frame
+    /// the Server rebroadcasts to a relay client — `terminal_resize_frame` is
+    /// the one place either is built. The
     /// property is not free: emitting `"stream_epoch":null` for them would hand
     /// an older reader a null it has to tolerate, which is exactly what the
     /// payload's `skip_serializing_if` pair exists to prevent — and it is
