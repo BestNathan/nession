@@ -48,6 +48,8 @@ export function TerminalRegion({
     transportEpoch,
     terminalControl,
     onTakeControl,
+    inputDrop,
+    dismissInputDrop,
   } = useTerminalOrchestration({ onDisconnect, onError });
 
   return (
@@ -72,6 +74,8 @@ export function TerminalRegion({
           onTakeControl={() => {
             void onTakeControl();
           }}
+          inputDrop={inputDrop}
+          onDismissInputDrop={dismissInputDrop}
         >
           <TerminalPane
             sessionId={sessionId}

@@ -11,6 +11,12 @@ const DEFAULT_STREAM_EVENTS: usize = 4096;
 
 /// Hands out an epoch no client can already be holding.
 ///
+/// It serves **both** the output stream ([`SessionStreamState`]) and the input
+/// cursor ([`SessionInputState`]), because the two want the same three
+/// properties and neither wants the other's value: the generations are
+/// independent (the output timeline is not the input timeline, #1307), and what
+/// they share is the *rule for making a fresh number*, not a number.
+///
 /// **A fresh stream state is a *different* stream, and the epoch is the only
 /// thing that says so.** A client keeps its `lastStreamSeq` across a reconnect,
 /// and resets it only when the epoch it receives differs from the one it holds.
@@ -41,7 +47,7 @@ const DEFAULT_STREAM_EVENTS: usize = 4096;
 /// be distinct rather than ordered. Seeded from wall-clock **microseconds**,
 /// which stays under the limit for some hundreds of thousands of years and
 /// costs no dependency.
-static NEXT_STREAM_EPOCH: OnceLock<AtomicU64> = OnceLock::new();
+static NEXT_EPOCH: OnceLock<AtomicU64> = OnceLock::new();
 
 /// The largest integer a JavaScript number represents exactly: 2^53 - 1.
 const JS_SAFE_INTEGER: u64 = (1 << 53) - 1;
@@ -50,8 +56,8 @@ const JS_SAFE_INTEGER: u64 = (1 << 53) - 1;
 /// before it walks into the range a browser rounds.
 const EPOCH_SEED_CEILING: u64 = JS_SAFE_INTEGER - 1_000_000;
 
-fn next_stream_epoch() -> u64 {
-    NEXT_STREAM_EPOCH
+fn next_epoch() -> u64 {
+    NEXT_EPOCH
         .get_or_init(|| {
             let seed = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -133,6 +139,185 @@ impl Default for SessionControlState {
     }
 }
 
+/// What one input frame says about its own place in the session's input stream
+/// (#1307).
+///
+/// Built from the wire payload by the arm that serves it, and named here so the
+/// decision below can be tested without a socket: the three sequenced fields
+/// are one statement, and a frame that names some of them is malformed rather
+/// than half-sequenced.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InputSequence {
+    /// A sender that names an epoch and a contiguous chunk range in it.
+    Sequenced {
+        epoch: u64,
+        seq_start: u64,
+        seq_end: u64,
+    },
+    /// A sender that names no sequence at all.
+    ///
+    /// Not an error and not a gap: it is a client written before this contract
+    /// existed, and its bytes reach the PTY exactly as they always did. What it
+    /// cannot do is move the cursor — there is nothing to move it to — so input
+    /// from such a sender is invisible to every later acknowledgement, and a
+    /// sequenced client that shared a session with one would see a cursor that
+    /// stalled under it. The two do not share a session in practice: sequencing
+    /// exists so that one controller's retries are safe, and there is one
+    /// controller.
+    Unsequenced,
+}
+
+impl InputSequence {
+    /// Read the three sequenced fields off a frame as one statement.
+    ///
+    /// `Err` names the field that arrived alone, because a malformed frame is a
+    /// sender's bug and the sender is the one who has to hear about it. The
+    /// three are separate fields on the wire only because an unsequenced sender
+    /// must stay legal; a sender that has any of them has all of them.
+    pub fn of(
+        epoch: Option<u64>,
+        seq_start: Option<u64>,
+        seq_end: Option<u64>,
+    ) -> Result<Self, &'static str> {
+        match (epoch, seq_start, seq_end) {
+            (None, None, None) => Ok(InputSequence::Unsequenced),
+            (Some(epoch), Some(seq_start), Some(seq_end)) => Ok(InputSequence::Sequenced {
+                epoch,
+                seq_start,
+                seq_end,
+            }),
+            (Some(_), _, _) => Err("input_epoch requires seq_start and seq_end"),
+            (None, Some(_), _) => Err("seq_start requires input_epoch and seq_end"),
+            (None, None, Some(_)) => Err("seq_end requires input_epoch and seq_start"),
+        }
+    }
+}
+
+/// The agent's input cursor: which chunk of which epoch is applied (#1307).
+///
+/// The counterpart of [`SessionStreamState`] on the other side of the socket,
+/// and deliberately not the same state: the output timeline is a *log* that a
+/// client replays, and this is a *cursor* that accounts for what has already
+/// happened. Nothing here is durable, and that is the v1 answer rather than an
+/// omission — see [`InputVerdict::StaleEpoch`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionInputState {
+    pub epoch: u64,
+    /// The highest chunk such that every chunk from 1 through it is applied.
+    ///
+    /// Contiguous by construction, because [`classify`](Self::classify) only
+    /// ever authorises the chunk that continues it. That contiguity is what
+    /// lets a client read a number instead of a set: everything at or below
+    /// this is applied, everything above it is not, and there is no third case
+    /// to represent.
+    pub applied_through: u64,
+}
+
+/// What the agent must do with one input frame, decided before a byte is
+/// written.
+///
+/// Every arm is a different answer to the same question — *may these bytes go
+/// to the PTY?* — and the ones that say no exist to keep a retry from writing
+/// the same bytes twice. The requirement's failure to prevent is
+/// `write PTY / ACK lost / reconnect / retry / PTY receives the bytes twice`,
+/// and the way this type stops it is by making the decision from the cursor
+/// alone, before any I/O has happened: a frame the cursor has already covered
+/// is not written, whatever the sender believes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InputVerdict {
+    /// Write these bytes, then advance the cursor to `through` — **and only
+    /// then**. The caller advances after `write_input` returns `Ok`, so a write
+    /// that failed leaves the cursor where it was and the sender free to retry
+    /// the same chunk.
+    Apply { through: u64 },
+    /// Already applied: write nothing, and restate the cursor.
+    ///
+    /// This is the lost-ACK retry. The sender cannot tell "my ACK was lost"
+    /// from "my frame was lost", so it re-sends; the bytes must not go to the
+    /// PTY a second time, and the sender must still learn where it stands.
+    Duplicate,
+    /// Past the cursor without continuing it. Write nothing.
+    ///
+    /// A gap cannot be repaired by the agent — it does not have the missing
+    /// bytes and must not invent them — and writing *past* it would apply the
+    /// user's later input out of order relative to the earlier input that never
+    /// arrived. So the frame is refused and the cursor is restated, which is
+    /// the sender's cue to re-send from there.
+    Gap,
+    /// The frame names an epoch this session is not in. Write nothing.
+    ///
+    /// The one verdict that is about *provenance* rather than position, and the
+    /// one the requirement spends a section on. `applied_through` lives in this
+    /// process's memory, so an agent that restarted has no cursor and cannot
+    /// say whether the input that was in flight when it died reached the PTY —
+    /// and a tmux session outlives the agent, so "it must have died before
+    /// writing" is not something the new process can know. Refusing the frame
+    /// is what makes that unprovable boundary visible to the sender instead of
+    /// letting it retry a command that may already have run. The new epoch
+    /// says which stream the refusal is about; the sender is the one that
+    /// decides what to tell the user.
+    StaleEpoch,
+}
+
+impl SessionInputState {
+    pub fn new() -> Self {
+        Self {
+            epoch: next_epoch(),
+            applied_through: 0,
+        }
+    }
+
+    /// What to do with one frame, given the cursor.
+    ///
+    /// A free function's worth of logic on a method because the cursor is the
+    /// only input: the verdict is a property of the state and the frame, and
+    /// nothing here writes, logs or decides what the sender is told.
+    pub fn classify(&self, sequence: InputSequence) -> InputVerdict {
+        match sequence {
+            InputSequence::Unsequenced => InputVerdict::Apply {
+                through: self.applied_through,
+            },
+            InputSequence::Sequenced {
+                epoch,
+                seq_start,
+                seq_end,
+            } => {
+                if epoch != self.epoch {
+                    return InputVerdict::StaleEpoch;
+                }
+                if seq_end <= self.applied_through {
+                    return InputVerdict::Duplicate;
+                }
+                if seq_start != self.applied_through.saturating_add(1) {
+                    // Includes the straddle: a frame whose range begins at or
+                    // below the cursor but ends above it. The agent has no byte
+                    // offsets — a frame is written whole or not at all — so the
+                    // honest answer is the cursor, and the sender resumes from
+                    // it with the bytes it is still holding.
+                    return InputVerdict::Gap;
+                }
+                InputVerdict::Apply { through: seq_end }
+            }
+        }
+    }
+
+    /// Move the cursor, after the bytes it accounts for are on their way.
+    ///
+    /// `max` rather than assignment so that a late advance from a frame the
+    /// lane reordered cannot walk the cursor backwards; in-order execution is
+    /// the key lane's job, and this is what keeps a violation of it from being
+    /// silent.
+    pub fn applied(&mut self, through: u64) {
+        self.applied_through = self.applied_through.max(through);
+    }
+}
+
+impl Default for SessionInputState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// One resume's answer: the events a caller is missing, and the two facts that
 /// say whether they are *all* of them (#1304).
 ///
@@ -165,10 +350,10 @@ pub struct SessionStreamState {
 impl SessionStreamState {
     pub fn new() -> Self {
         Self {
-            // Not a constant — see `next_stream_epoch`. This used to be `1`,
+            // Not a constant — see `next_epoch`. This used to be `1`,
             // which made every stream state indistinguishable from the last
             // one and left a reconnecting client's cursor looking valid.
-            epoch: next_stream_epoch(),
+            epoch: next_epoch(),
             next_seq: 0,
             events: VecDeque::new(),
             max_events: DEFAULT_STREAM_EVENTS,
@@ -540,5 +725,208 @@ mod tests {
             "first epoch was {epoch}, which looks like a small constant seed — \
              a client surviving an agent restart would collide with it"
         );
+    }
+
+    // ── Input cursor (#1307) ────────────────────────────────────────────────
+
+    /// A fresh session's input epoch is seeded like the stream's and satisfies
+    /// the same three properties, which is why both come from `next_epoch`.
+    ///
+    /// The mutation this pins is `epoch: 1`. A client holds its epoch across a
+    /// reconnect, so a restarted agent that re-used one would be asked to
+    /// confirm a cursor it never had — and would answer `StaleEpoch` for input
+    /// that is actually its own, turning every reattach into a false
+    /// delivery-unknown.
+    #[test]
+    fn a_new_input_state_never_reuses_the_epoch_it_replaces() {
+        let mut epochs = std::collections::HashSet::new();
+        for _ in 0..64 {
+            let input = SessionInputState::new();
+            assert_eq!(input.applied_through, 0);
+            assert!(
+                epochs.insert(input.epoch),
+                "input epoch {} was handed out twice; a client holding it from \
+                 the previous state would be told its own input is stale",
+                input.epoch
+            );
+            assert!(input.epoch <= JS_SAFE_INTEGER);
+        }
+    }
+
+    /// The three sequenced fields are one statement: a frame naming some of
+    /// them is malformed rather than half-sequenced.
+    #[test]
+    fn a_partial_sequence_is_not_a_sequence() {
+        assert_eq!(
+            InputSequence::of(Some(7), None, None),
+            Err("input_epoch requires seq_start and seq_end")
+        );
+        assert_eq!(
+            InputSequence::of(None, Some(1), None),
+            Err("seq_start requires input_epoch and seq_end")
+        );
+        assert_eq!(
+            InputSequence::of(None, None, Some(1)),
+            Err("seq_end requires input_epoch and seq_start")
+        );
+        assert_eq!(
+            InputSequence::of(None, None, None),
+            Ok(InputSequence::Unsequenced)
+        );
+        assert_eq!(
+            InputSequence::of(Some(7), Some(1), Some(2)),
+            Ok(InputSequence::Sequenced {
+                epoch: 7,
+                seq_start: 1,
+                seq_end: 2
+            })
+        );
+    }
+
+    /// The happy path, and the property the whole contract rests on: the cursor
+    /// moves only by the frames that continue it.
+    #[test]
+    fn a_contiguous_frame_advances_the_cursor() {
+        let mut input = SessionInputState::new();
+        let epoch = input.epoch;
+        assert_eq!(
+            input.classify(InputSequence::Sequenced {
+                epoch,
+                seq_start: 1,
+                seq_end: 1
+            }),
+            InputVerdict::Apply { through: 1 }
+        );
+        input.applied(1);
+        assert_eq!(input.applied_through, 1);
+        // A frame that coalesced three chunks advances over all three.
+        assert_eq!(
+            input.classify(InputSequence::Sequenced {
+                epoch,
+                seq_start: 2,
+                seq_end: 4
+            }),
+            InputVerdict::Apply { through: 4 }
+        );
+        input.applied(4);
+        assert_eq!(input.applied_through, 4);
+    }
+
+    /// The defect the requirement names: write, ACK lost, retry — and the bytes
+    /// must not reach the PTY twice.
+    ///
+    /// The mutation is dropping the `Duplicate` arm (letting `Apply` cover a
+    /// frame the cursor already holds). The bytes would be written again, which
+    /// is a command running twice.
+    #[test]
+    fn a_retry_of_an_applied_frame_is_not_written_again() {
+        let mut input = SessionInputState::new();
+        let epoch = input.epoch;
+        input.applied(3);
+        assert_eq!(
+            input.classify(InputSequence::Sequenced {
+                epoch,
+                seq_start: 1,
+                seq_end: 3
+            }),
+            InputVerdict::Duplicate,
+            "a frame the cursor already covers must not be written again"
+        );
+        assert_eq!(
+            input.classify(InputSequence::Sequenced {
+                epoch,
+                seq_start: 2,
+                seq_end: 3
+            }),
+            InputVerdict::Duplicate,
+            "a partially covered frame is entirely covered"
+        );
+    }
+
+    /// A gap is refused rather than jumped, and so is a straddle — the frame
+    /// whose range begins at or below the cursor and ends above it.
+    ///
+    /// The mutation is `seq_start <= applied_through + 1`, which would write
+    /// the straddle whole and re-send the bytes the cursor already covers.
+    #[test]
+    fn a_frame_that_does_not_continue_the_cursor_is_refused() {
+        let mut input = SessionInputState::new();
+        let epoch = input.epoch;
+        input.applied(3);
+        // `2..2` is deliberately absent: it ends *below* the cursor, so it is a
+        // duplicate rather than a gap, and the order of those two tests is the
+        // whole of "already applied" meaning. A range that ends at or below the
+        // cursor is covered whatever it starts at; only a range that reaches
+        // past the cursor can be a gap, because only that one has bytes the
+        // cursor does not account for.
+        for (seq_start, seq_end) in [(5u64, 6u64), (2, 4)] {
+            assert_eq!(
+                input.classify(InputSequence::Sequenced {
+                    epoch,
+                    seq_start,
+                    seq_end
+                }),
+                InputVerdict::Gap,
+                "range {seq_start}..{seq_end} does not continue a cursor at 3"
+            );
+        }
+        assert_eq!(
+            input.classify(InputSequence::Sequenced {
+                epoch,
+                seq_start: 2,
+                seq_end: 2
+            }),
+            InputVerdict::Duplicate,
+            "a range entirely below the cursor is already applied"
+        );
+        // The one range that does continue it.
+        assert_eq!(
+            input.classify(InputSequence::Sequenced {
+                epoch,
+                seq_start: 4,
+                seq_end: 4
+            }),
+            InputVerdict::Apply { through: 4 }
+        );
+    }
+
+    /// An epoch from another agent process is refused, and the cursor does not
+    /// move — this is what makes an unprovable commit boundary visible rather
+    /// than let it be retried blind.
+    ///
+    /// The mutation is dropping the epoch check, which is the whole of SC-09's
+    /// mechanism: the two epochs are indistinguishable from two numbers, and
+    /// only the refusal keeps the second from being applied over the first.
+    #[test]
+    fn input_from_another_epoch_is_refused() {
+        let input = SessionInputState::new();
+        let epoch = input.epoch;
+        assert_eq!(
+            input.classify(InputSequence::Sequenced {
+                epoch: epoch + 1,
+                seq_start: 1,
+                seq_end: 1
+            }),
+            InputVerdict::StaleEpoch,
+            "a frame from another epoch must not advance this one's cursor"
+        );
+        assert_eq!(input.applied_through, 0);
+    }
+
+    /// A sender with no sequence writes, and moves nothing.
+    ///
+    /// The mutation is treating `Unsequenced` as a gap: every client written
+    /// before this contract existed would stop being able to type.
+    #[test]
+    fn an_unsequenced_frame_writes_without_moving_the_cursor() {
+        let mut input = SessionInputState::new();
+        assert_eq!(
+            input.classify(InputSequence::Unsequenced),
+            InputVerdict::Apply {
+                through: input.applied_through
+            }
+        );
+        input.applied(input.applied_through);
+        assert_eq!(input.applied_through, 0);
     }
 }

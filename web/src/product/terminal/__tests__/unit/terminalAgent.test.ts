@@ -2,6 +2,17 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ATTACH_TIMEOUT_MS, createTerminalAgentApi, type TerminalAgentApi } from '@/product/terminal';
 import { createMockPluginSurface, type MockPluginSurface } from '@/test/mockPluginSurface';
 
+/**
+ * This client's identity, fixed rather than read from `localStorage` — which
+ * the unit environment does not have, and which would make "am I the
+ * controller" depend on whatever a previous test left behind. The lease decides
+ * the role by comparing `controller_client_id` against exactly this, so naming
+ * it is what makes the role arithmetic in these tests legible.
+ */
+vi.mock('@/platform/socket/clientId', () => ({
+  getOrCreateClientId: () => 'this-client',
+}));
+
 describe('createTerminalAgentApi', () => {
   let surface: MockPluginSurface;
   let api: TerminalAgentApi;
@@ -84,6 +95,54 @@ describe('createTerminalAgentApi', () => {
 
       expect(surface.sent).toEqual([
         { type: 'agent.terminal.input', payload: { session_name: 'work', data: 'aGVsbG8=' } },
+      ]);
+    });
+
+    /**
+     * #1307 SC-10's wire half: an observer's keystroke does not leave the
+     * client.
+     *
+     * This is the last check between a controller's privilege and the wire, and
+     * on P2P it is the *only* one — the agent's own lease is per-connection, so
+     * it has no second opinion to offer about which browser typed. The role is
+     * decided here because it is learned here: `control_role` arrives on this
+     * client's attach reply, and `agent.terminal.control.changed` moves it.
+     *
+     * Untested until now, which is what made it worth writing down: an early
+     * `return` with no test is a line a later refactor deletes as dead weight,
+     * and the deletion puts an observer's bytes on the wire with nothing above
+     * to notice.
+     */
+    it('sends nothing while this client is an observer (#1307 SC-10)', async () => {
+      const pending = api.attach('work', { cols: 80, rows: 24 });
+      surface.resolveNext('agent.attach', { control_role: 'observer' });
+      await expect(pending).resolves.toMatchObject({ ok: true, controlRole: 'observer' });
+
+      api.sendInput('work', 'rm -rf build');
+
+      expect(surface.sent).toEqual([]);
+    });
+
+    it('sends again once the lease is taken back', async () => {
+      const pending = api.attach('work', { cols: 80, rows: 24 });
+      surface.resolveNext('agent.attach', { control_role: 'observer' });
+      await pending;
+
+      // Another client holds the lease, and this one takes it: the generation
+      // moves, and the notification is what turns the role back.
+      surface.pushMessage('agent.terminal.control.changed', {
+        session_name: 'work',
+        generation: 3,
+        controller_client_id: 'this-client',
+      });
+
+      api.sendInput('work', 'ls');
+
+      expect(surface.sent).toEqual([
+        {
+          type: 'agent.terminal.input',
+          payload: { session_name: 'work', data: 'bHM=', control_generation: 3 },
+        },
       ]);
     });
   });

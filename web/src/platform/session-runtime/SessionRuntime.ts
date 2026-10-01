@@ -158,8 +158,22 @@ export class SessionRuntime {
    * attach.
    */
   private historyMayHaveGap = false;
-  /** Latest P2P attach stream cursor from agent.attach (#1094). */
-  private p2pStreamSeed: { streamEpoch?: number; streamCursor?: number } | null = null;
+  /**
+   * Latest P2P attach cursor from agent.attach — the stream timeline's
+   * (#1094) and the input cursor's (#1307).
+   *
+   * One seed rather than two, because they are stated by one reply and are read
+   * at one moment: the effect that consumes this runs on the transition to
+   * `attached`, and two getters would let a caller read one without the other
+   * and seed a stream cursor against an input cursor from a different attach.
+   */
+  private p2pAttachSeed: {
+    streamEpoch?: number;
+    streamCursor?: number;
+    inputEpoch?: number;
+    inputAppliedThrough?: number;
+    controlGeneration?: number;
+  } | null = null;
   private connectionUnsub: (() => void) | null = null;
   /** Liveness probe for the live P2P transport — see `startLivenessProbe`. */
   private livenessTimer: ReturnType<typeof setInterval> | null = null;
@@ -300,8 +314,14 @@ export class SessionRuntime {
     return this.agentTerminalApi;
   }
 
-  getP2pStreamSeed(): { streamEpoch?: number; streamCursor?: number } | null {
-    return this.p2pStreamSeed;
+  getP2pAttachSeed(): {
+    streamEpoch?: number;
+    streamCursor?: number;
+    inputEpoch?: number;
+    inputAppliedThrough?: number;
+    controlGeneration?: number;
+  } | null {
+    return this.p2pAttachSeed;
   }
 
   /** Live agent-transport connection state ('disconnected' outside the P2P transport). */
@@ -458,9 +478,12 @@ export class SessionRuntime {
       needsBootstrap: this.needsBootstrap(),
       transportGeneration: this.transportGeneration,
       onAttachOk: (result) => {
-        this.p2pStreamSeed = {
+        this.p2pAttachSeed = {
           streamEpoch: result.streamEpoch,
           streamCursor: result.streamCursor,
+          inputEpoch: result.inputEpoch,
+          inputAppliedThrough: result.inputAppliedThrough,
+          controlGeneration: result.controlGeneration,
         };
       },
     });

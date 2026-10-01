@@ -65,7 +65,30 @@ env_snapshots: Array<EnvSnapshot>,
  * before this field would get.
  */
 needs_bootstrap?: boolean | null, };
-export type ClientAttachResponse = { session_name: string, control_generation?: number | null, control_role?: string | null, controller_client_id?: string | null, stream_epoch?: number | null, stream_cursor?: number | null, };
+export type ClientAttachResponse = { session_name: string, control_generation?: number | null, control_role?: string | null, controller_client_id?: string | null, stream_epoch?: number | null, stream_cursor?: number | null, 
+/**
+ * The agent's input epoch and applied cursor, stated on attach (#1307).
+ *
+ * This is the **reconcile**, and it is here rather than on a wire of its
+ * own because a client that has just attached is exactly the client that
+ * does not know what became of the input it had in flight: its transport
+ * was rebuilt, and the frames it had sent on the old one may or may not
+ * have reached the PTY. The answer it needs is two numbers it would
+ * otherwise have to ask for separately, at the one moment it is certain to
+ * ask — and asking separately would need its own request, its own
+ * timeout, and its own ordering against the first input frame.
+ *
+ * Absent means **not stated**, never zero (#1304): a provider that holds
+ * no input state for this session — an agent built before this field
+ * existed — omits both, and a client that gets neither knows only that it
+ * cannot prove anything, which is the honest reading.
+ *
+ * A stated epoch that differs from the one a client is holding is the
+ * **delivery-unknown** signal: the agent that would have to say whether
+ * the pending bytes landed is gone, and its answer died with it. A client
+ * must not replay that input automatically.
+ */
+input_epoch?: number | null, input_applied_through?: number | null, };
 export type EnvSnapshot = { name: string, source: EnvSource, agent_id?: string | null, 
 /**
  * Ordered KEY/VALUE pairs (already deduplicated, last-wins).
@@ -126,5 +149,28 @@ env_snapshots: Array<EnvSnapshot>,
 needs_bootstrap?: boolean | null, };
 
 /** The payload the provider answers with. */
-export type ClientAttachReply = { session_name: string, control_generation?: number | null, control_role?: string | null, controller_client_id?: string | null, stream_epoch?: number | null, stream_cursor?: number | null, };
+export type ClientAttachReply = { session_name: string, control_generation?: number | null, control_role?: string | null, controller_client_id?: string | null, stream_epoch?: number | null, stream_cursor?: number | null, 
+/**
+ * The agent's input epoch and applied cursor, stated on attach (#1307).
+ *
+ * This is the **reconcile**, and it is here rather than on a wire of its
+ * own because a client that has just attached is exactly the client that
+ * does not know what became of the input it had in flight: its transport
+ * was rebuilt, and the frames it had sent on the old one may or may not
+ * have reached the PTY. The answer it needs is two numbers it would
+ * otherwise have to ask for separately, at the one moment it is certain to
+ * ask — and asking separately would need its own request, its own
+ * timeout, and its own ordering against the first input frame.
+ *
+ * Absent means **not stated**, never zero (#1304): a provider that holds
+ * no input state for this session — an agent built before this field
+ * existed — omits both, and a client that gets neither knows only that it
+ * cannot prove anything, which is the honest reading.
+ *
+ * A stated epoch that differs from the one a client is holding is the
+ * **delivery-unknown** signal: the agent that would have to say whether
+ * the pending bytes landed is gone, and its answer died with it. A client
+ * must not replay that input automatically.
+ */
+input_epoch?: number | null, input_applied_through?: number | null, };
 

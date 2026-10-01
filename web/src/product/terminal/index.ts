@@ -4,7 +4,13 @@
 // never leaks into those consumers.
 export { ATTACH_TIMEOUT_MS } from './agent';
 export { createTerminalAgentApi } from './agent';
-export type { AgentError, TerminalAgentApi, TerminalResizeFrame } from './agent';
+export type {
+  AgentError,
+  TerminalAgentApi,
+  TerminalInputAck,
+  TerminalInputSequence,
+  TerminalResizeFrame,
+} from './agent';
 export { TerminalServerPlugin } from './server';
 export { decodeTerminalData } from './base64';
 export { terminalServerApi } from './server';

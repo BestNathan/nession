@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { ConnectionManager } from '@/platform/terminal-runtime/ConnectionManager';
-import type { AgentError, TerminalAgentApi, TerminalResizeFrame } from '@/product/terminal';
+import { ConnectionManager, INPUT_QUEUE_BOUNDS } from '@/platform/terminal-runtime/ConnectionManager';
+import type { AgentError, TerminalAgentApi, TerminalInputAck, TerminalResizeFrame } from '@/product/terminal';
 import type { ResumeReply } from '@/platform/terminal-runtime/streamReconciler';
 import type { TerminalBootstrap } from '@/platform/terminal-runtime/bootstrap';
 import type { ConnectionState } from '@/platform/socket/types';
@@ -46,16 +46,22 @@ interface AgentApiHarness {
   outputHandlers: Array<(frame: { data: Uint8Array; streamEpoch?: number; streamSeq?: number; bootstrap?: TerminalBootstrap }) => void>;
   resizeHandlers: Array<(frame: TerminalResizeFrame) => void>;
   errorHandlers: Array<(error: AgentError) => void>;
+  inputAckHandlers: Array<(ack: TerminalInputAck) => void>;
+  controlChangedHandlers: Array<(sessionName: string, state: { role: 'controller' | 'observer'; generation?: number }) => void>;
 }
 
-function makeAgentApi(): AgentApiHarness & { unsubs: { output: ReturnType<typeof vi.fn>; resize: ReturnType<typeof vi.fn>; error: ReturnType<typeof vi.fn> } } {
+function makeAgentApi(): AgentApiHarness & { unsubs: { output: ReturnType<typeof vi.fn>; resize: ReturnType<typeof vi.fn>; error: ReturnType<typeof vi.fn>; inputAck: ReturnType<typeof vi.fn>; controlChanged: ReturnType<typeof vi.fn> } } {
   const outputHandlers: Array<(frame: { data: Uint8Array; streamEpoch?: number; streamSeq?: number; bootstrap?: TerminalBootstrap }) => void> = [];
   const resizeHandlers: Array<(frame: TerminalResizeFrame) => void> = [];
   const errorHandlers: Array<(error: AgentError) => void> = [];
+  const inputAckHandlers: Array<(ack: TerminalInputAck) => void> = [];
+  const controlChangedHandlers: Array<(sessionName: string, state: { role: 'controller' | 'observer'; generation?: number }) => void> = [];
   const unsubs = {
     output: vi.fn(() => {}),
     resize: vi.fn(() => {}),
     error: vi.fn(() => {}),
+    inputAck: vi.fn(() => {}),
+    controlChanged: vi.fn(() => {}),
   };
   const api = {
     attach: vi.fn(),
@@ -63,7 +69,14 @@ function makeAgentApi(): AgentApiHarness & { unsubs: { output: ReturnType<typeof
     sendResize: vi.fn(),
     getControlState: vi.fn(() => ({ role: 'controller' as const })),
     acquireControl: vi.fn(),
-    onControlChanged: vi.fn(() => () => {}),
+    onControlChanged: vi.fn((cb: (sessionName: string, state: { role: 'controller' | 'observer'; generation?: number }) => void) => {
+      controlChangedHandlers.push(cb);
+      return unsubs.controlChanged;
+    }),
+    onInputAck: vi.fn((cb: (ack: TerminalInputAck) => void) => {
+      inputAckHandlers.push(cb);
+      return unsubs.inputAck;
+    }),
     resumeStream: vi.fn(async () => ({ streamEpoch: 1, epochMatch: true, events: [] })),
     onOutput: vi.fn((cb: (frame: { data: Uint8Array }) => void) => {
       outputHandlers.push(cb);
@@ -87,6 +100,8 @@ function makeAgentApi(): AgentApiHarness & { unsubs: { output: ReturnType<typeof
     outputHandlers,
     resizeHandlers,
     errorHandlers,
+    inputAckHandlers,
+    controlChangedHandlers,
     unsubs,
   };
 }
@@ -94,13 +109,14 @@ function makeAgentApi(): AgentApiHarness & { unsubs: { output: ReturnType<typeof
 function makeMockWs(): RelayServerTransport {
   return {
     sendRelayInput: vi.fn(),
+    isReady: vi.fn(() => true),
     sendRelayResize: vi.fn(),
     onRelayOutput: vi.fn().mockReturnValue(() => {}),
     onRelayResize: vi.fn().mockReturnValue(() => {}),
+    onRelayInputAck: vi.fn().mockReturnValue(() => {}),
     onConnectionStateChange: vi.fn().mockReturnValue(() => {}),
     beginRelay: vi.fn(),
     endRelay: vi.fn(),
-    isReady: () => true,
   };
 }
 
@@ -648,6 +664,263 @@ describe('ConnectionManager', () => {
     });
   });
 
+  describe('sequenced input delivery (#1307)', () => {
+    /** A manager over the p2p harness, with the agent's cursor already seeded. */
+    function seeded(over: { inputEpoch?: number; appliedThrough?: number; controlGeneration?: number } = {}) {
+      const harness = makeAgentApi();
+      const cm = new ConnectionManager({
+        mode: 'p2p', sessionName: 'test', sessionId: 'a:test', agentApi: harness.api, ...attached,
+      });
+      cm.seedInputCursor({
+        inputEpoch: over.inputEpoch ?? 7,
+        appliedThrough: over.appliedThrough ?? 0,
+        controlGeneration: over.controlGeneration ?? 2,
+      });
+      return { harness, cm };
+    }
+
+    /** Push one acknowledgement to every subscriber the manager registered. */
+    function deliverAck(
+      harness: AgentApiHarness,
+      ack: { inputEpoch: number; appliedThrough: number; controlGeneration?: number },
+    ) {
+      for (const handler of harness.inputAckHandlers) {
+        handler({ sessionName: 'test', ...ack });
+      }
+    }
+
+    /**
+     * The mutation is dropping the sequence from the frame: the agent would
+     * write the bytes and move no cursor, so nothing the user typed could ever
+     * be acknowledged and no retry could be checked against anything.
+     */
+    it('sends input at a position once the agent has stated one', () => {
+      const { harness, cm } = seeded({ appliedThrough: 4 });
+      cm.send('a');
+      expect(harness.api.sendInput).toHaveBeenCalledWith('test', 'a', {
+        inputEpoch: 7,
+        seqStart: 5,
+        seqEnd: 5,
+      });
+      cm.dispose();
+    });
+
+    /**
+     * A cursor is cumulative, so the next chunk continues it — this is the
+     * derivation the whole retry story rests on, and a stored counter would
+     * drift from it the first time an acknowledgement arrived.
+     */
+    it('numbers consecutive chunks from the cursor', () => {
+      const { harness, cm } = seeded({ appliedThrough: 4 });
+      cm.send('a');
+      deliverAck(harness, { inputEpoch: 7, appliedThrough: 5 });
+      cm.send('b');
+      expect(harness.api.sendInput).toHaveBeenLastCalledWith('test', 'b', {
+        inputEpoch: 7,
+        seqStart: 6,
+        seqEnd: 6,
+      });
+      cm.dispose();
+    });
+
+    /**
+     * SC-03 at the client's end: the chunk an acknowledgement covered is gone
+     * from the queue, so the flush after a reconnect re-sends the rest and not
+     * the whole run. Sending it again would be a duplicate the agent has to
+     * refuse, and the acknowledgement exists precisely so the client can stop
+     * offering bytes the PTY already has.
+     */
+    it('does not re-send a chunk the agent has acknowledged', () => {
+      const { harness, cm } = seeded();
+      cm.send('a');
+      cm.send('b');
+      deliverAck(harness, { inputEpoch: 7, appliedThrough: 1 });
+      vi.mocked(harness.api.sendInput).mockClear();
+      cm.flushInputBuffer();
+      expect(harness.api.sendInput).toHaveBeenCalledTimes(1);
+      expect(harness.api.sendInput).toHaveBeenCalledWith('test', 'b', {
+        inputEpoch: 7,
+        seqStart: 2,
+        seqEnd: 2,
+      });
+      cm.dispose();
+    });
+
+    /**
+     * SC-04: the attach reply is the reconcile, and the queue keeps exactly the
+     * run above the cursor it states. The mutation is flushing before
+     * reconciling, or ignoring the stated cursor — either re-sends chunks the
+     * agent already applied.
+     */
+    it('resends only what is above the cursor an attach states', () => {
+      const { harness, cm } = seeded({ appliedThrough: 0 });
+      cm.send('a');
+      cm.send('b');
+      cm.send('c');
+      vi.mocked(harness.api.sendInput).mockClear();
+      // The reattach: two of the three were applied and their acks were lost.
+      cm.seedInputCursor({ inputEpoch: 7, appliedThrough: 2, controlGeneration: 2 });
+      cm.flushInputBuffer();
+      expect(harness.api.sendInput).toHaveBeenCalledTimes(1);
+      expect(harness.api.sendInput).toHaveBeenCalledWith('test', 'c', {
+        inputEpoch: 7,
+        seqStart: 3,
+        seqEnd: 3,
+      });
+      cm.dispose();
+    });
+
+    /**
+     * SC-09 at the client's end: an epoch that moved means the agent that could
+     * say whether these bytes landed is gone. Re-sending them would be
+     * replaying input that may already have run.
+     */
+    it('discards pending input rather than replaying it when the epoch moves', () => {
+      const { harness, cm } = seeded({ inputEpoch: 7 });
+      cm.send('a');
+      cm.send('b');
+      vi.mocked(harness.api.sendInput).mockClear();
+      cm.seedInputCursor({ inputEpoch: 8, appliedThrough: 0, controlGeneration: 2 });
+      cm.flushInputBuffer();
+      expect(harness.api.sendInput).not.toHaveBeenCalled();
+      cm.dispose();
+    });
+
+    /**
+     * SC-08: the lease moved to another client, so bytes typed under the old
+     * generation must not arrive under the new one's name — which is what would
+     * happen to a client that got the lease back and simply flushed what it had
+     * been holding.
+     */
+    it('discards pending input when the control generation moves', () => {
+      const { harness, cm } = seeded({ controlGeneration: 2 });
+      cm.send('a');
+      vi.mocked(harness.api.sendInput).mockClear();
+      for (const handler of harness.controlChangedHandlers) {
+        handler('test', { role: 'controller', generation: 3 });
+      }
+      cm.flushInputBuffer();
+      expect(harness.api.sendInput).not.toHaveBeenCalled();
+      cm.dispose();
+    });
+
+    /** A control change for another session says nothing about this one's input. */
+    it('ignores a control change for another session', () => {
+      const { harness, cm } = seeded({ controlGeneration: 2 });
+      cm.send('a');
+      vi.mocked(harness.api.sendInput).mockClear();
+      for (const handler of harness.controlChangedHandlers) {
+        handler('other', { role: 'controller', generation: 9 });
+      }
+      cm.flushInputBuffer();
+      expect(harness.api.sendInput).toHaveBeenCalledTimes(1);
+      cm.dispose();
+    });
+
+    /** An acknowledgement for another run is not this queue's to apply. */
+    it('ignores an acknowledgement for another epoch', () => {
+      const { harness, cm } = seeded({ inputEpoch: 7 });
+      cm.send('a');
+      deliverAck(harness, { inputEpoch: 8, appliedThrough: 1 });
+      vi.mocked(harness.api.sendInput).mockClear();
+      cm.flushInputBuffer();
+      expect(harness.api.sendInput).toHaveBeenCalledWith('test', 'a', {
+        inputEpoch: 7,
+        seqStart: 1,
+        seqEnd: 1,
+      });
+      cm.dispose();
+    });
+
+    /**
+     * An agent built before the input contract states no epoch, and a client
+     * that numbered input anyway would be numbering against a cursor nobody
+     * holds. The frame stays what it was: a keystroke with no position.
+     */
+    it('sends unsequenced input when the agent states no epoch', () => {
+      const harness = makeAgentApi();
+      const cm = new ConnectionManager({
+        mode: 'p2p', sessionName: 'test', sessionId: 'a:test', agentApi: harness.api, ...attached,
+      });
+      cm.seedInputCursor({ inputEpoch: undefined, appliedThrough: undefined });
+      cm.send('a');
+      expect(harness.api.sendInput).toHaveBeenCalledWith('test', 'a');
+      cm.dispose();
+    });
+
+    /**
+     * A relay client with no cursor still sends what it always sent.
+     *
+     * The transport split that used to be *is* the split that remains, stated
+     * by the one thing actually true about it: neither an agent built before
+     * the contract nor a relay attach states a position, so there is nothing to
+     * number against and the queue is a buffer rather than a retry log.
+     */
+    it('sends unsequenced relay input when no cursor was stated', () => {
+      const ws = makeMockWs();
+      const cm = new ConnectionManager({
+        mode: 'relay', sessionName: 'test', sessionId: 'a:test', serverConnection: ws, ...attached,
+      });
+      cm.send('a');
+      expect(ws.sendRelayInput).toHaveBeenCalledWith('test', 'a');
+      cm.dispose();
+    });
+
+    /**
+     * A bound refuses the newest input rather than evicting the oldest, because
+     * the oldest carries the front position and evicting it would leave a run
+     * the agent refuses forever. The refusal is recorded, not swallowed.
+     */
+    it('refuses input past the byte bound and keeps what it already holds', () => {
+      const { harness, cm } = seeded({ appliedThrough: 0 });
+      // Read from the policy rather than restated: the bound is a measured
+      // figure and it moved once already (#1307 stage 5). A copy here would
+      // have kept passing against the old number while testing nothing.
+      cm.send('x'.repeat(INPUT_QUEUE_BOUNDS.maxBytes));
+      expect(harness.api.sendInput).toHaveBeenCalledTimes(1);
+      vi.mocked(harness.api.sendInput).mockClear();
+      cm.send('y');
+      expect(harness.api.sendInput).not.toHaveBeenCalled();
+      // And the flush still offers the run it kept, at the position it had.
+      cm.flushInputBuffer();
+      expect(harness.api.sendInput).toHaveBeenCalledTimes(1);
+      cm.dispose();
+    });
+
+    /**
+     * The measurement the byte bound is set from (#1307 SC-14).
+     *
+     * A paste is one chunk, so the byte bound is the only thing that can refuse
+     * one — and it refuses it whole. Measured: a realistic paste runs 50 KB
+     * (a 200-line source block) to ~500 KB (a source file from this
+     * repository's own corpus, its largest being 326 KB). At the 64 KiB this
+     * bound shipped with, a user who pasted a file while a single keystroke was
+     * pending lost the entire paste.
+     *
+     * The mutation is the bound's value: restore `64 * 1024` and the paste
+     * below is refused, so `sendInput` is called once instead of twice.
+     */
+    it('admits a paste the size real ones measure at, alongside pending input', () => {
+      const { harness, cm } = seeded({ appliedThrough: 0 });
+      // One keystroke already pending, so the empty-queue exception does not
+      // apply — this is the case the bound actually governs.
+      cm.send('x');
+      expect(harness.api.sendInput).toHaveBeenCalledTimes(1);
+
+      cm.send('p'.repeat(500 * 1024));
+
+      // Three frames, not two: the paste was admitted, so the flush offered the
+      // whole unacknowledged run — the keystroke that was already pending, then
+      // the paste at the position after it. What is asserted is that the paste
+      // is *on the wire* at all, which is the half the bound decides.
+      const calls = vi.mocked(harness.api.sendInput).mock.calls;
+      expect(calls).toHaveLength(3);
+      const [, pasted] = calls[2];
+      expect(pasted).toHaveLength(500 * 1024);
+      cm.dispose();
+    });
+  });
+
   describe('Relay mode', () => {
     it('send routes data via serverConnection.sendRelayInput', () => {
       const ws = makeMockWs();
@@ -752,6 +1025,215 @@ describe('ConnectionManager', () => {
       cm.flushPendingResize();
       expect(ws.sendRelayResize).toHaveBeenCalledWith('test', 120, 40);
       cm.dispose();
+    });
+
+    describe('sequenced input delivery (#1307 SC-05, SC-13)', () => {
+      /**
+       * A relay manager with the attach's cursor already reconciled.
+       *
+       * `seedInputCursor` is the entry point a relay attach reaches through the
+       * same orchestration effect a direct one does — see the note on the
+       * production wiring in the report, which is the one thing these tests
+       * cannot show.
+       */
+      function seededRelay(
+        over: { inputEpoch?: number; appliedThrough?: number } = {},
+      ): {
+        ws: ReturnType<typeof makeMockWs>;
+        send: ReturnType<typeof vi.mocked<RelayServerTransport['sendRelayInput']>>;
+        cm: ConnectionManager;
+        deliverAck: (ack: Omit<TerminalInputAck, 'sessionName'>) => void;
+      } {
+        const ws = makeMockWs();
+        let ackHandler: ((ack: TerminalInputAck) => void) | null = null;
+        (ws.onRelayInputAck as ReturnType<typeof vi.fn>).mockImplementation(
+          (_sid: string, cb: (ack: TerminalInputAck) => void) => {
+            ackHandler = cb;
+            return () => {};
+          },
+        );
+        const cm = new ConnectionManager({
+          mode: 'relay', sessionName: 'test', sessionId: 'a:test', serverConnection: ws, ...attached,
+        });
+        cm.seedInputCursor({
+          inputEpoch: over.inputEpoch ?? 7,
+          appliedThrough: over.appliedThrough ?? 0,
+          controlGeneration: 2,
+        });
+        return {
+          ws,
+          send: vi.mocked(ws.sendRelayInput),
+          cm,
+          deliverAck: (ack) => ackHandler?.({ sessionName: 'test', ...ack }),
+        };
+      }
+
+      /**
+       * SC-05 on the client's half: a relay frame states its position.
+       *
+       * The mutation is **both** guards, and it has to be both — restoring the
+       * `mode === 'relay'` branch in `flushInputBuffer` alone still sends
+       * unsequenced bytes, and restoring the `mode !== 'p2p'` return in
+       * `seedInputCursor` alone means the cursor never binds so `outbound()`
+       * answers `null` and the frame goes out with no position. Only removing
+       * the pair reaches this assertion, which is why the requirement's own
+       * report recorded that a single-guard test proves nothing about the pair.
+       */
+      it('sequences relay input against the cursor the attach stated', () => {
+        const { send, cm } = seededRelay({ appliedThrough: 4 });
+        cm.send('a');
+        expect(send).toHaveBeenCalledWith('test', 'a', {
+          inputEpoch: 7,
+          seqStart: 5,
+          seqEnd: 5,
+        });
+        cm.dispose();
+      });
+
+      /**
+       * Ordering is the invariant the requirement states outright: input A
+       * before input B means the PTY sees A before B. On the relay that is a
+       * property of the positions, because the Server's merge carries every
+       * byte of a burst into one frame and the range it states is the range
+       * those bytes occupy.
+       */
+      it('numbers consecutive relay chunks from the cursor, in order', () => {
+        const { send, cm, deliverAck } = seededRelay({ appliedThrough: 0 });
+        // Acknowledged between keystrokes so each flush offers exactly the run
+        // standing above the cursor. Without the acknowledgements every flush
+        // re-offers the whole unacknowledged run — that is what a retry log is
+        // for, and the last flush would still show the order, but this states
+        // the numbering rather than the retransmission.
+        cm.send('a');
+        deliverAck({ inputEpoch: 7, appliedThrough: 1 });
+        cm.send('b');
+        deliverAck({ inputEpoch: 7, appliedThrough: 2 });
+        cm.send('c');
+        expect(send.mock.calls).toEqual([
+          ['test', 'a', { inputEpoch: 7, seqStart: 1, seqEnd: 1 }],
+          ['test', 'b', { inputEpoch: 7, seqStart: 2, seqEnd: 2 }],
+          ['test', 'c', { inputEpoch: 7, seqStart: 3, seqEnd: 3 }],
+        ]);
+        cm.dispose();
+      });
+
+      /**
+       * SC-13's ACK propagation, end to end at the client's end.
+       *
+       * Before this, the server forwarded the agent's `agent.terminal.input.ack`
+       * exactly as it forwards every other agent frame, and **nothing in the
+       * browser was subscribed to it** — so a relay client's queue never
+       * drained, every chunk stayed pending until the TTL discarded it, and
+       * each flush re-offered bytes the PTY already had.
+       *
+       * The mutation is the missing `onRelayInputAck` subscription in
+       * `setupRelay` (or the missing `agent.terminal.input.ack` subscribe in the
+       * server plugin): the ack is delivered to nobody, and the flush below
+       * re-sends both chunks.
+       */
+      it('drains acknowledged relay input, so a retry re-sends only the rest', () => {
+        const { send, cm, deliverAck } = seededRelay({ appliedThrough: 0 });
+        cm.send('a');
+        cm.send('b');
+        deliverAck({ inputEpoch: 7, appliedThrough: 1 });
+        send.mockClear();
+        cm.flushInputBuffer();
+        expect(send.mock.calls).toEqual([
+          ['test', 'b', { inputEpoch: 7, seqStart: 2, seqEnd: 2 }],
+        ]);
+        cm.dispose();
+      });
+
+      /**
+       * A cursor names a position *in a run*, so an acknowledgement for another
+       * epoch says nothing about this queue's — the same rule the direct path
+       * applies, through the same reader, which is what keeps the two
+       * transports from disagreeing about what an acknowledgement is.
+       */
+      it('ignores a relay acknowledgement that names another epoch', () => {
+        const { send, cm, deliverAck } = seededRelay({ appliedThrough: 0 });
+        cm.send('a');
+        deliverAck({ inputEpoch: 8, appliedThrough: 1 });
+        send.mockClear();
+        cm.flushInputBuffer();
+        expect(send).toHaveBeenCalledWith('test', 'a', {
+          inputEpoch: 7,
+          seqStart: 1,
+          seqEnd: 1,
+        });
+        cm.dispose();
+      });
+
+      /**
+       * SC-13's reconnect: the relay transport drops, the user keeps typing,
+       * and the flush after it comes back re-sends the run at the positions it
+       * already had.
+       *
+       * The mutation is deriving the position at flush time instead of
+       * deriving it from the cursor — a renumbering would leave the run
+       * continuing nothing, and the agent refuses a frame that does not
+       * continue its cursor, so no later input could ever land.
+       */
+      it('re-sends what a dropped relay transport could not carry, at the same positions', () => {
+        const { ws, send, cm, deliverAck } = seededRelay({ appliedThrough: 0 });
+        cm.send('a');
+        deliverAck({ inputEpoch: 7, appliedThrough: 1 });
+
+        let ready = false;
+        (ws.isReady as ReturnType<typeof vi.fn>).mockImplementation(() => ready);
+        cm.send('b');
+        cm.send('c');
+        expect(send).toHaveBeenCalledTimes(1);
+
+        ready = true;
+        cm.flushInputBuffer();
+        expect(send.mock.calls.slice(1)).toEqual([
+          ['test', 'b', { inputEpoch: 7, seqStart: 2, seqEnd: 2 }],
+          ['test', 'c', { inputEpoch: 7, seqStart: 3, seqEnd: 3 }],
+        ]);
+        cm.dispose();
+      });
+
+      /**
+       * SC-11: healthy input costs one frame per keystroke.
+       *
+       * `flushInputBuffer` re-offers **everything above the cursor**, and that
+       * is deliberate — it is the retry, and a lost acknowledgement costs
+       * nothing because the next one says the same thing. The cost of that
+       * decision is invisible until the acknowledgements stop, which is why it
+       * is measured here rather than asserted in prose:
+       *
+       * * **Measured, acknowledgements keeping up:** 64 keystrokes produce
+       *   **64** frames — one each. That is the bound below.
+       * * **Measured, acknowledgements stalled:** the same 64 keystrokes
+       *   produce **2080** frames, i.e. `K(K+1)/2`. Each keystroke re-offers
+       *   the whole unacknowledged run, so the cost is quadratic in the run
+       *   length rather than linear in the keystrokes. That number is *not*
+       *   pinned — it is the present shape of the retry, and a later change
+       *   that offered only the new chunk would be an improvement this test
+       *   must not fail.
+       *
+       * The healthy figure is what SC-11 promises, and it holds only while the
+       * acknowledgement is consumed. The mutation is that consumption —
+       * dropping the `pendingInput.acknowledge` call in `applyInputAck` (or the
+       * `onRelayInputAck` subscription that feeds it) leaves the cursor at 0,
+       * and this test then measures the quadratic case instead: 2080 frames
+       * for 64 keystrokes.
+       */
+      it('offers one frame per keystroke while acknowledgements keep up', () => {
+        const { send, cm, deliverAck } = seededRelay({ appliedThrough: 0 });
+
+        const keystrokes = 64;
+        for (let i = 1; i <= keystrokes; i += 1) {
+          cm.send('a');
+          // The agent answers each frame before the next keystroke — the
+          // healthy round trip, which is the state this bound is about.
+          deliverAck({ inputEpoch: 7, appliedThrough: i });
+        }
+
+        expect(send).toHaveBeenCalledTimes(keystrokes);
+        cm.dispose();
+      });
     });
   });
 });
