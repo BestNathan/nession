@@ -311,6 +311,39 @@ describe('ConnectionManager', () => {
       cm.dispose();
     });
 
+    it('carries a stated truncation out to the session owner (#1304)', async () => {
+      // The reconciler is React-free and owns only the cursor; "my buffer now
+      // has a hole in it" belongs to whoever owns the session, and this is the
+      // hop that carries it there. An answer the agent states is incomplete is
+      // not a filled gap, however much of a tail it carries.
+      const { api, outputHandlers } = makeAgentApi();
+      const received: string[] = [];
+      let truncated = 0;
+      const cm = new ConnectionManager({
+        mode: 'p2p', sessionName: 'test', sessionId: 'a:test', agentApi: api, ...attached,
+        onStreamTruncated: () => { truncated += 1; },
+      });
+      cm.onOutput = (data) => received.push(new TextDecoder().decode(data));
+
+      const reply = deferredReply();
+      (api.resumeStream as ReturnType<typeof vi.fn>).mockReturnValue(reply.promise);
+
+      outputHandlers[0]({ data: new TextEncoder().encode('five'), streamEpoch: 1, streamSeq: 5 });
+      outputHandlers[0]({ data: new TextEncoder().encode('twelve'), streamEpoch: 1, streamSeq: 12 });
+      reply.resolve({
+        ...replayOf({ 11: 'eleven', 12: 'twelve' }),
+        firstAvailableSeq: 11,
+        complete: false,
+      });
+      await flushMicrotasks();
+
+      expect(truncated).toBe(1);
+      // And the frames that are still there are delivered: a stated loss is not
+      // a reason to freeze the terminal on what it already holds.
+      expect(received).toEqual(['five', 'eleven', 'twelve']);
+      cm.dispose();
+    });
+
     it('discards a gap replay that lands after the transport was disposed (#1303)', async () => {
       // A resume is in flight across a transport rewire or teardown; its answer
       // describes a stream nobody is listening to any more.

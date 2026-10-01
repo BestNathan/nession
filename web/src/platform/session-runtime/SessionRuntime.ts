@@ -357,6 +357,30 @@ export class SessionRuntime {
     return this.historyMayHaveGap || !(this.config.hasSessionOutput?.() ?? false);
   }
 
+  /**
+   * The stream reported that replay cannot reach back to this client's cursor
+   * (#1304): the agent's retained window has passed it, or a hole was given up
+   * on and the frames in hand committed over it. Either way the buffer this
+   * Terminal holds has a hole in it that no later replay can fill.
+   *
+   * It is the same fact a lost transport leaves behind — "my buffer may not be
+   * complete" — and it takes the same repair, which is why it sets the same
+   * flag rather than a new one: a bootstrap **replaces** the buffer from tmux's
+   * own scrollback, so refilling a hole cannot duplicate what the client
+   * already has.
+   *
+   * The repair rides the next attach, deliberately. A snapshot cannot be asked
+   * for on a live transport — `client.attach` carries the request and
+   * `canStartAttach` refuses one while the phase is `attached` — so the choice
+   * here is between remembering and tearing down a healthy transport to force
+   * one. Remembering loses nothing that was still reachable: the events the
+   * hole is missing are already unrecoverable, and everything the buffer holds
+   * is still on screen.
+   */
+  noteStreamTruncated(): void {
+    this.historyMayHaveGap = true;
+  }
+
   updateContext(next: Partial<SessionRuntimeConfig>): RuntimeMirrorSnapshot {
     const routeChanged =
       next.routeIntentEpoch !== undefined

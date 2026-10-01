@@ -82,6 +82,34 @@ export interface TerminalResizeFrame {
 export interface TerminalStreamResumeResult {
   streamEpoch: number;
   epochMatch: boolean;
+  /**
+   * The lowest stream sequence the agent can still return — the front of its
+   * retained window (#1304).
+   *
+   * A cursor below `firstAvailableSeq - 1` has lost everything between, for
+   * good, and the agent is the only party that knows where that boundary is.
+   *
+   * `undefined` means the agent **stated none**: an epoch mismatch (there is no
+   * window for a request about another stream), or a provider built before the
+   * field existed. It is not a zero standing in for a position — a zero would
+   * claim sequence 0 is retained — so a consumer must read absence as "not
+   * said" and decide for itself what that is worth knowing.
+   */
+  firstAvailableSeq?: number;
+  /**
+   * The agent's verdict on whether {@link events} is **every** event from
+   * `afterSeq + 1` through its current cursor (#1304).
+   *
+   * Read as the agent's answer rather than recomputed from
+   * {@link firstAvailableSeq}: recomputing means re-implementing the agent's
+   * retention policy here, and reading a shorter-than-asked-for answer as whole
+   * the moment that policy bounds an answer for some other reason.
+   *
+   * `false` is the case the field exists for. It is not the same state as an
+   * empty `events` — that one is `complete: true` and means the cursor is
+   * already at the head. `undefined` again means the agent said nothing.
+   */
+  complete?: boolean;
   events: import('@/platform/terminal-runtime/streamApply').TerminalStreamEvent[];
 }
 
@@ -415,10 +443,19 @@ export function createTerminalAgentApi(surface: PluginSurface): TerminalAgentApi
         after_seq: afterSeq,
       });
       const r = reply as Record<string, unknown>;
+      // Both read by type and left `undefined` otherwise: the wire omits them
+      // when the agent has nothing to state, and a coercion here (`Number(x)`
+      // on a missing field is 0) would invent the position the contract
+      // forbids — 0 is below every sequence a stream can have (#1304).
+      const firstAvailableSeq = r.first_available_seq;
+      const complete = r.complete;
       return {
         streamEpoch:
           typeof r.stream_epoch === 'number' ? r.stream_epoch : streamEpoch,
         epochMatch: r.epoch_match === true,
+        firstAvailableSeq:
+          typeof firstAvailableSeq === 'number' ? firstAvailableSeq : undefined,
+        complete: typeof complete === 'boolean' ? complete : undefined,
         events: parseStreamEvents(r.events),
       };
     },
