@@ -114,7 +114,54 @@ describe('ConversationView', () => {
     expect(screen.getByTestId('conversation-master-detail')).toBeDefined()
     // Master-detail does not offer "back to the list": the list is already there.
     expect(screen.queryByTestId('conversation-show-list')).toBeNull()
+    expect(screen.getByTestId('conversation-nothing-open')).toBeDefined()
+    // `conversation-open` marks the detail pane, so it must be absent here —
+    // a marker that says "a conversation is open" while none is would be worse
+    // than no marker.
+    expect(screen.queryByTestId('conversation-open')).toBeNull()
+  })
+
+  it('marks the detail pane once a conversation is open', () => {
+    render(
+      <ConversationView
+        snapshot={snapshot({ conversations: [summary()], openId: 'c1', state: 'ready' })}
+        providerLabel="Claude"
+        layout="master-detail"
+        onSelect={() => undefined}
+        onLoadOlder={onLoadOlder}
+      />,
+    )
+
     expect(screen.getByTestId('conversation-open')).toBeDefined()
+    expect(screen.queryByTestId('conversation-nothing-open')).toBeNull()
+  })
+
+  it('tells an empty directory apart from a host that has none', () => {
+    const { unmount } = render(
+      <ConversationView
+        snapshot={snapshot({ listState: 'ready', conversations: [], openId: null })}
+        providerLabel="Claude"
+        layout="master-detail"
+        onSelect={() => undefined}
+        onLoadOlder={onLoadOlder}
+      />,
+    )
+    // The provider answered, and the answer is "nothing here" — which is a
+    // different sentence, and different advice, from "this host cannot".
+    expect(screen.getByTestId('conversation-not-found')).toBeDefined()
+    unmount()
+
+    render(
+      <ConversationView
+        snapshot={snapshot({ listState: 'unavailable', conversations: [], openId: null })}
+        providerLabel="Claude"
+        layout="master-detail"
+        onSelect={() => undefined}
+        onLoadOlder={onLoadOlder}
+      />,
+    )
+    expect(screen.getByTestId('conversation-unavailable')).toBeDefined()
+    expect(screen.queryByTestId('conversation-not-found')).toBeNull()
   })
 
   it('pushes the detail over the list on a narrow surface', () => {

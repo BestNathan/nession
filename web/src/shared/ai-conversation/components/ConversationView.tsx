@@ -132,7 +132,7 @@ function ListStateGuard({
   if (snapshot.listState === 'unavailable') {
     return (
       <p
-        data-testid="conversation-state"
+        data-testid="conversation-unavailable"
         className={cn('p-6 text-muted-foreground', chromeSansRole('secondary'))}
       >
         This host has no conversations here.
@@ -173,7 +173,10 @@ function listIsBlocked(snapshot: AIConversationSnapshot): boolean {
 function NothingOpen() {
   return (
     <p
-      data-testid="conversation-open"
+      // Deliberately *not* `conversation-open`: that name belongs to the detail
+      // pane, and a marker meaning "a conversation is open" that also appears
+      // when none is would be worse than no marker at all.
+      data-testid="conversation-nothing-open"
       className={cn(
         'flex h-full items-center justify-center gap-2 p-6 text-muted-foreground',
         chromeSansRole('secondary'),
@@ -237,7 +240,9 @@ export function ConversationView({
         {snapshot.openId === null ? (
           <NothingOpen />
         ) : (
-          <>
+          // `conversation-open` marks the detail pane itself — the same meaning
+          // it had before the surface moved to the shared framework.
+          <div className="flex min-h-0 flex-1 flex-col" data-testid="conversation-open">
             <ConversationHeader snapshot={snapshot} />
             <ConversationTranscript
               snapshot={snapshot}
@@ -245,7 +250,7 @@ export function ConversationView({
               onLoadOlder={onLoadOlder}
               onReload={onReload}
             />
-          </>
+          </div>
         )}
       </div>
     </div>
@@ -300,7 +305,7 @@ function PushLayout({
           )}
         </div>
       ) : (
-        <>
+        <div className="flex min-h-0 flex-1 flex-col" data-testid="conversation-open">
           <ConversationHeader snapshot={snapshot} onShowList={() => setShowingList(true)} />
           <ConversationTranscript
             snapshot={snapshot}
@@ -308,7 +313,7 @@ function PushLayout({
             onLoadOlder={onLoadOlder}
             onReload={onReload}
           />
-        </>
+        </div>
       )}
     </div>
   )
