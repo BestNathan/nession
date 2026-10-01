@@ -38,12 +38,21 @@ export const FIXTURE_FROZEN_TIME = new Date('2026-09-01T12:00:00.000Z');
  * rather than inventing a second one.
  *
  * The other half of the derivation holds, and it is what lets a region be
- * strict: the noise floor is measured rather than assumed. Two independent CI
- * regenerations of the same commit produced **byte-identical** baselines for
- * every shared image, so there is no rendering jitter for this budget to
- * absorb. Playwright's own per-pixel `threshold` (YIQ, default 0.2) already
- * covers antialiasing colour noise, so what this ratio governs is geometry and
- * content.
+ * strict. It said two independent CI regenerations of the same commit produced
+ * **byte-identical** baselines for every shared image — and that is measurably
+ * too strong, so it is corrected here too. Two regenerations of the same tree:
+ * 35 of 37 are byte-identical, and two are not — `app-sessions-status-filtered`
+ * by 6 px, `web-env-edit-dirty` by 15 px. Neither is stale; they disagree with
+ * *each other*, so the rendering is genuinely non-deterministic there.
+ *
+ * The conclusion survives because it now rests on the number that matters
+ * instead of on file identity: **none of those pixels is past the comparator's
+ * own threshold.** The worst YIQ distance among them is 0.016, against a
+ * default `threshold` of 0.2 — so Playwright counts zero differing pixels, and
+ * this ratio absorbs nothing. That is exactly the claim the derivation needs:
+ * what `0.002` governs is geometry and content, not rendering noise. Measured
+ * at file level it would have been wrong; measured at comparator level it is
+ * right, which is why the number to quote is the YIQ distance.
  *
  * One knob, not two: the ratio scales per frame, so a companion `maxDiffPixels`
  * cap would add config surface without adding protection.
