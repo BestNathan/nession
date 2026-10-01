@@ -218,8 +218,11 @@ export class ConnectionManager implements TerminalTransport {
       // in the timeline and only the reconciler may apply it: applying it here
       // would leave its sequence unaccounted for and hold the next live frame
       // behind a round trip (#1303). A resize with no position — the
-      // `%window-resize` echo — never had one to account for and goes straight
-      // through, which is what every resize did before this.
+      // `%window-resize` echo — never had one to account for, and still goes
+      // straight through; it goes through the reconciler to get there because
+      // it is also the newest word on the size, and the resizes it overtakes
+      // while they wait for their place have to learn that (#1350). The
+      // reconciler is the only thing that can tell them: the buffer is its.
       if (frame.streamEpoch !== undefined && frame.streamSeq !== undefined) {
         this.reconciler.acceptLiveResize({
           cols: frame.cols,
@@ -229,7 +232,7 @@ export class ConnectionManager implements TerminalTransport {
         });
         return;
       }
-      this.onResize?.(frame.cols, frame.rows);
+      this.reconciler.acceptLevelResize(frame.cols, frame.rows);
     });
 
     this.p2pUnsubError = api.onError((err) => {

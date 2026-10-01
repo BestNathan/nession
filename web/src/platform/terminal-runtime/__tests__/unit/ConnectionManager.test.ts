@@ -407,6 +407,45 @@ describe('ConnectionManager', () => {
       cm.dispose();
     });
 
+    it('lets a level resize supersede the recorded one the client is holding (#1350)', async () => {
+      // This class is what puts a level in front of the buffer it supersedes,
+      // and nothing downstream can recover from missing that: the frame with
+      // no position is the newest size there is, so a held one that commits
+      // after it leaves xterm on a grid the pane has left. Tested here as well
+      // as on the reconciler because routing the level *around* the reconciler
+      // passes every one of the reconciler's own tests.
+      const { api, resizeHandlers } = makeAgentApi();
+      const cm = new ConnectionManager({
+        mode: 'p2p', sessionName: 'test', sessionId: 'sess-1', agentApi: api, ...attached,
+      });
+      const onResize = vi.fn();
+      cm.onResize = onResize;
+      const reply = deferredReply();
+      (api.resumeStream as ReturnType<typeof vi.fn>).mockReturnValue(reply.promise);
+
+      // Seeded at 4, with the recorded resize at 6: 5 is missing, so there is
+      // a real gap for it to wait behind rather than "not yet" being
+      // indistinguishable from "never".
+      cm.seedStreamCursor(1, 4);
+      resizeHandlers[0]?.({ cols: 120, rows: 40, streamEpoch: 1, streamSeq: 6 });
+      expect(onResize).not.toHaveBeenCalled();
+
+      // While it waits, another connection reflows the shared pane. The agent
+      // recorded nothing, so the frame states no position — it is the size now.
+      resizeHandlers[0]?.({ cols: 100, rows: 30 });
+      expect(onResize).toHaveBeenCalledWith(100, 30);
+      onResize.mockClear();
+
+      // The gap fills and the held resize reaches its turn.
+      reply.resolve(replayOf({ 5: 'five' }));
+      await flushMicrotasks();
+
+      // It consumed its position and applied no size: the pane's is still the
+      // last one on screen.
+      expect(onResize).not.toHaveBeenCalled();
+      cm.dispose();
+    });
+
     it('does not apply a recorded resize until its place in the timeline arrives (#1303)', () => {
       // A resize the agent recorded consumed a sequence number. Applying it
       // here would show the right size and leave its position unaccounted for,
