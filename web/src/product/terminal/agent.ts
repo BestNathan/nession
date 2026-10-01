@@ -59,6 +59,23 @@ export interface TerminalOutputFrame {
   bootstrap?: TerminalBootstrap;
 }
 
+/**
+ * A `terminal.resize` frame from the agent.
+ *
+ * Two kinds arrive on the same wire, and the position is what tells them
+ * apart (#1303). A resize the agent **recorded** carries `streamEpoch`/
+ * `streamSeq`: it consumed a sequence number, so it is an event in the
+ * session's stream and belongs in the same timeline as output. A resize that
+ * only reports a size — the `%window-resize` echo, or a frame forwarded by the
+ * Server — carries neither, and is applied on its own.
+ */
+export interface TerminalResizeFrame {
+  cols: number;
+  rows: number;
+  streamEpoch?: number;
+  streamSeq?: number;
+}
+
 export interface TerminalStreamResumeResult {
   streamEpoch: number;
   epochMatch: boolean;
@@ -111,8 +128,8 @@ export interface TerminalAgentApi {
     streamEpoch: number,
     afterSeq: number,
   ): Promise<TerminalStreamResumeResult>;
-  /** Subscribe to terminal resize frames from the agent. */
-  onResize(cb: (cols: number, rows: number) => void): () => void;
+  /** Subscribe to terminal resize frames from the agent (#1303). */
+  onResize(cb: (frame: TerminalResizeFrame) => void): () => void;
   /**
    * Subscribe to uncorrelated agent `error` frames (see {@link AgentError}).
    * Errors that ack a request (e.g. `client.attach`) are consumed by the
@@ -303,10 +320,25 @@ export function createTerminalAgentApi(surface: PluginSurface): TerminalAgentApi
       };
     },
 
-    onResize: (cb: (cols: number, rows: number) => void): (() => void) => {
+    onResize: (cb: (frame: TerminalResizeFrame) => void): (() => void) => {
       return surface.subscribe(TERMINAL_RESIZE_WIRE, (payload) => {
-        const { cols, rows } = payload as { cols: number; rows: number };
-        cb(cols, rows);
+        const p = payload as {
+          cols: number;
+          rows: number;
+          stream_epoch?: unknown;
+          stream_seq?: unknown;
+        };
+        // Both or neither: the agent sets them together, and a frame that
+        // carried only one would be a position nothing can be placed at — so
+        // it is read as the level it still is rather than half-applied as an
+        // event (#1303).
+        const epoch = p.stream_epoch;
+        const seq = p.stream_seq;
+        if (typeof epoch === 'number' && typeof seq === 'number') {
+          cb({ cols: p.cols, rows: p.rows, streamEpoch: epoch, streamSeq: seq });
+          return;
+        }
+        cb({ cols: p.cols, rows: p.rows });
       });
     },
 

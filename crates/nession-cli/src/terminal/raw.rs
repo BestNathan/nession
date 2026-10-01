@@ -230,6 +230,8 @@ pub fn build_terminal_resize_message(session_name: &str, cols: u16, rows: u16) -
         cols,
         rows,
         control_generation: None,
+        stream_epoch: None,
+        stream_seq: None,
     };
     let msg = proto_msg(wire::AGENT_TERMINAL_RESIZE, payload);
     serde_json::to_string(&msg).unwrap_or_else(|_| String::new())

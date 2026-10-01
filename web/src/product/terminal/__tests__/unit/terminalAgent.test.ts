@@ -157,7 +157,47 @@ describe('createTerminalAgentApi', () => {
 
       surface.pushMessage('agent.terminal.resize', { session_name: 'work', cols: 150, rows: 50 });
 
-      expect(cb).toHaveBeenCalledWith(150, 50);
+      expect(cb).toHaveBeenCalledWith({ cols: 150, rows: 50 });
+    });
+
+    it('surfaces the stream position of a recorded resize (#1303)', () => {
+      // A resize the agent logged consumed a sequence number, and the client
+      // cannot place it without one — the decode is where a position the agent
+      // sent is either carried through or thrown away.
+      const cb = vi.fn();
+      api.onResize(cb);
+
+      surface.pushMessage('agent.terminal.resize', {
+        session_name: 'work',
+        cols: 150,
+        rows: 50,
+        stream_epoch: 1_790_771_445_798_089,
+        stream_seq: 7,
+      });
+
+      expect(cb).toHaveBeenCalledWith({
+        cols: 150,
+        rows: 50,
+        streamEpoch: 1_790_771_445_798_089,
+        streamSeq: 7,
+      });
+    });
+
+    it('reads a half-written position as the level it still is (#1303)', () => {
+      // The agent sets both fields together, so one without the other is not a
+      // position — and half-applying it would put a resize in the timeline at
+      // a sequence number nothing can be ordered against.
+      const cb = vi.fn();
+      api.onResize(cb);
+
+      surface.pushMessage('agent.terminal.resize', {
+        session_name: 'work',
+        cols: 150,
+        rows: 50,
+        stream_seq: 7,
+      });
+
+      expect(cb).toHaveBeenCalledWith({ cols: 150, rows: 50 });
     });
 
     it('stops delivering after unsubscribe', () => {
