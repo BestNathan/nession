@@ -21,13 +21,29 @@ export const FIXTURE_FROZEN_TIME = new Date('2026-09-01T12:00:00.000Z');
  *   That is how the workspace baseline kept showing chrome the app no longer
  *   had through #708, and it cost a wrong issue closure in #714.
  *
- * `0.002` is 10x tighter and sits ~2.7x below the smallest change known to have
- * slipped through. The other half of the derivation is the noise floor, measured
- * rather than assumed: two independent CI regenerations of the same commit
- * produced **byte-identical** baselines for every shared image, so there is no
- * rendering jitter for this budget to absorb. Playwright's own per-pixel
- * `threshold` (YIQ, default 0.2) already covers antialiasing colour noise, so
- * what this ratio governs is geometry and content.
+ * `0.002` is 10x tighter than `0.02`, and the sentence that used to follow —
+ * that it "sits ~2.7x below the smallest change known to have slipped through"
+ * — **was falsified by measurement and is corrected here rather than left
+ * standing** (#1332). The smallest known slip is now the Claude Code view strip
+ * gaining its third tab: **0.091%** of the frame, i.e. *below* this budget
+ * rather than 2.7x above it.
+ *
+ * That is not a reason to move the number. The budget is a *fraction of the
+ * frame*, so a chrome change confined to one strip is small by construction,
+ * and no ratio tight enough to catch it would stay above the noise floor of a
+ * whole 1440x900 frame. What changes is *where* the strictness is applied:
+ * chrome that matters is asserted as its own region, where the same change is a
+ * large fraction of the measured area — see `*-claude-code-view-tabs.png`. The
+ * whole-frame ratios stay as they are, and a region reuses this same budget
+ * rather than inventing a second one.
+ *
+ * The other half of the derivation holds, and it is what lets a region be
+ * strict: the noise floor is measured rather than assumed. Two independent CI
+ * regenerations of the same commit produced **byte-identical** baselines for
+ * every shared image, so there is no rendering jitter for this budget to
+ * absorb. Playwright's own per-pixel `threshold` (YIQ, default 0.2) already
+ * covers antialiasing colour noise, so what this ratio governs is geometry and
+ * content.
  *
  * One knob, not two: the ratio scales per frame, so a companion `maxDiffPixels`
  * cap would add config surface without adding protection.
@@ -40,6 +56,35 @@ export const FIXTURE_SCREENSHOT = {
   caret: 'hide' as const,
   maxDiffPixelRatio: 0.002,
 };
+
+/**
+ * Assert one piece of chrome as a **region**, under the same budget (#1332).
+ *
+ * The whole-frame ratio is blind to a small deliberate chrome change, and it
+ * has to be: the budget is a fraction of the frame, so a change confined to one
+ * strip can be a large, obvious change to a user and 0.091% of the image. That
+ * is exactly how a third tab reached CI green while the committed baseline
+ * still showed two (#1332), and how the workspace baseline kept a tool strip
+ * the app no longer had (#714).
+ *
+ * The fix is therefore not a tighter number — no whole-frame ratio could catch
+ * this and stay above the noise floor — but a *smaller denominator*. The same
+ * change against this element is a large fraction of the measured area, so the
+ * same `0.002` sees it. Reusing the budget is deliberate: a second, stricter
+ * number for regions would be a second thing to justify, and the derivation
+ * above is about the comparator, not the size of the picture.
+ *
+ * Apply it to chrome whose *content* is the thing under test — a strip whose
+ * set of tabs, labels or order is a decision someone made — rather than to
+ * everything, which would multiply the baseline surface for no added signal.
+ */
+export async function expectChromeRegion(
+  page: Page,
+  testId: string,
+  name: string,
+): Promise<void> {
+  await expect(page.getByTestId(testId)).toHaveScreenshot(name, FIXTURE_SCREENSHOT);
+}
 
 /** Install a fixed clock before navigation so formatRelativeTime is stable. */
 export async function freezeFixtureClock(page: Page): Promise<void> {

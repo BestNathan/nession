@@ -4,6 +4,7 @@
 import { expect, test, type Locator } from '@playwright/test';
 import {
   FIXTURE_SCREENSHOT,
+  expectChromeRegion,
   freezeFixtureClock,
   gotoFixtureApp,
   gotoFixtureShell,
@@ -138,6 +139,12 @@ test.describe('Web 1440×900', () => {
       fullPage: true,
       ...FIXTURE_SCREENSHOT,
     });
+
+    // And the strip as its own region (#1332). This is the case that found the
+    // whole-frame budget blind to exactly this: the strip gained a third tab,
+    // the change measured 0.091% of the frame, the comparison passed, and the
+    // committed baseline above still showed two tabs.
+    await expectChromeRegion(page, 'claude-code-view-tabs', 'web-claude-code-view-tabs.png');
   });
 
   test('Claude Code conversation list', async ({ page }) => {
@@ -182,6 +189,18 @@ test.describe('Web 1440×900', () => {
       fullPage: true,
       ...FIXTURE_SCREENSHOT,
     });
+
+    // The same strip with a different tab selected, so a second baseline rather
+    // than a shared one: the highlight is part of the picture, and one state's
+    // image is not evidence about another's (#1332). `Claude Code conversation
+    // list` is deliberately not asserted — it selects the same tab as the case
+    // above, so its region would be that same image, adding baseline surface
+    // without adding signal.
+    await expectChromeRegion(
+      page,
+      'claude-code-view-tabs',
+      'web-claude-code-view-tabs-configuration.png',
+    );
   });
 
   // #1202 — Environment as a context-first capability. Three states because
@@ -840,6 +859,10 @@ test.describe('App 390×844', () => {
       fullPage: true,
       ...FIXTURE_SCREENSHOT,
     });
+
+    // The App draws this view with its own layout, so its strip gets its own
+    // region rather than borrowing Web's (#1332).
+    await expectChromeRegion(page, 'claude-code-view-tabs', 'app-claude-code-view-tabs.png');
   });
 });
 
