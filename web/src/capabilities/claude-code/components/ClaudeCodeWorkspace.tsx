@@ -646,7 +646,11 @@ export function ClaudeCodeWorkspace({ ctx }: { ctx: WorkspaceContext }) {
           </div>
         ) : null}
         <Tabs value={activeView} onValueChange={(value) => setActiveView(value as View)}>
-          <TabsList>
+          {/* Named so the visual gate can assert this strip as a *region*
+              (#1332). A change here — this strip gained its third tab — is a
+              large fraction of this element and a negligible fraction of the
+              frame, which is why the whole-frame budget did not see it. */}
+          <TabsList data-testid="claude-code-view-tabs">
             <TabsTrigger value="conversations">Conversations</TabsTrigger>
             <TabsTrigger value="transcripts">Transcripts</TabsTrigger>
             <TabsTrigger value="configuration">Configuration</TabsTrigger>
