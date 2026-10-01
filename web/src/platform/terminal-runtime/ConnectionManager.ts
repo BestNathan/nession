@@ -16,26 +16,51 @@ import { PendingInputQueue, type InputDrop, type InputQueueBounds } from './inpu
  * How much typed-ahead input this client will hold for a session (#1307).
  *
  * The requirement asks for these to be fixed by measurement of real typing and
- * paste, and that measurement has not been taken — so these are reasoned
- * starting points rather than the settled numbers, and are stated here so the
- * reasoning can be replaced by a figure:
+ * paste, and that measurement has now been taken. What it measured:
  *
- * * **128 chunks** is far past any reconnect window's worth of fast typing
- *   (ten keys a second for twelve seconds) and far past any single paste, which
- *   arrives as one chunk. Reaching it means the transport has been unable to
- *   deliver for a long time.
- * * **64 KiB** is one large paste, and the bound is deliberately well above any
- *   keyboard burst. A single chunk is always accepted into an empty queue, so
- *   this bounds the *queue*, not the event.
- * * **5 s** is the age at which typed-ahead input stops being "typed ahead".
- *   The failure this prevents is the one the requirement names: bytes typed
- *   during an outage arriving at the shell much later, as if the user had just
- *   typed them, possibly into a different application state than the one they
- *   were typed for.
+ * * **A keystroke is one chunk of one byte.** Real `keydown` events dispatched
+ *   at xterm's own helper textarea produced exactly one `onData` each.
+ * * **A paste is one chunk carrying all of it.** A 200-line block arrived as
+ *   one chunk of 5 289 bytes and a 50 000-character single line as one chunk of
+ *   50 000 — xterm split neither.
+ * * **The fastest a key can repeat is 30 chunks a second.** macOS
+ *   `KeyRepeat=2` is 2/60 s ≈ 33 ms; `InitialKeyRepeat=15` is 250 ms before the
+ *   first repeat. That is the floor on how fast a queue can be filled.
+ * * **A realistic paste is 50 KB to 500 KB.** This repository's own corpus:
+ *   a 200-line source block is ~5 KB, the largest source file is 326 KB, and
+ *   the largest text file is 516 KB.
+ *
+ * Against those, per bound:
+ *
+ * * **128 chunks, confirmed.** The age bound discards the whole queue once its
+ *   oldest chunk is 5 s old, and `accept` expires before it bounds, so at the
+ *   measured 30 chunks/s the queue can never hold more than **150** chunks
+ *   before age takes it anyway. 128 sits just under that ceiling rather than
+ *   beside it: at maximum key repeat the chunk bound refuses ~0.73 s before the
+ *   TTL would have discarded the same input, and at a human 10 keys/s neither
+ *   bound is reached inside the TTL (50 chunks).
+ * * **1 MiB, moved up from 64 KiB.** The measured paste says 64 KiB was sized
+ *   for the wrong thing. It is *dead* for typing — 128 one-byte chunks cannot
+ *   approach 64 KiB — so the only chunk that can reach it is a paste, and a
+ *   chunk is refused whole: a user who pasted while one keystroke was pending
+ *   lost the entire paste. Measured pastes run to 500 KB, so the bound is set
+ *   to admit one with better than 2× headroom. It is still far below the
+ *   smallest wire bound on the path (the agent's 4 MiB outbound byte budget,
+ *   which `charge` clamps to rather than rejecting), so the queue stays the
+ *   binding constraint.
+ * * **5 s, confirmed.** A product judgement rather than a measurement — the
+ *   only thing the numbers fix is that it must not fall under what 128 chunks
+ *   can cover, and 30 chunks/s × 5 s = 150 clears it. What it is chosen for is
+ *   the failure the requirement names: bytes typed during an outage arriving at
+ *   the shell much later, as if the user had just typed them, possibly into a
+ *   different application state than the one they were typed for.
+ *
+ * Exported so a test can state "past the byte bound" against the policy itself
+ * rather than restating a number that would drift from this one silently.
  */
-const INPUT_QUEUE_BOUNDS: InputQueueBounds = {
+export const INPUT_QUEUE_BOUNDS: InputQueueBounds = {
   maxChunks: 128,
-  maxBytes: 64 * 1024,
+  maxBytes: 1024 * 1024,
   maxAgeMs: 5_000,
 };
 

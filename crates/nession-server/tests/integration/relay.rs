@@ -591,6 +591,26 @@ async fn relay_carries_the_input_ack_to_the_browser() {
             "seq_end": 1,
         }),
     );
+    // How long a healthy acknowledgement actually takes, which is the number
+    // SC-11's latency claim rests on and had none (#1307 stage 5).
+    //
+    // The client re-offers **everything above its cursor** on every keystroke —
+    // that is the retry, and it is what makes a lost acknowledgement free. So
+    // the frame count is `keystrokes x run length`, and the run length is set by
+    // how many keystrokes pass before an acknowledgement lands. A sender that
+    // types faster than the round trip pays for it quadratically.
+    //
+    // Measured at the client seam already: 64 keystrokes with the
+    // acknowledgement arriving between each produce 64 frames; with none
+    // arriving they produce 2080. This is the missing half — the round trip
+    // over the real stack, server and agent and PTY included, which is what
+    // decides whether "between each" is true.
+    //
+    // The bound is a rail rather than a budget: it catches the acknowledgement
+    // never arriving (which is exactly the relay defect #1307 stage 4 fixed —
+    // the frame reached the browser and nothing read it) without failing a slow
+    // CI machine. The figure it measured here is what the report cites.
+    let started = std::time::Instant::now();
     sink.send(WsMessage::Text(applied.to_string()))
         .await
         .expect("send sequenced input");
@@ -598,6 +618,14 @@ async fn relay_carries_the_input_ack_to_the_browser() {
     let applied_ack = await_wire(&mut stream, "agent.terminal.input.ack")
         .await
         .expect("the applied frame is acknowledged too");
+    let round_trip = started.elapsed();
+    eprintln!("measured input-ack round trip (server+agent+PTY): {round_trip:?}");
+    assert!(
+        round_trip < Duration::from_secs(2),
+        "a healthy acknowledgement took {round_trip:?}, which is far past any \
+         round trip this stack should have: the client's re-offer would grow \
+         with every keystroke typed in the meantime"
+    );
 
     assert_eq!(
         applied_ack["payload"]["input_epoch"], epoch,

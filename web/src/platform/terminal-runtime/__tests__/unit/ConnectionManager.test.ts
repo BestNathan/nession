@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { ConnectionManager } from '@/platform/terminal-runtime/ConnectionManager';
+import { ConnectionManager, INPUT_QUEUE_BOUNDS } from '@/platform/terminal-runtime/ConnectionManager';
 import type { AgentError, TerminalAgentApi, TerminalInputAck, TerminalResizeFrame } from '@/product/terminal';
 import type { ResumeReply } from '@/platform/terminal-runtime/streamReconciler';
 import type { TerminalBootstrap } from '@/platform/terminal-runtime/bootstrap';
@@ -873,7 +873,10 @@ describe('ConnectionManager', () => {
      */
     it('refuses input past the byte bound and keeps what it already holds', () => {
       const { harness, cm } = seeded({ appliedThrough: 0 });
-      cm.send('x'.repeat(64 * 1024));
+      // Read from the policy rather than restated: the bound is a measured
+      // figure and it moved once already (#1307 stage 5). A copy here would
+      // have kept passing against the old number while testing nothing.
+      cm.send('x'.repeat(INPUT_QUEUE_BOUNDS.maxBytes));
       expect(harness.api.sendInput).toHaveBeenCalledTimes(1);
       vi.mocked(harness.api.sendInput).mockClear();
       cm.send('y');
@@ -881,6 +884,39 @@ describe('ConnectionManager', () => {
       // And the flush still offers the run it kept, at the position it had.
       cm.flushInputBuffer();
       expect(harness.api.sendInput).toHaveBeenCalledTimes(1);
+      cm.dispose();
+    });
+
+    /**
+     * The measurement the byte bound is set from (#1307 SC-14).
+     *
+     * A paste is one chunk, so the byte bound is the only thing that can refuse
+     * one — and it refuses it whole. Measured: a realistic paste runs 50 KB
+     * (a 200-line source block) to ~500 KB (a source file from this
+     * repository's own corpus, its largest being 326 KB). At the 64 KiB this
+     * bound shipped with, a user who pasted a file while a single keystroke was
+     * pending lost the entire paste.
+     *
+     * The mutation is the bound's value: restore `64 * 1024` and the paste
+     * below is refused, so `sendInput` is called once instead of twice.
+     */
+    it('admits a paste the size real ones measure at, alongside pending input', () => {
+      const { harness, cm } = seeded({ appliedThrough: 0 });
+      // One keystroke already pending, so the empty-queue exception does not
+      // apply — this is the case the bound actually governs.
+      cm.send('x');
+      expect(harness.api.sendInput).toHaveBeenCalledTimes(1);
+
+      cm.send('p'.repeat(500 * 1024));
+
+      // Three frames, not two: the paste was admitted, so the flush offered the
+      // whole unacknowledged run — the keystroke that was already pending, then
+      // the paste at the position after it. What is asserted is that the paste
+      // is *on the wire* at all, which is the half the bound decides.
+      const calls = vi.mocked(harness.api.sendInput).mock.calls;
+      expect(calls).toHaveLength(3);
+      const [, pasted] = calls[2];
+      expect(pasted).toHaveLength(500 * 1024);
       cm.dispose();
     });
   });
@@ -1155,6 +1191,47 @@ describe('ConnectionManager', () => {
           ['test', 'b', { inputEpoch: 7, seqStart: 2, seqEnd: 2 }],
           ['test', 'c', { inputEpoch: 7, seqStart: 3, seqEnd: 3 }],
         ]);
+        cm.dispose();
+      });
+
+      /**
+       * SC-11: healthy input costs one frame per keystroke.
+       *
+       * `flushInputBuffer` re-offers **everything above the cursor**, and that
+       * is deliberate — it is the retry, and a lost acknowledgement costs
+       * nothing because the next one says the same thing. The cost of that
+       * decision is invisible until the acknowledgements stop, which is why it
+       * is measured here rather than asserted in prose:
+       *
+       * * **Measured, acknowledgements keeping up:** 64 keystrokes produce
+       *   **64** frames — one each. That is the bound below.
+       * * **Measured, acknowledgements stalled:** the same 64 keystrokes
+       *   produce **2080** frames, i.e. `K(K+1)/2`. Each keystroke re-offers
+       *   the whole unacknowledged run, so the cost is quadratic in the run
+       *   length rather than linear in the keystrokes. That number is *not*
+       *   pinned — it is the present shape of the retry, and a later change
+       *   that offered only the new chunk would be an improvement this test
+       *   must not fail.
+       *
+       * The healthy figure is what SC-11 promises, and it holds only while the
+       * acknowledgement is consumed. The mutation is that consumption —
+       * dropping the `pendingInput.acknowledge` call in `applyInputAck` (or the
+       * `onRelayInputAck` subscription that feeds it) leaves the cursor at 0,
+       * and this test then measures the quadratic case instead: 2080 frames
+       * for 64 keystrokes.
+       */
+      it('offers one frame per keystroke while acknowledgements keep up', () => {
+        const { send, cm, deliverAck } = seededRelay({ appliedThrough: 0 });
+
+        const keystrokes = 64;
+        for (let i = 1; i <= keystrokes; i += 1) {
+          cm.send('a');
+          // The agent answers each frame before the next keystroke — the
+          // healthy round trip, which is the state this bound is about.
+          deliverAck({ inputEpoch: 7, appliedThrough: i });
+        }
+
+        expect(send).toHaveBeenCalledTimes(keystrokes);
         cm.dispose();
       });
     });
