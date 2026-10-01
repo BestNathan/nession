@@ -133,6 +133,27 @@ impl Default for SessionControlState {
     }
 }
 
+/// One resume's answer: the events a caller is missing, and the two facts that
+/// say whether they are *all* of them (#1304).
+///
+/// The events are what the old answer carried on its own, and on their own they
+/// cannot say whether they are the whole stretch the caller asked for or a tail
+/// whose beginning has been evicted. That ambiguity is the bug: an answer of
+/// `[5000..6000]` to a request from 100 is either "here is everything" or "the
+/// first 4900 events are gone", and a client cannot tell. So the answer states
+/// its window and its own verdict, and the caller never has to read either off
+/// the events.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StreamReplay {
+    /// The lowest sequence number this stream can still return — see
+    /// [`SessionStreamState::first_available_seq`].
+    pub first_available_seq: u64,
+    /// Whether `events` runs from `after_seq + 1` through the current cursor
+    /// with nothing missing.
+    pub complete: bool,
+    pub events: Vec<TerminalStreamEventPayload>,
+}
+
 #[derive(Debug, Clone)]
 pub struct SessionStreamState {
     pub epoch: u64,
@@ -185,21 +206,57 @@ impl SessionStreamState {
         (self.epoch, seq)
     }
 
-    pub fn events_since(
-        &self,
-        epoch: u64,
-        after_seq: u64,
-    ) -> Option<Vec<TerminalStreamEventPayload>> {
+    /// The lowest sequence number this stream can still hand back (#1304).
+    ///
+    /// The front of the ring, because that is exactly what eviction decides: a
+    /// full ring drops the front on the next push, so every number below it is
+    /// unreachable by any later request. Nothing else bounds what a replay can
+    /// return — the ring holds a contiguous run, and `next_seq` only ever moves
+    /// forward — so this one number is the whole of the retained window's lower
+    /// edge.
+    ///
+    /// With nothing retained it is the number the next event will take. An
+    /// empty ring is a stream that has issued nothing, so a caller at any
+    /// cursor is level with it and has missed nothing; answering with the *next*
+    /// position rather than with a zero is what makes that fall out of the same
+    /// comparison as every other case instead of needing a special one.
+    /// (Reachable only before the first event: the ring is capped at a positive
+    /// number of events, so it cannot be pushed empty again.)
+    pub fn first_available_seq(&self) -> u64 {
+        self.events
+            .front()
+            .map_or_else(|| self.next_seq.saturating_add(1), stream_seq)
+    }
+
+    /// Everything after `after_seq` that is still retained, and whether that is
+    /// everything the caller asked for (#1304).
+    ///
+    /// `None` is an epoch mismatch — the request is about a stream this state
+    /// is not — and it is the **only** reason to refuse an answer. Whether the
+    /// answer is *whole* is a separate question, and it is answered by
+    /// [`StreamReplay::complete`] rather than by the caller reading the events:
+    /// a caller cannot tell "you are up to date" from "your stretch is gone" by
+    /// looking at a tail, and the two call for opposite responses.
+    pub fn replay_since(&self, epoch: u64, after_seq: u64) -> Option<StreamReplay> {
         if epoch != self.epoch {
             return None;
         }
-        Some(
-            self.events
-                .iter()
-                .filter(|ev| stream_seq(ev) > after_seq)
-                .cloned()
-                .collect(),
-        )
+        let first_available_seq = self.first_available_seq();
+        let events = self
+            .events
+            .iter()
+            .filter(|ev| stream_seq(ev) > after_seq)
+            .cloned()
+            .collect();
+        Some(StreamReplay {
+            first_available_seq,
+            // The ring is contiguous, so the floor is the whole test: every
+            // number from `after_seq + 1` up is either retained or already
+            // gone, and there is nothing in between. Saturating because
+            // `after_seq` is whatever a caller sent.
+            complete: after_seq.saturating_add(1) >= first_available_seq,
+            events,
+        })
     }
 
     fn push_event(&mut self, event: TerminalStreamEventPayload) {
@@ -257,8 +314,156 @@ mod tests {
         let (_, s2) = stream.record_resize("s", 80, 24);
         assert_eq!(s1, 1);
         assert_eq!(s2, 2);
-        let tail = stream.events_since(epoch, 0).expect("same epoch");
-        assert_eq!(tail.len(), 2);
+        let tail = stream.replay_since(epoch, 0).expect("same epoch");
+        assert_eq!(tail.events.len(), 2);
+    }
+
+    /// A stream whose ring keeps `capacity` events, with `n` outputs recorded
+    /// over it — so it holds the last `capacity` of them and eviction has taken
+    /// the rest. `max_events` is the real eviction policy (`push_event` drops
+    /// the front at the cap); a small cap is how a test reaches a state a real
+    /// session needs 4096 events to reach.
+    fn stream_of(n: u64, capacity: usize) -> SessionStreamState {
+        let mut stream = SessionStreamState::new();
+        stream.max_events = capacity;
+        for i in 1..=n {
+            stream.record_output("s", format!("e{i}"));
+        }
+        stream
+    }
+
+    fn seqs(events: &[TerminalStreamEventPayload]) -> Vec<u64> {
+        events.iter().map(stream_seq).collect()
+    }
+
+    /// The boundary of the retained window, from the side that has lost
+    /// nothing: a cursor one below the floor is asking for exactly what the
+    /// ring still holds (#1304).
+    ///
+    /// The mutation this pins is a floor that is off by one — reporting the
+    /// lowest *evicted* sequence, or comparing `after_seq > first_available_seq`
+    /// instead of `after_seq + 1 >= first_available_seq`. Either turns a resume
+    /// that lost nothing into one that is told it lost an event it is holding,
+    /// and the client's answer to an incomplete reply is to stop trusting its
+    /// buffer.
+    #[test]
+    fn a_replay_from_one_below_the_floor_is_complete() {
+        // Six events over a ring of four: 1 and 2 are gone, 3..6 are held.
+        let stream = stream_of(6, 4);
+        assert_eq!(stream.first_available_seq(), 3);
+        let replay = stream.replay_since(stream.epoch, 2).expect("same epoch");
+        assert_eq!(
+            replay.first_available_seq, 3,
+            "the floor is the front of the ring"
+        );
+        assert!(
+            replay.complete,
+            "a caller at 2 was told its replay is incomplete, but the next \
+             sequence it needs (3) is exactly the floor: nothing is missing"
+        );
+        assert_eq!(seqs(&replay.events), vec![3, 4, 5, 6]);
+    }
+
+    /// One event past that boundary, and the answer is not the same answer:
+    /// the single evicted sequence is the whole difference (#1304).
+    ///
+    /// The mutation this pins is the boundary comparison drifting one the other
+    /// way — `after_seq + 1 > first_available_seq`, which calls this case
+    /// complete. A client that is told it lost nothing advances its cursor over
+    /// an event that no later request can return.
+    #[test]
+    fn a_replay_one_event_below_the_floor_is_not_complete() {
+        let stream = stream_of(6, 4);
+        // Cursor 1 is missing only seq 2; 3..6 are in hand.
+        let replay = stream.replay_since(stream.epoch, 1).expect("same epoch");
+        assert_eq!(replay.first_available_seq, 3);
+        assert!(
+            !replay.complete,
+            "seq 2 was evicted and no later resume can return it, so this \
+             answer is not the whole stretch the cursor asked for"
+        );
+        assert_eq!(
+            seqs(&replay.events),
+            vec![3, 4, 5, 6],
+            "the same tail an incomplete answer carries — the events alone \
+             cannot tell the two cases apart, which is why `complete` exists"
+        );
+    }
+
+    /// Far below the floor: what the caller gets is the window, and the missing
+    /// stretch is every number between its cursor and the floor (#1304).
+    #[test]
+    fn a_replay_far_below_the_floor_states_the_window_it_is_inside() {
+        let stream = stream_of(100, 4);
+        let replay = stream.replay_since(stream.epoch, 1).expect("same epoch");
+        assert_eq!(replay.first_available_seq, 97);
+        assert!(!replay.complete);
+        assert_eq!(seqs(&replay.events), vec![97, 98, 99, 100]);
+        assert!(
+            replay.first_available_seq > 1 + 1,
+            "the floor is what says 2..96 is unrecoverable; without it the \
+             caller sees only a tail and cannot tell it apart from a whole \
+             stream that happens to be short"
+        );
+    }
+
+    /// A cursor at the head: nothing to send is not the same state as nothing
+    /// left (#1304).
+    ///
+    /// The mutation this pins is reading emptiness as truncation — treating an
+    /// empty `events` as "the ring has evicted past you". The two are opposite
+    /// answers: one means carry on, the other means the buffer has a hole.
+    #[test]
+    fn a_replay_from_the_cursor_is_complete_and_empty() {
+        let stream = stream_of(6, 4);
+        let replay = stream.replay_since(stream.epoch, 6).expect("same epoch");
+        assert!(replay.events.is_empty());
+        assert!(
+            replay.complete,
+            "an empty answer from the head was reported as incomplete"
+        );
+    }
+
+    /// A stream that has issued nothing: the floor is the position the next
+    /// event will take, so a caller is level with it rather than behind a
+    /// window that does not exist yet.
+    ///
+    /// The mutation this pins is answering the empty ring with `0` — the floor
+    /// collapsed to a sequence number no event can have. `0` is what absence on
+    /// the wire must never mean, and a provider that reports it here is stating
+    /// that sequence 0 is retained: a position the caller can never be behind
+    /// and never receive.
+    #[test]
+    fn a_stream_with_nothing_retained_has_its_floor_at_the_next_position() {
+        let stream = SessionStreamState::new();
+        assert_eq!(
+            stream.first_available_seq(),
+            1,
+            "an empty ring reported a floor that is not the next position"
+        );
+        // Which is what makes the caller's answer fall out of the same
+        // comparison as every other case: at 0 it has missed nothing.
+        let replay = stream.replay_since(stream.epoch, 0).expect("same epoch");
+        assert!(
+            replay.complete,
+            "a caller level with a stream that has recorded nothing was told \
+             its replay is incomplete"
+        );
+        assert!(replay.events.is_empty());
+    }
+
+    /// Epoch mismatch is unchanged: the request is about a stream this state is
+    /// not, so there is no replay and **no window** — the caller's sequences are
+    /// not comparable with this epoch's, so a floor here would be an answer to a
+    /// question nobody asked (#1304; #1094's behaviour, kept).
+    #[test]
+    fn a_replay_on_another_epoch_states_nothing() {
+        let stream = stream_of(6, 4);
+        let replay = stream.replay_since(stream.epoch.wrapping_add(1), 0);
+        assert!(
+            replay.is_none(),
+            "an epoch mismatch was answered with a window"
+        );
     }
 
     /// A fresh stream must be *distinguishable* from the one it replaces.

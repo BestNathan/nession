@@ -76,8 +76,13 @@ function useTransportFactory(opts: {
   isAttached: () => boolean;
   /** Asked after input is handed over — see `ConnectionOptions.onInputSent`. */
   onInputSent: () => void;
+  /**
+   * Asked when the stream leaves the buffer with a hole no later replay can
+   * fill — see `ConnectionOptions.onStreamTruncated` (#1304).
+   */
+  onStreamTruncated: () => void;
 }) {
-  const { effectiveMode, sessionName, sessionId, agentTerminalApi, serverConnection, isAttached, onInputSent } = opts;
+  const { effectiveMode, sessionName, sessionId, agentTerminalApi, serverConnection, isAttached, onInputSent, onStreamTruncated } = opts;
   // Holds the render-fresh factory; the callback identity stays stable while
   // the closure sees current values. The ref itself starts null — the
   // previous dummy ConnectionManager initializer was constructed and discarded
@@ -87,6 +92,8 @@ function useTransportFactory(opts: {
   isAttachedRef.current = isAttached;
   const onInputSentRef = useRef(onInputSent);
   onInputSentRef.current = onInputSent;
+  const onStreamTruncatedRef = useRef(onStreamTruncated);
+  onStreamTruncatedRef.current = onStreamTruncated;
   // The P2P transport is a pure I/O channel: ConnectionManager binds to
   // whatever agent terminal API the runtime currently owns (null while no
   // candidate is built — e.g. relay mode — making the transport inert).
@@ -102,6 +109,9 @@ function useTransportFactory(opts: {
       // (#1264). Same ref pattern as `isAttached`: the transport reads the
       // runtime as it is *now*, not as it was when this manager was built.
       onInputSent: () => onInputSentRef.current(),
+      // And the same for a stream that turned out to have a hole in it
+      // (#1304): the runtime is what remembers that a snapshot is owed.
+      onStreamTruncated: () => onStreamTruncatedRef.current(),
     });
   return useCallback(() => {
     const createTransport = transportFactoryRef.current;
@@ -249,6 +259,10 @@ export function useTerminalOrchestration({
     effectiveMode, sessionName, sessionId, agentTerminalApi, serverConnection: relayServer,
     isAttached: createAttachGate(() => terminalState),
     onInputSent: () => runtimeRef.current?.probeLivenessNow(),
+    // The session's own record of "my buffer may have a hole", which is what
+    // makes the next attach ask for a snapshot (#1304, #321). Reading it
+    // through the ref keeps a rewired transport pointing at the live runtime.
+    onStreamTruncated: () => runtimeRef.current?.noteStreamTruncated(),
   });
   const [deviceProfile] = useState(() => detectProfile(window.innerWidth));
   const controller = useTerminal({

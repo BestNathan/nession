@@ -26,7 +26,38 @@ export type TerminalStreamResumeResponse = { session_name: string, stream_epoch:
 /**
  * False when `stream_epoch` does not match the live session timeline (#1094).
  */
-epoch_match: boolean, events: Array<TerminalStreamEventPayload>, };
+epoch_match: boolean, 
+/**
+ * The lowest sequence number this stream can still return — the front of
+ * the provider's retained window (#1304).
+ *
+ * A caller holding a cursor below `first_available_seq - 1` has lost
+ * `cursor + 1 .. first_available_seq - 1` for good: no later resume can
+ * return them, so advancing the cursor over that stretch is not recovery
+ * and waiting on it is waiting for output that no longer exists.
+ *
+ * Stated only when `epoch_match` is true. On a mismatch the request is
+ * about a stream the provider no longer has, so there is no window for
+ * *that* request to be inside of; the live epoch's floor is not an answer
+ * to it, because the two sequences are not comparable.
+ */
+first_available_seq?: number | null, 
+/**
+ * Whether `events` carries **every** event from `after_seq + 1` through
+ * the provider's current cursor.
+ *
+ * The provider's verdict, not a fact the caller should derive: a consumer
+ * that recomputed it from `first_available_seq` would be re-implementing
+ * the provider's retention policy, and would read a shorter-than-asked-for
+ * answer as whole the moment that policy bounded an answer for a reason
+ * other than eviction.
+ *
+ * `false` is the case this field exists for. It is **not** the same state
+ * as an empty `events` — an answer with no events and `complete: true`
+ * means the caller is already at the head — and stating it is what keeps
+ * that ambiguity off the wire.
+ */
+complete?: boolean | null, events: Array<TerminalStreamEventPayload>, };
 export type TerminalStreamEventPayload = { "kind": "output", session_name: string, stream_epoch: number, stream_seq: number, data: string, } | { "kind": "resize", session_name: string, stream_epoch: number, stream_seq: number, cols: number, rows: number, };
 
 // ── Operations ──
@@ -39,5 +70,36 @@ export type TerminalStreamResumeReply = { session_name: string, stream_epoch: nu
 /**
  * False when `stream_epoch` does not match the live session timeline (#1094).
  */
-epoch_match: boolean, events: Array<TerminalStreamEventPayload>, };
+epoch_match: boolean, 
+/**
+ * The lowest sequence number this stream can still return — the front of
+ * the provider's retained window (#1304).
+ *
+ * A caller holding a cursor below `first_available_seq - 1` has lost
+ * `cursor + 1 .. first_available_seq - 1` for good: no later resume can
+ * return them, so advancing the cursor over that stretch is not recovery
+ * and waiting on it is waiting for output that no longer exists.
+ *
+ * Stated only when `epoch_match` is true. On a mismatch the request is
+ * about a stream the provider no longer has, so there is no window for
+ * *that* request to be inside of; the live epoch's floor is not an answer
+ * to it, because the two sequences are not comparable.
+ */
+first_available_seq?: number | null, 
+/**
+ * Whether `events` carries **every** event from `after_seq + 1` through
+ * the provider's current cursor.
+ *
+ * The provider's verdict, not a fact the caller should derive: a consumer
+ * that recomputed it from `first_available_seq` would be re-implementing
+ * the provider's retention policy, and would read a shorter-than-asked-for
+ * answer as whole the moment that policy bounded an answer for a reason
+ * other than eviction.
+ *
+ * `false` is the case this field exists for. It is **not** the same state
+ * as an empty `events` — an answer with no events and `complete: true`
+ * means the caller is already at the head — and stating it is what keeps
+ * that ambiguity off the wire.
+ */
+complete?: boolean | null, events: Array<TerminalStreamEventPayload>, };
 

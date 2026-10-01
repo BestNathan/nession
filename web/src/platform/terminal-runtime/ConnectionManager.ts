@@ -46,6 +46,11 @@ export class ConnectionManager implements TerminalTransport {
   private isAttached: () => boolean;
   /** Notified after input is handed to either transport — see `onInputSent`. */
   private onInputSent: () => void;
+  /**
+   * Notified when the stream leaves the consumer's buffer with a hole no later
+   * replay can fill — see `ConnectionOptions.onStreamTruncated` (#1304).
+   */
+  private onStreamTruncated: () => void;
 
   onStateChange: ((state: ConnectionState) => void) | null = null;
   /**
@@ -67,11 +72,17 @@ export class ConnectionManager implements TerminalTransport {
     this.serverConnection = options.serverConnection;
     this.isAttached = options.isAttached ?? (() => false);
     this.onInputSent = options.onInputSent ?? (() => {});
+    this.onStreamTruncated = options.onStreamTruncated ?? (() => {});
     this.reconciler = new StreamReconciler(
       (epoch, afterSeq) => this.resumeStream(epoch, afterSeq),
       {
         onOutput: (data, bootstrap) => this.onOutput?.(data, bootstrap),
         onResize: (cols, rows) => this.onResize?.(cols, rows),
+        // Only the reconciler can tell a buffer that is whole from one with a
+        // stretch given up on, and only this class holds the session's owner.
+        // It carries the fact up; what repair that implies is not the
+        // transport's decision (#1304).
+        onStreamTruncated: () => this.onStreamTruncated(),
       },
     );
 

@@ -1050,6 +1050,242 @@ async fn a_recorded_resize_reaches_the_client_at_its_stream_position() {
     handle.shutdown().await.ok();
 }
 
+/// `agent.terminal.stream.resume` says which window it is answering from, and
+/// whether that answer is the whole of it (#1304).
+///
+/// `epoch_match` answers "is this the stream you asked about" and nothing else.
+/// It never answered "does this stream still hold everything you are missing",
+/// and a stream log is bounded — the ring evicts from the front — so a client
+/// that was away long enough was handed a tail starting far above its cursor,
+/// under a matching epoch, with nothing on the wire saying the stretch in
+/// between was gone. It read that as complete recovery and advanced its cursor
+/// over output no later request could return.
+///
+/// The assertions are on the **raw JSON**, because the wire is what a client
+/// reads; a value shaped by a Rust type agreeing with itself would prove
+/// nothing about it.
+///
+/// The window reachable here is a fresh session's, so nothing has been evicted
+/// and the floor is the first event. Eviction itself is `session_terminal.rs`'s
+/// — `stream_of` drives the real policy with a small ring — because reaching it
+/// through a real pane would take 4096 events and exercise the same code.
+#[tokio::test]
+async fn a_resume_states_its_window_and_whether_it_is_complete() {
+    let (addr, handle, credentials) = start_server(19094).await.unwrap();
+
+    let tmux = SessionManager::new();
+    let session = TestSession::new("stream-window");
+    let session_name = session.name().to_string();
+    tmux.create_session(&session_name, 80, 24, "/tmp", &[])
+        .await
+        .unwrap();
+
+    let (mut sink, mut stream) = connect_for(&credentials, addr, &session_name)
+        .await
+        .unwrap();
+
+    let attach = ClientAttachPayload {
+        session_name: session_name.to_string(),
+        width: 80,
+        height: 24,
+        size_known: None,
+        env_snapshots: Vec::new(),
+        // No history: a bootstrap is outside the timeline by construction, and
+        // this test counts the positions that are in it.
+        needs_bootstrap: Some(false),
+    };
+    let req = new_message(msg_types::CLIENT_ATTACH, attach);
+    let attached: nession_agent::server::websocket::Message<ClientAttachResponse> =
+        round_trip(&mut sink, &mut stream, &req).await.unwrap();
+    let seeded_epoch = attached
+        .payload
+        .stream_epoch
+        .expect("the attach seeds an epoch");
+    let seeded_cursor = attached
+        .payload
+        .stream_cursor
+        .expect("the attach seeds a cursor");
+
+    // Something in the stream past the seeded cursor, so the first answer has a
+    // window and events to state it over.
+    use base64::Engine;
+    let input = base64::engine::general_purpose::STANDARD.encode(b"echo stream-window\n");
+    let req = new_message(
+        msg_types::TERMINAL_INPUT,
+        nession_agent::server::websocket::TerminalInputPayload {
+            session_name: session_name.to_string(),
+            data: input,
+            control_generation: None,
+        },
+    );
+    sink.send(WsMessage::Text(serde_json::to_string(&req).unwrap()))
+        .await
+        .unwrap();
+
+    let mut delivered: Vec<u64> = Vec::new();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while tokio::time::Instant::now() < deadline {
+        let Some(frame) = next_frame_within(&mut stream, Duration::from_secs(2))
+            .await
+            .unwrap()
+        else {
+            break;
+        };
+        if frame.get("msg_type").and_then(serde_json::Value::as_str)
+            == Some(msg_types::TERMINAL_OUTPUT)
+        {
+            if let Some(seq) = frame
+                .get("payload")
+                .and_then(|p| p.get("stream_seq"))
+                .and_then(serde_json::Value::as_u64)
+            {
+                delivered.push(seq);
+            }
+        }
+        if delivered.iter().any(|seq| *seq > seeded_cursor) {
+            break;
+        }
+    }
+    assert!(
+        delivered.iter().any(|seq| *seq > seeded_cursor),
+        "the pane produced nothing after the attach, so there is no window to \
+         state: {delivered:?}"
+    );
+
+    let resume = |epoch: u64, after_seq: u64| {
+        new_message(
+            msg_types::TERMINAL_STREAM_RESUME,
+            nession_agent::server::websocket::TerminalStreamResumePayload {
+                session_name: session_name.clone(),
+                stream_epoch: epoch,
+                after_seq,
+            },
+        )
+    };
+
+    let req = resume(seeded_epoch, seeded_cursor);
+    let reply: nession_agent::server::websocket::Message<serde_json::Value> =
+        round_trip(&mut sink, &mut stream, &req).await.unwrap();
+    assert_eq!(
+        reply
+            .payload
+            .get("complete")
+            .and_then(serde_json::Value::as_bool),
+        Some(true),
+        "a replay from the cursor the attach itself seeded was answered as \
+         incomplete, which tells a client with a whole buffer to distrust it"
+    );
+    assert_eq!(
+        reply
+            .payload
+            .get("first_available_seq")
+            .and_then(serde_json::Value::as_u64),
+        Some(1),
+        "the answer states no retained window, so a client cannot tell a tail \
+         whose beginning was evicted from a stream with nothing more to send \
+         (#1304)"
+    );
+    let events = reply
+        .payload
+        .get("events")
+        .and_then(|v| v.as_array())
+        .expect("a resume reply carries its events");
+    let log: Vec<u64> = events
+        .iter()
+        .filter_map(|event| event.get("stream_seq").and_then(serde_json::Value::as_u64))
+        .collect();
+    assert_eq!(
+        log,
+        (seeded_cursor + 1..=seeded_cursor + log.len() as u64).collect::<Vec<u64>>(),
+        "the replay is not contiguous from the cursor the attach seeded, so no \
+         client can advance past it without a round trip"
+    );
+
+    // A cursor at the head of what just arrived. The answer may carry more
+    // events — the pane is live — and the assertion covers both shapes: an
+    // empty answer is the one that used to be ambiguous, and it is complete by
+    // the same law as any other, because this cursor is inside the window.
+    let head = *log.last().expect("the first reply carried events");
+    let req = resume(seeded_epoch, head);
+    let reply: nession_agent::server::websocket::Message<serde_json::Value> =
+        round_trip(&mut sink, &mut stream, &req).await.unwrap();
+    assert_eq!(
+        reply
+            .payload
+            .get("first_available_seq")
+            .and_then(serde_json::Value::as_u64),
+        Some(1),
+        "the window moved between two resumes that evicted nothing"
+    );
+    assert_eq!(
+        reply
+            .payload
+            .get("complete")
+            .and_then(serde_json::Value::as_bool),
+        Some(true),
+        "a replay from a cursor inside the window was answered as incomplete"
+    );
+    let events = reply
+        .payload
+        .get("events")
+        .and_then(|v| v.as_array())
+        .expect("a resume reply carries its events");
+    let after: Vec<u64> = events
+        .iter()
+        .filter_map(|event| event.get("stream_seq").and_then(serde_json::Value::as_u64))
+        .collect();
+    assert_eq!(
+        after,
+        (head + 1..=head + after.len() as u64).collect::<Vec<u64>>(),
+        "the answer to a head cursor is not contiguous from it"
+    );
+
+    // An epoch this agent never issued. The behaviour #1094 shipped is
+    // unchanged, and the new fields are **absent** rather than zero: the live
+    // epoch's floor is not an answer to a request about a stream this agent no
+    // longer has, and a caller's sequences are not comparable with it.
+    let req = resume(seeded_epoch.wrapping_add(1), seeded_cursor);
+    let reply: nession_agent::server::websocket::Message<serde_json::Value> =
+        round_trip(&mut sink, &mut stream, &req).await.unwrap();
+    assert_eq!(
+        reply
+            .payload
+            .get("epoch_match")
+            .and_then(serde_json::Value::as_bool),
+        Some(false),
+        "a request about another stream was answered as if it matched"
+    );
+    assert!(
+        reply.payload.get("first_available_seq").is_none(),
+        "an epoch mismatch stated a window: the field's absence is what says \
+         there is no position for this request, and a zero would say the \
+         opposite"
+    );
+    assert!(
+        reply.payload.get("complete").is_none(),
+        "an epoch mismatch stated completeness about a stream it is not about"
+    );
+    assert_eq!(
+        reply
+            .payload
+            .get("events")
+            .and_then(|v| v.as_array())
+            .map(Vec::len),
+        Some(0),
+        "an epoch mismatch carried events from the live stream"
+    );
+
+    let detach = ClientDetachPayload {
+        session_name: session_name.to_string(),
+    };
+    let req = new_message(msg_types::CLIENT_DETACH, detach);
+    let _: nession_agent::server::websocket::Message<serde_json::Value> =
+        round_trip(&mut sink, &mut stream, &req).await.unwrap();
+
+    tmux.kill_session(&session_name).await.ok();
+    handle.shutdown().await.ok();
+}
+
 // ---------------------------------------------------------------------------
 // Web UI compatibility handlers
 // ---------------------------------------------------------------------------
