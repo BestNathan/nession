@@ -2,6 +2,7 @@ import { decodeBase64Bytes, encodeBase64 } from './base64';
 import {
   readAttachControlFields,
   readControlAcquireReply,
+  readInputAck,
 } from './controlPayload';
 import { parseStreamEvents } from '@/platform/terminal-runtime/streamApply';
 import {
@@ -9,10 +10,7 @@ import {
   type TerminalBootstrap,
 } from '@/platform/terminal-runtime/bootstrap';
 import { WIRE as ATTACH_WIRE } from '@/generated/protocol/core/agent-attach/v1';
-import {
-  WIRE as TERMINAL_INPUT_WIRE,
-  type TerminalInputAckPayload,
-} from '@/generated/protocol/core/agent-terminal-input/v1';
+import { WIRE as TERMINAL_INPUT_WIRE } from '@/generated/protocol/core/agent-terminal-input/v1';
 import { WIRE as TERMINAL_RESIZE_WIRE } from '@/generated/protocol/core/agent-terminal-resize/v1';
 import { WIRE as TERMINAL_CONTROL_ACQUIRE_WIRE } from '@/generated/protocol/core/agent-terminal-control-acquire/v1';
 import { WIRE as TERMINAL_STREAM_RESUME_WIRE } from '@/generated/protocol/core/agent-terminal-stream-resume/v1';
@@ -337,17 +335,11 @@ function subscribeInputAck(
   // silence is what it looks like when nothing arrives. `agent.terminal.output`
   // is spelled the same way, for the same reason.
   return surface.subscribe('agent.terminal.input.ack', (payload) => {
-    const p = payload as TerminalInputAckPayload;
-    if (typeof p.input_epoch !== 'number' || typeof p.applied_through !== 'number') {
+    const ack = readInputAck(payload);
+    if (ack === null) {
       return;
     }
-    cb({
-      sessionName: p.session_name,
-      inputEpoch: p.input_epoch,
-      appliedThrough: p.applied_through,
-      controlGeneration:
-        typeof p.control_generation === 'number' ? p.control_generation : undefined,
-    });
+    cb(ack);
   });
 }
 

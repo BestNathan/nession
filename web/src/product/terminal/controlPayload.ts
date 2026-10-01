@@ -36,6 +36,48 @@ export function readAttachControlFields(payload: unknown): {
   };
 }
 
+/** Where the agent said the session's input cursor stands (#1307). */
+export interface InputAckFields {
+  sessionName: string;
+  inputEpoch: number;
+  appliedThrough: number;
+  controlGeneration?: number;
+}
+
+/**
+ * Read an `agent.terminal.input.ack` payload, or drop it.
+ *
+ * One reader for both transports, because an acknowledgement is the agent's
+ * statement about where its cursor is and the two paths must not disagree about
+ * which statements count. The rule it applies is the same one the resize and
+ * control readers apply: **both numbers or nothing.** A cursor is a position in
+ * a *run*, so an epoch without a position — or a position without the run it
+ * belongs to — names no position at all, and a consumer that acted on one would
+ * retry against a cursor nobody holds.
+ *
+ * `null` rather than a partial object, so a caller cannot read the fields it
+ * did get and quietly invent the rest.
+ */
+export function readInputAck(payload: unknown): InputAckFields | null {
+  if (!payload || typeof payload !== 'object') {
+    return null;
+  }
+  const p = payload as Record<string, unknown>;
+  if (typeof p.session_name !== 'string') {
+    return null;
+  }
+  if (typeof p.input_epoch !== 'number' || typeof p.applied_through !== 'number') {
+    return null;
+  }
+  return {
+    sessionName: p.session_name,
+    inputEpoch: p.input_epoch,
+    appliedThrough: p.applied_through,
+    controlGeneration:
+      typeof p.control_generation === 'number' ? p.control_generation : undefined,
+  };
+}
+
 export function readControlAcquireReply(payload: unknown): {
   generation?: number;
   role?: 'controller' | 'observer';

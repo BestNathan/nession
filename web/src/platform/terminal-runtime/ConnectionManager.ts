@@ -1,4 +1,11 @@
 import type { ConnectionOptions } from './types';
+// The producer's own type rather than a restatement of its shape. An inline
+// structural type is how a field-name divergence type-checked vacuously here
+// once already (#1307 stage 3): it accepted `inputAppliedThrough` where the
+// reader wanted `appliedThrough`, the assignment compiled, and the reconcile
+// silently did nothing. Naming the producer makes the next such spelling a
+// compile error.
+import type { TerminalInputAck } from '@/product/terminal';
 import type { ConnectionState } from '@/platform/socket/types';
 import type { TerminalTransport, TerminalInputSeed } from './transport/TerminalTransport';
 import { StreamReconciler, type ResumeReply } from './streamReconciler';
@@ -51,6 +58,7 @@ export class ConnectionManager implements TerminalTransport {
   private relayUnsubOutput: (() => void) | null = null;
   private relayUnsubState: (() => void) | null = null;
   private relayUnsubResize: (() => void) | null = null;
+  private relayUnsubInputAck: (() => void) | null = null;
   private p2pUnsubOutput: (() => void) | null = null;
   private p2pUnsubResize: (() => void) | null = null;
   private p2pUnsubError: (() => void) | null = null;
@@ -206,25 +214,20 @@ export class ConnectionManager implements TerminalTransport {
    */
   flushInputBuffer(): void {
     if (this.disposed || this.pendingInput.size === 0) { return; }
-    if (this.mode === 'relay') {
-      // The Server's 16 ms merge keeps the newest frame's envelope and
-      // concatenates the bytes of the rest, so a sequence range sent through it
-      // would describe only the last frame of a burst while carrying all of
-      // them — the agent would read it as a gap and refuse. Until that merge
-      // carries the range (#1307 stage 4) this path sends unsequenced input,
-      // exactly as it did before this contract, and the queue is therefore a
-      // buffer rather than a retry log: handed over once, then forgotten.
-      for (const data of this.pendingInput.drain()) {
-        this.sendRawInput(data);
-      }
-      return;
-    }
     const outbound = this.pendingInput.outbound();
     if (outbound === null) {
-      // No epoch yet — either a transport that cannot carry one, or an agent
-      // built before this contract. Send unsequenced and do not retain: there
-      // is nothing a later retry could be checked against, and holding the
-      // bytes would only delay their discard by the TTL.
+      // No epoch yet — an agent built before this contract, or a transport that
+      // has not stated a cursor. Send unsequenced and do not retain: there is
+      // nothing a later retry could be checked against, and holding the bytes
+      // would only delay their discard by the TTL.
+      //
+      // The relay used to be here by *transport* rather than by not knowing a
+      // cursor (#1307 stage 2): its 16 ms merge kept the newest frame's
+      // envelope, so a sequence sent through it would have described only the
+      // last frame of a burst while carrying all of them. The merge now states
+      // the range it covers and refuses to merge a burst that has none
+      // (`merged_range`), which is what let the split move from "always" to
+      // "only when there is no position to send".
       for (const data of this.pendingInput.drain()) {
         this.sendRawInput(data);
       }
@@ -262,18 +265,31 @@ export class ConnectionManager implements TerminalTransport {
    * One chunk is one position: `seqStart === seqEnd`. The range exists in the
    * contract because a frame may cover several chunks, and nothing here
    * produces one yet — see {@link flushInputBuffer}.
+   *
+   * Both transports carry the position. A relay frame states it the same way a
+   * direct one does, and the Server's merge is what keeps it true across a
+   * burst: the merged frame states the first frame's `seq_start` through the
+   * last frame's `seq_end`, so the position a client sent is the position the
+   * agent reads (#1307 SC-05).
    */
   private sendSequencedInput(data: string, seq: number): void {
-    if (this.mode !== 'p2p' || !this.agentApi) { return; }
     const epoch = this.pendingInput.boundTo?.inputEpoch;
     if (epoch === undefined) { return; }
-    try {
-      this.agentApi.sendInput(this.sessionName, data, {
+    if (this.mode === 'p2p' && this.agentApi) {
+      try {
+        this.agentApi.sendInput(this.sessionName, data, {
+          inputEpoch: epoch,
+          seqStart: seq,
+          seqEnd: seq,
+        });
+      } catch { /* transport reconnecting — the chunk stays pending */ }
+    } else if (this.mode === 'relay' && this.serverConnection?.isReady()) {
+      this.serverConnection.sendRelayInput(this.sessionName, data, {
         inputEpoch: epoch,
         seqStart: seq,
         seqEnd: seq,
       });
-    } catch { /* transport reconnecting — the chunk stays pending */ }
+    }
   }
 
   /**
@@ -334,6 +350,23 @@ export class ConnectionManager implements TerminalTransport {
   }
 
   /**
+   * Apply the agent's cursor, whichever transport carried it (#1307).
+   *
+   * One method rather than two, because the relay's acknowledgement means
+   * exactly what the direct one means and a client that read them differently
+   * would retry against a position the agent never stated. The relay does not
+   * weaken it: the Server forwards the notification unchanged, and the burst
+   * merge that used to make a per-frame id meaningless no longer touches a
+   * cursor, which covers every byte of every frame it folds together.
+   */
+  private applyInputAck(ack: TerminalInputAck): void {
+    this.pendingInput.acknowledge(ack.inputEpoch, ack.appliedThrough);
+    if (ack.controlGeneration !== undefined) {
+      this.noteControlGeneration(ack.controlGeneration);
+    }
+  }
+
+  /**
    * Note the lease generation, discarding pending input if it moved.
    *
    * Reuses the queue's own reconcile rather than a second "clear if changed"
@@ -361,6 +394,7 @@ export class ConnectionManager implements TerminalTransport {
     this.relayUnsubOutput?.();
     this.relayUnsubState?.();
     this.relayUnsubResize?.();
+    this.relayUnsubInputAck?.();
     this.onStateChange = null;
     this.onOutput = null;
     this.onError = null;
@@ -414,10 +448,7 @@ export class ConnectionManager implements TerminalTransport {
     // dropped acknowledgement costs nothing: the next one says the same thing.
     this.p2pUnsubInputAck = api.onInputAck((ack) => {
       if (this.disposed) { return; }
-      this.pendingInput.acknowledge(ack.inputEpoch, ack.appliedThrough);
-      if (ack.controlGeneration !== undefined) {
-        this.noteControlGeneration(ack.controlGeneration);
-      }
+      this.applyInputAck(ack);
     });
 
     // A lease that moved takes this client's pending input with it (#1095,
@@ -478,13 +509,13 @@ export class ConnectionManager implements TerminalTransport {
    * applied or proven unapplied, and the alternative to saying so is replaying
    * a command that may already have run.
    *
-   * **P2P only.** The relay's merge would destroy the position a sequence
-   * carries (see {@link flushInputBuffer}), so a relay client never binds and
-   * its queue keeps the buffer semantics it had before this contract. Enabling
-   * it is part of stage 4, together with the merge that makes it sound.
+   * Both transports bind. The relay used to be excluded because its merge
+   * destroyed the position a sequence carries; the merge now states the range
+   * it covers (#1307 SC-05), so the exclusion would only be a client that
+   * cannot retry what it typed.
    */
   seedInputCursor(seed: TerminalInputSeed | undefined): void {
-    if (this.disposed || this.mode !== 'p2p' || !seed) { return; }
+    if (this.disposed || !seed) { return; }
     if (seed.inputEpoch === undefined) { return; }
     this.pendingInput.reconcile(
       {
@@ -538,6 +569,19 @@ export class ConnectionManager implements TerminalTransport {
         }
       },
     );
+
+    // The agent's applied cursor, on the relay lane (#1307 SC-13).
+    //
+    // It arrives here rather than through a reply because the Server forwards
+    // every agent frame to the browser unchanged — the notification is on the
+    // wire either way. What was missing was this subscription: the frame
+    // reached the browser and nothing read it, so a relay client's queue never
+    // drained and every chunk it had ever sent stayed pending until the TTL
+    // took it.
+    this.relayUnsubInputAck = svc.onRelayInputAck(this.sessionName, (ack) => {
+      if (this.disposed) { return; }
+      this.applyInputAck(ack);
+    });
 
     // Only the durable edges are reported: the new transport's
     // post-handshake 'connected' (old 'authenticated') and the

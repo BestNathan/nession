@@ -1155,6 +1155,123 @@ fn classify_client_frame(msg: &Message) -> ClientFrame {
     }
 }
 
+/// Where one terminal-input frame says its bytes sit in the session's input
+/// stream (#1307).
+///
+/// Three answers rather than two, because "this frame states no position" and
+/// "this frame states half a position" are different facts about it. The first
+/// is a sender from before the contract — `TerminalInputPayload` documents its
+/// absence as legal and means *unsequenced*, so it merges like any other bytes
+/// that claim nothing. The second is malformed: the two ends are present
+/// together or neither, the Agent refuses such a frame outright
+/// (`bad_input_sequence`), and merging cannot repair one.
+enum InputPosition {
+    /// No position stated: a sender that has none, whose bytes are still
+    /// written and still advance nothing.
+    Unsequenced,
+    Sequenced {
+        epoch: u64,
+        start: u64,
+        end: u64,
+    },
+    /// Some of the three fields and not all — never mergeable.
+    Malformed,
+}
+
+/// Read [`InputPosition`] off a frame's envelope.
+fn input_position(envelope: &serde_json::Value) -> InputPosition {
+    let payload = envelope.get("payload");
+    let field = |name: &str| {
+        payload
+            .and_then(|p| p.get(name))
+            .and_then(serde_json::Value::as_u64)
+    };
+    match (field("input_epoch"), field("seq_start"), field("seq_end")) {
+        (None, None, None) => InputPosition::Unsequenced,
+        (Some(epoch), Some(start), Some(end)) => InputPosition::Sequenced { epoch, start, end },
+        _ => InputPosition::Malformed,
+    }
+}
+
+/// The sequence range a burst's bytes lie in, once the burst is known to have
+/// one.
+enum MergedRange {
+    /// Every frame is unsequenced, so the merged frame claims nothing — and
+    /// claiming nothing is the only true statement about it.
+    Unsequenced,
+    Sequenced {
+        epoch: u64,
+        start: u64,
+        end: u64,
+    },
+    /// The burst has no single range, so it must not be given one.
+    Unmergeable,
+}
+
+/// Derive the range a burst covers, or refuse to state one.
+///
+/// A merged frame carries one envelope for bytes that came from several, so it
+/// can only be honest if those bytes really do form one run: **the first frame's
+/// `seq_start` through the last frame's `seq_end`**, with nothing missing in
+/// between. Refusing is the answer to everything that breaks that — which is
+/// the whole point of deriving rather than inventing, because a merged frame
+/// that overstates its range is worse than an unmerged one. The Agent advances
+/// its applied cursor to whatever the frame claims, so a range that spans a
+/// chunk the burst did not carry marks that chunk applied; the frame that later
+/// brings it is then refused as a duplicate, and the user's input is gone with
+/// no error anywhere.
+///
+/// Four ways a burst fails to be one run:
+///
+/// * a frame states half a position ([`InputPosition::Malformed`]);
+/// * the frames do not agree on `input_epoch`, so their numbers count in
+///   different runs and the merged frame would have to pick one;
+/// * the burst mixes sequenced and unsequenced frames — the sequenced ones name
+///   positions the unsequenced ones do not occupy, so no range states where the
+///   bytes are;
+/// * two consecutive frames do not meet end to end, leaving a hole the merged
+///   range would nonetheless claim.
+fn merged_range(positions: &[InputPosition]) -> MergedRange {
+    // `(epoch, first start, running end)` — the first frame's start and the
+    // last frame's end, which is the range the caller states.
+    let mut range: Option<(u64, u64, u64)> = None;
+    let mut saw_unsequenced = false;
+
+    for position in positions {
+        match *position {
+            InputPosition::Malformed => return MergedRange::Unmergeable,
+            InputPosition::Unsequenced => {
+                if range.is_some() {
+                    return MergedRange::Unmergeable;
+                }
+                saw_unsequenced = true;
+            }
+            InputPosition::Sequenced { epoch, start, end } => {
+                if saw_unsequenced {
+                    return MergedRange::Unmergeable;
+                }
+                match range {
+                    None => range = Some((epoch, start, end)),
+                    Some((seen_epoch, first_start, seen_end)) => {
+                        // `saturating_add`: a frame at the top of the u64 range
+                        // is not a burst to panic on, it is one no later frame
+                        // can continue.
+                        if epoch != seen_epoch || start != seen_end.saturating_add(1) {
+                            return MergedRange::Unmergeable;
+                        }
+                        range = Some((seen_epoch, first_start, end));
+                    }
+                }
+            }
+        }
+    }
+
+    match range {
+        Some((epoch, start, end)) => MergedRange::Sequenced { epoch, start, end },
+        None => MergedRange::Unsequenced,
+    }
+}
+
 /// Merge a burst of terminal-input frames into one that carries every byte.
 ///
 /// `#966`. The window used to keep only the **newest** frame of a burst, which
@@ -1169,19 +1286,36 @@ fn classify_client_frame(msg: &Message) -> ClientFrame {
 /// it: every byte survives, and the window still does its job, because the agent
 /// receives one frame instead of N.
 ///
-/// `None` when any frame's payload cannot be read, which is the honest answer —
-/// there is nothing to merge, and the caller forwards them in order rather than
-/// guessing which ones mattered.
+/// `#1307`: the newest frame's envelope also carried the newest frame's
+/// *position*, and every frame before it had none — so a burst of numbered
+/// input went out stating the last frame's range while carrying all of them,
+/// and the Agent, which refuses a frame that does not continue its cursor,
+/// refused the lot. The merged envelope's `seq_start`/`seq_end` are therefore
+/// replaced with the range the burst actually covers, derived by
+/// [`merged_range`].
+///
+/// `None` when any frame's payload cannot be read **or the burst has no single
+/// range** ([`MergedRange::Unmergeable`]), which is the honest answer in both
+/// cases — there is nothing to merge, and the caller forwards them in order
+/// rather than guessing which ones mattered.
 fn merge_terminal_input(frames: &[Message]) -> Option<Message> {
     use base64::Engine as _;
     let engine = base64::engine::general_purpose::STANDARD;
 
     let mut bytes = Vec::new();
+    let mut positions = Vec::with_capacity(frames.len());
     for frame in frames {
         let envelope: serde_json::Value = serde_json::from_str(frame.to_text().ok()?).ok()?;
         let data = envelope.get("payload")?.get("data")?.as_str()?;
         bytes.extend(engine.decode(data).ok()?);
+        positions.push(input_position(&envelope));
     }
+
+    let range = match merged_range(&positions) {
+        MergedRange::Unmergeable => return None,
+        MergedRange::Unsequenced => None,
+        MergedRange::Sequenced { epoch, start, end } => Some((epoch, start, end)),
+    };
 
     // The newest frame supplies the envelope — the id and the session — and only
     // its `data` is replaced. All frames in a burst are for this one relay's
@@ -1193,6 +1327,14 @@ fn merge_terminal_input(frames: &[Message]) -> Option<Message> {
         "data".to_string(),
         serde_json::Value::String(engine.encode(&bytes)),
     );
+    // Only for a sequenced burst: an unsequenced one states no position, and
+    // writing one there would be inventing the very thing this function
+    // exists to stop inventing.
+    if let Some((epoch, start, end)) = range {
+        payload.insert("input_epoch".to_string(), serde_json::Value::from(epoch));
+        payload.insert("seq_start".to_string(), serde_json::Value::from(start));
+        payload.insert("seq_end".to_string(), serde_json::Value::from(end));
+    }
     Some(Message::Text(envelope.to_string()))
 }
 
@@ -1488,6 +1630,41 @@ mod tests {
         )
     }
 
+    /// A terminal-input frame that states a position, as a sequenced sender
+    /// sends one (#1307).
+    ///
+    /// One chunk per frame, which is what `flushInputBuffer` sends: the range
+    /// exists in the contract because a frame may cover several chunks, and a
+    /// burst is where several frames become one.
+    fn sequenced_terminal_input(bytes: &str, epoch: u64, seq: u64) -> Message {
+        use base64::Engine as _;
+        frame_with_payload(
+            TERMINAL_INPUT_WIRE,
+            bytes,
+            json!({
+                "session_name": "sess",
+                "data": base64::engine::general_purpose::STANDARD.encode(bytes.as_bytes()),
+                "input_epoch": epoch,
+                "seq_start": seq,
+                "seq_end": seq,
+            }),
+        )
+    }
+
+    /// The three sequence fields of a frame, as the agent reads them.
+    ///
+    /// `None` for an unsequenced frame, which is not the same answer as zero —
+    /// the whole contract keeps those apart.
+    fn frame_sequence(msg: &Message) -> (Option<u64>, Option<u64>, Option<u64>) {
+        let envelope: serde_json::Value = serde_json::from_str(msg.to_text().unwrap()).unwrap();
+        let payload = &envelope["payload"];
+        (
+            payload["input_epoch"].as_u64(),
+            payload["seq_start"].as_u64(),
+            payload["seq_end"].as_u64(),
+        )
+    }
+
     /// The bytes a terminal-input frame carries, decoded.
     fn frame_data(msg: &Message) -> String {
         use base64::Engine as _;
@@ -1543,6 +1720,179 @@ mod tests {
             sent.len(),
             3,
             "three unmergeable frames arrive as three, not as one kept and two lost: {sent:?}"
+        );
+    }
+
+    /// #1307 SC-05: a merged burst states the range it covers.
+    ///
+    /// The envelope a merge keeps is the **newest** frame's, so before this the
+    /// merged frame carried every byte of `2..=4` while stating `4..=4`. That is
+    /// not a cosmetic lie: the Agent advances its applied cursor to whatever a
+    /// frame claims and refuses a frame that does not continue it, so the
+    /// over-tight range is input that never lands.
+    ///
+    /// The mutation is the range-rewriting block being absent — which is exactly
+    /// the tree before this change — and the failure is on `seq_start`, which
+    /// would read `4` instead of `2`.
+    #[tokio::test]
+    async fn a_merged_burst_states_the_range_it_covers() {
+        let (sent, _) = drive(vec![
+            // Forwarded on the leading edge; the other three open and join the
+            // window.
+            sequenced_terminal_input("a", 7, 1),
+            sequenced_terminal_input("b", 7, 2),
+            sequenced_terminal_input("c", 7, 3),
+            sequenced_terminal_input("d", 7, 4),
+        ])
+        .await;
+
+        assert_eq!(sent.len(), 2, "the held burst is one frame: {sent:?}");
+        assert_eq!(frame_data(&sent[0]), "a");
+        assert_eq!(
+            frame_sequence(&sent[0]),
+            (Some(7), Some(1), Some(1)),
+            "a lone frame keeps its own position"
+        );
+        assert_eq!(
+            frame_data(&sent[1]),
+            "bcd",
+            "every byte of the burst survives the merge"
+        );
+        assert_eq!(
+            frame_sequence(&sent[1]),
+            (Some(7), Some(2), Some(4)),
+            "the merged frame states the first frame's start through the last \
+             frame's end, not the newest frame's own range"
+        );
+    }
+
+    /// #1307 SC-05: an unsequenced burst still merges, and still states nothing.
+    ///
+    /// The other half of deriving a range rather than inventing one: input from
+    /// a sender that has no position — a client built before the contract, or an
+    /// agent that stated no epoch — must not acquire one by being merged. This
+    /// pins *this* change rather than the behaviour before it (unsequenced
+    /// bursts merged then too): a `merged_range` that answered `Unmergeable` for
+    /// the all-unsequenced case, or a range written unconditionally, fails here.
+    #[tokio::test]
+    async fn an_unsequenced_burst_merges_and_states_no_position() {
+        let (sent, _) = drive(vec![
+            terminal_input("a"),
+            terminal_input("b"),
+            terminal_input("c"),
+        ])
+        .await;
+
+        assert_eq!(sent.len(), 2, "the held burst is still one frame: {sent:?}");
+        assert_eq!(frame_data(&sent[1]), "bc");
+        assert_eq!(
+            frame_sequence(&sent[1]),
+            (None, None, None),
+            "an unsequenced burst must not be given a position by the merge"
+        );
+    }
+
+    /// #1307 SC-05: a burst that mixes sequenced and unsequenced frames has no
+    /// single range, so it is forwarded frame by frame.
+    ///
+    /// Both orders, because they fail differently. Unsequenced-then-sequenced
+    /// invents a position for bytes that never had one — the merged frame would
+    /// claim the sequenced frame's chunk while carrying the unsequenced frame's
+    /// bytes, and the Agent would mark a chunk applied that the burst did not
+    /// carry. Sequenced-then-unsequenced loses the position instead. Either way
+    /// the honest answer is the same: no merge.
+    #[tokio::test]
+    async fn a_burst_that_mixes_sequenced_and_unsequenced_is_forwarded_whole() {
+        // Sequenced first, then a sender that states nothing.
+        let (sent, _) = drive(vec![
+            sequenced_terminal_input("a", 7, 1),
+            sequenced_terminal_input("b", 7, 2),
+            terminal_input("c"),
+        ])
+        .await;
+        assert_eq!(sent.len(), 3, "mixed burst arrives whole: {sent:?}");
+        assert_eq!(frame_sequence(&sent[1]), (Some(7), Some(2), Some(2)));
+        assert_eq!(
+            frame_sequence(&sent[2]),
+            (None, None, None),
+            "the unsequenced frame keeps stating nothing"
+        );
+
+        // And the other way round: the unsequenced frames are held first.
+        // Four frames rather than three, because the first of any burst is
+        // forwarded on the leading edge and never joins it — a three-frame
+        // drive would leave the unsequenced frame outside the window and the
+        // burst all-sequenced, which is a different test that already passes.
+        let (sent, _) = drive(vec![
+            terminal_input("z"),
+            terminal_input("a"),
+            sequenced_terminal_input("b", 7, 2),
+            sequenced_terminal_input("c", 7, 3),
+        ])
+        .await;
+        assert_eq!(sent.len(), 4, "mixed burst arrives whole: {sent:?}");
+        assert_eq!(
+            frame_sequence(&sent[1]),
+            (None, None, None),
+            "the unsequenced frame states nothing"
+        );
+        assert_eq!(
+            frame_sequence(&sent[2]),
+            (Some(7), Some(2), Some(2)),
+            "the sequenced frame keeps its own range rather than acquiring one \
+             that covers the unsequenced bytes beside it"
+        );
+        assert_eq!(frame_sequence(&sent[3]), (Some(7), Some(3), Some(3)));
+    }
+
+    /// #1307 SC-05: frames that disagree on `input_epoch` have no range at all.
+    ///
+    /// Their numbers count in different runs, so any merged range would have to
+    /// pick one epoch's numbering and attribute the other's bytes to it. Both
+    /// epochs are live — a client that reconnected mid-burst is exactly this
+    /// shape — so there is no "older one" to drop either.
+    #[tokio::test]
+    async fn frames_that_disagree_on_epoch_are_forwarded_whole() {
+        let (sent, _) = drive(vec![
+            sequenced_terminal_input("a", 7, 1),
+            sequenced_terminal_input("b", 7, 2),
+            sequenced_terminal_input("c", 8, 3),
+        ])
+        .await;
+
+        assert_eq!(sent.len(), 3, "no merge across epochs: {sent:?}");
+        assert_eq!(frame_sequence(&sent[1]), (Some(7), Some(2), Some(2)));
+        assert_eq!(frame_sequence(&sent[2]), (Some(8), Some(3), Some(3)));
+    }
+
+    /// #1307 SC-05: a burst with a hole in it is not one run, so it is not
+    /// merged into one range.
+    ///
+    /// This is the case where a merge does not merely fail to help — it loses
+    /// input permanently and silently. A merged frame stating `2..=4` while
+    /// carrying chunks 2 and 4 makes the Agent advance its applied cursor to 4,
+    /// and the frame that later brings chunk 3 is refused as a duplicate. The
+    /// user's bytes are gone and nothing anywhere reports it.
+    #[tokio::test]
+    async fn a_burst_with_a_hole_is_forwarded_whole() {
+        let (sent, _) = drive(vec![
+            sequenced_terminal_input("a", 7, 1),
+            sequenced_terminal_input("b", 7, 2),
+            sequenced_terminal_input("d", 7, 4),
+        ])
+        .await;
+
+        assert_eq!(
+            sent.len(),
+            3,
+            "a burst whose chunks do not meet cannot state a range covering \
+             them: {sent:?}"
+        );
+        assert_eq!(frame_sequence(&sent[1]), (Some(7), Some(2), Some(2)));
+        assert_eq!(
+            frame_sequence(&sent[2]),
+            (Some(7), Some(4), Some(4)),
+            "chunk 4 is not folded into a range that would claim chunk 3 arrived"
         );
     }
 

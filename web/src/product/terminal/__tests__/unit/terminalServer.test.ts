@@ -248,6 +248,91 @@ describe('TerminalServerPlugin', () => {
     });
   });
 
+  describe('onRelayInputAck', () => {
+    it('routes the agent cursor per session_name and passes it through', () => {
+      const cbWork = vi.fn();
+      const cbOther = vi.fn();
+      plugin.onRelayInputAck('work', cbWork);
+      plugin.onRelayInputAck('other', cbOther);
+
+      surface.pushMessage('agent.terminal.input.ack', {
+        session_name: 'work',
+        input_epoch: 7,
+        applied_through: 3,
+        control_generation: 2,
+      });
+
+      expect(cbWork).toHaveBeenCalledWith({
+        sessionName: 'work',
+        inputEpoch: 7,
+        appliedThrough: 3,
+        controlGeneration: 2,
+      });
+      expect(cbOther).not.toHaveBeenCalled();
+    });
+
+    /**
+     * Both numbers or nothing. A cursor is a position *in a run*, so an epoch
+     * with no position names no position — and this is the same reader the
+     * direct path uses, which is what keeps the two transports from disagreeing
+     * about which statements count (#1307).
+     */
+    it('drops a half-stated cursor rather than inventing the missing half', () => {
+      const cb = vi.fn();
+      plugin.onRelayInputAck('work', cb);
+
+      surface.pushMessage('agent.terminal.input.ack', {
+        session_name: 'work',
+        input_epoch: 7,
+      });
+      surface.pushMessage('agent.terminal.input.ack', {
+        session_name: 'work',
+        applied_through: 3,
+      });
+      surface.pushMessage('agent.terminal.input.ack', { applied_through: 3, input_epoch: 7 });
+
+      expect(cb).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('sendRelayInput', () => {
+    /**
+     * SC-05 on the wire: the frame carries the position its bytes sit at, so
+     * the Server's merge has a range to carry and the agent has a cursor to
+     * advance.
+     */
+    it('carries the chunk position when the caller states one', () => {
+      plugin.sendRelayInput('work', 'a', { inputEpoch: 7, seqStart: 5, seqEnd: 5 });
+
+      expect(surface.sent).toEqual([
+        {
+          type: 'agent.terminal.input',
+          payload: {
+            session_name: 'work',
+            data: btoa('a'),
+            input_epoch: 7,
+            seq_start: 5,
+            seq_end: 5,
+          },
+        },
+      ]);
+    });
+
+    /**
+     * Absent rather than null, like every other optional field on this wire: a
+     * client with no cursor is a sender from before the contract, and the agent
+     * reads the three fields as one statement — an explicit null is something
+     * an older build has never seen.
+     */
+    it('omits all three when the caller states no position', () => {
+      plugin.sendRelayInput('work', 'a');
+
+      expect(surface.sent).toEqual([
+        { type: 'agent.terminal.input', payload: { session_name: 'work', data: btoa('a') } },
+      ]);
+    });
+  });
+
   describe('binding lifecycle', () => {
     it('double-mount replaces the binding; stale teardown keeps the newer one live', () => {
       const surfaceA = createMockPluginSurface();

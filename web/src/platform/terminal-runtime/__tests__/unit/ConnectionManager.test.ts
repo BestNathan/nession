@@ -109,13 +109,14 @@ function makeAgentApi(): AgentApiHarness & { unsubs: { output: ReturnType<typeof
 function makeMockWs(): RelayServerTransport {
   return {
     sendRelayInput: vi.fn(),
+    isReady: vi.fn(() => true),
     sendRelayResize: vi.fn(),
     onRelayOutput: vi.fn().mockReturnValue(() => {}),
     onRelayResize: vi.fn().mockReturnValue(() => {}),
+    onRelayInputAck: vi.fn().mockReturnValue(() => {}),
     onConnectionStateChange: vi.fn().mockReturnValue(() => {}),
     beginRelay: vi.fn(),
     endRelay: vi.fn(),
-    isReady: () => true,
   };
 }
 
@@ -848,18 +849,18 @@ describe('ConnectionManager', () => {
     });
 
     /**
-     * The relay's 16 ms merge keeps the newest frame's envelope and
-     * concatenates every frame's bytes, so a sequence range sent through it
-     * would describe only the last frame of a burst — the agent would read a
-     * gap and refuse. Until the merge carries the range (#1307 stage 4) this
-     * path must not claim a position it cannot have preserved.
+     * A relay client with no cursor still sends what it always sent.
+     *
+     * The transport split that used to be *is* the split that remains, stated
+     * by the one thing actually true about it: neither an agent built before
+     * the contract nor a relay attach states a position, so there is nothing to
+     * number against and the queue is a buffer rather than a retry log.
      */
-    it('never sequences relay input, even when the attach stated an epoch', () => {
+    it('sends unsequenced relay input when no cursor was stated', () => {
       const ws = makeMockWs();
       const cm = new ConnectionManager({
         mode: 'relay', sessionName: 'test', sessionId: 'a:test', serverConnection: ws, ...attached,
       });
-      cm.seedInputCursor({ inputEpoch: 7, appliedThrough: 0, controlGeneration: 2 });
       cm.send('a');
       expect(ws.sendRelayInput).toHaveBeenCalledWith('test', 'a');
       cm.dispose();
@@ -988,6 +989,174 @@ describe('ConnectionManager', () => {
       cm.flushPendingResize();
       expect(ws.sendRelayResize).toHaveBeenCalledWith('test', 120, 40);
       cm.dispose();
+    });
+
+    describe('sequenced input delivery (#1307 SC-05, SC-13)', () => {
+      /**
+       * A relay manager with the attach's cursor already reconciled.
+       *
+       * `seedInputCursor` is the entry point a relay attach reaches through the
+       * same orchestration effect a direct one does — see the note on the
+       * production wiring in the report, which is the one thing these tests
+       * cannot show.
+       */
+      function seededRelay(
+        over: { inputEpoch?: number; appliedThrough?: number } = {},
+      ): {
+        ws: ReturnType<typeof makeMockWs>;
+        send: ReturnType<typeof vi.mocked<RelayServerTransport['sendRelayInput']>>;
+        cm: ConnectionManager;
+        deliverAck: (ack: Omit<TerminalInputAck, 'sessionName'>) => void;
+      } {
+        const ws = makeMockWs();
+        let ackHandler: ((ack: TerminalInputAck) => void) | null = null;
+        (ws.onRelayInputAck as ReturnType<typeof vi.fn>).mockImplementation(
+          (_sid: string, cb: (ack: TerminalInputAck) => void) => {
+            ackHandler = cb;
+            return () => {};
+          },
+        );
+        const cm = new ConnectionManager({
+          mode: 'relay', sessionName: 'test', sessionId: 'a:test', serverConnection: ws, ...attached,
+        });
+        cm.seedInputCursor({
+          inputEpoch: over.inputEpoch ?? 7,
+          appliedThrough: over.appliedThrough ?? 0,
+          controlGeneration: 2,
+        });
+        return {
+          ws,
+          send: vi.mocked(ws.sendRelayInput),
+          cm,
+          deliverAck: (ack) => ackHandler?.({ sessionName: 'test', ...ack }),
+        };
+      }
+
+      /**
+       * SC-05 on the client's half: a relay frame states its position.
+       *
+       * The mutation is **both** guards, and it has to be both — restoring the
+       * `mode === 'relay'` branch in `flushInputBuffer` alone still sends
+       * unsequenced bytes, and restoring the `mode !== 'p2p'` return in
+       * `seedInputCursor` alone means the cursor never binds so `outbound()`
+       * answers `null` and the frame goes out with no position. Only removing
+       * the pair reaches this assertion, which is why the requirement's own
+       * report recorded that a single-guard test proves nothing about the pair.
+       */
+      it('sequences relay input against the cursor the attach stated', () => {
+        const { send, cm } = seededRelay({ appliedThrough: 4 });
+        cm.send('a');
+        expect(send).toHaveBeenCalledWith('test', 'a', {
+          inputEpoch: 7,
+          seqStart: 5,
+          seqEnd: 5,
+        });
+        cm.dispose();
+      });
+
+      /**
+       * Ordering is the invariant the requirement states outright: input A
+       * before input B means the PTY sees A before B. On the relay that is a
+       * property of the positions, because the Server's merge carries every
+       * byte of a burst into one frame and the range it states is the range
+       * those bytes occupy.
+       */
+      it('numbers consecutive relay chunks from the cursor, in order', () => {
+        const { send, cm, deliverAck } = seededRelay({ appliedThrough: 0 });
+        // Acknowledged between keystrokes so each flush offers exactly the run
+        // standing above the cursor. Without the acknowledgements every flush
+        // re-offers the whole unacknowledged run — that is what a retry log is
+        // for, and the last flush would still show the order, but this states
+        // the numbering rather than the retransmission.
+        cm.send('a');
+        deliverAck({ inputEpoch: 7, appliedThrough: 1 });
+        cm.send('b');
+        deliverAck({ inputEpoch: 7, appliedThrough: 2 });
+        cm.send('c');
+        expect(send.mock.calls).toEqual([
+          ['test', 'a', { inputEpoch: 7, seqStart: 1, seqEnd: 1 }],
+          ['test', 'b', { inputEpoch: 7, seqStart: 2, seqEnd: 2 }],
+          ['test', 'c', { inputEpoch: 7, seqStart: 3, seqEnd: 3 }],
+        ]);
+        cm.dispose();
+      });
+
+      /**
+       * SC-13's ACK propagation, end to end at the client's end.
+       *
+       * Before this, the server forwarded the agent's `agent.terminal.input.ack`
+       * exactly as it forwards every other agent frame, and **nothing in the
+       * browser was subscribed to it** — so a relay client's queue never
+       * drained, every chunk stayed pending until the TTL discarded it, and
+       * each flush re-offered bytes the PTY already had.
+       *
+       * The mutation is the missing `onRelayInputAck` subscription in
+       * `setupRelay` (or the missing `agent.terminal.input.ack` subscribe in the
+       * server plugin): the ack is delivered to nobody, and the flush below
+       * re-sends both chunks.
+       */
+      it('drains acknowledged relay input, so a retry re-sends only the rest', () => {
+        const { send, cm, deliverAck } = seededRelay({ appliedThrough: 0 });
+        cm.send('a');
+        cm.send('b');
+        deliverAck({ inputEpoch: 7, appliedThrough: 1 });
+        send.mockClear();
+        cm.flushInputBuffer();
+        expect(send.mock.calls).toEqual([
+          ['test', 'b', { inputEpoch: 7, seqStart: 2, seqEnd: 2 }],
+        ]);
+        cm.dispose();
+      });
+
+      /**
+       * A cursor names a position *in a run*, so an acknowledgement for another
+       * epoch says nothing about this queue's — the same rule the direct path
+       * applies, through the same reader, which is what keeps the two
+       * transports from disagreeing about what an acknowledgement is.
+       */
+      it('ignores a relay acknowledgement that names another epoch', () => {
+        const { send, cm, deliverAck } = seededRelay({ appliedThrough: 0 });
+        cm.send('a');
+        deliverAck({ inputEpoch: 8, appliedThrough: 1 });
+        send.mockClear();
+        cm.flushInputBuffer();
+        expect(send).toHaveBeenCalledWith('test', 'a', {
+          inputEpoch: 7,
+          seqStart: 1,
+          seqEnd: 1,
+        });
+        cm.dispose();
+      });
+
+      /**
+       * SC-13's reconnect: the relay transport drops, the user keeps typing,
+       * and the flush after it comes back re-sends the run at the positions it
+       * already had.
+       *
+       * The mutation is deriving the position at flush time instead of
+       * deriving it from the cursor — a renumbering would leave the run
+       * continuing nothing, and the agent refuses a frame that does not
+       * continue its cursor, so no later input could ever land.
+       */
+      it('re-sends what a dropped relay transport could not carry, at the same positions', () => {
+        const { ws, send, cm, deliverAck } = seededRelay({ appliedThrough: 0 });
+        cm.send('a');
+        deliverAck({ inputEpoch: 7, appliedThrough: 1 });
+
+        let ready = false;
+        (ws.isReady as ReturnType<typeof vi.fn>).mockImplementation(() => ready);
+        cm.send('b');
+        cm.send('c');
+        expect(send).toHaveBeenCalledTimes(1);
+
+        ready = true;
+        cm.flushInputBuffer();
+        expect(send.mock.calls.slice(1)).toEqual([
+          ['test', 'b', { inputEpoch: 7, seqStart: 2, seqEnd: 2 }],
+          ['test', 'c', { inputEpoch: 7, seqStart: 3, seqEnd: 3 }],
+        ]);
+        cm.dispose();
+      });
     });
   });
 });

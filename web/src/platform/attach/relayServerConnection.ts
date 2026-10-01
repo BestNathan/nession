@@ -61,7 +61,11 @@ export interface RelayServerHandle {
 export type RelayServerTransport = RelayServerHandle &
   Pick<
     TerminalServerApi,
-    'sendRelayInput' | 'sendRelayResize' | 'onRelayOutput' | 'onRelayResize'
+    | 'sendRelayInput'
+    | 'sendRelayResize'
+    | 'onRelayOutput'
+    | 'onRelayResize'
+    | 'onRelayInputAck'
   >;
 
 /**
@@ -94,9 +98,9 @@ export function relayServerHandle(
       if (stale()) { return; }
       terminalServerApi.endRelay(sessionId);
     },
-    sendRelayInput: (sessionName, data) => {
+    sendRelayInput: (sessionName, data, opts) => {
       if (stale()) { return; }
-      terminalServerApi.sendRelayInput(sessionName, data);
+      terminalServerApi.sendRelayInput(sessionName, data, opts);
     },
     sendRelayResize: (sessionName, cols, rows) => {
       if (stale()) { return; }
@@ -109,6 +113,10 @@ export function relayServerHandle(
     onRelayResize: (sessionName, cb) => {
       if (stale()) { return () => {}; }
       return terminalServerApi.onRelayResize(sessionName, cb);
+    },
+    onRelayInputAck: (sessionName, cb) => {
+      if (stale()) { return () => {}; }
+      return terminalServerApi.onRelayInputAck(sessionName, cb);
     },
   };
 }
