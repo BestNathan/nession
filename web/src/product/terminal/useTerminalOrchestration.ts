@@ -28,7 +28,10 @@ import { ConnectionManager } from '@/platform/terminal-runtime/ConnectionManager
 import type { TerminalController } from '@/platform/terminal-runtime/controller/TerminalController';
 import { createAttachGate } from '@/platform/terminal-runtime/adapters/TransportAttachGate';
 import { detectProfile, PROFILES } from '@/platform/terminal-runtime/DeviceProfile';
-import type { TerminalTransport } from '@/platform/terminal-runtime/transport/TerminalTransport';
+import type {
+  TerminalInputSeed,
+  TerminalTransport,
+} from '@/platform/terminal-runtime/transport/TerminalTransport';
 import type { TerminalStatus } from '@/product/terminal/state/session';
 import { bannerAtomFamily, bannerAttemptAtomFamily, type ReconnectBanner } from '@/product/terminal/state/ui';
 import { useTerminalControlBridge } from '@/product/terminal/hooks/useTerminalControlBridge';
@@ -173,6 +176,36 @@ function useEndRelayOnDisconnect(opts: {
   }, [effectiveMode, serverConnection, sessionId, onDisconnect]);
 }
 
+/**
+ * Apply what an attach stated about the session's cursors, then let the
+ * transport out (#1094, #1307).
+ *
+ * Module-level rather than inline because it is the same decision wherever it
+ * is made, and because it is worth being able to read in one place: the input
+ * cursor is reconciled *before* the flush (the order is explained at the call
+ * site), and the stream cursor is seeded after it. Those two orders differ on
+ * purpose — the stream seed fills a timeline the reconciler owns, and the input
+ * seed is what the flush that follows is numbered against.
+ */
+function applyAttachSeed(
+  controller: TerminalController | null,
+  runtime: { getP2pAttachSeed?: () => TerminalInputSeed & { streamEpoch?: number; streamCursor?: number } | null } | null,
+): void {
+  if (!controller) { return; }
+  const seed = runtime?.getP2pAttachSeed?.();
+  if (seed) {
+    controller.seedInputCursor({
+      inputEpoch: seed.inputEpoch,
+      appliedThrough: seed.appliedThrough,
+      controlGeneration: seed.controlGeneration,
+    });
+  }
+  controller.flushAllOutbound();
+  if (seed) {
+    controller.seedStreamCursor(seed.streamEpoch, seed.streamCursor);
+  }
+}
+
 export interface UseTerminalOrchestrationOptions {
   onDisconnect: () => void;
   onError: (error: Error) => void;
@@ -311,11 +344,7 @@ export function useTerminalOrchestration({
 
   useEffect(() => {
     if (terminalState === 'attached') {
-      controller?.flushAllOutbound();
-      const seed = runtime?.getP2pStreamSeed?.();
-      if (seed) {
-        controller?.seedStreamCursor(seed.streamEpoch, seed.streamCursor);
-      }
+      applyAttachSeed(controller, runtime);
     }
   }, [terminalState, controller, runtime]);
 

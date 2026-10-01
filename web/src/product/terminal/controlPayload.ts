@@ -5,6 +5,8 @@ export function readAttachControlFields(payload: unknown): {
   controllerClientId?: string;
   streamEpoch?: number;
   streamCursor?: number;
+  inputEpoch?: number;
+  inputAppliedThrough?: number;
 } {
   if (!payload || typeof payload !== 'object') {
     return {};
@@ -24,6 +26,13 @@ export function readAttachControlFields(payload: unknown): {
       typeof p.controller_client_id === 'string' ? p.controller_client_id : undefined,
     streamEpoch: typeof p.stream_epoch === 'number' ? p.stream_epoch : undefined,
     streamCursor: typeof p.stream_cursor === 'number' ? p.stream_cursor : undefined,
+    // Absent, never zero: an agent built before the input contract states
+    // neither field, and "I have no position" is a different answer from "my
+    // position is zero" — the first is why a client keeps sending unsequenced
+    // input rather than numbering against a cursor nobody holds (#1307).
+    inputEpoch: typeof p.input_epoch === 'number' ? p.input_epoch : undefined,
+    inputAppliedThrough:
+      typeof p.input_applied_through === 'number' ? p.input_applied_through : undefined,
   };
 }
 

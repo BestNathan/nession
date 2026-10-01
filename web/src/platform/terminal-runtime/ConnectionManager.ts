@@ -1,8 +1,36 @@
 import type { ConnectionOptions } from './types';
 import type { ConnectionState } from '@/platform/socket/types';
-import type { TerminalTransport } from './transport/TerminalTransport';
+import type { TerminalTransport, TerminalInputSeed } from './transport/TerminalTransport';
 import { StreamReconciler, type ResumeReply } from './streamReconciler';
 import type { TerminalBootstrap } from './bootstrap';
+import { PendingInputQueue, type InputQueueBounds } from './inputQueue';
+
+/**
+ * How much typed-ahead input this client will hold for a session (#1307).
+ *
+ * The requirement asks for these to be fixed by measurement of real typing and
+ * paste, and that measurement has not been taken — so these are reasoned
+ * starting points rather than the settled numbers, and are stated here so the
+ * reasoning can be replaced by a figure:
+ *
+ * * **128 chunks** is far past any reconnect window's worth of fast typing
+ *   (ten keys a second for twelve seconds) and far past any single paste, which
+ *   arrives as one chunk. Reaching it means the transport has been unable to
+ *   deliver for a long time.
+ * * **64 KiB** is one large paste, and the bound is deliberately well above any
+ *   keyboard burst. A single chunk is always accepted into an empty queue, so
+ *   this bounds the *queue*, not the event.
+ * * **5 s** is the age at which typed-ahead input stops being "typed ahead".
+ *   The failure this prevents is the one the requirement names: bytes typed
+ *   during an outage arriving at the shell much later, as if the user had just
+ *   typed them, possibly into a different application state than the one they
+ *   were typed for.
+ */
+const INPUT_QUEUE_BOUNDS: InputQueueBounds = {
+  maxChunks: 128,
+  maxBytes: 64 * 1024,
+  maxAgeMs: 5_000,
+};
 
 /**
  * Deadline for the periodic keepalive ping.
@@ -26,9 +54,25 @@ export class ConnectionManager implements TerminalTransport {
   private p2pUnsubOutput: (() => void) | null = null;
   private p2pUnsubResize: (() => void) | null = null;
   private p2pUnsubError: (() => void) | null = null;
+  private p2pUnsubInputAck: (() => void) | null = null;
+  private p2pUnsubControlChanged: (() => void) | null = null;
   private disposed = false;
-  /** Input typed before client.attach is acked — flushed once attached. */
-  private inputBuffer: string[] = [];
+  /**
+   * Input the PTY has not confirmed (#1307).
+   *
+   * It replaces a plain `string[]` FIFO and is bounded, sequenced and
+   * identity-bound — see {@link PendingInputQueue}, which owns every one of
+   * those decisions. This class only decides *when* to hand it over.
+   *
+   * **One queue per transport generation, by construction.** A transport swap
+   * rebuilds this manager (`transportEpoch` in the orchestration), so anything
+   * still pending is discarded with the manager that numbered it — which is the
+   * conservative answer and the one the requirement's "bound to runtime/
+   * transport generation" clause asks for: a different transport may be a
+   * different agent on a different cursor, and bytes numbered against the old
+   * one mean nothing to it.
+   */
+  private pendingInput = new PendingInputQueue(INPUT_QUEUE_BOUNDS);
   /**
    * Resize pending while state !== 'attached'. Coalesced — only the latest
    * {cols, rows} survives; intermediate sizes during the connect/reconnect
@@ -82,29 +126,84 @@ export class ConnectionManager implements TerminalTransport {
     }
   }
 
+  /**
+   * Take one chunk of user input.
+   *
+   * Accepted first, sent second, and the order is the contract: a chunk that
+   * reaches the transport has already been numbered, so the acknowledgement
+   * that eventually comes back can be matched against something. Input refused
+   * at a bound never reaches the transport and is recorded on the queue
+   * instead — the requirement's answer to undeliverable input is a stated
+   * loss, not a silent one.
+   */
   send(data: string): void {
     if (this.disposed) { return; }
-    if (!this.isAttached()) {
-      this.inputBuffer.push(data);
-      return;
-    }
+    // Refused at a bound: the input never reaches the transport, so there is
+    // nothing to hand over and nothing to question the link about. The drop is
+    // recorded on the queue for whoever reports it.
+    if (!this.pendingInput.accept(data)) { return; }
+    // Queued rather than sent: the probe asks whether the link is there, and
+    // input that was never offered to the link cannot answer that (#1264).
+    if (!this.isAttached()) { return; }
     this.flushInputBuffer();
-    this.sendRaw(data);
+    // Reported for both transports, and even when a send inside the flush
+    // threw: a refused send is exactly the case worth questioning, and the
+    // owner decides for itself whether a check is warranted right now (#1264).
+    this.onInputSent();
   }
 
   /**
-   * Flush any input buffered before the session was attached.  Called by the
-   * TerminalWorkspace effect when entering 'attached' so queued keystrokes
-   * don't sit in the buffer until the next user action.
+   * Hand over everything the queue is holding that has not been delivered.
+   *
+   * Called by the orchestration effect when the session becomes `attached`, and
+   * from `send()` on the live path — the two are the same operation: on a live
+   * path the queue is normally empty by the time the next keystroke arrives, so
+   * this sends exactly the chunk just accepted, and after a reconnect it sends
+   * the run that was typed while the transport was away.
+   *
+   * Reconcile runs **before** this, in the orchestration effect, and that order
+   * is load-bearing: a flush that preceded the attach reply would re-send
+   * chunks the agent had already applied and, worse, would do it with numbers
+   * derived from a stale cursor.
    */
   flushInputBuffer(): void {
-    if (this.disposed || this.inputBuffer.length === 0) { return; }
-    const buffered = this.inputBuffer.splice(0);
-    for (const d of buffered) { this.sendRaw(d); }
+    if (this.disposed || this.pendingInput.size === 0) { return; }
+    if (this.mode === 'relay') {
+      // The Server's 16 ms merge keeps the newest frame's envelope and
+      // concatenates the bytes of the rest, so a sequence range sent through it
+      // would describe only the last frame of a burst while carrying all of
+      // them — the agent would read it as a gap and refuse. Until that merge
+      // carries the range (#1307 stage 4) this path sends unsequenced input,
+      // exactly as it did before this contract, and the queue is therefore a
+      // buffer rather than a retry log: handed over once, then forgotten.
+      for (const data of this.pendingInput.drain()) {
+        this.sendRawInput(data);
+      }
+      return;
+    }
+    const outbound = this.pendingInput.outbound();
+    if (outbound === null) {
+      // No epoch yet — either a transport that cannot carry one, or an agent
+      // built before this contract. Send unsequenced and do not retain: there
+      // is nothing a later retry could be checked against, and holding the
+      // bytes would only delay their discard by the TTL.
+      for (const data of this.pendingInput.drain()) {
+        this.sendRawInput(data);
+      }
+      return;
+    }
+    // One frame per chunk. A chunk that coalesced several events would carry a
+    // range, which the agent understands, but nothing produces one yet: xterm
+    // delivers a paste as a single `onData`, so the batching the requirement
+    // asks for is already the shape of the event rather than something this
+    // layer has to do (#1307 SC-14).
+    for (const chunk of outbound) {
+      this.sendSequencedInput(chunk.data, chunk.seq);
+    }
   }
 
-  /** Send input unconditionally — used by send() once the session is attached. */
-  private sendRaw(data: string): void {
+  /** Send input with no position — a transport or peer that cannot carry one. */
+  private sendRawInput(data: string): void {
     if (this.mode === 'p2p' && this.agentApi) {
       // The underlying socket may be mid-reconnect or disposed — the agent
       // transport refuses with a throw ('WebSocket not connected' /
@@ -117,10 +216,26 @@ export class ConnectionManager implements TerminalTransport {
     } else if (this.mode === 'relay' && this.serverConnection?.isReady()) {
       this.serverConnection.sendRelayInput(this.sessionName, data);
     }
-    // Reported for both transports, and even when the branch above threw: a
-    // refused send is exactly the case worth questioning, and the owner decides
-    // for itself whether a check is warranted right now (#1264).
-    this.onInputSent();
+  }
+
+  /**
+   * Send input at a position the agent can acknowledge.
+   *
+   * One chunk is one position: `seqStart === seqEnd`. The range exists in the
+   * contract because a frame may cover several chunks, and nothing here
+   * produces one yet — see {@link flushInputBuffer}.
+   */
+  private sendSequencedInput(data: string, seq: number): void {
+    if (this.mode !== 'p2p' || !this.agentApi) { return; }
+    const epoch = this.pendingInput.boundTo?.inputEpoch;
+    if (epoch === undefined) { return; }
+    try {
+      this.agentApi.sendInput(this.sessionName, data, {
+        inputEpoch: epoch,
+        seqStart: seq,
+        seqEnd: seq,
+      });
+    } catch { /* transport reconnecting — the chunk stays pending */ }
   }
 
   /**
@@ -180,6 +295,22 @@ export class ConnectionManager implements TerminalTransport {
     }
   }
 
+  /**
+   * Note the lease generation, discarding pending input if it moved.
+   *
+   * Reuses the queue's own reconcile rather than a second "clear if changed"
+   * rule, so there is one place that decides what a moved generation means —
+   * and it is the place that already knows which chunks were numbered against
+   * the old one.
+   */
+  private noteControlGeneration(generation: number | undefined): void {
+    const bound = this.pendingInput.boundTo;
+    if (!bound || generation === undefined || bound.controlGeneration === generation) {
+      return;
+    }
+    this.pendingInput.reconcile({ ...bound, controlGeneration: generation });
+  }
+
   dispose(): void {
     this.disposed = true;
     this.reconciler.dispose();
@@ -187,6 +318,8 @@ export class ConnectionManager implements TerminalTransport {
     this.p2pUnsubOutput?.();
     this.p2pUnsubResize?.();
     this.p2pUnsubError?.();
+    this.p2pUnsubInputAck?.();
+    this.p2pUnsubControlChanged?.();
     this.relayUnsubOutput?.();
     this.relayUnsubState?.();
     this.relayUnsubResize?.();
@@ -235,6 +368,30 @@ export class ConnectionManager implements TerminalTransport {
       this.reconciler.acceptLevelResize(frame.cols, frame.rows);
     });
 
+    // The agent's applied cursor (#1307). A cursor rather than a receipt for
+    // this frame: the relay merges input frames, so on that path the id a
+    // reply would be paired by is gone for every frame but the last — which is
+    // the whole reason the agent states a position instead of answering each
+    // keystroke. `applied_through` covers every chunk at or below it, so a
+    // dropped acknowledgement costs nothing: the next one says the same thing.
+    this.p2pUnsubInputAck = api.onInputAck((ack) => {
+      if (this.disposed) { return; }
+      this.pendingInput.acknowledge(ack.inputEpoch, ack.appliedThrough);
+      if (ack.controlGeneration !== undefined) {
+        this.noteControlGeneration(ack.controlGeneration);
+      }
+    });
+
+    // A lease that moved takes this client's pending input with it (#1095,
+    // #1307 SC-08): the bytes were typed under a generation that no longer
+    // holds the session, and they must not arrive later under the new one's
+    // name — which is exactly what would happen if a client that lost the
+    // lease and got it back simply flushed what it had been holding.
+    this.p2pUnsubControlChanged = api.onControlChanged((sessionName, state) => {
+      if (this.disposed || sessionName !== this.sessionName) { return; }
+      this.noteControlGeneration(state.generation);
+    });
+
     this.p2pUnsubError = api.onError((err) => {
       if (this.disposed) { return; }
       // Belt-and-suspenders: the outbound gate should make `not_attached`
@@ -269,6 +426,40 @@ export class ConnectionManager implements TerminalTransport {
   /** Seed stream cursor after attach (late joiner / reconnect #1094). */
   seedStreamCursor(streamEpoch: number | undefined, streamCursor: number | undefined): void {
     this.reconciler.seed(streamEpoch, streamCursor);
+  }
+
+  /**
+   * Reconcile the input cursor against what the agent stated on attach
+   * (#1307).
+   *
+   * This is SC-04's mechanism and the reason the attach reply carries these two
+   * numbers: a client that has just attached does not know what became of the
+   * input it had in flight, and this is where it finds out. The queue keeps
+   * everything above the stated cursor — that is the retry — and discards
+   * everything if the *epoch* moved, because then nothing in it can be proven
+   * applied or proven unapplied, and the alternative to saying so is replaying
+   * a command that may already have run.
+   *
+   * **P2P only.** The relay's merge would destroy the position a sequence
+   * carries (see {@link flushInputBuffer}), so a relay client never binds and
+   * its queue keeps the buffer semantics it had before this contract. Enabling
+   * it is part of stage 4, together with the merge that makes it sound.
+   */
+  seedInputCursor(seed: TerminalInputSeed | undefined): void {
+    if (this.disposed || this.mode !== 'p2p' || !seed) { return; }
+    if (seed.inputEpoch === undefined) { return; }
+    this.pendingInput.reconcile(
+      {
+        sessionName: this.sessionName,
+        inputEpoch: seed.inputEpoch,
+        controlGeneration: seed.controlGeneration,
+      },
+      // The cursor is the reconcile: without it the queue would re-send every
+      // chunk from the start of the run, and the agent — which refuses a frame
+      // that does not continue its cursor — would answer each one with the
+      // position the client already had.
+      seed.appliedThrough,
+    );
   }
 
   /**

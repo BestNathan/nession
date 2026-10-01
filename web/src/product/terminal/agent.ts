@@ -9,7 +9,10 @@ import {
   type TerminalBootstrap,
 } from '@/platform/terminal-runtime/bootstrap';
 import { WIRE as ATTACH_WIRE } from '@/generated/protocol/core/agent-attach/v1';
-import { WIRE as TERMINAL_INPUT_WIRE } from '@/generated/protocol/core/agent-terminal-input/v1';
+import {
+  WIRE as TERMINAL_INPUT_WIRE,
+  type TerminalInputAckPayload,
+} from '@/generated/protocol/core/agent-terminal-input/v1';
 import { WIRE as TERMINAL_RESIZE_WIRE } from '@/generated/protocol/core/agent-terminal-resize/v1';
 import { WIRE as TERMINAL_CONTROL_ACQUIRE_WIRE } from '@/generated/protocol/core/agent-terminal-control-acquire/v1';
 import { WIRE as TERMINAL_STREAM_RESUME_WIRE } from '@/generated/protocol/core/agent-terminal-stream-resume/v1';
@@ -83,6 +86,34 @@ export interface TerminalStreamResumeResult {
 }
 
 /**
+ * Where the session's input cursor stands (#1307).
+ *
+ * A **cursor**, not a receipt: the agent writes this after bytes have reached
+ * the PTY, and it means "everything at or below this chunk is applied". It is
+ * not paired with any request — see {@link TerminalAgentApi.onInputAck}.
+ */
+export interface TerminalInputAck {
+  sessionName: string;
+  inputEpoch: number;
+  appliedThrough: number;
+  controlGeneration?: number;
+}
+
+/**
+ * Where one frame's bytes sit in the session's input stream (#1307).
+ *
+ * `inputEpoch` is the agent's run; `seqStart`/`seqEnd` are chunk ordinals
+ * within it. One xterm `onData` is one chunk, so a caller sending a single
+ * event sends `seqStart === seqEnd`; the range is what a frame that coalesced
+ * several events would carry.
+ */
+export interface TerminalInputSequence {
+  inputEpoch: number;
+  seqStart: number;
+  seqEnd: number;
+}
+
+/**
  * Agent (P2P) terminal capability — bound to one concrete connection, so a
  * factory takes the surface rather than a plugin install (the session
  * runtime owns install timing). The wire strings are the generated bindings,
@@ -110,8 +141,17 @@ export interface TerminalAgentApi {
     size?: TerminalSize,
     opts?: { timeoutMs?: number; needsBootstrap?: boolean },
   ): Promise<AttachResult>;
-  /** Send terminal input (keystrokes) to the session — base64-encoded. */
-  sendInput(sessionName: string, data: string): void;
+  /**
+   * Send terminal input (keystrokes) to the session — base64-encoded.
+   *
+   * `sequence` is present when the caller holds a cursor for this session
+   * (#1307): the frame then carries the position of its bytes, and the agent's
+   * acknowledgement of that position is what makes a later retry safe. Absent
+   * means the sender has no position to give — an agent built before the
+   * contract, a relay path whose merge would destroy one — and the frame is the
+   * one-way keystroke it always was.
+   */
+  sendInput(sessionName: string, data: string, sequence?: TerminalInputSequence): void;
   /** Resize the remote PTY (controller only). */
   sendResize(sessionName: string, cols: number, rows: number): void;
   /** Current control lease for a session (#1095). */
@@ -130,6 +170,17 @@ export interface TerminalAgentApi {
   ): Promise<TerminalStreamResumeResult>;
   /** Subscribe to terminal resize frames from the agent (#1303). */
   onResize(cb: (frame: TerminalResizeFrame) => void): () => void;
+  /**
+   * Subscribe to the agent's applied input cursor (#1307).
+   *
+   * Push, not reply — and the difference is the point of the contract rather
+   * than a stylistic choice. The wire is a notification (`agent.terminal.input.ack`)
+   * because the fact it carries is cumulative: one value accounts for every
+   * chunk at or below it, so it needs no envelope id to be paired with, and the
+   * relay's habit of merging a burst into the newest frame's envelope cannot
+   * cost it anything.
+   */
+  onInputAck(cb: (ack: TerminalInputAck) => void): () => void;
   /**
    * Subscribe to uncorrelated agent `error` frames (see {@link AgentError}).
    * Errors that ack a request (e.g. `client.attach`) are consumed by the
@@ -196,6 +247,8 @@ async function attachToSession(
       controllerClientId: fields.controllerClientId,
       streamEpoch: fields.streamEpoch,
       streamCursor: fields.streamCursor,
+      inputEpoch: fields.inputEpoch,
+      inputAppliedThrough: fields.inputAppliedThrough,
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -233,6 +286,43 @@ async function acquireSessionControl(
   }
 }
 
+/**
+ * Read the agent's applied input cursor off the notification (#1307).
+ *
+ * **Both numbers or nothing.** A cursor is a position *in a run*, so an epoch
+ * without a position — or a position without the run it belongs to — names no
+ * position at all, and this reader drops the frame rather than invent one. That
+ * is the same answer the resize reader gives to a half-stated frame, for the
+ * same reason (#1303): a partially-read position is worse than none, because
+ * the consumer acts on it.
+ */
+function subscribeInputAck(
+  surface: PluginSurface,
+  cb: (ack: TerminalInputAck) => void,
+): () => void {
+  // The wire is spelled here rather than behind a constant, and that is a
+  // requirement of the check rather than a style: `just check-protocol`
+  // resolves a subscription by reading a **dotted literal at the call site**,
+  // and a name reached through a `const` is a name it cannot see. This was
+  // measured — spelling the constant wrong left the gate green, which is the
+  // #913 failure exactly: a subscription to a wire nobody emits is silent, and
+  // silence is what it looks like when nothing arrives. `agent.terminal.output`
+  // is spelled the same way, for the same reason.
+  return surface.subscribe('agent.terminal.input.ack', (payload) => {
+    const p = payload as TerminalInputAckPayload;
+    if (typeof p.input_epoch !== 'number' || typeof p.applied_through !== 'number') {
+      return;
+    }
+    cb({
+      sessionName: p.session_name,
+      inputEpoch: p.input_epoch,
+      appliedThrough: p.applied_through,
+      controlGeneration:
+        typeof p.control_generation === 'number' ? p.control_generation : undefined,
+    });
+  });
+}
+
 export function createTerminalAgentApi(surface: PluginSurface): TerminalAgentApi {
   const lease = createAgentControlLease(surface);
 
@@ -244,7 +334,11 @@ export function createTerminalAgentApi(surface: PluginSurface): TerminalAgentApi
         needsBootstrap: opts?.needsBootstrap,
       }),
 
-    sendInput: (sessionName: string, data: string): void => {
+    sendInput: (
+      sessionName: string,
+      data: string,
+      sequence?: TerminalInputSequence,
+    ): void => {
       if (lease.getControlState(sessionName).role === 'observer') {
         return;
       }
@@ -253,6 +347,13 @@ export function createTerminalAgentApi(surface: PluginSurface): TerminalAgentApi
         session_name: sessionName,
         data: encodeBase64(data),
         ...(generation !== undefined ? { control_generation: generation } : {}),
+        ...(sequence
+          ? {
+              input_epoch: sequence.inputEpoch,
+              seq_start: sequence.seqStart,
+              seq_end: sequence.seqEnd,
+            }
+          : {}),
       });
     },
 
@@ -275,6 +376,8 @@ export function createTerminalAgentApi(surface: PluginSurface): TerminalAgentApi
 
     acquireControl: (sessionName) =>
       acquireSessionControl(surface, lease, sessionName),
+
+    onInputAck: (cb: (ack: TerminalInputAck) => void) => subscribeInputAck(surface, cb),
 
     onControlChanged: (cb) => lease.onControlChanged(cb),
 
