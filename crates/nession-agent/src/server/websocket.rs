@@ -2138,20 +2138,22 @@ p2p_routes! { ctx, msg_type, payload_value;
                             &format!("not attached to session: {}", payload.session_name),
                         );
                     };
-                    let epoch_match = session.stream.epoch == payload.stream_epoch;
-                    let events = if epoch_match {
-                        session
-                            .stream
-                            .events_since(payload.stream_epoch, payload.after_seq)
-                            .unwrap_or_default()
-                    } else {
-                        Vec::new()
-                    };
+                    // One call decides everything the answer says (#1304): the
+                    // replay is `None` exactly when the request is about another
+                    // stream, so `epoch_match` is derived from it rather than
+                    // asked alongside it. Two sources for the same fact is how
+                    // they come to disagree — an answer with a matching epoch
+                    // and no window, or the reverse.
+                    let replay = session
+                        .stream
+                        .replay_since(payload.stream_epoch, payload.after_seq);
                     TerminalStreamResumeResponse {
                         session_name: payload.session_name.clone(),
                         stream_epoch: session.stream.epoch,
-                        epoch_match,
-                        events,
+                        epoch_match: replay.is_some(),
+                        first_available_seq: replay.as_ref().map(|r| r.first_available_seq),
+                        complete: replay.as_ref().map(|r| r.complete),
+                        events: replay.map_or_else(Vec::new, |r| r.events),
                     }
                 };
                 serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))

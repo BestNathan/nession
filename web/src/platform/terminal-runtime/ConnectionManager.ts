@@ -46,6 +46,11 @@ export class ConnectionManager implements TerminalTransport {
   private isAttached: () => boolean;
   /** Notified after input is handed to either transport — see `onInputSent`. */
   private onInputSent: () => void;
+  /**
+   * Notified when a replay answer states that its window has passed this
+   * client's cursor — see `ConnectionOptions.onStreamTruncated` (#1304).
+   */
+  private onStreamTruncated: () => void;
 
   onStateChange: ((state: ConnectionState) => void) | null = null;
   /**
@@ -67,11 +72,17 @@ export class ConnectionManager implements TerminalTransport {
     this.serverConnection = options.serverConnection;
     this.isAttached = options.isAttached ?? (() => false);
     this.onInputSent = options.onInputSent ?? (() => {});
+    this.onStreamTruncated = options.onStreamTruncated ?? (() => {});
     this.reconciler = new StreamReconciler(
       (epoch, afterSeq) => this.resumeStream(epoch, afterSeq),
       {
         onOutput: (data, bootstrap) => this.onOutput?.(data, bootstrap),
         onResize: (cols, rows) => this.onResize?.(cols, rows),
+        // Only the reconciler can tell an answer that is whole from one whose
+        // beginning the agent has evicted, and only this class holds the
+        // session's owner. It carries the fact up; what repair that implies is
+        // not the transport's decision (#1304).
+        onStreamTruncated: () => this.onStreamTruncated(),
       },
     );
 

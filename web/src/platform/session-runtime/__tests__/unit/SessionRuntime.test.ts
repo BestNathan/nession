@@ -525,6 +525,37 @@ describe('SessionRuntime', () => {
       rt.dispose();
     });
 
+    it('asks for a bootstrap after the stream itself reports a hole (#1304)', async () => {
+      // The second road to "my buffer is incomplete". A replay answer whose
+      // window has passed this client's cursor leaves a Terminal that is
+      // non-empty and wrong — `hasSessionOutput()` still says `true`, and
+      // asking only that is what would carry the hole into the next session of
+      // this buffer's life. The repair is the same snapshot a transport loss
+      // asks for, which is why it is the same flag.
+      //
+      // Reached without any loss: the attach timeout is what drives the second
+      // `client.attach`, so the flag is visible on a runtime that has been
+      // attached the whole time.
+      vi.useFakeTimers();
+      const rt = new SessionRuntime(makeConfig({
+        transportReady: true,
+        hasSessionOutput: () => true,
+      }));
+      rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
+      openWs();
+      await flushMicrotasks();
+      // Attached, holding output, nothing lost yet: no history requested.
+      expect(clientAttachBootstrapFlags()).toEqual([false]);
+
+      rt.noteStreamTruncated();
+      vi.advanceTimersByTime(ATTACH_TIMEOUT_MS);
+      await flushMicrotasks();
+
+      expect(clientAttachBootstrapFlags()).toEqual([false, true]);
+      rt.dispose();
+      vi.useRealTimers();
+    });
+
     it('re-sends client.attach automatically after each attach timeout until the budget is exhausted (auto route)', async () => {
       vi.useFakeTimers();
       const rt = new SessionRuntime(makeConfig({ transportReady: true }));

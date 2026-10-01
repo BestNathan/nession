@@ -27,6 +27,18 @@ export interface ConnectionOptions {
    * interval; leaving it unwired keeps the previous behaviour exactly.
    */
   onInputSent?: () => void;
+  /**
+   * Called when a replay answer was not the whole stretch it was asked for
+   * (#1304) — the agent's retained window has passed this client's cursor, so
+   * the buffer now has a hole that no later replay can fill.
+   *
+   * Same kind of wiring point as {@link onInputSent}: it is a fact for the
+   * owner of the session, not something the transport acts on. The repair is a
+   * snapshot, which only an attach can carry (#321), so the owner's job is to
+   * remember that one is owed; leaving it unwired keeps the previous behaviour
+   * exactly.
+   */
+  onStreamTruncated?: () => void;
 }
 
 /** Device class for responsive rendering. */

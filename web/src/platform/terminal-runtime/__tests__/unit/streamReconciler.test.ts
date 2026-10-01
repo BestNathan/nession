@@ -23,12 +23,20 @@ interface Harness {
   requests: PendingRequest[];
   out: string[];
   resizes: Array<[number, number]>;
+  /**
+   * How many times the sink was told the buffer has a hole in it (#1304).
+   * Counted rather than flagged: a second notice for the same hole would mean
+   * the reconciler asked again for events the agent has already said it cannot
+   * return.
+   */
+  readonly truncated: number;
 }
 
 function makeHarness(): Harness {
   const requests: PendingRequest[] = [];
   const out: string[] = [];
   const resizes: Array<[number, number]> = [];
+  const seen = { truncated: 0 };
   const reconciler = new StreamReconciler(
     (epoch, afterSeq) =>
       new Promise<ResumeReply>((resolve, reject) => {
@@ -37,9 +45,20 @@ function makeHarness(): Harness {
     {
       onOutput: (data) => out.push(new TextDecoder().decode(data)),
       onResize: (cols, rows) => resizes.push([cols, rows]),
+      onStreamTruncated: () => {
+        seen.truncated += 1;
+      },
     },
   );
-  return { reconciler, requests, out, resizes };
+  return {
+    reconciler,
+    requests,
+    out,
+    resizes,
+    get truncated() {
+      return seen.truncated;
+    },
+  };
 }
 
 function live(h: Harness, seq: number, text: string, epoch = 1): void {
@@ -64,8 +83,21 @@ function liveResize(h: Harness, seq: number, cols = 120, rows = 40): void {
   h.reconciler.acceptLiveResize({ cols, rows, streamEpoch: 1, streamSeq: seq });
 }
 
-function reply(events: TerminalStreamEvent[], streamEpoch = 1): ResumeReply {
-  return { streamEpoch, epochMatch: true, events };
+/**
+ * An answer to a resume, with the window the agent states alongside it (#1304).
+ *
+ * `facts` is omitted only where the test is about an agent that states
+ * **nothing** — an epoch mismatch, or one built before the fields existed.
+ * Leaving it out everywhere else would make those tests say the same thing as
+ * the ones that pass a floor, which is exactly the distinction this field set
+ * exists to make.
+ */
+function reply(
+  events: TerminalStreamEvent[],
+  streamEpoch = 1,
+  facts: { firstAvailableSeq?: number; complete?: boolean } = {},
+): ResumeReply {
+  return { streamEpoch, epochMatch: true, ...facts, events };
 }
 
 /** Let the reconciler's `.then` handlers run. */
@@ -356,17 +388,111 @@ describe('StreamReconciler', () => {
 
   it('continues past a hole the agent no longer retains', async () => {
     // The agent's ring buffer evicted 6..10 before the resume was answered, so
-    // its answer starts at 11. Waiting for 6 would hold 12 and every frame
-    // after it forever — the retention case #1304 owns the reporting for, and
-    // this is what keeps the terminal alive until it lands.
+    // its answer starts at 11 — and it says so. Waiting for 6 would hold 12 and
+    // every frame after it forever; the loss is real, and now it is *stated*:
+    // the consumer is told the buffer has a hole, so the snapshot that repairs
+    // one (#321) can be asked for.
     const h = makeHarness();
     live(h, 5, 'five');
     live(h, 12, 'twelve');
-    h.requests[0].resolve(reply([11, 12].map((seq) => output(seq))));
+    h.requests[0].resolve(
+      reply([11, 12].map((seq) => output(seq)), 1, {
+        firstAvailableSeq: 11,
+        complete: false,
+      }),
+    );
     await flushMicrotasks();
 
+    expect(h.truncated).toBe(1);
     expect(h.out).toEqual(['five', 'replay-11', 'twelve']);
+    // And it is asked for once: the agent stated where its window begins, so
+    // asking again for 6..10 asks for events it has already said are gone.
     expect(h.requests).toHaveLength(1);
+  });
+
+  it('draws the boundary between whole and truncated at the stated floor', async () => {
+    // Two answers from the same cursor, one event apart. The first asks the
+    // agent for everything above 5 and gets it: its window begins at 6, which
+    // is exactly the cursor's next event, so nothing was evicted between them.
+    // The second's window begins at 7, so seq 6 is gone for good.
+    //
+    // Neither can be told from the other by looking at the events. That is what
+    // the interim reading this replaced did — `lowestSeqAbove` inferred the
+    // window from the tail — and it is why the boundary is drawn from the
+    // agent's statement and not from the shape of what it sent.
+    const whole = makeHarness();
+    live(whole, 5, 'five');
+    live(whole, 8, 'eight');
+    whole.requests[0].resolve(
+      reply([6, 7].map((seq) => output(seq)), 1, {
+        firstAvailableSeq: 6,
+        complete: true,
+      }),
+    );
+    await flushMicrotasks();
+
+    const truncated = makeHarness();
+    live(truncated, 5, 'five');
+    live(truncated, 8, 'eight');
+    truncated.requests[0].resolve(
+      reply([7].map((seq) => output(seq)), 1, {
+        firstAvailableSeq: 7,
+        complete: false,
+      }),
+    );
+    await flushMicrotasks();
+
+    // One event of difference in the floor, and the two verdicts are opposite.
+    expect(whole.truncated).toBe(0);
+    expect(truncated.truncated).toBe(1);
+
+    // Both continue, and neither invents the events it does not hold: seq 6 is
+    // applied in the first and absent in the second, and the frame in hand
+    // arrives after it either way. Advancing the cursor over 6 without stating
+    // it is what the client used to do silently.
+    expect(whole.out).toEqual(['five', 'replay-6', 'replay-7', 'eight']);
+    expect(truncated.out).toEqual(['five', 'replay-7', 'eight']);
+  });
+
+  it('states the loss when the window is far above the cursor', async () => {
+    // The reproduction from #1304: the client committed its cursor at 5, the
+    // agent's ring has long since passed it, and the answer it gets back is a
+    // tail. Everything between 6 and 4999 is unrecoverable, and saying so is
+    // the whole point — the cursor still advances, over ground the client now
+    // knows is missing rather than ground it believes it recovered.
+    const h = makeHarness();
+    live(h, 5, 'five');
+    live(h, 5002, 'later');
+    h.requests[0].resolve(
+      reply([5000, 5001, 5002].map((seq) => output(seq)), 1, {
+        firstAvailableSeq: 5000,
+        complete: false,
+      }),
+    );
+    await flushMicrotasks();
+
+    expect(h.truncated).toBe(1);
+    expect(h.out).toEqual(['five', 'replay-5000', 'replay-5001', 'later']);
+    expect(h.requests).toHaveLength(1);
+  });
+
+  it('claims nothing about a window when the answer is about another stream', async () => {
+    // An epoch mismatch is not a truncation and must not be reported as one:
+    // the agent holds no window for the stream this request is about, and the
+    // live epoch's floor is not an answer to it. The behaviour #1094 shipped is
+    // unchanged — reset onto the epoch the answer names, and let that
+    // generation's next frame anchor the timeline.
+    const h = makeHarness();
+    live(h, 5, 'five');
+    live(h, 8, 'eight');
+    h.requests[0].resolve({ streamEpoch: 2, epochMatch: false, events: [] });
+    await flushMicrotasks();
+
+    expect(h.truncated).toBe(0);
+    expect(h.out).toEqual(['five']);
+
+    live(h, 1, 'new-one', 2);
+    expect(h.out).toEqual(['five', 'new-one']);
   });
 
   it('resolves a hole from its own answer, not from the next frame', async () => {
