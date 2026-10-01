@@ -64,6 +64,10 @@ export interface SyntheticAdapterOptions {
   readState?: AIConversationPage['state']
   /** Make paged (cursor) reads reject, so pagination failure can be exercised. */
   failOlder?: boolean
+  /** Report the newest page as ending mid-record, as a provider being appended to does. */
+  partialTail?: boolean
+  /** Records the adapter could not model, so the surface can say so. */
+  skipped?: number
   /** Context key this adapter reports. Defaults to the context string itself. */
   key?: string
 }
@@ -196,8 +200,8 @@ export class SyntheticAdapter implements AIConversationAdapter<string> {
       activity: conversation.activity ?? 'unknown',
       items: page.items,
       nextCursor: page.nextCursor,
-      partialTail: false,
-      skipped: 0,
+      partialTail: this.options.partialTail ?? false,
+      skipped: this.options.skipped ?? 0,
     }
   }
 

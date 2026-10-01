@@ -117,7 +117,11 @@ export function SkippedRecords({ count }: { count: number }) {
   }
   return (
     <p
-      data-testid="conversation-skipped"
+      // Distinct from the header's `conversation-skipped` count: the header
+      // says it beside the title, and this says it at the end of the
+      // transcript. Two markers with one name would make every assertion about
+      // either of them ambiguous.
+      data-testid="conversation-skipped-records"
       className={cn('flex items-center gap-2 text-muted-foreground', chromeSansRole('caption'))}
     >
       <AlertCircle aria-hidden className="h-3.5 w-3.5 shrink-0" />

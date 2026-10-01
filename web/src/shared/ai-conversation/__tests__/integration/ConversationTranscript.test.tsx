@@ -144,7 +144,9 @@ describe('ConversationTranscript', () => {
   it('counts the records it could not show', () => {
     renderTranscript({ items: transcript(2), skipped: 3 })
 
-    expect(screen.getByTestId('conversation-skipped').textContent).toContain(
+    // Distinct from the header's count, which says the same thing beside the
+    // title — one name for both would make this assertion ambiguous.
+    expect(screen.getByTestId('conversation-skipped-records').textContent).toContain(
       '3 records were not shown',
     )
   })
