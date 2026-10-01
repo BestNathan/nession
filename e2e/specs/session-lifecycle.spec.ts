@@ -1,6 +1,26 @@
-import { test, expect } from '@playwright/test';
+import { test as base, expect } from '@playwright/test';
 import { waitForShell } from '../helpers/shell';
 import { watchSessionReports } from '../helpers/sessionReport';
+
+/**
+ * Watch the session lists from **before the page navigates** (#1326).
+ *
+ * Playwright reports a WebSocket when the page *opens* one, so a listener
+ * attached after `beforeEach`'s `goto` never sees the socket the app opened
+ * while loading — and every frame on it is invisible. That is the difference
+ * between "the report never arrived" and "the watcher never looked", and it is
+ * not visible in the result: both read as the same timeout.
+ *
+ * A fixture rather than a line in the test body, because fixtures are set up
+ * before `beforeEach` and a line in the body is not. Moving it back would
+ * silently return this spec to watching nothing; the failure message counts
+ * sockets, so that mistake says so instead of blaming the agent.
+ */
+const test = base.extend<{ reports: ReturnType<typeof watchSessionReports> }>({
+  reports: async ({ page }, use) => {
+    await use(watchSessionReports(page));
+  },
+});
 
 // CI-gated like terminal-io.spec.ts: drives a real tmux-backed agent, which the
 // e2e webServer stack only provides in CI. The historical blocker ("terminal
@@ -14,7 +34,7 @@ test.describe('Session lifecycle', () => {
     await waitForShell(page);
   });
 
-  test('create a session, verify it appears, then kill it', async ({ page }, testInfo) => {
+  test('create a session, verify it appears, then kill it', async ({ page, reports }, testInfo) => {
     test.skip(!process.env.CI, 'local only — runs in CI workflow only');
     const SESSION_NAME = `e2e-lifecycle-${testInfo.retry}-${Date.now()}`;
 
@@ -25,10 +45,6 @@ test.describe('Session lifecycle', () => {
     // The sidebar is always present; there is no drawer opener to click (#748).
     const createButton = page.getByTestId('create-session');
     await expect(createButton).toBeEnabled({ timeout: 60_000 });
-
-    // Watch the pushes from here on, before the Session exists, so no report
-    // can be missed between the click and the assertion (#1326).
-    const reports = watchSessionReports(page);
 
     // ── Create session ──
     await createButton.click();

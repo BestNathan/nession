@@ -42,9 +42,18 @@ export function watchSessionReports(page: Page): {
   waitForCommand: (sessionName: string) => Promise<string>;
 } {
   const reported = new Map<string, string>();
+  // Counted so the failure can tell its two causes apart: a watcher that never
+  // attached to a socket sees nothing at all, and one that attached but matched
+  // the wrong shape sees frames and no lists. The first version of this helper
+  // reported "no command arrived" for both, which cannot be acted on.
+  let sockets = 0;
+  let frames = 0;
+  let lists = 0;
 
   page.on('websocket', (socket) => {
+    sockets += 1;
     socket.on('framereceived', (frame) => {
+      frames += 1;
       const text = typeof frame.payload === 'string' ? frame.payload : null;
       if (text === null) {
         return;
@@ -59,6 +68,7 @@ export function watchSessionReports(page: Page): {
       if (!Array.isArray(sessions)) {
         return;
       }
+      lists += 1;
       for (const session of sessions) {
         const command = session.foreground_command;
         if (session.session_name && command) {
@@ -70,13 +80,19 @@ export function watchSessionReports(page: Page): {
 
   return {
     async waitForCommand(sessionName: string): Promise<string> {
+      const seen = () =>
+        `${sockets} socket(s), ${frames} frame(s), ${lists} carrying a session list`;
       await expect
         .poll(() => reported.get(sessionName) ?? null, {
           message:
             `no session list carrying a foreground command for ${sessionName} ` +
-            'reached the page. This is the agent/server leg, not the renderer: ' +
-            'check that the agent reported the pane command and that the list ' +
-            'reached the browser on either wire.',
+            `reached the page (saw ${seen()}). ` +
+            (sockets === 0
+              ? 'Zero sockets means the watcher attached after the app had ' +
+                'already opened its own — it must be installed before the ' +
+                'navigation that opens it, or it watches nothing.'
+              : 'Sockets were seen, so this is the agent/server leg rather than ' +
+                'the renderer: check that the agent reported the pane command.'),
           timeout: 15_000,
         })
         .not.toBeNull();
