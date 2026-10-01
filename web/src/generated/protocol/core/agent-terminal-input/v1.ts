@@ -29,6 +29,56 @@ data: string,
 /**
  * Controller generation at send time (#1095). Absent for legacy senders.
  */
+control_generation?: number | null, 
+/**
+ * The agent's input epoch this frame belongs to (#1307).
+ *
+ * Input identity, and it is deliberately not the envelope's `id`. An
+ * envelope id is a per-connection name for one *frame*, and the relay
+ * merges several frames of a burst into one — so on that path the ids of
+ * everything but the newest frame never reach the agent, and a receipt
+ * keyed on one would be a receipt for input that had no name. A cursor
+ * keyed on `(input_epoch, seq)` is a fact about the *bytes*, which survive
+ * the merge because the merge is defined to keep every byte.
+ *
+ * **Absence preserves the old meaning**, and the old meaning is a sender
+ * that has no sequence at all: its bytes are written and the applied cursor
+ * does not move, because there is nothing to advance it to. That is what a
+ * client written before this field existed gets, and what a paste from an
+ * old build must keep getting.
+ *
+ * A frame that names an epoch the agent is not in is refused rather than
+ * applied — see [`TerminalInputAckPayload`] on what the sender does then.
+ */
+input_epoch?: number | null, 
+/**
+ * The first and last input **chunk** this frame carries, in `input_epoch`.
+ *
+ * Chunk ordinals, not byte offsets (the requirement leaves the choice
+ * open and prefers chunks): one frame is normally one chunk, and a frame
+ * that coalesced several covers the range between them. The agent never
+ * needs a byte map, because it only ever writes a whole frame — see
+ * [`TerminalInputAckPayload::applied_through`].
+ *
+ * Both are present together or neither is; a frame that names one without
+ * the other is malformed rather than half-sequenced.
+ */
+seq_start?: number | null, seq_end?: number | null, };
+export type TerminalInputAckPayload = { session_name: string, 
+/**
+ * The agent's live input epoch. Not necessarily the one the frame named:
+ * a frame from a previous epoch is exactly the case this field answers.
+ */
+input_epoch: number, 
+/**
+ * The highest chunk such that every chunk from 1 through it is applied.
+ */
+applied_through: number, 
+/**
+ * The session's control generation at the moment of the write. A sender
+ * whose lease has moved on reads this and knows the acknowledgement is
+ * about a generation it no longer holds.
+ */
 control_generation?: number | null, };
 
 // ── Operations ──
@@ -42,7 +92,41 @@ data: string,
 /**
  * Controller generation at send time (#1095). Absent for legacy senders.
  */
-control_generation?: number | null, };
+control_generation?: number | null, 
+/**
+ * The agent's input epoch this frame belongs to (#1307).
+ *
+ * Input identity, and it is deliberately not the envelope's `id`. An
+ * envelope id is a per-connection name for one *frame*, and the relay
+ * merges several frames of a burst into one — so on that path the ids of
+ * everything but the newest frame never reach the agent, and a receipt
+ * keyed on one would be a receipt for input that had no name. A cursor
+ * keyed on `(input_epoch, seq)` is a fact about the *bytes*, which survive
+ * the merge because the merge is defined to keep every byte.
+ *
+ * **Absence preserves the old meaning**, and the old meaning is a sender
+ * that has no sequence at all: its bytes are written and the applied cursor
+ * does not move, because there is nothing to advance it to. That is what a
+ * client written before this field existed gets, and what a paste from an
+ * old build must keep getting.
+ *
+ * A frame that names an epoch the agent is not in is refused rather than
+ * applied — see [`TerminalInputAckPayload`] on what the sender does then.
+ */
+input_epoch?: number | null, 
+/**
+ * The first and last input **chunk** this frame carries, in `input_epoch`.
+ *
+ * Chunk ordinals, not byte offsets (the requirement leaves the choice
+ * open and prefers chunks): one frame is normally one chunk, and a frame
+ * that coalesced several covers the range between them. The agent never
+ * needs a byte map, because it only ever writes a whole frame — see
+ * [`TerminalInputAckPayload::applied_through`].
+ *
+ * Both are present together or neither is; a frame that names one without
+ * the other is malformed rather than half-sequenced.
+ */
+seq_start?: number | null, seq_end?: number | null, };
 
 /**
  * No response alias: the catalog declares no response shape for this unit.

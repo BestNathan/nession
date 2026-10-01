@@ -946,6 +946,30 @@ pub struct ClientAttachResponse {
     pub stream_epoch: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stream_cursor: Option<u64>,
+    /// The agent's input epoch and applied cursor, stated on attach (#1307).
+    ///
+    /// This is the **reconcile**, and it is here rather than on a wire of its
+    /// own because a client that has just attached is exactly the client that
+    /// does not know what became of the input it had in flight: its transport
+    /// was rebuilt, and the frames it had sent on the old one may or may not
+    /// have reached the PTY. The answer it needs is two numbers it would
+    /// otherwise have to ask for separately, at the one moment it is certain to
+    /// ask — and asking separately would need its own request, its own
+    /// timeout, and its own ordering against the first input frame.
+    ///
+    /// Absent means **not stated**, never zero (#1304): a provider that holds
+    /// no input state for this session — an agent built before this field
+    /// existed — omits both, and a client that gets neither knows only that it
+    /// cannot prove anything, which is the honest reading.
+    ///
+    /// A stated epoch that differs from the one a client is holding is the
+    /// **delivery-unknown** signal: the agent that would have to say whether
+    /// the pending bytes landed is gone, and its answer died with it. A client
+    /// must not replay that input automatically.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_epoch: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_applied_through: Option<u64>,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]

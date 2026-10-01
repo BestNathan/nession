@@ -10,6 +10,84 @@ pub struct TerminalInputPayload {
     /// Controller generation at send time (#1095). Absent for legacy senders.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub control_generation: Option<u64>,
+    /// The agent's input epoch this frame belongs to (#1307).
+    ///
+    /// Input identity, and it is deliberately not the envelope's `id`. An
+    /// envelope id is a per-connection name for one *frame*, and the relay
+    /// merges several frames of a burst into one — so on that path the ids of
+    /// everything but the newest frame never reach the agent, and a receipt
+    /// keyed on one would be a receipt for input that had no name. A cursor
+    /// keyed on `(input_epoch, seq)` is a fact about the *bytes*, which survive
+    /// the merge because the merge is defined to keep every byte.
+    ///
+    /// **Absence preserves the old meaning**, and the old meaning is a sender
+    /// that has no sequence at all: its bytes are written and the applied cursor
+    /// does not move, because there is nothing to advance it to. That is what a
+    /// client written before this field existed gets, and what a paste from an
+    /// old build must keep getting.
+    ///
+    /// A frame that names an epoch the agent is not in is refused rather than
+    /// applied — see [`TerminalInputAckPayload`] on what the sender does then.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_epoch: Option<u64>,
+    /// The first and last input **chunk** this frame carries, in `input_epoch`.
+    ///
+    /// Chunk ordinals, not byte offsets (the requirement leaves the choice
+    /// open and prefers chunks): one frame is normally one chunk, and a frame
+    /// that coalesced several covers the range between them. The agent never
+    /// needs a byte map, because it only ever writes a whole frame — see
+    /// [`TerminalInputAckPayload::applied_through`].
+    ///
+    /// Both are present together or neither is; a frame that names one without
+    /// the other is malformed rather than half-sequenced.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seq_start: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seq_end: Option<u64>,
+}
+
+/// The agent's answer to input it has applied — a **cursor**, not a receipt
+/// (#1307).
+///
+/// Emitted on its own wire (`agent.terminal.input.ack`, a notification) rather
+/// than as the reply to [`TerminalInputPayload`], and that placement is forced
+/// by the relay rather than chosen: the Server's 16 ms window merges a burst of
+/// input frames into one that carries the newest envelope's `id` and the
+/// concatenated bytes of all of them. A per-frame reply could therefore only
+/// ever answer the one frame whose id survived, and the delivery state of every
+/// other frame in the burst — the bytes a user actually typed — would be
+/// unrecoverable. A cursor needs no id: the same number accounts for every byte
+/// of a merged frame, and for every frame that preceded it.
+///
+/// `applied_through = N` is the whole invariant: **N and every chunk before it
+/// in `input_epoch` has been written to the PTY**. Nothing above N has been.
+/// The cursor is contiguous by construction — the agent writes only the chunk
+/// that continues it — so a sender may drop everything it holds at or below N
+/// and re-send the rest unchanged, with no renumbering and no risk of writing
+/// the same bytes twice.
+///
+/// The epoch is what makes an unprovable boundary visible. A cursor is
+/// agent-memory state, so an agent that restarted has no cursor, and a fresh
+/// one cannot say whether the input that was in flight when it died reached the
+/// PTY. It says so by naming a **different** epoch: a sender holding a cursor
+/// from another epoch learns that its unacknowledged input is neither applied
+/// nor safely re-sendable, and states that to the user rather than replaying a
+/// command that may already have run.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TerminalInputAckPayload {
+    pub session_name: String,
+    /// The agent's live input epoch. Not necessarily the one the frame named:
+    /// a frame from a previous epoch is exactly the case this field answers.
+    pub input_epoch: u64,
+    /// The highest chunk such that every chunk from 1 through it is applied.
+    pub applied_through: u64,
+    /// The session's control generation at the moment of the write. A sender
+    /// whose lease has moved on reads this and knows the acknowledgement is
+    /// about a generation it no longer holds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub control_generation: Option<u64>,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]

@@ -10,6 +10,9 @@ fn terminal_input_round_trips() {
         session_name: "work".to_string(),
         data: "aGVsbG8=".to_string(),
         control_generation: None,
+        input_epoch: None,
+        seq_start: None,
+        seq_end: None,
     };
     let json = serde_json::to_string(&msg).unwrap();
     assert!(json.contains("\"aGVsbG8=\""));
