@@ -70,28 +70,30 @@ export interface TerminalSurfaceProps {
  * requirement forbids. What is left is the smallest useful thing — telling the
  * user what is uncertain, and getting out of the way.
  *
- * ## It is currently not visible (#1307 stage 5, measured)
+ * ## It was invisible until stage 6, and the geometry is why (measured)
  *
- * The band below is the last flex child of the surface, and the capsule is
- * `absolute z-30` against the same host — so it floats over the band rather
- * than after it. Measured at 390x844 on `/fixture/app?drop=epoch`, which
- * renders this surface through the same components the product mounts:
+ * The band used to be the last flex child of the surface *while the surface
+ * root was itself the capsule host*, so the capsule — `absolute z-30` against
+ * that host — floated over the band rather than after it. Measured at 390x844
+ * on `/fixture/app?drop=epoch`, which renders this surface through the same
+ * components the product mounts:
  *
  * * notice 390x61 at y=783; capsule shell 366x56 at y=776, `z-index: 30`,
  *   background `oklch(1 0 0 / 0.96)` with `backdrop-filter: blur(12px)`;
- * * **366x49 of the two overlap — 75% of the notice**, sentence included, and
- *   `document.elementFromPoint` at the notice's own centre lands on the
+ * * **366x49 of the two overlapped — 75% of the notice**, sentence included, and
+ *   `document.elementFromPoint` at the notice's own centre landed on the
  *   capsule's textarea;
- * * the frame is **byte-identical** (md5 `fa3c7ea907eaf6b212152736620aff1c`,
- *   35 061 bytes) whether the route names a drop or not, while the DOM differs
- *   by this whole band. Adding the notice changes no pixel.
+ * * the frame was **byte-identical** (md5 `fa3c7ea907eaf6b212152736620aff1c`,
+ *   35 061 bytes) whether the route named a drop or not, while the DOM differed
+ *   by this whole band. Adding the notice changed no pixel.
  *
- * The observer bar below has the same geometry and so the same problem; it
- * predates this one, which is why the fix is a capsule-geometry decision
- * (`--terminal-capsule-shell-inset-*`) rather than a change here. Until it is
- * taken, this notice is asserted by tests that read the DOM and cannot see
- * occlusion — `TerminalSurface.test.tsx` and
- * `app/fixture/__tests__/integration/FixtureInputDrop.test.tsx` both pass.
+ * The observer bar has the same geometry and had the same problem, and it
+ * **predates this notice** — the whole band, not this change, sat under the
+ * composer. Both are fixed the same way: `data-terminal-capsule-host` is the
+ * well *and* the capsule, so a strip the surface owns is laid out as its
+ * sibling rather than inside it. Nothing about the strip itself moved, which is
+ * why the two look identical to the byte at rest: with no strip rendered the
+ * host fills the surface exactly as the root used to.
  */
 function inputDropNotice(drop: InputDrop): string {
   switch (drop.reason) {
@@ -147,16 +149,39 @@ export function TerminalSurface({
     <div
       data-testid="terminal-surface"
       className="relative flex min-h-0 flex-1 flex-col"
-      data-terminal-capsule-host
-      data-terminal-scrollback-mode="local-buffer"
     >
-      <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
-        {isSwitching && (
-          <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-terminal-background/50">
-            <Loader2 className="size-8 animate-spin text-muted-foreground" />
-          </div>
-        )}
-        {children}
+      {/*
+        The host is the **well plus the floating capsule**, and deliberately not
+        the whole surface: everything laid out inside it at its bottom is drawn
+        under the composer, because the dock is `absolute z-30` against this box
+        and `index.css` draws the occlusion band along its bottom edge. The
+        status strips below are its siblings for that reason — moving this
+        attribute back up to the surface root puts them back under the capsule,
+        which is the defect `#1307` stage 6 measured (the notice was 75% covered
+        and the frame was byte-identical to the route with no notice at all).
+      */}
+      <div
+        data-terminal-capsule-host
+        data-terminal-scrollback-mode="local-buffer"
+        className="relative flex min-h-0 flex-1 flex-col"
+      >
+        <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+          {isSwitching && (
+            <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-terminal-background/50">
+              <Loader2 className="size-8 animate-spin text-muted-foreground" />
+            </div>
+          )}
+          {children}
+        </div>
+        <TerminalCapsule
+          experience={experience}
+          sendText={capsuleSendText}
+          sendPhysKey={capsuleSendPhysKey}
+          disabled={inputDisabled}
+          capabilityDisclosure={capsuleCapabilities?.disclosure}
+          capabilityProjection={capsuleProjection}
+          adjacentAction={surfaceAction}
+        />
       </div>
       {inputDrop ? (
         <div
@@ -191,15 +216,6 @@ export function TerminalSurface({
           </Button>
         </div>
       ) : null}
-      <TerminalCapsule
-        experience={experience}
-        sendText={capsuleSendText}
-        sendPhysKey={capsuleSendPhysKey}
-        disabled={inputDisabled}
-        capabilityDisclosure={capsuleCapabilities?.disclosure}
-        capabilityProjection={capsuleProjection}
-        adjacentAction={surfaceAction}
-      />
     </div>
   );
 }

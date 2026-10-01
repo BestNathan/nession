@@ -29,7 +29,12 @@ vi.mock('@/product/terminal/hooks/useCommandHistory', () => ({
 
 function renderSurface(
   experience: 'web' | 'app',
-  props: Partial<Pick<TerminalSurfaceProps, 'inputDrop' | 'onDismissInputDrop'>> = {},
+  props: Partial<
+    Pick<
+      TerminalSurfaceProps,
+      'inputDrop' | 'onDismissInputDrop' | 'terminalControl' | 'onTakeControl'
+    >
+  > = {},
 ) {
   return render(
     <TerminalSurface
@@ -47,15 +52,16 @@ describe('TerminalSurface', () => {
   it('hosts xterm tree and floating capsule without legacy layout', () => {
     renderSurface('web');
 
-    expect(screen.getByTestId('terminal-surface')).toHaveAttribute(
-      'data-terminal-capsule-host',
-    );
-    expect(screen.getByTestId('terminal-surface')).toHaveAttribute(
-      'data-terminal-scrollback-mode',
-      'local-buffer',
-    );
+    // The host is the *inner* box, not the surface root: it carries the
+    // scrollback mode and the capsule the occlusion band is drawn for, and the
+    // strips the surface owns are laid out after it (#1307 stage 6 — see the
+    // last describe block, which is what fails if this moves back up).
+    const surface = screen.getByTestId('terminal-surface');
+    const host = surface.querySelector('[data-terminal-capsule-host]');
+    expect(host).toHaveAttribute('data-terminal-scrollback-mode', 'local-buffer');
+    expect(host).toContainElement(screen.getByTestId('terminal-capsule'));
+
     expect(screen.getByTestId('terminal-viewport-slot')).toBeInTheDocument();
-    expect(screen.getByTestId('terminal-capsule')).toBeInTheDocument();
     expect(screen.queryByTestId('mobile-terminal-layout')).not.toBeInTheDocument();
   });
 
@@ -142,5 +148,69 @@ describe('input that will never arrive (#1307 SC-09)', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
     expect(onDismissInputDrop).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * What the capsule host wraps (#1307 stage 6).
+ *
+ * `[data-terminal-capsule-host]` is not merely the capsule's positioning
+ * anchor. `index.css` gives it the occlusion band — an `::after` at its own
+ * bottom, `height: var(--terminal-content-bottom-inset)` — and the dock is
+ * `absolute z-30` against it, so *anything laid out inside the host at its
+ * bottom* is drawn under the composer. That is what happened: measured at
+ * 390×844 on `/fixture/app?drop=epoch`, the notice was 366×49 (75%) covered by
+ * an opaque `backdrop-filter` shell, `elementFromPoint` at its own centre
+ * returned the capsule's textarea, and the frame was byte-identical to the
+ * route with no notice at all.
+ *
+ * jsdom performs no layout, so this file cannot assert the geometry. It asserts
+ * the structural invariant the geometry follows from — the part a later
+ * refactor would break silently, because every DOM-reading assertion in this
+ * file passes either way:
+ *
+ *   host  ⊇  { the well } ∪ { the capsule }      and      host  ⊅  { strips }
+ *
+ * The capsule is asserted *inside* the host for the same reason the strips are
+ * asserted outside it: it is `z-30` and measured against the host, so a fix
+ * that moved it out would trade one occlusion bug for another.
+ */
+describe('the capsule host wraps the well, not the surface (#1307 stage 6)', () => {
+  function hostOf(view: ReturnType<typeof renderSurface>): HTMLElement {
+    const surface = view.getByTestId('terminal-surface');
+    // The host *is* the surface in the shape this test exists to reject, so the
+    // lookup has to accept both or the assertions below would fail on a null
+    // lookup instead of on the containment they are about.
+    const host = surface.matches('[data-terminal-capsule-host]')
+      ? surface
+      : surface.querySelector('[data-terminal-capsule-host]');
+    // Reachability, so "outside the host" cannot be satisfied by dropping the
+    // attribute from the tree.
+    expect(host).not.toBeNull();
+    return host as HTMLElement;
+  }
+
+  it('keeps the delivery-unknown notice out of the host', () => {
+    const view = renderSurface('web', { inputDrop: { reason: 'epoch', chunks: 1, at: 0 } });
+    const notice = view.getByTestId('terminal-input-drop');
+
+    expect(hostOf(view).contains(notice)).toBe(false);
+  });
+
+  it('keeps the observer bar out of the host', () => {
+    // The same geometry as the notice, and the same occlusion — it predates
+    // #1307, which is why it is asserted here rather than in that change.
+    const view = renderSurface('web', { terminalControl: { role: 'observer' } });
+    const bar = view.getByTestId('terminal-observer-bar');
+
+    expect(hostOf(view).contains(bar)).toBe(false);
+  });
+
+  it('wraps the well and the capsule the band exists for', () => {
+    const view = renderSurface('web');
+    const host = hostOf(view);
+
+    expect(host.contains(view.getByTestId('terminal-viewport-slot'))).toBe(true);
+    expect(host.contains(view.getByTestId('terminal-capsule'))).toBe(true);
   });
 });
