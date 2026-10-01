@@ -153,6 +153,16 @@ export function createClaudeCodeAdapter(
 }
 
 /**
+ * The one adapter instance, for surfaces to hand to `useAIConversation`.
+ *
+ * A module-level constant rather than a call at each site: the hook reads it on
+ * the first render and treats it as the provider's identity, so a surface
+ * building a new adapter per render would be asserting that the provider
+ * changed. Building it once is what makes that impossible to get wrong.
+ */
+export const claudeCodeConversationAdapter = createClaudeCodeAdapter()
+
+/**
  * A runtime already pointed at this provider.
  *
  * Surfaces do not each build their own bridge: the provider declares how it is

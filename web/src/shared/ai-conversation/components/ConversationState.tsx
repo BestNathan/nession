@@ -73,17 +73,34 @@ export function EmptyConversation() {
   )
 }
 
-/** The provider could not read it, or could not say it has it. */
-export function ConversationFailure({ message }: { message: string }) {
+/**
+ * The provider could not read it, or could not say it has it.
+ *
+ * Carries a retry when the caller can offer one: a failure with no way to ask
+ * again leaves the reader with nothing to do but leave and come back, which is
+ * a worse answer than the failure itself.
+ */
+export function ConversationFailure({
+  message,
+  onRetry,
+}: {
+  message: string
+  onRetry?: () => void
+}) {
   return (
-    <p
+    <div
       data-testid="conversation-error"
       role="alert"
-      className={cn('flex items-center gap-2 text-destructive', chromeSansRole('secondary'))}
+      className={cn('flex flex-wrap items-center gap-2 text-destructive', chromeSansRole('secondary'))}
     >
       <AlertCircle aria-hidden className="h-4 w-4 shrink-0" />
-      {message}
-    </p>
+      <span>{message}</span>
+      {onRetry ? (
+        <Button variant="outline" size="xs" type="button" onClick={() => onRetry()}>
+          Retry
+        </Button>
+      ) : null}
+    </div>
   )
 }
 

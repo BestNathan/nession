@@ -91,17 +91,31 @@ function ConversationHeader({
 }
 
 /** The list's own loading and failure states, answered before anything else. */
-function ListStateGuard({ snapshot }: { snapshot: AIConversationSnapshot }) {
+function ListStateGuard({
+  snapshot,
+  onReload,
+}: {
+  snapshot: AIConversationSnapshot
+  onReload?: () => void
+}) {
   if (snapshot.error && snapshot.conversations.length === 0) {
     return (
-      <p
+      <div
         data-testid="conversation-error"
         role="alert"
-        className={cn('flex items-center gap-2 p-6 text-destructive', chromeSansRole('secondary'))}
+        className={cn(
+          'flex flex-wrap items-center gap-2 p-6 text-destructive',
+          chromeSansRole('secondary'),
+        )}
       >
         <AlertCircle aria-hidden className="h-4 w-4 shrink-0" />
-        {snapshot.error}
-      </p>
+        <span>{snapshot.error}</span>
+        {onReload ? (
+          <Button variant="outline" size="xs" type="button" onClick={() => onReload()}>
+            Retry
+          </Button>
+        ) : null}
+      </div>
     )
   }
   if (snapshot.loading && snapshot.conversations.length === 0) {
@@ -125,6 +139,19 @@ function ListStateGuard({ snapshot }: { snapshot: AIConversationSnapshot }) {
       </p>
     )
   }
+  if (snapshot.listState === 'ready') {
+    // Distinct from `unavailable` and from a failed read: the provider answered
+    // and the answer is that there is nothing here. Saying "unavailable" for
+    // this would tell the reader to check something that is working.
+    return (
+      <p
+        data-testid="conversation-not-found"
+        className={cn('p-6 text-muted-foreground', chromeSansRole('secondary'))}
+      >
+        No conversations here yet.
+      </p>
+    )
+  }
   return null
 }
 
@@ -136,14 +163,10 @@ function ListStateGuard({ snapshot }: { snapshot: AIConversationSnapshot }) {
  * refresh that is still going.
  */
 function listIsBlocked(snapshot: AIConversationSnapshot): boolean {
-  if (snapshot.conversations.length > 0) {
-    return false
-  }
-  return (
-    (snapshot.error !== null && snapshot.error !== undefined) ||
-    snapshot.loading ||
-    snapshot.listState === 'unavailable'
-  )
+  // Nothing to choose from and nothing open: whatever the reason — still
+  // loading, failed, unavailable, or answered-empty — the guard is the whole
+  // story and an empty list would be a worse way to tell it.
+  return snapshot.conversations.length === 0 && snapshot.openId === null
 }
 
 /** Neither one is open. */
@@ -168,12 +191,15 @@ export function ConversationView({
   layout,
   onSelect,
   onLoadOlder,
+  onReload,
 }: {
   snapshot: AIConversationSnapshot
   providerLabel: string
   layout: ConversationLayout
   onSelect: (id: string) => void
   onLoadOlder: () => boolean
+  /** Ask the provider again after a failed read or listing. */
+  onReload?: () => void
 }) {
   // The guard replaces the list when it has something to say; otherwise the
   // list is the answer. The predicate lives here rather than beside the guard
@@ -185,6 +211,7 @@ export function ConversationView({
         providerLabel={providerLabel}
         onSelect={onSelect}
         onLoadOlder={onLoadOlder}
+        onReload={onReload}
       />
     )
   }
@@ -200,7 +227,11 @@ export function ConversationView({
   return (
     <div className="flex h-full min-h-0" data-testid="conversation-master-detail">
       <div className="w-72 shrink-0 overflow-auto border-r p-2">
-        {listIsBlocked(snapshot) ? <ListStateGuard snapshot={snapshot} /> : list}
+        {listIsBlocked(snapshot) ? (
+          <ListStateGuard snapshot={snapshot} onReload={onReload} />
+        ) : (
+          list
+        )}
       </div>
       <div className="flex min-w-0 flex-1 flex-col">
         {snapshot.openId === null ? (
@@ -212,6 +243,7 @@ export function ConversationView({
               snapshot={snapshot}
               providerLabel={providerLabel}
               onLoadOlder={onLoadOlder}
+              onReload={onReload}
             />
           </>
         )}
@@ -233,11 +265,13 @@ function PushLayout({
   providerLabel,
   onSelect,
   onLoadOlder,
+  onReload,
 }: {
   snapshot: AIConversationSnapshot
   providerLabel: string
   onSelect: (id: string) => void
   onLoadOlder: () => boolean
+  onReload?: () => void
 }) {
   const [showingList, setShowingList] = useState(false)
   const listBlocked = listIsBlocked(snapshot)
@@ -256,7 +290,7 @@ function PushLayout({
       {showList ? (
         <div className="min-h-0 flex-1 overflow-auto p-2">
           {listBlocked ? (
-            <ListStateGuard snapshot={snapshot} />
+            <ListStateGuard snapshot={snapshot} onReload={onReload} />
           ) : (
             <ConversationList
               conversations={snapshot.conversations}
@@ -272,6 +306,7 @@ function PushLayout({
             snapshot={snapshot}
             providerLabel={providerLabel}
             onLoadOlder={onLoadOlder}
+            onReload={onReload}
           />
         </>
       )}

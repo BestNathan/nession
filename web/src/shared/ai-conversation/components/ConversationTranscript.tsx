@@ -51,10 +51,13 @@ function TranscriptContent({
   snapshot,
   providerLabel,
   onLoadOlder,
+  onReload,
 }: {
   snapshot: AIConversationSnapshot
   providerLabel: string
   onLoadOlder: () => boolean
+  /** Ask again after a read failed. */
+  onReload?: () => void
 }) {
   const contentRef = useRef<HTMLDivElement>(null)
 
@@ -93,7 +96,13 @@ function TranscriptContent({
       {snapshot.olderError ? (
         <OlderError message={snapshot.olderError} onRetry={onLoadOlder} />
       ) : null}
-      <ConversationBody snapshot={snapshot} providerLabel={providerLabel} lastId={lastId} rows={rows} />
+      <ConversationBody
+        snapshot={snapshot}
+        providerLabel={providerLabel}
+        lastId={lastId}
+        rows={rows}
+        onReload={onReload}
+      />
     </MessageScrollerContent>
   )
 }
@@ -111,14 +120,16 @@ function ConversationBody({
   providerLabel,
   lastId,
   rows,
+  onReload,
 }: {
   snapshot: AIConversationSnapshot
   providerLabel: string
   lastId: string | undefined
   rows: ReturnType<typeof groupRows>
+  onReload?: () => void
 }) {
   if (snapshot.error) {
-    return <ConversationFailure message={snapshot.error} />
+    return <ConversationFailure message={snapshot.error} onRetry={onReload} />
   }
   if (snapshot.state === 'not_found') {
     return (
@@ -180,12 +191,15 @@ export function ConversationTranscript({
   snapshot,
   providerLabel,
   onLoadOlder,
+  onReload,
 }: {
   snapshot: AIConversationSnapshot
   /** The provider's name for the assistant, from its adapter's identity. */
   providerLabel: string
   /** Starts an older-page fetch; answers synchronously whether one engaged. */
   onLoadOlder: () => boolean
+  /** Ask the provider again after a failed read. */
+  onReload?: () => void
 }) {
   const loadOlder = useCallback(() => onLoadOlder(), [onLoadOlder])
   return (
@@ -196,6 +210,7 @@ export function ConversationTranscript({
             snapshot={snapshot}
             providerLabel={providerLabel}
             onLoadOlder={loadOlder}
+            onReload={onReload}
           />
         </MessageScrollerViewport>
         <MessageScrollerButton direction="end" />
