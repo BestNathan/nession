@@ -15,6 +15,7 @@ import {
 } from '@/product/terminal/capsule/types';
 import { useCapsuleLayoutFlip } from '@/product/terminal/capsule/useCapsuleLayoutFlip';
 import { useCapsuleDockClearance } from '@/product/terminal/capsule/hooks/useCapsuleDockClearance';
+import type { ResolvedWorkContext } from '@/product/terminal/capsule/workAwareness';
 
 export interface TerminalCapsuleProps {
   sendText: (text: string) => void;
@@ -36,6 +37,13 @@ export interface TerminalCapsuleProps {
    * it owns a slot in the dock region, never what fills it.
    */
   adjacentAction?: ReactNode;
+  /**
+   * Work-awareness context (#1347): whether any capability is working.
+   *
+   * When working, the `+` button shows a partial work ring. The ring is a
+   * restrained static indicator — not a spinner, pulse, or animation.
+   */
+  workContext?: ResolvedWorkContext;
 }
 
 export function TerminalCapsule({
@@ -46,6 +54,7 @@ export function TerminalCapsule({
   capabilityDisclosure,
   capabilityProjection,
   adjacentAction,
+  workContext,
 }: TerminalCapsuleProps) {
   const resolvedExperience = experience;
   const experienceConfig = CAPSULE_EXPERIENCE[resolvedExperience];
@@ -180,6 +189,7 @@ export function TerminalCapsule({
           capabilityDisclosure={capabilityDisclosure}
           onFieldFocus={handleFieldFocus}
           fieldRef={fieldRef}
+          workContext={workContext}
         />
       </CapsuleShell>
     </CapsuleProvider>

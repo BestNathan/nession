@@ -11,6 +11,8 @@ import { cn } from '@/shared/lib/utils';
 import type {
   CapsuleCapabilityDisclosure,
 } from '@/product/terminal/capsule/types';
+import { WorkRing } from '@/product/terminal/capsule/WorkRing';
+import type { ResolvedWorkContext } from '@/product/terminal/capsule/workAwareness';
 
 interface CapsuleInputTrailingActionsProps {
   /** Whether this experience declares a history trigger in the composer row. */
@@ -33,8 +35,16 @@ interface CapsuleInputTrailingActionsProps {
  * here, and the ones that are relevant or active are marked. One muted control,
  * and the list opens as a popover, so the band stays a single line however many
  * capabilities exist and whatever states they are in.
+ *
+ * **Capsule V2 (#1347):** When working, the `+` button shows a partial work ring
+ * — a restrained static indicator (not spinner/pulse/animation).
  */
-function CapsuleCapabilityMore({ disclosure }: { disclosure: CapsuleCapabilityDisclosure }) {
+function CapsuleCapabilityMore({ disclosure, workContext }: {
+  disclosure: CapsuleCapabilityDisclosure;
+  workContext?: ResolvedWorkContext;
+}) {
+  const isWorking = workContext?.status === 'working';
+
   return (
     <CapabilityDisclosureMenu
       entries={disclosure.entries}
@@ -54,12 +64,14 @@ function CapsuleCapabilityMore({ disclosure }: { disclosure: CapsuleCapabilityDi
           // carries the same pairing (CapsuleHistoryPopover).
           className={cn(
             capsuleIconButtonClass,
-            'inline-flex items-center justify-center bg-transparent hover:bg-transparent',
+            'relative inline-flex items-center justify-center bg-transparent hover:bg-transparent',
           )}
         >
           <CapsuleIconVisual>
             <Plus className="size-[length:var(--icon-md)]" />
           </CapsuleIconVisual>
+          {/* Work Ring — partial ring around + when working (#1347). */}
+          <WorkRing working={isWorking} />
         </button>
       }
     />
@@ -73,18 +85,22 @@ function CapsuleCapabilityMore({ disclosure }: { disclosure: CapsuleCapabilityDi
  * `terminal-capsule.md` §Anatomy draws (`[+] [ input ... ] [send]`) and the one
  * the intent composer's resting row is built around. Nothing else earns this
  * slot: the capsule is conversational first and extensible second.
+ *
+ * **Capsule V2 (#1347):** Accepts workContext to show work ring on `+`.
  */
 export function CapsuleInputLeading({
   capabilityDisclosure,
+  workContext,
 }: {
   capabilityDisclosure?: CapsuleCapabilityDisclosure;
+  workContext?: ResolvedWorkContext;
 }) {
   if (!capabilityDisclosure || capabilityDisclosure.entries.length === 0) {
     return null;
   }
   return (
     <div data-testid="capsule-input-leading" className={capsuleControlRowClass}>
-      <CapsuleCapabilityMore disclosure={capabilityDisclosure} />
+      <CapsuleCapabilityMore disclosure={capabilityDisclosure} workContext={workContext} />
     </div>
   );
 }
