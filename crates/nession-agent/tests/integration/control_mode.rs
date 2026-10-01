@@ -189,6 +189,60 @@ async fn two_clients_share_one_window() -> Result<()> {
     Ok(())
 }
 
+/// A size change one client causes reaches **another** client (#1349).
+///
+/// This is the assertion a synthetic line cannot make, and the reason the bug
+/// lived: every other test here feeds the router a `%window-resize` string and
+/// checks it routes, which says nothing about whether tmux ever *sends* one.
+/// Measured 2026-10-01, tmux 3.6b does not — a control client attached and
+/// resized underneath printed `%layout-change @0 a87d,100x30,0,0,0` and no
+/// `%window-resize` at all. So this drives the real thing: two control-mode
+/// clients on one window, and the second one's attach (which resizes the shared
+/// window) is the "peer reflow" the first has to hear about.
+///
+/// Red before the fix, and red by *timeout* rather than by a wrong value: the
+/// first client was told nothing at all.
+#[tokio::test]
+async fn a_peer_driven_resize_reaches_the_other_client() -> Result<()> {
+    if cfg!(target_os = "macos") {
+        return Ok(());
+    }
+    let guard = TestSession::new("ctrl-peer-reflow");
+    create_session(guard.name()).await?;
+    sleep(Duration::from_millis(300)).await;
+
+    let (mut client1, _rx1, mut rz1, _cap1) =
+        ControlModeSession::attach(&TmuxDep::global(), guard.name(), 80, 24, None).await?;
+    sleep(Duration::from_millis(300)).await;
+
+    // Whatever the first attach reported about its own resize is not this
+    // test's subject; drain it so the assertion below reads what follows.
+    while rz1.try_recv().is_ok() {}
+
+    // The second client attaches at a different size, which moves the one
+    // shared window — the peer reflow.
+    let (mut client2, _rx2, _rz2, _cap2) =
+        ControlModeSession::attach(&TmuxDep::global(), guard.name(), 120, 40, None).await?;
+
+    let reported = tokio::time::timeout(Duration::from_secs(5), rz1.recv())
+        .await
+        .map_err(|_| {
+            anyhow!(
+                "the first client was never told the window moved to 120x40: the size signal \
+                 tmux actually sends is not being read"
+            )
+        })?;
+    assert_eq!(
+        reported,
+        Some((120, 40)),
+        "the first client was told about a resize, but not the one that happened"
+    );
+
+    let _ = client1.close().await;
+    let _ = client2.close().await;
+    Ok(())
+}
+
 #[tokio::test]
 async fn test_close_is_idempotent() -> Result<()> {
     if cfg!(target_os = "macos") {
