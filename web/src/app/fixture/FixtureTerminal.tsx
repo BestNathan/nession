@@ -20,6 +20,7 @@ import {
 import { TerminalSurface } from '@/product/terminal/patterns/TerminalSurface';
 import type { CapsuleExperience } from '@/product/terminal/capsule/types';
 import type { TerminalChrome } from '@/app/ShellMain';
+import type { InputDrop } from '@/platform/terminal-runtime/inputQueue';
 
 /**
  * How many frames to keep re-deriving the grid for, after each change to the
@@ -91,10 +92,23 @@ const FIXTURE_BUFFER = [
 export function FixtureTerminal({
   chrome,
   experience,
+  inputDrop = null,
 }: {
   chrome?: TerminalChrome;
   /** Which experience's capsule to render — the same prop the real shell passes. */
   experience: CapsuleExperience;
+  /**
+   * Input this Session lost rather than delivered (#1307 SC-09), from the
+   * route. The surface's own prop, forwarded unchanged — the fixture's job is
+   * to make the notice *reachable*, and it cannot be reached any other way: it
+   * needs a live transport to lose something on.
+   *
+   * `onDismissInputDrop` is deliberately not passed. Dismissing is real in the
+   * product and inert here, like every other handler the fixture supplies
+   * (`onCreate`, `onRefresh`, `onKill`): the fixture renders states, it does
+   * not run flows.
+   */
+  inputDrop?: InputDrop | null;
 }) {
   const ref = useRef<HTMLDivElement>(null);
 
@@ -159,6 +173,7 @@ export function FixtureTerminal({
       experience={experience}
       inputDisabled={false}
       controller={null}
+      inputDrop={inputDrop}
       capsuleCapabilities={chrome?.capsuleCapabilities}
       capsuleProjection={chrome?.capsuleProjection}
       surfaceAction={chrome?.surfaceAction}

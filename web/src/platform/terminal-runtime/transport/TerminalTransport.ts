@@ -1,6 +1,20 @@
 import type { ConnectionState } from '@/platform/socket/types';
 import type { TerminalBootstrap } from '../bootstrap';
 
+/**
+ * What an attach said about the agent's input cursor (#1307).
+ *
+ * Both fields are optional and absence is a statement rather than a zero: an
+ * agent built before the input contract states neither, and a transport that
+ * cannot carry a sequence — the relay, until its merge preserves one — never
+ * asks.
+ */
+export interface TerminalInputSeed {
+  inputEpoch?: number;
+  appliedThrough?: number;
+  controlGeneration?: number;
+}
+
 /** Abstraction over ConnectionManager so Controller never touches WebSocket/P2P details. */
 export interface TerminalTransport {
   readonly mode: 'p2p' | 'relay';
@@ -9,7 +23,15 @@ export interface TerminalTransport {
   sendResize(cols: number, rows: number): void;
   /** Seed stream timeline after P2P attach (#1094). Optional on transports without seq. */
   seedStreamCursor?(streamEpoch: number | undefined, streamCursor: number | undefined): void;
-  /** Flush any input buffered before the session was attached. */
+  /**
+   * Reconcile the input cursor against the attach reply (#1307).
+   *
+   * Optional and separate from `seedStreamCursor` because the two travel on
+   * different paths: the output timeline has a resume of its own, and the input
+   * cursor is stated by the attach itself.
+   */
+  seedInputCursor?(seed: TerminalInputSeed | undefined): void;
+  /** Flush any input waiting for the session to be attached. */
   flushInputBuffer(): void;
   /** Flush the coalesced resize buffered before the session was attached. */
   flushPendingResize(): void;

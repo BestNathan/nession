@@ -213,6 +213,9 @@ pub fn build_terminal_input_message(session_name: &str, data: &[u8]) -> String {
         session_name: session_name.to_string(),
         data: base64::engine::general_purpose::STANDARD.encode(data),
         control_generation: None,
+        input_epoch: None,
+        seq_start: None,
+        seq_end: None,
     };
     // Through `proto_msg`, so the wire name is a call site the gate reads.
     // The envelope's `id` and `timestamp` come from there too — the hand-built

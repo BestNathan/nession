@@ -3,11 +3,21 @@ import { render, screen, act } from '@testing-library/react';
 import { Provider, createStore } from 'jotai';
 import { TerminalRegion } from '@/app/TerminalRegion';
 import { sessionIdAtom, attachInfoAtom } from '@/product/session/state';
-import { bannerAtomFamily } from '@/product/terminal/state/ui';
+import { bannerAtomFamily, inputDropAtomFamily } from '@/product/terminal/state/ui';
 import type { ConnectionState } from '@/platform/socket/types';
 
-const { wsListeners } = vi.hoisted(() => ({
+const { wsListeners, surfaceProps } = vi.hoisted(() => ({
   wsListeners: [] as Array<(state: ConnectionState) => void>,
+  /**
+   * What the region last handed the surface.
+   *
+   * The surface is mocked here, so this is the only place the *pass-through*
+   * is observable at all — and it is worth observing, because dropping either
+   * prop leaves every other test in the tree green: the orchestration still
+   * fills the atom, the surface still knows how to render a notice, and no
+   * notice ever appears.
+   */
+  surfaceProps: { current: null as Record<string, unknown> | null },
 }));
 
 vi.mock('@/product/terminal/hooks/useP2PAttachTransport', () => ({
@@ -52,9 +62,10 @@ vi.mock('@/product/terminal/TerminalPane', () => ({
   ),
 }));
 vi.mock('@/product/terminal/patterns/TerminalSurface', () => ({
-  TerminalSurface: ({ children }: { children: React.ReactNode }) => (
-    <div data-testid="terminal-surface">{children}</div>
-  ),
+  TerminalSurface: (props: { children: React.ReactNode }) => {
+    surfaceProps.current = props as unknown as Record<string, unknown>;
+    return <div data-testid="terminal-surface">{props.children}</div>;
+  },
 }));
 
 function renderTerminal(hidden: boolean, store = createStore()) {
@@ -109,6 +120,35 @@ describe('TerminalRegion', () => {
     const root = screen.getByTestId('terminal');
     expect(root).toHaveTextContent('Select a session to open its terminal.');
     expect(screen.queryByTestId('terminal-pane')).not.toBeInTheDocument();
+  });
+
+  it('hands a lost-input notice to the surface, and takes the dismissal back (#1307 SC-09)', () => {
+    // The middle of SC-09's chain. The orchestration proves the flow fills the
+    // session's atom and the surface proves the atom renders; this is the two
+    // lines between them, which nothing else covers — the region is the only
+    // place both live, and a prop that stops being passed is invisible to
+    // every test on either side of it.
+    const store = createStore();
+    store.set(sessionIdAtom, 'agent:sess');
+    renderTerminal(false, store);
+
+    expect(surfaceProps.current?.inputDrop).toBeNull();
+
+    act(() => {
+      store.set(inputDropAtomFamily('agent:sess'), { reason: 'epoch', chunks: 1, at: 0 });
+    });
+    expect(surfaceProps.current?.inputDrop).toMatchObject({ reason: 'epoch' });
+
+    // The way back, which is what makes the notice a decision rather than a
+    // permanent banner: dismissing it is the surface's only action, and it has
+    // to reach the same atom the notice came from.
+    const dismiss = surfaceProps.current?.onDismissInputDrop;
+    if (typeof dismiss !== 'function') {
+      throw new Error('the region never passed a dismissal to the surface');
+    }
+    act(() => (dismiss as () => void)());
+    expect(store.get(inputDropAtomFamily('agent:sess'))).toBeNull();
+    expect(surfaceProps.current?.inputDrop).toBeNull();
   });
 
   it('renders native TerminalSurface when a session is attached', () => {

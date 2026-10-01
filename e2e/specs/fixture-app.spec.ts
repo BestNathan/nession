@@ -118,6 +118,67 @@ test('an emerged capability does not reflow the terminal (#826)', async ({ page 
 });
 
 /**
+ * The delivery-unknown notice is *painted*, not merely present (#1307 stage 6).
+ *
+ * The defect this pins was invisible to everything that read the DOM. The
+ * notice rendered, occupied 390×61, and was covered by the capsule's opaque
+ * `backdrop-filter` shell — measured at 366×49 (75%, sentence included), with
+ * `elementFromPoint` at the notice's own centre landing on the capsule's
+ * textarea, and the frame **byte-identical** to the route with no notice at
+ * all (md5 `fa3c7ea907eaf6b212152736620aff1c`, 35 061 bytes, both). A DOM
+ * assertion cannot see that, which is why this one is taken the same way the
+ * #1051 navigation-owner assertion above is: at the element's own centre.
+ *
+ * The geometry is asserted beside it rather than instead of it, because the two
+ * say different things: `paintedCount` is what the user gets, and the box
+ * comparison is the *mechanism* — the strip is laid out after the capsule host,
+ * so the capsule ends above it rather than floating over it.
+ */
+test('the delivery-unknown notice is not drawn under the capsule (#1307)', async ({ page }) => {
+  await page.goto('/#/fixture/app?drop=epoch');
+  await expect(page.getByTestId('app-layer-terminal')).toBeInViewport();
+  await expect(page.getByTestId('terminal-input-drop')).toBeVisible();
+
+  expect(await paintedCount(page, '[data-testid="terminal-input-drop"]')).toBe(1);
+
+  const boxes = await page.evaluate(() => {
+    const host = document.querySelector('[data-terminal-capsule-host]');
+    const notice = document.querySelector('[data-testid="terminal-input-drop"]');
+    const dock = document.querySelector('[data-testid="terminal-capsule"]');
+    const box = (el: Element | null) => {
+      const b = el?.getBoundingClientRect();
+      return b ? { top: Math.round(b.top), bottom: Math.round(b.bottom) } : null;
+    };
+    return {
+      host: box(host),
+      notice: box(notice),
+      dock: box(dock),
+      // The invariant, read off the live tree: the capsule host is the well and
+      // the capsule, and the strip is its sibling.
+      hostContainsNotice: host !== null && notice !== null && host.contains(notice),
+      hostContainsDock: host !== null && dock !== null && host.contains(dock),
+    };
+  });
+
+  expect(boxes.hostContainsNotice).toBe(false);
+  expect(boxes.hostContainsDock).toBe(true);
+
+  // The capsule floats above the strip instead of over it. Both sides are read
+  // first, so a failure names the box that moved rather than just the relation.
+  expect(boxes.dock).not.toBeNull();
+  expect(boxes.notice).not.toBeNull();
+  const { capsuleBottom, noticeTop } = {
+    capsuleBottom: boxes.dock!.bottom,
+    noticeTop: boxes.notice!.top,
+  };
+  expect({ capsuleBottom, noticeTop, floatingAbove: capsuleBottom <= noticeTop }).toEqual({
+    capsuleBottom,
+    noticeTop,
+    floatingAbove: true,
+  });
+});
+
+/**
  * How many elements matching `selector` a user could actually read right now.
  *
  * Occlusion-aware on purpose. `locator.count()` answers "is it in the DOM", and

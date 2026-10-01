@@ -1,0 +1,259 @@
+/**
+ * Chat Markdown styling, adapted from DeepSeek Harness MarkdownText.module.css.
+ * Uses Nession design tokens instead of DeepSeek tokens.
+ *
+ * Simplifications:
+ * - No file mention styles (DeepSeek-specific feature)
+ * - No image button/preview styles (DeepSeek-specific feature)
+ * - No compact mode (not needed for Chat)
+ * - Uses Nession design tokens (--dsw-* → Nession tokens)
+ */
+
+.markdown {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font: var(--typography-body-base);
+  color: var(--color-text-primary);
+}
+
+.markdown strong {
+  font-weight: 600;
+}
+
+.markdown h1 {
+  font: var(--typography-heading-h1);
+  margin: 32px 0 16px;
+}
+
+.markdown h2 {
+  font: var(--typography-heading-h2);
+  margin: 32px 0 16px;
+}
+
+.markdown h3 {
+  font: var(--typography-heading-h3);
+  margin: 32px 0 16px;
+}
+
+.markdown h4 {
+  font: var(--typography-heading-h4);
+  margin: 16px 0;
+}
+
+.markdown :where(h5, h6) {
+  font: var(--typography-body-strong);
+  margin: 16px 0;
+}
+
+.markdown :where(h1, h2, h3, h4, h5, h6) strong {
+  font-weight: inherit;
+}
+
+.markdown p {
+  margin: 16px 0;
+}
+
+/* Tighten h4–h6 against a following list. */
+.markdown :where(h4, h5, h6) + :where(ul, ol) {
+  margin-top: 8px;
+}
+
+.markdown :where(h4, h5, h6):has(+ :where(ul, ol)) {
+  margin-bottom: 8px;
+}
+
+.markdown a {
+  color: var(--color-text-link);
+  font-weight: 500;
+  transition: box-shadow var(--transition-duration) var(--transition-ease);
+  position: relative;
+  text-decoration: none;
+  /* Transparent hit-area padding. */
+  border-left: 3px solid rgb(255 255 255 / 0);
+  border-right: 3px solid rgb(255 255 255 / 0);
+  border-top: 2px solid rgb(255 255 255 / 0);
+  border-bottom: 2px solid rgb(255 255 255 / 0);
+  margin-left: -3px;
+  margin-right: -3px;
+}
+
+.markdown a:hover,
+.markdown a:focus {
+  outline: none;
+  text-decoration: underline dotted var(--color-text-link);
+  text-underline-offset: 3px;
+}
+
+.markdown a:focus-visible {
+  box-shadow: 0 0 0 2px var(--color-focus-ring);
+}
+
+.markdown :where(ul, ol) {
+  margin: 16px 0;
+  padding-left: 18px;
+}
+
+.markdown li:not(:first-child) {
+  margin-top: 6px;
+}
+
+.markdown li > :where(ul, ol) {
+  margin-top: 4px;
+}
+
+.markdown li::marker {
+  line-height: 24px;
+  color: var(--color-text-secondary);
+}
+
+/* Nested ol under ul/ol. */
+.markdown :where(ul, ol) ol {
+  list-style-position: inside;
+  padding-left: 0;
+}
+
+.markdown :where(ul, ol) ol li p {
+  display: inline;
+}
+
+.markdown li > p {
+  margin: 8px 0;
+}
+
+.markdown li > *:first-child {
+  margin-top: 0;
+}
+
+.markdown li > *:last-child {
+  margin-bottom: 0;
+}
+
+.markdown hr {
+  display: block;
+  border: none;
+  height: 0.5px;
+  margin: 32px 0;
+  background: var(--color-border-subtle);
+}
+
+.markdown blockquote {
+  border-left: 2px solid var(--color-text-tertiary);
+  margin: 16px 0 0;
+  padding-left: 14px;
+}
+
+.markdown pre {
+  margin: 16px 0;
+  font-family: var(--font-family-mono);
+  overflow: auto;
+}
+
+.markdown :not(pre) > code {
+  display: inline-flex;
+  align-items: center;
+  box-sizing: border-box;
+  font: var(--typography-code-base);
+  font-family: var(--font-family-mono);
+  font-size: 0.875em !important;
+  background-color: var(--color-surface-code-inline);
+  border: 0.5px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 0 5px;
+}
+
+.markdown :where(h1, h2, h3, h4, h5, h6) code {
+  font: inherit;
+  font-family: var(--font-family-mono);
+}
+
+.markdown :global(.katex-display) {
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.markdown input[type='checkbox'] {
+  margin: 0 8px 0 0;
+  accent-color: var(--color-text-secondary);
+}
+
+.tableScroll {
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+
+.tableScroll:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--color-focus-ring);
+}
+
+.tableScroll table {
+  border-collapse: collapse;
+  width: max-content;
+  max-width: max-content;
+}
+
+.tableFill table {
+  width: 100%;
+  max-width: none;
+}
+
+.tableScroll th {
+  text-align: start;
+  padding: 10px 16px;
+  border-bottom: 0.5px solid var(--color-border-strong);
+  border-top: none;
+  font: var(--typography-table-head);
+  max-width: 320px;
+  max-width: min(30vw, 320px);
+  min-width: 100px;
+}
+
+.tableScroll td {
+  padding: 10px 16px;
+  border-bottom: 0.5px solid var(--color-border-subtle);
+  font: var(--typography-table-body);
+  max-width: 320px;
+  max-width: min(30vw, 320px);
+  min-width: 100px;
+}
+
+.tableScroll th:first-child,
+.tableScroll td:first-child {
+  padding-left: 0;
+}
+
+.tableScroll td:last-child {
+  padding-right: 0;
+}
+
+.tableScroll table code {
+  font-size: 11px;
+}
+
+.markdown > *:first-child,
+.markdown p:first-child {
+  margin-top: 0 !important;
+}
+
+.markdown > *:last-child,
+.markdown p:last-child {
+  margin-bottom: 0 !important;
+}
+
+.imageAlt {
+  color: var(--color-text-tertiary);
+  font-style: italic;
+}
+
+.image {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  margin: 0;
+  border-radius: var(--radius-md);
+  background: var(--color-surface-base);
+  object-fit: contain;
+}

@@ -1,4 +1,5 @@
 import { decodeTerminalData, encodeBase64 } from './base64';
+import { readInputAck, type InputAckFields } from './controlPayload';
 import {
   decodeBootstrapMarker,
   type TerminalBootstrap,
@@ -25,6 +26,22 @@ import type { RelayBeginOptions } from '@/platform/attach/relayServerConnection'
  */
 type RelayOutputCallback = (data: Uint8Array, bootstrap?: TerminalBootstrap) => void;
 type RelayResizeCallback = (cols: number, rows: number) => void;
+type RelayInputAckCallback = (ack: InputAckFields) => void;
+
+/**
+ * The position a relay input frame carries (#1307).
+ *
+ * The same three fields the direct path sends, because they are one statement
+ * about the bytes rather than a property of the transport: the Server's merge
+ * carries them across a burst (it states the first frame's `seq_start` through
+ * the last frame's `seq_end`, and refuses to merge a burst that has no single
+ * range), so what the Agent reads is what this client sent.
+ */
+export interface RelayInputOptions {
+  inputEpoch: number;
+  seqStart: number;
+  seqEnd: number;
+}
 
 /** One registration, tagged with the install generation that created it. */
 interface GenerationEntry<T> {
@@ -57,13 +74,31 @@ function getSessionId(payload: Record<string, unknown>): string {
 export interface TerminalServerApi {
   beginRelay(sessionId: string, opts?: RelayBeginOptions): void;
   endRelay(sessionId: string): void;
-  /** Relay terminal input — base64-wrapped, mirroring the server wire. */
-  sendRelayInput(sessionName: string, data: string): void;
+  /**
+   * Relay terminal input — base64-wrapped, mirroring the server wire.
+   *
+   * `opts` states the chunk's position (#1307). Omitted means unsequenced,
+   * which is what a client with no input epoch sends and what a sender from
+   * before the contract always sent.
+   */
+  sendRelayInput(sessionName: string, data: string, opts?: RelayInputOptions): void;
   sendRelayResize(sessionName: string, cols: number, rows: number): void;
   /** Subscribe to relay output frames for one session (routed by session_name). */
   onRelayOutput(sessionName: string, cb: RelayOutputCallback): () => void;
   /** Subscribe to relay resize frames for one session (routed by session_name). */
   onRelayResize(sessionName: string, cb: RelayResizeCallback): () => void;
+  /**
+   * Subscribe to the agent's input cursor as the relay carries it back
+   * (routed by session_name).
+   *
+   * The Server forwards every agent frame to the browser unchanged, so this
+   * notification arrives on the same lane the output does — there is nothing
+   * for the relay to do with it and deliberately nothing it does. What needed
+   * adding was the subscription: without one the frame reached the browser and
+   * was dropped, and a client whose queue never drains is a client that
+   * re-sends everything it ever typed.
+   */
+  onRelayInputAck(sessionName: string, cb: RelayInputAckCallback): () => void;
 }
 
 export class TerminalServerPlugin implements TransportPlugin, TerminalServerApi {
@@ -73,6 +108,7 @@ export class TerminalServerPlugin implements TransportPlugin, TerminalServerApi 
   private generation = 0;
   private outputCallbacks = new Map<string, Array<GenerationEntry<RelayOutputCallback>>>();
   private resizeCallbacks = new Map<string, Array<GenerationEntry<RelayResizeCallback>>>();
+  private inputAckCallbacks = new Map<string, Array<GenerationEntry<RelayInputAckCallback>>>();
 
   /**
    * Bind the plugin to the server connection. A later install replaces an
@@ -98,6 +134,13 @@ export class TerminalServerPlugin implements TransportPlugin, TerminalServerApi 
       connection.subscribe(TERMINAL_RESIZE_WIRE, (payload) => {
         this.handleRelayResize(payload as Record<string, unknown>);
       }),
+      // Spelled as a literal rather than through a constant, like the direct
+      // path in ./agent and for the same measured reason: `just check-protocol`
+      // resolves a subscription by reading a dotted literal at the call site,
+      // so a name reached through a `const` is a name it cannot see (#913).
+      connection.subscribe('agent.terminal.input.ack', (payload) => {
+        this.handleRelayInputAck(payload as Record<string, unknown>);
+      }),
     ];
 
     return () => {
@@ -110,6 +153,7 @@ export class TerminalServerPlugin implements TransportPlugin, TerminalServerApi 
         // registration belongs to this release. Drop them all.
         this.outputCallbacks.clear();
         this.resizeCallbacks.clear();
+        this.inputAckCallbacks.clear();
       } else {
         // Stale release — a newer binding is active. Drop only the
         // registrations this release created; never touch newer ones.
@@ -150,9 +194,22 @@ export class TerminalServerPlugin implements TransportPlugin, TerminalServerApi 
     this.requireConnection().send(RELAY_END_WIRE, { session_id: sessionId });
   }
 
-  sendRelayInput(sessionName: string, data: string): void {
+  sendRelayInput(sessionName: string, data: string, opts?: RelayInputOptions): void {
     const encoded = encodeBase64(data);
-    this.requireConnection().send(TERMINAL_INPUT_WIRE, { session_name: sessionName, data: encoded });
+    this.requireConnection().send(TERMINAL_INPUT_WIRE, {
+      session_name: sessionName,
+      data: encoded,
+      // Absent rather than null, like every other optional field on this wire:
+      // the Agent reads the three as one statement (`InputSequence::of`), and a
+      // `null` is something an older build has never seen.
+      ...(opts
+        ? {
+            input_epoch: opts.inputEpoch,
+            seq_start: opts.seqStart,
+            seq_end: opts.seqEnd,
+          }
+        : {}),
+    });
   }
 
   sendRelayResize(sessionName: string, cols: number, rows: number): void {
@@ -165,6 +222,26 @@ export class TerminalServerPlugin implements TransportPlugin, TerminalServerApi 
 
   onRelayResize(sessionName: string, cb: RelayResizeCallback): () => void {
     return this.addMapCallback(this.resizeCallbacks, sessionName, cb);
+  }
+
+  onRelayInputAck(sessionName: string, cb: RelayInputAckCallback): () => void {
+    return this.addMapCallback(this.inputAckCallbacks, sessionName, cb);
+  }
+
+  private handleRelayInputAck(payload: Record<string, unknown>): void {
+    // The same reader the direct path uses, so the two transports cannot
+    // disagree about what counts as an acknowledgement — a half-stated one is
+    // dropped here exactly as it is there.
+    const ack = readInputAck(payload);
+    if (ack === null) {
+      return;
+    }
+    const callbacks = this.inputAckCallbacks.get(ack.sessionName);
+    if (callbacks) {
+      for (const entry of callbacks) {
+        entry.cb(ack);
+      }
+    }
   }
 
   private handleRelayOutput(payload: Record<string, unknown>): void {
@@ -238,6 +315,7 @@ export class TerminalServerPlugin implements TransportPlugin, TerminalServerApi 
   private dropGeneration(generation: number): void {
     this.dropGenerationFrom(this.outputCallbacks, generation);
     this.dropGenerationFrom(this.resizeCallbacks, generation);
+    this.dropGenerationFrom(this.inputAckCallbacks, generation);
   }
 
   private dropGenerationFrom<T>(

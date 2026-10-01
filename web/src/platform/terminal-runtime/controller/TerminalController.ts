@@ -487,7 +487,18 @@ export class TerminalController {
     return this.inputSourceManager.onSourceChange(callback);
   }
 
-  /** Flush any input buffered before the transport was attached. */
+  /**
+   * Reconcile the input cursor against what the attach reply stated (#1307).
+   *
+   * Delegated like the rest of the transport surface: the controller is where
+   * the React layer meets the transport, and the decision about what a moved
+   * epoch or generation means belongs one level down.
+   */
+  seedInputCursor(seed: import('../transport/TerminalTransport').TerminalInputSeed): void {
+    this.transport?.seedInputCursor?.(seed);
+  }
+
+  /** Flush any input waiting for the session to be attached. */
   flushInputBuffer(): void {
     this.transport?.flushInputBuffer();
   }

@@ -2,6 +2,7 @@ import { decodeBase64Bytes, encodeBase64 } from './base64';
 import {
   readAttachControlFields,
   readControlAcquireReply,
+  readInputAck,
 } from './controlPayload';
 import { parseStreamEvents } from '@/platform/terminal-runtime/streamApply';
 import {
@@ -79,7 +80,63 @@ export interface TerminalResizeFrame {
 export interface TerminalStreamResumeResult {
   streamEpoch: number;
   epochMatch: boolean;
+  /**
+   * The lowest stream sequence the agent can still return — the front of its
+   * retained window (#1304).
+   *
+   * A cursor below `firstAvailableSeq - 1` has lost everything between, for
+   * good, and the agent is the only party that knows where that boundary is.
+   *
+   * `undefined` means the agent **stated none**: an epoch mismatch (there is no
+   * window for a request about another stream), or a provider built before the
+   * field existed. It is not a zero standing in for a position — a zero would
+   * claim sequence 0 is retained — so a consumer must read absence as "not
+   * said" and decide for itself what that is worth knowing.
+   */
+  firstAvailableSeq?: number;
+  /**
+   * The agent's verdict on whether {@link events} is **every** event from
+   * `afterSeq + 1` through its current cursor (#1304).
+   *
+   * Read as the agent's answer rather than recomputed from
+   * {@link firstAvailableSeq}: recomputing means re-implementing the agent's
+   * retention policy here, and reading a shorter-than-asked-for answer as whole
+   * the moment that policy bounds an answer for some other reason.
+   *
+   * `false` is the case the field exists for. It is not the same state as an
+   * empty `events` — that one is `complete: true` and means the cursor is
+   * already at the head. `undefined` again means the agent said nothing.
+   */
+  complete?: boolean;
   events: import('@/platform/terminal-runtime/streamApply').TerminalStreamEvent[];
+}
+
+/**
+ * Where the session's input cursor stands (#1307).
+ *
+ * A **cursor**, not a receipt: the agent writes this after bytes have reached
+ * the PTY, and it means "everything at or below this chunk is applied". It is
+ * not paired with any request — see {@link TerminalAgentApi.onInputAck}.
+ */
+export interface TerminalInputAck {
+  sessionName: string;
+  inputEpoch: number;
+  appliedThrough: number;
+  controlGeneration?: number;
+}
+
+/**
+ * Where one frame's bytes sit in the session's input stream (#1307).
+ *
+ * `inputEpoch` is the agent's run; `seqStart`/`seqEnd` are chunk ordinals
+ * within it. One xterm `onData` is one chunk, so a caller sending a single
+ * event sends `seqStart === seqEnd`; the range is what a frame that coalesced
+ * several events would carry.
+ */
+export interface TerminalInputSequence {
+  inputEpoch: number;
+  seqStart: number;
+  seqEnd: number;
 }
 
 /**
@@ -110,8 +167,17 @@ export interface TerminalAgentApi {
     size?: TerminalSize,
     opts?: { timeoutMs?: number; needsBootstrap?: boolean },
   ): Promise<AttachResult>;
-  /** Send terminal input (keystrokes) to the session — base64-encoded. */
-  sendInput(sessionName: string, data: string): void;
+  /**
+   * Send terminal input (keystrokes) to the session — base64-encoded.
+   *
+   * `sequence` is present when the caller holds a cursor for this session
+   * (#1307): the frame then carries the position of its bytes, and the agent's
+   * acknowledgement of that position is what makes a later retry safe. Absent
+   * means the sender has no position to give — an agent built before the
+   * contract, a relay path whose merge would destroy one — and the frame is the
+   * one-way keystroke it always was.
+   */
+  sendInput(sessionName: string, data: string, sequence?: TerminalInputSequence): void;
   /** Resize the remote PTY (controller only). */
   sendResize(sessionName: string, cols: number, rows: number): void;
   /** Current control lease for a session (#1095). */
@@ -130,6 +196,17 @@ export interface TerminalAgentApi {
   ): Promise<TerminalStreamResumeResult>;
   /** Subscribe to terminal resize frames from the agent (#1303). */
   onResize(cb: (frame: TerminalResizeFrame) => void): () => void;
+  /**
+   * Subscribe to the agent's applied input cursor (#1307).
+   *
+   * Push, not reply — and the difference is the point of the contract rather
+   * than a stylistic choice. The wire is a notification (`agent.terminal.input.ack`)
+   * because the fact it carries is cumulative: one value accounts for every
+   * chunk at or below it, so it needs no envelope id to be paired with, and the
+   * relay's habit of merging a burst into the newest frame's envelope cannot
+   * cost it anything.
+   */
+  onInputAck(cb: (ack: TerminalInputAck) => void): () => void;
   /**
    * Subscribe to uncorrelated agent `error` frames (see {@link AgentError}).
    * Errors that ack a request (e.g. `client.attach`) are consumed by the
@@ -196,6 +273,8 @@ async function attachToSession(
       controllerClientId: fields.controllerClientId,
       streamEpoch: fields.streamEpoch,
       streamCursor: fields.streamCursor,
+      inputEpoch: fields.inputEpoch,
+      inputAppliedThrough: fields.inputAppliedThrough,
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -233,6 +312,37 @@ async function acquireSessionControl(
   }
 }
 
+/**
+ * Read the agent's applied input cursor off the notification (#1307).
+ *
+ * **Both numbers or nothing.** A cursor is a position *in a run*, so an epoch
+ * without a position — or a position without the run it belongs to — names no
+ * position at all, and this reader drops the frame rather than invent one. That
+ * is the same answer the resize reader gives to a half-stated frame, for the
+ * same reason (#1303): a partially-read position is worse than none, because
+ * the consumer acts on it.
+ */
+function subscribeInputAck(
+  surface: PluginSurface,
+  cb: (ack: TerminalInputAck) => void,
+): () => void {
+  // The wire is spelled here rather than behind a constant, and that is a
+  // requirement of the check rather than a style: `just check-protocol`
+  // resolves a subscription by reading a **dotted literal at the call site**,
+  // and a name reached through a `const` is a name it cannot see. This was
+  // measured — spelling the constant wrong left the gate green, which is the
+  // #913 failure exactly: a subscription to a wire nobody emits is silent, and
+  // silence is what it looks like when nothing arrives. `agent.terminal.output`
+  // is spelled the same way, for the same reason.
+  return surface.subscribe('agent.terminal.input.ack', (payload) => {
+    const ack = readInputAck(payload);
+    if (ack === null) {
+      return;
+    }
+    cb(ack);
+  });
+}
+
 export function createTerminalAgentApi(surface: PluginSurface): TerminalAgentApi {
   const lease = createAgentControlLease(surface);
 
@@ -244,7 +354,11 @@ export function createTerminalAgentApi(surface: PluginSurface): TerminalAgentApi
         needsBootstrap: opts?.needsBootstrap,
       }),
 
-    sendInput: (sessionName: string, data: string): void => {
+    sendInput: (
+      sessionName: string,
+      data: string,
+      sequence?: TerminalInputSequence,
+    ): void => {
       if (lease.getControlState(sessionName).role === 'observer') {
         return;
       }
@@ -253,6 +367,13 @@ export function createTerminalAgentApi(surface: PluginSurface): TerminalAgentApi
         session_name: sessionName,
         data: encodeBase64(data),
         ...(generation !== undefined ? { control_generation: generation } : {}),
+        ...(sequence
+          ? {
+              input_epoch: sequence.inputEpoch,
+              seq_start: sequence.seqStart,
+              seq_end: sequence.seqEnd,
+            }
+          : {}),
       });
     },
 
@@ -275,6 +396,8 @@ export function createTerminalAgentApi(surface: PluginSurface): TerminalAgentApi
 
     acquireControl: (sessionName) =>
       acquireSessionControl(surface, lease, sessionName),
+
+    onInputAck: (cb: (ack: TerminalInputAck) => void) => subscribeInputAck(surface, cb),
 
     onControlChanged: (cb) => lease.onControlChanged(cb),
 
@@ -312,10 +435,19 @@ export function createTerminalAgentApi(surface: PluginSurface): TerminalAgentApi
         after_seq: afterSeq,
       });
       const r = reply as Record<string, unknown>;
+      // Both read by type and left `undefined` otherwise: the wire omits them
+      // when the agent has nothing to state, and a coercion here (`Number(x)`
+      // on a missing field is 0) would invent the position the contract
+      // forbids — 0 is below every sequence a stream can have (#1304).
+      const firstAvailableSeq = r.first_available_seq;
+      const complete = r.complete;
       return {
         streamEpoch:
           typeof r.stream_epoch === 'number' ? r.stream_epoch : streamEpoch,
         epochMatch: r.epoch_match === true,
+        firstAvailableSeq:
+          typeof firstAvailableSeq === 'number' ? firstAvailableSeq : undefined,
+        complete: typeof complete === 'boolean' ? complete : undefined,
         events: parseStreamEvents(r.events),
       };
     },

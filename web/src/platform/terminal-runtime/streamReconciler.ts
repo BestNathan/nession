@@ -34,8 +34,11 @@ import type { TerminalBootstrap } from './bootstrap';
  * - The frontier (`frontier`) only ever moves to `frontier + 1`, so a consumer
  *   sees a contiguous run starting from wherever the stream was anchored.
  * - A gap is a *state*, not an error: it is filled by one resume request at a
- *   time, and it is only ever abandoned — see {@link abandon} — when waiting
- *   for it has started to cost output that is already in hand.
+ *   time, and it is only ever abandoned — see {@link abandon} — when it is
+ *   known to be unfillable. Two things establish that, and they are not
+ *   guesses: the agent states that its retained window has passed the cursor
+ *   (#1304), or waiting for it has started to cost output that is already in
+ *   hand.
  */
 export class StreamReconciler {
   private epoch: number | null = null;
@@ -347,15 +350,27 @@ export class StreamReconciler {
       }
     }
 
-    // The agent answered a request for `afterSeq` with events that start later
-    // than `afterSeq + 1`: everything in between has left its retained window
-    // and no later request can return it. This is the interim client-side
-    // reading of a truncation the protocol cannot state yet — #1304 owns saying
-    // it explicitly, and the bootstrap fallback that should replace this.
-    if (reply.events.length > 0) {
-      const firstSeq = lowestSeqAbove(reply.events, afterSeq);
-      if (firstSeq !== null && firstSeq > afterSeq + 1) {
-        this.skipHole(firstSeq);
+    // What the agent said about its own retained window (#1304). An answer it
+    // calls incomplete is one whose missing stretch has left its ring: the
+    // agent is the only party that knows where that boundary is, and a client
+    // that inferred it from the events it happened to receive would be reading
+    // a truncation out of a shape — which is what this used to do, and it
+    // guessed wrong in both directions.
+    //
+    // The hole is given up on here rather than held: no later request can fill
+    // it, and holding output for one that cannot come is the freeze this class
+    // exists to prevent. What changed is that the loss is **stated** — the
+    // consumer is told its buffer has a hole, so the snapshot that repairs one
+    // can be asked for (#321) — instead of being a silent skip the client read
+    // as continuous recovery.
+    if (reply.complete === false) {
+      this.sink.onStreamTruncated();
+      if (reply.firstAvailableSeq !== undefined) {
+        // Where the agent's window begins, from the agent. Not derived from
+        // the reply's events: those are what the agent had, and an answer whose
+        // events start above the stated floor is a hole with output after it,
+        // which is the attempt limit's business, not this boundary's.
+        this.skipHole(reply.firstAvailableSeq);
       }
     }
 
@@ -445,17 +460,44 @@ export class StreamReconciler {
   /**
    * Give up on the hole at the frontier and let the timeline continue after it.
    *
-   * Only reached when the hole has outlasted {@link HOLE_ATTEMPT_LIMIT}
-   * requests, none of which moved the frontier. The output already in hand is
-   * committed rather than held; the frames the
-   * agent no longer retains are lost, which is the state the stream was in
-   * before this class buffered anything, minus the freeze.
+   * Reached two ways, and both mean the same thing: the hole has outlasted
+   * {@link HOLE_ATTEMPT_LIMIT} requests, none of which moved the frontier, or
+   * one request has held the frames in hand for {@link RESUME_DEADLINE_MS}
+   * without answering. The output already in hand is committed rather than
+   * held; the frames the agent no longer retains are lost, which is the state
+   * the stream was in before this class buffered anything, minus the freeze.
+   *
+   * ## Why this states the loss, exactly as a stated truncation does
+   *
+   * A fill is visible to the consumer: the events arrive and the buffer is
+   * whole. Giving up is not. The frontier moves over the missing stretch, the
+   * frames above it commit, and the buffer *looks* continuous — while the
+   * consumer's copy of the session is missing output that happened. That is
+   * the same defect #1304 exists to remove, one layer down: an unanswered or
+   * slow request is not proof of eviction, so the agent may still hold the
+   * missing events, and only the consumer can ask for the snapshot that
+   * repairs a hole (#321). Left unstated, the repair is never asked for.
+   *
+   * The skip itself stays — holding output for a fill that may never come is
+   * the freeze this class exists to prevent. Only the silence was wrong.
+   *
+   * Nothing is stated when no frame is committed over a gap. A request that
+   * was only ever for history — a seeded cursor, nothing buffered — moves no
+   * frontier when it is given up on: the buffer is where the snapshot left it,
+   * and the first later frame that cannot be placed reaches this path with a
+   * hole to state. Saying otherwise would send the consumer after a bootstrap
+   * that repaints a buffer with nothing missing from it. See {@link skipHole}.
    */
   private abandon(): void {
     this.attemptsFor = -1;
     this.attempts = 0;
     this.wantHistory = false;
     if (this.pending.size > 0) {
+      // Frames in hand are always a hole at this point: `drain` commits
+      // contiguously and runs after every frame is buffered, so a frame still
+      // pending is never adjacent to the frontier — the frame under it is the
+      // one that never arrived.
+      this.sink.onStreamTruncated();
       this.skipHole(lowestPendingSeq(this.pending));
     }
   }
@@ -464,9 +506,11 @@ export class StreamReconciler {
    * Stop waiting for the hole below `toExclusive` and commit what is in hand.
    *
    * Two things can establish that a hole will never be filled: the agent
-   * answers a request from `afterSeq` with events that begin later than
-   * `afterSeq + 1` — everything in between has left its retained window — or
-   * the hole outlives {@link HOLE_ATTEMPT_LIMIT} attempts.
+   * answers a request from `afterSeq` with `complete: false` — its retained
+   * window begins above the cursor, so everything in between is gone — or the
+   * hole outlives {@link HOLE_ATTEMPT_LIMIT} attempts. The first states where
+   * the window begins; the second has nothing to say about where it begins, and
+   * passes the lowest frame actually held.
    *
    * The timeline is re-anchored just under the lowest frame actually held, so
    * output the client already has is delivered rather than dropped, and never
@@ -556,6 +600,18 @@ export interface LiveResizeFrame {
 export interface ResumeReply {
   streamEpoch: number;
   epochMatch: boolean;
+  /**
+   * The lowest sequence the agent can still return (#1304), or `undefined`
+   * when it stated none. Absence is not a position: a consumer that reads it as
+   * one invents the boundary the field exists to state.
+   */
+  firstAvailableSeq?: number;
+  /**
+   * The agent's verdict on whether `events` runs from `afterSeq + 1` through
+   * its current cursor with nothing missing (#1304), or `undefined` when it
+   * stated none.
+   */
+  complete?: boolean;
   events: TerminalStreamEvent[];
 }
 
@@ -563,6 +619,27 @@ export interface ResumeReply {
 export interface StreamSink {
   onOutput: (data: Uint8Array, bootstrap?: TerminalBootstrap) => void;
   onResize: (cols: number, rows: number) => void;
+  /**
+   * The consumer's buffer now has a hole in it that no later request can
+   * fill (#1304).
+   *
+   * Two states establish that, and they are the two ways the reconciler stops
+   * waiting for a stretch of output: the agent states that its retained window
+   * begins above the cursor (so the events in between are gone for good), or
+   * the reconciler gives up on a hole it is still holding frames for —
+   * {@link StreamReconciler}'s own deadline, or the attempt limit — because
+   * holding them for a fill that has not come is the freeze this class exists
+   * to prevent. The second is not a claim that the events are unrecoverable:
+   * an unanswered request is not proof of eviction. It is a claim about the
+   * buffer, which is the one the consumer acts on.
+   *
+   * Delivered because a hole is repaired by a snapshot rather than by more
+   * replay — the same repair a lost transport needs (#321). This is a
+   * statement about the buffer, not a frame: nothing was applied and no
+   * position moved, so a consumer that ignores it keeps exactly the old
+   * behaviour.
+   */
+  onStreamTruncated: () => void;
 }
 
 interface PendingFrame {
@@ -623,20 +700,6 @@ function lowestPendingSeq(pending: Map<number, PendingFrame>): number {
   for (const seq of pending.keys()) {
     if (seq < lowest) {
       lowest = seq;
-    }
-  }
-  return lowest;
-}
-
-/**
- * The lowest sequence number in `events` that is above `afterSeq` — where the
- * agent's retained window still reaches, read off the answer it just gave.
- */
-function lowestSeqAbove(events: TerminalStreamEvent[], afterSeq: number): number | null {
-  let lowest: number | null = null;
-  for (const event of events) {
-    if (event.streamSeq > afterSeq && (lowest === null || event.streamSeq < lowest)) {
-      lowest = event.streamSeq;
     }
   }
   return lowest;

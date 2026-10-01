@@ -1716,8 +1716,18 @@ wires: &["server.commands.update"],
             // `agent.terminal.input` itself, and nothing in the tree sends one.
             // The absence used to be indistinguishable from an unfinished
             // entry, which is what this comment is for.
+            // `TerminalInputAckPayload` is declared beside the request even
+            // though it is not the request's reply, because it is the *same*
+            // seam's second shape: the agent emits it on
+            // `agent.terminal.input.ack` (#1307). Declaring it here is what
+            // gives the Web a generated type for the notification's payload,
+            // and it advertises nothing — a `decl` is a shape, and the
+            // notification's wire stays uncarried by any binding, which is
+            // what makes it visible to `just check-protocol` as a
+            // notification rather than an unanswered operation.
             decls: vec![
                 decl_of::<nession_protocol::contracts::terminal::v1::TerminalInputPayload>(cfg),
+                decl_of::<nession_protocol::contracts::terminal::v1::TerminalInputAckPayload>(cfg),
             ],
             request: Some((
                 "TerminalInputCall",

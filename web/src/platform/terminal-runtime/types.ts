@@ -1,5 +1,6 @@
 import type { TerminalAgentApi } from '@/product/terminal';
 import type { RelayServerTransport } from '@/platform/attach/relayServerConnection';
+import type { InputDrop } from './inputQueue';
 
 /** Banner state surfaced to the React layer for UI rendering. */
 export type ReconnectBanner = 'none' | 'reconnecting' | 'failed';
@@ -27,6 +28,31 @@ export interface ConnectionOptions {
    * interval; leaving it unwired keeps the previous behaviour exactly.
    */
   onInputSent?: () => void;
+  /**
+   * Called when the stream reported that the consumer's buffer now has a hole
+   * in it (#1304): the agent's retained window has passed this client's
+   * cursor, or the reconciler gave up on a hole it was holding frames for and
+   * committed them over it. Either way no later replay fills it.
+   *
+   * Same kind of wiring point as {@link onInputSent}: it is a fact for the
+   * owner of the session, not something the transport acts on. The repair is a
+   * snapshot, which only an attach can carry (#321), so the owner's job is to
+   * remember that one is owed; leaving it unwired keeps the previous behaviour
+   * exactly.
+   */
+  onStreamTruncated?: () => void;
+  /**
+   * Called when input the user typed is lost rather than delivered (#1307
+   * SC-09), with what was lost and why.
+   *
+   * The third of the same kind of wiring point, and the one the requirement
+   * says must be *visible*: the transport decides that bytes cannot be
+   * delivered and records the decision, but "the user typed this and it will
+   * never arrive" is not a transport conclusion — what a person is told about
+   * it is the product's. Reporting it upward is all this does; leaving it
+   * unwired keeps every silence the previous behaviour had.
+   */
+  onInputDrop?: (drop: InputDrop) => void;
 }
 
 /** Device class for responsive rendering. */
