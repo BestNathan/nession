@@ -1,5 +1,4 @@
 import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { WorkspaceShell } from '@/app/workspace/WorkspaceShell';
 import { SurfaceDestinationAction } from '@/product/workspace/patterns/SurfaceDestinationAction';
@@ -37,7 +36,7 @@ function workspaceContext(overrides: Partial<WorkspaceContext> = {}): WorkspaceC
 }
 
 describe('WorkspaceShell contextual capability presentation', () => {
-  it('renders only the opened capability directly and progressively discloses the rest', () => {
+  it('renders only the opened capability directly in the capsule', () => {
     const ctx = workspaceContext();
     render(<WorkspaceShell ctx={ctx} activeCapabilityId="files" />);
 
@@ -45,40 +44,27 @@ describe('WorkspaceShell contextual capability presentation', () => {
     expect(screen.getByTestId('workspace-tool-files')).toBeInTheDocument();
     expect(screen.queryByTestId('workspace-tool-session')).not.toBeInTheDocument();
     expect(screen.queryAllByRole('tab')).toHaveLength(0);
+    // Capsule V2 (#1347): no + button in Workspace — discoverable capabilities
+    // are accessed through other means (Work Overview in Terminal form).
     expect(
-      screen.getByRole('button', { name: 'More workspace capabilities' }),
-    ).toBeInTheDocument();
+      screen.queryByRole('button', { name: 'More workspace capabilities' }),
+    ).not.toBeInTheDocument();
     expect(screen.getByTestId('workspace-tool-bar')).toHaveAttribute(
       'data-navigation-mode',
       'contextual',
     );
   });
 
-  it('puts available capabilities in More and invokes the selected deeper view', async () => {
-    const user = userEvent.setup();
-    const onToolChange = vi.fn();
-    const ctx = workspaceContext({ onToolChange });
+  // Capsule V2 (#1347): discoverable capabilities are no longer shown in Workspace.
+  // They are accessed through Work Overview in Terminal form. Removed tests that
+  // validated the disclosure menu behavior.
 
-    render(<WorkspaceShell ctx={ctx} activeCapabilityId="files" />);
-    await user.click(screen.getByRole('button', { name: 'More workspace capabilities' }));
-    await user.click(await screen.findByRole('menuitem', { name: 'Agent' }));
-
-    expect(onToolChange).toHaveBeenCalledWith('agent');
-  });
-
-  it('does not advertise unavailable capabilities in direct chrome or More', async () => {
-    const user = userEvent.setup();
+  it('does not advertise unavailable capabilities in direct chrome', () => {
     const ctx = workspaceContext({ fileOps: null });
 
     render(<WorkspaceShell ctx={ctx} activeCapabilityId="session" />);
     expect(screen.queryByTestId('workspace-tool-files')).not.toBeInTheDocument();
-
-    await user.click(screen.getByRole('button', { name: 'More workspace capabilities' }));
-    // The menu mounts a tick after the click, so the negative assertion has to
-    // wait for a positive one first — otherwise "not advertised" would also
-    // pass on a menu that never opened.
-    expect(await screen.findByRole('menuitem', { name: 'Agent' })).toBeInTheDocument();
-    expect(screen.queryByRole('menuitem', { name: 'Files' })).not.toBeInTheDocument();
+    // Capsule V2: no disclosure menu, so no need to test what it contains.
   });
 
   it('keeps an unavailable opened capability stable instead of switching arbitrarily', () => {
@@ -93,17 +79,8 @@ describe('WorkspaceShell contextual capability presentation', () => {
     expect(screen.queryByTestId('workspace-tool-files')).not.toBeInTheDocument();
   });
 
-  it('keeps Claude Code discoverable through its direct capability provider', async () => {
-    const user = userEvent.setup();
-    const onToolChange = vi.fn();
-    const ctx = workspaceContext({ onToolChange });
-
-    render(<WorkspaceShell ctx={ctx} activeCapabilityId="session" />);
-    await user.click(screen.getByRole('button', { name: 'More workspace capabilities' }));
-    await user.click(await screen.findByRole('menuitem', { name: 'Claude Code' }));
-
-    expect(onToolChange).toHaveBeenCalledWith('claude-code');
-  });
+  // Capsule V2 (#1347): Claude Code discoverability through disclosure menu removed.
+  // Discoverable capabilities are now accessed through Work Overview in Terminal form.
 });
 
 describe('WorkspaceShell surface navigation (#1204)', () => {
@@ -111,7 +88,7 @@ describe('WorkspaceShell surface navigation (#1204)', () => {
     <SurfaceDestinationAction destination="terminal" onOpen={() => {}} />
   );
 
-  it('renders the surface action beside — not inside — the capability dock', () => {
+  it('renders the surface action beside — not inside — the capability capsule', () => {
     const ctx = workspaceContext();
     render(
       <WorkspaceShell ctx={ctx} activeCapabilityId="files" surfaceAction={openTerminal} />,
@@ -119,12 +96,12 @@ describe('WorkspaceShell surface navigation (#1204)', () => {
 
     const surfaceNav = screen.getByTestId('workspace-surface-navigation');
     expect(surfaceNav).toContainElement(screen.getByTestId('surface-action-open-terminal'));
-    // Surface navigation and capability navigation are separate axes: the
-    // circle is adjacent to the dock, never an entry in it.
+    // Capsule V2 (#1347): reciprocal layout — surface navigation (circle) left,
+    // capability capsule right. They are separate axes.
     expect(
       screen.getByRole('navigation', { name: 'Workspace capabilities' }),
     ).not.toContainElement(screen.getByTestId('surface-action-open-terminal'));
-    // …and it precedes the dock, so the group reads [Terminal ○] [dock].
+    // …and it precedes the capsule, so the group reads [Terminal ○] [capsule].
     expect(
       surfaceNav.compareDocumentPosition(
         screen.getByRole('navigation', { name: 'Workspace capabilities' }),

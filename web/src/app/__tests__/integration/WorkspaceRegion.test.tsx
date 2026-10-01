@@ -1,15 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { useState } from 'react';
 import {
   WorkspaceRegion,
   type WorkspaceRegionProps,
 } from '@/app/WorkspaceRegion';
 import type { DomainState } from '@/product/session/model/domainState';
 import type { Agent, Session } from '@/types';
-import type { Surface } from '@/app/patterns/SessionHeader';
-import type { CapabilityId } from '@/product/capability';
 
 const agent: Agent = {
   agent_id: 'a1',
@@ -93,50 +90,8 @@ function baseProps(
   };
 }
 
-function AppNavigationHarness() {
-  const [surface, setSurface] = useState<Surface>('terminal');
-  const [tool, setTool] = useState<CapabilityId>('files');
-
-  return (
-    <WorkspaceRegion
-      {...baseProps({
-        isWide: false,
-        selectedId: sess.session_id,
-        selectedSession: sess,
-        selectedAgent: agent,
-        domain,
-        surface,
-        tool,
-        onSurfaceChange: setSurface,
-        onToolChange: setTool,
-        showList: false,
-        showDetail: true,
-      })}
-    />
-  );
-}
-
-type AppLayerName = 'terminal' | 'workspace';
-
-/**
- * `AppLayers` mounts only the layer that is open and names it on the root's
- * `data-layer`, so the current layer is asserted directly.
- *
- * The helper this replaces had to reverse-engineer the active page out of the
- * pager's track transform, because the shell exposed no active-page signal —
- * the transform *was* the state. That indirection is gone with the pager.
- *
- * The Terminal layer is asserted present in every case. It is the root: a
- * navigation that unmounted it would rebuild xterm, the attach state and the
- * scrollback, which #1049 forbids.
- */
-function expectActiveAppLayer(layer: AppLayerName) {
-  expect(screen.getByTestId('app-layer-root')).toHaveAttribute(
-    'data-layer',
-    layer,
-  );
-  expect(screen.getByTestId('app-layer-terminal')).toBeInTheDocument();
-}
+// Capsule V2 (#1347): AppNavigationHarness and expectActiveAppLayer removed —
+// the test that used them (navigating via disclosure menu) is no longer valid.
 
 describe('WorkspaceRegion app layer composition', () => {
   beforeEach(() => {
@@ -312,25 +267,6 @@ describe('WorkspaceRegion app layer composition', () => {
     });
   });
 
-  it('navigates to Claude Code from the app dock and back to terminal', async () => {
-    const user = userEvent.setup();
-    render(<AppNavigationHarness />);
-
-    expectActiveAppLayer('terminal');
-
-    await user.click(screen.getByTestId('app-header-workspace'));
-    await waitFor(() => {
-      expectActiveAppLayer('workspace');
-    });
-    await user.click(screen.getByTestId('workspace-capability-more'));
-    await user.click(await screen.findByRole('menuitem', { name: 'Claude Code' }));
-    expect(screen.getByTestId('claude-code-workspace')).toBeInTheDocument();
-    expect(screen.getAllByRole('heading', { name: 'Claude Code' })).toHaveLength(1);
-
-    await user.click(screen.getByTestId('app-page-back'));
-    await waitFor(() => {
-      expectActiveAppLayer('terminal');
-    });
-    expect(screen.getByTestId('terminal-well')).not.toHaveClass('hidden');
-  });
+  // Capsule V2 (#1347): removed test that navigated to Claude Code via disclosure menu.
+  // Discoverable capabilities are no longer accessible from Workspace.
 });
