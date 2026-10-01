@@ -332,6 +332,18 @@
     "$description": "App dock targets: the workspace-navigation band declares touchTarget.compact (#730) instead of the 44px chrome floor, because it floats over the terminal rather than taking a row from it. control-md is 44px on app by design, so this cannot borrow it.",
     "value": "28px"
   },
+  "conversation": {
+    "$owner": "pattern.conversation",
+    "$description": "App density for an AI conversation transcript (#1363). The hierarchy, the disclosure levels and the interaction meaning are identical to Web — this block states only what a narrower, touch-driven surface changes. The rhythm is deliberately *not* restated: a reader moving between Web and App should find the same conversation, so the App leaves every leaf it agrees with to Web's value and overrides only the two below.",
+    "bubbleMaxWidth": {
+      "$description": "The user's bubble as a fraction of the reading column. Wider than Web's 70%: the App's column is already narrow, and holding the bubble to Web's fraction would make ordinary prompts wrap to three lines. Still short of the full measure, so the assistant's answer stays visually the wider voice.",
+      "value": "82%"
+    },
+    "groupMaxHeight": {
+      "$description": "Cap on a process group's body. Shorter than Web's 50vh: on a phone the group, its title, the answer and the actions all share one viewport, and a group that took half of it would hide the thing the reader opened the conversation for.",
+      "value": "min(320px, 42vh)"
+    }
+  },
   "workspace": {
     "$owner": "pattern.file-workspace",
     "$description": "App overrides for the Workspace surface's chrome text. The App does not reuse the Web layout — `FilesAppLayout` pushes the tree full-screen and then the viewer over it — but it composes the same `FileList` / `FileViewer`, so the leaves that carry text are the same ones Web states. Only the chrome is remapped: the code surface itself (`workspace.editorFontSize`, read by CodeMirror) and Markdown document typography stay on Web's values, because they are the workload's own rendering and not chrome (#1073 non-goals).",

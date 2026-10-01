@@ -138,6 +138,10 @@ export const motion = {
   terminalCapsule: "280ms cubic-bezier(0.22, 1, 0.36, 1)",
 } as const;
 export const dockTarget = 28 as const;
+export const conversation = {
+  bubbleMaxWidth: "82%",
+  groupMaxHeight: "min(320px, 42vh)",
+} as const;
 export const workspace = {
   treeFontSize: 13,
   listRowTitleFontSize: 16,

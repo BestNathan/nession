@@ -212,6 +212,17 @@
   --motion-shell-duration: 180ms;
   --motion-shell-ease: cubic-bezier(0.2, 0, 0, 1);
   --dock-target: 32px;
+  --conversation-row-gap: 8px;
+  --conversation-row-gap-expanded: 16px;
+  --conversation-response-gap: 16px;
+  --conversation-turn-gap: 16px;
+  --conversation-process-to-answer-gap: 8px;
+  --conversation-group-title-gap: 16px;
+  --conversation-group-max-height: min(400px, 50vh);
+  --conversation-group-fade: 24px;
+  --conversation-reading-column-max: 720px;
+  --conversation-bubble-max-width: 70%;
+  --conversation-fold-control-height: 32px;
   --workspace-tree-width: 208px;
   --workspace-tree-font-size: 12.5px;
   --workspace-tree-row-radius: 5px;
@@ -599,6 +610,8 @@
   --terminal-capsule-projection-mark-width: 0.75rem;
   --motion-terminal-capsule: 280ms cubic-bezier(0.22, 1, 0.36, 1);
   --dock-target: 28px;
+  --conversation-bubble-max-width: 82%;
+  --conversation-group-max-height: min(320px, 42vh);
   --workspace-tree-font-size: 13px;
   --workspace-list-row-title-font-size: 16px;
   --workspace-editor-head-font-size: 13px;
