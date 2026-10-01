@@ -27,6 +27,34 @@ listed here without a header is a defect, and so is a header whose file is not
 listed — `docs/superpowers/plans/2026-10-01-ai-conversation-framework.md`
 records the requirement (#1363 SC-16) that asks for both.
 
+## Design baselines that were read, not copied
+
+Requirement #1363 asks for its conversation UI to adopt the structure,
+information density and interaction semantics of two upstream chat
+implementations rather than to redesign something similar. Both were read at a
+pinned commit, and the readings are recorded in
+[`docs/superpowers/plans/2026-10-01-ai-conversation-upstream-port.md`](docs/superpowers/plans/2026-10-01-ai-conversation-upstream-port.md).
+
+| Upstream | Baseline | Read for |
+|---|---|---|
+| [openclaw/openclaw](https://github.com/openclaw/openclaw) | `6d7d81fb569ea3413b26f41cc4522252840dcd18` | grouping rules, the reserved disclosure row, hover/focus reveal, the touch fallbacks |
+| [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) | `21638c56315ae6a2b552d6091945d3144c9af32e` | the turn → process → tool model, the density values, the scroll and anchor protocols |
+
+**No upstream source was copied into Nession for this work, so no additional
+notice is owed for it.** The shared conversation components under
+`web/src/shared/ai-conversation/` are Nession's own code, written against those
+contracts: the numbers in the port document, the six/ twelve/ sixteen-pixel
+rhythm, the zero-height hidden row, the opacity-only reveal, and the
+focus-preserving collapse. Where an upstream mechanism was not portable it
+was translated rather than transcribed — OpenClaw's chat is Lit, so its
+state/layout/interaction contracts were re-expressed in React, which the
+requirement anticipated.
+
+This section exists so the baselines are re-checkable and so the distinction
+between *read* and *copied* is on the record. If a future change does port
+upstream source directly, it belongs in the section below, with a per-file
+header, and not here.
+
 ## DeepSeek Harness — incremental Markdown runtime
 
 Adopted by #1184 as the Chat Markdown path, and listed here retroactively: the
