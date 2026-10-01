@@ -228,15 +228,25 @@ export function ConversationView({
   )
 
   return (
-    <div className="flex h-full min-h-0" data-testid="conversation-master-detail">
-      <div className="w-72 shrink-0 overflow-auto border-r p-2">
+    // A grid rather than a flex row, and the columns are floors rather than
+    // fixed widths: `18rem` is what the list takes when there is room, and
+    // `14rem` is what the transcript will not go below. A list pinned at 18rem
+    // on a 375px surface leaves the conversation about eighty pixels wide, in
+    // which every word wraps to its own line — measured in the browser, not
+    // guessed. The Web experience is the wide one by design (App pushes), but
+    // "narrow" is not the same as "unusable".
+    <div
+      className="grid h-full min-h-0 grid-cols-[minmax(0,18rem)_minmax(14rem,1fr)]"
+      data-testid="conversation-master-detail"
+    >
+      <div className="min-h-0 overflow-auto border-r p-2">
         {listIsBlocked(snapshot) ? (
           <ListStateGuard snapshot={snapshot} onReload={onReload} />
         ) : (
           list
         )}
       </div>
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-h-0 min-w-0 flex-col">
         {snapshot.openId === null ? (
           <NothingOpen />
         ) : (
