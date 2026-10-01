@@ -108,7 +108,7 @@ export class StreamReconciler {
       this.sink.onOutput(frame.data, frame.bootstrap);
       return;
     }
-    this.accept(frame.streamEpoch, frame.streamSeq, () =>
+    this.accept(frame.streamEpoch, frame.streamSeq, 'output', () =>
       this.sink.onOutput(frame.data, frame.bootstrap),
     );
   }
@@ -122,15 +122,57 @@ export class StreamReconciler {
    * skipped it would see a hole where the log has an event, and the next live
    * frame would be held behind a resume round trip that returns this same
    * resize. A resize carrying no position — the `%window-resize` echo, or any
-   * relay frame — is not this method's: it goes straight to the sink, exactly
-   * as it did before the agent gave resizes a position.
+   * relay frame — goes through {@link acceptLevelResize} instead.
    */
   acceptLiveResize(frame: LiveResizeFrame): void {
     if (this.disposed) {
       return;
     }
     const { streamEpoch, streamSeq, cols, rows } = frame;
-    this.accept(streamEpoch, streamSeq, () => this.sink.onResize(cols, rows));
+    this.accept(streamEpoch, streamSeq, 'resize', () => this.sink.onResize(cols, rows));
+  }
+
+  /**
+   * A resize that states **no** position: a level, applied on arrival (#1350).
+   *
+   * It applies immediately because nothing can be ordered against it, and a
+   * level is by definition the size the pane has *now* — holding it would be
+   * holding the truth behind a gap. But applying it while a *sequenced* resize
+   * is still held is the half of the composition that used to be missing: when
+   * the held frame finally drained it applied the **older** size over this one,
+   * and xterm was left on a grid the pane no longer has, with nothing to correct
+   * it.
+   *
+   * So a level supersedes the resizes waiting behind it. `supersedeBufferedResizes`
+   * explains why they are emptied rather than removed.
+   */
+  acceptLevelResize(cols: number, rows: number): void {
+    if (this.disposed) {
+      return;
+    }
+    this.supersedeBufferedResizes();
+    this.sink.onResize(cols, rows);
+  }
+
+  /**
+   * Empty every buffered resize without taking it out of the timeline.
+   *
+   * The tempting version — `pending.delete(seq)` — breaks the cursor. `drain`
+   * only ever commits `frontier + 1`, so a hole where a frame used to be stops
+   * the frontier at the number below it: everything above waits out
+   * {@link HOLE_ATTEMPT_LIMIT} requests before being given up on, and a replay
+   * that still carries that sequence number puts it straight back. Committing an
+   * empty frame keeps the run contiguous and still drops exactly what this
+   * supersession is meant to drop — the **size** it would have applied.
+   *
+   * Output is left alone: a level resize says nothing about bytes.
+   */
+  private supersedeBufferedResizes(): void {
+    for (const [seq, frame] of this.pending) {
+      if (frame.kind === 'resize') {
+        this.pending.set(seq, { seq, kind: frame.kind, apply: () => {} });
+      }
+    }
   }
 
   /**
@@ -194,7 +236,12 @@ export class StreamReconciler {
     return this.attemptsFor === position ? this.attempts : 0;
   }
 
-  private accept(epoch: number, seq: number, apply: () => void): void {
+  private accept(
+    epoch: number,
+    seq: number,
+    kind: PendingFrame['kind'],
+    apply: () => void,
+  ): void {
     if (this.disposed) {
       return;
     }
@@ -219,7 +266,7 @@ export class StreamReconciler {
       return;
     }
     if (!this.pending.has(seq)) {
-      this.pending.set(seq, { seq, apply });
+      this.pending.set(seq, { seq, kind, apply });
     }
     if (anchors) {
       this.anchor();
@@ -270,6 +317,7 @@ export class StreamReconciler {
       if (!this.pending.has(event.streamSeq)) {
         this.pending.set(event.streamSeq, {
           seq: event.streamSeq,
+          kind: event.kind,
           apply: () => applyTerminalStreamEvents([event], this.handlers),
         });
       }
@@ -487,6 +535,13 @@ export interface StreamSink {
 
 interface PendingFrame {
   seq: number;
+  /**
+   * What this frame commits when its turn comes. A resize is distinguishable
+   * from output because a *level* resize supersedes the resizes waiting ahead
+   * of it and leaves output alone (#1350) — the frame itself stays either way,
+   * see {@link StreamReconciler.supersedeBufferedResizes}.
+   */
+  kind: 'output' | 'resize';
   apply: () => void;
 }
 

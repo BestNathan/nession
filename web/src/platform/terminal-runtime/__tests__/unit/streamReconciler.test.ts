@@ -292,6 +292,62 @@ describe('StreamReconciler', () => {
     expect(h.requests).toHaveLength(1);
   });
 
+  it('empties a held resize a newer level overtakes (#1350)', async () => {
+    // A level states the size the pane has *now*, so a sequenced resize still
+    // waiting behind a gap states an older one the moment it arrives. Applying
+    // it when it finally drains is what left xterm on a grid the pane had moved
+    // off, with nothing to correct it.
+    const h = makeHarness();
+    live(h, 5, 'five');
+    h.reconciler.acceptLiveResize({ cols: 120, rows: 40, streamEpoch: 1, streamSeq: 8 });
+    expect(h.resizes).toEqual([]);
+
+    h.reconciler.acceptLevelResize(100, 30);
+    expect(h.resizes).toEqual([[100, 30]]);
+
+    // The held frame drains when the gap below it fills — and must not put the
+    // size it named back on screen.
+    h.requests[0].resolve(reply([6, 7].map((seq) => output(seq))));
+    await flushMicrotasks();
+    expect(h.resizes).toEqual([[100, 30]]);
+    expect(h.out).toEqual(['five', 'replay-6', 'replay-7']);
+  });
+
+  it('keeps the cursor moving through the resize it emptied (#1350)', async () => {
+    // The superseded frame is *emptied*, not deleted. Deleting it would leave a
+    // hole where it used to be — `drain` only commits `frontier + 1`, so the
+    // cursor would stop below it, every frame above would wait out the attempt
+    // limit, and a replay carrying that sequence number would put it straight
+    // back. Committing an empty frame keeps the run contiguous and still drops
+    // the size, which is the whole of what the supersession is for.
+    const h = makeHarness();
+    live(h, 5, 'five');
+    h.reconciler.acceptLiveResize({ cols: 120, rows: 40, streamEpoch: 1, streamSeq: 8 });
+    h.reconciler.acceptLevelResize(100, 30);
+    h.requests[0].resolve(reply([6, 7].map((seq) => output(seq))));
+    await flushMicrotasks();
+
+    // The discriminator is the next frame: if the emptied one had been removed
+    // instead of committed, this one would find a hole at 8 and ask for it.
+    live(h, 9, 'nine');
+    expect(h.out).toEqual(['five', 'replay-6', 'replay-7', 'nine']);
+    expect(h.requests).toHaveLength(1);
+  });
+
+  it('leaves buffered output alone when a level resize supersedes (#1350)', async () => {
+    // A level speaks about a size and nothing else: the bytes waiting behind the
+    // same gap are still the session's output and must still be applied.
+    const h = makeHarness();
+    live(h, 5, 'five');
+    live(h, 8, 'eight');
+    h.reconciler.acceptLevelResize(100, 30);
+    expect(h.resizes).toEqual([[100, 30]]);
+
+    h.requests[0].resolve(reply([6, 7].map((seq) => output(seq))));
+    await flushMicrotasks();
+    expect(h.out).toEqual(['five', 'replay-6', 'replay-7', 'eight']);
+  });
+
   it('continues past a hole the agent no longer retains', async () => {
     // The agent's ring buffer evicted 6..10 before the resume was answered, so
     // its answer starts at 11. Waiting for 6 would hold 12 and every frame

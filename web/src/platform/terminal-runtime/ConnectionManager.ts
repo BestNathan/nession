@@ -214,12 +214,15 @@ export class ConnectionManager implements TerminalTransport {
       if (this.disposed) {
         return;
       }
-      // A resize the agent recorded consumed a sequence number, so it belongs
-      // in the timeline and only the reconciler may apply it: applying it here
-      // would leave its sequence unaccounted for and hold the next live frame
-      // behind a round trip (#1303). A resize with no position — the
-      // `%window-resize` echo — never had one to account for and goes straight
-      // through, which is what every resize did before this.
+      // Both kinds go to the reconciler, and neither is applied from here. A
+      // resize the agent recorded consumed a sequence number, so applying it
+      // here would leave that number unaccounted for and hold the next live
+      // frame behind a round trip (#1303). A resize with no position is a
+      // *level* — applied on arrival, because it names the size the pane has
+      // now — and it is still the reconciler's, because applying it is the
+      // moment the resizes held ahead of it become wrong: any of them that
+      // drains afterwards states an older size, and is emptied rather than
+      // applied (#1350).
       if (frame.streamEpoch !== undefined && frame.streamSeq !== undefined) {
         this.reconciler.acceptLiveResize({
           cols: frame.cols,
@@ -229,7 +232,7 @@ export class ConnectionManager implements TerminalTransport {
         });
         return;
       }
-      this.onResize?.(frame.cols, frame.rows);
+      this.reconciler.acceptLevelResize(frame.cols, frame.rows);
     });
 
     this.p2pUnsubError = api.onError((err) => {

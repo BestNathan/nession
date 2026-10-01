@@ -407,6 +407,39 @@ describe('ConnectionManager', () => {
       cm.dispose();
     });
 
+    it('empties the resize a level one overtakes, through the reconciler (#1350)', async () => {
+      // The level path used to call `onResize` directly, which meant the
+      // reconciler never learned that the pane had moved on — so a sequenced
+      // resize it was still holding drained later and applied its older size
+      // over the newer one. This pins the wiring: both kinds reach the
+      // reconciler, and only it applies anything.
+      const { api, resizeHandlers } = makeAgentApi();
+      const cm = new ConnectionManager({
+        mode: 'p2p', sessionName: 'test', sessionId: 'sess-1', agentApi: api, ...attached,
+      });
+      const onResize = vi.fn();
+      cm.onResize = onResize;
+
+      const reply = deferredReply();
+      (api.resumeStream as ReturnType<typeof vi.fn>).mockReturnValue(reply.promise);
+      cm.seedStreamCursor(1, 4);
+
+      // Recorded at 6, with 5 missing ahead of it: held.
+      resizeHandlers[0]?.({ cols: 120, rows: 40, streamEpoch: 1, streamSeq: 6 });
+      expect(onResize).not.toHaveBeenCalled();
+
+      // The pane moves again, unsequenced. This is the truth now.
+      resizeHandlers[0]?.({ cols: 100, rows: 30 });
+      expect(onResize).toHaveBeenCalledWith(100, 30);
+
+      // The gap fills, and the held frame drains behind it — as a no-op.
+      reply.resolve(replayOf({ 5: 'five' }));
+      await flushMicrotasks();
+      expect(onResize).toHaveBeenCalledTimes(1);
+
+      cm.dispose();
+    });
+
     it('does not apply a recorded resize until its place in the timeline arrives (#1303)', () => {
       // A resize the agent recorded consumed a sequence number. Applying it
       // here would show the right size and leave its position unaccounted for,
