@@ -13,6 +13,7 @@ import type {
   WorkspaceViewBinding,
 } from '@/app/workspace/workspaceContext';
 import { CapabilityCapsule } from '@/app/workspace/CapabilityCapsule';
+import { capsuleZoneClass } from '@/product/terminal/capsule/CapsuleZone';
 
 const workspaceViewBindings = new Map<string, WorkspaceViewBinding>(
   WORKSPACE_VIEW_BINDINGS.map((view) => [view.id, view]),
@@ -181,11 +182,11 @@ export function WorkspaceShell({
            Surface navigation (Terminal destination) on the left; capability
            capsule on the right. This is the reciprocal of Terminal's layout
            (capsule left, circle right). Both share the same transparent bottom
-           Capsule Zone. */
+           Capsule Zone (SC-09, SC-10). */
         <div
           data-testid="workspace-tool-bar"
           data-navigation-mode="contextual"
-          className="pointer-events-none absolute inset-x-0 bottom-[var(--shell-space-3)] z-10 flex items-center justify-center gap-[length:var(--shell-space-2)] px-4"
+          className={cn(capsuleZoneClass, 'gap-[length:var(--shell-space-2)]')}
         >
           {showSurfaceAction ? <SurfaceNavigation>{surfaceAction}</SurfaceNavigation> : null}
           {showDock ? (
