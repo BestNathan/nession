@@ -38,7 +38,9 @@ export function ChatCodeBlock({ value, language }: ChatCodeBlockProps) {
   }, [value, language]);
 
   const copy = () => {
-    copyToClipboard(value).then(
+    // Add trailing newline for proper file pasting (if not already present)
+    const textToCopy = value.endsWith('\n') ? value : value + '\n';
+    copyToClipboard(textToCopy).then(
       () => {
         toast.success('Code copied');
       },
@@ -55,7 +57,7 @@ export function ChatCodeBlock({ value, language }: ChatCodeBlockProps) {
     >
       <div className="flex items-center justify-between gap-2 bg-[var(--conversation-code-surface)] px-2 py-1">
         <span
-          data-testid="chat-code-block-language"
+          data-testid="code-block-language"
           className="font-mono text-[length:var(--typography-code-size)] text-[var(--conversation-code-foreground)]"
         >
           {language ?? ''}

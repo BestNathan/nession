@@ -22,6 +22,7 @@ import { copyToClipboard } from '@/shared/lib/clipboard';
 import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import { Markdown } from '@/shared/markdown';
+import { ChatMarkdown } from '@/shared/markdown/ChatMarkdown';
 import type { ConversationViewState } from '../hooks/useConversation';
 import type { ClaudeCodeMessagesResponse } from '../types';
 import { clockTime } from '../model/clockTime';
@@ -147,7 +148,7 @@ function TranscriptContent({
       ) : (
         view.items.map((item) => (
           <MessageScrollerItem key={item.id} messageId={item.id}>
-            <ItemView item={item} />
+            <ItemView item={item} partialTail={view.partialTail} />
           </MessageScrollerItem>
         ))
       )}
@@ -155,10 +156,10 @@ function TranscriptContent({
   );
 }
 
-function ItemView({ item }: { item: Item }) {
+function ItemView({ item, partialTail }: { item: Item; partialTail: boolean }) {
   switch (item.kind) {
     case 'message':
-      return item.role === 'user' ? <UserMessage item={item} /> : <AssistantMessage item={item} />;
+      return item.role === 'user' ? <UserMessage item={item} /> : <AssistantMessage item={item} streaming={partialTail} />;
     case 'tool':
       return <ToolActivity item={item} />;
     case 'unknown':
@@ -266,7 +267,7 @@ export const UserMessage = memo(function UserMessage({ item }: { item: MessageIt
  * already carries its own typography is chrome that says nothing. So there is
  * no bubble — the reading column is the message.
  */
-export const AssistantMessage = memo(function AssistantMessage({ item }: { item: MessageItem }) {
+export const AssistantMessage = memo(function AssistantMessage({ item, streaming = false }: { item: MessageItem; streaming?: boolean }) {
   return (
     <MessageFrame item={item} speaker="assistant">
       <div
@@ -276,7 +277,7 @@ export const AssistantMessage = memo(function AssistantMessage({ item }: { item:
           'prose-headings:mt-4 prose-headings:mb-2 prose-headings:first:mt-0',
         )}
       >
-        <Markdown>{contentOf(item)}</Markdown>
+        <ChatMarkdown text={contentOf(item)} streaming={streaming} />
       </div>
     </MessageFrame>
   );

@@ -215,7 +215,10 @@ function renderHeading(
   context: MarkdownRenderContext,
 ): ReactNode {
   const children = renderChildren(node.children, context);
-  switch (node.depth) {
+  // Downgrade heading levels by one to avoid conflicting with the page's own heading.
+  // h1→h2, h2→h3, h3→h4, h4→h5, h5→h6, h6→h6 (two levels share one).
+  const depth = Math.min(node.depth + 1, 6);
+  switch (depth) {
     case 1:
       return <h1 key={key}>{children}</h1>;
     case 2:
