@@ -1,0 +1,110 @@
+/**
+ * Everything a transcript says when it is not saying messages.
+ *
+ * `#1363` SC-11 asks for these to mean the same thing across providers, and the
+ * way that is achieved is by there being exactly one of each — a second
+ * provider does not get to invent its own wording for "this conversation could
+ * not be read".
+ *
+ * Two distinctions the states preserve, both measured in #1222 and both easy to
+ * lose:
+ *
+ * - **Unavailable is not empty.** "This host does not have that directory" and
+ *   "that directory has no conversations" are different sentences to a reader.
+ * - **Not found is not an error.** A conversation that was deleted is not a
+ *   failure to read one, and the selection stays on it rather than bouncing the
+ *   reader back to the list with no explanation.
+ */
+
+import { AlertCircle, Loader } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { cn } from '@/shared/lib/utils'
+import { chromeSansRole } from '@/shared/typography/chromeRoles'
+
+/** Older history is being fetched above what is already on screen. */
+export function LoadingOlder() {
+  return (
+    <p
+      data-testid="conversation-loading-older"
+      role="status"
+      className={cn(
+        'flex items-center justify-center gap-2 pb-3 text-muted-foreground',
+        chromeSansRole('metadata'),
+      )}
+    >
+      <Loader aria-hidden className="h-3.5 w-3.5 animate-spin" />
+      Loading earlier messages…
+    </p>
+  )
+}
+
+/**
+ * Older history failed while what is already loaded stays readable.
+ *
+ * Kept inline and above the transcript rather than replacing it: the reader
+ * still has a conversation, and taking it away because one page failed would
+ * punish them for the network.
+ */
+export function OlderError({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <div
+      data-testid="conversation-older-error"
+      role="alert"
+      className={cn('flex flex-wrap items-center gap-2 pb-3 text-destructive', chromeSansRole('metadata'))}
+    >
+      <span>{message}</span>
+      <Button variant="outline" size="xs" type="button" onClick={() => onRetry()}>
+        Retry
+      </Button>
+    </div>
+  )
+}
+
+/** A conversation that loaded and has nothing in it. */
+export function EmptyConversation() {
+  return (
+    <p
+      data-testid="conversation-empty"
+      className={cn('flex items-center gap-2 text-muted-foreground', chromeSansRole('secondary'))}
+    >
+      <AlertCircle aria-hidden className="h-4 w-4" />
+      This conversation has no messages yet.
+    </p>
+  )
+}
+
+/** The provider could not read it, or could not say it has it. */
+export function ConversationFailure({ message }: { message: string }) {
+  return (
+    <p
+      data-testid="conversation-error"
+      role="alert"
+      className={cn('flex items-center gap-2 text-destructive', chromeSansRole('secondary'))}
+    >
+      <AlertCircle aria-hidden className="h-4 w-4 shrink-0" />
+      {message}
+    </p>
+  )
+}
+
+/**
+ * Records the model does not name.
+ *
+ * Counted rather than listed, because the count is the actionable part: a
+ * reader who sees "3 records were not shown" knows the transcript is complete
+ * except for three things, where silence would let them believe it is complete.
+ */
+export function SkippedRecords({ count }: { count: number }) {
+  if (count <= 0) {
+    return null
+  }
+  return (
+    <p
+      data-testid="conversation-skipped"
+      className={cn('flex items-center gap-2 text-muted-foreground', chromeSansRole('caption'))}
+    >
+      <AlertCircle aria-hidden className="h-3.5 w-3.5 shrink-0" />
+      {count === 1 ? '1 record was not shown.' : `${count} records were not shown.`}
+    </p>
+  )
+}

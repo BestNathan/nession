@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { ConversationRuntime } from '@/shared/ai-conversation'
 import { createClaudeCodeAdapter } from '../../adapter'
-import { toActivity, toItem, toSummary } from '../../normalizers'
+import { toActivity, toCategory, toItem, toSummary } from '../../normalizers'
 import type { ClaudeCodeConversationsResponse, ClaudeCodeMessagesResponse } from '../../../types'
 
 const context = { agentId: 'agent-1', sessionId: 'session-1' }
@@ -80,6 +80,8 @@ describe('Claude Code normalizers', () => {
       timestamp: '2026-10-01T10:00:00Z',
       callId: 'call-1',
       name: 'Bash',
+      // The mapping is Claude's; the category is Nession's vocabulary.
+      category: 'command',
       status: 'running',
       summary: 'cargo test',
       input: { text: '{"command":"cargo test"}', kind: 'json', truncated: false },
@@ -99,6 +101,15 @@ describe('Claude Code normalizers', () => {
     // Whether a message is still being written is the page's `partial_tail`,
     // not a per-message claim this provider can make.
     expect(item).not.toHaveProperty('status')
+  })
+
+  it('classifies a tool into the shared vocabulary, and an unknown tool into other', () => {
+    expect(toCategory('Grep')).toBe('search')
+    expect(toCategory('Edit')).toBe('edit')
+    // A Claude release that adds a tool must not break a transcript: an
+    // unclassifiable call is `other`, which is an honest description rather
+    // than a failure or a guess.
+    expect(toCategory('SomeFutureTool')).toBe('other')
   })
 
   it('keeps an unmodelled record as an unknown item', () => {

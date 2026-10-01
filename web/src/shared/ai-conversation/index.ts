@@ -30,6 +30,7 @@ export type {
   AITextContent,
   AIUnknownContent,
   AIUnknownItem,
+  AIToolCategory,
   AIToolItem,
   AIToolPayload,
   AIToolStatus,
@@ -68,4 +69,15 @@ export {
   UserMessage,
 } from './components/ConversationMessage'
 export { ToolActivity, UnknownActivity } from './components/ToolActivity'
+export { ToolGroup } from './components/ToolGroup'
+export { ConversationTranscript } from './components/ConversationTranscript'
+export {
+  ConversationFailure,
+  EmptyConversation,
+  LoadingOlder,
+  OlderError,
+  SkippedRecords,
+} from './components/ConversationState'
 export { isStreaming } from './components/streaming'
+export { groupRows, summarizeTools } from './model/grouping'
+export type { ConversationRow, ToolGroupSummary } from './model/grouping'

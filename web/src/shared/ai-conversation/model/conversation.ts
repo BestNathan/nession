@@ -24,7 +24,12 @@ export type {
   AITextContent,
   AIUnknownContent,
 } from './content'
-export type { AIToolItem, AIToolPayload, AIToolStatus } from './activity'
+export type {
+  AIToolCategory,
+  AIToolItem,
+  AIToolPayload,
+  AIToolStatus,
+} from './activity'
 
 /**
  * Whether the conversation is still being written to, relative to the context

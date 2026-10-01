@@ -27,12 +27,47 @@ import type {
   AIConversationActivity,
   AIConversationItem,
   AIConversationSummary,
+  AIToolCategory,
 } from '@/shared/ai-conversation'
 import type {
   ConversationActivityV1,
   ConversationItemV1,
 } from '@/generated/protocol/claude-code/conversations/v1'
 import type { MessageItemV1 } from '@/generated/protocol/claude-code/messages/v1'
+
+/**
+ * Claude's tool names, in the terms the shared summary counts in.
+ *
+ * This mapping is exactly the kind of thing `#1363` means by "provider-specific
+ * tool summary 只在 adapter 中产生": the names are Claude's, the *categories*
+ * are Nession's, and the renderer that draws "3 file reads · 1 command" never
+ * learns what a `Grep` is.
+ *
+ * An unrecognised name is `other` rather than an error — a Claude release that
+ * adds a tool must not break a transcript, and "1 other action" is an honest
+ * description of a call this version cannot classify, which is what the shared
+ * model's `other` arm is for.
+ */
+const CATEGORY_BY_TOOL: Record<string, AIToolCategory> = {
+  Bash: 'command',
+  BashOutput: 'command',
+  KillShell: 'command',
+  Read: 'read',
+  NotebookRead: 'read',
+  Edit: 'edit',
+  MultiEdit: 'edit',
+  NotebookEdit: 'edit',
+  Write: 'write',
+  Grep: 'search',
+  Glob: 'search',
+  LS: 'search',
+  WebFetch: 'fetch',
+  WebSearch: 'fetch',
+}
+
+export function toCategory(name: string): AIToolCategory {
+  return CATEGORY_BY_TOOL[name] ?? 'other'
+}
 
 /**
  * Claude's conversation, as the shared model's summary.
@@ -108,6 +143,7 @@ export function toItem(item: MessageItemV1): AIConversationItem {
         timestamp: item.timestamp ?? null,
         callId: item.tool.call_id,
         name: item.tool.name,
+        category: toCategory(item.tool.name),
         status: item.tool.status,
         summary: item.tool.summary,
         input: item.tool.input ?? null,

@@ -25,6 +25,33 @@
 export type AIToolStatus = 'running' | 'success' | 'error' | 'unknown'
 
 /**
+ * What kind of work the call did, in the terms a reader thinks in.
+ *
+ * A collapsed group is summarised by *category* rather than by tool name
+ * (`#1363`: "group summary 优先用动作类别 + bounded live detail，不堆原始 tool
+ * 名"), because the names are the provider's: one provider's `Bash` is another's
+ * `shell`, and a summary built from names would read as a list of implementation
+ * details rather than as a description of the work.
+ *
+ * The mapping is the adapter's, because only it knows what its tools do. This
+ * is deliberately a small closed set rather than a free string: a provider that
+ * needs a new category has found a *shared* concept, and adding it here is how
+ * every provider gets it — which is the same rule the model's other unions
+ * follow.
+ *
+ * Absent means "the adapter did not classify it", and the summary falls back to
+ * the names it does have rather than guessing.
+ */
+export type AIToolCategory =
+  | 'command'
+  | 'read'
+  | 'edit'
+  | 'write'
+  | 'search'
+  | 'fetch'
+  | 'other'
+
+/**
  * A tool's input or output, as the provider could give it.
  *
  * `kind` tells the renderer whether to pretty-print (JSON) or show verbatim
@@ -55,6 +82,8 @@ export interface AIToolItem {
    * collapsed summary leads with what the call *did*.
    */
   name: string
+  /** The adapter's classification; absent when it did not make one. */
+  category?: AIToolCategory
   status: AIToolStatus
   /**
    * One line describing the call, refined by the adapter from provider

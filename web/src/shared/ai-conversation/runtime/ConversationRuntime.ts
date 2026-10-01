@@ -79,6 +79,17 @@ export interface AIConversationSnapshot {
    * with no explanation.
    */
   openId: string | null
+  /**
+   * The provider's own word for what it could answer about the open
+   * conversation.
+   *
+   * Kept beside `error` rather than folded into it, because `not_found` and
+   * `unavailable` are answers, not failures: SC-11 requires "this conversation
+   * was deleted" and "this host cannot read that directory" to stay distinct
+   * from "the read failed", and a surface that only had `error` would have to
+   * infer which it was from a message string.
+   */
+  state: AIConversationReadState | null
   /** The open conversation's own description, from the read response. */
   conversation: AIConversationSummary | null
   /** Its liveness relative to the context — "Running now" / "Finished". */
@@ -161,6 +172,7 @@ const EMPTY_SNAPSHOT: AIConversationSnapshot = {
   conversations: [],
   bindingId: null,
   openId: null,
+  state: null,
   conversation: null,
   activity: null,
   items: [],
@@ -555,6 +567,7 @@ export class ConversationRuntime<Context> {
       conversations: this.list.conversations,
       bindingId: this.list.bindingId,
       openId,
+      state: this.thread.state,
       conversation: this.thread.conversation,
       activity: this.thread.activity,
       items: itemsOf(this.positions),
