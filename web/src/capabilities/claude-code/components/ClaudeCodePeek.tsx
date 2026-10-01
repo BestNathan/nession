@@ -1,7 +1,7 @@
 import { capsulePeekActionClass } from '@/shared/lib/peekActionClass';
 import type { CapabilityState } from '@/product/capability';
 import type { CapsuleDetail } from '@/product/terminal/capsule/types';
-import { conversationLabel } from '../model/conversationLabel';
+import { conversationLabel } from '@/shared/ai-conversation';
 import { stateLine } from '../model/stateLine';
 import type { ConversationSummary } from './ClaudeCodeProjection';
 import { ConversationOverlay } from './ConversationOverlay';
@@ -88,7 +88,10 @@ export function ClaudeCodePeek({
                     'transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                   )}
                 >
-                  {conversationLabel(candidate)}
+                  {/* The shared namer takes the canonical shape, so the
+                      provider's snake_case stops here rather than leaking into
+                      a shared helper. */}
+                  {conversationLabel({ title: candidate.title, updatedAt: candidate.updated_at })}
                 </button>
               </li>
             ))}
