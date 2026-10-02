@@ -64,6 +64,65 @@ export interface AIToolPayload {
   truncated: boolean
 }
 
+/**
+ * The assistant thinking, as opposed to what it did or what it said.
+ *
+ * ## Why this arm exists before any provider emits one
+ *
+ * The model's own rule is the opposite of this. `content.ts` states it — an arm
+ * is added when a provider demonstrates the need, not when one is imagined
+ * ("不要为尚未存在的 provider feature 预先设计大量 union") — and that rule is
+ * why `image` / `file` / `citation` are absent from the content union on
+ * purpose.
+ *
+ * **This arm is a recorded exception to it, made deliberately by the repository
+ * owner on 2026-10-02.** The reason is that the requirement does not merely
+ * allow reasoning, it *names* it: `#1363`'s interaction model is
+ * `Turn → Process Group → Tool/Reasoning`, and a disclosure hierarchy that has
+ * nowhere to put reasoning is not the hierarchy that was asked for. The
+ * alternative — wait for the first provider — means the *shape* of the feature
+ * arrives fused to that provider's dialect, which is the coupling the whole
+ * adapter boundary exists to prevent.
+ *
+ * What that costs, said now so it is not discovered later:
+ *
+ * - The renderer carries a row no adapter produces yet. Its tests are the only
+ *   evidence it works, which makes them the thing to keep honest.
+ * - **Nothing is required of a provider.** An adapter with no reasoning simply
+ *   never emits one, exactly as it never emits a tool it does not have. Absent
+ *   reasoning is the ordinary case, not a failure, and no surface may treat it
+ *   as one.
+ *
+ * What would retire the exception: the first adapter that emits this is also the
+ * first real evidence about its fields. Whoever writes it should expect to
+ * reshape `summary` and `status` to what that provider actually says, and to
+ * delete this note when the arm is no longer speculative.
+ */
+export interface AIReasoningItem {
+  kind: 'reasoning'
+  /** Stable within the conversation — see [`AIMessageItem.id`](./content.ts). */
+  id: string
+  timestamp?: string | null
+  /**
+   * One line of what it thought, as the provider gives it.
+   *
+   * The provider's own words or its own summary, never this client's paraphrase:
+   * a transcript that rewrote someone's reasoning would be asserting a thought
+   * nobody had.
+   */
+  summary: string
+  /**
+   * Whether the thinking has finished.
+   *
+   * [`AIToolStatus`] rather than a second vocabulary, because the process window
+   * reads one: a group's summary counts what is still running, and reasoning
+   * that could not answer "still running?" would have to be counted separately
+   * for no reason a reader would recognise. Only `running` and `success` are
+   * meaningful here — a thought does not fail, it stops.
+   */
+  status: AIToolStatus
+}
+
 export interface AIToolItem {
   kind: 'tool'
   /** Stable within the conversation — see [`AIMessageItem.id`](./content.ts). */

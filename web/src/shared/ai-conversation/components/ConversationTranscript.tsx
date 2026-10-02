@@ -43,6 +43,7 @@ import { isStreaming } from './streaming'
 import { TurnActions } from './TurnActions'
 import { TurnProcess } from './TurnProcess'
 import { ConversationMessage } from './ConversationMessage'
+import { ReasoningActivity } from './ReasoningActivity'
 import { ToolActivity, UnknownActivity } from './ToolActivity'
 import { ToolGroup } from './ToolGroup'
 import {
@@ -308,6 +309,8 @@ function ConversationBody({
               <ToolGroup items={row.items} summary={row.summary} />
             ) : row.item.kind === 'tool' ? (
               <ToolActivity item={row.item} />
+            ) : row.item.kind === 'reasoning' ? (
+              <ReasoningActivity item={row.item} />
             ) : row.item.kind === 'message' ? (
               <ConversationMessage
                 item={row.item}
