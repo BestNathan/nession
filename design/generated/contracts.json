@@ -182,9 +182,9 @@
         "overflow": "scroll",
         "wrap": false,
         "alignY": "middle",
-        "touchTargetToken": "experience.app.touchTarget.compact",
+        "touchTargetToken": "experience.app.touchTarget.min",
         "justify": "start",
-        "touchTargetTokenPx": 28
+        "touchTargetTokenPx": 44
       }
     }
   }

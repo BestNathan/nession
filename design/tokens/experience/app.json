@@ -88,9 +88,6 @@
   "touchTarget": {
     "min": {
       "value": 44
-    },
-    "compact": {
-      "value": 28
     }
   },
   "shell": {
@@ -327,10 +324,6 @@
     "terminalCapsule": {
       "value": "280ms cubic-bezier(0.22, 1, 0.36, 1)"
     }
-  },
-  "dockTarget": {
-    "$description": "App dock targets: the workspace-navigation band declares touchTarget.compact (#730) instead of the 44px chrome floor, because it floats over the terminal rather than taking a row from it. control-md is 44px on app by design, so this cannot borrow it.",
-    "value": "28px"
   },
   "conversation": {
     "$owner": "pattern.conversation",

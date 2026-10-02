@@ -212,7 +212,6 @@
   --motion-terminal-capsule: 280ms cubic-bezier(0.22, 1, 0.36, 1);
   --motion-shell-duration: 180ms;
   --motion-shell-ease: cubic-bezier(0.2, 0, 0, 1);
-  --dock-target: 32px;
   --conversation-row-gap: 8px;
   --conversation-row-gap-expanded: 16px;
   --conversation-response-gap: 16px;
@@ -541,7 +540,6 @@
   --icon-md: 20px;
   --panel-padding: 16px;
   --touch-target-min: 44;
-  --touch-target-compact: 28;
   --shell-icon-button-size: 44px;
   --shell-session-row-title-font-size: 16px;
   --shell-session-row-meta-font-size: 12px;
@@ -612,7 +610,6 @@
   --terminal-capsule-projection-item-pad-y: 0.125rem;
   --terminal-capsule-projection-mark-width: 0.75rem;
   --motion-terminal-capsule: 280ms cubic-bezier(0.22, 1, 0.36, 1);
-  --dock-target: 28px;
   --conversation-bubble-max-width: 82%;
   --conversation-group-max-height: min(320px, 42vh);
   --workspace-tree-font-size: 13px;

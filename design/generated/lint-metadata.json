@@ -159,7 +159,6 @@
   },
   "experienceAppVars": [
     "touch-target-min",
-    "touch-target-compact",
     "shell-sessions-list-min-height",
     "terminal-capsule-quick-key-pad-x",
     "terminal-capsule-quick-key-gap",
