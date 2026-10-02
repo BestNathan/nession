@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { CapabilityState } from '@/product/capability';
 import type { CapsuleDetail } from '@/product/terminal/capsule/types';
-import { capsulePeekActionClass } from '@/shared/lib/peekActionClass';
 import { claudeCodeApi } from '../ClaudeCodePlugin';
 import { stateLine } from '../model/stateLine';
 import type {
@@ -55,11 +54,12 @@ export function ClaudeCodeProjection({
   depth: 'signal' | 'peek';
   state: CapabilityState;
   /**
-   * The way in (#1046).
+   * The host's Workspace routing, for the Peek's content rows.
    *
-   * Supplied by the host and drawn by the capability, at both depths: whether
-   * there is somewhere deeper to go, and what that looks like, is this
-   * capability's answer rather than a footer every Peek inherits.
+   * The destination action itself is the host's (#1347 SC-21): this body
+   * draws no "Open in Workspace" of its own at either depth. What the
+   * routing is for is content navigation — a candidate row that opens the
+   * conversation it names.
    */
   onOpenWorkspace?: (resourceId?: string) => void;
   /** The host's approved child overlay. Required: the host always offers it. */
@@ -85,18 +85,6 @@ export function ClaudeCodeProjection({
     <div data-testid="claude-code-signal-body" className="flex flex-col gap-1">
       <p className={cn('truncate text-foreground', chromeSansRole('metadata'))}>{stateLine(state)}</p>
       <p className={cn('truncate text-muted-foreground', chromeSansRole('caption'))}>{detailLine(conversation, summary)}</p>
-      {onOpenWorkspace ? (
-        <div className="flex justify-end">
-          <button
-            type="button"
-            data-testid="capsule-capability-open-workspace"
-            onClick={() => onOpenWorkspace()}
-            className={capsulePeekActionClass}
-          >
-            Open in Workspace →
-          </button>
-        </div>
-      ) : null}
     </div>
   );
 }
