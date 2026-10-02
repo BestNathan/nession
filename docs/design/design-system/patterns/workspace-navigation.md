@@ -188,49 +188,57 @@ this document forbids at the top. Context is carried by the tree's root row
 instead: the tree starts at `nession`, so the root row states what the user is
 looking at without a chrome band restating it.
 
-### Open inconsistency: where the App band actually floats
+### The App Capsule family (owner decision, 2026-10-03)
 
-This document (and #748 §6) describes the App band as a pill floating **over the
-terminal**. In the implementation the band is rendered by `WorkspaceShell`, which
-mounts on the Workspace page — so on App it floats over the *Workspace*, not the
-terminal.
+On App there is **one Capsule with two states**, and the state decides only what
+is inside it:
 
-That matters beyond wording: #748 §7 asks for the band to hide when the capsule
-expands, and the capsule lives on the Terminal page. If the two are never on
-screen together, the rule has nothing to govern, and if the band is meant to
-float over the terminal, it is in the wrong container.
+```text
+Terminal page   -> Conversation Form   [ + | Ask Nession… | Send ]
+Workspace root  -> Capability Form     [ Files | Git | Claude | … ]
+```
 
-Recorded rather than resolved — moving the band changes which page owns it and
-what the App's two-layer stack means, and that is a product call, not a
-consequence of the wording.
+Surface navigation stays with the App's spatial model (swipe) plus the existing
+shell/header fallback — the Capsule Zone adds **no** Terminal/Workspace
+destination circles, unlike Web's reciprocal pair, and that difference is
+experience presentation, not a divergence in the Capsule's identity.
 
-### Touch floor (recorded decision, #730, extended by #748)
+What the two states **share** is the outer geometry: the floating surface and
+elevation, the semantic capsule radius (`--radius-capsule`), the `control-md`
+vertical mass, the App dock's bottom and safe-area-aware placement, and the
+shell's inner padding rhythm. What they **do not** share is content — a composer
+on one, the capability row on the other.
 
-The App band is a compact pill floating over the terminal, and it declares its own
-touch floor — `experience.app.touchTarget.compact` (28px) — instead of the 44px
-that `category.chrome` applies to chrome bands. The reasoning: chrome yields
-before the work surface, the pill already floats *over* the terminal rather than
-taking a row from it, and these entries are secondary controls reached
-deliberately rather than in a hurry.
+Two questions the previous revision left open, now settled by the same decision:
 
-This is a floor, not a waiver: the contract states the size the pill is allowed to
-be, the executable assertion enforces it at every App viewport, and shrinking it
-further fails CI. What it does not claim is comfort — 28px is below the platform
-guideline, and that cost is accepted in exchange for the terminal keeping its
-space. If the pill ever gains a touch-first role, the token moves back to `min`
-and the implementation has to grow with it.
+- **Where the band floats.** The band was described as floating "over the
+  terminal", but it is rendered by `WorkspaceShell` and mounts on the Workspace
+  page. It floats over whichever surface owns it — the Conversation Form over
+  the Terminal, the Capability Form over the Workspace. They are the same
+  Capsule at the same place on both pages, which is what makes a surface switch
+  read as one object rather than two components.
+- **The touch floor.** The App capability band used to declare its own compact
+  floor — `experience.app.touchTarget.compact` (28px, #730), with
+  `dockTarget` as its twin — on the reasoning that it was a legacy dock
+  borrowing space from the terminal. Once the two states are one Capsule, that
+  exception has no owner: the entries take the standard App control band like
+  every other Capsule control, `control.md` (44px) hit target with the
+  `control.visualSize` (36px) circle drawn inside it (#1034). The
+  `touchTarget.compact` / `dockTarget` vocabulary **retired with the decision**
+  rather than being protected; the pattern declares no override, so the
+  viewport matrix enforces `category.chrome`'s
+  `experience.app.touchTarget.min` (44px) on every App viewport.
 
-**#748 extended the App band to two layers.** The band carries capability entries
-*and* the TerminalCapsule; **when the capsule expands, the band hides.** Hiding —
-not shifting, not shrinking — is what "yielding" means here: a partially visible
-band competes with the expanded capsule for the same thumb reach and reads as two
-half-controls rather than one. The 28px floor governs the capability layer; the
-capsule keeps its own sizing from `terminal-capsule.md`.
+`#748`'s yielding rule survives in the shape the one-Capsule model gives it: on
+the Workspace, the root capsule is absent over capability-owned detail (see
+"the dock is the root's"), so it neither shifts nor shrinks — it leaves with the
+navigation it belongs to. The Conversation Form keeps its own sizing from
+`terminal-capsule.md`.
 
 The narrowest supported App viewport is `app.narrow-phone` (375×812, from
-`design/contracts/viewports.json`). The two-layer stack is verified there, because
-that is where it has the least room and where a band that merely shrinks would
-first become unusable.
+`design/contracts/viewports.json`), and the family is verified there: both
+states at the canonical App viewports, plus the relational assertion that
+compares them as one Capsule rather than verifying each alone (#1347 SC-30).
 
 ## Files and other capability-specific layouts
 
@@ -285,7 +293,8 @@ Existing components should migrate incrementally. Do not remove reliable capabil
 - [ ] Workspace root communicates context, not a global feature catalog.
 - [ ] Extensions cannot independently fragment the global navigation model.
 - [ ] Web/App may present the same capability differently while preserving semantic state.
-- [ ] The App band meets its declared compact touch floor (`experience.app.touchTarget.compact`), enforced by the viewport matrix.
+- [ ] The App entries meet the chrome touch floor (`experience.app.touchTarget.min`, 44px) — the pattern declares no compact override since the 2026-10-03 Capsule-family decision — enforced by the viewport matrix.
+- [ ] The App Capability Form and Conversation Form share one outer geometry (radius, vertical mass, dock placement), asserted relationally rather than each alone (#1347 SC-30).
 - [ ] The capsule appears only at capability-root depth, and is absent over capability-owned detail.
 - [ ] Files-specific layout remains local to Files.
 - [ ] The capsule stays inside the tool bar at every viewport, and its row scrolls internally.

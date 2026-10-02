@@ -33,9 +33,14 @@ test('the app-only token list is derived from the token source, not hand-listed'
   assert.ok(Array.isArray(vars) && vars.length > 0, 'experienceAppVars is empty or missing');
 
   // Present in experience/app.json only — emitted solely under [data-experience="app"].
-  for (const appOnly of ['touch-target-min', 'touch-target-compact', 'terminal-capsule-shell-inset']) {
+  for (const appOnly of ['touch-target-min', 'terminal-capsule-shell-inset']) {
     assert.ok(vars.includes(appOnly), `expected ${appOnly} in experienceAppVars`);
   }
+  // `touch-target-compact` used to pin this list too, and retired with the
+  // 2026-10-03 Capsule-family decision (#1347 SC-30) — the capability band
+  // takes the standard App control floor now. The assertion above still pins
+  // the derivation: it fails if the list ever goes back to a hand-written
+  // literal that drifts from the token source.
 
   // Present in BOTH experiences (app overrides it). Emitted at :root, so it
   // resolves on Web too — flagging it would be a false positive.

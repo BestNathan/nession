@@ -4,10 +4,14 @@ import type { CapabilityId } from '@/product/capability';
 import { WORKSPACE_VIEW_BINDINGS } from '@/app/workspace/viewBindings';
 import type { WorkspacePresentationItem } from '@/app/workspace/presentation';
 import {
-  capsuleShellSurfaceClass,
-  capsuleShellPillRadiusClass,
+  capsuleIconButtonClass,
+  capsuleShellCapsuleRadiusClass,
   capsuleShellInnerPadClass,
+  capsuleShellPillRadiusClass,
+  capsuleShellSurfaceClass,
 } from '@/product/terminal/capsule/capsuleStyles';
+import { CapsuleIconVisual } from '@/product/terminal/capsule/CapsuleIconVisual';
+import type { CapsuleExperience } from '@/product/terminal/capsule/types';
 
 const workspaceViewBindings = new Map(
   WORKSPACE_VIEW_BINDINGS.map((view) => [view.id, view]),
@@ -20,6 +24,20 @@ interface CapabilityCapsuleProps {
   activeCapabilityId: CapabilityId;
   /** Callback when a capability is selected. */
   onSelect: (id: CapabilityId) => void;
+  /**
+   * Which Capsule the Workspace form belongs to (#1347 SC-08 / SC-29).
+   *
+   * The two experiences answer differently and both answers are settled. On Web
+   * the reciprocal pair draws both forms as pills, so this form is a pill. On
+   * App there is one Capsule with two states, so this form wears the
+   * Conversation form's outer geometry — the same semantic radius, the same
+   * `control-md` vertical mass, the same App dock placement (the zone carries
+   * it) — and differs only in what is inside it. The owner decision
+   * (2026-10-03) made that continuity an acceptance rule: the old compact dock
+   * language (`touchTarget.compact`, `dockTarget`, 28px) is retired rather than
+   * protected.
+   */
+  experience: CapsuleExperience;
 }
 
 /**
@@ -43,6 +61,7 @@ export function CapabilityCapsule({
   items,
   activeCapabilityId,
   onSelect,
+  experience,
 }: CapabilityCapsuleProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const activeItemRef = useRef<HTMLButtonElement>(null);
@@ -76,10 +95,14 @@ export function CapabilityCapsule({
          carries the same id, so a surface switch slides each from the
          other's former place. */
       data-morph-id="capsule-shell"
+      data-shell-shape={experience === 'app' ? 'capsule' : 'pill'}
       className={cn(
-        'pointer-events-auto flex items-center',
+        // `min-h-[control-md]` matches `CapsuleShell`'s own row: on App that is
+        // the 44px control band the Conversation form uses, so the two states
+        // have the same vertical mass; on Web it is a no-op at today's density.
+        'pointer-events-auto flex min-h-[length:var(--control-md)] items-center',
         capsuleShellSurfaceClass,
-        capsuleShellPillRadiusClass,
+        experience === 'app' ? capsuleShellCapsuleRadiusClass : capsuleShellPillRadiusClass,
         capsuleShellInnerPadClass,
       )}
     >
@@ -119,7 +142,12 @@ export function CapabilityCapsule({
               data-capability-active={isActive ? 'true' : undefined}
               onClick={() => onSelect(item.snapshot.id)}
               className={cn(
-                'relative flex size-[length:var(--dock-target)] shrink-0 items-center justify-center rounded-[var(--radius-control)] transition-colors duration-[var(--motion-shell-duration)] ease-[var(--motion-shell-ease)]',
+                // The capsule's own control vocabulary, not a dock-local size:
+                // `control-md` hit target with the `control-visual-size` circle
+                // drawn inside it (#1034), so a capability entry is the same
+                // object as a Conversation entry — 44/36 on App, 32/32 on Web.
+                capsuleIconButtonClass,
+                'relative inline-flex items-center justify-center transition-colors duration-[var(--motion-shell-duration)] ease-[var(--motion-shell-ease)]',
                 isUnavailable
                   ? 'cursor-default text-disabled-foreground'
                   : isActive
@@ -127,7 +155,9 @@ export function CapabilityCapsule({
                     : 'text-muted-foreground hover:text-foreground',
               )}
             >
-              <Icon className="size-[length:var(--icon-md)]" aria-hidden />
+              <CapsuleIconVisual>
+                <Icon className="size-[length:var(--icon-md)]" aria-hidden />
+              </CapsuleIconVisual>
               {/* Active capability marked with dot indicator — same visual language
                   as the previous dock, but now inside a capsule shape. The dot is
                   always rendered so the row's geometry does not shift between states. */}

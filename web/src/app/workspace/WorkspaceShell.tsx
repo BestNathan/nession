@@ -13,7 +13,7 @@ import type {
   WorkspaceViewBinding,
 } from '@/app/workspace/workspaceContext';
 import { CapabilityCapsule } from '@/app/workspace/CapabilityCapsule';
-import { capsuleZoneClass } from '@/product/terminal/capsule/CapsuleZone';
+import { capsuleZoneAppClass, capsuleZoneClass } from '@/product/terminal/capsule/CapsuleZone';
 
 const workspaceViewBindings = new Map<string, WorkspaceViewBinding>(
   WORKSPACE_VIEW_BINDINGS.map((view) => [view.id, view]),
@@ -193,7 +193,13 @@ export function WorkspaceShell({
         <div
           data-testid="workspace-tool-bar"
           data-navigation-mode="contextual"
-          className={cn(capsuleZoneClass, 'gap-[length:var(--shell-space-2)]')}
+          className={cn(
+            // #1347 SC-08 / SC-29: on App the zone sits where the Conversation
+            // capsule does (the App dock placement); on Web it keeps the shared
+            // zone's own bottom offset.
+            ctx.experience === 'app' ? capsuleZoneAppClass : capsuleZoneClass,
+            'gap-[length:var(--shell-space-2)]',
+          )}
         >
           {showSurfaceAction ? <SurfaceNavigation>{surfaceAction}</SurfaceNavigation> : null}
           {showDock ? (
@@ -201,6 +207,7 @@ export function WorkspaceShell({
               items={allCapsuleItems}
               activeCapabilityId={activeCapabilityId}
               onSelect={ctx.onToolChange}
+              experience={ctx.experience}
             />
           ) : null}
         </div>
