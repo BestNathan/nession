@@ -150,7 +150,9 @@ describe('WorkspacePanel — the Terminal-return circle projects the active conv
         tool="files"
         fileOps={null}
         experience="web"
-        facts={undefined}
+        // Detection reads the same facts the capsule's work awareness reads,
+        // so the ring and the destination glyph cannot disagree about a pane.
+        facts={foregroundCommand ? { sessionForegroundCommand: foregroundCommand } : undefined}
         onSurfaceChange={vi.fn()}
         onToolChange={vi.fn()}
       />,
