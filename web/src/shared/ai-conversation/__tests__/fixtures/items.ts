@@ -54,6 +54,11 @@ export function unknownItem(id: string): AIConversationItem {
   return { kind: 'unknown', id }
 }
 
+/** A notice from the provider — not the assistant's work, so it never folds. */
+export function statusItem(id: string, text = 'This turn was interrupted'): AIConversationItem {
+  return { kind: 'status', id, text }
+}
+
 /** A conversation of `count` alternating messages, oldest first. */
 export function transcript(count: number, prefix = 'm'): AIConversationItem[] {
   return Array.from({ length: count }, (_, index) =>
