@@ -26,6 +26,14 @@ list_gates() {
   done | sort
   shopt -u nullglob
 }
+list_suites() {
+  local path
+  shopt -s nullglob
+  for path in "$SUITES_DIR"/*.gates; do
+    basename "$path" .gates
+  done | sort
+  shopt -u nullglob
+}
 
 load_suite() {
   local suite="$1"
@@ -56,6 +64,73 @@ load_suite() {
   done < "$suite_file"
 }
 
+validate_gate() {
+  local id="$1"
+  local path desc declared field
+  path="$(gate_path "$id")"
+  if [ ! -x "$path" ]; then
+    printf '[ERROR] unknown gate: %s\\n' "$id" >&2
+    return 2
+  fi
+  if ! desc="$("$path" --describe 2>&1)"; then
+    printf '[ERROR] gate contract cannot be described: %s\\n%s\\n' "$id" "$desc" >&2
+    return 2
+  fi
+  declared="$(printf '%s\\n' "$desc" | sed -n 's/^id: //p' | head -1)"
+  if [ "$declared" != "$id" ]; then
+    printf '[ERROR] gate id/path mismatch: requested=%s declared=%s\\n' "$id" "${declared:-<missing>}" >&2
+    return 2
+  fi
+  for field in name command success failure repair owner; do
+    if ! printf '%s\\n' "$desc" | grep -q "^${field}: ."; then
+      printf '[ERROR] gate %s is missing describe field: %s\\n' "$id" "$field" >&2
+      return 2
+    fi
+  done
+}
+
+contains_id() {
+  local needle="$1"
+  shift
+  local item
+  for item in "$@"; do
+    [ "$item" = "$needle" ] && return 0
+  done
+  return 1
+}
+
+validate_catalog() {
+  local id suite line path tmp
+  local gate_count=0 suite_count=0
+  while IFS= read -r id; do
+    [ -z "$id" ] && continue
+    validate_gate "$id" || return 2
+    gate_count=$((gate_count + 1))
+  done <<EOF_GATES
+$(list_gates)
+EOF_GATES
+  [ "$gate_count" -gt 0 ] || { printf '[ERROR] gate catalog is empty\\n' >&2; return 2; }
+  while IFS= read -r suite; do
+    [ -z "$suite" ] && continue
+    suite_count=$((suite_count + 1))
+    tmp="$(mktemp "${TMPDIR:-/tmp}/nession-suite-${suite}.XXXXXX")"
+    if ! load_suite "$suite" >"$tmp"; then rm -f "$tmp"; return 2; fi
+    while IFS= read -r line || [ -n "$line" ]; do
+      [ -z "$line" ] && continue
+      path="$(gate_path "$line")"
+      if [ ! -x "$path" ]; then
+        printf '[ERROR] suite %s references unknown gate: %s\\n' "$suite" "$line" >&2
+        rm -f "$tmp"
+        return 2
+      fi
+    done < "$tmp"
+    rm -f "$tmp"
+  done <<EOF_SUITES
+$(list_suites)
+EOF_SUITES
+  printf '✓ gate catalog: %d gates, %d suites\\n' "$gate_count" "$suite_count"
+}
+
 if [ "$#" -eq 0 ]; then usage >&2; exit 2; fi
 
 case "$1" in
@@ -64,7 +139,7 @@ case "$1" in
     list_gates
     exit 0
     ;;
-  --describe)
+  --list-suites)\n    [ "$#" -eq 1 ] || { usage >&2; exit 2; }\n    list_suites\n    exit 0\n    ;;\n  --validate)\n    [ "$#" -eq 1 ] || { usage >&2; exit 2; }\n    validate_catalog\n    exit $?\n    ;;\n  --describe)
     [ "$#" -eq 2 ] || { usage >&2; exit 2; }
     id="$2"
     valid_id "$id" || { printf '[ERROR] invalid gate id: %s\n' "$id" >&2; exit 2; }
