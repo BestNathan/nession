@@ -255,7 +255,6 @@ export function ShellMain({
                 }) ?? (
                   <TerminalRegion
                     hidden={surface !== 'terminal' || !selectedSession}
-                    onDisconnect={() => undefined}
                     onError={() => undefined}
                     experience={experience}
                     capsuleCapabilities={capsuleCapabilities}

@@ -341,7 +341,7 @@ function startSession(initialSeed: TerminalSeed) {
   };
 
   const view = renderHook(
-    () => useTerminalOrchestration({ onDisconnect: vi.fn(), onError: vi.fn() }),
+    () => useTerminalOrchestration({ onError: vi.fn() }),
     { wrapper: wrapper(store) },
   );
   const controller = built.controller;
@@ -397,7 +397,7 @@ describe('useTerminalOrchestration', () => {
     store.set(sessionNameAtom, 's1');
     store.set(attachInfoAtom, makeAttachInfo());
     const view = renderHook(
-      () => useTerminalOrchestration({ onDisconnect: vi.fn(), onError: vi.fn() }),
+      () => useTerminalOrchestration({ onError: vi.fn() }),
       { wrapper: wrapper(store) },
     );
 
@@ -452,7 +452,7 @@ describe('useTerminalOrchestration', () => {
     const harness = makeRuntimeHarness({ store });
     deps.runtime = harness.runtime;
     const view = renderHook(
-      () => useTerminalOrchestration({ onDisconnect: vi.fn(), onError: vi.fn() }),
+      () => useTerminalOrchestration({ onError: vi.fn() }),
       { wrapper: wrapper(store) },
     );
 

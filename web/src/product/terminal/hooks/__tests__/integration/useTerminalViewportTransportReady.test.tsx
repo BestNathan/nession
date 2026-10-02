@@ -47,9 +47,7 @@ function makeTransport(): TerminalTransport {
     flushAllOutbound: vi.fn<() => void>(),
     onOutput: null,
     onResize: null,
-    onStateChange: null,
     onError: null,
-    onDisconnect: null,
     dispose: vi.fn<() => void>(),
   };
 }

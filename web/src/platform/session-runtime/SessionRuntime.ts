@@ -681,6 +681,17 @@ export class SessionRuntime {
 
   dispose(): void {
     this.disposed = true;
+    // End the server-side relay forwarding loop with the runtime that began
+    // it (#1309 SC-08). Disposal covers every leave — disconnect, session
+    // switch, unmount — so this is the one place an endRelay can never be
+    // forgotten; the orchestration's dead controller.onDisconnect chain used
+    // to pretend to cover exactly one of them. Best-effort: a gone server
+    // connection has nothing to tell, and dispose must not throw.
+    if (this.effectiveForcedRelay && this.config.attachInfo && this.config.serverConnection?.isReady()) {
+      try {
+        this.config.serverConnection.endRelay(this.sessionId);
+      } catch { /* best-effort teardown */ }
+    }
     this.teardownConnectionHandler();
     this.teardownRelayServerHandler();
     this.attachController.cancelActiveAttach();

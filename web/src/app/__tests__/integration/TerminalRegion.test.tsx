@@ -66,13 +66,11 @@ vi.mock('@/product/terminal/patterns/TerminalSurface', () => ({
 }));
 
 function renderTerminal(hidden: boolean, store = createStore()) {
-  const onDisconnect = vi.fn();
   const onError = vi.fn();
   const view = (
     <Provider store={store}>
       <TerminalRegion
         hidden={hidden}
-        onDisconnect={onDisconnect}
         onError={onError}
         experience="web"
       />
@@ -87,7 +85,6 @@ function renderTerminal(hidden: boolean, store = createStore()) {
         <Provider store={store}>
           <TerminalRegion
             hidden={next}
-            onDisconnect={onDisconnect}
             onError={onError}
             experience="web"
           />

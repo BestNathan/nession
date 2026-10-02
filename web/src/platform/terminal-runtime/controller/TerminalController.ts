@@ -1,12 +1,10 @@
 // web/src/terminal/controller/TerminalController.ts
 import { Terminal } from '@xterm/xterm';
-import type { ConnectionState } from '@/platform/socket/types';
 import type {
   DeviceProfile,
   InputMode,
   TerminalScrollbackMode,
   TerminalSession,
-  TerminalStatus,
 } from '../types';
 import type { TerminalTransport } from '../transport/TerminalTransport';
 import type { TerminalBootstrap } from '../bootstrap';
@@ -103,20 +101,6 @@ function shouldUseMobileIme(profile: DeviceProfile | undefined): boolean {
   return profile === 'mobile' && typeof window !== 'undefined' && 'ontouchstart' in window;
 }
 
-/** Map a transport ConnectionState onto the domain TerminalStatus. */
-function mapConnectionState(state: ConnectionState): TerminalStatus {
-  switch (state) {
-    case 'connecting':
-      return 'connecting';
-    case 'connected':
-      return 'connected';
-    case 'disconnected':
-      return 'failed';
-    case 'reconnecting':
-      return 'reconnecting';
-  }
-}
-
 /**
  * Imperative facade over xterm + TerminalTransport. React components interact
  * with this class instead of touching xterm or WebSocket/P2P details directly.
@@ -158,10 +142,8 @@ export class TerminalController {
   events?: TerminalControllerEvents;
 
   /** Callbacks → Jotai */
-  onStateChange: ((status: TerminalStatus) => void) | null = null;
   onTitleChange: ((title: string) => void) | null = null;
   onError: ((err: Error) => void) | null = null;
-  onDisconnect: (() => void) | null = null;
 
   constructor(
     session: TerminalSession,
@@ -286,11 +268,7 @@ export class TerminalController {
       this.markSessionOutput();
     };
     transport.onResize = (cols: number, rows: number) => { terminal.resize(cols, rows); };
-    transport.onStateChange = (state: ConnectionState) => {
-      this.onStateChange?.(mapConnectionState(state));
-    };
     transport.onError = (err: Error) => { this.onError?.(err); };
-    transport.onDisconnect = () => { this.onDisconnect?.(); };
     this.events?.onTransportReady?.(true);
   }
 
@@ -318,9 +296,7 @@ export class TerminalController {
     if (this.transport) {
       this.transport.onOutput = null;
       this.transport.onResize = null;
-      this.transport.onStateChange = null;
       this.transport.onError = null;
-      this.transport.onDisconnect = null;
       this.transport.dispose();
       this.transport = null;
     }

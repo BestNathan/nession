@@ -12,7 +12,6 @@ import { useTerminalOrchestration } from '@/product/terminal/useTerminalOrchestr
 
 export interface TerminalRegionProps {
   hidden: boolean;
-  onDisconnect: () => void;
   onError: (error: Error) => void;
   /** Which experience's capsule to render — supplied by the shell. */
   experience: CapsuleExperience;
@@ -30,7 +29,6 @@ export interface TerminalRegionProps {
  */
 export function TerminalRegion({
   hidden,
-  onDisconnect,
   onError,
   experience,
   capsuleCapabilities,
@@ -49,7 +47,7 @@ export function TerminalRegion({
     onTakeControl,
     inputDrop,
     dismissInputDrop,
-  } = useTerminalOrchestration({ onDisconnect, onError });
+  } = useTerminalOrchestration({ onError });
 
   return (
     <div

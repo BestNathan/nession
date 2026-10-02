@@ -3,7 +3,6 @@ import { ConnectionManager, INPUT_QUEUE_BOUNDS } from '@/platform/terminal-runti
 import type { AgentError, TerminalAgentApi, TerminalInputAck, TerminalResizeFrame } from '@/product/terminal';
 import type { ResumeReply } from '@/platform/terminal-runtime/streamReconciler';
 import type { TerminalBootstrap } from '@/platform/terminal-runtime/bootstrap';
-import type { ConnectionState } from '@/platform/socket/types';
 import type { RelayServerTransport } from '@/platform/attach/relayServerConnection';
 
 const attached = { isAttached: () => true };
@@ -980,35 +979,6 @@ describe('ConnectionManager', () => {
         mode: 'relay', sessionName: 'test', sessionId: 'a:test', serverConnection: ws, ...attached,
       });
       expect(ws.onRelayOutput).toHaveBeenCalledWith('test', expect.any(Function));
-      cm.dispose();
-    });
-
-    it('reports only the durable connection edges — intra-budget loss is a no-op', () => {
-      const ws = makeMockWs();
-      let stateCb: (state: ConnectionState) => void = () => {};
-      (ws.onConnectionStateChange as ReturnType<typeof vi.fn>).mockImplementation(
-        (cb: (state: ConnectionState) => void) => { stateCb = cb; return () => {}; },
-      );
-      const cm = new ConnectionManager({
-        mode: 'relay', sessionName: 'test', sessionId: 'a:test', serverConnection: ws, ...attached,
-      });
-      const calls: string[] = [];
-      cm.onStateChange = (s) => calls.push(s);
-
-      // Post-handshake 'connected' (old 'authenticated') and budget-exhausted
-      // 'disconnected' are the only edges this transport reports — the
-      // intra-budget window surfaces as 'connecting'/'reconnecting', which the
-      // manager mirrors by staying silent (old facade collapsed them onto
-      // 'connecting', which ConnectionManager also ignored).
-      stateCb('connected');
-      stateCb('disconnected');
-      stateCb('connecting');
-      stateCb('reconnecting');
-
-      expect(calls).toEqual([
-        'connected',
-        'disconnected',
-      ]);
       cm.dispose();
     });
 

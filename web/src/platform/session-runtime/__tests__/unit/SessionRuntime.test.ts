@@ -109,9 +109,7 @@ function makeMockTransport(opts: ConnectionOptions): MockTransport {
     builtWith: opts,
     onOutput: null,
     onResize: null,
-    onStateChange: null,
     onError: null,
-    onDisconnect: null,
     send: vi.fn(),
     sendResize: vi.fn(),
     seedStreamCursor: vi.fn<(streamEpoch: number | undefined, streamCursor: number | undefined) => void>(),
@@ -677,6 +675,45 @@ describe('SessionRuntime', () => {
       expect(rt.activeUrl).toBe('ws://c/ws');
       expect(wsInstances.length).toBeGreaterThan(wsBefore);
       rt.dispose();
+    });
+  });
+
+
+  describe('dispose ends the relay (#1309 SC-08)', () => {
+    it('ends the server-side relay with the runtime that began it', () => {
+      const serverConnection = makeRelayServerConnection('connected');
+      const rt = new SessionRuntime(makeConfig({ serverConnection, forcedRelay: true }));
+      rt.dispose();
+      expect(serverConnection.endRelay).toHaveBeenCalledTimes(1);
+      expect(serverConnection.endRelay).toHaveBeenCalledWith('agent:s1');
+    });
+
+    it('ends the relay after a dynamic fallback, not only a static relay intent', async () => {
+      const serverConnection = makeRelayServerConnection('connected');
+      const rt = new SessionRuntime(makeConfig({ serverConnection }));
+      rt.setTransportReady(true);
+      rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
+      expect(rt.onCandidateDisconnected()).toBe('next-candidate');
+      expect(rt.onCandidateDisconnected()).toBe('force-relay');
+      await flushMicrotasks();
+      rt.dispose();
+      expect(serverConnection.endRelay).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not end a relay the runtime never used', () => {
+      const serverConnection = makeRelayServerConnection('connected');
+      // P2P intent, no fallback: the relay handle was retained for a possible
+      // fallback but nothing was ever begun on it.
+      const rt = new SessionRuntime(makeConfig({ serverConnection }));
+      rt.dispose();
+      expect(serverConnection.endRelay).not.toHaveBeenCalled();
+    });
+
+    it('does not end relay against a server connection that is not ready', () => {
+      const serverConnection = makeRelayServerConnection('disconnected');
+      const rt = new SessionRuntime(makeConfig({ serverConnection, forcedRelay: true }));
+      rt.dispose();
+      expect(serverConnection.endRelay).not.toHaveBeenCalled();
     });
   });
 

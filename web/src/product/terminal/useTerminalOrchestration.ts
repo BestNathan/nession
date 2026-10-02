@@ -102,30 +102,13 @@ function useReconnectBanner(opts: {
       : 'none';
 }
 
-function useEndRelayOnDisconnect(opts: {
-  effectiveMode: 'p2p' | 'relay';
-  serverConnection: RelayServerHandle;
-  sessionId: string;
-  onDisconnect: () => void;
-}) {
-  const { effectiveMode, serverConnection, sessionId, onDisconnect } = opts;
-  return useCallback(() => {
-    if (effectiveMode === 'relay' && serverConnection?.isReady()) {
-      try { serverConnection.endRelay(sessionId); } catch { /* best-effort */ }
-    }
-    onDisconnect();
-  }, [effectiveMode, serverConnection, sessionId, onDisconnect]);
-}
-
 export interface UseTerminalOrchestrationOptions {
-  onDisconnect: () => void;
   onError: (error: Error) => void;
   rendererType?: 'webgl' | 'canvas';
   scrollbackMode?: 'legacy' | 'local-buffer';
 }
 
 export function useTerminalOrchestration({
-  onDisconnect,
   onError,
   rendererType = 'canvas',
   scrollbackMode = 'local-buffer',
@@ -140,7 +123,7 @@ export function useTerminalOrchestration({
   const wsService = useWebSocket();
   // One relay handle per service instance, shared by every relay consumer —
   // the runtime (begin/endRelay + state), the transport factory (relay I/O),
-  // the banner, and disconnect cleanup. Rebuilt only when the service does.
+  // and the banner. Rebuilt only when the service does.
   const relayServer = useMemo(() => relayServerHandle(wsService, terminalServerApi), [wsService]);
   // The bootstrap question (#321) is answered by the live Terminal, which does
   // not exist yet at this point in the hook — so the runtime is handed a reader
@@ -182,9 +165,6 @@ export function useTerminalOrchestration({
   const effectiveMode: 'p2p' | 'relay' =
     (snapshot?.forcedRelay ?? false) || attachInfo?.mode !== 'p2p' ? 'relay' : 'p2p';
 
-  const handleDisconnect = useEndRelayOnDisconnect({
-    effectiveMode, serverConnection: relayServer, sessionId, onDisconnect,
-  });
   useSessionEnvSourcing({ envRefs, sessionId, effectiveMode, agentTerminalApi, connectionState });
   const [inputDrop, setInputDrop] = useAtom(inputDropAtomFamily(sessionId));
   const [deviceProfile] = useState(() => detectProfile(window.innerWidth));
@@ -230,8 +210,7 @@ export function useTerminalOrchestration({
   useEffect(() => {
     if (!controller) { return; }
     controller.onError = onError;
-    controller.onDisconnect = handleDisconnect;
-  }, [controller, handleDisconnect, onError]);
+  }, [controller, onError]);
 
   useEffect(() => {
     if (!controller) {
