@@ -116,10 +116,13 @@ test('workspace-navigation: self-scrolling overflow both experiences, no pinned 
   assert.equal(merged.app.overflow, 'scroll');
   assert.equal(merged.app.justify, 'start');
   assert.equal(merged.app.heightToken, undefined);
-  // The App band floats over the terminal, so it declares its own floor (#730)
-  // and overrides the 44px that category.chrome applies to chrome bands.
-  assert.equal(merged.app.touchTargetToken, 'experience.app.touchTarget.compact');
-  assert.equal(merged.app.touchTargetTokenPx, 28);
+  // Owner decision 2026-10-03 (#1347 SC-08 / SC-29): on App this band is one
+  // state of the same Capsule as the Conversation form, so its entries carry
+  // the standard App control band (`control.md` hit target, `control.visualSize`
+  // affordance) and the pattern declares no floor of its own. The compact
+  // override it used to carry (#730) retired with the two tokens that fed it.
+  assert.equal(merged.app.touchTargetToken, 'experience.app.touchTarget.min');
+  assert.equal(merged.app.touchTargetTokenPx, 44);
 });
 
 test('a pattern may declare its own touch floor without changing the category', () => {
@@ -128,7 +131,33 @@ test('a pattern may declare its own touch floor without changing the category', 
   // The override is local: patterns that declare nothing keep the chrome default.
   assert.equal(merged['pattern.session-header'].app.touchTargetToken, 'experience.app.touchTarget.min');
   assert.equal(merged['pattern.session-header'].app.touchTargetTokenPx, 44);
-  assert.equal(merged['pattern.workspace-navigation'].app.touchTargetTokenPx, 28);
+  assert.equal(merged['pattern.workspace-navigation'].app.touchTargetTokenPx, 44);
+
+  // No real contract overrides the floor anymore — workspace-navigation was the
+  // only one, and the 2026-10-03 Capsule-family decision retired it. The
+  // mechanism is still part of the merge, so it is asserted with a fixture:
+  // session-header's app block is re-pointed at a token with a *different*
+  // resolved size (32 ≠ 44), which only passes if the merge honors the local
+  // declaration rather than the category default.
+  const header = REAL.patterns['session-header.json'];
+  const fixture = {
+    ...REAL,
+    patterns: {
+      ...REAL.patterns,
+      'session-header.json': {
+        ...header,
+        app: { ...header.app, touchTargetToken: 'experience.web.control.md' },
+      },
+    },
+  };
+  const overridden = mergeContracts(fixture, TOKENS)['pattern.session-header'];
+  assert.equal(overridden.app.touchTargetToken, 'experience.web.control.md');
+  assert.equal(overridden.app.touchTargetTokenPx, 32);
+  assert.equal(
+    mergeContracts(REAL, TOKENS)['pattern.session-header'].app.touchTargetTokenPx,
+    44,
+    'the real contract still resolves to the chrome floor — the fixture replaced, never added',
+  );
 });
 
 test('every merged pattern keeps provenance and experience blocks', () => {

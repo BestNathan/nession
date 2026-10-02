@@ -235,9 +235,9 @@ for (const row of viewports.filter((v) => v.experience === 'app')) {
       const allCaps = nav.locator('button[data-testid^="workspace-tool-"]');
       expect(await allCaps.count()).toBeGreaterThan(0);
 
-      // The pattern declares its own App touch floor (touchTarget.compact, #730):
-      // this band floats over the terminal, so it is held to 28px rather than the
-      // 44px chrome default — and no lower than that.
+      // The entries carry the standard App control band — the pattern declares
+      // no compact override since the 2026-10-03 Capsule-family decision — so
+      // the contract's resolved target is the chrome floor (44px).
       for (let i = 0; i < (await allCaps.count()); i += 1) {
         await expect(allCaps.nth(i)).toBeVisible();
         await expectTouchTarget(allCaps.nth(i), optsFor(PATTERN_WORKSPACE_NAV, 'app', row.id));
@@ -250,6 +250,49 @@ for (const row of viewports.filter((v) => v.experience === 'app')) {
       await expectTouchTarget(capsule, optsFor(PATTERN_WORKSPACE_NAV, 'app', row.id));
       await expectSingleLine(capsule, optsFor(PATTERN_WORKSPACE_NAV, 'app', row.id));
       await expectVisibleWithin(capsule, bar, optsFor(PATTERN_WORKSPACE_NAV, 'app', row.id));
+    });
+
+    test('the two App Capsule states are one family (#1347 SC-30)', async ({ page }) => {
+      // SC-30 exists because per-state verification stayed green while the two
+      // states drifted apart: 22px semantic radius over a 44/36 control band on
+      // the Conversation Form, a 9999px pill over a 28px dock on the Capability
+      // Form. This is the relational assertion — both states measured in one
+      // scenario and compared to each other, so a change that moves only one of
+      // them fails here even though both still "pass" alone.
+      // The shape attribute sits on each state's own outer object — the
+      // Conversation dock (`terminal-capsule`) and the capability nav.
+      const geometryOf = async (testId: string, shapeTestId: string) => {
+        const el = page.getByTestId(testId);
+        await expect(el).toBeVisible();
+        const measured = await el.evaluate((node) => {
+          const rect = node.getBoundingClientRect();
+          return {
+            radius: getComputedStyle(node).borderRadius,
+            height: rect.height,
+            bottom: window.innerHeight - rect.bottom,
+          };
+        });
+        const shape = await page.getByTestId(shapeTestId).getAttribute('data-shell-shape');
+        return { ...measured, shape };
+      };
+
+      await page.goto('/#/fixture/app');
+      const conversation = await geometryOf('capsule-shell', 'terminal-capsule');
+
+      await page.getByTestId('app-header-workspace').first().click();
+      await expect(page.getByTestId('files-app-layout')).toBeVisible();
+      const capability = await geometryOf(
+        'workspace-capability-capsule',
+        'workspace-capability-capsule',
+      );
+
+      // Same shape claim, same semantic radius, same vertical mass, same
+      // placement above the viewport bottom — sub-pixel tolerance only.
+      expect(conversation.shape).toBe('capsule');
+      expect(capability.shape).toBe('capsule');
+      expect(capability.radius).toBe(conversation.radius);
+      expect(Math.abs(capability.height - conversation.height)).toBeLessThanOrEqual(1);
+      expect(Math.abs(capability.bottom - conversation.bottom)).toBeLessThanOrEqual(1);
     });
 
     test('session rows meet the App touch target and stay clipped', async ({ page }) => {
@@ -317,9 +360,10 @@ for (const row of viewports.filter((v) => v.experience === 'app')) {
         await expect(page.getByTestId(absent)).toHaveCount(0);
       }
 
-      // Unlike the workspace bar — which floats over the terminal and settles for
-      // touchTarget.compact, 28px (#730) — the capsule is the App's primary input
-      // surface and is held to the 44px chrome floor.
+      // The capsule is the App's primary input surface, held to the 44px chrome
+      // floor — and since the 2026-10-03 Capsule-family decision the Workspace
+      // bar shares that floor and the same outer geometry (see the relational
+      // assertion above, #1347 SC-30).
       const controls = page.getByTestId('capsule-input-actions').locator('button');
       for (let i = 0; i < (await controls.count()); i += 1) {
         await expectTouchTarget(controls.nth(i), optsFor(PATTERN_TERMINAL_CAPSULE, 'app', row.id));
