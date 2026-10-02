@@ -48,6 +48,27 @@ describe('useAIConversation', () => {
     await waitFor(() => expect(screen.getAllByRole('listitem')).toHaveLength(4))
   })
 
+  it('keeps its commands stable across renders', async () => {
+    // Not a micro-optimisation. The transcript watches `loadOlder` in an effect
+    // dependency list — a page arriving is what should pull the next one — so
+    // an identity that changed every render would re-run that effect every
+    // render and page for reasons unrelated to a page arriving. This is what
+    // makes the paging trigger deliberate rather than accidental.
+    const seen: Array<() => boolean> = []
+    function Recorder() {
+      const handle = useAIConversation(moduleAdapter, 'a:s1')
+      seen.push(handle.loadOlder)
+      return null
+    }
+
+    const { rerender } = render(<Recorder />)
+    await waitFor(() => expect(seen.length).toBeGreaterThan(1))
+    rerender(<Recorder />)
+
+    expect(seen.length).toBeGreaterThan(2)
+    expect(new Set(seen).size).toBe(1)
+  })
+
   it('survives StrictMode’s mount, unmount and mount again', async () => {
     // Development renders effects twice, disposing in between. A hook that
     // disposed into a dead runtime would show an empty conversation here and
