@@ -281,6 +281,23 @@ describe('a turn the reader is inside when its answer settles', () => {
     expect(document.activeElement).toBe(inner)
   })
 
+  it('keeps a turn open while its work is still running, answer or not', () => {
+    // #1363 round 3, the contradiction it named: the assistant answered *and* a
+    // tool it started is still going. An answer alone would settle the turn and
+    // fold away the only thing still moving, so liveness reads the canonical
+    // work items rather than only what the provider said about the message.
+    renderTranscript({
+      items: [
+        userMessage('u1', 'q'),
+        toolItem('t1', { status: 'running' }),
+        toolItem('t2', { status: 'running' }),
+        assistantMessage('a1', 'started it'),
+      ],
+    })
+
+    expect(rowOf(screen.getByTestId('conversation-tool-group'))).not.toHaveAttribute('hidden')
+  })
+
   it('still folds a settled turn nobody is inside', () => {
     // The guard on the rule above. A pin that fired for every turn would pass
     // that test and quietly delete the folding feature, so the ordinary case is
