@@ -176,7 +176,7 @@ test.describe('App 390×844', () => {
     // Environment earns no direct dock slot at rest — `available` is
     // discoverable, so the App reaches it through the capability picker, the
     // same walk a user takes.
-    await page.getByTestId('workspace-capability-more').click();
+    await page.getByTestId('workspace-capability-capsule').click();
     await page.getByTestId('workspace-capability-picker-env').click();
     await page.getByTestId('env-profile-list').waitFor();
   }

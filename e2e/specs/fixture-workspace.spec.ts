@@ -27,7 +27,7 @@ test('canonical Workspace fixture renders the plugin shell', async ({ page }) =>
   await page.screenshot({ path: 'test-results/canonical-workspace.png', fullPage: true });
 
   // Everything else available is progressively disclosed through More.
-  await page.getByTestId('workspace-capability-more').click();
+  await page.getByTestId('workspace-capability-capsule').click();
   await expect(page.getByTestId('workspace-capability-picker-agent')).toBeVisible();
   await expect(page.getByTestId('workspace-capability-picker-session')).toBeVisible();
 });
