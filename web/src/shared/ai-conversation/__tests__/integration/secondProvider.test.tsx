@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import { ConversationView } from '../../components/ConversationView'
@@ -97,16 +97,14 @@ describe('a second provider through the shared conversation', () => {
     )
   })
 
-  it('pages backwards through the provider it was given', async () => {
+  it('reaches the whole history through the provider it was given, oldest first', async () => {
     let handle: AIConversationHandle | undefined
     const adapter = new SyntheticAdapter({
-      conversations: [
-        { id: 'thread-1', activity: 'inactive', items: [userMessage('u1', 'one')] },
-      ],
+      conversations: [{ id: 'thread-1', activity: 'inactive', items: [] }],
       bindingId: 'thread-1',
+      // One item per page, so the transcript has to page twice to show three.
       pageSize: 1,
     })
-    // Ten items, one per page: enough that older pages exist.
     adapter.replaceItems(
       'thread-1',
       Array.from({ length: 3 }, (_, index) => userMessage(`u${index}`, `turn ${index}`)),
@@ -115,13 +113,29 @@ describe('a second provider through the shared conversation', () => {
     render(<Harness adapter={adapter} onReady={(value) => (handle = value)} />)
     await waitFor(() => expect(screen.getAllByTestId('conversation-turn')).toHaveLength(1))
 
-    expect(handle?.snapshot.hasMore).toBe(true)
-    handle?.loadOlder()
-    await waitFor(() => expect(screen.getAllByTestId('conversation-turn')).toHaveLength(2))
+    // The reader goes to the top. Everything after this is the shared trigger
+    // doing its job against a provider it has never seen — one page at a time,
+    // continuing on its own while the reader stays there, which is the
+    // behaviour that regressed and is pinned in
+    // `ConversationTranscriptPaging.test.tsx`.
+    const viewport = document.querySelector('[data-slot="message-scroller-viewport"]')
+    if (!(viewport instanceof HTMLElement)) {
+      throw new Error('the transcript did not render a scroller viewport')
+    }
+    viewport.scrollTop = 0
+    fireEvent.scroll(viewport)
 
-    // Oldest first, and the prepend did not reorder what was already there.
+    await waitFor(() => expect(screen.getAllByTestId('conversation-turn')).toHaveLength(3))
+
+    // Oldest first, and each prepend kept the order it arrived in.
     const turns = screen.getAllByTestId('conversation-turn')
-    expect(within(turns[1] as HTMLElement).getByText('turn 2')).toBeDefined()
+    expect(within(turns[0] as HTMLElement).getByText('turn 0')).toBeDefined()
+    expect(within(turns[1] as HTMLElement).getByText('turn 1')).toBeDefined()
+    expect(within(turns[2] as HTMLElement).getByText('turn 2')).toBeDefined()
+
+    // And it stopped at the oldest, rather than asking again for a page that
+    // does not exist.
+    expect(handle?.snapshot.hasMore).toBe(false)
   })
 
   it('refreshes a push provider, with no timer and no provider branch in the UI', async () => {
