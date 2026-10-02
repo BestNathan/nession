@@ -2,19 +2,13 @@ import { Loader2 } from 'lucide-react';
 import type { TerminalController } from '@/platform/terminal-runtime/controller/TerminalController';
 import { TerminalViewport } from '@/product/terminal/components/TerminalViewport';
 import { TerminalInputOverlay } from '@/product/terminal/components/input/TerminalInputOverlay';
-import { isTerminalLive } from '@/product/terminal/useTerminalAttach';
-import type { TerminalStatus } from '@/product/terminal/state/session';
+import { isTerminalLive, type TerminalStatus } from '@/product/terminal/state/session';
 
 interface TerminalPaneProps {
   sessionId: string;
   controller: TerminalController | null;
   terminalState: TerminalStatus;
   viewportReady: boolean;
-  /**
-   * Bumped when the runtime swaps its live agent-terminal API (post-swap by
-   * construction) — rewires the ConnectionManager to the new socket (#668).
-   */
-  transportEpoch: number;
   onOpenWorkspaceFile?: (path: string, line?: number) => void;
 }
 
@@ -27,7 +21,6 @@ export function TerminalPane({
   controller,
   terminalState,
   viewportReady,
-  transportEpoch,
   onOpenWorkspaceFile,
 }: TerminalPaneProps) {
   const showViewport = Boolean(controller) && viewportReady;
@@ -39,7 +32,6 @@ export function TerminalPane({
         {showViewport ? (
           <TerminalViewport
             controller={controller}
-            transportEpoch={transportEpoch}
             onOpenWorkspaceFile={onOpenWorkspaceFile}
           />
         ) : null}

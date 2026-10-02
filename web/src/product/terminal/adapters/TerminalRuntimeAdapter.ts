@@ -1,46 +1,36 @@
 import { getDefaultStore } from 'jotai';
 import type { TerminalControllerEvents } from '@/platform/terminal-runtime/controller/TerminalController';
 import { inputModeAtomFamily } from '../state/input';
-import { lastResizeAtom } from '../state/terminal';
-import { terminalTransportReadyAtom } from '../state/transport';
 import type { SessionRuntime } from '@/platform/session-runtime/SessionRuntime';
 
 /**
- * Mirrors imperative TerminalController events into Jotai atoms for React UI.
- * Keeps terminal/** free of direct getDefaultStore() writes in the controller.
+ * Mirrors imperative TerminalController events to their owners: viewport facts
+ * (transport readiness, size) go straight to the SessionRuntime, UI preference
+ * (input mode) to Jotai.
  *
  * Injected into the TerminalController at construction (useTerminal), so
  * readiness published during the viewport's layout-phase attach is never lost
  * to a late binding (issue #598). Detach/dispose publish ready=false through
  * the same adapter, so no explicit unbind is required.
+ *
+ * There is exactly one sink for readiness and size — the runtime (#1309 SC-02).
+ * They used to also be written to Jotai atoms that `useSessionRuntime` fed back
+ * into the runtime config, and that round-trip clobbered the fresher direct
+ * push on every config sync: the atom's stale `false` once pinned a live
+ * session at 'connecting' with every keystroke buffered forever. The atoms are
+ * gone; the config no longer carries either field.
  */
-export function createTerminalRuntimeAdapter(runtime?: SessionRuntime | null): TerminalControllerEvents {
+export function createTerminalRuntimeAdapter(runtime: SessionRuntime): TerminalControllerEvents {
   const store = getDefaultStore();
   return {
     onTransportReady: (ready) => {
-      // Both sinks, always. `useSessionRuntime` reads this atom and feeds it
-      // into the runtime config, which `updateContext` applies back onto the
-      // runtime — so publishing to only one of them lets that config sync
-      // clobber what this adapter just set. That is what pinned the attach phase
-      // at 'connecting' after a successful relay attach: the adapter set
-      // ready=true on the runtime, the next config update pushed the atom's
-      // stale `false` back over it, and `driveRelayAttach` then early-returned
-      // on `!transportReady` forever — so every keystroke sat in
-      // ConnectionManager's inputBuffer and was never sent.
-      store.set(terminalTransportReadyAtom, ready);
-      if (runtime) {
-        runtime.setTransportReady(ready);
-      }
+      runtime.setTransportReady(ready);
     },
     onInputModeChange: (sid, mode) => {
       store.set(inputModeAtomFamily(sid), mode);
     },
     onResize: (_sid, cols, rows) => {
-      if (runtime) {
-        runtime.updateViewportSize({ cols, rows });
-      } else {
-        store.set(lastResizeAtom, { cols, rows });
-      }
+      runtime.updateViewportSize({ cols, rows });
     },
   };
 }

@@ -1,4 +1,3 @@
-import type { ConnectionState } from '@/platform/socket/types';
 import type { TerminalBootstrap } from '../bootstrap';
 
 /**
@@ -52,9 +51,7 @@ export interface TerminalTransport {
    */
   onOutput: ((data: Uint8Array, bootstrap?: TerminalBootstrap) => void) | null;
   onResize: ((cols: number, rows: number) => void) | null;
-  onStateChange: ((state: ConnectionState) => void) | null;
   onError: ((err: Error) => void) | null;
-  onDisconnect: (() => void) | null;
 
   dispose(): void;
 }

@@ -3,6 +3,7 @@ import { SessionRuntimeRegistry } from '@/platform/session-runtime/SessionRuntim
 import { createFilesApi } from '@/capabilities/files';
 import { createTerminalAgentApi } from '@/product/terminal';
 import type { SessionRuntimeConfig } from '@/platform/session-runtime/SessionRuntime';
+import type { TerminalTransport } from '@/platform/terminal-runtime/transport/TerminalTransport';
 import type { AttachInfo } from '@/types';
 
 function makeConfig(sessionId: string): SessionRuntimeConfig {
@@ -23,6 +24,19 @@ function makeConfig(sessionId: string): SessionRuntimeConfig {
     routeIntentEpoch: 0,
     createFilesApi,
     createTerminalAgentApi,
+    // The registry never builds a transport — this only satisfies the config.
+    createTransport: (opts): TerminalTransport => ({
+      mode: opts.mode,
+      onOutput: null,
+      onResize: null,
+      onError: null,
+      send: () => {},
+      sendResize: () => {},
+      flushInputBuffer: () => {},
+      flushPendingResize: () => {},
+      flushAllOutbound: () => {},
+      dispose: () => {},
+    }),
   };
 }
 
