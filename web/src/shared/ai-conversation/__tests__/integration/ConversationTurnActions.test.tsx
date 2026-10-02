@@ -69,6 +69,24 @@ describe('a turn’s actions', () => {
     )
   })
 
+  it('reveals on its own hover, not through a group it does not have', () => {
+    // The one thing about the reveal that *is* decidable here, and the thing
+    // `#1363` round 3 found: this element declared `group/actions` and consumed
+    // `group-hover/actions` **on itself**, which compiles to `X:hover X` — the
+    // same behaviour under a selector claiming an ancestor that does not exist.
+    //
+    // That is a structural claim, not a media-query result, so jsdom can settle
+    // it — even though the *lit or not* half genuinely cannot be tested here.
+    // The action row is a sibling of the answer's row and re-parenting is
+    // forbidden (`conversation.md`), so its own hover is the honest trigger, and
+    // a selector naming a group would be that claim coming back.
+    renderTranscript([userMessage('u1', 'q'), assistantMessage('a1', 'the answer')])
+
+    const actions = screen.getAllByTestId('conversation-turn-actions')[0]
+    expect(actions?.className).toContain('pointer-fine:hover:opacity-100')
+    expect(actions?.className).not.toContain('group-hover')
+  })
+
   it('is not drawn for a turn that has not answered', () => {
     // Nothing to copy, and nothing to say about it.
     renderTranscript([userMessage('u1', 'q'), toolItem('t1'), toolItem('t2')])
