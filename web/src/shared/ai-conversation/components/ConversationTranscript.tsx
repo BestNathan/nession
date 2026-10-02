@@ -152,8 +152,8 @@ function ConversationBody({
   rows: ReturnType<typeof groupRows>
   onReload?: () => void
 }) {
-  if (snapshot.error) {
-    return <ConversationFailure message={snapshot.error} onRetry={onReload} />
+  if (snapshot.threadError) {
+    return <ConversationFailure message={snapshot.threadError} onRetry={onReload} />
   }
   if (snapshot.state === 'not_found') {
     return (
@@ -166,7 +166,7 @@ function ConversationBody({
       </p>
     )
   }
-  if (snapshot.loading && snapshot.items.length === 0) {
+  if (snapshot.threadLoading && snapshot.items.length === 0) {
     return (
       <p
         data-testid="conversation-loading"

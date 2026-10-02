@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import { ConversationView } from '../../components/ConversationView'
@@ -249,6 +249,30 @@ describe('a second provider through the shared conversation', () => {
     expect(body().dataset.streaming).toBeUndefined()
     // One row throughout, never two.
     expect(screen.getAllByTestId('conversation-assistant-body')).toHaveLength(1)
+  })
+
+  it('keeps a list failure out of the thread the reader is reading', async () => {
+    // SC-11: the list and the open thread fail independently. A refresh the
+    // reader did not ask for, about a pane they are not looking at, must not
+    // replace the conversation they are in with an error surface.
+    let handle: AIConversationHandle | undefined
+    const adapter = conversationAdapter()
+    render(<Harness adapter={adapter} onReady={(value) => (handle = value)} />)
+    await waitFor(() => expect(screen.getByTestId('conversation-open')).toBeDefined())
+
+    const turnsBefore = screen.getAllByTestId('conversation-turn').length
+
+    adapter.failList = true
+    act(() => handle?.reload())
+    await waitFor(() =>
+      expect(adapter.calls.filter((call) => call.kind === 'list').length).toBeGreaterThan(1),
+    )
+
+    // The thread is untouched: still open, still the same rows.
+    expect(screen.getByTestId('conversation-open')).toBeDefined()
+    expect(screen.getAllByTestId('conversation-turn')).toHaveLength(turnsBefore)
+    // And nothing replaced it with a failure about something else.
+    expect(screen.queryByTestId('conversation-error')).toBeNull()
   })
 
   it('lets the reader choose instead of guessing, and says what it skipped', async () => {

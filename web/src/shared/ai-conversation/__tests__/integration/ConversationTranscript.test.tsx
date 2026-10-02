@@ -19,10 +19,12 @@ function snapshot(overrides: Partial<AIConversationSnapshot> = {}): AIConversati
     hasMore: false,
     partialTail: false,
     skipped: 0,
-    loading: false,
+    listLoading: false,
+    threadLoading: false,
     loadingOlder: false,
     olderError: null,
-    error: null,
+    listError: null,
+    threadError: null,
     ...overrides,
   }
 }
@@ -105,13 +107,13 @@ describe('ConversationTranscript', () => {
   })
 
   it('says the conversation is loading before anything arrives', () => {
-    renderTranscript({ loading: true, items: [] })
+    renderTranscript({ threadLoading: true, items: [] })
 
     expect(screen.getByTestId('conversation-loading')).toBeDefined()
   })
 
   it('says the conversation is empty once it has loaded and has nothing', () => {
-    renderTranscript({ loading: false, items: [] })
+    renderTranscript({ threadLoading: false, items: [] })
 
     // Unavailable is not empty, and empty is not an error.
     expect(screen.getByTestId('conversation-empty')).toBeDefined()
@@ -120,7 +122,7 @@ describe('ConversationTranscript', () => {
   it('keeps not-found distinct from a failure', () => {
     const { unmount } = render(
       <ConversationTranscript
-        snapshot={snapshot({ state: 'not_found', loading: false })}
+        snapshot={snapshot({ state: 'not_found', threadLoading: false })}
         providerLabel="Claude"
         onLoadOlder={() => false}
       />,
@@ -133,7 +135,7 @@ describe('ConversationTranscript', () => {
     // failed is not a conversation that does not exist.
     render(
       <ConversationTranscript
-        snapshot={snapshot({ state: 'error', error: 'the host refused', loading: false })}
+        snapshot={snapshot({ state: 'error', threadError: 'the host refused', threadLoading: false })}
         providerLabel="Claude"
         onLoadOlder={() => false}
       />,
