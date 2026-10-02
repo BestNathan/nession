@@ -12,7 +12,6 @@ import {
 import type { EnvFileRef } from '@/types';
 import {
   attachInfoAtom,
-  effectiveModeAtom,
   envRefsAtom,
   manualOverrideAtom,
   orderedUrlsAtom,
@@ -134,7 +133,6 @@ export function useTerminalOrchestration({
   const [sessionId] = useAtom(sessionIdAtom);
   const [sessionName] = useAtom(sessionNameAtom);
   const [attachInfo] = useAtom(attachInfoAtom);
-  const [effectiveMode] = useAtom(effectiveModeAtom);
   const [manualOverride] = useAtom(manualOverrideAtom);
   const [orderedUrls] = useAtom(orderedUrlsAtom);
   const [envRefs] = useAtom(envRefsAtom);
@@ -176,6 +174,13 @@ export function useTerminalOrchestration({
   // attaching: idle, zero attempts.
   const terminalState = snapshot?.phase ?? 'idle';
   const reconnectCount = snapshot?.reconnectCount ?? 0;
+  // The effective transport mode, derived — never stored (#1309 SC-02): the
+  // static intent comes from the attach choice, and a runtime that fell back
+  // to relay says so on its own snapshot. The deleted effectiveModeAtom read
+  // the fallback from an atom the runtime's React mirror wrote, which is one
+  // of the two mirrors this refactor removes.
+  const effectiveMode: 'p2p' | 'relay' =
+    (snapshot?.forcedRelay ?? false) || attachInfo?.mode !== 'p2p' ? 'relay' : 'p2p';
 
   const handleDisconnect = useEndRelayOnDisconnect({
     effectiveMode, serverConnection: relayServer, sessionId, onDisconnect,

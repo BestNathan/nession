@@ -31,6 +31,15 @@ export interface SessionRuntimeConfig {
   attachInfo: AttachInfo | null;
   orderedUrls: string[] | null;
   manualOverride: string | null;
+  /**
+   * The STATIC relay intent (the attach choice was not P2P). The dynamic
+   * fallback — every P2P candidate failed, so the session continues through
+   * the server — is runtime-owned state on top of this, never a config round
+   * trip: carrying the effective value here let a stale React-side `false`
+   * clobber the runtime's own fallback on every updateContext (#1309 SC-02).
+   * The effective mode is `forcedRelay || internalFallback`, published on the
+   * snapshot.
+   */
   forcedRelay: boolean;
   addressPlan: AddressPlan;
   /** User-initiated route identity (manual switch); resets candidate index when changed. */
@@ -99,6 +108,13 @@ export interface SessionRuntimeSnapshot extends RuntimeMirrorSnapshot {
   sessionId: string;
   activeUrl: string | null;
   waitingForAddressPlan: boolean;
+  /**
+   * The EFFECTIVE relay mode: static intent OR the runtime's own fallback
+   * (#1309 SC-02). This is the only place the fallback is published — React
+   * consumers derive the effective mode from it instead of mirroring it into
+   * an atom of their own.
+   */
+  forcedRelay: boolean;
   transportReady: boolean;
   lastResize: { cols: number; rows: number } | null;
   reconnectCount: number;
@@ -132,6 +148,7 @@ function isSameSnapshot(a: SessionRuntimeSnapshot, b: SessionRuntimeSnapshot): b
     && a.agentTerminalApi === b.agentTerminalApi
     && a.activeUrl === b.activeUrl
     && a.waitingForAddressPlan === b.waitingForAddressPlan
+    && a.forcedRelay === b.forcedRelay
     && a.transportReady === b.transportReady
     && a.lastResize?.cols === b.lastResize?.cols
     && a.lastResize?.rows === b.lastResize?.rows
@@ -170,6 +187,14 @@ export class SessionRuntime {
   private transportGeneration = 0;
   private lastResize: { cols: number; rows: number } | null = null;
   private transportReady = false;
+  /**
+   * Runtime-owned dynamic relay fallback: every P2P candidate failed, so the
+   * session continues through the server. Deliberately NOT part of the config
+   * — it is a verdict the runtime reached, not an intent the caller holds. It
+   * is cleared only by a new route intent or a fresh address plan (both arrive
+   * via updateContext), never by a steady-state config sync (#1309 SC-02).
+   */
+  private forcedRelayFallback = false;
   /** Transport generation for which client.attach succeeded. */
   private attachedTransportGeneration: number | null = null;
   /**
@@ -299,7 +324,7 @@ export class SessionRuntime {
       phase: this.attachState.phase,
       transportGeneration: this.transportGeneration,
       connectionState: this.agentWs?.connectionState ?? 'disconnected',
-      agentTerminalApi: this.config.forcedRelay ? null : this.agentTerminalApi,
+      agentTerminalApi: this.effectiveForcedRelay ? null : this.agentTerminalApi,
     };
   }
 
@@ -317,7 +342,7 @@ export class SessionRuntime {
     }
     this.transportReady = ready;
     if (ready) {
-      if (this.config.forcedRelay && this.attachState.phase === 'idle') {
+      if (this.effectiveForcedRelay && this.attachState.phase === 'idle') {
         this.attachController.dispatch({ type: 'SESSION_SELECTED' });
       }
       this.maybeStartP2PAttach();
@@ -332,6 +357,16 @@ export class SessionRuntime {
     }
     this.lastResize = size;
     this.emitSnapshot();
+  }
+
+  /**
+   * The effective relay mode: static config intent OR the runtime's own
+   * fallback. Every behavioral read of "are we relay" goes through here —
+   * reading `config.forcedRelay` directly would miss the fallback, and the
+   * fallback is what keeps a session alive after its candidates fail.
+   */
+  private get effectiveForcedRelay(): boolean {
+    return this.config.forcedRelay || this.forcedRelayFallback;
   }
 
   subscribeAttachOutcomes(handler: (result: AttachTransitionResult) => void): () => void {
@@ -433,16 +468,26 @@ export class SessionRuntime {
     const routeChanged =
       next.routeIntentEpoch !== undefined
       && next.routeIntentEpoch !== this.routeIntentEpoch;
+    const planUrlsChanged =
+      next.addressPlan !== undefined
+      && next.addressPlan.urls.join('|') !== this.config.addressPlan.urls.join('|');
     this.config = { ...this.config, ...next };
     if (next.routeIntentEpoch !== undefined) {
       this.routeIntentEpoch = next.routeIntentEpoch;
+    }
+    if (routeChanged || planUrlsChanged) {
+      // The fallback was a verdict about the old route's candidates; a new
+      // route intent or a fresh address plan retries P2P (#1309 SC-02). A
+      // steady-state config sync touches neither and must NOT clear it — that
+      // round trip is what used to clobber the fallback.
+      this.forcedRelayFallback = false;
     }
 
     this.addressPolicy.update({
       attachInfo: this.config.attachInfo,
       orderedUrls: this.config.orderedUrls,
       manualOverride: this.config.manualOverride,
-      forcedRelay: this.config.forcedRelay,
+      forcedRelay: this.effectiveForcedRelay,
       addressPlan: this.config.addressPlan,
       addressIndex: this.addressPolicy.currentIndex,
     });
@@ -464,10 +509,10 @@ export class SessionRuntime {
   }
 
   private applyForceRelay(): void {
-    if (this.config.forcedRelay) {
+    if (this.effectiveForcedRelay) {
       return;
     }
-    this.config = { ...this.config, forcedRelay: true };
+    this.forcedRelayFallback = true;
     this.addressPolicy.update({ forcedRelay: true });
     this.attachedTransportGeneration = null;
     this.attachController.cancelActiveAttach();
@@ -492,7 +537,7 @@ export class SessionRuntime {
   }
 
   private maybeStartP2PAttach(): void {
-    if (this.config.forcedRelay || !this.agentWs || !this.agentTerminalApi) {
+    if (this.effectiveForcedRelay || !this.agentWs || !this.agentTerminalApi) {
       return;
     }
     if (this.agentWs.connectionState !== 'connected') {
@@ -551,7 +596,7 @@ export class SessionRuntime {
    * construction instead of by React effect ordering).
    */
   buildTransport(): TerminalTransport {
-    const relay = this.config.forcedRelay;
+    const relay = this.effectiveForcedRelay;
     const transport = this.config.createTransport({
       mode: relay ? 'relay' : 'p2p',
       sessionName: this.config.sessionName,
@@ -669,6 +714,7 @@ export class SessionRuntime {
       sessionId: this.sessionId,
       activeUrl: this.activeUrl,
       waitingForAddressPlan: this.waitingForAddressPlan,
+      forcedRelay: this.effectiveForcedRelay,
       transportReady: this.transportReady,
       lastResize: this.lastResize,
       reconnectCount: this.attachState.reconnectCount,
@@ -855,7 +901,7 @@ export class SessionRuntime {
   private wireRelayServerHandler(): void {
     this.teardownRelayServerHandler();
     const conn = this.config.serverConnection;
-    if (!this.config.forcedRelay || !conn || !this.config.attachInfo) {
+    if (!this.effectiveForcedRelay || !conn || !this.config.attachInfo) {
       return;
     }
 
@@ -891,7 +937,7 @@ export class SessionRuntime {
     if (!conn || !this.config.attachInfo) {
       return;
     }
-    if (!this.config.forcedRelay) {
+    if (!this.effectiveForcedRelay) {
       return; // P2P transport active — nothing to drive
     }
     if (!this.transportReady) {
@@ -989,7 +1035,7 @@ export class SessionRuntime {
     const url = this.addressPolicy.activeUrl;
     const token = this.config.attachInfo?.connection_token;
 
-    if (!url || !this.config.attachInfo || this.config.forcedRelay) {
+    if (!url || !this.config.attachInfo || this.effectiveForcedRelay) {
       const hadBinding = this.agentWs !== null || this.agentTerminalApi !== null;
       this.teardownConnectionHandler();
       this.attachController.cancelActiveAttach();

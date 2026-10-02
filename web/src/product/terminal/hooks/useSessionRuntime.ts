@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import {
-  attachInfoAtom, effectiveModeAtom, forcedRelayAtom, manualOverrideAtom,
+  attachInfoAtom, manualOverrideAtom,
   orderedUrlsAtom, sessionIdAtom, sessionNameAtom,
 } from '@/product/session/state';
 import { routeIntentEpochAtom } from '@/platform/attach/state';
-import { terminalSessionStateAtom } from '@/product/terminal/state';
 import { inputDropAtomFamily } from '@/product/terminal/state/ui';
 import { useAddressPlan } from '@/shared/hooks/useAddressPlan';
 import { sessionRuntimeRegistry } from '@/platform/session-runtime/SessionRuntimeRegistry';
@@ -58,6 +57,7 @@ const EMPTY_RUNTIME_SNAPSHOT: SessionRuntimeSnapshot = {
   agentTerminalApi: null,
   activeUrl: null,
   waitingForAddressPlan: false,
+  forcedRelay: false,
   transportReady: false,
   lastResize: null,
   reconnectCount: 0,
@@ -71,12 +71,6 @@ export function useSessionRuntimeSnapshot(runtime: SessionRuntime | null): Sessi
   const getSnapshot = runtime?.getSnapshot ?? EMPTY_RUNTIME_GET_SNAPSHOT;
   const snapshot = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
   return runtime ? snapshot : null;
-}
-
-function useForcedRelayReset(planUrlsKey: string, setForcedRelay: (v: boolean) => void): void {
-  useEffect(() => {
-    setForcedRelay(false);
-  }, [planUrlsKey, setForcedRelay]);
 }
 
 function useRuntimeOwnership(
@@ -124,16 +118,13 @@ interface RuntimeConnectionSyncResult {
 function applyRuntimeMirrorSnapshot(opts: {
   snapshot: import('@/platform/session-runtime/SessionRuntime').RuntimeMirrorSnapshot;
   inP2PTransport: boolean;
-  setTerminalState: (s: import('@/product/terminal/state/session').TerminalStatus) => void;
   setAgentTerminalApi: (api: TerminalAgentApi | null) => void;
   setConnectionState: (s: ConnectionState) => void;
 }): void {
   const {
     snapshot, inP2PTransport,
-    setTerminalState,
     setAgentTerminalApi, setConnectionState,
   } = opts;
-  setTerminalState(snapshot.phase);
   // Both mirrors are gated to the P2P transport: outside it the mirror already
   // carries null / 'disconnected', and the gate keeps a stale value from
   // leaking during the same-render flip.
@@ -146,36 +137,18 @@ function handleRuntimeEvent(
   ctx: {
     runtime: SessionRuntime;
     inP2PTransport: boolean;
-    setTerminalState: (s: import('@/product/terminal/state/session').TerminalStatus) => void;
-    setForcedRelay: (v: boolean) => void;
     setAgentTerminalApi: (api: TerminalAgentApi | null) => void;
   },
 ): void {
-  const {
-    runtime, inP2PTransport,
-    setTerminalState, setForcedRelay, setAgentTerminalApi,
-  } = ctx;
-  if (event.type === 'next-candidate') {
-    setTerminalState('connecting');
-    if (inP2PTransport) {
-      setAgentTerminalApi(runtime.getAgentTerminalApi());
-    }
-    return;
-  }
-  if (event.type === 'force-relay') {
-    setTerminalState('connecting');
-    setForcedRelay(true);
-    return;
-  }
-  if (event.type === 'transport-exhausted') {
-    setTerminalState('failed');
-    return;
-  }
-  if (event.type === 'route-intent-changed') {
-    setTerminalState(event.phase);
-    if (inP2PTransport) {
-      setAgentTerminalApi(runtime.getAgentTerminalApi());
-    }
+  const { runtime, inP2PTransport, setAgentTerminalApi } = ctx;
+  // Only live API binding remains here (#1309 SC-02): the phase, the relay
+  // fallback, and exhaustion all publish through the runtime snapshot, so an
+  // event that carried no identity change needs no React-side action at all.
+  if (
+    (event.type === 'next-candidate' || event.type === 'route-intent-changed')
+    && inP2PTransport
+  ) {
+    setAgentTerminalApi(runtime.getAgentTerminalApi());
   }
 }
 
@@ -185,8 +158,6 @@ function useRuntimeConnectionSync(opts: {
   runtimeConfig: SessionRuntimeConfig | null;
   inP2PTransport: boolean;
   configOwner: boolean;
-  setForcedRelay: (v: boolean) => void;
-  setTerminalState: (s: import('@/product/terminal/state/session').TerminalStatus) => void;
 }): RuntimeConnectionSyncResult {
   const {
     sessionId,
@@ -194,8 +165,6 @@ function useRuntimeConnectionSync(opts: {
     runtimeConfig,
     inP2PTransport,
     configOwner,
-    setForcedRelay,
-    setTerminalState,
   } = opts;
   const [agentTerminalApi, setAgentTerminalApi] = useState<TerminalAgentApi | null>(null);
   const [connectionState, setConnectionState] = useState<ConnectionState>('disconnected');
@@ -228,8 +197,6 @@ function useRuntimeConnectionSync(opts: {
       handleRuntimeEvent(event, {
         runtime,
         inP2PTransport,
-        setTerminalState,
-        setForcedRelay,
         setAgentTerminalApi,
       });
     });
@@ -242,7 +209,6 @@ function useRuntimeConnectionSync(opts: {
       applyRuntimeMirrorSnapshot({
         snapshot,
         inP2PTransport,
-        setTerminalState,
         setAgentTerminalApi,
         setConnectionState,
       });
@@ -260,8 +226,6 @@ function useRuntimeConnectionSync(opts: {
     runtime,
     runtimeConfig,
     inP2PTransport,
-    setForcedRelay,
-    setTerminalState,
     configOwner,
   ]);
 
@@ -284,24 +248,24 @@ export function useSessionRuntime(options: UseSessionRuntimeOptions): UseSession
   const [attachInfo] = useAtom(attachInfoAtom);
   const [orderedUrls] = useAtom(orderedUrlsAtom);
   const [manualOverride] = useAtom(manualOverrideAtom);
-  const [forcedRelayState, setForcedRelay] = useAtom(forcedRelayAtom);
-  const effectiveMode = useAtomValue(effectiveModeAtom);
   const routeIntentEpoch = useAtomValue(routeIntentEpochAtom);
-  const setTerminalState = useSetAtom(terminalSessionStateAtom);
   // The session's own record of input that was lost rather than delivered
   // (#1307 SC-09). Kept in an atom — UI state, not a runtime fact — so the
   // notice survives the transport generation that recorded it; the runtime
   // routes the transport's report here through its config.
   const setInputDrop = useSetAtom(inputDropAtomFamily(sessionId));
 
-  const forcedRelay = manualOverride ? false : forcedRelayState;
   const addressPlan = useAddressPlan(attachInfo, { orderedUrls, manualUrl: manualOverride });
-  const planUrlsKey = addressPlan.urls.join(',');
   const addressPlanReady = addressPlan.ready;
 
-  useForcedRelayReset(planUrlsKey, setForcedRelay);
-
-  const inP2PTransport = effectiveMode === 'p2p' && attachInfo?.mode === 'p2p' && !forcedRelay;
+  // Relay has two sources with two owners (#1309 SC-02): the static intent
+  // (the attach choice was not P2P) is a config fact this hook computes, and
+  // the dynamic fallback (every candidate failed) is a verdict the runtime
+  // reached and publishes on its snapshot. The deleted forcedRelayAtom used
+  // to round-trip the verdict through React — and a steady-state config sync
+  // could clobber it on the way back. The config now carries the intent only;
+  // the effective mode is read from the snapshot below.
+  const p2pIntent = attachInfo?.mode === 'p2p';
 
   const runtimeConfig = useMemo((): SessionRuntimeConfig | null => {
     if (!sessionId || !attachInfo) {
@@ -313,8 +277,10 @@ export function useSessionRuntime(options: UseSessionRuntimeOptions): UseSession
       attachInfo,
       orderedUrls,
       manualOverride,
-      forcedRelay: inP2PTransport ? forcedRelay : true,
-      addressPlan: inP2PTransport
+      // Static intent only — the runtime's own fallback lives inside the
+      // runtime and must never be overwritten by a config sync.
+      forcedRelay: !p2pIntent,
+      addressPlan: p2pIntent
         ? { urls: addressPlan.urls, ready: addressPlanReady }
         : { urls: [], ready: true },
       routeIntentEpoch,
@@ -338,8 +304,7 @@ export function useSessionRuntime(options: UseSessionRuntimeOptions): UseSession
     attachInfo,
     orderedUrls,
     manualOverride,
-    forcedRelay,
-    inP2PTransport,
+    p2pIntent,
     addressPlanReady,
     addressPlan.urls,
     options.serverConnection,
@@ -351,14 +316,19 @@ export function useSessionRuntime(options: UseSessionRuntimeOptions): UseSession
   const runtime = useRuntimeOwnership(sessionId, attachInfo?.session_id, runtimeConfig);
   const snapshot = useSessionRuntimeSnapshot(runtime);
 
+  // The effective transport: P2P only when the intent is P2P AND the runtime
+  // has not fallen back to relay. Before the runtime exists (no snapshot)
+  // there is no fallback, so the intent alone decides — the same initial
+  // value the deleted atom carried.
+  const runtimeForcedRelay = snapshot?.forcedRelay ?? !p2pIntent;
+  const inP2PTransport = p2pIntent && !runtimeForcedRelay;
+
   const { agentTerminalApi, connectionState } = useRuntimeConnectionSync({
     sessionId,
     runtime,
     runtimeConfig,
     inP2PTransport,
     configOwner: options.configOwner ?? false,
-    setForcedRelay,
-    setTerminalState,
   });
 
   const fileOps: FileOps | null = useMemo(() => {

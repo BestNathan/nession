@@ -9,16 +9,3 @@ export type { TerminalSession, TerminalStatus } from '@/platform/terminal-runtim
 export function isTerminalLive(state: TerminalStatus): boolean {
   return state === 'attached';
 }
-
-/**
- * Current terminal connection status — driven by the attach/disconnect/switch
- * actions in `product/session/state` and the state machine effect in the
- * terminal hooks.
- *
- * Re-exported, not defined: it lives in `platform/attach/state/transport.ts`,
- * below both this module and the `product/session` actions that write it.
- * Defining it here instead makes `product/session/state` and this file import
- * each other — which is what an earlier revision of this refactor did, and it
- * deterministically broke relay-mode terminal I/O in e2e.
- */
-export { terminalSessionStateAtom } from '@/platform/attach/state/transport';

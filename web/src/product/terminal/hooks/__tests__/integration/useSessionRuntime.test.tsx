@@ -9,11 +9,9 @@ import {
   sessionNameAtom,
   attachInfoAtom,
   orderedUrlsAtom,
-  forcedRelayAtom,
   manualOverrideAtom,
 } from '@/product/session/state';
 import { routeIntentEpochAtom } from '@/platform/attach/state';
-import { terminalSessionStateAtom } from '@/product/terminal/state';
 import type { ConnectionState } from '@/platform/socket/types';
 import type { RelayServerTransport } from '@/platform/attach/relayServerConnection';
 import type { AttachInfo } from '@/types';
@@ -93,7 +91,6 @@ function makeStore(sessionId: string, token: string) {
   store.set(sessionNameAtom, sessionId.split(':')[1] ?? sessionId);
   store.set(attachInfoAtom, makeAttachInfo(sessionId, token));
   store.set(orderedUrlsAtom, ['ws://shared-agent/ws']);
-  store.set(terminalSessionStateAtom, 'connecting');
   return store;
 }
 
@@ -287,7 +284,7 @@ describe('useSessionRuntime integration', () => {
     expect(renders.mock.calls.length).toBe(settled);
   });
 
-  it('clears P2P state when forced to relay', async () => {
+  it('clears P2P state when the intent flips to relay', async () => {
     const store = makeStore('agent:a', 'token-a');
     const { result, rerender } = renderHook(
       () => useSessionRuntime({ configOwner: true }),
@@ -299,7 +296,7 @@ describe('useSessionRuntime integration', () => {
     });
 
     act(() => {
-      store.set(forcedRelayAtom, true);
+      store.set(attachInfoAtom, { mode: 'relay', session_id: 'agent:a' });
     });
     rerender();
 
@@ -355,7 +352,9 @@ describe('useSessionRuntime integration', () => {
 
     expect(disconnectSpy).toHaveBeenCalledTimes(1);
     expect(shell.result.current.activeUrl).toBe('ws://b/ws');
-    expect(store.get(forcedRelayAtom)).toBe(false);
+    // Rotation alone never forces relay: the runtime publishes the effective
+    // mode on its own snapshot (#1309 SC-02).
+    expect(shared.getSnapshot().forcedRelay).toBe(false);
 
     disconnectSpy.mockRestore();
     shell.unmount();
@@ -396,7 +395,7 @@ describe('useSessionRuntime integration', () => {
     expect(result.current.activeUrl).toBe('ws://b/ws');
   });
 
-  it('mirrors force-relay from runtime event to forcedRelayAtom', async () => {
+  it('force-relay fallback flips the runtime to relay and clears the P2P mirrors', async () => {
     addressPlanState.urls = ['ws://a/ws', 'ws://b/ws'];
 
     const store = makeStore('agent:failover-relay', 'token-a');
@@ -424,12 +423,13 @@ describe('useSessionRuntime integration', () => {
     });
     rerender();
 
-    expect(store.get(forcedRelayAtom)).toBe(true);
-    rerender();
+    // The fallback is runtime-owned (#1309 SC-02): published on the snapshot,
+    // and the hook's P2P mirrors follow it without any atom in between.
+    expect(result.current.snapshot?.forcedRelay).toBe(true);
     expect(result.current.agentTerminalApi).toBeNull();
   });
 
-  it('mirrors transport-exhausted to failed terminal state on manual route', async () => {
+  it('publishes failed phase on transport-exhausted on manual route', async () => {
     addressPlanState.urls = ['ws://manual/ws'];
 
     const store = makeStore('agent:manual-fail', 'token-a');
@@ -455,7 +455,7 @@ describe('useSessionRuntime integration', () => {
     });
     rerender();
 
-    expect(store.get(terminalSessionStateAtom)).toBe('failed');
+    expect(result.current.snapshot?.phase).toBe('failed');
   });
 
   it('retains runtime in relay mode so attach can drive beginRelay', async () => {
@@ -476,20 +476,19 @@ describe('useSessionRuntime integration', () => {
     expect(result.current.runtime!.sessionId).toBe('agent:relay');
   });
 
-  it('config owner mirrors the fresh runtime snapshot over a pre-set terminal state', async () => {
+  it('exposes the fresh runtime phase on the snapshot — no React mirror to consult', async () => {
     const store = makeStore('agent:a', 'token-a');
-    store.set(terminalSessionStateAtom, 'attached');
 
-    renderHook(
+    const { result } = renderHook(
       () => useSessionRuntime({ configOwner: true }),
       { wrapper: wrapper(store) },
     );
 
-    // The attach-phase mirror is unconditional: a fresh runtime has already
-    // selected its session at construction (#1309 SC-01), and the atom
-    // converges to runtime truth instead of holding a stale value.
+    // A fresh runtime has already selected its session at construction (#1309
+    // SC-01), and the hook's snapshot IS the phase — there is no mirror atom
+    // that could hold a stale value (#1309 SC-02).
     await waitFor(() => {
-      expect(store.get(terminalSessionStateAtom)).toBe('connecting');
+      expect(result.current.snapshot?.phase).toBe('connecting');
     });
   });
 
@@ -565,20 +564,19 @@ describe('useSessionRuntime integration', () => {
     });
 
     await waitFor(() => {
-      expect(store.get(forcedRelayAtom)).toBe(true);
+      expect(result.current.snapshot?.forcedRelay).toBe(true);
     });
     await waitFor(() => {
       expect(beginRelay).toHaveBeenCalledTimes(1);
     });
     await waitFor(() => {
-      expect(store.get(terminalSessionStateAtom)).toBe('attached');
+      expect(result.current.snapshot?.phase).toBe('attached');
     });
     expect(result.current.agentTerminalApi).toBeNull();
   });
 
   it('applies route-intent snapshot when config owner updates after subscribing', async () => {
     const store = makeStore('agent:a', 'token-a');
-    store.set(terminalSessionStateAtom, 'attached');
 
     const { result, rerender } = renderHook(
       () => useSessionRuntime({ configOwner: true }),
@@ -587,9 +585,10 @@ describe('useSessionRuntime integration', () => {
 
     await waitForRuntime(() => result.current.runtime);
     const rt = result.current.runtime!;
-    rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
     rt.attachController.dispatch({ type: 'ATTACH_OK' });
-    store.set(terminalSessionStateAtom, 'attached');
+    await waitFor(() => {
+      expect(result.current.snapshot?.phase).toBe('attached');
+    });
 
     act(() => {
       store.set(manualOverrideAtom, 'ws://shared-agent/ws');
@@ -598,7 +597,7 @@ describe('useSessionRuntime integration', () => {
     rerender();
 
     await waitFor(() => {
-      expect(store.get(terminalSessionStateAtom)).toBe('connecting');
+      expect(result.current.snapshot?.phase).toBe('connecting');
     });
   });
 });

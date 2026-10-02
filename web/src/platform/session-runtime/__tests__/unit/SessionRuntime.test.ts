@@ -620,6 +620,67 @@ describe('SessionRuntime', () => {
   });
 
 
+  describe('relay fallback ownership (#1309 SC-02)', () => {
+    /** Drive a default (two-candidate) runtime into its relay fallback. */
+    function forceRelayNow(rt: InstanceType<typeof SessionRuntime>): void {
+      rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
+      expect(rt.onCandidateDisconnected()).toBe('next-candidate');
+      expect(rt.onCandidateDisconnected()).toBe('force-relay');
+      expect(rt.getSnapshot().forcedRelay).toBe(true);
+    }
+
+    it('a steady-state config sync does not clobber the runtime-owned fallback', async () => {
+      const serverConnection = makeRelayServerConnection('connected');
+      const rt = new SessionRuntime(makeConfig({ serverConnection }));
+      rt.setTransportReady(true);
+      forceRelayNow(rt);
+      await flushMicrotasks();
+      expect(rt.attachState.phase).toBe('attached');
+
+      // The config channel carries the static intent only — `false` here is
+      // what used to tear the fallback down on every registry.update.
+      rt.updateContext({ sessionName: 's1', forcedRelay: false });
+      expect(rt.getSnapshot().forcedRelay).toBe(true);
+      expect(rt.attachState.phase).toBe('attached');
+      expect(serverConnection.beginRelay).toHaveBeenCalledTimes(1);
+      rt.dispose();
+    });
+
+    it('a route intent change clears the fallback and rebuilds P2P', async () => {
+      const serverConnection = makeRelayServerConnection('connected');
+      const rt = new SessionRuntime(makeConfig({ serverConnection }));
+      rt.setTransportReady(true);
+      forceRelayNow(rt);
+      await flushMicrotasks();
+      const wsBefore = wsInstances.length;
+
+      rt.updateContext({ routeIntentEpoch: 1, manualOverride: 'ws://a/ws' });
+      expect(rt.getSnapshot().forcedRelay).toBe(false);
+      expect(rt.activeUrl).toBe('ws://a/ws');
+      expect(wsInstances.length).toBeGreaterThan(wsBefore);
+      rt.dispose();
+    });
+
+    it('a fresh address plan clears the fallback (the probe verdict it was based on is stale)', async () => {
+      const serverConnection = makeRelayServerConnection('connected');
+      const rt = new SessionRuntime(makeConfig({ serverConnection }));
+      rt.setTransportReady(true);
+      forceRelayNow(rt);
+      await flushMicrotasks();
+      const wsBefore = wsInstances.length;
+
+      rt.updateContext({
+        orderedUrls: ['ws://c/ws'],
+        addressPlan: { urls: ['ws://c/ws'], ready: true },
+      });
+      expect(rt.getSnapshot().forcedRelay).toBe(false);
+      expect(rt.activeUrl).toBe('ws://c/ws');
+      expect(wsInstances.length).toBeGreaterThan(wsBefore);
+      rt.dispose();
+    });
+  });
+
+
   describe('self-driving attach retry', () => {
     afterEach(() => {
       vi.useRealTimers();

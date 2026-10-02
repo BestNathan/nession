@@ -7,17 +7,13 @@
 import { atom } from 'jotai';
 import type { AttachInfo, EnvFileRef, Session, ProbedAddress } from '@/types';
 import type { AttachChoice } from '@/product/session/components/AttachDialog';
-import {
-  routeIntentEpochAtom,
-  terminalSessionStateAtom,
-} from '@/platform/attach/state/transport';
+import { routeIntentEpochAtom } from '@/platform/attach/state/transport';
 
 export const sessionIdAtom = atom('');
 export const sessionNameAtom = atom('');
 export const attachInfoAtom = atom<AttachInfo | null>(null);
 export const orderedUrlsAtom = atom<string[]>([]);
 export const manualOverrideAtom = atom<string | null>(null);
-export const forcedRelayAtom = atom(false);
 /** The renderer this attachment was opened with, from its AttachChoice. */
 export const rendererAtom = atom<'webgl' | 'canvas'>('webgl');
 /** Env files this attachment was opened with, from its AttachChoice. */
@@ -79,7 +75,6 @@ export const attachToSessionAtom = atom(
     set(rendererAtom, choice.renderer);
     set(envRefsAtom, choice.envRefs ?? []);
     set(manualOverrideAtom, choice.selectedUrl ?? null);
-    set(forcedRelayAtom, false);
     set(attachDialogSessionAtom, null);
     set(attachDialogIntentAtom, 'attach');
     navigate(`/terminal/${encodeURIComponent(session.session_id)}`);
@@ -94,11 +89,9 @@ export const disconnectAtom = atom(
     set(attachInfoAtom, null);
     set(orderedUrlsAtom, []);
     set(manualOverrideAtom, null);
-    set(forcedRelayAtom, false);
     set(envRefsAtom, []);
     set(attachDialogSessionAtom, null);
     set(attachDialogIntentAtom, 'attach');
-    set(terminalSessionStateAtom, 'idle');
     navigate('/');
   },
 );

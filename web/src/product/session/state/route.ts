@@ -6,23 +6,16 @@
 // constraint, not taste, is what keeps them here (#801 Phase 5).
 import { atom } from 'jotai';
 import { probeResultsAtom } from '@/product/agent/state/probe';
-import {
-  routeIntentEpochAtom,
-  terminalSessionStateAtom,
-} from '@/platform/attach/state/transport';
+import { routeIntentEpochAtom } from '@/platform/attach/state/transport';
+import { sessionRuntimeRegistry } from '@/platform/session-runtime/SessionRuntimeRegistry';
 import { resolveAutoP2pUrl } from '@/platform/attach/resolveAutoP2pUrl';
 import {
   agentIdAtom,
   attachInfoAtom,
-  forcedRelayAtom,
   manualOverrideAtom,
   orderedUrlsAtom,
+  sessionIdAtom,
 } from './session';
-
-export const effectiveModeAtom = atom<'p2p' | 'relay'>((get) => {
-  if (get(forcedRelayAtom)) { return 'relay'; }
-  return get(attachInfoAtom)?.mode === 'p2p' ? 'p2p' : 'relay';
-});
 
 export const switchAddressAtom = atom(
   null,
@@ -58,8 +51,13 @@ export const switchAddressAtom = atom(
         get(attachInfoAtom),
       );
       if (autoUrl === currentOverride) {
-        const terminalState = get(terminalSessionStateAtom);
-        if (terminalState !== 'failed') {
+        // The failed-phase read-back asks the runtime — the only owner of the
+        // attach phase (#1309 SC-01). No runtime (nothing attached, or the
+        // terminal subtree unmounted) reads as not-failed: there is no live
+        // attach to recover, so clearing the override is enough.
+        const terminalPhase =
+          sessionRuntimeRegistry.get(get(sessionIdAtom))?.getSnapshot().phase ?? 'idle';
+        if (terminalPhase !== 'failed') {
           set(manualOverrideAtom, null);
           return;
         }
@@ -70,7 +68,6 @@ export const switchAddressAtom = atom(
     }
 
     set(manualOverrideAtom, url);
-    set(forcedRelayAtom, false);
     // Bump the route epoch so SessionRuntime detects the route change and the
     // terminal rebuilds its view against the new socket — even when the
     // resolved activeUrl does not change (e.g. Auto → an explicit route that
