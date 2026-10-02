@@ -18,7 +18,7 @@
  * a promise.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertCircle } from 'lucide-react'
 import {
   MessageScroller,
@@ -31,7 +31,7 @@ import {
 import { cn } from '@/shared/lib/utils'
 import { chromeSansRole } from '@/shared/typography/chromeRoles'
 import type { AIConversationSnapshot } from '../runtime/ConversationRuntime'
-import { groupRows } from '../model/grouping'
+import { carryGroupKeys, groupRows, rememberGroups } from '../model/grouping'
 import { isStreaming } from './streaming'
 import { ConversationMessage } from './ConversationMessage'
 import { ToolActivity, UnknownActivity } from './ToolActivity'
@@ -110,7 +110,17 @@ function TranscriptContent({
     onLoadOlder,
   ])
 
-  const rows = groupRows(snapshot.items)
+  const grouped = useMemo(() => groupRows(snapshot.items), [snapshot.items])
+  // What each group was last rendered as. Kept here rather than in `groupRows`
+  // because it is history, not a function of the items — see `carryGroupKeys`.
+  const remembered = useRef(new Map<string, string>())
+  const rows = useMemo(() => carryGroupKeys(grouped, remembered.current), [grouped])
+  // Written after the render that used it, so a render that never commits
+  // leaves nothing behind.
+  useEffect(() => {
+    rememberGroups(rows, remembered.current)
+  }, [rows])
+
   const lastIndex = snapshot.items.length - 1
   const lastId = lastIndex >= 0 ? snapshot.items[lastIndex]?.id : undefined
 

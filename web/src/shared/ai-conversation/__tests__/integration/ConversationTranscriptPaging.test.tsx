@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
 import { ConversationTranscript } from '../../components/ConversationTranscript'
 import type { AIConversationSnapshot } from '../../runtime/ConversationRuntime'
-import { transcript } from '../fixtures/items'
+import { toolItem, transcript } from '../fixtures/items'
 
 /**
  * Reading backwards through history, which is a *state* the reader is in, not
@@ -143,5 +143,46 @@ describe('reading backwards through the transcript', () => {
     // asking for "older" before there is a newest would be asking for nothing.
     expect(onLoadOlder).not.toHaveBeenCalled()
     expect(screen.getByTestId('conversation-empty')).toBeDefined()
+  })
+})
+
+describe('a work group across a prepend', () => {
+  it('stays open and keeps focus when an older page extends it', () => {
+    // #1363: "load older / prepend 后 disclosure state 和 reading anchor 保持稳定";
+    // SC-20 wants it to hold focus too. A group is keyed by its *first* call —
+    // load-bearing for the append case, where the group must keep its identity
+    // as it grows — and a prepend that reaches across the group's start changes
+    // which call that is. The row is then a different element, so the reader's
+    // expanded group closes under them and anything focused inside it is gone.
+    const { rerender } = render(
+      <ConversationTranscript
+        snapshot={snapshot({ items: [toolItem('a'), toolItem('b')] })}
+        providerLabel="Claude"
+        onLoadOlder={() => false}
+      />,
+    )
+
+    const group = screen.getByTestId('conversation-tool-group') as HTMLDetailsElement
+    group.open = true
+    const inner = screen.getAllByRole('button')[0] as HTMLElement
+    inner.focus()
+    expect(document.activeElement).toBe(inner)
+
+    // An older page arrives whose last call is contiguous with the group, so the
+    // run now starts at `x` instead of `a`.
+    rerender(
+      <ConversationTranscript
+        snapshot={snapshot({ items: [toolItem('x'), toolItem('a'), toolItem('b')] })}
+        providerLabel="Claude"
+        onLoadOlder={() => false}
+      />,
+    )
+
+    const after = screen.getByTestId('conversation-tool-group') as HTMLDetailsElement
+    // The same element, so its open state and its focused subtree came with it.
+    expect(after).toBe(group)
+    expect(after.open).toBe(true)
+    expect(after.dataset.count).toBe('3')
+    expect(document.activeElement).toBe(inner)
   })
 })
