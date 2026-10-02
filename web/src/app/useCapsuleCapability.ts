@@ -6,6 +6,7 @@ import {
   type CapsuleCapabilityInput,
 } from '@/app/capsulePresence';
 import { CAPSULE_PROJECTION_IDS, projectionBindingFor } from '@/app/capsuleProjections';
+import { WORKSPACE_VIEW_BINDINGS } from '@/app/workspace/viewBindings';
 import {
   resolveCapabilityPresences,
   resolveCapabilityProjection,
@@ -194,8 +195,16 @@ export function useCapsuleCapability(
             // boolean; only the capability knows which projections need it.
             ownsInputFocus: binding.ownsInputFocus,
             onDismiss: () => onDismiss(active.capabilityId),
-            onOpenWorkspace: (resourceId) =>
-              input.onOpenWorkspace(active.capabilityId, resourceId),
+            // The Workspace destination's presence is Nession's answer (#1347
+            // SC-21), read from the Workspace view registry rather than left
+            // for the body to decide: a capability with no Workspace view
+            // (Terminal Keys) gets no routing at all, and the host draws no
+            // destination action for it.
+            onOpenWorkspace: WORKSPACE_VIEW_BINDINGS.some(
+              (view) => view.id === active.capabilityId,
+            )
+              ? (resourceId) => input.onOpenWorkspace(active.capabilityId, resourceId)
+              : undefined,
             // The body reports what the user picked; the frame holds it and
             // hands it to `onOpenWorkspace`, so the handoff carries the item
             // that caused it without the body knowing where it is going.

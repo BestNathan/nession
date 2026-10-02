@@ -251,8 +251,10 @@ describe('Claude Code Peek', () => {
   });
 
   it('deepens with the item that was tapped, not with nothing', async () => {
-    // #1046 moved the Workspace action out of the host's footer and into the
-    // capability, because only the capability knows which row the user picked.
+    // Content navigation: the row is the capability's (only it knows which
+    // candidate the user picked), the routing is the host's. The destination
+    // action itself is the host's too (#1347 SC-21) — this is the body's
+    // scrollable content, not a second destination.
     mockedConversation.mockResolvedValue(unbound('first', 'second'));
     const onOpenWorkspace = vi.fn();
     render(
