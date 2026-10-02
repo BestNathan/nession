@@ -138,9 +138,13 @@ export function WorkspaceShell({
 
   const directItems = [...presentation.primary, ...presentation.contextual].filter(bindingFor);
   const discoverableItems = presentation.discoverable.filter(bindingFor);
+  // Capabilities the reader cannot act with here keep a slot too, rendered inert
+  // rather than dropped — membership that changes as the work changes is how a
+  // reader loses track of what the Workspace holds.
+  const unavailableItems = presentation.unavailable.filter(bindingFor);
   // Capsule V2 (#1347): Workspace capsule shows ALL capabilities (scrollable).
   // This is the reciprocal of Terminal, which shows only the active capability.
-  const allCapsuleItems = [...directItems, ...discoverableItems];
+  const allCapsuleItems = [...directItems, ...discoverableItems, ...unavailableItems];
   const hasNavigation = allCapsuleItems.length > 0;
   // `#1051`: the dock is the *capability root's* switcher. A pushed detail has
   // its own page and its own Back, so a global capability switcher over it would

@@ -195,11 +195,25 @@ describe('fixture conversation surface', () => {
       cursor,
     });
     expect(older.state).toBe('ready');
-    expect(older.has_more).toBe(false);
     const newestIds = (newest.items ?? []).map((item) => item.id);
     const olderIds = (older.items ?? []).map((item) => item.id);
     expect(olderIds.length).toBeGreaterThan(0);
     expect(olderIds.every((id) => !newestIds.includes(id))).toBe(true);
+
+    // More than one step deep, which is what lets a reader — or a test — tell
+    // "paging works" from "paging worked once".
+    expect(older.has_more).toBe(true);
+    const oldest = await paged.request<MessagesResponse>('claude-code.messages', {
+      conversation_id: boundId,
+      cursor: older.next_cursor as string,
+    });
+    expect(oldest.state).toBe('ready');
+    expect(oldest.has_more).toBe(false);
+    const oldestIds = (oldest.items ?? []).map((item) => item.id);
+    expect(oldestIds.length).toBeGreaterThan(0);
+    // Every page is older than every page before it, and none repeats.
+    const held = new Set([...newestIds, ...olderIds]);
+    expect(oldestIds.every((id) => !held.has(id))).toBe(true);
 
     // A cursor no page handed out is a client bug, and the fixture says so
     // loudly rather than answering a page that cannot exist.

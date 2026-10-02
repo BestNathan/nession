@@ -23,7 +23,7 @@
  * `setContext` re-arms.
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AIConversationAdapter } from '../adapter/types'
 import { ConversationRuntime, type AIConversationSnapshot } from './ConversationRuntime'
 import { useConversationSnapshot } from './useConversationSnapshot'
@@ -60,10 +60,24 @@ export function useAIConversation<Context>(
   useEffect(() => () => runtime.dispose(), [runtime])
 
   const snapshot = useConversationSnapshot(runtime)
-  return {
-    snapshot,
-    select: (conversationId) => runtime.select(conversationId),
-    reload: () => runtime.reload(),
-    loadOlder: () => runtime.loadOlder(),
-  }
+
+  // Each command is stable for the runtime's lifetime, and that is a
+  // correctness property rather than a micro-optimisation. The transcript
+  // watches `loadOlder` in an effect dependency list — a page arriving is what
+  // should pull the next one — and an identity that changed every render would
+  // re-run that effect every render, paging for reasons that have nothing to do
+  // with a page arriving. Memoising the *object* alone would not do it: the
+  // snapshot changes on every update, so the object is rebuilt and would carry
+  // fresh arrows with it.
+  const select = useCallback(
+    (conversationId: string | null) => runtime.select(conversationId),
+    [runtime],
+  )
+  const reload = useCallback(() => runtime.reload(), [runtime])
+  const loadOlder = useCallback(() => runtime.loadOlder(), [runtime])
+
+  return useMemo(
+    () => ({ snapshot, select, reload, loadOlder }),
+    [snapshot, select, reload, loadOlder],
+  )
 }
