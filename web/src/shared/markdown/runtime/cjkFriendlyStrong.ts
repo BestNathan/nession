@@ -1,4 +1,13 @@
-/** Let asterisk strong emphasis close after punctuation when CJK prose continues without whitespace. */
+/**
+ * Let asterisk strong emphasis close after punctuation when CJK prose
+ * continues without whitespace.
+ *
+ * Upstream: https://github.com/deepseek-ai/deepseek-harness
+ * Baseline: 21638c56315ae6a2b552d6091945d3144c9af32e
+ * Source: packages/client/ui-primitives/src/markdown/cjkFriendlyStrong.ts
+ * License: MIT (see THIRD_PARTY_NOTICES.md)
+ * Adaptation: Adopted; a one-line brace-style change only.
+ */
 
 import { attention } from 'micromark-core-commonmark'
 import { unicodePunctuation } from 'micromark-util-character'

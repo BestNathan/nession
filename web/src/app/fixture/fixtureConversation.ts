@@ -283,8 +283,110 @@ const ITEMS: MessageItemV1[] = [
 
 /** The item a `messages` answer carries whole — no client join by id (#1222). */
 function itemOf(conversationId: string): ConversationItemV1 | undefined {
-  return CONVERSATIONS.find((c) => c.id === conversationId);
+  return [...CONVERSATIONS, RICH_CONVERSATION].find((c) => c.id === conversationId);
 }
+
+/** The conversation the `rich` scenario is bound to (#1184's Chat dialect). */
+const RICH_ID = 'a9b8c7d6-9999-4aaa-8bbb-ccccddddeeee';
+
+const RICH_CONVERSATION: ConversationItemV1 = {
+  id: RICH_ID,
+  cwd: '/Users/dev/code/nession-capsule',
+  updated_at: '2026-09-01T11:52:00Z',
+  title: 'Chat Markdown dialect',
+  preview: 'The corpus the Chat profile has to keep readable',
+};
+
+/**
+ * The `rich` scenario's page: the #1184 acceptance corpus as one assistant
+ * turn, plus a user turn that carries Markdown of its own.
+ *
+ * It exists because the dialect's guarantees are *negative* — `$HOME` is not
+ * math, `60~70%` is not strikethrough, `<tool_call>` is not a tool call — and
+ * a negative is exactly what a prose fixture cannot reach: the canonical
+ * conversation contains none of these shapes, so a regression that swallowed
+ * `$HOME` into KaTeX would leave every existing golden identical. The
+ * requirement lists this corpus by name (#1184 Testing), and a state with no
+ * route is a state with no gate.
+ *
+ * The definitions deliberately sit at the *end* of the message: the settled
+ * full parse must resolve a reference and a footnote the streaming prefix
+ * would have rendered literally, which is the behaviour SC-14 is about.
+ */
+const RICH_ITEMS: MessageItemV1[] = [
+  {
+    id: 'rich-1',
+    kind: 'message',
+    role: 'user',
+    timestamp: '2026-09-01T11:50:00Z',
+    content: [
+      {
+        type: 'text',
+        text: '这个 **PeekHost.tsx** 的 ownership 是怎么决定的？顺便看看 `$HOME` 下面的配置。',
+      },
+    ],
+  },
+  {
+    id: 'rich-2',
+    kind: 'message',
+    role: 'assistant',
+    timestamp: '2026-09-01T11:52:00Z',
+    content: [
+      {
+        type: 'text',
+        text: [
+          '## Ownership, and the things that look like formulas',
+          '',
+          'The controller is whoever attached last, and the config it reads is whatever',
+          '`$HOME` resolved to at launch — `$PATH` and `$SHELL` ride along. A run costs',
+          '$100 in the worst case and finishes in ~10ms, and 60~70% of that is the render;',
+          'the rest is the tmux round trip.',
+          '',
+          '中文**重点。**下一句继续，强调在这里收尾。',
+          '',
+          'Inline math stays explicit: \\(E = mc^2\\), and display math is its own block:',
+          '',
+          '\\[',
+          '\\int_0^1 x^2 \\, dx = \\frac{1}{3}',
+          '\\]',
+          '',
+          'The tag below is literal text in a conversation, not a tool call:',
+          '',
+          '<tool_call>{"name": "Read", "path": "~/.claude/CLAUDE.md"}</tool_call>',
+          '',
+          'The handler everyone reaches for:',
+          '',
+          '```rust',
+          'impl ConnectionManager {',
+          '    fn attach(&mut self, client: ClientId) -> Epoch {',
+          '        self.epoch.bump();',
+          '        self.owner = Some(client);',
+          '        self.epoch',
+          '    }',
+          '',
+          '    fn observer(&self, client: ClientId) -> bool {',
+          '        self.observer == Some(client)',
+          '    }',
+          '}',
+          '```',
+          '',
+          '| Path | Arbitrated? | Tested? |',
+          '| --- | --- | --- |',
+          '| attach | yes | yes |',
+          '| observer | no | **no** |',
+          '',
+          'The observer path is the untested one. See the [stream replay notes][notes]',
+          'and the footnote for the measured shape.[^observer] The local path',
+          '[PeekHost.tsx](web/src/product/terminal/capsule/PeekHost.tsx) stays text until a',
+          'resolver vouches for it.',
+          '',
+          '[notes]: https://example.com/nession',
+          '[^observer]: Only the attach path is covered by the ownership suite.',
+        ].join('\n'),
+      },
+    ],
+  },
+];
 
 /**
  * The page *behind* `ITEMS` — what the `paged` scenario answers to a request
@@ -363,6 +465,17 @@ function conversationsFor(scenario: string): ConversationsResponse | undefined {
         items: CONVERSATIONS,
         has_more: false,
       };
+    case 'rich':
+      // The #1184 corpus, bound on purpose: the Peek's "View conversation"
+      // action only renders in the bound state, and that overlay is one of
+      // the two surfaces the requirement's acceptance names.
+      return {
+        state: 'ready',
+        cwd: RICH_CONVERSATION.cwd ?? '/Users/dev/code/nession-capsule',
+        items: [RICH_CONVERSATION],
+        binding: { conversation_id: RICH_ID, activity: 'inactive' },
+        has_more: false,
+      };
     case 'none':
       // Read, and empty. There is no `not_found` on this unit: an empty list
       // is a complete answer rather than an error.
@@ -437,6 +550,17 @@ function messagesFor(
     return undefined;
   }
   if (scenario === 'none' || scenario === 'unavailable' || named === undefined) {
+    return {
+      state: 'not_found',
+      items: [],
+      has_more: false,
+      partial_tail: false,
+      skipped: 0,
+    };
+  }
+  if (scenario === 'rich' && named.id !== RICH_ID) {
+    // The canonical conversations are not part of this scenario's directory —
+    // answering one with the corpus would be the substitution `#1222` forbids.
     return {
       state: 'not_found',
       items: [],
@@ -537,6 +661,19 @@ function messagesFor(
         conversation: named,
         activity: 'unknown',
         items: ITEMS,
+        has_more: false,
+        partial_tail: false,
+        skipped: 0,
+      };
+    case 'rich':
+      // Settled and inactive: the corpus is the *settled* full parse's job
+      // (SC-14 — references and footnotes resolve there), and `inactive` keeps
+      // `partial_tail` from turning the last item into a streaming one.
+      return {
+        state: 'ready',
+        conversation: named,
+        activity: 'inactive',
+        items: RICH_ITEMS,
         has_more: false,
         partial_tail: false,
         skipped: 0,
