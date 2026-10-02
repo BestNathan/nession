@@ -339,6 +339,14 @@ The mirror-image mistake is a branch cut from `main` but targeting `staging` whi
 
 `EnterWorktree` bases on `origin/main` by default. For the staging exception, use manual `git worktree add … origin/staging` — do not reset project root away from `main`.
 
+### Executable Requirement Acceptance
+
+`.github/workflows/acceptance.yml` is the reusable/manual executor for stage-specific Requirement acceptance. Callers pass `issue_number`, explicit `stage`, and the exact `target_ref`; a deterministic structured result may be supplied to skip model verification. Otherwise the read-only Acceptance Agent may reuse the Cursor/DeepSeek provider environments.
+
+The workflow freezes a structured result before mutation, then a separate trusted job with `issues: write` updates the Acceptance Report and checkbox projection. Requirement-level `Fail` / `Pending` remains data rather than an Actions infrastructure failure. The existing Requirement Acceptance merge/close gate remains authoritative.
+
+Full lifecycle and result contract: `.claude/skills/nession-acceptance/SKILL.md`.
+
 ### Issue auto-close
 
 Before a main-targeting PR may close a `requirement`, it must be **merge-ready**; merge readiness is intentionally weaker than final acceptance:
