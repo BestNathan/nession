@@ -12,6 +12,8 @@ usage:
   ./gates/run --suite <suite-name>
   ./gates/run --describe <gate-id>
   ./gates/run --list
+  ./gates/run --list-suites
+  ./gates/run --validate
 USAGE
 }
 
@@ -21,46 +23,30 @@ gate_path() { printf '%s/%s.sh\n' "$CHECKS_DIR" "$1"; }
 list_gates() {
   local path
   shopt -s nullglob
-  for path in "$CHECKS_DIR"/*.sh; do
-    basename "$path" .sh
-  done | sort
+  for path in "$CHECKS_DIR"/*.sh; do basename "$path" .sh; done | sort
   shopt -u nullglob
 }
+
 list_suites() {
   local path
   shopt -s nullglob
-  for path in "$SUITES_DIR"/*.gates; do
-    basename "$path" .gates
-  done | sort
+  for path in "$SUITES_DIR"/*.gates; do basename "$path" .gates; done | sort
   shopt -u nullglob
 }
 
 load_suite() {
   local suite="$1"
   local suite_file="${SUITES_DIR}/${suite}.gates"
-  local line id
-
-  valid_id "$suite" || {
-    printf '[ERROR] invalid suite name: %s\n' "$suite" >&2
-    return 2
-  }
-  [ -f "$suite_file" ] || {
-    printf '[ERROR] unknown gate suite: %s\n' "$suite" >&2
-    printf 'expected: %s\n' "$suite_file" >&2
-    return 2
-  }
-
+  local line
+  valid_id "$suite" || { printf '[ERROR] invalid suite name: %s\n' "$suite" >&2; return 2; }
+  [ -f "$suite_file" ] || { printf '[ERROR] unknown gate suite: %s\n' "$suite" >&2; return 2; }
   while IFS= read -r line || [ -n "$line" ]; do
     line="${line%%#*}"
     line="${line#"${line%%[![:space:]]*}"}"
     line="${line%"${line##*[![:space:]]}"}"
     [ -z "$line" ] && continue
-    id="$line"
-    valid_id "$id" || {
-      printf '[ERROR] invalid gate id in %s: %s\n' "$suite_file" "$id" >&2
-      return 2
-    }
-    printf '%s\n' "$id"
+    valid_id "$line" || { printf '[ERROR] invalid gate id in %s: %s\n' "$suite_file" "$line" >&2; return 2; }
+    printf '%s\n' "$line"
   done < "$suite_file"
 }
 
@@ -68,24 +54,15 @@ validate_gate() {
   local id="$1"
   local path desc declared field
   path="$(gate_path "$id")"
-  if [ ! -x "$path" ]; then
-    printf '[ERROR] unknown gate: %s\\n' "$id" >&2
-    return 2
-  fi
+  [ -x "$path" ] || { printf '[ERROR] unknown gate: %s\n' "$id" >&2; return 2; }
   if ! desc="$("$path" --describe 2>&1)"; then
-    printf '[ERROR] gate contract cannot be described: %s\\n%s\\n' "$id" "$desc" >&2
+    printf '[ERROR] gate contract cannot be described: %s\n%s\n' "$id" "$desc" >&2
     return 2
   fi
-  declared="$(printf '%s\\n' "$desc" | sed -n 's/^id: //p' | head -1)"
-  if [ "$declared" != "$id" ]; then
-    printf '[ERROR] gate id/path mismatch: requested=%s declared=%s\\n' "$id" "${declared:-<missing>}" >&2
-    return 2
-  fi
+  declared="$(printf '%s\n' "$desc" | sed -n 's/^id: //p' | head -1)"
+  [ "$declared" = "$id" ] || { printf '[ERROR] gate id/path mismatch: requested=%s declared=%s\n' "$id" "${declared:-<missing>}" >&2; return 2; }
   for field in name command success failure repair owner; do
-    if ! printf '%s\\n' "$desc" | grep -q "^${field}: ."; then
-      printf '[ERROR] gate %s is missing describe field: %s\\n' "$id" "$field" >&2
-      return 2
-    fi
+    printf '%s\n' "$desc" | grep -q "^${field}: ." || { printf '[ERROR] gate %s is missing describe field: %s\n' "$id" "$field" >&2; return 2; }
   done
 }
 
@@ -93,14 +70,12 @@ contains_id() {
   local needle="$1"
   shift
   local item
-  for item in "$@"; do
-    [ "$item" = "$needle" ] && return 0
-  done
+  for item in "$@"; do [ "$item" = "$needle" ] && return 0; done
   return 1
 }
 
 validate_catalog() {
-  local id suite line path tmp
+  local id suite line tmp
   local gate_count=0 suite_count=0
   while IFS= read -r id; do
     [ -z "$id" ] && continue
@@ -109,7 +84,7 @@ validate_catalog() {
   done <<EOF_GATES
 $(list_gates)
 EOF_GATES
-  [ "$gate_count" -gt 0 ] || { printf '[ERROR] gate catalog is empty\\n' >&2; return 2; }
+  [ "$gate_count" -gt 0 ] || { printf '[ERROR] gate catalog is empty\n' >&2; return 2; }
   while IFS= read -r suite; do
     [ -z "$suite" ] && continue
     suite_count=$((suite_count + 1))
@@ -117,18 +92,13 @@ EOF_GATES
     if ! load_suite "$suite" >"$tmp"; then rm -f "$tmp"; return 2; fi
     while IFS= read -r line || [ -n "$line" ]; do
       [ -z "$line" ] && continue
-      path="$(gate_path "$line")"
-      if [ ! -x "$path" ]; then
-        printf '[ERROR] suite %s references unknown gate: %s\\n' "$suite" "$line" >&2
-        rm -f "$tmp"
-        return 2
-      fi
+      [ -x "$(gate_path "$line")" ] || { printf '[ERROR] suite %s references unknown gate: %s\n' "$suite" "$line" >&2; rm -f "$tmp"; return 2; }
     done < "$tmp"
     rm -f "$tmp"
   done <<EOF_SUITES
 $(list_suites)
 EOF_SUITES
-  printf '✓ gate catalog: %d gates, %d suites\\n' "$gate_count" "$suite_count"
+  printf '✓ gate catalog: %d gates, %d suites\n' "$gate_count" "$suite_count"
 }
 
 if [ "$#" -eq 0 ]; then usage >&2; exit 2; fi
@@ -136,68 +106,57 @@ if [ "$#" -eq 0 ]; then usage >&2; exit 2; fi
 case "$1" in
   --list)
     [ "$#" -eq 1 ] || { usage >&2; exit 2; }
-    list_gates
-    exit 0
+    list_gates; exit 0
     ;;
-  --list-suites)\n    [ "$#" -eq 1 ] || { usage >&2; exit 2; }\n    list_suites\n    exit 0\n    ;;\n  --validate)\n    [ "$#" -eq 1 ] || { usage >&2; exit 2; }\n    validate_catalog\n    exit $?\n    ;;\n  --describe)
+  --list-suites)
+    [ "$#" -eq 1 ] || { usage >&2; exit 2; }
+    list_suites; exit 0
+    ;;
+  --validate)
+    [ "$#" -eq 1 ] || { usage >&2; exit 2; }
+    validate_catalog; exit $?
+    ;;
+  --describe)
     [ "$#" -eq 2 ] || { usage >&2; exit 2; }
     id="$2"
     valid_id "$id" || { printf '[ERROR] invalid gate id: %s\n' "$id" >&2; exit 2; }
-    path="$(gate_path "$id")"
-    [ -x "$path" ] || { printf '[ERROR] unknown gate: %s\n' "$id" >&2; exit 2; }
-    exec "$path" --describe
+    validate_gate "$id" || exit 2
+    exec "$(gate_path "$id")" --describe
     ;;
   --suite)
     [ "$#" -eq 2 ] || { usage >&2; exit 2; }
-    mapfile -t requested < <(load_suite "$2") || exit $?
     suite_name="$2"
+    suite_tmp="$(mktemp "${TMPDIR:-/tmp}/nession-suite-${suite_name}.XXXXXX")"
+    if ! load_suite "$suite_name" >"$suite_tmp"; then rm -f "$suite_tmp"; exit 2; fi
+    requested=()
+    while IFS= read -r line || [ -n "$line" ]; do
+      [ -z "$line" ] && continue
+      requested[${#requested[@]}]="$line"
+    done < "$suite_tmp"
+    rm -f "$suite_tmp"
     ;;
-  --*)
-    usage >&2
-    exit 2
-    ;;
-  *)
-    requested=("$@")
-    suite_name=""
-    ;;
+  --*) usage >&2; exit 2 ;;
+  *) requested=("$@"); suite_name="" ;;
 esac
 
-if [ "${#requested[@]}" -eq 0 ]; then
-  printf '[ERROR] no gates selected%s\n' "${suite_name:+ for suite ${suite_name}}" >&2
-  exit 2
-fi
-
-declare -A seen=()
+[ "${#requested[@]}" -gt 0 ] || { printf '[ERROR] no gates selected\n' >&2; exit 2; }
 gate_ids=()
 for id in "${requested[@]}"; do
   valid_id "$id" || { printf '[ERROR] invalid gate id: %s\n' "$id" >&2; exit 2; }
-  if [ -n "${seen[$id]:-}" ]; then continue; fi
-  seen[$id]=1
-  path="$(gate_path "$id")"
-  if [ ! -x "$path" ]; then
-    printf '[ERROR] unknown gate: %s\n' "$id" >&2
-    printf 'available gates:\n' >&2
-    list_gates | sed 's/^/  /' >&2
-    exit 2
-  fi
-  gate_ids+=("$id")
+  if [ "${#gate_ids[@]}" -gt 0 ] && contains_id "$id" "${gate_ids[@]}"; then continue; fi
+  validate_gate "$id" || { printf 'available gates:\n' >&2; list_gates | sed 's/^/  /' >&2; exit 2; }
+  gate_ids[${#gate_ids[@]}]="$id"
 done
 
 result_dir="$(mktemp -d "${TMPDIR:-/tmp}/nession-gates-run.XXXXXX")"
 trap 'rm -rf "$result_dir"' EXIT
-
-passed=0
-failed=0
-errors=0
+passed=0; failed=0; errors=0
 for id in "${gate_ids[@]}"; do
-  path="$(gate_path "$id")"
   output="${result_dir}/${id}.out"
-  status=0
   set +e
-  "$path" >"$output" 2>&1
+  "$(gate_path "$id")" >"$output" 2>&1
   status=$?
   set -e
-
   case "$status" in
     0) printf '✓ %s\n' "$id"; passed=$((passed + 1)) ;;
     1) printf '✗ %s\n' "$id"; failed=$((failed + 1)) ;;
@@ -206,21 +165,14 @@ for id in "${gate_ids[@]}"; do
   printf '%s\n' "$status" >"${result_dir}/${id}.status"
 done
 
-total="${#gate_ids[@]}"
-printf '\n%d gates: %d passed, %d failed, %d errors\n' "$total" "$passed" "$failed" "$errors"
-
+printf '\n%d gates: %d passed, %d failed, %d errors\n' "${#gate_ids[@]}" "$passed" "$failed" "$errors"
 if [ "$failed" -gt 0 ] || [ "$errors" -gt 0 ]; then
-  printf '\nFailures\n'
-  printf '%s\n' '========'
+  printf '\nFailures\n========\n'
   for id in "${gate_ids[@]}"; do
     status="$(cat "${result_dir}/${id}.status")"
-    if [ "$status" -ne 0 ]; then
-      printf '\n--- %s ---\n' "$id"
-      cat "${result_dir}/${id}.out"
-    fi
+    if [ "$status" -ne 0 ]; then printf '\n--- %s ---\n' "$id"; cat "${result_dir}/${id}.out"; fi
   done
 fi
-
-if [ "$errors" -gt 0 ]; then exit 2; fi
-if [ "$failed" -gt 0 ]; then exit 1; fi
+[ "$errors" -eq 0 ] || exit 2
+[ "$failed" -eq 0 ] || exit 1
 exit 0
