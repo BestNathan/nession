@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { LayoutPanelTop, SquareTerminal } from 'lucide-react';
 
 import { surfaceDestinationActionBandClass } from '@/product/workspace/patterns/surfaceDestinationStyles';
@@ -13,6 +14,16 @@ export interface SurfaceDestinationActionProps {
    */
   destination: Surface;
   onOpen: () => void;
+  /**
+   * A capability glyph projected into the circle (#1347 SC-25) — on the
+   * Workspace's Terminal-return action, the conversational capability that is
+   * active over there.
+   *
+   * Decorative only (SC-26): it is drawn as a badge inside the same button,
+   * so it cannot change where the action goes, what it is called, or how big
+   * it is — `aria-label`, activation and geometry all stay the destination's.
+   */
+  glyph?: ReactNode;
 }
 
 const DESTINATIONS = {
@@ -44,6 +55,7 @@ const DESTINATIONS = {
 export function SurfaceDestinationAction({
   destination,
   onOpen,
+  glyph,
 }: SurfaceDestinationActionProps) {
   const { icon: Icon, label } = DESTINATIONS[destination];
   return (
@@ -52,13 +64,28 @@ export function SurfaceDestinationAction({
       aria-label={label}
       title={label}
       data-testid={`surface-action-open-${destination}`}
+      /* Reciprocal morph key (#1347 SC-08): both surfaces' destination actions
+         carry the same id, so the circle slides to its mirror side on a
+         surface switch. */
+      data-morph-id="surface-action"
       onClick={() => onOpen()}
       className={cn(
-        'pointer-events-auto flex shrink-0 items-center justify-center rounded-full bg-[color:var(--terminal-capsule-surface)] text-muted-foreground shadow-[var(--elevation-floating)] backdrop-blur-md transition-colors duration-[var(--motion-shell-duration)] ease-[var(--motion-shell-ease)] hover:text-foreground focus-visible:text-foreground motion-reduce:transition-none',
+        'pointer-events-auto relative flex shrink-0 items-center justify-center rounded-full bg-[color:var(--terminal-capsule-surface)] text-muted-foreground shadow-[var(--elevation-floating)] backdrop-blur-md transition-colors duration-[var(--motion-shell-duration)] ease-[var(--motion-shell-ease)] hover:text-foreground focus-visible:text-foreground motion-reduce:transition-none',
         surfaceDestinationActionBandClass,
       )}
     >
       <Icon className="size-[length:var(--icon-md)]" aria-hidden />
+      {glyph ? (
+        /* The badge is absolutely positioned: it projects into the circle
+           without changing the circle's size, hit area or label (SC-26). */
+        <span
+          aria-hidden
+          data-testid="surface-action-glyph"
+          className="absolute -right-0.5 -top-0.5 flex size-3 items-center justify-center rounded-full bg-[color:var(--terminal-capsule-surface)] text-muted-foreground shadow-[var(--elevation-floating)] [&_svg]:size-2"
+        >
+          {glyph}
+        </span>
+      ) : null}
     </button>
   );
 }
