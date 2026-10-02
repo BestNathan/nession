@@ -111,6 +111,26 @@ export class SyntheticAdapter implements AIConversationAdapter<string> {
    */
   failList = false
 
+  /**
+   * Force the state every read answers with from here on.
+   *
+   * Mutable rather than only the constructor option, for the same reason
+   * `failList` is: the case worth testing is a thread that *was* readable and
+   * then stopped being. A provider that never answered `ready` never had a
+   * thread to lose, so a constructor-only knob cannot express the transition.
+   */
+  forcedReadState: AIConversationPage['state'] | null = null
+
+  /**
+   * Make every read reject, as a transport failure rather than an answer.
+   *
+   * The distinction this fixture exists to keep: a thrown read says nothing
+   * about the conversation, while a non-`ready` *answer* says something. Mutable
+   * for the same reason as the two above — the case worth testing is a poll that
+   * fails after the thread was readable.
+   */
+  failRead = false
+
   private readonly options: SyntheticAdapterOptions
   private readonly gates: Gate[] = []
 
@@ -183,13 +203,17 @@ export class SyntheticAdapter implements AIConversationAdapter<string> {
     cursor?: string,
   ): Promise<AIConversationPage> {
     this.calls.push({ kind: 'read', context, conversationId, cursor })
+    if (this.failRead) {
+      throw new Error('the conversation could not be read')
+    }
     // The answer is computed *before* the gate, because that is what a real
     // provider does: the response describes the data at the moment it was
     // asked, not at the moment it arrives. A fixture that read the data after
     // the gate would make two overlapping requests return the same page, and a
     // test could then never tell which of them the runtime applied.
     const conversation = this.options.conversations.find((c) => c.id === conversationId)
-    const state = this.options.readState ?? (conversation ? 'ready' : 'not_found')
+    const state =
+      this.forcedReadState ?? this.options.readState ?? (conversation ? 'ready' : 'not_found')
     if (state !== 'ready' || !conversation) {
       await this.waitFor('read', cursor)
       return { state, items: [], partialTail: false, skipped: 0 }

@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
 import { ConversationTranscript } from '../../components/ConversationTranscript'
 import type { AIConversationSnapshot } from '../../runtime/ConversationRuntime'
-import { toolItem, transcript } from '../fixtures/items'
+import { assistantMessage, toolItem, transcript, userMessage } from '../fixtures/items'
 
 /**
  * Reading backwards through history, which is a *state* the reader is in, not
@@ -207,6 +207,71 @@ describe('the reader’s intent, which is not their offset', () => {
     redraw({ openId: 'c2', items: transcript(3), hasMore: true })
 
     expect(onLoadOlder).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('a turn across a prepend', () => {
+  // A window that starts mid-turn: no user message above the tools, which is
+  // what reading a conversation backwards from the middle produces.
+  const midTurn = [toolItem('t1'), toolItem('t2'), assistantMessage('ans', 'answered')]
+
+  /** The row a drawn tool group sits in — what folding hides. */
+  function groupRow(): HTMLElement {
+    const group = screen.getByTestId('conversation-tool-group')
+    const row = group.closest('[data-slot="message-scroller-item"]')
+    if (!(row instanceof HTMLElement)) {
+      throw new Error('the tool group was drawn outside a transcript row')
+    }
+    return row
+  }
+
+  function draw(items: typeof midTurn) {
+    return render(
+      <ConversationTranscript
+        snapshot={snapshot({ items })}
+        providerLabel="Claude"
+        onLoadOlder={() => false}
+      />,
+    )
+  }
+
+  it('keeps the reader’s expansion when an older page reveals its opening', () => {
+    // The invariant the group test below proves, one level up — and the reason
+    // that fix does not already cover it. A turn is keyed by its *first* item,
+    // and the rows that test cares about sit inside a turn whose key is about
+    // to move.
+    const { rerender } = draw(midTurn)
+
+    // The turn answered, so its work is folded until the reader asks for it.
+    expect(groupRow()).toHaveAttribute('hidden')
+
+    fireEvent.click(screen.getByTestId('conversation-turn-process'))
+    expect(groupRow()).not.toHaveAttribute('hidden')
+
+    // A control *inside* the process window — the group's own disclosure, not
+    // the turn's, which sits outside the region that folds.
+    const inner = groupRow().querySelector('summary')
+    if (!(inner instanceof HTMLElement)) {
+      throw new Error('the tool group has no summary to focus')
+    }
+    inner.focus()
+    expect(document.activeElement).toBe(inner)
+
+    // `load older` finally delivers the user message that opened this turn, so
+    // the turn's first item — the thing `turnOf` keys it by — changes.
+    rerender(
+      <ConversationTranscript
+        snapshot={snapshot({ items: [userMessage('u0', 'the opener'), ...midTurn] })}
+        providerLabel="Claude"
+        onLoadOlder={() => false}
+      />,
+    )
+
+    // Still open. Without the carry the key moves from `t1` to `u0`, the
+    // override recorded under `t1` is never consulted, and a finished turn
+    // falls back to folded — the work vanishes under the reader who opened it.
+    expect(groupRow()).not.toHaveAttribute('hidden')
+    expect(document.activeElement).toBe(inner)
   })
 })
 

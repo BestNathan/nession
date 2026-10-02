@@ -38,7 +38,13 @@ import {
   rememberGroups,
   type ConversationRow,
 } from '../model/grouping'
-import { turnMembership, turnsOf, type ConversationTurn } from '../model/turns'
+import {
+  carryTurnKeys,
+  rememberTurns,
+  turnMembership,
+  turnsOf,
+  type ConversationTurn,
+} from '../model/turns'
 import { useReaderIntent } from '../runtime/useReaderIntent'
 import { isStreaming } from './streaming'
 import { TurnActions } from './TurnActions'
@@ -49,6 +55,7 @@ import { ToolActivity, UnknownActivity } from './ToolActivity'
 import { ToolGroup } from './ToolGroup'
 import {
   ConversationFailure,
+  ConversationUnavailable,
   EmptyConversation,
   LoadingOlder,
   OlderError,
@@ -131,7 +138,16 @@ function TranscriptContent({
     rememberGroups(rows, remembered.current)
   }, [rows])
 
-  const turns = useMemo(() => turnsOf(snapshot.items), [snapshot.items])
+  const derivedTurns = useMemo(() => turnsOf(snapshot.items), [snapshot.items])
+  // A second map, not the group one above: an item belongs to a group *and* to a
+  // turn, and one map would let either answer for the other. Keyed by id like
+  // the group map, and carried for the same reason — see `carryTurnKeys`.
+  const rememberedTurns = useRef(new Map<string, string>())
+  const turns = useMemo(() => carryTurnKeys(derivedTurns, rememberedTurns.current), [derivedTurns])
+  useEffect(() => {
+    rememberTurns(turns, rememberedTurns.current)
+  }, [turns])
+
   const membership = useMemo(() => turnMembership(turns), [turns])
   const lastKey = turns[turns.length - 1]?.key ?? null
 
@@ -261,6 +277,16 @@ function ConversationBody({
         This conversation is no longer available.
       </p>
     )
+  }
+  // Before the empty check, deliberately. `unavailable` is a state the provider
+  // answered with, not the absence of an answer, and it reaches here with
+  // `items` either empty (a first read that could not be made) or *full* (a
+  // readable thread whose re-read came back unavailable). Both must render as
+  // this state: the first would otherwise be told it has no messages, and the
+  // second would keep showing a transcript as if it were current, which is the
+  // worse of the two — stale content is indistinguishable from live content.
+  if (snapshot.state === 'unavailable') {
+    return <ConversationUnavailable onRetry={onReload} />
   }
   if (snapshot.threadLoading && snapshot.items.length === 0) {
     return (

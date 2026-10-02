@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { turnsOf } from '../../model/turns'
+import { carryTurnKeys, rememberTurns, turnsOf } from '../../model/turns'
 import { assistantMessage, toolItem, unknownItem, userMessage } from '../fixtures/items'
 
 const ids = (items: { id: string }[]) => items.map((item) => item.id)
@@ -89,5 +89,62 @@ describe('turnsOf', () => {
 
   it('has no turns for an empty transcript', () => {
     expect(turnsOf([])).toEqual([])
+  })
+})
+
+describe('carrying turn identity across a prepend', () => {
+  /** The window a conversation read backwards from the middle actually opens. */
+  const midTurn = [
+    userMessage('u0', 'the question'),
+    toolItem('t1'),
+    toolItem('t2'),
+    assistantMessage('a1', 'the answer'),
+  ]
+
+  it('keys a mid-turn window by the first item it has', () => {
+    // The baseline the carry is measured against: without the opener, the turn
+    // is keyed by the tool call it happens to start with.
+    const without = turnsOf(midTurn.slice(1))
+    expect(without.map((turn) => turn.key)).toEqual(['t1'])
+  })
+
+  it('keeps that key when an older page reveals the opener', () => {
+    const remembered = new Map<string, string>()
+    const before = carryTurnKeys(turnsOf(midTurn.slice(1)), remembered)
+    rememberTurns(before, remembered)
+
+    const after = carryTurnKeys(turnsOf(midTurn), remembered)
+
+    // The key the reader's expansion was recorded under, not the opener's id.
+    expect(after.map((turn) => turn.key)).toEqual(['t1'])
+    // And the turn really did gain its opening — otherwise this would pass by
+    // the prepend having done nothing.
+    expect(after[0]?.opening?.id).toBe('u0')
+  })
+
+  it('leaves a turn the renderer has never seen at its own key', () => {
+    const remembered = new Map<string, string>()
+    rememberTurns(carryTurnKeys(turnsOf(midTurn.slice(1)), remembered), remembered)
+
+    // A genuinely new turn appends at the end; it has no history to carry, so
+    // inventing one would be worse than the derived key.
+    const after = carryTurnKeys(
+      turnsOf([...midTurn, userMessage('u2', 'next'), assistantMessage('a2', 'again')]),
+      remembered,
+    )
+
+    expect(after.map((turn) => turn.key)).toEqual(['t1', 'u2'])
+  })
+
+  it('forgets ids that are no longer in any turn', () => {
+    const remembered = new Map<string, string>()
+    rememberTurns(carryTurnKeys(turnsOf(midTurn), remembered), remembered)
+    expect([...remembered.keys()].sort()).toEqual(['a1', 't1', 't2', 'u0'])
+
+    const shrunk = new Map(remembered)
+    rememberTurns(carryTurnKeys(turnsOf([assistantMessage('a1', 'the answer')]), shrunk), shrunk)
+
+    // Otherwise the map grows with the conversation rather than with the screen.
+    expect([...shrunk.keys()]).toEqual(['a1'])
   })
 })

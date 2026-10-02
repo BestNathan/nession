@@ -377,6 +377,69 @@ describe('ConversationRuntime — refresh policy', () => {
     expect(adapter.calls.filter((call) => call.kind === 'list').length).toBe(2)
     expect(adapter.calls.filter((call) => call.kind === 'read').length).toBe(2)
   })
+
+  /**
+   * A readable thread, then a poll whose *answer* is something other than
+   * `ready`.
+   *
+   * Written once and used by all three, because the defect was a missing branch
+   * — `applyNewest` returned before `syncRefresh()` for every non-ready state —
+   * so covering one of the three would leave the other two unproven.
+   */
+  async function answersNonReady(state: 'not_found' | 'unavailable' | 'error') {
+    const { runtime, adapter, clock } = setup()
+    runtime.setContext('a:s1')
+    await flush()
+    expect(clock.armed()).toBe(1)
+
+    adapter.forcedReadState = state
+    clock.tick()
+    await flush()
+
+    return { snapshot: runtime.getSnapshot(), armed: clock.armed() }
+  }
+
+  it('stops refreshing when a re-read answers not_found', async () => {
+    const { snapshot, armed } = await answersNonReady('not_found')
+    expect(snapshot.state).toBe('not_found')
+    expect(armed).toBe(0)
+  })
+
+  it('stops refreshing when a re-read answers unavailable', async () => {
+    // The one that matters most in practice: a provider that cannot say is not
+    // a provider that will say something different on the next tick, so an
+    // armed timer only repeats the question.
+    const { snapshot, armed } = await answersNonReady('unavailable')
+    expect(snapshot.state).toBe('unavailable')
+    expect(armed).toBe(0)
+  })
+
+  it('stops refreshing when a re-read answers error', async () => {
+    const { snapshot, armed } = await answersNonReady('error')
+    expect(snapshot.state).toBe('error')
+    expect(armed).toBe(0)
+  })
+
+  it('keeps the readable thread and the cadence when a poll throws', async () => {
+    // The deliberate other half of the three above. A thrown failure says
+    // nothing about the conversation — it is the transport, not the provider —
+    // so the reader keeps the transcript they had and the runtime keeps asking.
+    // Collapsing these two into one behaviour either freezes live conversations
+    // or abandons conversations that were only briefly unreachable.
+    const { runtime, adapter, clock } = setup()
+    runtime.setContext('a:s1')
+    await flush()
+    const readable = ids(runtime)
+    expect(readable.length).toBeGreaterThan(0)
+
+    adapter.failRead = true
+    clock.tick()
+    await flush()
+
+    expect(runtime.getSnapshot().state).toBe('ready')
+    expect(ids(runtime)).toEqual(readable)
+    expect(clock.armed()).toBe(1)
+  })
 })
 
 describe('ConversationRuntime — state the surface draws', () => {
