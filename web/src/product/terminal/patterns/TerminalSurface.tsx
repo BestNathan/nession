@@ -11,6 +11,7 @@ import type { TerminalSemanticKey } from '@/platform/terminal-runtime/interactio
 import type { TerminalControlState } from '@/product/terminal/state/terminalControl';
 import type { InputDrop } from '@/platform/terminal-runtime/inputQueue';
 import { Button } from '@/components/ui/button';
+import type { ResolvedWorkContext } from '@/product/terminal/capsule/workAwareness';
 
 export interface TerminalSurfaceProps {
   /** xterm mount tree (TerminalPane). */
@@ -50,6 +51,8 @@ export interface TerminalSurfaceProps {
    * the capsule's dock region, which owns the geometry.
    */
   surfaceAction?: ReactNode;
+  /** Work-awareness context (#1347): whether any capability is working. */
+  workContext?: ResolvedWorkContext;
 }
 
 /**
@@ -125,6 +128,7 @@ export function TerminalSurface({
   inputDrop = null,
   onDismissInputDrop,
   surfaceAction,
+  workContext,
 }: TerminalSurfaceProps) {
 
   const capsuleSendText = (text: string) => {
@@ -181,6 +185,7 @@ export function TerminalSurface({
           capabilityDisclosure={capsuleCapabilities?.disclosure}
           capabilityProjection={capsuleProjection}
           adjacentAction={surfaceAction}
+          workContext={workContext}
         />
       </div>
       {inputDrop ? (
