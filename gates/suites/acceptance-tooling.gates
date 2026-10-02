@@ -1,0 +1,5 @@
+# acceptance-tooling
+# Gate IDs only. Not wired into current hooks/workflows yet.
+requirement-acceptance-selftest
+acceptance-executor-selftest
+acceptance-agent-selftest
