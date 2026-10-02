@@ -4,6 +4,7 @@ import { jsonPreviewSurfaceClass } from '@/components/json/jsonTreeSyntax';
 import { parseJsonDocument } from '../model/jsonParse';
 import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
+import { workspaceScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
 
 interface JsonPreviewProps {
   content: string;
@@ -29,7 +30,7 @@ export function JsonPreview({ content }: JsonPreviewProps) {
   }
 
   return (
-    <div className="overflow-y-auto h-full p-[var(--workspace-editor-pad-y)] px-[var(--workspace-editor-head-pad-x)] min-w-0">
+    <div className={cn('overflow-y-auto h-full p-[var(--workspace-editor-pad-y)] px-[var(--workspace-editor-head-pad-x)] min-w-0', workspaceScrollClearanceClass)}>
       <div className={jsonPreviewSurfaceClass('py-[var(--shell-space-2)]')}>
         <JsonTree value={parsed.value} mode="inspector" pinRootOpen />
       </div>
