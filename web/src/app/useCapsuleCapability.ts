@@ -106,6 +106,23 @@ export function useCapsuleCapability(
   );
 
   /**
+   * Choose at Peek depth (#1347 SC-20): WorkOverview selection opens Peek.
+   *
+   * Same as `choose` but sets `opened: true` so the capability emerges at Peek
+   * depth instead of Signal. Used by WorkOverview to satisfy SC-20.
+   */
+  const chooseAtPeek = useCallback(
+    (id: CapabilityId) => {
+      setEmergence((current) => ({
+        chosen: id,
+        opened: true,
+        dismissed: current.dismissed.filter((candidate) => candidate !== id),
+      }));
+    },
+    [],
+  );
+
+  /**
    * Deepening acts on the projection that is on screen, so the id is bound in
    * by the caller rather than read from `chosen`. A projection can also emerge
    * from the observed-command path — a capability the Session is running right
@@ -153,7 +170,13 @@ export function useCapsuleCapability(
     facts,
     capabilities:
       resolution.entries.length > 0
-        ? { disclosure: { entries: resolution.entries, onSelect: choose } }
+        ? {
+            disclosure: {
+              entries: resolution.entries,
+              onSelect: choose,
+              onSelectAtPeek: chooseAtPeek,
+            },
+          }
         : {},
     projection:
       active && binding

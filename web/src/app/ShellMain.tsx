@@ -17,6 +17,7 @@ import { SessionMainHeader } from '@/app/SessionMainHeader';
 import { SurfaceDestinationAction } from '@/product/workspace/patterns/SurfaceDestinationAction';
 import { WorkspacePanel } from '@/app/WorkspacePanel';
 import { useCapsuleCapability } from '@/app/useCapsuleCapability';
+import { useWorkSignals } from '@/app/useWorkSignals';
 import type { Agent, Session } from '@/types';
 
 export interface ShellMainProps {
@@ -204,12 +205,8 @@ export function ShellMain({
     onSurfaceChange: () => onSurfaceChange('workspace'),
     onOpenWorkspace: openWorkspaceFromCapsule,
   });
-
-  // App reaches Workspace through its spatial model, so it is handed nothing.
-  const surfaceAction =
-    hasSession && experience === 'web' ? (
-      <WebOpenWorkspaceAction onSurfaceChange={onSurfaceChange} />
-    ) : undefined;
+  const workContext = useWorkSignals(selectedSession ?? undefined);
+  const surfaceAction = hasSession && experience === 'web' ? <WebOpenWorkspaceAction onSurfaceChange={onSurfaceChange} /> : undefined;
 
   return (
     <>
@@ -262,6 +259,7 @@ export function ShellMain({
                     capsuleProjection={projection}
                     surfaceAction={surfaceAction}
                     onOpenWorkspaceFile={onOpenWorkspaceFile}
+                    workContext={workContext}
                   />
                 )}
               </TerminalWell>
