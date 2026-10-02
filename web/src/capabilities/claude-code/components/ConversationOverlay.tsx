@@ -28,7 +28,10 @@ export function ConversationOverlay({
   sessionId: string | undefined;
 }) {
   const context = agentId && sessionId ? { agentId, sessionId } : null;
-  const { snapshot, loadOlder } = useAIConversation(claudeCodeConversationAdapter, context);
+  const { snapshot, loadOlder, reload } = useAIConversation(
+    claudeCodeConversationAdapter,
+    context,
+  );
 
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="conversation-overlay">
@@ -36,6 +39,12 @@ export function ConversationOverlay({
         snapshot={snapshot}
         providerLabel={claudeCodeConversationAdapter.identity.label}
         onLoadOlder={loadOlder}
+        // The same command Workspace passes, and the reason it has to be here
+        // too: a degraded read now *offers* a retry (see `ConversationUnavailable`),
+        // and the runtime stops refreshing on a non-ready answer — so a surface
+        // that drops this control leaves the reader with a button that does
+        // nothing but a reload of the page. #1363 round 3.
+        onReload={reload}
       />
     </div>
   );
