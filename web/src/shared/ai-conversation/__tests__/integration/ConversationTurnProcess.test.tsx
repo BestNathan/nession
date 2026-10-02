@@ -179,3 +179,80 @@ describe('the turn process control', () => {
     expect(screen.getByTestId('conversation-turn-process')).toHaveTextContent('Worked')
   })
 })
+
+describe('a turn the reader is inside when its answer settles', () => {
+  const streaming = [
+    userMessage('u1', 'the question'),
+    toolItem('t1'),
+    toolItem('t2'),
+    assistantMessage('a1', 'writing…', 'streaming'),
+  ]
+
+  /** The same message, same id, now settled — the automatic fold. */
+  const settled = [
+    userMessage('u1', 'the question'),
+    toolItem('t1'),
+    toolItem('t2'),
+    assistantMessage('a1', 'done', 'settled'),
+  ]
+
+  function draw(items: typeof streaming) {
+    return render(
+      <ConversationTranscript
+        snapshot={snapshot({ items })}
+        providerLabel="Claude"
+        onLoadOlder={() => false}
+      />,
+    )
+  }
+
+  /** A control inside the work — what folding hides, and would strand focus in. */
+  function innerControl(): HTMLElement {
+    const summary = screen.getByTestId('conversation-tool-group').querySelector('summary')
+    if (!(summary instanceof HTMLElement)) {
+      throw new Error('the tool group has no summary to focus')
+    }
+    return summary
+  }
+
+  it('stays open rather than folding out from under the reader', () => {
+    const { rerender } = draw(streaming)
+
+    // Streaming, so the work is open without anyone having asked for it.
+    expect(rowOf(screen.getByTestId('conversation-tool-group'))).not.toHaveAttribute('hidden')
+
+    const inner = innerControl()
+    inner.focus()
+    expect(document.activeElement).toBe(inner)
+
+    rerender(
+      <ConversationTranscript
+        snapshot={snapshot({ items: settled })}
+        providerLabel="Claude"
+        onLoadOlder={() => false}
+      />,
+    )
+
+    // A system transition must not close what the reader is reading — and the
+    // focus has to still be *in* it, not merely near it.
+    expect(rowOf(screen.getByTestId('conversation-tool-group'))).not.toHaveAttribute('hidden')
+    expect(document.activeElement).toBe(inner)
+  })
+
+  it('still folds a settled turn nobody is inside', () => {
+    // The guard on the rule above. A pin that fired for every turn would pass
+    // that test and quietly delete the folding feature, so the ordinary case is
+    // asserted beside it.
+    const { rerender } = draw(streaming)
+
+    rerender(
+      <ConversationTranscript
+        snapshot={snapshot({ items: settled })}
+        providerLabel="Claude"
+        onLoadOlder={() => false}
+      />,
+    )
+
+    expect(rowOf(screen.getByTestId('conversation-tool-group'))).toHaveAttribute('hidden')
+  })
+})

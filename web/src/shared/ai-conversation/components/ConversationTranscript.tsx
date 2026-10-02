@@ -45,6 +45,7 @@ import {
   turnsOf,
   type ConversationTurn,
 } from '../model/turns'
+import { useFocusPinsTurn } from '../runtime/useFocusPinsTurn'
 import { useReaderIntent } from '../runtime/useReaderIntent'
 import { isStreaming } from './streaming'
 import { TurnActions } from './TurnActions'
@@ -176,6 +177,19 @@ function TranscriptContent({
 
   const [overrides, setOverrides] = useState(() => new Map<string, boolean>())
   const isOpen = (turn: ConversationTurn) => overrides.get(turn.key) ?? workingOf(turn)
+  // Focusing inside a turn's work records that it stays open, so the automatic
+  // settle cannot close what the reader is inspecting. See `useFocusPinsTurn`
+  // for why this is an override rather than a condition on `isOpen`.
+  useFocusPinsTurn(contentRef, (key) => {
+    setOverrides((previous) => {
+      if (previous.get(key) === true) {
+        return previous
+      }
+      const next = new Map(previous)
+      next.set(key, true)
+      return next
+    })
+  })
   const toggle = (key: string) => {
     setOverrides((previous) => {
       const next = new Map(previous)
@@ -321,6 +335,9 @@ function ConversationBody({
               with it. */}
           <MessageScrollerItem
             messageId={row.key}
+            // Which turn this row draws. The focus rule reads it to know what to
+            // keep open, and it is only set on the rows a fold can hide.
+            data-turn-key={turn?.key}
             hidden={turn !== null && !isTurnOpen(turn)}
           >
             {row.kind === 'tools' ? (
