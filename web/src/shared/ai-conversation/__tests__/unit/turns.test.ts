@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { carryTurnKeys, rememberTurns, turnsOf } from '../../model/turns'
+import { carryTurnKeys, rememberTurns, runningWork, turnsOf } from '../../model/turns'
 import { assistantMessage, toolItem, unknownItem, userMessage } from '../fixtures/items'
 
 const ids = (items: { id: string }[]) => items.map((item) => item.id)
@@ -89,6 +89,98 @@ describe('turnsOf', () => {
 
   it('has no turns for an empty transcript', () => {
     expect(turnsOf([])).toEqual([])
+  })
+})
+
+/**
+ * When a turn has finished, and it is not when the assistant last spoke.
+ *
+ * `#1363` round 3. The rule used to be "the last assistant message", which is
+ * wrong in the case a live turn produces constantly: the assistant says
+ * something and then goes back to work. Calling that message the answer ends
+ * the turn, so the work still happening is drawn as finished.
+ */
+describe('the turn’s final answer', () => {
+  it('is not a message the assistant went back to work after', () => {
+    const [turn] = turnsOf([
+      userMessage('u1', 'q'),
+      assistantMessage('a1', 'working on it'),
+      toolItem('t1', { status: 'running' }),
+    ])
+
+    expect(turn?.answer).toBeNull()
+    // And the demoted message stays in the process window rather than vanishing:
+    // it is progress, which is a thing the turn has, not a thing it lost.
+    expect(turn?.process.map((item) => item.id)).toEqual(['a1', 't1'])
+  })
+
+  it('is still nothing when that work finishes with no answer after it', () => {
+    // The tool settling does not promote the message it followed. Nothing was
+    // answered, so inventing an answer would be the defect wearing a different
+    // status.
+    const [turn] = turnsOf([
+      userMessage('u1', 'q'),
+      assistantMessage('a1', 'working on it'),
+      toolItem('t1', { status: 'success' }),
+    ])
+
+    expect(turn?.answer).toBeNull()
+  })
+
+  it('is the later message once the assistant answers after the work', () => {
+    const [turn] = turnsOf([
+      userMessage('u1', 'q'),
+      assistantMessage('a1', 'working on it'),
+      toolItem('t1', { status: 'success' }),
+      assistantMessage('a2', 'done'),
+    ])
+
+    expect(turn?.answer?.id).toBe('a2')
+    expect(turn?.process.map((item) => item.id)).toEqual(['a1', 't1'])
+  })
+
+  it('is not demoted by a trailing record the model does not name', () => {
+    // `unknown` is not evidence that anything is still happening. Demoting on it
+    // would end the turn for every provider that trails an unmodelled record,
+    // which is the opposite of the fix.
+    const [turn] = turnsOf([
+      userMessage('u1', 'q'),
+      assistantMessage('a1', 'done'),
+      unknownItem('x1'),
+    ])
+
+    expect(turn?.answer?.id).toBe('a1')
+  })
+})
+
+describe('runningWork', () => {
+  it('reports work that has not finished, answer or not', () => {
+    // The contradiction the review named: an answer *and* a tool still going.
+    // The turn is not settled, and `workingOf` reads this to keep it open.
+    const [turn] = turnsOf([
+      userMessage('u1', 'q'),
+      toolItem('t1', { status: 'running' }),
+      assistantMessage('a1', 'done'),
+    ])
+    if (turn === undefined) {
+      throw new Error('no turn')
+    }
+
+    expect(turn.answer?.id).toBe('a1')
+    expect(runningWork(turn)).toBe(true)
+  })
+
+  it('is false when every work item has stopped', () => {
+    const [turn] = turnsOf([
+      userMessage('u1', 'q'),
+      toolItem('t1'),
+      assistantMessage('a1', 'done'),
+    ])
+    if (turn === undefined) {
+      throw new Error('no turn')
+    }
+
+    expect(runningWork(turn)).toBe(false)
   })
 })
 
