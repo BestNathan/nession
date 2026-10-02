@@ -246,11 +246,11 @@ for (const row of viewports.filter((v) => v.experience === 'app')) {
         await expectVisibleWithin(direct.nth(i), bar, optsFor(PATTERN_WORKSPACE_NAV, 'app', row.id));
       }
 
-      const more = page.getByTestId('workspace-capability-more');
-      await expect(more).toBeVisible();
-      await expectTouchTarget(more, optsFor(PATTERN_WORKSPACE_NAV, 'app', row.id));
-      await expectSingleLine(more, optsFor(PATTERN_WORKSPACE_NAV, 'app', row.id));
-      await expectVisibleWithin(more, bar, optsFor(PATTERN_WORKSPACE_NAV, 'app', row.id));
+      const capsule = page.getByTestId('workspace-capability-capsule');
+      await expect(capsule).toBeVisible();
+      await expectTouchTarget(capsule, optsFor(PATTERN_WORKSPACE_NAV, 'app', row.id));
+      await expectSingleLine(capsule, optsFor(PATTERN_WORKSPACE_NAV, 'app', row.id));
+      await expectVisibleWithin(capsule, bar, optsFor(PATTERN_WORKSPACE_NAV, 'app', row.id));
     });
 
     test('session rows meet the App touch target and stay clipped', async ({ page }) => {

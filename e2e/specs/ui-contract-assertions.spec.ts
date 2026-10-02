@@ -318,11 +318,11 @@ test.describe('real fixture surfaces satisfy their contracts', () => {
       await expectVisibleWithin(direct.nth(i), bar, WEB);
     }
 
-    // More is the disclosure path and shares the same bar contract.
-    const more = page.getByTestId('workspace-capability-more');
-    await expect(more).toBeVisible();
-    await expectSingleLine(more, WEB);
-    await expectVisibleWithin(more, bar, WEB);
+    // Capsule is the disclosure path and shares the same bar contract.
+    const capsule = page.getByTestId('workspace-capability-capsule');
+    await expect(capsule).toBeVisible();
+    await expectSingleLine(capsule, WEB);
+    await expectVisibleWithin(capsule, bar, WEB);
   });
 
   test('web: capability presence follows what the session was seen running', async ({ page }) => {
@@ -357,7 +357,7 @@ test.describe('real fixture surfaces satisfy their contracts', () => {
     const direct = nav.locator('button[data-testid^="workspace-tool-"]');
     expect(await direct.count()).toBeLessThanOrEqual(2);
     // The ones that did not fit are disclosed, not dropped.
-    await expect(page.getByTestId('workspace-capability-more')).toBeVisible();
+    await expect(page.getByTestId('workspace-capability-capsule')).toBeVisible();
   });
 });
 
