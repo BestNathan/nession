@@ -38,7 +38,13 @@ import {
   rememberGroups,
   type ConversationRow,
 } from '../model/grouping'
-import { turnMembership, turnsOf, type ConversationTurn } from '../model/turns'
+import {
+  carryTurnKeys,
+  rememberTurns,
+  turnMembership,
+  turnsOf,
+  type ConversationTurn,
+} from '../model/turns'
 import { useReaderIntent } from '../runtime/useReaderIntent'
 import { isStreaming } from './streaming'
 import { TurnActions } from './TurnActions'
@@ -132,7 +138,16 @@ function TranscriptContent({
     rememberGroups(rows, remembered.current)
   }, [rows])
 
-  const turns = useMemo(() => turnsOf(snapshot.items), [snapshot.items])
+  const derivedTurns = useMemo(() => turnsOf(snapshot.items), [snapshot.items])
+  // A second map, not the group one above: an item belongs to a group *and* to a
+  // turn, and one map would let either answer for the other. Keyed by id like
+  // the group map, and carried for the same reason — see `carryTurnKeys`.
+  const rememberedTurns = useRef(new Map<string, string>())
+  const turns = useMemo(() => carryTurnKeys(derivedTurns, rememberedTurns.current), [derivedTurns])
+  useEffect(() => {
+    rememberTurns(turns, rememberedTurns.current)
+  }, [turns])
+
   const membership = useMemo(() => turnMembership(turns), [turns])
   const lastKey = turns[turns.length - 1]?.key ?? null
 
