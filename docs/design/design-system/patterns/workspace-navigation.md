@@ -12,7 +12,9 @@ It is a capability capsule in the bottom Capsule Zone, and it is not a second ap
 
 This pattern previously required that direct chrome be **bounded to the contextually-justified set**, that everything else be disclosed through a `More`/`+` menu, and it stated as a rule that *capability registration never implies permanent navigation*.
 
-**#1347 (Capsule V2) supersedes both.** The Workspace capsule now carries the capability list — every capability that has a Workspace view — as one bounded, internally-scrolling horizontal row, and the `+`/menu disclosure is gone from Workspace. The contract's `overflow` moved from `menu` to `scroll` in the same change; the design-source test that pinned it moved with it.
+**#1347 (Capsule V2) supersedes both.** The Workspace capsule now carries the capability list — every capability that has a Workspace view *and* is not `unavailable` — as one bounded, internally-scrolling horizontal row, and the `+`/menu disclosure is gone from Workspace. The contract's `overflow` moved from `menu` to `scroll` in the same change; the design-source test that pinned it moved with it.
+
+**It supersedes those two rules and no others.** The row is not a licence to advertise everything: "an unavailable capability renders no slot" is *not* part of what #1347 replaced, and it still decides the row's membership. Read the table below before concluding the capsule shows "all capabilities" — it shows all *callable* ones.
 
 What the supersession keeps, and what carries the old rules' weight instead:
 
@@ -20,7 +22,7 @@ What the supersession keeps, and what carries the old rules' weight instead:
 |---|---|
 | Direct chrome is bounded | The **capsule** is bounded: it must stay inside the tool bar while its content scrolls. The bound is on the row's width, not on the entry count. |
 | Registration never implies permanent navigation | A capability with no Workspace view contributes **no slot**. Visibility follows the view binding, not the registry. |
-| Unavailable capabilities render no dead slot | Entries carry `data-capability-state` / `data-capability-presence`. Presence is **data on the entry**, not a gate on the entry's existence. |
+| Unavailable capabilities render no dead slot | **Unchanged by #1347 — and still the row's second membership rule.** `unavailable` resolves to `hidden` presence, and `resolveCapabilityDisclosure` drops `hidden` before either bucket, so no entry is built. `WorkspaceShell.test.tsx` pins it: *does not advertise unavailable capabilities in direct chrome*. |
 | Not a second application shell | Unchanged — the capsule is a bottom-zone control, not a sidebar and not a band above the capability. |
 
 The tradeoff, stated plainly: a Workspace with many capabilities now shows many icons in one row, and that row scrolls. The earlier design preferred a small visible set. That preference is **no longer a rule of this pattern** — the anti-patterns below were narrowed to match, and what remains forbidden is a row that *grows the shell* rather than a row that holds many entries.
@@ -33,7 +35,7 @@ Navigation should be generated from Workspace context and capability state rathe
 
 Must not:
 
-- render a slot for a capability that has no Workspace view — a dead/disabled entry advertising something that cannot be opened;
+- render a slot for a capability that has no Workspace view, or for one that is `unavailable` — a dead entry advertising something that cannot be opened;
 - let the row grow the shell: the capsule's width is bounded and its content scrolls, so registering another capability never widens the chrome and never wraps the row onto a second line;
 - force Files master/detail chrome onto unrelated capabilities;
 - allow an extension to define global Workspace navigation independently of Nession;
@@ -53,12 +55,12 @@ Navigation consequences:
 
 | State | Navigation behavior |
 |-------|---------------------|
-| `unavailable` | Keeps its slot if it has a Workspace view; the slot carries `unavailable` and opens the capability's own not-available state |
+| `unavailable` | **No slot.** Resolves to `hidden` presence, which is dropped before the row is built — see the supersession table above. The capability keeps its own not-available state for whatever opens it directly. |
 | `available` | Its slot, carrying `available` |
 | `relevant` | The same slot, carrying `relevant` — state is data on the entry, not a promotion into or out of the row |
 | `active` | Selected state (dot) and scrolled into view; may also have Session-level presence |
 
-State is published on the entry (`data-capability-state`, `data-capability-presence`), so a capability's condition stays legible without the row changing size or membership as the work changes. A capability does not become primary navigation merely because it is active. Current work remains primary.
+For every state that has a slot, state is published on the entry (`data-capability-state`, `data-capability-presence`), so a capability's condition stays legible without the row changing size or membership as the work changes. `unavailable` is the one state that changes membership — and it *removes* the entry rather than dimming it. A capability does not become primary navigation merely because it is active. Current work remains primary.
 
 ## Presentation model
 
@@ -168,8 +170,8 @@ it: the band is root-only on whichever page owns it.
 
 Capability navigation on Web is a **capsule** of rounded icon targets in the bottom
 Capsule Zone, with a dot marking the open one. It carries every capability that has a
-Workspace view (#1347). The capsule's width is bounded and the row scrolls internally,
-so the shell does not grow when an extension registers.
+Workspace view and is not `unavailable` (#1347). The capsule's width is bounded and the
+row scrolls internally, so the shell does not grow when an extension registers.
 
 **No shell band above the capability area.** `workspace.md` is explicit that a
 capability's own layout belongs to the capability — Files' master/detail *"belongs
@@ -266,7 +268,7 @@ Existing components should migrate incrementally. Do not remove reliable capabil
 
 ## Acceptance for future implementation work
 
-- [ ] A capability with no Workspace view contributes no slot.
+- [ ] A capability contributes no slot when it has no Workspace view **or** when it is `unavailable`.
 - [ ] Capability state and presence are legible from the entry without changing the row's membership.
 - [ ] Workspace root communicates context, not a global feature catalog.
 - [ ] Extensions cannot independently fragment the global navigation model.
