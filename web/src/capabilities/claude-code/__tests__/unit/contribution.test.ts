@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { claudeCodeWork, resolveClaudeCodeState } from '../../contribution';
+import {
+  claudeCodeConversation,
+  claudeCodeView,
+  claudeCodeWork,
+  resolveClaudeCodeState,
+} from '../../contribution';
 import type { CapabilityFacts, CapabilityState } from '@/product/capability';
 
 const SESSION = 'a1:work';
@@ -86,5 +91,39 @@ describe('claude-code work signal', () => {
     // One definition of "Claude is running" — the ring and the presence chip
     // cannot disagree about the same pane.
     expect(claudeCodeWork.sense({ sessionForegroundCommand: 'node' })).toBeNull();
+  });
+});
+
+/**
+ * The conversational-identity contribution (#1347 SC-25): while the
+ * conversation is live, the Workspace's Terminal-return circle draws this
+ * capability's glyph in place of its Terminal icon. The capability owns the
+ * matcher and the glyph; the shell only asks the registry.
+ */
+describe('claude-code conversation identity', () => {
+  it('projects its identity while the pane runs Claude Code', () => {
+    expect(
+      claudeCodeConversation.sense({ sessionForegroundCommand: 'claude.exe' }),
+    ).toEqual({ capabilityId: 'claude-code', glyph: claudeCodeView.icon });
+  });
+
+  it('matches the bare command name too', () => {
+    expect(
+      claudeCodeConversation.sense({ sessionForegroundCommand: 'claude' })?.capabilityId,
+    ).toBe('claude-code');
+  });
+
+  it('projects nothing for an unrelated command', () => {
+    expect(claudeCodeConversation.sense({ sessionForegroundCommand: 'bash' })).toBeNull();
+  });
+
+  it('projects nothing without facts', () => {
+    expect(claudeCodeConversation.sense(undefined)).toBeNull();
+  });
+
+  it('answers from the same matcher as the presence state and the work signal', () => {
+    // One definition of "Claude is running" — the chip, the ring and the
+    // destination glyph cannot disagree about the same pane.
+    expect(claudeCodeConversation.sense({ sessionForegroundCommand: 'node' })).toBeNull();
   });
 });

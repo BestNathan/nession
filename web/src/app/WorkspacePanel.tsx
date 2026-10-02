@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { cn } from '@/shared/lib/utils';
 import type { FileOps } from '@/capabilities/files';
-import { claudeCodeView, isClaudeCodeCommand } from '@/capabilities/claude-code';
+import { resolveConversationIdentity } from '@/app/conversationIdentities';
 import type { CapabilityFacts, CapabilityId } from '@/product/capability';
 import type { DomainState } from '@/product/session/model/domainState';
 import type { Agent, Session } from '@/types';
@@ -151,21 +151,19 @@ export function WorkspacePanel({
   //
   // SC-25 (#1347): while the pane is running a conversational capability, the
   // Terminal-return circle projects that capability's glyph — "your
-  // conversation is over there". Claude Code is the only conversational
-  // capability today, and the command matcher stays owned by its slice. The
-  // glyph is a badge inside the same button, so the destination is untouched
-  // (SC-26).
-  const ConversationGlyph = claudeCodeView.icon;
-  const conversationActive = Boolean(
-    selectedSession.foreground_command &&
-      isClaudeCodeCommand(selectedSession.foreground_command),
-  );
+  // conversation is over there". Which capabilities are conversational and
+  // when one is live is contribution knowledge: the registry is asked, no
+  // capability is named here, and a second one (Codex, OpenCode) projects its
+  // identity without this file changing. The glyph replaces the circle's
+  // inner Terminal icon, so the destination is untouched (SC-26).
+  const conversation = resolveConversationIdentity(facts);
+  const ConversationGlyph = conversation?.glyph;
   const surfaceAction =
     experience === 'web' ? (
       <SurfaceDestinationAction
         destination="terminal"
         onOpen={() => onSurfaceChange('terminal')}
-        glyph={conversationActive ? <ConversationGlyph aria-hidden /> : undefined}
+        glyph={ConversationGlyph ? <ConversationGlyph aria-hidden /> : undefined}
       />
     ) : undefined;
 
