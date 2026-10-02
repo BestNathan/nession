@@ -40,6 +40,7 @@ import {
 } from '../model/grouping'
 import { turnMembership, turnsOf, type ConversationTurn } from '../model/turns'
 import { isStreaming } from './streaming'
+import { TurnActions } from './TurnActions'
 import { TurnProcess } from './TurnProcess'
 import { ConversationMessage } from './ConversationMessage'
 import { ToolActivity, UnknownActivity } from './ToolActivity'
@@ -58,6 +59,23 @@ const TOP_THRESHOLD = 50
 /** Which item a row is anchored to — a group by its first call. */
 function firstItemIdOf(row: ConversationRow): string {
   return row.kind === 'tools' ? (row.items[0]?.id ?? row.key) : row.item.id
+}
+
+/**
+ * What a turn's copy action copies.
+ *
+ * The text blocks, joined the way the renderer draws them. A block the model
+ * could not name contributes nothing rather than a placeholder: copying
+ * `[unknown]` into someone's clipboard would be worse than copying less.
+ */
+function answerText(turn: ConversationTurn): string {
+  if (turn.answer === null) {
+    return ''
+  }
+  return turn.answer.content
+    .filter((block) => block.type === 'text')
+    .map((block) => block.text)
+    .join('\n\n')
 }
 
 /** The one line a folded turn shows in place of its work. */
@@ -189,11 +207,21 @@ function TranscriptContent({
     return rows.map((row) => {
       const entry = membership.get(firstItemIdOf(row))
       if (entry === undefined || !entry.process) {
-        return { row, turn: null as ConversationTurn | null, control: null as ConversationTurn | null }
+        // Actions close a turn, so they hang off the row that answers it —
+        // nothing else in the turn has anything to do.
+        const answer = entry?.turn.answer ?? null
+        const actions =
+          answer !== null && firstItemIdOf(row) === answer.id ? entry?.turn ?? null : null
+        return {
+          row,
+          turn: null as ConversationTurn | null,
+          control: null as ConversationTurn | null,
+          actions,
+        }
       }
       const control = emitted.has(entry.turn.key) ? null : entry.turn
       emitted.add(entry.turn.key)
-      return { row, turn: entry.turn, control }
+      return { row, turn: entry.turn, control, actions: null as ConversationTurn | null }
     })
   }, [rows, membership])
 
@@ -243,6 +271,7 @@ function ConversationBody({
     row: ConversationRow
     turn: ConversationTurn | null
     control: ConversationTurn | null
+    actions: ConversationTurn | null
   }[]
   isTurnOpen: (turn: ConversationTurn) => boolean
   onToggleTurn: (key: string) => void
@@ -278,7 +307,7 @@ function ConversationBody({
   }
   return (
     <>
-      {plan.map(({ row, turn, control }) => (
+      {plan.map(({ row, turn, control, actions }) => (
         <Fragment key={row.key}>
           {control === null ? null : (
             <MessageScrollerItem messageId={`${control.key}·process`}>
@@ -311,6 +340,11 @@ function ConversationBody({
               <UnknownActivity />
             )}
           </MessageScrollerItem>
+          {actions === null ? null : (
+            <MessageScrollerItem messageId={`${actions.key}·actions`}>
+              <TurnActions text={answerText(actions)} label="answer" />
+            </MessageScrollerItem>
+          )}
         </Fragment>
       ))}
       <SkippedRecords count={snapshot.skipped} />
