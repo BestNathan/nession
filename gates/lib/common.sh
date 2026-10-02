@@ -17,7 +17,15 @@ _gate_contract_error() {
 gate_contract_validate() {
   local field value
   for field in GATE_ID GATE_NAME GATE_COMMAND GATE_SUCCESS GATE_FAILURE GATE_REPAIR GATE_OWNER; do
-    eval "value=\${$field-}"
+    case "$field" in
+      GATE_ID) value="${GATE_ID-}" ;;
+      GATE_NAME) value="${GATE_NAME-}" ;;
+      GATE_COMMAND) value="${GATE_COMMAND-}" ;;
+      GATE_SUCCESS) value="${GATE_SUCCESS-}" ;;
+      GATE_FAILURE) value="${GATE_FAILURE-}" ;;
+      GATE_REPAIR) value="${GATE_REPAIR-}" ;;
+      GATE_OWNER) value="${GATE_OWNER-}" ;;
+    esac
     if [ -z "$value" ]; then
       _gate_contract_error "missing required gate metadata: ${field}"
       return 2
@@ -72,11 +80,12 @@ gate_require_path() {
     return 2
   fi
 }
+
 gate_require_env() {
   local name="$1"
   local repair="${2:-Provide '${name}' and rerun the gate.}"
   local value=""
-  eval "value=\${$name-}"
+  value="$(printenv "$name" 2>/dev/null || true)"
   if [ -z "$value" ]; then
     gate_runtime_error "required environment variable '${name}' is unavailable" "$repair"
     return 2
@@ -95,7 +104,6 @@ _gate_print_detail() {
   local reason="$2"
   local repair="$3"
   local output_file="$4"
-
   printf '[%s] %s\n' "$kind" "$GATE_ID" >&2
   printf 'name: %s\n' "$GATE_NAME" >&2
   printf 'reason: %s\n' "$reason" >&2
@@ -111,6 +119,7 @@ _gate_print_detail() {
 gate_main() {
   local status=0
   local output_file=""
+  local caller_cwd="$PWD"
   GATE_RUNTIME_REASON=""
   GATE_RUNTIME_REPAIR=""
 
@@ -137,7 +146,6 @@ gate_main() {
   esac
 
   output_file="$(mktemp "${TMPDIR:-/tmp}/nession-gate-${GATE_ID}.XXXXXX")"
-  local caller_cwd="$PWD"
   cd "$GATE_REPO_ROOT"
   set +e
   gate_check "$@" >"$output_file" 2>&1
@@ -147,11 +155,13 @@ gate_main() {
 
   case "$status" in
     0)
+      rm -f "$output_file"
       printf '✓ %s\n' "$GATE_ID"
       return 0
       ;;
     1)
       _gate_print_detail "FAIL" "${GATE_RUNTIME_REASON:-$GATE_FAILURE}" "${GATE_RUNTIME_REPAIR:-$GATE_REPAIR}" "$output_file"
+      rm -f "$output_file"
       return 1
       ;;
     *)
@@ -159,6 +169,7 @@ gate_main() {
         "${GATE_RUNTIME_REASON:-gate command exited with status ${status}; the invariant could not be proven}" \
         "${GATE_RUNTIME_REPAIR:-restore the gate tooling/environment, then rerun the exact command above}" \
         "$output_file"
+      rm -f "$output_file"
       return 2
       ;;
   esac
