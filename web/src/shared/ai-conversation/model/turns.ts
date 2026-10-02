@@ -73,7 +73,13 @@ function isUser(item: AIConversationItem): boolean {
 }
 
 function timeOf(item: AIConversationItem): number | null {
-  const timestamp = messageOf(item)?.timestamp
+  // Straight off the item, not through `messageOf`. Every arm of the union
+  // carries `timestamp` — that is what makes the rule `durationOf` states
+  // implementable — and reading it through the message narrowing is what
+  // silently turned "any timestamped item" into "the messages". A provider that
+  // timestamps its work and not its participants was being told `Worked` while
+  // its own data supported `Worked for …`.
+  const timestamp = item.timestamp
   if (timestamp === undefined || timestamp === null) {
     return null
   }

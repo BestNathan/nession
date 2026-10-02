@@ -172,10 +172,105 @@ describe('the turn process control', () => {
     expect(screen.getByTestId('conversation-turn-process')).toHaveTextContent('Worked for 12s')
   })
 
+  it('measures the work when the provider timestamped only the work', () => {
+    // The case the contract names and the implementation did not honour: a
+    // provider that times its *tools* and leaves the participant messages
+    // untimed. Both ends here are work, so a version reading timestamps through
+    // the message narrowing reports `Worked` — true, but less than the data
+    // supports.
+    renderTranscript({
+      items: [
+        userMessage('u1', 'q'),
+        { ...toolItem('t1'), timestamp: '2026-10-02T10:00:00.000Z' },
+        { ...toolItem('t2'), timestamp: '2026-10-02T10:00:30.000Z' },
+        assistantMessage('a1', 'a'),
+      ],
+    })
+
+    expect(screen.getByTestId('conversation-turn-process')).toHaveTextContent('Worked for 30s')
+  })
+
   it('says only that it worked when the provider did not timestamp it', () => {
     renderTranscript({ items: [userMessage('u1', 'q'), toolItem('t1'), assistantMessage('a1', 'a')] })
 
     // Not "Worked for 0s": a provider that states no time has stated no time.
     expect(screen.getByTestId('conversation-turn-process')).toHaveTextContent('Worked')
+  })
+})
+
+describe('a turn the reader is inside when its answer settles', () => {
+  const streaming = [
+    userMessage('u1', 'the question'),
+    toolItem('t1'),
+    toolItem('t2'),
+    assistantMessage('a1', 'writing…', 'streaming'),
+  ]
+
+  /** The same message, same id, now settled — the automatic fold. */
+  const settled = [
+    userMessage('u1', 'the question'),
+    toolItem('t1'),
+    toolItem('t2'),
+    assistantMessage('a1', 'done', 'settled'),
+  ]
+
+  function draw(items: typeof streaming) {
+    return render(
+      <ConversationTranscript
+        snapshot={snapshot({ items })}
+        providerLabel="Claude"
+        onLoadOlder={() => false}
+      />,
+    )
+  }
+
+  /** A control inside the work — what folding hides, and would strand focus in. */
+  function innerControl(): HTMLElement {
+    const summary = screen.getByTestId('conversation-tool-group').querySelector('summary')
+    if (!(summary instanceof HTMLElement)) {
+      throw new Error('the tool group has no summary to focus')
+    }
+    return summary
+  }
+
+  it('stays open rather than folding out from under the reader', () => {
+    const { rerender } = draw(streaming)
+
+    // Streaming, so the work is open without anyone having asked for it.
+    expect(rowOf(screen.getByTestId('conversation-tool-group'))).not.toHaveAttribute('hidden')
+
+    const inner = innerControl()
+    inner.focus()
+    expect(document.activeElement).toBe(inner)
+
+    rerender(
+      <ConversationTranscript
+        snapshot={snapshot({ items: settled })}
+        providerLabel="Claude"
+        onLoadOlder={() => false}
+      />,
+    )
+
+    // A system transition must not close what the reader is reading — and the
+    // focus has to still be *in* it, not merely near it.
+    expect(rowOf(screen.getByTestId('conversation-tool-group'))).not.toHaveAttribute('hidden')
+    expect(document.activeElement).toBe(inner)
+  })
+
+  it('still folds a settled turn nobody is inside', () => {
+    // The guard on the rule above. A pin that fired for every turn would pass
+    // that test and quietly delete the folding feature, so the ordinary case is
+    // asserted beside it.
+    const { rerender } = draw(streaming)
+
+    rerender(
+      <ConversationTranscript
+        snapshot={snapshot({ items: settled })}
+        providerLabel="Claude"
+        onLoadOlder={() => false}
+      />,
+    )
+
+    expect(rowOf(screen.getByTestId('conversation-tool-group'))).toHaveAttribute('hidden')
   })
 })
