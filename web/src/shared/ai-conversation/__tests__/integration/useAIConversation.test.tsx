@@ -2,7 +2,7 @@ import { StrictMode } from 'react'
 import { render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { useAIConversation } from '../../runtime/useAIConversation'
-import { SyntheticAdapter } from '../fixtures/syntheticAdapter'
+import { SyntheticAdapter, flush } from '../fixtures/syntheticAdapter'
 import { transcript } from '../fixtures/items'
 
 /** A surface in miniature: a context in, the snapshot's items out. */
@@ -22,6 +22,69 @@ const moduleAdapter = new SyntheticAdapter({
   conversations: [{ id: 'c1', title: 'One', activity: 'inactive', items: transcript(4) }],
   bindingId: 'c1',
   pageSize: 10,
+})
+
+/**
+ * Two providers, and a surface told which to draw.
+ *
+ * The bindings deliberately differ, so the assertion is about *which provider
+ * answered* rather than about whether anything rendered.
+ */
+function Switchable({
+  adapter,
+  context,
+}: {
+  adapter: SyntheticAdapter
+  context: string
+}) {
+  const { snapshot } = useAIConversation(adapter, context)
+  return <span data-testid="binding">{snapshot.bindingId ?? 'none'}</span>
+}
+
+describe('switching providers', () => {
+  const providerA = () =>
+    new SyntheticAdapter({
+      conversations: [{ id: 'c1', title: 'One', activity: 'inactive', items: transcript(2) }],
+      bindingId: 'c1',
+      pageSize: 10,
+    })
+  const providerB = () =>
+    new SyntheticAdapter({
+      conversations: [{ id: 'c2', title: 'Two', activity: 'inactive', items: transcript(2) }],
+      bindingId: 'c2',
+      pageSize: 10,
+    })
+
+  it('answers from the provider it was given, not from the first one', async () => {
+    // #1363 round 3: `useState`'s initialiser runs once, so the runtime used to
+    // outlive the adapter it was built for and go on answering the first
+    // provider. A second provider could be registered and never drawn.
+    const { rerender } = render(<Switchable adapter={providerA()} context="a:s1" />)
+    await waitFor(() => expect(screen.getByTestId('binding').textContent).toBe('c1'))
+
+    rerender(<Switchable adapter={providerB()} context="a:s1" />)
+
+    await waitFor(() => expect(screen.getByTestId('binding').textContent).toBe('c2'))
+  })
+
+  it('cannot let the previous provider’s late answer land', async () => {
+    // The half that makes the swap safe rather than merely different. A's read
+    // is held open across the switch, so it is genuinely in flight when the
+    // runtime that asked for it is disposed.
+    const first = providerA()
+    const release = first.hold('list')
+
+    const { rerender } = render(<Switchable adapter={first} context="a:s1" />)
+    rerender(<Switchable adapter={providerB()} context="a:s1" />)
+    await waitFor(() => expect(screen.getByTestId('binding').textContent).toBe('c2'))
+
+    release()
+    await flush()
+
+    // Still B. A disposed runtime refuses everything through `wanted()`, and its
+    // generation counters belong to it alone.
+    expect(screen.getByTestId('binding').textContent).toBe('c2')
+  })
 })
 
 describe('useAIConversation', () => {
