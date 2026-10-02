@@ -856,6 +856,14 @@ test.describe('App 390×844', () => {
     await expect(conversation).not.toContainText('c0a1b2c3-');
     // The tool call is a collapsed row here too (#1005 criterion 10), and the
     // fixture's second one errors — so the failure treatment is in the picture.
+    //
+    // A finished turn folds its work behind its process control (#1363 SC-17/18),
+    // so the rows are not on screen until the reader opens them. Asserting the
+    // fold and then opening it keeps this walk about what it says it is about —
+    // the App's own layout drawing work rows and a failure — instead of asserting
+    // a default the pattern no longer has.
+    await expect(page.getByTestId('conversation-tool').first()).toBeHidden();
+    await page.getByTestId('conversation-turn-process').first().click();
     await expect(page.getByTestId('conversation-tool').first()).toBeVisible();
 
     await expect(page).toHaveScreenshot('app-claude-code-conversation.png', {
