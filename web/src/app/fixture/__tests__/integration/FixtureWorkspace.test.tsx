@@ -25,20 +25,19 @@ describe('FixtureWorkspace', () => {
     expect(screen.getByTestId('files-web-layout')).toBeInTheDocument();
   });
 
-  // Capsule V2 (#1347): discoverable capabilities are no longer shown in Workspace.
-  // They are accessed through Work Overview in Terminal form. The capsule only
-  // shows direct capabilities (primary + contextual).
-  it('renders the workspace shell with the tool bar and files layout', () => {
+  // Capsule V2 (#1347): Workspace capsule shows ALL capabilities (scrollable).
+  // This is the reciprocal of Terminal, which shows only the active capability.
+  it('renders the workspace shell with all capabilities in the scrollable capsule', () => {
     renderFixture();
 
-    // Files is the opened capability, so it owns the direct slot; registration
-    // alone no longer buys a capability permanent navigation.
+    // All capabilities with a workspace view binding are shown in the capsule.
     expect(screen.getByTestId('workspace-tool-files')).toBeInTheDocument();
-    expect(screen.queryByTestId('workspace-tool-session')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('workspace-tool-agent')).not.toBeInTheDocument();
+    expect(screen.getByTestId('workspace-tool-session')).toBeInTheDocument();
+    expect(screen.getByTestId('workspace-tool-agent')).toBeInTheDocument();
+    expect(screen.getByTestId('workspace-tool-env')).toBeInTheDocument();
     expect(screen.queryAllByRole('tab')).toHaveLength(0);
 
-    // Capsule V2: no disclosure menu in Workspace.
+    // Capsule V2: no disclosure menu in Workspace — all capabilities are directly visible.
     expect(screen.queryByTestId('workspace-capability-more')).not.toBeInTheDocument();
   });
 
@@ -47,11 +46,10 @@ describe('FixtureWorkspace', () => {
 
     const entry = screen.getByTestId('workspace-tool-claude-code');
     expect(entry).toHaveAttribute('data-capability-state', 'active');
-    // Still bounded: the opened capability plus the one that earned it — the
-    // remaining capabilities stay behind More.
+    // Capsule V2: all capabilities are shown in the scrollable capsule.
     expect(screen.getByTestId('workspace-tool-files')).toBeInTheDocument();
-    expect(screen.queryByTestId('workspace-tool-session')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('workspace-tool-agent')).not.toBeInTheDocument();
+    expect(screen.getByTestId('workspace-tool-session')).toBeInTheDocument();
+    expect(screen.getByTestId('workspace-tool-agent')).toBeInTheDocument();
   });
 
   it('keeps a capability that ran here in direct chrome, marked relevant', () => {
@@ -62,18 +60,19 @@ describe('FixtureWorkspace', () => {
     expect(entry).toHaveAttribute('data-capability-presence', 'contextual');
   });
 
-  it('leaves a capability the session never ran in disclosure', () => {
+  it('shows a capability the session never ran as discoverable', () => {
     renderFixture('/fixture/workspace');
 
-    expect(screen.queryByTestId('workspace-tool-claude-code')).not.toBeInTheDocument();
+    // Capsule V2: all capabilities are shown in the scrollable capsule.
+    // Claude Code is discoverable (not active), but still visible.
+    expect(screen.getByTestId('workspace-tool-claude-code')).toBeInTheDocument();
   });
 
-  it('keeps Git out of direct chrome on the canonical route', () => {
-    // Presence is earned, not granted: registering Git must not grow the dock,
-    // which is also why the golden screenshots do not move.
+  it('shows Git in the capsule when registered', () => {
+    // Capsule V2: all capabilities with a workspace view binding are shown.
     renderFixture('/fixture/workspace');
 
-    expect(screen.queryByTestId('workspace-tool-git')).not.toBeInTheDocument();
+    expect(screen.getByTestId('workspace-tool-git')).toBeInTheDocument();
   });
 
   it('renders the Git view when the route opens it', async () => {
