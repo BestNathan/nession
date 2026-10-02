@@ -72,6 +72,10 @@ export function CapabilityCapsule({
     <nav
       aria-label="Workspace capabilities"
       data-testid="workspace-capability-capsule"
+      /* Reciprocal morph key (#1347 SC-08): the Terminal's capsule shell
+         carries the same id, so a surface switch slides each from the
+         other's former place. */
+      data-morph-id="capsule-shell"
       className={cn(
         'pointer-events-auto flex items-center',
         capsuleShellSurfaceClass,

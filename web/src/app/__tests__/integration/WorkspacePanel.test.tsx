@@ -11,11 +11,21 @@ import type { Session } from '@/types';
  * `FilesAppLayout` calls `depth.setPush` from an effect, and this is the same
  * call, without needing a real file tree to get there.
  */
-const captured = vi.hoisted(() => ({ depth: null as WorkspaceDepthControl | null }));
+const captured = vi.hoisted(() => ({
+  depth: null as WorkspaceDepthControl | null,
+  surfaceAction: null as React.ReactNode,
+}));
 
 vi.mock('@/app/workspace/WorkspaceShell', () => ({
-  WorkspaceShell: ({ depth }: { depth?: WorkspaceDepthControl }) => {
+  WorkspaceShell: ({
+    depth,
+    surfaceAction,
+  }: {
+    depth?: WorkspaceDepthControl;
+    surfaceAction?: React.ReactNode;
+  }) => {
     captured.depth = depth ?? null;
+    captured.surfaceAction = surfaceAction ?? null;
     return <div data-testid="stub-workspace-shell" />;
   },
 }));
@@ -125,5 +135,42 @@ describe('WorkspacePanel — the pushed depth is reported upward (#1081)', () =>
         />,
       ),
     ).not.toThrow();
+  });
+});
+
+describe('WorkspacePanel — the Terminal-return circle projects the active conversation (#1347 SC-25)', () => {
+  function renderWebPanel(foregroundCommand: string | null) {
+    render(
+      <WorkspacePanel
+        selectedSession={{ ...sess, foreground_command: foregroundCommand }}
+        selectedAgent={undefined}
+        agents={[]}
+        domain={domain}
+        surface="workspace"
+        tool="files"
+        fileOps={null}
+        experience="web"
+        facts={undefined}
+        onSurfaceChange={vi.fn()}
+        onToolChange={vi.fn()}
+      />,
+    );
+    // The stubbed shell hands the action back; render what the panel resolved.
+    return render(<>{captured.surfaceAction}</>);
+  }
+
+  it('shows the capability glyph while the pane runs a Claude Code command', () => {
+    const view = renderWebPanel('claude.exe');
+
+    expect(view.getByTestId('surface-action-glyph')).toBeInTheDocument();
+    // …inside the Terminal-return circle, destination untouched (SC-26).
+    expect(view.getByTestId('surface-action-open-terminal')).toBeInTheDocument();
+  });
+
+  it('shows no glyph when the pane runs something else', () => {
+    const view = renderWebPanel('bash');
+
+    expect(view.queryByTestId('surface-action-glyph')).not.toBeInTheDocument();
+    expect(view.getByTestId('surface-action-open-terminal')).toBeInTheDocument();
   });
 });
