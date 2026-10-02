@@ -65,6 +65,48 @@ describe('SurfaceDestinationAction (#1204)', () => {
     expect(onOpen).toHaveBeenCalledTimes(1);
   });
 
+  it('projects a capability glyph as a badge when one is supplied (#1347 SC-25)', () => {
+    render(
+      <SurfaceDestinationAction
+        destination="terminal"
+        onOpen={vi.fn()}
+        glyph={<svg data-testid="glyph-icon" />}
+      />,
+    );
+
+    const badge = screen.getByTestId('surface-action-glyph');
+    expect(badge).toBeInTheDocument();
+    expect(screen.getByTestId('glyph-icon')).toBeInTheDocument();
+    // Decorative: the badge is hidden from assistive technology, so the
+    // action's accessible name stays the destination's.
+    expect(badge).toHaveAttribute('aria-hidden', 'true');
+  });
+
+  it('renders no badge without a glyph', () => {
+    render(<SurfaceDestinationAction destination="terminal" onOpen={vi.fn()} />);
+
+    expect(screen.queryByTestId('surface-action-glyph')).not.toBeInTheDocument();
+  });
+
+  it('a projected glyph cannot alter the destination (#1347 SC-26)', async () => {
+    const user = userEvent.setup();
+    const onOpen = vi.fn();
+    render(
+      <SurfaceDestinationAction
+        destination="terminal"
+        onOpen={onOpen}
+        glyph={<svg data-testid="glyph-icon" />}
+      />,
+    );
+
+    const action = screen.getByRole('button', { name: 'Open Terminal' });
+    await user.click(action);
+
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    expect(action).toHaveAttribute('aria-label', 'Open Terminal');
+    expect(action).toHaveAttribute('data-testid', 'surface-action-open-terminal');
+  });
+
   it('activates with keyboard (Enter and Space)', async () => {
     const user = userEvent.setup();
     const onOpen = vi.fn();
