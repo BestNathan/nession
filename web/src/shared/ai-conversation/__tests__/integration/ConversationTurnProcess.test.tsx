@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
 import { ConversationTranscript } from '../../components/ConversationTranscript'
 import type { AIConversationSnapshot } from '../../runtime/ConversationRuntime'
-import { assistantMessage, toolItem, userMessage } from '../fixtures/items'
+import { assistantMessage, statusItem, toolItem, userMessage } from '../fixtures/items'
 
 /**
  * The turn's process control: one line per turn, folding the work behind it.
@@ -188,6 +188,30 @@ describe('the turn process control', () => {
     })
 
     expect(screen.getByTestId('conversation-turn-process')).toHaveTextContent('Worked for 30s')
+  })
+
+  it('draws a status notice without folding it into the work', () => {
+    // #1363 SC-03: a provider's notice is a row of the transcript, not `unknown`
+    // and not part of the assistant's work. The second half is the load-bearing
+    // half — a notice that folded away with the process would vanish exactly
+    // when a reader folds the work to look at the answer, which is when "why
+    // there isn't one" matters most.
+    renderTranscript({
+      items: [
+        userMessage('u1', 'q'),
+        toolItem('t1'),
+        toolItem('t2'),
+        statusItem('s1', 'The host went away mid-turn'),
+        assistantMessage('a1', 'a'),
+      ],
+    })
+
+    // Settled, so the work is folded.
+    expect(rowOf(screen.getByTestId('conversation-tool-group'))).toHaveAttribute('hidden')
+
+    const notice = screen.getByTestId('conversation-status')
+    expect(notice).toHaveTextContent('The host went away mid-turn')
+    expect(rowOf(notice)).not.toHaveAttribute('hidden')
   })
 
   it('says only that it worked when the provider did not timestamp it', () => {

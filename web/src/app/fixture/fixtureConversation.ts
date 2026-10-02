@@ -389,6 +389,20 @@ function conversationsFor(scenario: string): ConversationsResponse | undefined {
       // could not be read at all, against one that was read and held no
       // conversations. `#1128` names both, and the view renders them apart.
       return { state: 'unavailable', items: [], has_more: false };
+    case 'thread-unavailable':
+      // The list reads fine and the *thread* cannot be. Kept as its own
+      // scenario because `unavailable` above means the folder could not be
+      // listed at all — a different screen, and until now the only one a
+      // browser could reach. `#1397` gave the thread its own arm precisely
+      // because "cannot say" is not "there is nothing"; the round-2 review
+      // named the absence of a path driving that arm as a gap.
+      return {
+        state: 'ready',
+        cwd: '/Users/dev/code/nession-capsule',
+        items: CONVERSATIONS,
+        binding: { conversation_id: BOUND_ID, activity: 'active' },
+        has_more: false,
+      };
     case 'paged':
       // `ready`, plus a messages unit that admits an older page exists. See
       // `messagesFor`: the paging lives entirely on the messages answer — the
@@ -432,6 +446,18 @@ function messagesFor(
     };
   }
   switch (scenario) {
+    case 'thread-unavailable':
+      // The read the list above promised and could not make. `items: []` here
+      // is the provider being honest, not a conversation that is empty — and
+      // the surface must not turn one into the other, which is the whole point
+      // of the state.
+      return {
+        state: 'unavailable',
+        items: [],
+        has_more: false,
+        partial_tail: false,
+        skipped: 0,
+      };
     case 'ready':
       return {
         state: 'ready',

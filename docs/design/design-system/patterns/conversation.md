@@ -22,15 +22,26 @@ it — and re-parenting is what would remount them.
 user message                     ← opens the turn
 turn process control             ← one line: "Worked" / "Worked for 12s"
   ├─ tool activity rows          ┐
-  ├─ reasoning / status rows     ├─ the process window
+  ├─ reasoning rows              ├─ the process window
   └─ …                           ┘
 assistant answer                 ← the turn's main content
 turn actions                     ← copy, and whatever the surface adds
+
+status notice                    ← wherever it happened; never folds
 ```
 
 Rows that are **not** the assistant's work — the user's own message, a status
 notice, the turn's terminal state — never fold into the process. A user's
 message disappearing into the assistant's work would invert whose turn it is.
+
+A **status notice** is the case worth naming, because this document used to both
+draw status among the process window's rows and say, one line below, that it
+never folds. It does not fold (#1363). A notice is *about* the conversation
+rather than produced by the assistant working on it — an interrupted turn, a host
+that went away — so a reader who folds the work away is asking to see the answer,
+not asking to lose the reason there isn't one. The model holds the same reading:
+a status item is a sibling of the content kinds, not of the work, and it carries
+no severity vocabulary until a provider needs one.
 
 ## Hierarchy
 

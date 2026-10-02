@@ -122,8 +122,14 @@ function turnOf(items: AIConversationItem[]): ConversationTurn {
     }
   }
 
+  // A status notice is not the assistant's work, so it is not inside the window
+  // a fold closes over — see `AIStatusItem` for why that reading won over the
+  // other one the canonical document offers. Leaving it out of `process` is the
+  // whole mechanism: the renderer folds by turn membership, so an item with
+  // none is never hidden.
   const process = items.filter(
-    (item, index) => item !== answer && !(opening !== null && index === 0),
+    (item, index) =>
+      item !== answer && item.kind !== 'status' && !(opening !== null && index === 0),
   )
 
   return {
