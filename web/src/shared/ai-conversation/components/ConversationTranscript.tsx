@@ -144,16 +144,38 @@ function TranscriptContent({
 
   const turns = useMemo(() => turnsOf(snapshot.items), [snapshot.items])
   const membership = useMemo(() => turnMembership(turns), [turns])
-  // The turn being worked on: the last one, while the page says it is still
-  // being appended to. Everything before it has finished, and a finished turn
-  // folds — that is the "rest" state `conversation.md` describes.
-  const workingKey = snapshot.partialTail ? (turns[turns.length - 1]?.key ?? null) : null
+  const lastKey = turns[turns.length - 1]?.key ?? null
+
+  /**
+   * Whether a turn is still being worked on — the pattern's two live phases.
+   *
+   * **Working only.** The turn has no answer, so its work is the only thing it
+   * has to show. Folding it renders the turn as a question and then silence,
+   * which is what the first version of this did; a question whose work has been
+   * hidden and whose answer has not been written is not the "rest" state, it is
+   * a hole.
+   *
+   * **Streaming output.** The answer is on its way and the reader is watching it
+   * arrive. It stays open for that reason even though it now *has* an answer.
+   *
+   * Two signals say whether output is streaming, and they are the two
+   * `isStreaming` already weighs: what the provider stated about the message,
+   * and what the page said about itself. A provider that states a status is
+   * believed; the page's mid-record flag is the fallback, and it only speaks for
+   * the turn the page ended in.
+   */
+  const workingOf = (turn: ConversationTurn): boolean =>
+    turn.answer === null ||
+    turn.answer.status === 'streaming' ||
+    (turn.key === lastKey && snapshot.partialTail)
+
   const [overrides, setOverrides] = useState(() => new Map<string, boolean>())
-  const isOpen = (turn: ConversationTurn) => overrides.get(turn.key) ?? turn.key === workingKey
+  const isOpen = (turn: ConversationTurn) => overrides.get(turn.key) ?? workingOf(turn)
   const toggle = (key: string) => {
     setOverrides((previous) => {
       const next = new Map(previous)
-      next.set(key, !(previous.get(key) ?? key === workingKey))
+      const turn = turns.find((candidate) => candidate.key === key)
+      next.set(key, !(previous.get(key) ?? (turn !== undefined && workingOf(turn))))
       return next
     })
   }
