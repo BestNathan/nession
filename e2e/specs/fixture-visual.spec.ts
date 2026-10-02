@@ -813,7 +813,7 @@ test.describe('App 390×844', () => {
   test('Workspace / Environment, pushed detail', async ({ page }) => {
     await gotoFixtureApp(page);
     await page.getByTestId('app-header-workspace').first().click();
-    await page.getByTestId('workspace-capability-more').click();
+    await page.getByTestId('workspace-capability-capsule').click();
     await page.getByTestId('workspace-capability-picker-env').click();
     await page.getByTestId('env-profile-list').waitFor();
 
@@ -842,7 +842,7 @@ test.describe('App 390×844', () => {
     await gotoFixtureApp(page);
     await page.getByTestId('app-header-workspace').first().click();
 
-    await page.getByTestId('workspace-capability-more').click();
+    await page.getByTestId('workspace-capability-capsule').click();
     await page.getByTestId('workspace-capability-picker-claude-code').click();
 
     const conversation = page.getByTestId('conversation-open');

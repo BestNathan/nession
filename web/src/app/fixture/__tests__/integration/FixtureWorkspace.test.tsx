@@ -25,8 +25,10 @@ describe('FixtureWorkspace', () => {
     expect(screen.getByTestId('files-web-layout')).toBeInTheDocument();
   });
 
-  it('keeps direct chrome to the opened capability and discloses the rest through More', async () => {
-    const user = userEvent.setup();
+  // Capsule V2 (#1347): discoverable capabilities are no longer shown in Workspace.
+  // They are accessed through Work Overview in Terminal form. The capsule only
+  // shows direct capabilities (primary + contextual).
+  it('renders the workspace shell with the tool bar and files layout', () => {
     renderFixture();
 
     // Files is the opened capability, so it owns the direct slot; registration
@@ -36,9 +38,8 @@ describe('FixtureWorkspace', () => {
     expect(screen.queryByTestId('workspace-tool-agent')).not.toBeInTheDocument();
     expect(screen.queryAllByRole('tab')).toHaveLength(0);
 
-    await user.click(screen.getByTestId('workspace-capability-more'));
-    expect(await screen.findByTestId('workspace-capability-picker-session')).toBeInTheDocument();
-    expect(screen.getByTestId('workspace-capability-picker-agent')).toBeInTheDocument();
+    // Capsule V2: no disclosure menu in Workspace.
+    expect(screen.queryByTestId('workspace-capability-more')).not.toBeInTheDocument();
   });
 
   it('gives a capability that is running here a direct slot, marked active', () => {

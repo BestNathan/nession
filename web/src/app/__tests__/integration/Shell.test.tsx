@@ -201,22 +201,8 @@ function renderShell(initialEntry = '/') {
   return { store, ...view };
 }
 
-/**
- * Open More and pick a progressively disclosed Workspace capability.
- *
- * Base UI keeps one popup node mounted across open/close and holds it inert
- * (`pointer-events: none`) until the open transition settles, so a click issued
- * the moment the item appears can land on a menu that is still animating in.
- * Wait for the popup to actually be interactive rather than sleeping.
- */
-async function clickDisclosedCapability(name: string) {
-  await userEvent.click(screen.getByTestId('workspace-capability-more'));
-  const item = await screen.findByRole('menuitem', { name });
-  await waitFor(() => {
-    expect(item).not.toHaveStyle({ pointerEvents: 'none' });
-  });
-  await userEvent.click(item);
-}
+// Capsule V2 (#1347): clickDisclosedCapability helper removed — the disclosure
+// menu no longer exists in Workspace.
 
 describe('Shell', () => {
   beforeEach(() => {
@@ -282,7 +268,10 @@ describe('Shell', () => {
     expect(screen.queryByTestId('agent-grid')).not.toBeInTheDocument();
   });
 
-  it('selects a session, defaults to Terminal, then switches Workspace capabilities from More', async () => {
+  // Capsule V2 (#1347): discoverable capabilities are no longer accessible from
+  // Workspace. The test now stops after opening Workspace and verifying the
+  // unavailable state. Capability switching through disclosure menu is removed.
+  it('selects a session, defaults to Terminal, then opens Workspace', async () => {
     deepLink.sessionIdFromUrl = sess.session_id;
     renderShell();
     await userEvent.click(screen.getByTestId('session-item-a1:fix'));
@@ -305,14 +294,9 @@ describe('Shell', () => {
       'Files is not available here',
     );
 
-    // Available capabilities are progressively disclosed instead of parked in
-    // permanent chrome.
-    await clickDisclosedCapability('Agent');
-    expect(screen.getByTestId('agent-detail')).toBeInTheDocument();
-
-    await clickDisclosedCapability('Claude Code');
-    expect(screen.getByTestId('claude-code-workspace')).toBeInTheDocument();
-    expect(screen.queryByTestId('agent-detail')).not.toBeInTheDocument();
+    // Capsule V2: no disclosure menu in Workspace — discoverable capabilities
+    // are accessed through Work Overview in Terminal form.
+    expect(screen.queryByTestId('workspace-capability-more')).not.toBeInTheDocument();
   });
 
   it('shows empty copy when there are no sessions', () => {
@@ -492,14 +476,8 @@ describe('Shell', () => {
     expect(screen.getByTestId('create-session')).toBeDisabled();
   });
 
-  it('opens env files from workspace dock when a session is selected', async () => {
-    deepLink.sessionIdFromUrl = sess.session_id;
-    renderShell();
-    await userEvent.click(screen.getByTestId('session-item-a1:fix'));
-    await userEvent.click(screen.getByRole('button', { name: 'Open Workspace' }));
-    await clickDisclosedCapability('Environment');
-    expect(screen.getByTestId('env-workspace')).toBeInTheDocument();
-  });
+  // Capsule V2 (#1347): removed test that opened Environment from disclosure menu.
+  // Discoverable capabilities are no longer accessible from Workspace.
 
   it('renders without the global chrome bar', () => {
     renderShell();
