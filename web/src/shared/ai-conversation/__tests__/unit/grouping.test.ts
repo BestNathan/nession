@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { groupRows, summarizeTools } from '../../model/grouping'
+import {
+  carryGroupKeys,
+  groupRows,
+  rememberGroups,
+  summarizeTools,
+} from '../../model/grouping'
 import { assistantMessage, toolItem, unknownItem, userMessage } from '../fixtures/items'
 
 describe('groupRows', () => {
@@ -113,5 +118,41 @@ describe('summarizeTools', () => {
 
     expect(summary.text).not.toContain('Bash')
     expect(summary.text).not.toContain('Read')
+  })
+})
+
+describe('carrying a work group’s identity across a prepend', () => {
+  it('keeps the key a group was rendered under when an older call joins it', () => {
+    const remembered = new Map<string, string>()
+
+    const before = carryGroupKeys(groupRows([toolItem('a'), toolItem('b')]), remembered)
+    rememberGroups(before, remembered)
+    expect(before[0]).toMatchObject({ key: 'tools:a' })
+
+    // The run now starts at `x`; the derived key would be `tools:x`.
+    const after = carryGroupKeys(
+      groupRows([toolItem('x'), toolItem('a'), toolItem('b')]),
+      remembered,
+    )
+    expect(after[0]).toMatchObject({ key: 'tools:a' })
+  })
+
+  it('leaves a genuinely new group on its derived key', () => {
+    const remembered = new Map<string, string>([['a', 'tools:a']])
+
+    const rows = carryGroupKeys(groupRows([toolItem('p'), toolItem('q')]), remembered)
+
+    expect(rows[0]).toMatchObject({ key: 'tools:p' })
+  })
+
+  it('forgets ids that are no longer grouped', () => {
+    const remembered = new Map<string, string>()
+    rememberGroups(groupRows([toolItem('a'), toolItem('b')]), remembered)
+    expect([...remembered.keys()]).toEqual(['a', 'b'])
+
+    rememberGroups(groupRows([assistantMessage('m', 'done')]), remembered)
+
+    // Otherwise the map grows with the conversation for as long as it is open.
+    expect([...remembered.keys()]).toEqual([])
   })
 })

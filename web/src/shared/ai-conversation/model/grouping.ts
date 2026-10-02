@@ -19,10 +19,14 @@
  * state mid-read. Keying by the first item's id means appending mutates the
  * group's contents and leaves its identity alone.
  *
- * The cost is at the *other* end: prepending older history across a group
- * boundary forms a different group with a different key, so that one group
- * remounts. That is correct — its contents genuinely changed — and the reading
- * anchor across a prepend is the scroller's job, not the key's.
+ * The other end is the problem, and it is not the scroller's to solve:
+ * prepending older history across a group's start makes a *different* call the
+ * first, so the key changes and the row is a new element. It remounts — the
+ * reader's expanded group closes under them, anything focused inside it is gone,
+ * and `MessageScrollerItem` is handed a different `messageId` for content that
+ * did not move. [`carryGroupKeys`] is what keeps the key still; this function
+ * cannot, because a group's identity across a prepend is history, not something
+ * derivable from the items in front of it.
  *
  * ## A lone call is not a group
  *
@@ -162,4 +166,70 @@ export function groupRows(items: AIConversationItem[]): ConversationRow[] {
   flush()
 
   return rows
+}
+
+/**
+ * Give a group back the key it was last rendered under.
+ *
+ * `groupRows` derives a group's key from its first call. That is the right
+ * anchor for the case that happens constantly — a live conversation appends a
+ * call, the run grows at its end, and the group must keep its identity while it
+ * is being appended to — and the wrong one for a prepend, where the run grows at
+ * its start and the anchor moves.
+ *
+ * So identity is *carried* rather than re-derived. Every grouped item remembers
+ * the key it was rendered under, and a group adopts the remembered key of any
+ * item it already held. A group that is genuinely new has no remembered item and
+ * keeps the derived key.
+ *
+ * Reading only — [`rememberGroups`] is the write, and it belongs in an effect
+ * rather than in render, so a render that never commits cannot leave a trace.
+ */
+export function carryGroupKeys(
+  rows: ConversationRow[],
+  remembered: ReadonlyMap<string, string>,
+): ConversationRow[] {
+  return rows.map((row) => {
+    if (row.kind !== 'tools') {
+      return row
+    }
+    let key = row.key
+    for (const item of row.items) {
+      const held = remembered.get(item.id)
+      if (held !== undefined) {
+        key = held
+        break
+      }
+    }
+    return key === row.key ? row : { ...row, key }
+  })
+}
+
+/**
+ * Remember which key each grouped item was rendered under.
+ *
+ * Ids that are no longer in a group are forgotten. Without that the map is a
+ * leak proportional to the conversation; with it, it holds exactly the items on
+ * screen. A stale id could not be adopted anyway — an item is only ever in one
+ * group — so forgetting costs nothing.
+ */
+export function rememberGroups(
+  rows: readonly ConversationRow[],
+  remembered: Map<string, string>,
+): void {
+  const live = new Set<string>()
+  for (const row of rows) {
+    if (row.kind !== 'tools') {
+      continue
+    }
+    for (const item of row.items) {
+      remembered.set(item.id, row.key)
+      live.add(item.id)
+    }
+  }
+  for (const id of [...remembered.keys()]) {
+    if (!live.has(id)) {
+      remembered.delete(id)
+    }
+  }
 }
