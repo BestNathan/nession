@@ -11,7 +11,7 @@
  */
 
 import type { AIMessageItem } from './content'
-import type { AIToolItem } from './activity'
+import type { AIReasoningItem, AIToolItem } from './activity'
 
 // Re-exported here so `model/` reads as one vocabulary to everything outside
 // it: a consumer imports the model from one path, and the internal split by
@@ -25,6 +25,7 @@ export type {
   AIUnknownContent,
 } from './content'
 export type {
+  AIReasoningItem,
   AIToolCategory,
   AIToolItem,
   AIToolPayload,
@@ -74,7 +75,11 @@ export interface AIUnknownItem {
   timestamp?: string | null
 }
 
-export type AIConversationItem = AIMessageItem | AIToolItem | AIUnknownItem
+export type AIConversationItem =
+  | AIMessageItem
+  | AIToolItem
+  | AIReasoningItem
+  | AIUnknownItem
 
 /**
  * What a provider answered about a directory of conversations.
