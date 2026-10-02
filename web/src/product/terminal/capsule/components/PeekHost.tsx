@@ -76,6 +76,15 @@ export function PeekHost({
         capsuleProjectionDockClass,
         capsuleProjectionTextClass,
         capsuleProjectionScrollClass,
+        // The containment boundary (#1347 SC-27): paint containment clips the
+        // body to this box and makes it the containing block and stacking
+        // context for everything inside — a plugin body's `position: fixed`
+        // resolves against the host instead of the viewport, and its z-index
+        // cannot leapfrog the shell's own layers. Combined with the binding
+        // contract's no-portals rule (#1120), that is "cannot escape the Peek
+        // host" enforced rather than intended. The host's own overlay is
+        // unaffected: the Dialog portals to the body, outside this subtree.
+        'contain-paint',
       )}
     >
       <div className="flex items-center justify-between gap-[length:var(--terminal-capsule-projection-item-gap)]">

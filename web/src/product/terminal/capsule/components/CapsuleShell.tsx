@@ -67,6 +67,11 @@ export function CapsuleShell({
     <div
       ref={shellRef}
       data-testid="capsule-shell"
+      /* Reciprocal morph key (#1347 SC-08): the Workspace's capability capsule
+         carries the same id, so a surface switch slides each from the other's
+         former place. Not `data-flip-id` — that namespace belongs to the
+         intra-capsule composer FLIP. */
+      data-morph-id="capsule-shell"
       className={cn(
         'flex min-h-[length:var(--control-md)] items-center',
         capsuleShellInnerClass,

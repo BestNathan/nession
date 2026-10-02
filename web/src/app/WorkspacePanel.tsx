@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { cn } from '@/shared/lib/utils';
 import type { FileOps } from '@/capabilities/files';
+import { claudeCodeView, isClaudeCodeCommand } from '@/capabilities/claude-code';
 import type { CapabilityFacts, CapabilityId } from '@/product/capability';
 import type { DomainState } from '@/product/session/model/domainState';
 import type { Agent, Session } from '@/types';
@@ -147,11 +148,24 @@ export function WorkspacePanel({
   // action beside the capability dock — surface navigation, not a capability,
   // so it stays when a pushed detail depth hides the dock. The App leaves
   // through `AppPageHeader`'s Back and gets no second leave affordance.
+  //
+  // SC-25 (#1347): while the pane is running a conversational capability, the
+  // Terminal-return circle projects that capability's glyph — "your
+  // conversation is over there". Claude Code is the only conversational
+  // capability today, and the command matcher stays owned by its slice. The
+  // glyph is a badge inside the same button, so the destination is untouched
+  // (SC-26).
+  const ConversationGlyph = claudeCodeView.icon;
+  const conversationActive = Boolean(
+    selectedSession.foreground_command &&
+      isClaudeCodeCommand(selectedSession.foreground_command),
+  );
   const surfaceAction =
     experience === 'web' ? (
       <SurfaceDestinationAction
         destination="terminal"
         onOpen={() => onSurfaceChange('terminal')}
+        glyph={conversationActive ? <ConversationGlyph aria-hidden /> : undefined}
       />
     ) : undefined;
 
