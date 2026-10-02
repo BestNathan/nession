@@ -9,10 +9,10 @@ import type {
   CapsuleExperience,
 } from '@/product/terminal/capsule/types';
 import { useTerminalOrchestration } from '@/product/terminal/useTerminalOrchestration';
+import type { ResolvedWorkContext } from '@/product/terminal/capsule/workAwareness';
 
 export interface TerminalRegionProps {
   hidden: boolean;
-  onDisconnect: () => void;
   onError: (error: Error) => void;
   /** Which experience's capsule to render — supplied by the shell. */
   experience: CapsuleExperience;
@@ -22,6 +22,8 @@ export interface TerminalRegionProps {
   onOpenWorkspaceFile?: (path: string, line?: number) => void;
   /** The shell's surface-navigation action beside the capsule (#1204). */
   surfaceAction?: ReactNode;
+  /** Work-awareness context (#1347): whether any capability is working. */
+  workContext?: ResolvedWorkContext;
 }
 
 /**
@@ -30,13 +32,13 @@ export interface TerminalRegionProps {
  */
 export function TerminalRegion({
   hidden,
-  onDisconnect,
   onError,
   experience,
   capsuleCapabilities,
   capsuleProjection,
   onOpenWorkspaceFile,
   surfaceAction,
+  workContext,
 }: TerminalRegionProps) {
   const {
     sessionId,
@@ -45,12 +47,11 @@ export function TerminalRegion({
     inputDisabled,
     viewportReady,
     terminalState,
-    transportEpoch,
     terminalControl,
     onTakeControl,
     inputDrop,
     dismissInputDrop,
-  } = useTerminalOrchestration({ onDisconnect, onError });
+  } = useTerminalOrchestration({ onError });
 
   return (
     <div
@@ -76,13 +77,13 @@ export function TerminalRegion({
           }}
           inputDrop={inputDrop}
           onDismissInputDrop={dismissInputDrop}
+          workContext={workContext}
         >
           <TerminalPane
             sessionId={sessionId}
             controller={controller}
             terminalState={terminalState}
             viewportReady={viewportReady}
-            transportEpoch={transportEpoch}
             onOpenWorkspaceFile={onOpenWorkspaceFile}
           />
         </TerminalSurface>

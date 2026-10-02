@@ -26,16 +26,20 @@ async function gotoGit(page: import('@playwright/test').Page): Promise<void> {
   await page.getByTestId('git-change-list').waitFor();
 }
 
-test('a capability earns its slot only when opened or observed', async ({ page }) => {
-  // The canonical route does not open Git, and nothing about the session says
-  // Git is relevant — so it must not be in direct chrome. This is also why the
-  // golden screenshots do not move when a capability is registered.
+test('a registered capability holds a slot without becoming the opened one', async ({ page }) => {
+  // Capsule V2 (#1347) keeps a slot for every capability that has a Workspace
+  // view, so the canonical route shows Git whether or not it is opened. What
+  // separates a registered capability from the opened one is therefore no longer
+  // membership but selection — and opening Git must move that selection, and
+  // only it.
   await page.goto('/#/fixture/workspace');
-  await expect(page.getByTestId('workspace-tool-git')).toHaveCount(0);
-
-  // Opening it gives it the slot it needs, and only that one.
-  await gotoGit(page);
   await expect(page.getByTestId('workspace-tool-git')).toBeVisible();
+  await expect(page.getByTestId('workspace-tool-git')).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.getByTestId('workspace-tool-files')).toHaveAttribute('aria-pressed', 'true');
+
+  await gotoGit(page);
+  await expect(page.getByTestId('workspace-tool-git')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('workspace-tool-files')).toHaveAttribute('aria-pressed', 'false');
   await expect(page.getByTestId('git-workspace')).toBeVisible();
 });
 

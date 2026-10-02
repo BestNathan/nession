@@ -1,9 +1,4 @@
-import { Plus } from 'lucide-react';
 import { resolveCapabilityPresences, type CapabilityId } from '@/product/capability';
-import {
-  CapabilityDisclosureMenu,
-  type CapabilityDisclosureMenuEntry,
-} from '@/product/capability/components/CapabilityDisclosureMenu';
 import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import { resolveWorkspaceCapabilities } from '@/app/workspace/capabilities';
@@ -17,6 +12,8 @@ import type {
   WorkspaceDepthControl,
   WorkspaceViewBinding,
 } from '@/app/workspace/workspaceContext';
+import { CapabilityCapsule } from '@/app/workspace/CapabilityCapsule';
+import { capsuleZoneClass } from '@/product/terminal/capsule/CapsuleZone';
 
 const workspaceViewBindings = new Map<string, WorkspaceViewBinding>(
   WORKSPACE_VIEW_BINDINGS.map((view) => [view.id, view]),
@@ -79,18 +76,6 @@ function SurfaceNavigation({ children }: { children: React.ReactNode }) {
   );
 }
 
-function disclosureEntries(items: WorkspacePresentationItem[]): CapabilityDisclosureMenuEntry[] {
-  return items.map((item) => {
-    const binding = bindingFor(item)!;
-    return {
-      id: item.snapshot.id,
-      title: item.snapshot.title,
-      icon: binding.icon,
-      state: item.snapshot.state,
-    };
-  });
-}
-
 /**
  * What the Workspace shows when the open capability has no view to draw.
  *
@@ -111,93 +96,6 @@ function UnavailableCapability({ title }: { title: string }) {
         </p>
       </div>
     </div>
-  );
-}
-
-/**
- * The capability dock (`#1051`): direct entries for what earned presence, More
- * for the rest. Rendered only at the capability root — a pushed detail has its
- * own page and its own Back, so a global capability switcher over it would be
- * a second navigation owner answering to a depth it does not belong to.
- */
-function CapabilityDock({
-  directItems,
-  discoverableItems,
-  activeCapabilityId,
-  onToolChange,
-}: {
-  directItems: WorkspacePresentationItem[];
-  discoverableItems: WorkspacePresentationItem[];
-  activeCapabilityId: CapabilityId;
-  onToolChange: (tool: CapabilityId) => void;
-}) {
-  return (
-    <nav
-      aria-label="Workspace capabilities"
-      className="pointer-events-auto flex items-center gap-1 rounded-full bg-background px-1.5 py-[length:var(--terminal-capsule-shell-pad-y)] shadow-[var(--elevation-floating)]"
-    >
-      {directItems.map((item) => {
-        const binding = bindingFor(item)!;
-        const Icon = binding.icon;
-        const isActive = item.snapshot.id === activeCapabilityId;
-        return (
-          <button
-            key={item.snapshot.id}
-            id={`workspace-capability-${item.snapshot.id}`}
-            type="button"
-            aria-pressed={isActive}
-            aria-label={item.snapshot.title}
-            title={item.snapshot.title}
-            data-testid={`workspace-tool-${item.snapshot.id}`}
-            data-capability-state={item.snapshot.state}
-            data-capability-presence={item.presence.level}
-            onClick={() => onToolChange(item.snapshot.id)}
-            className={cn(
-              'relative flex size-[length:var(--dock-target)] shrink-0 items-center justify-center rounded-[var(--radius-control)] transition-colors duration-[var(--motion-shell-duration)] ease-[var(--motion-shell-ease)]',
-              isActive ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
-            )}
-          >
-            <Icon className="size-[length:var(--icon-md)]" aria-hidden />
-            {/* The open capability is marked by a dot, not by filling the
-                target. It is always rendered so the row's geometry does
-                not shift between states. */}
-            <span
-              aria-hidden
-              className={cn(
-                'absolute bottom-0.5 size-1 rounded-full',
-                isActive ? 'bg-foreground' : 'bg-transparent',
-              )}
-            />
-          </button>
-        );
-      })}
-
-      {discoverableItems.length > 0 ? (
-        <CapabilityDisclosureMenu
-          entries={disclosureEntries(discoverableItems)}
-          onSelect={onToolChange}
-          label="Workspace capabilities"
-          testIdPrefix="workspace-capability-picker"
-          trigger={
-            /* `+` is capability disclosure, never "create". Its name says
-               so in both the accessible name and the tooltip, and what it
-               opens is the same capability list the row's icons come from —
-               `entries` above is built from capability snapshots, so the
-               menu cannot become a resource picker without this line
-               changing too (#1051 criterion 7). */
-            <button
-              type="button"
-              aria-label="More workspace capabilities"
-              title="More workspace capabilities"
-              data-testid="workspace-capability-more"
-              className="flex size-[length:var(--dock-target)] shrink-0 items-center justify-center rounded-[var(--radius-control)] text-muted-foreground transition-colors duration-[var(--motion-shell-duration)] ease-[var(--motion-shell-ease)] hover:text-foreground"
-            >
-              <Plus className="size-[length:var(--icon-md)]" aria-hidden />
-            </button>
-          }
-        />
-      ) : null}
-    </nav>
   );
 }
 
@@ -240,7 +138,14 @@ export function WorkspaceShell({
 
   const directItems = [...presentation.primary, ...presentation.contextual].filter(bindingFor);
   const discoverableItems = presentation.discoverable.filter(bindingFor);
-  const hasNavigation = directItems.length > 0 || discoverableItems.length > 0;
+  // Capabilities the reader cannot act with here keep a slot too, rendered inert
+  // rather than dropped — membership that changes as the work changes is how a
+  // reader loses track of what the Workspace holds.
+  const unavailableItems = presentation.unavailable.filter(bindingFor);
+  // Capsule V2 (#1347): Workspace capsule shows ALL capabilities (scrollable).
+  // This is the reciprocal of Terminal, which shows only the active capability.
+  const allCapsuleItems = [...directItems, ...discoverableItems, ...unavailableItems];
+  const hasNavigation = allCapsuleItems.length > 0;
   // `#1051`: the dock is the *capability root's* switcher. A pushed detail has
   // its own page and its own Back, so a global capability switcher over it would
   // be a second navigation owner answering to a depth it does not belong to.
@@ -280,20 +185,22 @@ export function WorkspaceShell({
       </div>
 
       {showDock || showSurfaceAction ? (
-        /* Bottom controls, centered as one group (#1204 §3): surface navigation
-           adjacent to — never merged into — capability navigation. */
+        /* Capsule V2 (#1347): Reciprocal layout — circle left, capsule right.
+           Surface navigation (Terminal destination) on the left; capability
+           capsule on the right. This is the reciprocal of Terminal's layout
+           (capsule left, circle right). Both share the same transparent bottom
+           Capsule Zone (SC-09, SC-10). */
         <div
           data-testid="workspace-tool-bar"
           data-navigation-mode="contextual"
-          className="pointer-events-none absolute inset-x-0 bottom-[var(--shell-space-3)] z-10 flex items-center justify-center gap-[length:var(--shell-space-2)] px-4"
+          className={cn(capsuleZoneClass, 'gap-[length:var(--shell-space-2)]')}
         >
           {showSurfaceAction ? <SurfaceNavigation>{surfaceAction}</SurfaceNavigation> : null}
           {showDock ? (
-            <CapabilityDock
-              directItems={directItems}
-              discoverableItems={discoverableItems}
+            <CapabilityCapsule
+              items={allCapsuleItems}
               activeCapabilityId={activeCapabilityId}
-              onToolChange={ctx.onToolChange}
+              onSelect={ctx.onToolChange}
             />
           ) : null}
         </div>

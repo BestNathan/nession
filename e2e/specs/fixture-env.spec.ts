@@ -173,11 +173,11 @@ test.describe('App 390×844', () => {
   async function gotoEnvCapability(page: Page): Promise<void> {
     await gotoFixtureApp(page);
     await page.getByTestId('app-header-workspace').click();
-    // Environment earns no direct dock slot at rest — `available` is
-    // discoverable, so the App reaches it through the capability picker, the
-    // same walk a user takes.
-    await page.getByTestId('workspace-capability-more').click();
-    await page.getByTestId('workspace-capability-picker-env').click();
+    // Capsule V2 (#1347) gives every capability with a Workspace view a slot of
+    // its own, `available` ones included, so the App reaches Environment by
+    // tapping its entry. The picker this walk used to open is gone, and with it
+    // the old rule that `available` meant "no direct dock slot".
+    await page.getByTestId('workspace-tool-env').click();
     await page.getByTestId('env-profile-list').waitFor();
   }
 

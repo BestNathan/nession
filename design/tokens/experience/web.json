@@ -381,6 +381,54 @@
     "$description": "Web dock targets: pointer input, so the control-md band applies.",
     "value": "32px"
   },
+  "conversation": {
+    "$owner": "pattern.conversation",
+    "$description": "Web density for an AI conversation transcript (#1363). The rhythm is the design: work rows sit close together so a long process reads as one block, and the answer is separated from that block by the loose gap so it reads as the thing you came for. Only the measurements live here — the hierarchy that motivates them is owned by the pattern doc.",
+    "rowGap": {
+      "$description": "Between two rows of the same process group. Tight, because a group is scanned as one unit rather than read.",
+      "value": "8px"
+    },
+    "rowGapExpanded": {
+      "$description": "Between rows of a group the reader has opened. Looser, because now each row is being read on its own.",
+      "value": "16px"
+    },
+    "responseGap": {
+      "$description": "Between blocks of one assistant response. Looser than a process row gap: this is the content, and its parts should not run together.",
+      "value": "16px"
+    },
+    "turnGap": {
+      "$description": "Between a turn's own parts — the process control, the answer, the actions.",
+      "value": "16px"
+    },
+    "processToAnswerGap": {
+      "$description": "From a collapsed process control to the answer it precedes. Tighter than `turnGap`, because a folded process is a label for the answer rather than a peer of it.",
+      "value": "8px"
+    },
+    "groupTitleGap": {
+      "$description": "Below an expanded group's title — the space that says the title belongs to the body rather than to the next title.",
+      "value": "16px"
+    },
+    "groupMaxHeight": {
+      "$description": "Cap on a process group's body before it scrolls inside itself. Viewport-relative as well as absolute: a group on a short window must not push its own answer off screen.",
+      "value": "min(400px, 50vh)"
+    },
+    "groupFade": {
+      "$description": "The edge fade that says a capped group body continues past the cap — the affordance, since a scrollbar gutter may be hidden.",
+      "value": "24px"
+    },
+    "readingColumnMax": {
+      "$description": "The measure for assistant prose. Replaces the ad-hoc `max-w-prose` the transcript used before #1363: a readable line length is a conversation decision, and stating it here is what lets App state its own.",
+      "value": "720px"
+    },
+    "bubbleMaxWidth": {
+      "$description": "The user's bubble as a fraction of the reading column — deliberately well under it, so a short prompt is a short bubble and the assistant's answer owns the full measure. App states the wider value.",
+      "value": "70%"
+    },
+    "foldControlHeight": {
+      "$description": "The one-line process control. Its own height rather than a control token's, because it is a text row with a hairline under it rather than a button with a box.",
+      "value": "32px"
+    }
+  },
   "workspace": {
     "$owner": "pattern.file-workspace",
     "$description": "Web Workspace master/detail. The mockup draws the tree at a fixed 208px — a navigation column sized to its content, not a fraction of the pane — with the editor taking the rest.",

@@ -12,5 +12,6 @@ export {
   CLAUDE_CODE_TITLE,
   claudeCodeProjection,
   claudeCodeView,
+  isClaudeCodeCommand,
   resolveClaudeCodeState,
 } from './contribution';

@@ -3,7 +3,6 @@ import { useMemo, useEffect, useRef } from 'react';
 import { TerminalController } from '@/platform/terminal-runtime/controller/TerminalController';
 import { createTerminalRuntimeAdapter } from '../adapters/TerminalRuntimeAdapter';
 import type { TerminalSession } from '../state/session';
-import type { TerminalTransport } from '@/platform/terminal-runtime/transport/TerminalTransport';
 import type { DeviceProfile, TerminalScrollbackMode } from '@/platform/terminal-runtime/types';
 import type { SessionRuntime } from '@/platform/session-runtime/SessionRuntime';
 
@@ -11,18 +10,23 @@ export interface UseTerminalOptions {
   sessionId: string;
   sessionName: string;
   mode: 'p2p' | 'relay';
-  transportFactory: () => TerminalTransport;
   rendererType?: 'webgl' | 'canvas';
   fontSize?: number;
-  /** xterm's line-height multiplier, from the device profile's Experience tokens. */
+  /** xterm's line-height: a multiple of the font box, from the device profile's Experience tokens. */
   lineHeight?: number;
   scrollback?: number;
   /** Device class — 'mobile' enables the IME-friendly input textarea. */
   deviceProfile?: DeviceProfile;
   /** Whether history is owned by xterm's browser buffer or the legacy path. */
   scrollbackMode?: TerminalScrollbackMode;
-  /** Shared session lifecycle owner receiving viewport readiness and size. */
-  runtime?: SessionRuntime | null;
+  /**
+   * The session's lifecycle owner — required. The controller is not created
+   * without it: the runtime builds every transport the controller binds
+   * (#1309), so a controller created before the lease lands could only bind a
+   * transport the runtime did not issue. Waiting one commit also means the
+   * adapter sees the runtime from construction, which is the #598 invariant.
+   */
+  runtime: SessionRuntime | null;
 }
 
 function isCurrentControllerGeneration(
@@ -38,15 +42,12 @@ function isCurrentControllerGeneration(
  * The controller owns the xterm instance, so its identity must be stable across
  * every re-render — including each terminalState transition (connecting →
  * connected → attached), which derive a fresh session object but must NOT tear
- * down the live terminal view. Only the session identity fields (id/name/mode)
- * and the transport factory are memo deps; the factory itself is kept stable by
- * the caller (a ref-backed wrapper) so frequently-changing connection objects
- * never recreate the controller.
+ * down the live terminal view.
  *
- * Address switches never recreate the controller: the legacy pane passes no
- * transportEpoch to TerminalViewport, and the shell pane gates its
- * viewport rebuild on `transportEpoch` (bumped when the runtime swaps its live
- * agent-terminal API — see useTerminalOrchestration), not on the controller.
+ * Neither address switches nor P2P↔relay flips recreate the controller: the
+ * runtime's transport-swap notification rewires the transport under the live
+ * xterm (#1309), so `mode` is deliberately absent from the memo deps — a
+ * fallback to relay no longer destroys the buffer the user is reading.
  * Recreating the controller here would dispose xterm on every route rotation.
  */
 export function useTerminal(options: UseTerminalOptions): TerminalController | null {
@@ -54,7 +55,6 @@ export function useTerminal(options: UseTerminalOptions): TerminalController | n
     sessionId,
     sessionName,
     mode,
-    transportFactory,
     rendererType,
     fontSize,
     lineHeight,
@@ -64,27 +64,37 @@ export function useTerminal(options: UseTerminalOptions): TerminalController | n
     runtime,
   } = options;
 
+  // `mode` is creation-time display metadata with no readers — the live mode
+  // is a runtime fact that swaps underneath (#1309). Read through a ref so the
+  // memo can see the value without depending on it: depending on it would
+  // recreate the controller on every P2P↔relay flip and destroy the buffer
+  // the user is reading.
+  const modeRef = useRef(mode);
+  modeRef.current = mode;
+
   const controller = useMemo(() => {
-    if (!sessionId) { return null; }
+    if (!sessionId || !runtime) { return null; }
     const session: TerminalSession = {
       id: sessionId,
       name: sessionName,
-      // Live status is owned by terminalSessionStateAtom (the state machine);
-      // the controller never reads it.
+      // Live status is owned by the SessionRuntime's snapshot; the controller
+      // never reads it.
       status: 'idle',
-      mode,
+      mode: modeRef.current,
       startedAt: 0,
     };
     // The runtime adapter is injected at construction — BEFORE any viewport can
     // attach. TerminalViewport attaches the controller in a useLayoutEffect,
     // and the controller publishes transport readiness during that attach; a
-    // late (passive-effect) binding used to miss that first event, leaving
-    // terminalTransportReadyAtom false and blocking the SessionRuntime's
-    // transportReady-gated attach forever (issue #598).
+    // late (passive-effect) binding used to miss that first event, leaving the
+    // runtime's transportReady false and blocking the attach forever (#598).
     const events = createTerminalRuntimeAdapter(runtime);
     return new TerminalController(
       session,
-      transportFactory,
+      // The runtime is the transport authority: every ConnectionManager the
+      // controller binds is built from the identity the runtime owns *now*,
+      // tagged with the runtime's own transport generation.
+      () => runtime.buildTransport(),
       {
         rendererType: rendererType ?? 'canvas',
         fontSize,
@@ -93,9 +103,12 @@ export function useTerminal(options: UseTerminalOptions): TerminalController | n
         deviceProfile,
         scrollbackMode,
         events,
+        transportBinding: {
+          subscribe: (listener) => runtime.subscribeTransportSwap(listener),
+        },
       },
     );
-  }, [sessionId, sessionName, mode, transportFactory, rendererType, fontSize, lineHeight, scrollback, deviceProfile, scrollbackMode, runtime]);
+  }, [sessionId, sessionName, rendererType, fontSize, lineHeight, scrollback, deviceProfile, scrollbackMode, runtime]);
 
   // Dispose replaced controllers (session switch). Never dispose synchronously
   // in cleanup: StrictMode replays effects as unmount→remount and would

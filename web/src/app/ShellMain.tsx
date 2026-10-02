@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useRef, type ReactNode } from 'react';
 import { useIncomingCapabilityFocus } from '@/app/useIncomingCapabilityFocus';
 import { useShellMainFocusTooling } from '@/app/useShellMainFocusTooling';
 import { cn } from '@/shared/lib/utils';
@@ -9,6 +9,7 @@ import { AppHome } from '@/app/experiences/app/AppHome';
 import { TerminalRegion } from '@/app/TerminalRegion';
 import type { CapsuleCapabilityContribution } from '@/app/capsulePresence';
 import type { CapsuleCapabilityProjection } from '@/product/terminal/capsule/types';
+import type { ResolvedWorkContext } from '@/product/terminal/capsule/workAwareness';
 import { TerminalWell } from '@/app/TerminalWell';
 import type { CapabilityId } from '@/product/capability';
 import type { CapabilityFocus, Experience } from '@/app/workspace/workspaceContext';
@@ -17,6 +18,8 @@ import { SessionMainHeader } from '@/app/SessionMainHeader';
 import { SurfaceDestinationAction } from '@/product/workspace/patterns/SurfaceDestinationAction';
 import { WorkspacePanel } from '@/app/WorkspacePanel';
 import { useCapsuleCapability } from '@/app/useCapsuleCapability';
+import { useCapsuleMorph } from '@/product/terminal/capsule/useCapsuleMorph';
+import { useWorkSignals } from '@/app/useWorkSignals';
 import type { Agent, Session } from '@/types';
 
 export interface ShellMainProps {
@@ -160,6 +163,56 @@ function WebOpenWorkspaceAction({
   );
 }
 
+/**
+ * The Terminal half of the work area: the well, a caller-supplied terminal or
+ * the real `TerminalRegion`, hidden rather than unmounted on the Workspace
+ * surface so the reciprocal morph (#1347 SC-08) has both elements to measure.
+ */
+function ShellTerminal({
+  surface,
+  selectedSession,
+  terminal,
+  experience,
+  capsuleCapabilities,
+  capsuleProjection,
+  surfaceAction,
+  onOpenWorkspaceFile,
+  workContext,
+}: {
+  surface: Surface;
+  selectedSession: Session | null;
+  terminal: ShellMainProps['terminal'];
+  experience: Experience;
+  capsuleCapabilities?: CapsuleCapabilityContribution;
+  capsuleProjection?: CapsuleCapabilityProjection;
+  surfaceAction?: ReactNode;
+  onOpenWorkspaceFile?: (path: string, line?: number) => void;
+  workContext?: ResolvedWorkContext;
+}) {
+  return (
+    <TerminalWell
+      className={cn('min-h-0', (surface !== 'terminal' || !selectedSession) && 'hidden')}
+    >
+      {renderTerminal(terminal, {
+        capsuleCapabilities,
+        capsuleProjection,
+        surfaceAction,
+      }) ?? (
+        <TerminalRegion
+          hidden={surface !== 'terminal' || !selectedSession}
+          onError={() => undefined}
+          experience={experience}
+          capsuleCapabilities={capsuleCapabilities}
+          capsuleProjection={capsuleProjection}
+          surfaceAction={surfaceAction}
+          onOpenWorkspaceFile={onOpenWorkspaceFile}
+          workContext={workContext}
+        />
+      )}
+    </TerminalWell>
+  );
+}
+
 export function ShellMain({
   selectedSession,
   selectedAgent,
@@ -204,12 +257,10 @@ export function ShellMain({
     onSurfaceChange: () => onSurfaceChange('workspace'),
     onOpenWorkspace: openWorkspaceFromCapsule,
   });
-
-  // App reaches Workspace through its spatial model, so it is handed nothing.
-  const surfaceAction =
-    hasSession && experience === 'web' ? (
-      <WebOpenWorkspaceAction onSurfaceChange={onSurfaceChange} />
-    ) : undefined;
+  const workContext = useWorkSignals(selectedSession ?? undefined);
+  const surfaceAction = hasSession && experience === 'web' ? <WebOpenWorkspaceAction onSurfaceChange={onSurfaceChange} /> : undefined;
+  const capsuleZoneRef = useRef<HTMLDivElement>(null);
+  useCapsuleMorph(surface, capsuleZoneRef);
 
   return (
     <>
@@ -233,6 +284,7 @@ export function ShellMain({
         />
       ) : null}
       <div
+        ref={capsuleZoneRef}
         data-testid="main-content"
         className="relative flex min-h-0 flex-1 flex-col gap-0">
         {!hasSession ? (
@@ -245,26 +297,17 @@ export function ShellMain({
         ) : (
           <>
             {showTerminal ? (
-              <TerminalWell
-                className={cn('min-h-0', (surface !== 'terminal' || !selectedSession) && 'hidden')}
-              >
-                {renderTerminal(terminal, {
-                  capsuleCapabilities,
-                  capsuleProjection: projection,
-                  surfaceAction,
-                }) ?? (
-                  <TerminalRegion
-                    hidden={surface !== 'terminal' || !selectedSession}
-                    onDisconnect={() => undefined}
-                    onError={() => undefined}
-                    experience={experience}
-                    capsuleCapabilities={capsuleCapabilities}
-                    capsuleProjection={projection}
-                    surfaceAction={surfaceAction}
-                    onOpenWorkspaceFile={onOpenWorkspaceFile}
-                  />
-                )}
-              </TerminalWell>
+              <ShellTerminal
+                surface={surface}
+                selectedSession={selectedSession}
+                terminal={terminal}
+                experience={experience}
+                capsuleCapabilities={capsuleCapabilities}
+                capsuleProjection={projection}
+                surfaceAction={surfaceAction}
+                onOpenWorkspaceFile={onOpenWorkspaceFile}
+                workContext={workContext}
+              />
             ) : null}
             {showWorkspace && hasSession ? (
               <WorkspacePanel

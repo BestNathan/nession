@@ -142,36 +142,48 @@ describe('TerminalViewport', () => {
     });
   });
 
-  it('sends one typed keystroke exactly once after a transportEpoch rewire (#1096)', async () => {
+  it('sends one typed keystroke exactly once after a transport-swap rewire (#1096)', async () => {
     // The production path #668 was about. A P2P route or socket identity change
-    // bumps `transportEpoch`, which detaches and re-attaches the same
-    // controller — StrictMode's cycle, reached a different way and without dev
-    // mode to trigger it. CI never caught the duplication here: `terminal-io`
+    // swaps the runtime's transport identity, and the runtime pushes that to
+    // the controller through the binding subscription — the controller
+    // detaches and re-attaches itself in the same tick, with no React render
+    // involved (#1309). CI never caught the duplication here: `terminal-io`
     // attaches once, and its own comment blames this exact window for stray
     // bytes ("P2P attach can rewire the transport once the live agent-terminal
     // API swaps (#668)") rather than asserting on it.
     //
-    // Readiness across the bump is asserted in
+    // Readiness across the swap is asserted in
     // `useTerminalViewportTransportReady.test.tsx`. What is asserted here is
     // what a user would see: one key, one send.
     await withResizeObserverStub(async () => {
       const transport = makeTransport();
       let transports = 0;
-      const controller = new TerminalController(makeSession(), () => {
-        transports += 1;
-        return transport;
-      });
-
-      const { rerender } = render(
-        <TerminalViewport controller={controller} transportEpoch={0} />,
+      let swapListener: (() => void) | null = null;
+      const controller = new TerminalController(
+        makeSession(),
+        () => {
+          transports += 1;
+          return transport;
+        },
+        {
+          rendererType: 'canvas',
+          transportBinding: {
+            subscribe: (listener) => {
+              swapListener = listener;
+              return () => {};
+            },
+          },
+        },
       );
+
+      render(<TerminalViewport controller={controller} />);
       await flush();
 
-      rerender(<TerminalViewport controller={controller} transportEpoch={1} />);
+      swapListener!();
       await flush();
 
-      // The rewire is the thing under test, so assert it happened: a rerender
-      // that detached nothing would leave the counts below just as green.
+      // The rewire is the thing under test, so assert it happened: a swap that
+      // detached nothing would leave the counts below just as green.
       expect(transports).toBe(2);
 
       const terminal = controller.terminal;

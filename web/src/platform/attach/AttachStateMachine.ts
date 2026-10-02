@@ -26,7 +26,6 @@ export interface AttachTransitionResult {
   phase: AttachPhase;
   reconnectCount: number;
   forceRelay: boolean;
-  bumpRouteEpoch: boolean;
   /** True when an ATTACH_TIMEOUT left budget remaining — the owner should re-attach. */
   retryAttach: boolean;
 }
@@ -46,13 +45,12 @@ export class AttachStateMachine {
   }
 
   dispatch(event: AttachEvent): AttachTransitionResult {
-    const flags = { forceRelay: false, bumpRouteEpoch: false, retryAttach: false };
+    const flags = { forceRelay: false, retryAttach: false };
     this.applyEvent(event, flags);
     return {
       phase: this.phase,
       reconnectCount: this.reconnectCount,
       forceRelay: flags.forceRelay,
-      bumpRouteEpoch: flags.bumpRouteEpoch,
       retryAttach: flags.retryAttach,
     };
   }
@@ -72,7 +70,7 @@ export class AttachStateMachine {
 
   private applyEvent(
     event: AttachEvent,
-    flags: { forceRelay: boolean; bumpRouteEpoch: boolean; retryAttach: boolean },
+    flags: { forceRelay: boolean; retryAttach: boolean },
   ): void {
     switch (event.type) {
       case 'SESSION_SELECTED':
@@ -147,19 +145,18 @@ export class AttachStateMachine {
     }
   }
 
-  private onAttachError(manualRoute: boolean, flags: { forceRelay: boolean; bumpRouteEpoch: boolean }): void {
+  private onAttachError(manualRoute: boolean, flags: { forceRelay: boolean }): void {
     if (manualRoute) {
       this.phase = 'failed';
       return;
     }
     flags.forceRelay = true;
-    flags.bumpRouteEpoch = true;
     this.phase = 'connecting';
   }
 
   private onAttachTimeout(
     event: Extract<AttachEvent, { type: 'ATTACH_TIMEOUT' }>,
-    flags: { forceRelay: boolean; bumpRouteEpoch: boolean; retryAttach: boolean },
+    flags: { forceRelay: boolean; retryAttach: boolean },
   ): void {
     this.reconnectCount = event.attempt;
     if (event.attempt > P2P_MAX_RECONNECT) {
@@ -168,12 +165,15 @@ export class AttachStateMachine {
         return;
       }
       flags.forceRelay = true;
-      flags.bumpRouteEpoch = true;
       this.phase = 'connecting';
       return;
     }
     flags.retryAttach = true;
-    this.phase = this.phase === 'connecting' ? 'reconnecting' : 'connecting';
+    // Stable, not alternating (#1309 SC-07): the retry is driven by the
+    // retryAttach flag and the attempt number rides reconnectCount, so the
+    // connecting ↔ reconnecting toggle only re-fired mirrors — and made the
+    // reconnect banner flicker every other attempt.
+    this.phase = 'reconnecting';
   }
 
   private onDisconnect(): void {

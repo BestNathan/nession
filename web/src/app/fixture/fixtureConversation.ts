@@ -313,8 +313,28 @@ const OLDER_ITEMS: MessageItemV1[] = [
   },
 ];
 
-/** The cursor the `paged` scenario's newest page hands out. */
+/**
+ * The page *behind* that one, so the history is more than a single step deep.
+ *
+ * One older page proves a cursor round-trips; it cannot show whether the
+ * transcript *keeps* paging. That distinction is the whole of a reported
+ * defect — a reader scrolling up through a long conversation had to nudge the
+ * transcript between pages instead of pulling continuously — and a fixture
+ * that runs out of history after one step can never express it.
+ */
+const OLDEST_ITEMS: MessageItemV1[] = [
+  {
+    id: 'oldest-1',
+    kind: 'message',
+    role: 'user',
+    timestamp: '2026-09-01T11:02:00Z',
+    content: [{ type: 'text', text: 'The oldest thing recorded — history ends here.' }],
+  },
+];
+
+/** The cursors the `paged` scenario hands out, in the order it hands them out. */
 const PAGED_CURSOR = 'page-boundary-1';
+const PAGED_CURSOR_2 = 'page-boundary-2';
 
 /**
  * What the `conversations` unit answers for a named scenario.
@@ -446,6 +466,20 @@ function messagesFor(
           conversation: named,
           activity: 'active',
           items: OLDER_ITEMS,
+          // More history behind this one, so a reader who pulls twice gets two
+          // pages — the behaviour a single-step fixture cannot show.
+          has_more: true,
+          next_cursor: PAGED_CURSOR_2,
+          partial_tail: false,
+          skipped: 0,
+        };
+      }
+      if (cursor === PAGED_CURSOR_2) {
+        return {
+          state: 'ready',
+          conversation: named,
+          activity: 'active',
+          items: OLDEST_ITEMS,
           has_more: false,
           partial_tail: false,
           skipped: 0,

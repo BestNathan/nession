@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { useAtom, useSetAtom } from 'jotai';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useAtom } from 'jotai';
 import { useP2PAttachTransport } from '@/product/terminal/hooks/useP2PAttachTransport';
 import { useWebSocket } from '@/shared/hooks/useWebSocket';
 import { envApi } from '@/capabilities/env';
@@ -8,14 +8,11 @@ import type { ConnectionState } from '@/platform/socket/types';
 import {
   relayServerHandle,
   type RelayServerHandle,
-  type RelayServerTransport,
 } from '@/platform/attach/relayServerConnection';
 import type { EnvFileRef } from '@/types';
 import {
   attachInfoAtom,
-  effectiveModeAtom,
   envRefsAtom,
-  isSwitchingAtom,
   manualOverrideAtom,
   orderedUrlsAtom,
   sessionIdAtom,
@@ -23,21 +20,13 @@ import {
 } from '@/product/session/state';
 import { terminalServerApi } from '@/product/terminal';
 import { useTerminal } from '@/product/terminal/hooks/useTerminal';
-import { useTerminalAttach } from '@/product/terminal/useTerminalAttach';
-import { ConnectionManager } from '@/platform/terminal-runtime/ConnectionManager';
 import type { TerminalController } from '@/platform/terminal-runtime/controller/TerminalController';
-import { createAttachGate } from '@/platform/terminal-runtime/adapters/TransportAttachGate';
 import { detectProfile, PROFILES } from '@/platform/terminal-runtime/DeviceProfile';
-import type { TerminalTransport } from '@/platform/terminal-runtime/transport/TerminalTransport';
-import type { SessionRuntime } from '@/platform/session-runtime/SessionRuntime';
 import type { TerminalStatus } from '@/product/terminal/state/session';
 import {
-  bannerAtomFamily,
-  bannerAttemptAtomFamily,
   inputDropAtomFamily,
   type ReconnectBanner,
 } from '@/product/terminal/state/ui';
-import type { InputDrop } from '@/platform/terminal-runtime/inputQueue';
 import { useTerminalControlBridge } from '@/product/terminal/hooks/useTerminalControlBridge';
 
 function useSessionEnvSourcing(opts: {
@@ -74,83 +63,13 @@ function useSessionEnvSourcing(opts: {
   }, [envRefs, sessionId, effectiveMode, agentTerminalApi, connectionState]);
 }
 
-function useTransportFactory(opts: {
-  effectiveMode: 'p2p' | 'relay';
-  sessionName: string;
-  sessionId: string;
-  agentTerminalApi: TerminalAgentApi | null;
-  serverConnection: RelayServerTransport;
-  isAttached: () => boolean;
-  /** Asked after input is handed over — see `ConnectionOptions.onInputSent`. */
-  onInputSent: () => void;
-  /**
-   * Asked when the stream leaves the buffer with a hole no later replay can
-   * fill — see `ConnectionOptions.onStreamTruncated` (#1304).
-   */
-  onStreamTruncated: () => void;
-  /**
-   * Told when input the user typed is lost rather than delivered — see
-   * `ConnectionOptions.onInputDrop` (#1307 SC-09).
-   */
-  onInputDrop: (drop: InputDrop) => void;
-}) {
-  const { effectiveMode, sessionName, sessionId, agentTerminalApi, serverConnection, isAttached, onInputSent, onStreamTruncated, onInputDrop } = opts;
-  // Holds the render-fresh factory; the callback identity stays stable while
-  // the closure sees current values. The ref itself starts null — the
-  // previous dummy ConnectionManager initializer was constructed and discarded
-  // every render.
-  const transportFactoryRef = useRef<(() => TerminalTransport) | null>(null);
-  const isAttachedRef = useRef(isAttached);
-  isAttachedRef.current = isAttached;
-  const onInputSentRef = useRef(onInputSent);
-  onInputSentRef.current = onInputSent;
-  const onStreamTruncatedRef = useRef(onStreamTruncated);
-  onStreamTruncatedRef.current = onStreamTruncated;
-  const onInputDropRef = useRef(onInputDrop);
-  onInputDropRef.current = onInputDrop;
-  // The P2P transport is a pure I/O channel: ConnectionManager binds to
-  // whatever agent terminal API the runtime currently owns (null while no
-  // candidate is built — e.g. relay mode — making the transport inert).
-  transportFactoryRef.current = () =>
-    new ConnectionManager({
-      mode: effectiveMode,
-      sessionName,
-      sessionId,
-      agentApi: effectiveMode === 'p2p' ? agentTerminalApi ?? undefined : undefined,
-      serverConnection: effectiveMode === 'relay' ? serverConnection : undefined,
-      isAttached: () => isAttachedRef.current(),
-      // Input is the moment a dead-but-open socket stops being invisible
-      // (#1264). Same ref pattern as `isAttached`: the transport reads the
-      // runtime as it is *now*, not as it was when this manager was built.
-      onInputSent: () => onInputSentRef.current(),
-      // And the same for a stream that turned out to have a hole in it
-      // (#1304): the runtime is what remembers that a snapshot is owed.
-      onStreamTruncated: () => onStreamTruncatedRef.current(),
-      // Input the transport could not deliver (#1307 SC-09). Read through the
-      // ref for the same reason as the two above: the manager is built once
-      // per transport generation and must report to the live owner, not to the
-      // closure that happened to be current when it was constructed.
-      onInputDrop: (drop) => onInputDropRef.current(drop),
-    });
-  return useCallback(() => {
-    const createTransport = transportFactoryRef.current;
-    if (createTransport === null) {
-      throw new Error('Transport factory is not initialized');
-    }
-    return createTransport();
-  }, []);
-}
-
 function useReconnectBanner(opts: {
   sessionId: string;
   terminalState: TerminalStatus;
-  reconnectCount: number;
   effectiveMode: 'p2p' | 'relay';
   serverConnection: RelayServerHandle;
 }): ReconnectBanner {
-  const { sessionId, terminalState, reconnectCount, effectiveMode, serverConnection } = opts;
-  const setBanner = useSetAtom(bannerAtomFamily(sessionId));
-  const setBannerAttempt = useSetAtom(bannerAttemptAtomFamily(sessionId));
+  const { sessionId, terminalState, effectiveMode, serverConnection } = opts;
   const [relayLost, setRelayLost] = useState(false);
 
   useEffect(() => {
@@ -173,84 +92,23 @@ function useReconnectBanner(opts: {
     });
   }, [effectiveMode, serverConnection]);
 
-  const banner: ReconnectBanner =
-    terminalState === 'reconnecting'
-      ? 'reconnecting'
-      : terminalState === 'failed' || relayLost
-        ? 'failed'
-        : 'none';
-  useEffect(() => {
-    setBanner(banner);
-    setBannerAttempt(reconnectCount);
-  }, [banner, reconnectCount, setBanner, setBannerAttempt]);
-
-  return banner;
-}
-
-function useEndRelayOnDisconnect(opts: {
-  effectiveMode: 'p2p' | 'relay';
-  serverConnection: RelayServerHandle;
-  sessionId: string;
-  onDisconnect: () => void;
-}) {
-  const { effectiveMode, serverConnection, sessionId, onDisconnect } = opts;
-  return useCallback(() => {
-    if (effectiveMode === 'relay' && serverConnection?.isReady()) {
-      try { serverConnection.endRelay(sessionId); } catch { /* best-effort */ }
-    }
-    onDisconnect();
-  }, [effectiveMode, serverConnection, sessionId, onDisconnect]);
-}
-
-/**
- * Apply what an attach stated about the session's cursors, then let the
- * transport out (#1094, #1307).
- *
- * Module-level rather than inline because it is the same decision wherever it
- * is made, and because it is worth being able to read in one place: the input
- * cursor is reconciled *before* the flush (the order is explained at the call
- * site), and the stream cursor is seeded after it. Those two orders differ on
- * purpose — the stream seed fills a timeline the reconciler owns, and the input
- * seed is what the flush that follows is numbered against.
- *
- * `runtime` is typed against the producer instead of restating the seed, and
- * that is load-bearing rather than tidiness. Every field of a seed is optional,
- * so an inline type that spelled the cursor `appliedThrough` accepted the
- * runtime's `inputAppliedThrough` object **vacuously** — the assignment
- * type-checks, the property reads `undefined`, and the reconcile silently does
- * nothing. That is what a client that restated the shape got: a reconnect
- * re-sending bytes the agent had already applied, because the cursor it was
- * told never reached the queue. Naming the producer's own signature makes the
- * next such spelling a compile error.
- */
-function applyAttachSeed(
-  controller: TerminalController | null,
-  runtime: { getP2pAttachSeed?: SessionRuntime['getP2pAttachSeed'] } | null,
-): void {
-  if (!controller) { return; }
-  const seed = runtime?.getP2pAttachSeed?.();
-  if (seed) {
-    controller.seedInputCursor({
-      inputEpoch: seed.inputEpoch,
-      appliedThrough: seed.inputAppliedThrough,
-      controlGeneration: seed.controlGeneration,
-    });
-  }
-  controller.flushAllOutbound();
-  if (seed) {
-    controller.seedStreamCursor(seed.streamEpoch, seed.streamCursor);
-  }
+  // Derived per render, never stored (#1309 SC-02): the banner atoms this used
+  // to feed had exactly one reader — a view-model atom with no readers of its
+  // own. The only live consumer is `inputDisabled` below.
+  return terminalState === 'reconnecting'
+    ? 'reconnecting'
+    : terminalState === 'failed' || relayLost
+      ? 'failed'
+      : 'none';
 }
 
 export interface UseTerminalOrchestrationOptions {
-  onDisconnect: () => void;
   onError: (error: Error) => void;
   rendererType?: 'webgl' | 'canvas';
   scrollbackMode?: 'legacy' | 'local-buffer';
 }
 
 export function useTerminalOrchestration({
-  onDisconnect,
   onError,
   rendererType = 'canvas',
   scrollbackMode = 'local-buffer',
@@ -258,16 +116,14 @@ export function useTerminalOrchestration({
   const [sessionId] = useAtom(sessionIdAtom);
   const [sessionName] = useAtom(sessionNameAtom);
   const [attachInfo] = useAtom(attachInfoAtom);
-  const [effectiveMode] = useAtom(effectiveModeAtom);
   const [manualOverride] = useAtom(manualOverrideAtom);
   const [orderedUrls] = useAtom(orderedUrlsAtom);
-  const [isSwitching] = useAtom(isSwitchingAtom);
   const [envRefs] = useAtom(envRefsAtom);
 
   const wsService = useWebSocket();
   // One relay handle per service instance, shared by every relay consumer —
   // the runtime (begin/endRelay + state), the transport factory (relay I/O),
-  // the banner, and disconnect cleanup. Rebuilt only when the service does.
+  // and the banner. Rebuilt only when the service does.
   const relayServer = useMemo(() => relayServerHandle(wsService, terminalServerApi), [wsService]);
   // The bootstrap question (#321) is answered by the live Terminal, which does
   // not exist yet at this point in the hook — so the runtime is handed a reader
@@ -289,52 +145,33 @@ export function useTerminalOrchestration({
     hasSessionOutput,
   });
 
-  // Declared after the runtime exists (the transport factory above only reads
-  // it when it is *called*, which is later). Keeps the input path asking the
-  // runtime that is current now, not the one that was current at construction
-  // (#1264) — the same reason `isAttachedRef` exists.
-  const runtimeRef = useRef(runtime);
-  runtimeRef.current = runtime;
-
   const { control: terminalControl, takeControl } = useTerminalControlBridge(
     sessionName,
     agentTerminalApi,
   );
 
-  const mirroredAttach = useTerminalAttach({
-    sessionId,
-    runtime,
-  });
-  // Runtime snapshot is the protocol source of truth. The attach hook keeps
-  // the legacy atom mirror alive for older chrome/components during migration.
-  const terminalState = snapshot?.phase ?? mirroredAttach.terminalState;
-  const reconnectCount = snapshot?.reconnectCount ?? mirroredAttach.reconnectCount;
+  // The runtime snapshot is the only attach-phase source: the runtime selects
+  // its session at construction and drives every transition itself (#1309
+  // SC-01) — there is no React mirror to fall back to. No runtime yet (no
+  // session, or the address plan is still resolving) means nothing is
+  // attaching: idle, zero attempts.
+  const terminalState = snapshot?.phase ?? 'idle';
+  const reconnectCount = snapshot?.reconnectCount ?? 0;
+  // The effective transport mode, derived — never stored (#1309 SC-02): the
+  // static intent comes from the attach choice, and a runtime that fell back
+  // to relay says so on its own snapshot. The deleted effectiveModeAtom read
+  // the fallback from an atom the runtime's React mirror wrote, which is one
+  // of the two mirrors this refactor removes.
+  const effectiveMode: 'p2p' | 'relay' =
+    (snapshot?.forcedRelay ?? false) || attachInfo?.mode !== 'p2p' ? 'relay' : 'p2p';
 
-  const handleDisconnect = useEndRelayOnDisconnect({
-    effectiveMode, serverConnection: relayServer, sessionId, onDisconnect,
-  });
   useSessionEnvSourcing({ envRefs, sessionId, effectiveMode, agentTerminalApi, connectionState });
   const [inputDrop, setInputDrop] = useAtom(inputDropAtomFamily(sessionId));
-  const transportFactory = useTransportFactory({
-    effectiveMode, sessionName, sessionId, agentTerminalApi, serverConnection: relayServer,
-    isAttached: createAttachGate(() => terminalState),
-    onInputSent: () => runtimeRef.current?.probeLivenessNow(),
-    // The session's own record of "my buffer may have a hole", which is what
-    // makes the next attach ask for a snapshot (#1304, #321). Reading it
-    // through the ref keeps a rewired transport pointing at the live runtime.
-    onStreamTruncated: () => runtimeRef.current?.noteStreamTruncated(),
-    // Input that was lost rather than delivered (#1307 SC-09). Written to the
-    // session's own atom rather than kept here, so the fact survives the
-    // transport generation that recorded it — a notice that vanished with the
-    // socket would be missing at exactly the reconnect that produced it.
-    onInputDrop: (drop) => setInputDrop(drop),
-  });
   const [deviceProfile] = useState(() => detectProfile(window.innerWidth));
   const controller = useTerminal({
     sessionId,
     sessionName,
     mode: effectiveMode,
-    transportFactory,
     // Canvas avoids WebGL context exhaustion when the viewport remounts during
     // address-plan resolution / StrictMode — lost GL contexts render blank.
     rendererType,
@@ -356,43 +193,24 @@ export function useTerminalOrchestration({
   controllerRef.current = controller;
 
   const banner = useReconnectBanner({
-    sessionId, terminalState, reconnectCount, effectiveMode, serverConnection: relayServer,
+    sessionId, terminalState, effectiveMode, serverConnection: relayServer,
   });
   const observerReadOnly =
     effectiveMode === 'p2p' && terminalControl.role === 'observer';
+  // A manual route is being switched while its transport is not yet connected
+  // (#1309 SC-02 — read from the runtime's live connection state instead of
+  // the deleted p2pStateAtom mirror; a failed session never counts as
+  // switching, matching the old atom's guard).
+  const isSwitching =
+    terminalState !== 'failed' && manualOverride !== null && connectionState !== 'connected';
   const inputDisabled = banner !== 'none' || isSwitching || observerReadOnly;
   const modeGateOk = !(effectiveMode === 'p2p' && !agentTerminalApi);
   const viewportReady = modeGateOk && !waitingForAddressPlan;
-  // Transport rewire epoch. TerminalViewport rebuilds the ConnectionManager
-  // whenever this changes, and the manager binds the agent-terminal API the
-  // transport factory captures at build time — so the rebuild must never run
-  // BEFORE the runtime has swapped its live API, or the fresh transport binds
-  // the pre-swap (soon-disposed) socket and the terminal freezes (#668).
-  // routeIntentEpoch / transportGeneration change in the same commit whose
-  // passive parent effects perform the swap, while (layout) viewport effects
-  // run first — keying on either races the swap. The mirrored agentTerminalApi
-  // commits only AFTER the swap, so its identity is the safe trigger.
-  const [transportEpoch, setTransportEpoch] = useState(0);
-  const previousApiRef = useRef(agentTerminalApi);
-  useLayoutEffect(() => {
-    if (previousApiRef.current === agentTerminalApi) {
-      return;
-    }
-    previousApiRef.current = agentTerminalApi;
-    setTransportEpoch((epoch) => epoch + 1);
-  }, [agentTerminalApi]);
 
   useEffect(() => {
     if (!controller) { return; }
     controller.onError = onError;
-    controller.onDisconnect = handleDisconnect;
-  }, [controller, handleDisconnect, onError]);
-
-  useEffect(() => {
-    if (terminalState === 'attached') {
-      applyAttachSeed(controller, runtime);
-    }
-  }, [terminalState, controller, runtime]);
+  }, [controller, onError]);
 
   useEffect(() => {
     if (!controller) {
@@ -411,7 +229,6 @@ export function useTerminalOrchestration({
     inputDisabled,
     terminalState,
     reconnectCount,
-    transportEpoch,
     fileOps,
     terminalControl,
     onTakeControl: takeControl,

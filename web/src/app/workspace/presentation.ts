@@ -21,6 +21,17 @@ export interface WorkspacePresentationModel {
   contextual: WorkspacePresentationItem[];
   /** Visible capabilities intentionally revealed through More/discovery. */
   discoverable: WorkspacePresentationItem[];
+  /**
+   * Capabilities the user cannot act with right now — `unavailable`, which the
+   * presence policy resolves to `hidden`.
+   *
+   * They are neither direct chrome nor disclosure, so the policy has no bucket
+   * for them; they are carried here so a surface can render them *inert* rather
+   * than drop them. Membership that changes as the work changes is the thing
+   * being avoided: an entry that vanishes and reappears is how a reader loses
+   * track of what the Workspace holds.
+   */
+  unavailable: WorkspacePresentationItem[];
 }
 
 export interface WorkspacePresentationInput {
@@ -65,6 +76,10 @@ export function buildWorkspacePresentationModel({
     primary: direct.filter((item) => item.snapshot.id === openedCapabilityId),
     contextual: direct.filter((item) => item.snapshot.id !== openedCapabilityId),
     discoverable: disclosure.discoverable.flatMap((presence) => {
+      const item = itemById.get(presence.capabilityId);
+      return item ? [item] : [];
+    }),
+    unavailable: disclosure.hidden.flatMap((presence) => {
       const item = itemById.get(presence.capabilityId);
       return item ? [item] : [];
     }),

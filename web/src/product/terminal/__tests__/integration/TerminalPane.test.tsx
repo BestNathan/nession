@@ -23,7 +23,6 @@ describe('TerminalPane', () => {
         controller={makeController()}
         terminalState="connecting"
         viewportReady={false}
-        transportEpoch={0}
       />,
     );
 
@@ -38,7 +37,6 @@ describe('TerminalPane', () => {
         controller={makeController()}
         terminalState="attached"
         viewportReady
-        transportEpoch={0}
       />,
     );
 

@@ -39,7 +39,12 @@ function setup(overrides: { session?: Session | null } = {}) {
       view.result.current.capabilities.disclosure?.onSelect(id);
     });
 
-  return { ...view, initialProps, choose, onToolChange, onSurfaceChange, onOpenWorkspace };
+  const chooseAtPeek = (id: CapabilityId) =>
+    act(() => {
+      view.result.current.capabilities.disclosure?.onSelectAtPeek?.(id);
+    });
+
+  return { ...view, initialProps, choose, chooseAtPeek, onToolChange, onSurfaceChange, onOpenWorkspace };
 }
 
 describe('capsule emergence', () => {
@@ -67,6 +72,20 @@ describe('capsule emergence', () => {
     choose('git');
 
     expect(result.current.projection?.title).toBe('Git');
+  });
+
+  it('emerges a Peek directly when chosen at Peek depth (#1347 SC-20)', () => {
+    // The Work Overview selects through `onSelectAtPeek`: the capability is
+    // already the subject of the surface the user is leaving, so skipping the
+    // Signal it would otherwise open at is the point, not a shortcut.
+    const { result, chooseAtPeek, onSurfaceChange } = setup();
+
+    chooseAtPeek('git');
+
+    expect(result.current.projection?.id).toBe('git');
+    expect(result.current.projection?.depth).toBe('peek');
+    // A Peek from the Work Overview still must not take the work surface.
+    expect(onSurfaceChange).not.toHaveBeenCalled();
   });
 
   it('opens the Signal to a Peek, one level at a time', () => {
