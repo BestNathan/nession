@@ -813,8 +813,10 @@ test.describe('App 390×844', () => {
   test('Workspace / Environment, pushed detail', async ({ page }) => {
     await gotoFixtureApp(page);
     await page.getByTestId('app-header-workspace').first().click();
-    await page.getByTestId('workspace-capability-capsule').click();
-    await page.getByTestId('workspace-capability-picker-env').click();
+    // The capsule carries the capability list directly since Capsule V2 (#1347);
+    // the `+` disclosure it replaced — and its `workspace-capability-picker-*`
+    // items — is gone, so the entry is what is clicked.
+    await page.getByTestId('workspace-tool-env').click();
     await page.getByTestId('env-profile-list').waitFor();
 
     await page.getByTestId('env-profile-row-server::staging.env').click();
@@ -842,8 +844,9 @@ test.describe('App 390×844', () => {
     await gotoFixtureApp(page);
     await page.getByTestId('app-header-workspace').first().click();
 
-    await page.getByTestId('workspace-capability-capsule').click();
-    await page.getByTestId('workspace-capability-picker-claude-code').click();
+    // Same reason as the Environment walk above: Capsule V2 (#1347) put the
+    // capability list in the capsule and removed the picker.
+    await page.getByTestId('workspace-tool-claude-code').click();
 
     const conversation = page.getByTestId('conversation-open');
     await expect(conversation).toBeVisible();
