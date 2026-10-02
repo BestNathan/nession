@@ -138,7 +138,10 @@ export function WorkspaceShell({
 
   const directItems = [...presentation.primary, ...presentation.contextual].filter(bindingFor);
   const discoverableItems = presentation.discoverable.filter(bindingFor);
-  const hasNavigation = directItems.length > 0 || discoverableItems.length > 0;
+  // Capsule V2 (#1347): Workspace capsule shows ALL capabilities (scrollable).
+  // This is the reciprocal of Terminal, which shows only the active capability.
+  const allCapsuleItems = [...directItems, ...discoverableItems];
+  const hasNavigation = allCapsuleItems.length > 0;
   // `#1051`: the dock is the *capability root's* switcher. A pushed detail has
   // its own page and its own Back, so a global capability switcher over it would
   // be a second navigation owner answering to a depth it does not belong to.
@@ -191,7 +194,7 @@ export function WorkspaceShell({
           {showSurfaceAction ? <SurfaceNavigation>{surfaceAction}</SurfaceNavigation> : null}
           {showDock ? (
             <CapabilityCapsule
-              items={directItems}
+              items={allCapsuleItems}
               activeCapabilityId={activeCapabilityId}
               onSelect={ctx.onToolChange}
             />
