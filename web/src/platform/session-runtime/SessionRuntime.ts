@@ -35,8 +35,6 @@ export interface SessionRuntimeConfig {
   addressPlan: AddressPlan;
   /** User-initiated route identity (manual switch); resets candidate index when changed. */
   routeIntentEpoch: number;
-  lastResize?: { cols: number; rows: number } | null;
-  transportReady?: boolean;
   /**
    * Relay-mode server connection — runtime re-begins relay after server
    * reconnect. The full transport shape rather than the narrow handle because
@@ -251,8 +249,10 @@ export class SessionRuntime {
       addressPlan: config.addressPlan,
       addressIndex: 0,
     });
-    this.lastResize = config.lastResize ?? null;
-    this.transportReady = config.transportReady ?? false;
+    // transportReady and lastResize are NOT config: they are facts about the
+    // live xterm viewport, pushed by its adapter (setTransportReady /
+    // updateViewportSize). Carrying them in the config let a stale React-side
+    // value clobber the fresher push on every updateContext (#1309 SC-02).
     this.snapshot = this.buildSnapshot();
     this.attachController.subscribeOutcomes((result) => {
       if (result.phase === 'attached') {
@@ -433,16 +433,9 @@ export class SessionRuntime {
     const routeChanged =
       next.routeIntentEpoch !== undefined
       && next.routeIntentEpoch !== this.routeIntentEpoch;
-    const prevTransportReady = this.transportReady;
     this.config = { ...this.config, ...next };
     if (next.routeIntentEpoch !== undefined) {
       this.routeIntentEpoch = next.routeIntentEpoch;
-    }
-    if (next.lastResize !== undefined) {
-      this.lastResize = next.lastResize ?? null;
-    }
-    if (next.transportReady !== undefined) {
-      this.transportReady = next.transportReady;
     }
 
     this.addressPolicy.update({
@@ -463,9 +456,6 @@ export class SessionRuntime {
 
     this.syncAgentConnection();
     this.wireRelayServerHandler();
-    if (!prevTransportReady && this.transportReady) {
-      this.maybeStartP2PAttach();
-    }
     // A relay attach may be due now: forced-relay context just applied, or the
     // xterm viewport became ready while relay attach was pending.
     this.driveRelayAttach();

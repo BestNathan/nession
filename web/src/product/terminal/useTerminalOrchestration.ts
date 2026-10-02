@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useAtom, useSetAtom } from 'jotai';
+import { useAtom } from 'jotai';
 import { useP2PAttachTransport } from '@/product/terminal/hooks/useP2PAttachTransport';
 import { useWebSocket } from '@/shared/hooks/useWebSocket';
 import { envApi } from '@/capabilities/env';
@@ -14,7 +14,6 @@ import {
   attachInfoAtom,
   effectiveModeAtom,
   envRefsAtom,
-  isSwitchingAtom,
   manualOverrideAtom,
   orderedUrlsAtom,
   sessionIdAtom,
@@ -26,8 +25,6 @@ import type { TerminalController } from '@/platform/terminal-runtime/controller/
 import { detectProfile, PROFILES } from '@/platform/terminal-runtime/DeviceProfile';
 import type { TerminalStatus } from '@/product/terminal/state/session';
 import {
-  bannerAtomFamily,
-  bannerAttemptAtomFamily,
   inputDropAtomFamily,
   type ReconnectBanner,
 } from '@/product/terminal/state/ui';
@@ -70,13 +67,10 @@ function useSessionEnvSourcing(opts: {
 function useReconnectBanner(opts: {
   sessionId: string;
   terminalState: TerminalStatus;
-  reconnectCount: number;
   effectiveMode: 'p2p' | 'relay';
   serverConnection: RelayServerHandle;
 }): ReconnectBanner {
-  const { sessionId, terminalState, reconnectCount, effectiveMode, serverConnection } = opts;
-  const setBanner = useSetAtom(bannerAtomFamily(sessionId));
-  const setBannerAttempt = useSetAtom(bannerAttemptAtomFamily(sessionId));
+  const { sessionId, terminalState, effectiveMode, serverConnection } = opts;
   const [relayLost, setRelayLost] = useState(false);
 
   useEffect(() => {
@@ -99,18 +93,14 @@ function useReconnectBanner(opts: {
     });
   }, [effectiveMode, serverConnection]);
 
-  const banner: ReconnectBanner =
-    terminalState === 'reconnecting'
-      ? 'reconnecting'
-      : terminalState === 'failed' || relayLost
-        ? 'failed'
-        : 'none';
-  useEffect(() => {
-    setBanner(banner);
-    setBannerAttempt(reconnectCount);
-  }, [banner, reconnectCount, setBanner, setBannerAttempt]);
-
-  return banner;
+  // Derived per render, never stored (#1309 SC-02): the banner atoms this used
+  // to feed had exactly one reader — a view-model atom with no readers of its
+  // own. The only live consumer is `inputDisabled` below.
+  return terminalState === 'reconnecting'
+    ? 'reconnecting'
+    : terminalState === 'failed' || relayLost
+      ? 'failed'
+      : 'none';
 }
 
 function useEndRelayOnDisconnect(opts: {
@@ -147,7 +137,6 @@ export function useTerminalOrchestration({
   const [effectiveMode] = useAtom(effectiveModeAtom);
   const [manualOverride] = useAtom(manualOverrideAtom);
   const [orderedUrls] = useAtom(orderedUrlsAtom);
-  const [isSwitching] = useAtom(isSwitchingAtom);
   const [envRefs] = useAtom(envRefsAtom);
 
   const wsService = useWebSocket();
@@ -219,10 +208,16 @@ export function useTerminalOrchestration({
   controllerRef.current = controller;
 
   const banner = useReconnectBanner({
-    sessionId, terminalState, reconnectCount, effectiveMode, serverConnection: relayServer,
+    sessionId, terminalState, effectiveMode, serverConnection: relayServer,
   });
   const observerReadOnly =
     effectiveMode === 'p2p' && terminalControl.role === 'observer';
+  // A manual route is being switched while its transport is not yet connected
+  // (#1309 SC-02 — read from the runtime's live connection state instead of
+  // the deleted p2pStateAtom mirror; a failed session never counts as
+  // switching, matching the old atom's guard).
+  const isSwitching =
+    terminalState !== 'failed' && manualOverride !== null && connectionState !== 'connected';
   const inputDisabled = banner !== 'none' || isSwitching || observerReadOnly;
   const modeGateOk = !(effectiveMode === 'p2p' && !agentTerminalApi);
   const viewportReady = modeGateOk && !waitingForAddressPlan;

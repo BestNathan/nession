@@ -7,7 +7,6 @@
 import { atom } from 'jotai';
 import { probeResultsAtom } from '@/product/agent/state/probe';
 import {
-  p2pStateAtom,
   routeIntentEpochAtom,
   terminalSessionStateAtom,
 } from '@/platform/attach/state/transport';
@@ -23,13 +22,6 @@ import {
 export const effectiveModeAtom = atom<'p2p' | 'relay'>((get) => {
   if (get(forcedRelayAtom)) { return 'relay'; }
   return get(attachInfoAtom)?.mode === 'p2p' ? 'p2p' : 'relay';
-});
-
-export const isSwitchingAtom = atom((get) => {
-  if (get(terminalSessionStateAtom) === 'failed') {
-    return false;
-  }
-  return get(manualOverrideAtom) !== null && get(p2pStateAtom) !== 'connected';
 });
 
 export const switchAddressAtom = atom(

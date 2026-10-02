@@ -10,11 +10,10 @@ import {
   attachInfoAtom,
   orderedUrlsAtom,
   forcedRelayAtom,
-  isSwitchingAtom,
   manualOverrideAtom,
 } from '@/product/session/state';
 import { routeIntentEpochAtom } from '@/platform/attach/state';
-import { terminalSessionStateAtom, terminalTransportReadyAtom } from '@/product/terminal/state';
+import { terminalSessionStateAtom } from '@/product/terminal/state';
 import type { ConnectionState } from '@/platform/socket/types';
 import type { RelayServerTransport } from '@/platform/attach/relayServerConnection';
 import type { AttachInfo } from '@/types';
@@ -95,7 +94,6 @@ function makeStore(sessionId: string, token: string) {
   store.set(attachInfoAtom, makeAttachInfo(sessionId, token));
   store.set(orderedUrlsAtom, ['ws://shared-agent/ws']);
   store.set(terminalSessionStateAtom, 'connecting');
-  store.set(terminalTransportReadyAtom, true);
   return store;
 }
 
@@ -458,7 +456,6 @@ describe('useSessionRuntime integration', () => {
     rerender();
 
     expect(store.get(terminalSessionStateAtom)).toBe('failed');
-    expect(store.get(isSwitchingAtom)).toBe(false);
   });
 
   it('retains runtime in relay mode so attach can drive beginRelay', async () => {
@@ -533,7 +530,9 @@ describe('useSessionRuntime integration', () => {
     });
 
     act(() => {
-      result.current.runtime!.attachController.dispatch({ type: 'SESSION_SELECTED' });
+      // The viewport's adapter is the only readiness source (#1309 SC-02);
+      // this push stands in for its layout-phase attach report.
+      result.current.runtime!.setTransportReady(true);
     });
     act(() => {
       const ws = lastWs();

@@ -8,7 +8,6 @@ import { atom } from 'jotai';
 import type { AttachInfo, EnvFileRef, Session, ProbedAddress } from '@/types';
 import type { AttachChoice } from '@/product/session/components/AttachDialog';
 import {
-  p2pStateAtom,
   routeIntentEpochAtom,
   terminalSessionStateAtom,
 } from '@/platform/attach/state/transport';
@@ -99,7 +98,6 @@ export const disconnectAtom = atom(
     set(envRefsAtom, []);
     set(attachDialogSessionAtom, null);
     set(attachDialogIntentAtom, 'attach');
-    set(p2pStateAtom, 'disconnected');
     set(terminalSessionStateAtom, 'idle');
     navigate('/');
   },

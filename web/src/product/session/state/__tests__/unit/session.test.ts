@@ -3,7 +3,7 @@ import { describe, it, expect } from 'vitest';
 import { createStore } from 'jotai';
 import type { Session } from '@/types';
 import type { AttachChoice } from '@/product/session/components/AttachDialog';
-import { p2pStateAtom, routeIntentEpochAtom } from '@/platform/attach/state';
+import { routeIntentEpochAtom } from '@/platform/attach/state';
 import {
   sessionIdAtom, sessionNameAtom, attachInfoAtom, orderedUrlsAtom,
   manualOverrideAtom, forcedRelayAtom, rendererAtom, envRefsAtom,
@@ -127,12 +127,10 @@ describe('action atoms', () => {
     store.set(sessionIdAtom, 'agent:sess');
     store.set(sessionNameAtom, 'sess');
     store.set(manualOverrideAtom, 'ws://a/ws');
-    store.set(p2pStateAtom, 'connected');
     store.set(disconnectAtom, navigate);
     expect(store.get(sessionIdAtom)).toBe('');
     expect(store.get(sessionNameAtom)).toBe('');
     expect(store.get(manualOverrideAtom)).toBeNull();
-    expect(store.get(p2pStateAtom)).toBe('disconnected');
   });
 
   it('switchAddressAtom sets override and resets state', () => {

@@ -7,7 +7,7 @@ import type {
 import { createStore, Provider } from 'jotai';
 import { createElement, type ReactNode } from 'react';
 import { useTerminalOrchestration } from '@/product/terminal/useTerminalOrchestration';
-import { attachInfoAtom, sessionIdAtom, sessionNameAtom } from '@/product/session/state';
+import { attachInfoAtom, manualOverrideAtom, sessionIdAtom, sessionNameAtom } from '@/product/session/state';
 import type { TerminalAgentApi } from '@/product/terminal';
 import type { UseTerminalOptions } from '@/product/terminal/hooks/useTerminal';
 import type { ResumeReply } from '@/platform/terminal-runtime/streamReconciler';
@@ -51,7 +51,8 @@ const { deps } = vi.hoisted(() => ({
   deps: {
     runtime: null as unknown,
     api: null as unknown,
-    snapshot: { phase: 'attached' as 'attached' | 'reconnecting', reconnectCount: 0 },
+    snapshot: { phase: 'attached' as 'attached' | 'reconnecting' | 'failed', reconnectCount: 0 },
+    connectionState: 'connected' as ConnectionState,
     makeController: null as ((factory: () => TerminalTransport) => TerminalController) | null,
   },
 }));
@@ -60,7 +61,7 @@ vi.mock('@/product/terminal/hooks/useP2PAttachTransport', () => ({
   useP2PAttachTransport: () => ({
     waitingForAddressPlan: false,
     agentTerminalApi: deps.api,
-    connectionState: 'connected' as ConnectionState,
+    connectionState: deps.connectionState,
     runtime: deps.runtime,
     snapshot: deps.snapshot,
     fileOps: null,
@@ -383,6 +384,49 @@ describe('useTerminalOrchestration', () => {
     deps.runtime = null;
     deps.api = null;
     deps.snapshot = { phase: 'attached', reconnectCount: 0 };
+    deps.connectionState = 'connected';
+  });
+
+  it('derives isSwitching from the manual route and the live connection state, never a stored mirror (#1309 SC-02)', () => {
+    // The old isSwitchingAtom read p2pStateAtom — a Jotai mirror of the
+    // runtime's connection state that could tell a different story than the
+    // transport. The derivation now reads what the orchestration already
+    // holds: the manual route and the runtime's live connection state.
+    const store = createStore();
+    store.set(sessionIdAtom, 'agent:s1');
+    store.set(sessionNameAtom, 's1');
+    store.set(attachInfoAtom, makeAttachInfo());
+    const view = renderHook(
+      () => useTerminalOrchestration({ onDisconnect: vi.fn(), onError: vi.fn() }),
+      { wrapper: wrapper(store) },
+    );
+
+    // Auto route, transport connected — not switching.
+    expect(view.result.current.isSwitching).toBe(false);
+
+    // A manual route whose transport is still up is not a switch in flight.
+    act(() => { store.set(manualOverrideAtom, 'ws://b/ws'); });
+    expect(view.result.current.isSwitching).toBe(false);
+
+    // The new route's transport still connecting — the switch is in flight.
+    act(() => { deps.connectionState = 'connecting'; });
+    view.rerender();
+    expect(view.result.current.isSwitching).toBe(true);
+
+    // Connected on the new route — done.
+    act(() => { deps.connectionState = 'connected'; });
+    view.rerender();
+    expect(view.result.current.isSwitching).toBe(false);
+
+    // A failed session never reads as switching (the old atom's guard).
+    act(() => {
+      deps.connectionState = 'connecting';
+      deps.snapshot = { phase: 'failed', reconnectCount: 0 };
+    });
+    view.rerender();
+    expect(view.result.current.isSwitching).toBe(false);
+
+    view.unmount();
   });
 
   it('carries a truncation the transport sees through to the session runtime (#1304)', async () => {

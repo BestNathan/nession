@@ -3,7 +3,7 @@ import { render, screen, act } from '@testing-library/react';
 import { Provider, createStore } from 'jotai';
 import { TerminalRegion } from '@/app/TerminalRegion';
 import { sessionIdAtom, attachInfoAtom } from '@/product/session/state';
-import { bannerAtomFamily, inputDropAtomFamily } from '@/product/terminal/state/ui';
+import { inputDropAtomFamily } from '@/product/terminal/state/ui';
 import type { ConnectionState } from '@/platform/socket/types';
 
 const { wsListeners, surfaceProps } = vi.hoisted(() => ({
@@ -168,7 +168,11 @@ describe('TerminalRegion', () => {
     expect(screen.getByTestId('terminal-pane')).toBe(pane);
   });
 
-  it('clears a stuck failed banner when attaching a new session after relay drop', () => {
+  it('clears a stuck input lock when attaching a new session after relay drop', () => {
+    // The banner atoms are gone (#1309 SC-02) — the banner is derived per
+    // render and its only live consumer is inputDisabled, so that is what
+    // these tests observe. A durable relay loss locks input; the lock must
+    // not leak into the next session.
     const store = createStore();
     store.set(sessionIdAtom, 'agent:old');
     renderTerminal(false, store);
@@ -178,15 +182,15 @@ describe('TerminalRegion', () => {
         cb('disconnected');
       }
     });
-    expect(store.get(bannerAtomFamily('agent:old'))).toBe('failed');
+    expect(surfaceProps.current?.inputDisabled).toBe(true);
 
     act(() => {
       store.set(sessionIdAtom, 'agent:new');
     });
-    expect(store.get(bannerAtomFamily('agent:new'))).toBe('none');
+    expect(surfaceProps.current?.inputDisabled).toBe(false);
   });
 
-  it('clears a stuck failed banner when switching the same session to P2P', () => {
+  it('clears a stuck input lock when switching the same session to P2P', () => {
     const store = createStore();
     store.set(sessionIdAtom, 'agent:sess');
     renderTerminal(false, store);
@@ -196,11 +200,11 @@ describe('TerminalRegion', () => {
         cb('disconnected');
       }
     });
-    expect(store.get(bannerAtomFamily('agent:sess'))).toBe('failed');
+    expect(surfaceProps.current?.inputDisabled).toBe(true);
 
     act(() => {
       store.set(attachInfoAtom, { mode: 'p2p', session_id: 'agent:sess' });
     });
-    expect(store.get(bannerAtomFamily('agent:sess'))).toBe('none');
+    expect(surfaceProps.current?.inputDisabled).toBe(false);
   });
 });

@@ -418,7 +418,7 @@ describe('SessionRuntime', () => {
     // update has to be a no-op. Notifying here re-renders the external-store
     // subscriber, whose next render rebuilds the context again — the loop that
     // any extra render source above the terminal used to fall into.
-    rt.updateContext({ transportReady: false });
+    rt.updateContext({ forcedRelay: false });
     rt.updateContext({});
 
     expect(rt.getSnapshot()).toBe(published);
@@ -433,10 +433,12 @@ describe('SessionRuntime', () => {
     const changes = vi.fn();
     const unsubscribe = rt.subscribe(changes);
 
-    rt.updateContext({ transportReady: true });
+    // forcedRelay flips the transport identity the snapshot publishes, so the
+    // subscriber must hear about it.
+    rt.updateContext({ forcedRelay: true });
 
     expect(changes).toHaveBeenCalledTimes(1);
-    expect(rt.getSnapshot().transportReady).toBe(true);
+    expect(rt.getSnapshot().activeUrl).toBeNull();
 
     unsubscribe();
     rt.dispose();
@@ -485,7 +487,6 @@ describe('SessionRuntime', () => {
       const serverConnection = makeRelayServerConnection('connected');
       const rt = new SessionRuntime(makeConfig({
         forcedRelay: true,
-        transportReady: false,
         serverConnection,
       }));
 
@@ -499,10 +500,11 @@ describe('SessionRuntime', () => {
 
     it('re-begins exactly once across connected -> connecting -> connected (recoverable loss cycle)', async () => {
       const serverConnection = makeRelayServerConnection('connected');
-      const rt = new SessionRuntime(makeConfig({ forcedRelay: true, transportReady: true, serverConnection }));
+      const rt = new SessionRuntime(makeConfig({ forcedRelay: true, serverConnection }));
+      rt.setTransportReady(true);
 
-      // Construction selected the session (#1309 SC-01): a ready relay config
-      // is attached before the constructor returns — no React driver exists.
+      // Construction selected the session (#1309 SC-01), and the viewport's
+      // ready push completed the attach — no React driver exists.
       await flushMicrotasks();
       expect(serverConnection.beginRelay).toHaveBeenCalledTimes(1);
       expect(rt.attachState.phase).toBe('attached');
@@ -530,9 +532,11 @@ describe('SessionRuntime', () => {
 
     it('ignores repeated connecting while already reconnecting (no double TRANSPORT_LOST)', async () => {
       const serverConnection = makeRelayServerConnection('connected');
-      const rt = new SessionRuntime(makeConfig({ forcedRelay: true, transportReady: true, serverConnection }));
+      const rt = new SessionRuntime(makeConfig({ forcedRelay: true, serverConnection }));
+      rt.setTransportReady(true);
 
-      // Construction selected the session (#1309 SC-01) — already attached.
+      // Construction selected the session (#1309 SC-01) and the ready push
+      // completed the attach.
       await flushMicrotasks();
       expect(rt.attachState.phase).toBe('attached');
 
@@ -553,7 +557,8 @@ describe('SessionRuntime', () => {
   describe('atomic P2P -> relay fallback (runtime-owned beginRelay)', () => {
     it('attach-error fallback begins relay immediately when the server ws is already connected', async () => {
       const serverConnection = makeRelayServerConnection('connected');
-      const rt = new SessionRuntime(makeConfig({ transportReady: true, serverConnection }));
+      const rt = new SessionRuntime(makeConfig({ serverConnection }));
+      rt.setTransportReady(true);
 
       rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
       await flushMicrotasks();
@@ -572,7 +577,8 @@ describe('SessionRuntime', () => {
 
     it('defers beginRelay while the server ws is not ready, then begins exactly once on connected', async () => {
       const serverConnection = makeRelayServerConnection('connecting');
-      const rt = new SessionRuntime(makeConfig({ transportReady: true, serverConnection }));
+      const rt = new SessionRuntime(makeConfig({ serverConnection }));
+      rt.setTransportReady(true);
 
       rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
       rt.attachController.dispatch({ type: 'ATTACH_ERROR', manualRoute: false });
@@ -594,7 +600,8 @@ describe('SessionRuntime', () => {
 
     it('candidate/address exhaustion routes through applyForceRelay (single force-relay event, p2p torn down)', async () => {
       const serverConnection = makeRelayServerConnection('connected');
-      const rt = new SessionRuntime(makeConfig({ transportReady: true, serverConnection }));
+      const rt = new SessionRuntime(makeConfig({ serverConnection }));
+      rt.setTransportReady(true);
       const events: string[] = [];
       rt.subscribeRuntimeEvents((e) => events.push(e.type));
 
@@ -620,9 +627,9 @@ describe('SessionRuntime', () => {
 
     it('asks the agent for a bootstrap only when its Terminal says it has no history (#321)', async () => {
       const empty = new SessionRuntime(makeConfig({
-        transportReady: true,
         hasSessionOutput: () => false,
       }));
+      empty.setTransportReady(true);
       empty.attachController.dispatch({ type: 'SESSION_SELECTED' });
       openWs();
       await flushMicrotasks();
@@ -631,9 +638,9 @@ describe('SessionRuntime', () => {
 
       wsInstances = [];
       const holding = new SessionRuntime(makeConfig({
-        transportReady: true,
         hasSessionOutput: () => true,
       }));
+      holding.setTransportReady(true);
       holding.attachController.dispatch({ type: 'SESSION_SELECTED' });
       openWs();
       await flushMicrotasks();
@@ -647,7 +654,8 @@ describe('SessionRuntime', () => {
       // The safe direction for a consumer with no Terminal to ask — the CLI's
       // own attach makes the same choice for the same reason, and the
       // alternative silently withholds history from whoever needed it.
-      const rt = new SessionRuntime(makeConfig({ transportReady: true }));
+      const rt = new SessionRuntime(makeConfig());
+      rt.setTransportReady(true);
       rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
       openWs();
       await flushMicrotasks();
@@ -672,9 +680,9 @@ describe('SessionRuntime', () => {
       // attached, then truncated, then a later attach — is the test below.
       vi.useFakeTimers();
       const rt = new SessionRuntime(makeConfig({
-        transportReady: true,
         hasSessionOutput: () => true,
       }));
+      rt.setTransportReady(true);
       rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
       openWs();
       await flushMicrotasks();
@@ -699,9 +707,9 @@ describe('SessionRuntime', () => {
       // a fresh transport for the same session, and no loss, so nothing but
       // the truncation is setting the flag.
       const rt = new SessionRuntime(makeConfig({
-        transportReady: true,
         hasSessionOutput: () => true,
       }));
+      rt.setTransportReady(true);
       rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
       openWs();
       await flushMicrotasks();
@@ -740,7 +748,8 @@ describe('SessionRuntime', () => {
 
     it('re-sends client.attach automatically after each attach timeout until the budget is exhausted (auto route)', async () => {
       vi.useFakeTimers();
-      const rt = new SessionRuntime(makeConfig({ transportReady: true }));
+      const rt = new SessionRuntime(makeConfig());
+      rt.setTransportReady(true);
       rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
       openWs();
       expect(rt.attachState.phase).toBe('connecting');
@@ -768,7 +777,8 @@ describe('SessionRuntime', () => {
 
     it('stops retrying with failed on a manual route after the budget is exhausted', async () => {
       vi.useFakeTimers();
-      const rt = new SessionRuntime(makeConfig({ transportReady: true, manualOverride: 'ws://a/ws' }));
+      const rt = new SessionRuntime(makeConfig({ manualOverride: 'ws://a/ws' }));
+      rt.setTransportReady(true);
       rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
       openWs();
       expect(countClientAttach()).toBe(1);
@@ -788,13 +798,14 @@ describe('SessionRuntime', () => {
 
     it('updateContext churn during an in-flight attach neither cancels nor duplicates the attempt', async () => {
       vi.useFakeTimers();
-      const rt = new SessionRuntime(makeConfig({ transportReady: true }));
+      const rt = new SessionRuntime(makeConfig());
+      rt.setTransportReady(true);
       rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
       openWs();
       expect(countClientAttach()).toBe(1);
 
-      rt.updateContext({ lastResize: { cols: 120, rows: 40 } });
-      rt.updateContext({ lastResize: { cols: 80, rows: 24 } });
+      rt.updateContext({ sessionName: 's1' });
+      rt.updateContext({});
       expect(countClientAttach()).toBe(1);
 
       vi.advanceTimersByTime(ATTACH_TIMEOUT_MS);
@@ -809,13 +820,13 @@ describe('SessionRuntime', () => {
     const serverConnection = makeRelayServerConnection('connected');
     const rt = new SessionRuntime(makeConfig({
       forcedRelay: true,
-      transportReady: true,
       serverConnection,
     }));
 
-    // Relay attach is construction-driven (#1309 SC-01): the runtime selects
-    // its session in the constructor, and the already-connected server WS
-    // begins relay without any React driver.
+    // Relay attach needs no React driver (#1309 SC-01/02): construction
+    // selects the session, and the viewport's ready report — a direct push,
+    // not a config round-trip — lets the already-connected server WS begin.
+    rt.setTransportReady(true);
     await flushMicrotasks();
     expect(serverConnection.beginRelay).toHaveBeenCalledTimes(1);
     expect(rt.attachState.phase).toBe('attached');
@@ -849,7 +860,8 @@ describe('SessionRuntime', () => {
     });
 
     it('declares the transport lost when the agent stops answering', async () => {
-      const rt = new SessionRuntime(makeConfig({ transportReady: true }));
+      const rt = new SessionRuntime(makeConfig());
+      rt.setTransportReady(true);
       rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
       openWs();
       await flushMicrotasks();
@@ -880,7 +892,8 @@ describe('SessionRuntime', () => {
     });
 
     it('leaves a healthy transport alone when the agent answers', async () => {
-      const rt = new SessionRuntime(makeConfig({ transportReady: true }));
+      const rt = new SessionRuntime(makeConfig());
+      rt.setTransportReady(true);
       rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
       openWs();
       await flushMicrotasks();
@@ -906,7 +919,8 @@ describe('SessionRuntime', () => {
     });
 
     it('questions the link as soon as input is sent (#1264)', async () => {
-      const rt = new SessionRuntime(makeConfig({ transportReady: true }));
+      const rt = new SessionRuntime(makeConfig());
+      rt.setTransportReady(true);
       rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
       openWs();
       await flushMicrotasks();
@@ -926,7 +940,8 @@ describe('SessionRuntime', () => {
     });
 
     it('does not stack probes while the user keeps typing (#1264)', async () => {
-      const rt = new SessionRuntime(makeConfig({ transportReady: true }));
+      const rt = new SessionRuntime(makeConfig());
+      rt.setTransportReady(true);
       rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
       openWs();
       await flushMicrotasks();
@@ -946,7 +961,8 @@ describe('SessionRuntime', () => {
     });
 
     it('ignores an input-triggered probe before the session is attached (#1264)', async () => {
-      const rt = new SessionRuntime(makeConfig({ transportReady: true }));
+      const rt = new SessionRuntime(makeConfig());
+      rt.setTransportReady(true);
       const before = countPings();
 
       // An unattached transport is already driven by the attach retry budget;
@@ -961,9 +977,9 @@ describe('SessionRuntime', () => {
 
     it('asks for the history again after a transport loss, though the Terminal holds output', async () => {
       const rt = new SessionRuntime(makeConfig({
-        transportReady: true,
         hasSessionOutput: () => true,
       }));
+      rt.setTransportReady(true);
       rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
       openWs();
       await flushMicrotasks();
@@ -1083,7 +1099,8 @@ describe('SessionRuntime', () => {
     });
 
     it('applies the attach seed to the live transport in reconcile → flush → seed order (#1094, #1307)', async () => {
-      const rt = new SessionRuntime(makeConfig({ transportReady: true }));
+      const rt = new SessionRuntime(makeConfig());
+      rt.setTransportReady(true);
       rt.buildTransport();
       rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
       openWs();
@@ -1121,7 +1138,8 @@ describe('SessionRuntime', () => {
 
     it('retires the P2P seed with its transport — a relay attach applies no P2P cursors', async () => {
       const serverConnection = makeRelayServerConnection('connected');
-      const rt = new SessionRuntime(makeConfig({ transportReady: true, serverConnection }));
+      const rt = new SessionRuntime(makeConfig({ serverConnection }));
+      rt.setTransportReady(true);
       rt.buildTransport();
       rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
       openWs();

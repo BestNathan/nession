@@ -4,8 +4,8 @@ import {
   attachInfoAtom, effectiveModeAtom, forcedRelayAtom, manualOverrideAtom,
   orderedUrlsAtom, sessionIdAtom, sessionNameAtom,
 } from '@/product/session/state';
-import { p2pStateAtom, routeIntentEpochAtom, transportGenerationAtom } from '@/platform/attach/state';
-import { terminalSessionStateAtom, lastResizeAtom, terminalTransportReadyAtom } from '@/product/terminal/state';
+import { routeIntentEpochAtom } from '@/platform/attach/state';
+import { terminalSessionStateAtom } from '@/product/terminal/state';
 import { inputDropAtomFamily } from '@/product/terminal/state/ui';
 import { useAddressPlan } from '@/shared/hooks/useAddressPlan';
 import { sessionRuntimeRegistry } from '@/platform/session-runtime/SessionRuntimeRegistry';
@@ -125,25 +125,20 @@ function applyRuntimeMirrorSnapshot(opts: {
   snapshot: import('@/platform/session-runtime/SessionRuntime').RuntimeMirrorSnapshot;
   inP2PTransport: boolean;
   setTerminalState: (s: import('@/product/terminal/state/session').TerminalStatus) => void;
-  setTransportGeneration: (n: number) => void;
   setAgentTerminalApi: (api: TerminalAgentApi | null) => void;
   setConnectionState: (s: ConnectionState) => void;
-  setP2pState: (s: ConnectionState) => void;
 }): void {
   const {
     snapshot, inP2PTransport,
-    setTerminalState, setTransportGeneration,
-    setAgentTerminalApi, setConnectionState, setP2pState,
+    setTerminalState,
+    setAgentTerminalApi, setConnectionState,
   } = opts;
   setTerminalState(snapshot.phase);
-  setTransportGeneration(snapshot.transportGeneration);
   // Both mirrors are gated to the P2P transport: outside it the mirror already
   // carries null / 'disconnected', and the gate keeps a stale value from
   // leaking during the same-render flip.
   setAgentTerminalApi(inP2PTransport ? snapshot.agentTerminalApi : null);
-  const state = inP2PTransport ? snapshot.connectionState : 'disconnected';
-  setConnectionState(state);
-  setP2pState(state);
+  setConnectionState(inP2PTransport ? snapshot.connectionState : 'disconnected');
 }
 
 function handleRuntimeEvent(
@@ -152,16 +147,14 @@ function handleRuntimeEvent(
     runtime: SessionRuntime;
     inP2PTransport: boolean;
     setTerminalState: (s: import('@/product/terminal/state/session').TerminalStatus) => void;
-    setTransportGeneration: (n: number) => void;
     setForcedRelay: (v: boolean) => void;
     setAgentTerminalApi: (api: TerminalAgentApi | null) => void;
   },
 ): void {
   const {
     runtime, inP2PTransport,
-    setTerminalState, setTransportGeneration, setForcedRelay, setAgentTerminalApi,
+    setTerminalState, setForcedRelay, setAgentTerminalApi,
   } = ctx;
-  setTransportGeneration(runtime.currentTransportGeneration);
   if (event.type === 'next-candidate') {
     setTerminalState('connecting');
     if (inP2PTransport) {
@@ -192,10 +185,8 @@ function useRuntimeConnectionSync(opts: {
   runtimeConfig: SessionRuntimeConfig | null;
   inP2PTransport: boolean;
   configOwner: boolean;
-  setP2pState: (s: ConnectionState) => void;
   setForcedRelay: (v: boolean) => void;
   setTerminalState: (s: import('@/product/terminal/state/session').TerminalStatus) => void;
-  setTransportGeneration: (n: number) => void;
 }): RuntimeConnectionSyncResult {
   const {
     sessionId,
@@ -203,10 +194,8 @@ function useRuntimeConnectionSync(opts: {
     runtimeConfig,
     inP2PTransport,
     configOwner,
-    setP2pState,
     setForcedRelay,
     setTerminalState,
-    setTransportGeneration,
   } = opts;
   const [agentTerminalApi, setAgentTerminalApi] = useState<TerminalAgentApi | null>(null);
   const [connectionState, setConnectionState] = useState<ConnectionState>('disconnected');
@@ -221,14 +210,12 @@ function useRuntimeConnectionSync(opts: {
     ) {
       setAgentTerminalApi(null);
       setConnectionState('disconnected');
-      setP2pState('disconnected');
       return;
     }
 
     const unsubState = inP2PTransport
       ? runtime.subscribeConnectionState((next) => {
         setConnectionState(next);
-        setP2pState(next);
         if (next === 'connecting') {
           // A fresh transport is being built for a candidate — surface its
           // terminal API so I/O binds to the new socket immediately.
@@ -242,7 +229,6 @@ function useRuntimeConnectionSync(opts: {
         runtime,
         inP2PTransport,
         setTerminalState,
-        setTransportGeneration,
         setForcedRelay,
         setAgentTerminalApi,
       });
@@ -257,17 +243,12 @@ function useRuntimeConnectionSync(opts: {
         snapshot,
         inP2PTransport,
         setTerminalState,
-        setTransportGeneration,
         setAgentTerminalApi,
         setConnectionState,
-        setP2pState,
       });
     } else {
       setAgentTerminalApi(inP2PTransport ? runtime.getAgentTerminalApi() : null);
-      const initial = inP2PTransport ? runtime.connectionState : 'disconnected';
-      setConnectionState(initial);
-      setP2pState(initial);
-      setTransportGeneration(runtime.currentTransportGeneration);
+      setConnectionState(inP2PTransport ? runtime.connectionState : 'disconnected');
     }
 
     return () => {
@@ -279,10 +260,8 @@ function useRuntimeConnectionSync(opts: {
     runtime,
     runtimeConfig,
     inP2PTransport,
-    setP2pState,
     setForcedRelay,
     setTerminalState,
-    setTransportGeneration,
     configOwner,
   ]);
 
@@ -290,9 +269,8 @@ function useRuntimeConnectionSync(opts: {
     if (!inP2PTransport) {
       setAgentTerminalApi(null);
       setConnectionState('disconnected');
-      setP2pState('disconnected');
     }
-  }, [inP2PTransport, setP2pState]);
+  }, [inP2PTransport]);
 
   return {
     agentTerminalApi: inP2PTransport ? agentTerminalApi : null,
@@ -309,11 +287,7 @@ export function useSessionRuntime(options: UseSessionRuntimeOptions): UseSession
   const [forcedRelayState, setForcedRelay] = useAtom(forcedRelayAtom);
   const effectiveMode = useAtomValue(effectiveModeAtom);
   const routeIntentEpoch = useAtomValue(routeIntentEpochAtom);
-  const lastResize = useAtomValue(lastResizeAtom);
-  const transportReady = useAtomValue(terminalTransportReadyAtom);
-  const setP2pState = useSetAtom(p2pStateAtom);
   const setTerminalState = useSetAtom(terminalSessionStateAtom);
-  const setTransportGeneration = useSetAtom(transportGenerationAtom);
   // The session's own record of input that was lost rather than delivered
   // (#1307 SC-09). Kept in an atom — UI state, not a runtime fact — so the
   // notice survives the transport generation that recorded it; the runtime
@@ -344,8 +318,6 @@ export function useSessionRuntime(options: UseSessionRuntimeOptions): UseSession
         ? { urls: addressPlan.urls, ready: addressPlanReady }
         : { urls: [], ready: true },
       routeIntentEpoch,
-      lastResize,
-      transportReady,
       // Retained even while P2P is active: the runtime needs the relay-capable
       // server WS handle in hand when a fallback happens with the Terminal
       // config-owner subtree unmounted.
@@ -373,8 +345,6 @@ export function useSessionRuntime(options: UseSessionRuntimeOptions): UseSession
     options.serverConnection,
     options.hasSessionOutput,
     routeIntentEpoch,
-    lastResize,
-    transportReady,
     setInputDrop,
   ]);
 
@@ -387,10 +357,8 @@ export function useSessionRuntime(options: UseSessionRuntimeOptions): UseSession
     runtimeConfig,
     inP2PTransport,
     configOwner: options.configOwner ?? false,
-    setP2pState,
     setForcedRelay,
     setTerminalState,
-    setTransportGeneration,
   });
 
   const fileOps: FileOps | null = useMemo(() => {

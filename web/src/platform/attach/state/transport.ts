@@ -6,7 +6,6 @@
 // than with the session state they are used alongside. (#801 Phase 5: state
 // follows ownership, not "it is a Jotai atom".)
 import { atom } from 'jotai';
-import type { ConnectionState } from '@/platform/socket/types';
 import type { TerminalStatus } from '@/types';
 
 /**
@@ -24,10 +23,5 @@ import type { TerminalStatus } from '@/types';
  */
 export const terminalSessionStateAtom = atom<TerminalStatus>('idle');
 
-export const p2pStateAtom = atom<ConnectionState>('disconnected');
-
 /** User-initiated route switch epoch — resets P2P candidate index when changed. */
 export const routeIntentEpochAtom = atom(0);
-
-/** Runtime-owned transport generation — candidate rotation / endpoint switch. */
-export const transportGenerationAtom = atom(0);
