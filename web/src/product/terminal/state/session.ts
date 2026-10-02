@@ -7,8 +7,13 @@ import { terminalSessionStateAtom } from '@/platform/attach/state/transport';
 // TerminalStatus/TerminalSession live in platform/terminal-runtime so runtime
 // consumers never depend on the Jotai state layer; re-exported here for
 // React-side imports.
-import type { TerminalSession } from '@/platform/terminal-runtime/types';
+import type { TerminalSession, TerminalStatus } from '@/platform/terminal-runtime/types';
 export type { TerminalSession, TerminalStatus } from '@/platform/terminal-runtime/types';
+
+/** Live means attached: every other phase is a form of not-yet or no-longer. */
+export function isTerminalLive(state: TerminalStatus): boolean {
+  return state === 'attached';
+}
 
 /**
  * Current terminal connection status — driven by the attach/disconnect/switch

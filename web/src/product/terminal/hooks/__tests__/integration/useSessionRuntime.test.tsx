@@ -481,17 +481,18 @@ describe('useSessionRuntime integration', () => {
 
   it('config owner mirrors the fresh runtime snapshot over a pre-set terminal state', async () => {
     const store = makeStore('agent:a', 'token-a');
-    store.set(terminalSessionStateAtom, 'connecting');
+    store.set(terminalSessionStateAtom, 'attached');
 
     renderHook(
       () => useSessionRuntime({ configOwner: true }),
       { wrapper: wrapper(store) },
     );
 
-    // The attach-phase mirror is unconditional: a fresh runtime reports 'idle',
-    // and the atom converges to runtime truth instead of holding a stale value.
+    // The attach-phase mirror is unconditional: a fresh runtime has already
+    // selected its session at construction (#1309 SC-01), and the atom
+    // converges to runtime truth instead of holding a stale value.
     await waitFor(() => {
-      expect(store.get(terminalSessionStateAtom)).toBe('idle');
+      expect(store.get(terminalSessionStateAtom)).toBe('connecting');
     });
   });
 

@@ -271,6 +271,16 @@ describe('SessionRuntime', () => {
     globalThis.WebSocket = OriginalWebSocket;
   });
 
+  it('selects its session at construction — idle promotes to connecting with no React driver (#1309 SC-01)', () => {
+    const rt = new SessionRuntime(makeConfig());
+    // The dispatch is synchronous in the constructor: a runtime that outlives
+    // its React tree (registry lease) still attaches, because selection is a
+    // construction fact rather than an effect noticing the runtime.
+    expect(rt.attachState.phase).toBe('connecting');
+    expect(rt.getSnapshot().phase).toBe('connecting');
+    rt.dispose();
+  });
+
   it('creates P2P connection and file capability when address plan is ready', () => {
     const rt = new SessionRuntime(makeConfig());
     expect(rt.activeUrl).toBe('ws://a/ws');
@@ -491,7 +501,8 @@ describe('SessionRuntime', () => {
       const serverConnection = makeRelayServerConnection('connected');
       const rt = new SessionRuntime(makeConfig({ forcedRelay: true, transportReady: true, serverConnection }));
 
-      rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
+      // Construction selected the session (#1309 SC-01): a ready relay config
+      // is attached before the constructor returns — no React driver exists.
       await flushMicrotasks();
       expect(serverConnection.beginRelay).toHaveBeenCalledTimes(1);
       expect(rt.attachState.phase).toBe('attached');
@@ -521,7 +532,7 @@ describe('SessionRuntime', () => {
       const serverConnection = makeRelayServerConnection('connected');
       const rt = new SessionRuntime(makeConfig({ forcedRelay: true, transportReady: true, serverConnection }));
 
-      rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
+      // Construction selected the session (#1309 SC-01) — already attached.
       await flushMicrotasks();
       expect(rt.attachState.phase).toBe('attached');
 
@@ -802,9 +813,9 @@ describe('SessionRuntime', () => {
       serverConnection,
     }));
 
-    // Relay attach is runtime-driven: SESSION_SELECTED → connecting, and the
-    // already-connected server WS begins relay without any React driver.
-    rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
+    // Relay attach is construction-driven (#1309 SC-01): the runtime selects
+    // its session in the constructor, and the already-connected server WS
+    // begins relay without any React driver.
     await flushMicrotasks();
     expect(serverConnection.beginRelay).toHaveBeenCalledTimes(1);
     expect(rt.attachState.phase).toBe('attached');

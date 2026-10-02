@@ -28,9 +28,6 @@ vi.mock('@/product/terminal/hooks/useP2PAttachTransport', () => ({
     activeUrl: null,
   }),
 }));
-vi.mock('@/product/terminal/useTerminalAttach', () => ({
-  useTerminalAttach: () => ({ terminalState: 'idle', reconnectCount: 0 }),
-}));
 vi.mock('@/product/terminal/hooks/useTerminal', () => ({ useTerminal: () => null }));
 vi.mock('@/shared/hooks/useWebSocket', () => ({
   // The new-core WebSocketService surface: useTerminalOrchestration wraps the

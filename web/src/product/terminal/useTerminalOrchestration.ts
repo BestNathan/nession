@@ -22,7 +22,6 @@ import {
 } from '@/product/session/state';
 import { terminalServerApi } from '@/product/terminal';
 import { useTerminal } from '@/product/terminal/hooks/useTerminal';
-import { useTerminalAttach } from '@/product/terminal/useTerminalAttach';
 import type { TerminalController } from '@/platform/terminal-runtime/controller/TerminalController';
 import { detectProfile, PROFILES } from '@/platform/terminal-runtime/DeviceProfile';
 import type { TerminalStatus } from '@/product/terminal/state/session';
@@ -181,14 +180,13 @@ export function useTerminalOrchestration({
     agentTerminalApi,
   );
 
-  const mirroredAttach = useTerminalAttach({
-    sessionId,
-    runtime,
-  });
-  // Runtime snapshot is the protocol source of truth. The attach hook keeps
-  // the legacy atom mirror alive for older chrome/components during migration.
-  const terminalState = snapshot?.phase ?? mirroredAttach.terminalState;
-  const reconnectCount = snapshot?.reconnectCount ?? mirroredAttach.reconnectCount;
+  // The runtime snapshot is the only attach-phase source: the runtime selects
+  // its session at construction and drives every transition itself (#1309
+  // SC-01) — there is no React mirror to fall back to. No runtime yet (no
+  // session, or the address plan is still resolving) means nothing is
+  // attaching: idle, zero attempts.
+  const terminalState = snapshot?.phase ?? 'idle';
+  const reconnectCount = snapshot?.reconnectCount ?? 0;
 
   const handleDisconnect = useEndRelayOnDisconnect({
     effectiveMode, serverConnection: relayServer, sessionId, onDisconnect,

@@ -85,10 +85,6 @@ vi.mock('@/product/terminal/hooks/useTerminal', () => ({
   },
 }));
 
-vi.mock('@/product/terminal/useTerminalAttach', () => ({
-  useTerminalAttach: () => ({ terminalState: 'attached', reconnectCount: 0 }),
-}));
-
 vi.mock('@/shared/hooks/useWebSocket', () => ({
   useWebSocket: () => ({
     connectionState: 'connected',

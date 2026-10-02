@@ -282,6 +282,12 @@ export class SessionRuntime {
       }
       this.emitSnapshot();
     });
+    // The runtime exists because a session was selected — attach begins here,
+    // not in a React effect that notices the runtime (#1309 SC-01). A runtime
+    // that outlives its React tree (registry lease) never re-selects:
+    // selection is a construction fact; later route intents arrive via
+    // updateContext.
+    this.attachController.dispatch({ type: 'SESSION_SELECTED' });
     this.syncAgentConnection();
     this.wireRelayServerHandler();
     this.driveRelayAttach();

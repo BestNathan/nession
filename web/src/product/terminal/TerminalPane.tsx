@@ -2,8 +2,7 @@ import { Loader2 } from 'lucide-react';
 import type { TerminalController } from '@/platform/terminal-runtime/controller/TerminalController';
 import { TerminalViewport } from '@/product/terminal/components/TerminalViewport';
 import { TerminalInputOverlay } from '@/product/terminal/components/input/TerminalInputOverlay';
-import { isTerminalLive } from '@/product/terminal/useTerminalAttach';
-import type { TerminalStatus } from '@/product/terminal/state/session';
+import { isTerminalLive, type TerminalStatus } from '@/product/terminal/state/session';
 
 interface TerminalPaneProps {
   sessionId: string;
