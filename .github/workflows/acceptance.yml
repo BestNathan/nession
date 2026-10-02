@@ -75,7 +75,7 @@ jobs:
     name: Execute acceptance
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    environment: ${{ inputs.provider }}
+    environment: ${{ inputs.provider == 'deepseek' && 'deepseek' || 'cursor' }}
     permissions:
       contents: read
       issues: read
