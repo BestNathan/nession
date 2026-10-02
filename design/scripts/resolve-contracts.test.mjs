@@ -103,13 +103,17 @@ test('session-header inherits chrome band rules and distributes title/actions', 
   assert.equal(merged.app.touchTargetTokenPx, 44);
 });
 
-test('workspace-navigation: menu overflow both experiences, no pinned strip height', () => {
+test('workspace-navigation: self-scrolling overflow both experiences, no pinned strip height', () => {
   const merged = mergeContracts(REAL, TOKENS)['pattern.workspace-navigation'];
-  assert.equal(merged.web.overflow, 'menu');
+  // #1347 Capsule V2: the capsule carries the capability list and scrolls
+  // itself, so its overflow strategy is `scroll` rather than the More/menu
+  // disclosure the pattern required before. The bound moved from the entry
+  // count to the capsule's own width — see the patternRef doc.
+  assert.equal(merged.web.overflow, 'scroll');
   assert.equal(merged.web.justify, 'start');
   assert.equal(merged.web.heightToken, undefined, 'strip height is layout-derived, not token-pinned');
   assert.equal(merged.web.wrap, false, 'single-line entries via category.chrome');
-  assert.equal(merged.app.overflow, 'menu');
+  assert.equal(merged.app.overflow, 'scroll');
   assert.equal(merged.app.justify, 'start');
   assert.equal(merged.app.heightToken, undefined);
   // The App band floats over the terminal, so it declares its own floor (#730)
