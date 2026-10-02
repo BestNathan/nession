@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createFilesApi } from '@/capabilities/files';
 import { createTerminalAgentApi } from '@/product/terminal';
 import { SessionRuntime } from '@/platform/session-runtime/SessionRuntime';
-import { ATTACH_TIMEOUT_MS, P2P_MAX_RECONNECT } from '@/platform/attach/AttachStateMachine';
+import { ATTACH_TIMEOUT_MS, P2P_MAX_RECONNECT, type AttachTransitionResult } from '@/platform/attach/AttachStateMachine';
+import { WebSocketService } from '@/platform/socket/WebSocketService';
 import type { RelayServerTransport } from '@/platform/attach/relayServerConnection';
 import type { ConnectionState } from '@/platform/socket/types';
 import type { ConnectionOptions } from '@/platform/terminal-runtime/types';
@@ -1125,6 +1126,82 @@ describe('SessionRuntime', () => {
     // nulls the agent api, and the tick returns early unless the phase is
     // 'attached'). A test that cannot fail is worse than no test: it is the
     // artefact a reviewer stops looking at.
+  });
+
+  describe('stale resolutions from an old generation (#1309 SC-10)', () => {
+    it('a route change strands the in-flight attach: its disposal rejection is no spurious timeout', async () => {
+      const rt = new SessionRuntime(makeConfig());
+      rt.setTransportReady(true);
+      rt.subscribeTransportSwap(() => {
+        rt.buildTransport();
+      });
+      rt.buildTransport();
+      // Construction selected the session; connecting starts the first attach.
+      openWs();
+      await flushMicrotasks();
+      expect(countClientAttach()).toBe(1);
+      expect(rt.attachState.phase).toBe('connecting');
+
+      const outcomes: AttachTransitionResult[] = [];
+      rt.subscribeAttachOutcomes((r) => outcomes.push(r));
+
+      // The route intent changes mid-attach. The teardown cancels the
+      // in-flight request synchronously (epoch bump, in both
+      // handleRouteIntentChange and the socket rebuild), so the disposal's
+      // rejection of the pending client.attach — which settles a microtask
+      // later — is a no-op. The mutation this pins is dropping those
+      // cancels, which turns the rejection into a spurious ATTACH_TIMEOUT
+      // that burns a reconnect-budget attempt on a route the user just
+      // switched away from.
+      rt.updateContext({ routeIntentEpoch: 1 });
+      await flushMicrotasks();
+
+      expect(rt.currentTransportGeneration).toBe(1);
+      // The phase is the NEW selection's, the budget is untouched, and no
+      // retry/force-relay outcome escaped the stranded attach.
+      expect(rt.attachState.phase).toBe('connecting');
+      expect(rt.attachState.reconnectCount).toBe(0);
+      expect(outcomes.some((r) => r.retryAttach || r.forceRelay)).toBe(false);
+
+      // The new generation's own attach proceeds untouched by the wreckage.
+      openWs();
+      await flushMicrotasks();
+      expect(countClientAttach()).toBe(2);
+      answerPending('agent.attach', 'ok', { stream_epoch: 1, stream_cursor: 2 });
+      await flushMicrotasks();
+      expect(rt.attachState.phase).toBe('attached');
+      expect(lastTransport().seedStreamCursor).toHaveBeenCalledWith(1, 2);
+      rt.dispose();
+    });
+
+    it('a probe left in flight by a transport swap cannot declare the replacement dead', async () => {
+      const unresponsive = vi.spyOn(WebSocketService.prototype, 'reportUnresponsive');
+      const rt = new SessionRuntime(makeConfig());
+      rt.setTransportReady(true);
+      openWs();
+      await flushMicrotasks();
+      answerAttach();
+      await flushMicrotasks();
+      expect(rt.attachState.phase).toBe('attached');
+
+      // Input asks "is the link alive" — the question is now outstanding on
+      // the first socket, with a deadline that has not elapsed.
+      rt.probeLivenessNow();
+      await flushMicrotasks();
+      expect(countPings()).toBe(1);
+
+      // The transport moves on before the answer comes back: candidate
+      // rotation disposes the socket, which rejects the in-flight ping late.
+      // That rejection belongs to the generation already being replaced;
+      // acting on it would schedule a reconnect on top of the rotation (the
+      // mutation this pins is deleting the probe-token guard).
+      expect(rt.onCandidateDisconnected()).toBe('next-candidate');
+      await flushMicrotasks();
+
+      expect(rt.currentTransportGeneration).toBe(1);
+      expect(unresponsive).not.toHaveBeenCalled();
+      rt.dispose();
+    });
   });
 
   describe('transport binding (#1309)', () => {

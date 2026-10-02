@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { renderHook, act, cleanup, waitFor } from '@testing-library/react';
+import { render, renderHook, act, cleanup, waitFor } from '@testing-library/react';
 import { createElement, StrictMode, type ReactNode } from 'react';
 import { Provider, createStore } from 'jotai';
 import { useSessionRuntime } from '@/product/terminal/hooks/useSessionRuntime';
@@ -73,6 +73,23 @@ function lastWs(): MockWs {
   return instances[instances.length - 1];
 }
 
+/** Count client.attach frames sent on any tracked socket. */
+function countAttachFrames(): number {
+  let count = 0;
+  for (const ws of instances) {
+    for (const call of ws.send.mock.calls) {
+      try {
+        if (JSON.parse(String(call[0])).msg_type === 'agent.attach') {
+          count += 1;
+        }
+      } catch {
+        // non-JSON frame — ignore
+      }
+    }
+  }
+  return count;
+}
+
 function makeAttachInfo(sessionId: string, token: string): AttachInfo {
   return {
     mode: 'p2p',
@@ -94,10 +111,46 @@ function makeStore(sessionId: string, token: string) {
   return store;
 }
 
-function wrapper(store: ReturnType<typeof createStore>, strict = false) {
+function wrapper(store: ReturnType<typeof createStore>) {
   const W = ({ children }: { children: ReactNode }) =>
-    createElement(Provider, { store }, strict ? createElement(StrictMode, null, children) : children);
+    createElement(Provider, { store }, children);
   return W;
+}
+
+/**
+ * Renders the hook inside a REAL StrictMode replay. StrictMode must be the
+ * root element of the render call: measured on this React build (19.3),
+ * StrictMode nested one level down — e.g. inside a renderHook `wrapper` —
+ * never replays effects, so a wrapper-based StrictMode test mounts once and
+ * proves nothing.
+ */
+function RuntimeHarness({
+  options,
+  onResult,
+}: {
+  options: Parameters<typeof useSessionRuntime>[0];
+  onResult: (r: { runtime: SessionRuntime | null }) => void;
+}) {
+  onResult(useSessionRuntime(options));
+  return null;
+}
+
+function renderStrict(
+  store: ReturnType<typeof createStore>,
+  options: Parameters<typeof useSessionRuntime>[0],
+  onResult: (r: { runtime: SessionRuntime | null }) => void,
+) {
+  return render(
+    createElement(
+      StrictMode,
+      null,
+      createElement(
+        Provider,
+        { store },
+        createElement(RuntimeHarness, { options, onResult }),
+      ),
+    ),
+  );
 }
 
 const SESSION_IDS = ['agent:a', 'agent:b', 'agent:failover-b', 'agent:failover-relay', 'agent:manual-fail', 'agent:relay'];
@@ -232,23 +285,98 @@ describe('useSessionRuntime integration', () => {
     });
   });
 
-  it('StrictMode replay keeps a single runtime for the same session', () => {
+  it('StrictMode replay does not dispose the session runtime (#1309 SC-11)', async () => {
+    // dispose is the assertion because the rendered value cannot see the
+    // defect: under a dispose-and-rebuild the effect replay's setStates
+    // batch, the intermediate runtime never surfaces in a render, and an
+    // identity check on the hook's return passes either way.
+    const disposeSpy = vi.spyOn(SessionRuntime.prototype, 'dispose');
     const store = makeStore('agent:a', 'token-a');
-    const seen: SessionRuntime[] = [];
+    let current: SessionRuntime | null = null;
 
-    renderHook(
-      () => {
-        const rt = useSessionRuntime({ configOwner: true });
-        if (rt.runtime) {
-          seen.push(rt.runtime);
-        }
-        return rt;
-      },
-      { wrapper: wrapper(store, true) },
-    );
+    renderStrict(store, { configOwner: true }, (r) => {
+      current = r.runtime;
+    });
+    await waitFor(() => {
+      expect(current).not.toBeNull();
+    });
+    // Let the transient unmount's deferred dispose fire if it is going to.
+    await act(async () => {
+      await new Promise((resolve) => {
+        setTimeout(resolve, 5);
+      });
+    });
 
-    expect(seen.length).toBeGreaterThan(0);
-    expect(new Set(seen).size).toBe(1);
+    expect(disposeSpy).not.toHaveBeenCalled();
+  });
+
+  it('StrictMode replay builds one socket and sends one attach (#1309 SC-11)', async () => {
+    const store = makeStore('agent:a', 'token-a');
+    let current: SessionRuntime | null = null;
+    renderStrict(store, { configOwner: true }, (r) => {
+      current = r.runtime;
+    });
+    await waitFor(() => {
+      expect(current).not.toBeNull();
+    });
+
+    // Viewport readiness arrives the way the terminal's adapter pushes it;
+    // connecting then starts the attach.
+    act(() => {
+      current!.setTransportReady(true);
+    });
+    act(() => {
+      const ws = lastWs();
+      ws._readyState = WS.OPEN;
+      ws.onopen?.(new Event('open'));
+    });
+    await waitFor(() => {
+      expect(countAttachFrames()).toBe(1);
+    });
+
+    // The replay's transient unmount deferred the runtime's dispose and the
+    // second mount cancelled it. Give the deferred macrotask its chance to
+    // misfire: had the runtime been disposed and rebuilt, a second socket
+    // (and a second attach on it) would exist. The mutation this pins is
+    // disposing eagerly on release.
+    await act(async () => {
+      await new Promise((resolve) => {
+        setTimeout(resolve, 5);
+      });
+    });
+    expect(instances.length).toBe(1);
+    expect(countAttachFrames()).toBe(1);
+  });
+
+  it('StrictMode replay does not end the relay in the transient unmount (#1309 SC-11)', async () => {
+    const store = makeStore('agent:relay', 'token-r');
+    store.set(attachInfoAtom, { mode: 'relay', session_id: 'agent:relay' } as AttachInfo);
+    const serverConnection = makeRelayHandle('connected');
+    let current: SessionRuntime | null = null;
+    renderStrict(store, { configOwner: true, serverConnection }, (r) => {
+      current = r.runtime;
+    });
+    await waitFor(() => {
+      expect(current).not.toBeNull();
+    });
+    act(() => {
+      current!.setTransportReady(true);
+    });
+    await waitFor(() => {
+      expect(serverConnection.beginRelay).toHaveBeenCalledTimes(1);
+    });
+
+    // Same deferred-dispose window as the socket half, but for the leave the
+    // runtime itself now performs: dispose() ends the relay (#1309 SC-08),
+    // so a dispose that fired during the replay would end a relay the
+    // surviving runtime is still using.
+    await act(async () => {
+      await new Promise((resolve) => {
+        setTimeout(resolve, 5);
+      });
+    });
+    expect(serverConnection.endRelay).not.toHaveBeenCalled();
+    expect(serverConnection.beginRelay).toHaveBeenCalledTimes(1);
   });
 
   it('survives a caller that rebuilds its context on every render', async () => {
