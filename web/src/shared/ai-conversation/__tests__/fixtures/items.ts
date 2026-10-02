@@ -42,6 +42,14 @@ export function toolItem(
   }
 }
 
+export function reasoningItem(
+  id: string,
+  summary = 'weighing the options',
+  status: AIToolItem['status'] = 'success',
+): AIConversationItem {
+  return { kind: 'reasoning', id, summary, status }
+}
+
 export function unknownItem(id: string): AIConversationItem {
   return { kind: 'unknown', id }
 }
