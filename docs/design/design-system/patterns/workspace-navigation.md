@@ -68,7 +68,7 @@ Navigation consequences:
 | `relevant` | The same slot, carrying `relevant` — state is data on the entry, not a promotion into or out of the row |
 | `active` | Selected state (dot) and scrolled into view; may also have Session-level presence |
 
-For every state that has a slot, state is published on the entry (`data-capability-state`, `data-capability-presence`), so a capability's condition stays legible without the row changing size or membership as the work changes. `unavailable` is the one state that changes membership — and it *removes* the entry rather than dimming it. A capability does not become primary navigation merely because it is active. Current work remains primary.
+For every state that has a slot, state is published on the entry (`data-capability-state`, `data-capability-presence`), so a capability's condition stays legible without the row changing size or membership as the work changes — `unavailable` included, since it keeps its slot drawn inert rather than being removed (see the membership note above). A capability does not become primary navigation merely because it is active. Current work remains primary.
 
 ## Presentation model
 
