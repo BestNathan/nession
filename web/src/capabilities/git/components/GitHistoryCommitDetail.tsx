@@ -1,5 +1,6 @@
 import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
+import { workspaceScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
 import { describeUnavailable, formatBytes } from '../state';
 import type { GitCommitChangedFile, GitCommitResponse } from '../types';
 
@@ -49,7 +50,7 @@ export function GitHistoryCommitDetail({
 
   const c = detail.commit;
   return (
-    <div data-testid="git-commit-detail" className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
+    <div data-testid="git-commit-detail" className={cn('flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4', workspaceScrollClearanceClass)}>
       <p className={chromeSansRole('secondary')}>{c.subject}</p>
       {c.body ? (
         <pre className={cn('whitespace-pre-wrap text-muted-foreground', chromeSansRole('metadata'))}>{c.body}</pre>

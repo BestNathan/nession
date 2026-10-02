@@ -6,6 +6,7 @@ import { Info } from 'lucide-react';
 import { getRehypePlugins, getRemarkPlugins, getRemarkRehypeOptions } from '@/shared/markdown';
 import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
+import { workspaceScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
 
 /** Props for MarkdownPreview */
 interface MarkdownPreviewProps {
@@ -70,7 +71,7 @@ export function MarkdownPreview({ content, filename }: MarkdownPreviewProps) {
 
   return (
     <MarkdownErrorBoundary onFallback={handleErrorFallback}>
-      <div className="markdown-preview overflow-y-auto h-full p-4 text-sm leading-relaxed">
+      <div className={cn('markdown-preview overflow-y-auto h-full p-4 text-sm leading-relaxed', workspaceScrollClearanceClass)}>
         {isLargeFile && (
           <div className={cn('mb-3 flex items-center gap-2 rounded border border-border bg-muted px-3 py-2 text-muted-foreground', chromeSansRole('metadata'))}>
             <Info className="h-3.5 w-3.5 shrink-0" />

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { FileOps, FileEntry } from '@/capabilities/files';
 import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
+import { workspaceScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
 import {
   FileListEntryRows,
   FileListErrorPanel,
@@ -108,7 +109,7 @@ export function FileList({
   return (
     <div
       ref={listRef}
-      className="h-full min-h-0 overflow-y-auto"
+      className={cn('h-full min-h-0 overflow-y-auto', workspaceScrollClearanceClass)}
       data-testid="files-app-list"
       onScroll={() => {
         const node = listRef.current;

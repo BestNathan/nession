@@ -1,5 +1,7 @@
+import { useRef } from 'react';
 import { resolveCapabilityPresences, type CapabilityId } from '@/product/capability';
 import { cn } from '@/shared/lib/utils';
+import { useWorkspaceCapsuleClearance } from '@/app/workspace/hooks/useWorkspaceCapsuleClearance';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import { resolveWorkspaceCapabilities } from '@/app/workspace/capabilities';
 import {
@@ -111,6 +113,11 @@ export function WorkspaceShell({
   pushed = false,
   surfaceAction,
 }: WorkspaceShellProps) {
+  // SC-12: the shell is the Workspace's occlusion owner — see the hook for why
+  // it measures the tool bar rather than the Terminal's composer.
+  const shellRef = useRef<HTMLDivElement>(null);
+  useWorkspaceCapsuleClearance(shellRef);
+
   const resolution = resolveWorkspaceCapabilities(ctx);
   const presences = resolveCapabilityPresences(resolution.snapshots, {
     surface: 'workspace',
@@ -157,6 +164,7 @@ export function WorkspaceShell({
 
   return (
     <div
+      ref={shellRef}
       data-testid="workspace-shell"
       data-capability-diagnostics={resolution.diagnostics.length}
       /* The Workspace region's ground is the canvas, not a tint of it.
@@ -170,7 +178,13 @@ export function WorkspaceShell({
          declared and consumed by nothing until here. */
       className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-workspace-background"
     >
-      <div data-testid="workspace-tool-content" className="min-h-0 flex-1 overflow-hidden">
+      {/* `flex flex-col` so the region constrains its single view instead of
+          letting it size to its content: a view built as `flex-1 min-h-0`
+          (AgentDetail, GitWorkspace) is a flex item here, and without the
+          container a tall view overflowed the region — clipped by
+          `overflow-hidden`, with no scroll to reach its end, which is the
+          thing SC-12 assumes can always happen. */}
+      <div data-testid="workspace-tool-content" className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {ctx.experience === 'app' ? (
           ActiveAppLayout ? (
             <ActiveAppLayout ctx={ctx} depth={depth} />

@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { MASKED_VALUE, isSensitiveKey } from '@/capabilities/env/model/sensitive';
 import { cn } from '@/shared/lib/utils';
 import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
+import { workspaceScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
 
 /** Below this count a filter field would be chrome in search of a problem. */
 const SEARCH_THRESHOLD = 6;
@@ -150,7 +151,7 @@ export function EnvVariablesView({
         </div>
       ) : null}
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className={cn('min-h-0 flex-1 overflow-y-auto', workspaceScrollClearanceClass)}>
         {filtered.length === 0 ? (
           <p className={cn('px-4 py-8 text-center text-muted-foreground', chromeSansRole('secondary'))}>
             No variables match &ldquo;{query.trim()}&rdquo;

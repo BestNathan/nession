@@ -3,6 +3,7 @@ import { ZoomIn, ZoomOut, Maximize, Minimize } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/shared/lib/utils';
 import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
+import { workspaceScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
 
 export interface ImageViewerProps {
   blobUrl: string;
@@ -25,7 +26,7 @@ export function ImageViewer({ blobUrl, filename }: ImageViewerProps) {
         </span>
         <span className={cn('text-muted-foreground', chromeSansRole('metadata'))}>{Math.round(scale * 100)}%</span>
       </div>
-      <div className="flex-1 min-h-0 overflow-auto flex items-center justify-center bg-inverse/20">
+      <div className={cn('flex-1 min-h-0 overflow-auto flex items-center justify-center bg-inverse/20', workspaceScrollClearanceClass)}>
         <img
           src={blobUrl}
           alt={filename}
