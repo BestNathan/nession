@@ -67,20 +67,59 @@ re-checked.
 - **License:** MIT
 - **Copyright:** Copyright (c) 2026 DeepSeek
 
-**Files.** These carry the adaptation in their own header:
+**Files.** Every file below is upstream source at the pinned baseline, copied
+or substantially adapted, and each carries the matching header:
 
-| Path | Adapted from |
-|---|---|
-| `web/src/shared/markdown/runtime/render.tsx` | DeepSeek Harness `render.tsx`, simplified |
-| `web/src/shared/markdown/runtime/MarkdownText.tsx` | DeepSeek Harness `MarkdownText.tsx`, simplified |
-| `web/src/shared/markdown/ChatMarkdown.module.css` | DeepSeek Harness `MarkdownText.module.css` |
+| Path | Upstream source | What changed |
+|---|---|---|
+| `web/src/shared/markdown/runtime/parser.ts` | `markdown/parse.ts` | grammar options for the Chat dialect (below) |
+| `web/src/shared/markdown/runtime/incremental.ts` | `markdown/incremental.ts` | re-formatting only |
+| `web/src/shared/markdown/runtime/cjkFriendlyStrong.ts` | `markdown/cjkFriendlyStrong.ts` | re-formatting only |
+| `web/src/shared/markdown/runtime/mathCompatibility.ts` | `markdown/mathCompatibility.ts` | re-formatting only |
+| `web/src/shared/markdown/runtime/local-image-syntax.ts` | `markdown/local-image-syntax.ts` | simplified; no `dsh-app://` vocabulary |
+| `web/src/shared/markdown/runtime/katex.tsx` | `markdown/katex.tsx` | error span uses a Nession token |
+| `web/src/shared/markdown/runtime/render.tsx` | `markdown/render.tsx` | simplified; Nession product semantics (links, images, tables, footnotes) |
+| `web/src/shared/markdown/runtime/MarkdownText.tsx` | `markdown/MarkdownText.tsx` | simplified; Nession styling and lifecycle wiring |
+| `web/src/shared/markdown/ChatMarkdown.module.css` | `markdown/MarkdownText.module.css` | Nession design tokens |
 
-The rest of `web/src/shared/markdown/runtime/` is Nession's own code written
-against that runtime's design; it depends on `micromark` and `mdast-util-*` as
-declared npm packages rather than vendoring DeepSeek source.
+It is a *copy*, not a dependency: the file is in this repository and the
+package manager records nothing for it. The one file under
+`web/src/shared/markdown/runtime/` that is **not** upstream's is
+`ChatCodeBlock.tsx`, which is Nession's own highlight.js code block; the
+runtime depends on `micromark`, `mdast-util-*`, `katex` and `highlight.js` as
+declared npm packages.
 
-**Adaptation.** Pruned to the Chat profile: single-dollar inline math is off so
-a `$HOME` in prose is not a formula; `\(...\)`, `\[...\]` and `$$` delimiters
-are on; CJK-friendly strong emphasis; local image syntax recovery. Styling is
-Nession's — the upstream palette, typography scale and radius tokens are not
-adopted.
+**Adaptation.** Pruned to the Chat profile: single-dollar text math is off so
+`$HOME`, `$PATH`, `$100 ... $200` and `echo "$VAR"` in prose are not formulae
+(`\(...\)`, `\[...\]` and `$$` delimiters are on); GFM's optional single-tilde
+strikethrough is off so `~/.claude`, `~10ms` and `60~70%` stay prose and only
+`~~explicit~~` strikes through; CJK-friendly strong emphasis; local image
+syntax recovery. Styling is Nession's — the upstream palette, typography scale
+and radius tokens are not adopted, and upstream's file-mention, image-preview
+and link-glyph UI is not ported.
+
+**License text.** As the MIT terms require:
+
+```text
+MIT License
+
+Copyright (c) 2026 DeepSeek
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
