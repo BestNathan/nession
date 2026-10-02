@@ -49,6 +49,7 @@ import { ToolActivity, UnknownActivity } from './ToolActivity'
 import { ToolGroup } from './ToolGroup'
 import {
   ConversationFailure,
+  ConversationUnavailable,
   EmptyConversation,
   LoadingOlder,
   OlderError,
@@ -261,6 +262,16 @@ function ConversationBody({
         This conversation is no longer available.
       </p>
     )
+  }
+  // Before the empty check, deliberately. `unavailable` is a state the provider
+  // answered with, not the absence of an answer, and it reaches here with
+  // `items` either empty (a first read that could not be made) or *full* (a
+  // readable thread whose re-read came back unavailable). Both must render as
+  // this state: the first would otherwise be told it has no messages, and the
+  // second would keep showing a transcript as if it were current, which is the
+  // worse of the two — stale content is indistinguishable from live content.
+  if (snapshot.state === 'unavailable') {
+    return <ConversationUnavailable onRetry={onReload} />
   }
   if (snapshot.threadLoading && snapshot.items.length === 0) {
     return (
