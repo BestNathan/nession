@@ -17,7 +17,7 @@ _gate_contract_error() {
 gate_contract_validate() {
   local field value
   for field in GATE_ID GATE_NAME GATE_COMMAND GATE_SUCCESS GATE_FAILURE GATE_REPAIR GATE_OWNER; do
-    value="${!field-}"
+    eval "value=\${$field-}"
     if [ -z "$value" ]; then
       _gate_contract_error "missing required gate metadata: ${field}"
       return 2
@@ -72,6 +72,23 @@ gate_require_path() {
     return 2
   fi
 }
+gate_require_env() {
+  local name="$1"
+  local repair="${2:-Provide '${name}' and rerun the gate.}"
+  local value=""
+  eval "value=\${$name-}"
+  if [ -z "$value" ]; then
+    gate_runtime_error "required environment variable '${name}' is unavailable" "$repair"
+    return 2
+  fi
+}
+
+gate_run_invariant() {
+  if "$@"; then
+    return 0
+  fi
+  gate_invariant_failure "$GATE_FAILURE" "$GATE_REPAIR"
+}
 
 _gate_print_detail() {
   local kind="$1"
@@ -120,8 +137,6 @@ gate_main() {
   esac
 
   output_file="$(mktemp "${TMPDIR:-/tmp}/nession-gate-${GATE_ID}.XXXXXX")"
-  trap 'rm -f "$output_file"' RETURN
-
   local caller_cwd="$PWD"
   cd "$GATE_REPO_ROOT"
   set +e
