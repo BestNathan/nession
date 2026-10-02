@@ -173,13 +173,13 @@
         "category.chrome"
       ],
       "web": {
-        "overflow": "menu",
+        "overflow": "scroll",
         "wrap": false,
         "alignY": "middle",
         "justify": "start"
       },
       "app": {
-        "overflow": "menu",
+        "overflow": "scroll",
         "wrap": false,
         "alignY": "middle",
         "touchTargetToken": "experience.app.touchTarget.compact",
