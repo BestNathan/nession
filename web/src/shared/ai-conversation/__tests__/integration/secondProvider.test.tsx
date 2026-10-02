@@ -159,7 +159,7 @@ describe('a second provider through the shared conversation', () => {
       ],
       refresh: {
         kind: 'push',
-        subscribe: (onChange) => {
+        subscribe: (_context, _conversationId, onChange) => {
           push.notify = onChange
           return () => undefined
         },
@@ -190,6 +190,65 @@ describe('a second provider through the shared conversation', () => {
     const bodies = screen.getAllByTestId('conversation-assistant-body')
     expect(bodies).toHaveLength(1)
     expect(bodies[0]?.dataset.streaming).toBe('true')
+  })
+
+  it('follows the status the provider states, not only the page’s partial tail', async () => {
+    // SC-12 asks for streaming -> settled to be proven from a provider that can
+    // *state* it, and SC-19 for the transition to be stable. Claude Code cannot
+    // state one, which is why the page-level inference exists — but a provider
+    // that does state it has to be believed, or the shared renderer is Claude's
+    // renderer wearing the shared contract.
+    const push: { notify?: () => void } = {}
+    const adapter = new SyntheticAdapter({
+      conversations: [
+        {
+          id: 'thread-1',
+          activity: 'active',
+          items: [userMessage('u1', 'do the thing'), assistantMessage('a1', 'wor', 'streaming')],
+        },
+      ],
+      bindingId: 'thread-1',
+      // Deliberately false: the provider is stating per-message status, and the
+      // test would pass for the wrong reason if both signals agreed.
+      partialTail: false,
+      refresh: {
+        kind: 'push',
+        subscribe: (_context, _conversationId, onChange) => {
+          push.notify = onChange
+          return () => undefined
+        },
+      },
+    })
+
+    render(<Harness adapter={adapter} />)
+    await waitFor(() => expect(screen.getByTestId('conversation-assistant-body')).toBeDefined())
+
+    const body = () => screen.getByTestId('conversation-assistant-body')
+    const first = body()
+    expect(first.dataset.streaming).toBe('true')
+    expect(first.textContent).toBe('wor')
+
+    // Still streaming, more text — the same row, grown, not a second one.
+    adapter.replaceItems('thread-1', [
+      userMessage('u1', 'do the thing'),
+      assistantMessage('a1', 'working on', 'streaming'),
+    ])
+    push.notify?.()
+    await waitFor(() => expect(body().textContent).toBe('working on'))
+    expect(body()).toBe(first)
+    expect(body().dataset.streaming).toBe('true')
+
+    // Settled. The provider says so, and the presentation follows it.
+    adapter.replaceItems('thread-1', [
+      userMessage('u1', 'do the thing'),
+      assistantMessage('a1', 'working on it — done', 'settled'),
+    ])
+    push.notify?.()
+    await waitFor(() => expect(body().textContent).toBe('working on it — done'))
+    expect(body()).toBe(first)
+    expect(body().dataset.streaming).toBeUndefined()
+    // One row throughout, never two.
+    expect(screen.getAllByTestId('conversation-assistant-body')).toHaveLength(1)
   })
 
   it('lets the reader choose instead of guessing, and says what it skipped', async () => {

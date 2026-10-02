@@ -218,6 +218,17 @@ export class ConversationRuntime<Context> {
   private olderGeneration = 0
   private timer: unknown = null
   private unsubscribePush: (() => void) | null = null
+  /**
+   * What the running refresh is watching.
+   *
+   * A push stream is opened *for a conversation*, so "is a refresh running" is
+   * not enough to know whether the right one is: a subscription left over from
+   * a conversation the reader has left is still running, and still firing.
+   * Holding the target is what lets both halves be wrong in a way the other
+   * notices — the subscription knows what it was for, and an event from one that
+   * no longer matches is not evidence about what is open now.
+   */
+  private refreshArmedFor: { key: string; conversationId: string } | null = null
   private disposed = false
 
   constructor(
@@ -524,15 +535,39 @@ export class ConversationRuntime<Context> {
 
   /** Ask again while the open conversation is not known to be finished. */
   private startRefresh(): void {
-    if (this.timer !== null || this.unsubscribePush !== null) {
+    const key = this.contextKey
+    const conversationId = this.loadedId
+    const context = this.context
+    const policy = this.adapter.refresh
+
+    if (policy.kind === 'manual' || key === null || conversationId === null || context === null) {
+      this.stopRefresh()
       return
     }
-    const policy = this.adapter.refresh
+    // Already watching exactly this. Re-arming would close and reopen a stream
+    // on every poll of a conversation that has not moved.
+    if (
+      this.refreshArmedFor?.key === key &&
+      this.refreshArmedFor.conversationId === conversationId
+    ) {
+      return
+    }
+    this.stopRefresh()
+
     if (policy.kind === 'poll') {
       this.timer = this.scheduler.setInterval(() => this.poll(), policy.intervalMs)
-    } else if (policy.kind === 'push') {
-      this.unsubscribePush = policy.subscribe(() => this.poll())
+    } else {
+      this.unsubscribePush = policy.subscribe(context, conversationId, () => {
+        // The provider may emit once more before its unsubscribe lands. That
+        // event is about a conversation the reader has left, so it is not a
+        // reason to re-read the one they are in.
+        if (this.contextKey !== key || this.loadedId !== conversationId) {
+          return
+        }
+        this.poll()
+      })
     }
+    this.refreshArmedFor = { key, conversationId }
   }
 
   private stopRefresh(): void {
@@ -544,6 +579,7 @@ export class ConversationRuntime<Context> {
       this.unsubscribePush()
       this.unsubscribePush = null
     }
+    this.refreshArmedFor = null
   }
 
   /**
