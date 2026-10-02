@@ -172,6 +172,24 @@ describe('the turn process control', () => {
     expect(screen.getByTestId('conversation-turn-process')).toHaveTextContent('Worked for 12s')
   })
 
+  it('measures the work when the provider timestamped only the work', () => {
+    // The case the contract names and the implementation did not honour: a
+    // provider that times its *tools* and leaves the participant messages
+    // untimed. Both ends here are work, so a version reading timestamps through
+    // the message narrowing reports `Worked` — true, but less than the data
+    // supports.
+    renderTranscript({
+      items: [
+        userMessage('u1', 'q'),
+        { ...toolItem('t1'), timestamp: '2026-10-02T10:00:00.000Z' },
+        { ...toolItem('t2'), timestamp: '2026-10-02T10:00:30.000Z' },
+        assistantMessage('a1', 'a'),
+      ],
+    })
+
+    expect(screen.getByTestId('conversation-turn-process')).toHaveTextContent('Worked for 30s')
+  })
+
   it('says only that it worked when the provider did not timestamp it', () => {
     renderTranscript({ items: [userMessage('u1', 'q'), toolItem('t1'), assistantMessage('a1', 'a')] })
 
