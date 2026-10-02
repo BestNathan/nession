@@ -16,20 +16,29 @@ test('canonical Workspace fixture renders the plugin shell', async ({ page }) =>
   await expect(page.getByTestId('workspace-shell')).toBeVisible();
   await expect(page.getByTestId('workspace-tool-bar')).toBeVisible();
 
-  // Contextual chrome: the opened capability holds the direct slot, and
-  // registration no longer produces a permanent navigation item.
+  // Contextual chrome: the opened capability is the *selected* entry. Capsule V2
+  // keeps a slot for every capability that has a Workspace view — being merely
+  // registered no longer decides membership, so selection is what distinguishes
+  // the opened one.
   await expect(page.getByTestId('workspace-tool-files')).toBeVisible();
-  await expect(page.getByTestId('workspace-tool-agent')).toHaveCount(0);
+  await expect(page.getByTestId('workspace-tool-files')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('workspace-tool-agent')).toBeVisible();
+  await expect(page.getByTestId('workspace-tool-agent')).toHaveAttribute('aria-pressed', 'false');
 
   // files web layout renders tree ‖ editor
   await expect(page.getByTestId('files-web-layout')).toBeVisible();
 
   await page.screenshot({ path: 'test-results/canonical-workspace.png', fullPage: true });
 
-  // Everything else available is progressively disclosed through More.
-  await page.getByTestId('workspace-capability-capsule').click();
-  await expect(page.getByTestId('workspace-capability-picker-agent')).toBeVisible();
-  await expect(page.getByTestId('workspace-capability-picker-session')).toBeVisible();
+  // The capsule is the whole disclosure now: one bounded, horizontally
+  // scrollable row holding every capability that has a Workspace view, with no
+  // second-level picker to click through. Every remaining entry is asserted by
+  // name — so a capability quietly dropping out of the row fails here instead
+  // of passing as a shorter run.
+  await expect(page.getByTestId('workspace-capability-scroll')).toBeVisible();
+  for (const id of ['session', 'agent', 'env', 'claude-code', 'git']) {
+    await expect(page.getByTestId(`workspace-tool-${id}`)).toBeVisible();
+  }
 });
 
 test('the Terminal destination action sits left of the capability dock (#1204)', async ({ page }) => {
