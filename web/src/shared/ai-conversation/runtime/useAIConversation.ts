@@ -39,16 +39,39 @@ export interface AIConversationHandle {
 }
 
 /**
- * `adapter` is expected to be stable — a module-level constant, or built once
- * by the caller. It is read on the first render only, so a new adapter object
- * per render is harmless to correctness but would be a new provider identity,
- * which is not a thing a re-render should be able to change.
+ * `adapter` identifies the provider, and a different adapter is a *different
+ * provider*: the runtime is replaced and the previous one disposed. That is what
+ * makes a provider switch real rather than decorative (`#1363` round 3) — and it
+ * raises the cost of an unstable one, because a new adapter object on every
+ * render would be a new runtime on every render. Build it once: a module-level
+ * constant, or a `useMemo`.
  */
 export function useAIConversation<Context>(
   adapter: AIConversationAdapter<Context>,
   context: Context | null,
 ): AIConversationHandle {
-  const [runtime] = useState(() => new ConversationRuntime(adapter))
+  // The runtime is owned by the *provider*, not by this component: a runtime
+  // built for one adapter cannot answer for another, and `useState`'s
+  // initialiser runs exactly once — so a changed adapter used to be ignored
+  // outright, and the hook went on answering the first provider forever.
+  //
+  // Replaced rather than mutated, and that is the half that makes the swap safe:
+  // the old runtime is *disposed*, `wanted()` refuses everything once `disposed`
+  // is set, and the generation counters belong to one runtime alone — so a
+  // response A is still holding cannot land in B even if it resolves after the
+  // switch.
+  const [entry, setEntry] = useState(() => ({
+    adapter,
+    runtime: new ConversationRuntime(adapter),
+  }))
+  // Adjusting state during render, which React documents for a prop whose
+  // identity changed. It re-renders before committing, so the new provider is
+  // never drawn with the old runtime's snapshot — and the discarded pass runs no
+  // effects, which is where subscriptions live.
+  if (entry.adapter !== adapter) {
+    setEntry({ adapter, runtime: new ConversationRuntime(adapter) })
+  }
+  const { runtime } = entry
   const contextRef = useRef(context)
   contextRef.current = context
   const key = context === null ? null : adapter.contextKey(context)
