@@ -24,10 +24,12 @@ function snapshot(overrides: Partial<AIConversationSnapshot> = {}): AIConversati
     hasMore: false,
     partialTail: false,
     skipped: 0,
-    loading: false,
+    listLoading: false,
+    threadLoading: false,
     loadingOlder: false,
     olderError: null,
-    error: null,
+    listError: null,
+    threadError: null,
     ...overrides,
   }
 }
@@ -241,7 +243,7 @@ describe('ConversationView', () => {
   it('speaks about a failed list rather than showing an empty one', () => {
     render(
       <ConversationView
-        snapshot={snapshot({ error: 'the host refused', conversations: [] })}
+        snapshot={snapshot({ listError: 'the host refused', conversations: [] })}
         providerLabel="Claude"
         layout="master-detail"
         onSelect={() => undefined}
@@ -255,7 +257,7 @@ describe('ConversationView', () => {
   it('keeps the rows it has when a refresh fails', () => {
     render(
       <ConversationView
-        snapshot={snapshot({ error: 'refresh failed', conversations: [summary()] })}
+        snapshot={snapshot({ listError: 'refresh failed', conversations: [summary()] })}
         providerLabel="Claude"
         layout="master-detail"
         onSelect={() => undefined}

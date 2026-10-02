@@ -104,6 +104,13 @@ export class SyntheticAdapter implements AIConversationAdapter<string> {
   /** Every request the runtime made, in order. */
   readonly calls: RecordedCall[] = []
 
+  /**
+   * Make list reads reject. Mutable rather than a constructor option because the
+   * interesting case is a list that fails *after* a thread is open and readable —
+   * a provider that never answered the list could not open one.
+   */
+  failList = false
+
   private readonly options: SyntheticAdapterOptions
   private readonly gates: Gate[] = []
 
@@ -153,6 +160,9 @@ export class SyntheticAdapter implements AIConversationAdapter<string> {
   async list(context: string): Promise<AIConversationListResult> {
     this.calls.push({ kind: 'list', context })
     await this.waitFor('list', undefined)
+    if (this.failList) {
+      throw new Error('the list could not be read')
+    }
     return {
       state: this.options.listState ?? 'ready',
       conversations: this.options.conversations.map((c) => ({

@@ -102,11 +102,27 @@ export interface AIConversationSnapshot {
   partialTail: boolean
   /** Records the adapter could not model, so the surface can say so. */
   skipped: number
-  loading: boolean
+  /**
+   * Whether the *list* is being read.
+   *
+   * Loading and failure are per half, and they are four fields rather than two
+   * for the same reason `state` sits beside `error`: the list and the open
+   * thread fail independently, and a single collapsed pair lets either half's
+   * bad news be shown as the other's. Measured before the split — a list
+   * refresh failing while a readable thread was open replaced that thread with
+   * a failure surface, because the transcript reads `error` and `error` was
+   * whichever half had spoken last (#1363 SC-11).
+   */
+  listLoading: boolean
+  /** Whether the *open thread* is being read. */
+  threadLoading: boolean
   loadingOlder: boolean
   /** Older-page pagination failed while readable items remain (#1190). */
   olderError: string | null
-  error: string | null
+  /** The list pane's failure. The list pane is the only thing that may show it. */
+  listError: string | null
+  /** The open thread's failure. The transcript is the only thing that may show it. */
+  threadError: string | null
 }
 
 /**
@@ -179,10 +195,12 @@ const EMPTY_SNAPSHOT: AIConversationSnapshot = {
   hasMore: false,
   partialTail: false,
   skipped: 0,
-  loading: true,
+  listLoading: true,
+  threadLoading: false,
   loadingOlder: false,
   olderError: null,
-  error: null,
+  listError: null,
+  threadError: null,
 }
 
 function message(error: unknown, fallback: string): string {
@@ -613,10 +631,12 @@ export class ConversationRuntime<Context> {
       hasMore: hasOlder(this.positions),
       partialTail: this.thread.partialTail,
       skipped: this.thread.skipped,
-      loading: this.list.loading || (openId !== null && this.thread.loading),
+      listLoading: this.list.loading,
+      threadLoading: openId !== null && this.thread.loading,
       loadingOlder: this.thread.loadingOlder,
       olderError: this.thread.olderError,
-      error: this.list.error ?? this.thread.error,
+      listError: this.list.error,
+      threadError: this.thread.error,
     }
     for (const listener of this.listeners) {
       listener()

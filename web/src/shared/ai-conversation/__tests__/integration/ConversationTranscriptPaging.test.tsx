@@ -35,10 +35,12 @@ function snapshot(overrides: Partial<AIConversationSnapshot> = {}): AIConversati
     hasMore: true,
     partialTail: false,
     skipped: 0,
-    loading: false,
+    listLoading: false,
+    threadLoading: false,
     loadingOlder: false,
     olderError: null,
-    error: null,
+    listError: null,
+    threadError: null,
     ...overrides,
   }
 }

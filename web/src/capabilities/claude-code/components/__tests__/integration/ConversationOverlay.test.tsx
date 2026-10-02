@@ -47,10 +47,12 @@ const snapshot: AIConversationSnapshot = {
   hasMore: false,
   partialTail: false,
   skipped: 0,
-  loading: false,
+  listLoading: false,
+  threadLoading: false,
   loadingOlder: false,
   olderError: null,
-  error: null,
+  listError: null,
+  threadError: null,
 };
 
 const loadOlder = vi.fn(() => false);

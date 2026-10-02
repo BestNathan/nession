@@ -98,7 +98,7 @@ function ListStateGuard({
   snapshot: AIConversationSnapshot
   onReload?: () => void
 }) {
-  if (snapshot.error && snapshot.conversations.length === 0) {
+  if (snapshot.listError && snapshot.conversations.length === 0) {
     return (
       <div
         data-testid="conversation-error"
@@ -109,7 +109,7 @@ function ListStateGuard({
         )}
       >
         <AlertCircle aria-hidden className="h-4 w-4 shrink-0" />
-        <span>{snapshot.error}</span>
+        <span>{snapshot.listError}</span>
         {onReload ? (
           <Button variant="outline" size="xs" type="button" onClick={() => onReload()}>
             Retry
@@ -118,7 +118,7 @@ function ListStateGuard({
       </div>
     )
   }
-  if (snapshot.loading && snapshot.conversations.length === 0) {
+  if (snapshot.listLoading && snapshot.conversations.length === 0) {
     return (
       <p
         data-testid="conversation-loading"
