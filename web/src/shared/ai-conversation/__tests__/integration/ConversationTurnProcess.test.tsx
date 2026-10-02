@@ -125,6 +125,41 @@ describe('the turn process control', () => {
     expect(groupRows()[1]).not.toHaveAttribute('hidden')
   })
 
+  it('shows the work of a turn that has not answered yet', () => {
+    // The next question arrives before this one was answered. The turn has no
+    // answer, so its work is the only thing it has to show — and folding it
+    // renders the turn as a question and then silence.
+    renderTranscript({
+      items: [
+        userMessage('u1', 'q'),
+        toolItem('t1'),
+        toolItem('t2'),
+        userMessage('u2', 'q2'),
+        assistantMessage('a1', 'answer'),
+      ],
+    })
+
+    expect(groupRows()[0]).not.toHaveAttribute('hidden')
+  })
+
+  it('keeps a turn open while its answer is still arriving', () => {
+    // The provider says the answer is streaming and the page says nothing about
+    // itself. Believing the provider is the same precedence `isStreaming`
+    // applies to the message, and it is what keeps the work in view while the
+    // answer it is producing is being written.
+    renderTranscript({
+      items: [
+        userMessage('u1', 'q'),
+        toolItem('t1'),
+        toolItem('t2'),
+        assistantMessage('a1', 'partial', 'streaming'),
+      ],
+      partialTail: false,
+    })
+
+    expect(groupRows()[0]).not.toHaveAttribute('hidden')
+  })
+
   it('says how long the work took only when the provider stated both ends', () => {
     renderTranscript({
       items: [
