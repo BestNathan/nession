@@ -1,6 +1,11 @@
 import { useMemo } from 'react';
+import { isClaudeCodeCommand } from '@/capabilities/claude-code';
 import type { Session } from '@/types';
-import { resolveWorkContext, type WorkSignal, type ResolvedWorkContext } from '@/product/terminal/capsule/workAwareness';
+import {
+  resolveWorkContext,
+  type WorkSignal,
+  type ResolvedWorkContext,
+} from '@/product/terminal/capsule/workAwareness';
 
 /**
  * Collect work signals from capabilities and aggregate into ResolvedWorkContext.
@@ -29,43 +34,26 @@ export function useWorkSignals(session: Session | undefined): ResolvedWorkContex
 }
 
 /**
- * Claude Code work signal — emits 'working' when there's an active conversation.
+ * Claude Code work signal — passive sensing from the pane's foreground command.
  *
- * Observes the session's Claude Code conversation state. When a conversation is
- * active (not finished, not empty), returns a work signal. Otherwise returns null.
- *
- * **Rationale:**
- * - Claude Code is the primary conversational capability
- * - An active conversation represents ongoing work
- * - The signal is passive (observed from state), not active (no explicit API call)
+ * The agent already reports what the session's pane is running with every
+ * session update; when that is a Claude Code process the capability is working,
+ * so the signal fires without any explicit API call. The command matcher stays
+ * owned by the claude-code capability — the same one `resolveClaudeCodeState`
+ * uses — so "Claude is running" means the same thing in both places.
  */
 function useClaudeCodeWorkSignal(
   session: Session | undefined,
 ): WorkSignal | null {
+  const command = session?.foreground_command ?? null;
   return useMemo(() => {
-    if (!session) {
+    if (!command || !isClaudeCodeCommand(command)) {
       return null;
     }
-
-    // Check if Claude Code has an active conversation
-    // This is a simplified check — in production, this would read from the
-    // conversation state atom or plugin state
-    const hasActiveConversation = Boolean(
-      session.session_id &&
-        // Placeholder: in real implementation, check conversation state
-        // For now, return null to indicate no active work
-        // TODO: Integrate with actual conversation state
-        false,
-    );
-
-    if (!hasActiveConversation) {
-      return null;
-    }
-
     return {
       capabilityId: 'claude-code',
       status: 'working',
-      summary: 'Active conversation',
+      summary: 'Claude Code is running in this session',
     };
-  }, [session]);
+  }, [command]);
 }
