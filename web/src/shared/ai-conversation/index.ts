@@ -59,7 +59,7 @@ export {
   withOlderPage,
 } from './runtime/pagination'
 export type { ConversationPositions } from './runtime/pagination'
-export { reusing } from './runtime/reconcile'
+export { merging } from './runtime/reconcile'
 
 export { useConversationSnapshot } from './runtime/useConversationSnapshot'
 export { useAIConversation } from './runtime/useAIConversation'

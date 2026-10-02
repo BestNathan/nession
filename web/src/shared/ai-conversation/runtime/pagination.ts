@@ -2,37 +2,48 @@
  * The window of a conversation the client is holding, and where "older"
  * continues from.
  *
- * ## Why two lists rather than one
+ * ## Why one window, and not a newest page plus older pages
  *
- * The newest page is re-read on every refresh, but a reader who has scrolled
- * back holds items that response does not mention. Keeping one list and
- * replacing it on each refresh would silently throw their older pages away
- * every few seconds; appending to one list would duplicate everything the
- * refresh re-sends. So the newest page is tracked apart from the pages loaded
- * behind it, and [`itemsOf`] joins the two.
+ * It was two lists — the newest page, and the pages loaded behind it — on the
+ * reasoning that a refresh re-reads the newest page and must not disturb what
+ * the reader scrolled back to. The reasoning was right and the shape was wrong.
  *
- * ## Why `paged` is a flag and not `older.length > 0`
+ * The newest page is a **fixed-size tail**. When the conversation grows, its
+ * window slides forward and the item that used to head it stops being mentioned
+ * by any response. Two disjoint segments then lose it between them: the refresh
+ * replaces its own half, the item belongs to neither, and a message the reader
+ * is looking at disappears on the next poll. Measured with a page size of three,
+ * loading one older page, and appending one item:
+ *
+ *     held   older  = [m0, m1, m2]
+ *            newest = [m3, m4, m5]
+ *     append m6   ->  tail page is now [m4, m5, m6]
+ *     result            [m0, m1, m2, m4, m5, m6]      m3 gone
+ *
+ * One merged window is the shape that matches how a provider actually answers:
+ * a refresh is reconciled *into* what is held (`merging`, by id) instead of
+ * being allowed to redefine a range. What the reader has loaded, they keep.
+ *
+ * ## Why `paged` is a flag and not `items.length > 0`
  *
  * `cursor` answers "where does older continue from". Before the reader pages
  * back, that is the newest page's own `nextCursor`; afterwards it is theirs,
  * and refreshes must leave it alone — the newest page's cursor points at the
  * newest page's *start*, so following it after scrolling back would re-fetch
  * what is already on screen. A page that legitimately returned zero items would
- * make `older.length > 0` the wrong test, so the flag says it directly.
+ * make `items.length > 0` the wrong test, so the flag says it directly.
  *
  * This module is the provider-agnostic form of behaviour #1222 measured in
  * `capabilities/claude-code/model/messagePositions.ts`; that file's tests are
  * the specification this one is held to.
  */
 
-import { reusing } from './reconcile'
+import { merging } from './reconcile'
 import type { AIConversationItem } from '../model/conversation'
 
 export interface ConversationPositions {
-  /** The most recently read newest page — replaced wholesale by each refresh. */
-  newest: AIConversationItem[]
-  /** Pages loaded behind it, oldest-first, in the order they were fetched. */
-  older: AIConversationItem[]
+  /** Everything the client is holding, oldest first, each id at most once. */
+  items: AIConversationItem[]
   /** Where older continues from; `null` when there is nothing older. */
   cursor: string | null
   /** Whether the reader has paged back at least once. */
@@ -40,7 +51,7 @@ export interface ConversationPositions {
 }
 
 export function emptyPositions(): ConversationPositions {
-  return { newest: [], older: [], cursor: null, paged: false }
+  return { items: [], cursor: null, paged: false }
 }
 
 /** The two fields a page contributes to the window. */
@@ -50,18 +61,19 @@ interface PageSlice {
 }
 
 /**
- * A fresh newest page: replace it, keep everything behind it.
+ * A fresh newest page: reconciled into the window, not substituted for a range.
  *
- * Object identity is preserved for the items that did not change, which is what
- * keeps a poll from re-parsing the Markdown of a whole page.
+ * Items the page restates are updated in place — keeping their object identity
+ * when nothing changed, which is what keeps a poll from re-parsing the Markdown
+ * of a whole page — items it introduces are appended, and items it has stopped
+ * mentioning stay where they are.
  */
 export function withNewest(
   current: ConversationPositions,
   page: PageSlice,
 ): ConversationPositions {
   return {
-    newest: reusing(current.newest, page.items ?? []),
-    older: current.older,
+    items: merging(current.items, page.items ?? []),
     cursor: current.paged ? current.cursor : (page.nextCursor ?? null),
     paged: current.paged,
   }
@@ -70,14 +82,20 @@ export function withNewest(
 /**
  * A page fetched with the older cursor: it is older than everything held, so it
  * goes in front. Its own items are oldest-first within the page already.
+ *
+ * Filtered against the window first. A cursor is the provider's to define and
+ * nothing forbids it from overlapping what is already loaded; without this an
+ * overlap would be a duplicated message, which is the same class of bug as the
+ * one above with the opposite sign.
  */
 export function withOlderPage(
   current: ConversationPositions,
   page: PageSlice,
 ): ConversationPositions {
+  const held = new Set(current.items.map((item) => item.id))
+  const arriving = (page.items ?? []).filter((item) => !held.has(item.id))
   return {
-    newest: current.newest,
-    older: [...(page.items ?? []), ...current.older],
+    items: [...arriving, ...current.items],
     cursor: page.nextCursor ?? null,
     paged: true,
   }
@@ -85,7 +103,7 @@ export function withOlderPage(
 
 /** Everything to render, oldest first. */
 export function itemsOf(positions: ConversationPositions): AIConversationItem[] {
-  return [...positions.older, ...positions.newest]
+  return positions.items
 }
 
 /** Whether a page of older items can still be fetched. */

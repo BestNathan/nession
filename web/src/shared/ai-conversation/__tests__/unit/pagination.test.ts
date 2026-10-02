@@ -26,6 +26,55 @@ describe('conversation positions', () => {
     ])
   })
 
+  it('keeps every loaded item when the provider’s tail page slides forward', () => {
+    // The provider reads a fixed-size tail page. Appending one item slides that
+    // page's start forward, so the item that used to head it is no longer
+    // mentioned by any refresh — and the reader has already paged in behind it.
+    // Losing it here is losing something they can see.
+    const all = transcript(7) // m0 … m6
+
+    const newest = withNewest(emptyPositions(), {
+      items: all.slice(3, 6), // the tail page: m3, m4, m5
+      nextCursor: 'a',
+    })
+    const paged = withOlderPage(newest, {
+      items: all.slice(0, 3), // m0, m1, m2
+      nextCursor: 'older',
+    })
+
+    // m6 arrives. The tail page is now m4, m5, m6 — m3 has fallen off it.
+    const refreshed = withNewest(paged, {
+      items: all.slice(4, 7),
+      nextCursor: 'a',
+    })
+
+    const ids = itemsOf(refreshed).map((item) => item.id)
+    expect(ids).toEqual(['m0', 'm1', 'm2', 'm3', 'm4', 'm5', 'm6'])
+    // Present exactly once: the overlap between the page and the window is
+    // reconciled, not appended.
+    expect(new Set(ids).size).toBe(ids.length)
+  })
+
+  it('does not duplicate an item an older page overlaps', () => {
+    // A cursor is the provider's to define, and nothing forbids one that reaches
+    // back into what is already on screen. A duplicate message is the same class
+    // of bug as a lost one, with the opposite sign.
+    const all = transcript(4) // m0 … m3
+
+    const first = withNewest(emptyPositions(), {
+      items: all.slice(2, 4), // m2, m3
+      nextCursor: 'a',
+    })
+    const older = withOlderPage(first, {
+      items: all.slice(0, 3), // m0, m1, m2 — m2 is already held
+      nextCursor: null,
+    })
+
+    const ids = itemsOf(older).map((item) => item.id)
+    expect(ids).toEqual(['m0', 'm1', 'm2', 'm3'])
+    expect(new Set(ids).size).toBe(ids.length)
+  })
+
   it('follows the newest page cursor only while the reader has not paged back', () => {
     const first = withNewest(emptyPositions(), { items: transcript(2), nextCursor: 'a' })
     expect(first.cursor).toBe('a')
@@ -72,7 +121,7 @@ describe('conversation positions', () => {
       nextCursor: null,
     })
 
-    expect(refreshed.newest[0]).toBe(held)
+    expect(refreshed.items[0]).toBe(held)
   })
 
   it('gives a new object for an item that did change', () => {
@@ -83,8 +132,8 @@ describe('conversation positions', () => {
       nextCursor: null,
     })
 
-    expect(refreshed.newest[0]).not.toBe(held)
-    expect(refreshed.newest[0]).toEqual(
+    expect(refreshed.items[0]).not.toBe(held)
+    expect(refreshed.items[0]).toEqual(
       assistantMessage('a', 'partial and complete', 'settled'),
     )
   })
