@@ -118,7 +118,7 @@ export interface AIConversationPage {
  * that later gains a stream adds an arm here, and the runtime handles it once,
  * instead of every surface learning a second refresh path.
  */
-export type AIRefreshPolicy =
+export type AIRefreshPolicy<Context = AIConversationContext> =
   | {
       kind: 'poll'
       /**
@@ -130,11 +130,21 @@ export type AIRefreshPolicy =
   | {
       kind: 'push'
       /**
-       * Ask the provider to call `onChange` when the open conversation may have
+       * Ask the provider to call `onChange` when **this** conversation may have
        * changed. Returns the unsubscribe function; the runtime calls it on
        * disposal and whenever the open conversation changes.
+       *
+       * The target is passed rather than left for the provider to remember. A
+       * stream is per-conversation in every provider that has one, and a
+       * provider asked to subscribe without being told to what can only
+       * subscribe globally and re-read indiscriminately — a filter wearing an
+       * adapter's name, which is the shape #1363 SC-06 exists to rule out.
        */
-      subscribe: (onChange: () => void) => () => void
+      subscribe: (
+        context: Context,
+        conversationId: string,
+        onChange: () => void,
+      ) => () => void
     }
   | {
       /** Neither — the user asks, and only the user asks. */
@@ -184,5 +194,5 @@ export interface AIConversationAdapter<Context = AIConversationContext> {
     cursor?: string,
   ): Promise<AIConversationPage>
 
-  readonly refresh: AIRefreshPolicy
+  readonly refresh: AIRefreshPolicy<Context>
 }

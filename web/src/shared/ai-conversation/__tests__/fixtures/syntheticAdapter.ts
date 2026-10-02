@@ -57,7 +57,7 @@ export interface SyntheticAdapterOptions {
   bindingFor?: (context: string) => string | null
   /** Items per page, for the pagination tests. */
   pageSize?: number
-  refresh?: AIRefreshPolicy
+  refresh?: AIRefreshPolicy<string>
   /** Force the list's answer, whatever the data says. */
   listState?: AIConversationListResult['state']
   /** Force every read's answer, whatever the data says. */
@@ -115,7 +115,7 @@ export class SyntheticAdapter implements AIConversationAdapter<string> {
     return this.options.key ?? context
   }
 
-  get refresh(): AIRefreshPolicy {
+  get refresh(): AIRefreshPolicy<string> {
     return this.options.refresh ?? { kind: 'manual' }
   }
 

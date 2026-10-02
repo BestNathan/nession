@@ -285,7 +285,7 @@ describe('ConversationRuntime — refresh policy', () => {
     const { runtime, adapter } = setup({
       refresh: {
         kind: 'push',
-        subscribe: (onChange) => {
+        subscribe: (_context, _conversationId, onChange) => {
           push.notify = onChange
           return unsubscribe
         },
@@ -302,6 +302,54 @@ describe('ConversationRuntime — refresh policy', () => {
 
     runtime.dispose()
     expect(unsubscribe).toHaveBeenCalled()
+  })
+
+  it('scopes a push subscription to the conversation it is watching', async () => {
+    // A real provider opens a stream *for a thread*. Without the target it can
+    // only subscribe globally and re-read indiscriminately, which is the
+    // difference between an adapter and a filter (#1363 SC-06).
+    const targets: Array<{ context: string; conversationId: string; notify: () => void }> = []
+    const disposed: string[] = []
+    const { runtime, adapter } = setup({
+      conversations: [
+        { id: 'c1', activity: 'active', items: transcript(2) },
+        { id: 'c2', activity: 'active', items: transcript(2, 'other') },
+      ],
+      bindingId: 'c1',
+      refresh: {
+        kind: 'push',
+        subscribe: (context, conversationId, onChange) => {
+          targets.push({ context, conversationId, notify: onChange })
+          return () => disposed.push(conversationId)
+        },
+      },
+    })
+    runtime.setContext('a:s1')
+    await flush()
+
+    expect(targets.map((target) => target.conversationId)).toEqual(['c1'])
+    expect(targets[0]?.context).toBe('a:s1')
+
+    // The reader opens the other conversation.
+    runtime.select('c2')
+    await flush()
+
+    // The old stream is closed, and a new one is opened for the new target.
+    expect(disposed).toEqual(['c1'])
+    expect(targets.map((target) => target.conversationId)).toEqual(['c1', 'c2'])
+
+    // An event from the *old* stream is not evidence about the conversation now
+    // open. A provider whose unsubscribe races its next emission is the ordinary
+    // case, not a hypothetical one.
+    const before = adapter.calls.filter((call) => call.kind === 'read').length
+    targets[0]?.notify()
+    await flush()
+    expect(adapter.calls.filter((call) => call.kind === 'read').length).toBe(before)
+
+    // The live one still refreshes.
+    targets[1]?.notify()
+    await flush()
+    expect(adapter.calls.filter((call) => call.kind === 'read').length).toBe(before + 1)
   })
 
   it('does nothing on its own for a manual provider', async () => {
