@@ -107,7 +107,7 @@ for (const row of viewports.filter((v) => v.experience === 'web')) {
   test.describe(`${row.id} ${row.width}×${row.height}`, () => {
     test.use({ viewport: { width: row.width, height: row.height } });
 
-    test('session rows stay clipped; workspace chrome and the menu it discloses stay bounded', async ({ page }) => {
+    test('session rows stay clipped; workspace chrome stays inside the tool bar', async ({ page }) => {
       await page.goto('/#/fixture');
       await assertSessionRowsClipped(page, 'web', row.id);
 
@@ -115,12 +115,12 @@ for (const row of viewports.filter((v) => v.experience === 'web')) {
       const bar = page.getByTestId('workspace-tool-bar');
       await expect(bar).toBeVisible();
 
-      // Contextual direct chrome stays bounded at every viewport instead of
-      // rendering one permanent slot per registered capability.
+      // #1347 Capsule V2: the capsule carries the capability list and scrolls
+      // itself. The bound this pattern keeps is the capsule's *width*, not the
+      // entry count — `expectVisibleWithin(capsule, bar)` below is what holds it.
       const nav = page.getByRole('navigation', { name: 'Workspace capabilities' });
       const direct = nav.locator('button[data-testid^="workspace-tool-"]');
       expect(await direct.count()).toBeGreaterThan(0);
-      expect(await direct.count()).toBeLessThanOrEqual(2);
 
       for (let i = 0; i < (await direct.count()); i += 1) {
         await expect(direct.nth(i)).toBeVisible();
@@ -224,7 +224,7 @@ for (const row of viewports.filter((v) => v.experience === 'app')) {
   test.describe(`${row.id} ${row.width}×${row.height}`, () => {
     test.use({ viewport: { width: row.width, height: row.height } });
 
-    test('workspace direct chrome stays bounded and disclosed inside the App bar', async ({ page }) => {
+    test('workspace chrome stays inside the App bar', async ({ page }) => {
       await page.goto('/#/fixture/app');
       await page.getByTestId('app-header-workspace').first().click();
       await expect(page.getByTestId('files-app-layout')).toBeVisible();
@@ -232,10 +232,11 @@ for (const row of viewports.filter((v) => v.experience === 'app')) {
       const bar = page.getByTestId('workspace-tool-bar');
       await expect(bar).toBeVisible();
 
+      // #1347 Capsule V2: same capsule as Web — the bound is its width, held by
+      // `expectVisibleWithin(capsule, bar)` below, not the entry count.
       const nav = page.getByRole('navigation', { name: 'Workspace capabilities' });
       const direct = nav.locator('button[data-testid^="workspace-tool-"]');
       expect(await direct.count()).toBeGreaterThan(0);
-      expect(await direct.count()).toBeLessThanOrEqual(2);
 
       // The pattern declares its own App touch floor (touchTarget.compact, #730):
       // this band floats over the terminal, so it is held to 28px rather than the
