@@ -11,8 +11,8 @@ import type {
 import { cn } from '@/shared/lib/utils';
 import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
 import type { WorkspaceContext } from '@/app/workspace/workspaceContext';
-import { ConversationView } from './ConversationView';
-import { useConversation } from '../hooks/useConversation';
+import { ConversationView, useAIConversation } from '@/shared/ai-conversation';
+import { claudeCodeConversationAdapter } from '../conversation/adapter';
 import { useTranscripts } from '../hooks/useTranscripts';
 import { useTranscriptItems } from '../hooks/useTranscriptItems';
 import { TranscriptView } from './TranscriptView';
@@ -541,7 +541,14 @@ function useClaudeCodeWorkspace(ctx: WorkspaceContext) {
   // `project` by default: the more specific scope is the more likely one to
   // want, and it is the order `#1120` writes the pair in.
   const [activeScope, setActiveScope] = useState<Scope>('project');
-  const conversation = useConversation({ agentId, sessionId });
+  // The conversation comes from the shared framework (#1363). What is
+  // Claude-specific is the adapter; the runtime, the paging, the refresh and
+  // every state below it are Nession's, and the same ones the capsule Peek
+  // draws in the Terminal.
+  const conversation = useAIConversation(
+    claudeCodeConversationAdapter,
+    agentId && sessionId ? { agentId, sessionId } : null,
+  );
 
   // `#1234`. The transcript projection is a second first-class view over the
   // same upstream sessions, not a debug switch on the conversation one — which
@@ -639,7 +646,11 @@ export function ClaudeCodeWorkspace({ ctx }: { ctx: WorkspaceContext }) {
           </div>
         ) : null}
         <Tabs value={activeView} onValueChange={(value) => setActiveView(value as View)}>
-          <TabsList>
+          {/* Named so the visual gate can assert this strip as a *region*
+              (#1332). A change here — this strip gained its third tab — is a
+              large fraction of this element and a negligible fraction of the
+              frame, which is why the whole-frame budget did not see it. */}
+          <TabsList data-testid="claude-code-view-tabs">
             <TabsTrigger value="conversations">Conversations</TabsTrigger>
             <TabsTrigger value="transcripts">Transcripts</TabsTrigger>
             <TabsTrigger value="configuration">Configuration</TabsTrigger>
@@ -653,7 +664,8 @@ export function ClaudeCodeWorkspace({ ctx }: { ctx: WorkspaceContext }) {
           switching to Configuration and back not lose the open transcript. */}
       <main className={activeView === 'conversations' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}>
         <ConversationView
-          view={conversation.view}
+          snapshot={conversation.snapshot}
+          providerLabel={claudeCodeConversationAdapter.identity.label}
           // `#1120` items 8 and 9. The mapping lives here rather than inside
           // the view because it is the same decision `showHeading` above
           // already makes from the same field: what the experience has room
@@ -661,7 +673,7 @@ export function ClaudeCodeWorkspace({ ctx }: { ctx: WorkspaceContext }) {
           // push.
           layout={ctx.experience === 'app' ? 'push' : 'master-detail'}
           onSelect={conversation.select}
-          onLoadOlder={() => conversation.loadOlder()}
+          onLoadOlder={conversation.loadOlder}
           onReload={conversation.reload}
         />
       </main>

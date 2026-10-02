@@ -158,8 +158,22 @@ export class SessionRuntime {
    * attach.
    */
   private historyMayHaveGap = false;
-  /** Latest P2P attach stream cursor from agent.attach (#1094). */
-  private p2pStreamSeed: { streamEpoch?: number; streamCursor?: number } | null = null;
+  /**
+   * Latest P2P attach cursor from agent.attach — the stream timeline's
+   * (#1094) and the input cursor's (#1307).
+   *
+   * One seed rather than two, because they are stated by one reply and are read
+   * at one moment: the effect that consumes this runs on the transition to
+   * `attached`, and two getters would let a caller read one without the other
+   * and seed a stream cursor against an input cursor from a different attach.
+   */
+  private p2pAttachSeed: {
+    streamEpoch?: number;
+    streamCursor?: number;
+    inputEpoch?: number;
+    inputAppliedThrough?: number;
+    controlGeneration?: number;
+  } | null = null;
   private connectionUnsub: (() => void) | null = null;
   /** Liveness probe for the live P2P transport — see `startLivenessProbe`. */
   private livenessTimer: ReturnType<typeof setInterval> | null = null;
@@ -300,8 +314,14 @@ export class SessionRuntime {
     return this.agentTerminalApi;
   }
 
-  getP2pStreamSeed(): { streamEpoch?: number; streamCursor?: number } | null {
-    return this.p2pStreamSeed;
+  getP2pAttachSeed(): {
+    streamEpoch?: number;
+    streamCursor?: number;
+    inputEpoch?: number;
+    inputAppliedThrough?: number;
+    controlGeneration?: number;
+  } | null {
+    return this.p2pAttachSeed;
   }
 
   /** Live agent-transport connection state ('disconnected' outside the P2P transport). */
@@ -335,6 +355,30 @@ export class SessionRuntime {
    */
   private needsBootstrap(): boolean {
     return this.historyMayHaveGap || !(this.config.hasSessionOutput?.() ?? false);
+  }
+
+  /**
+   * The stream reported that replay cannot reach back to this client's cursor
+   * (#1304): the agent's retained window has passed it, or a hole was given up
+   * on and the frames in hand committed over it. Either way the buffer this
+   * Terminal holds has a hole in it that no later replay can fill.
+   *
+   * It is the same fact a lost transport leaves behind — "my buffer may not be
+   * complete" — and it takes the same repair, which is why it sets the same
+   * flag rather than a new one: a bootstrap **replaces** the buffer from tmux's
+   * own scrollback, so refilling a hole cannot duplicate what the client
+   * already has.
+   *
+   * The repair rides the next attach, deliberately. A snapshot cannot be asked
+   * for on a live transport — `client.attach` carries the request and
+   * `canStartAttach` refuses one while the phase is `attached` — so the choice
+   * here is between remembering and tearing down a healthy transport to force
+   * one. Remembering loses nothing that was still reachable: the events the
+   * hole is missing are already unrecoverable, and everything the buffer holds
+   * is still on screen.
+   */
+  noteStreamTruncated(): void {
+    this.historyMayHaveGap = true;
   }
 
   updateContext(next: Partial<SessionRuntimeConfig>): RuntimeMirrorSnapshot {
@@ -434,9 +478,12 @@ export class SessionRuntime {
       needsBootstrap: this.needsBootstrap(),
       transportGeneration: this.transportGeneration,
       onAttachOk: (result) => {
-        this.p2pStreamSeed = {
+        this.p2pAttachSeed = {
           streamEpoch: result.streamEpoch,
           streamCursor: result.streamCursor,
+          inputEpoch: result.inputEpoch,
+          inputAppliedThrough: result.inputAppliedThrough,
+          controlGeneration: result.controlGeneration,
         };
       },
     });

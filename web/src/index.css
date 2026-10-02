@@ -165,7 +165,15 @@ html {
 }
 
 /* Terminal capsule — occlusion band. Same colour as the terminal itself (the
-   terminal sits on the canvas), so scrolled lines are hidden without a seam. */
+   terminal sits on the canvas), so scrolled lines are hidden without a seam.
+
+   The host is the **well plus the floating capsule**, not the whole surface:
+   the band below is drawn along this element's bottom edge and the dock is
+   `absolute z-30` against it, so anything laid out inside it at its bottom is
+   drawn *under* the composer. `TerminalSurface` keeps the delivery-unknown
+   notice and the observer bar outside it for exactly that reason — as its
+   siblings, they take their space from the well instead of being covered by
+   the capsule (#1307 stage 6). */
 [data-terminal-capsule-host] {
   position: relative;
   flex: 1 1 0%;

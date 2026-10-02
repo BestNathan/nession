@@ -382,6 +382,9 @@ async fn test_terminal_io_through_full_chain() {
         session_name: session_name.to_string(),
         data: input,
         control_generation: None,
+        input_epoch: None,
+        seq_start: None,
+        seq_end: None,
     };
     let req = new_message(agent_msg_types::TERMINAL_INPUT, payload);
     let json = serde_json::to_string(&req).unwrap();

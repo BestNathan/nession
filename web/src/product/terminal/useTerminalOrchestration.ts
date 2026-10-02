@@ -29,8 +29,15 @@ import type { TerminalController } from '@/platform/terminal-runtime/controller/
 import { createAttachGate } from '@/platform/terminal-runtime/adapters/TransportAttachGate';
 import { detectProfile, PROFILES } from '@/platform/terminal-runtime/DeviceProfile';
 import type { TerminalTransport } from '@/platform/terminal-runtime/transport/TerminalTransport';
+import type { SessionRuntime } from '@/platform/session-runtime/SessionRuntime';
 import type { TerminalStatus } from '@/product/terminal/state/session';
-import { bannerAtomFamily, bannerAttemptAtomFamily, type ReconnectBanner } from '@/product/terminal/state/ui';
+import {
+  bannerAtomFamily,
+  bannerAttemptAtomFamily,
+  inputDropAtomFamily,
+  type ReconnectBanner,
+} from '@/product/terminal/state/ui';
+import type { InputDrop } from '@/platform/terminal-runtime/inputQueue';
 import { useTerminalControlBridge } from '@/product/terminal/hooks/useTerminalControlBridge';
 
 function useSessionEnvSourcing(opts: {
@@ -76,8 +83,18 @@ function useTransportFactory(opts: {
   isAttached: () => boolean;
   /** Asked after input is handed over — see `ConnectionOptions.onInputSent`. */
   onInputSent: () => void;
+  /**
+   * Asked when the stream leaves the buffer with a hole no later replay can
+   * fill — see `ConnectionOptions.onStreamTruncated` (#1304).
+   */
+  onStreamTruncated: () => void;
+  /**
+   * Told when input the user typed is lost rather than delivered — see
+   * `ConnectionOptions.onInputDrop` (#1307 SC-09).
+   */
+  onInputDrop: (drop: InputDrop) => void;
 }) {
-  const { effectiveMode, sessionName, sessionId, agentTerminalApi, serverConnection, isAttached, onInputSent } = opts;
+  const { effectiveMode, sessionName, sessionId, agentTerminalApi, serverConnection, isAttached, onInputSent, onStreamTruncated, onInputDrop } = opts;
   // Holds the render-fresh factory; the callback identity stays stable while
   // the closure sees current values. The ref itself starts null — the
   // previous dummy ConnectionManager initializer was constructed and discarded
@@ -87,6 +104,10 @@ function useTransportFactory(opts: {
   isAttachedRef.current = isAttached;
   const onInputSentRef = useRef(onInputSent);
   onInputSentRef.current = onInputSent;
+  const onStreamTruncatedRef = useRef(onStreamTruncated);
+  onStreamTruncatedRef.current = onStreamTruncated;
+  const onInputDropRef = useRef(onInputDrop);
+  onInputDropRef.current = onInputDrop;
   // The P2P transport is a pure I/O channel: ConnectionManager binds to
   // whatever agent terminal API the runtime currently owns (null while no
   // candidate is built — e.g. relay mode — making the transport inert).
@@ -102,6 +123,14 @@ function useTransportFactory(opts: {
       // (#1264). Same ref pattern as `isAttached`: the transport reads the
       // runtime as it is *now*, not as it was when this manager was built.
       onInputSent: () => onInputSentRef.current(),
+      // And the same for a stream that turned out to have a hole in it
+      // (#1304): the runtime is what remembers that a snapshot is owed.
+      onStreamTruncated: () => onStreamTruncatedRef.current(),
+      // Input the transport could not deliver (#1307 SC-09). Read through the
+      // ref for the same reason as the two above: the manager is built once
+      // per transport generation and must report to the live owner, not to the
+      // closure that happened to be current when it was constructed.
+      onInputDrop: (drop) => onInputDropRef.current(drop),
     });
   return useCallback(() => {
     const createTransport = transportFactoryRef.current;
@@ -171,6 +200,46 @@ function useEndRelayOnDisconnect(opts: {
     }
     onDisconnect();
   }, [effectiveMode, serverConnection, sessionId, onDisconnect]);
+}
+
+/**
+ * Apply what an attach stated about the session's cursors, then let the
+ * transport out (#1094, #1307).
+ *
+ * Module-level rather than inline because it is the same decision wherever it
+ * is made, and because it is worth being able to read in one place: the input
+ * cursor is reconciled *before* the flush (the order is explained at the call
+ * site), and the stream cursor is seeded after it. Those two orders differ on
+ * purpose — the stream seed fills a timeline the reconciler owns, and the input
+ * seed is what the flush that follows is numbered against.
+ *
+ * `runtime` is typed against the producer instead of restating the seed, and
+ * that is load-bearing rather than tidiness. Every field of a seed is optional,
+ * so an inline type that spelled the cursor `appliedThrough` accepted the
+ * runtime's `inputAppliedThrough` object **vacuously** — the assignment
+ * type-checks, the property reads `undefined`, and the reconcile silently does
+ * nothing. That is what a client that restated the shape got: a reconnect
+ * re-sending bytes the agent had already applied, because the cursor it was
+ * told never reached the queue. Naming the producer's own signature makes the
+ * next such spelling a compile error.
+ */
+function applyAttachSeed(
+  controller: TerminalController | null,
+  runtime: { getP2pAttachSeed?: SessionRuntime['getP2pAttachSeed'] } | null,
+): void {
+  if (!controller) { return; }
+  const seed = runtime?.getP2pAttachSeed?.();
+  if (seed) {
+    controller.seedInputCursor({
+      inputEpoch: seed.inputEpoch,
+      appliedThrough: seed.inputAppliedThrough,
+      controlGeneration: seed.controlGeneration,
+    });
+  }
+  controller.flushAllOutbound();
+  if (seed) {
+    controller.seedStreamCursor(seed.streamEpoch, seed.streamCursor);
+  }
 }
 
 export interface UseTerminalOrchestrationOptions {
@@ -245,10 +314,20 @@ export function useTerminalOrchestration({
     effectiveMode, serverConnection: relayServer, sessionId, onDisconnect,
   });
   useSessionEnvSourcing({ envRefs, sessionId, effectiveMode, agentTerminalApi, connectionState });
+  const [inputDrop, setInputDrop] = useAtom(inputDropAtomFamily(sessionId));
   const transportFactory = useTransportFactory({
     effectiveMode, sessionName, sessionId, agentTerminalApi, serverConnection: relayServer,
     isAttached: createAttachGate(() => terminalState),
     onInputSent: () => runtimeRef.current?.probeLivenessNow(),
+    // The session's own record of "my buffer may have a hole", which is what
+    // makes the next attach ask for a snapshot (#1304, #321). Reading it
+    // through the ref keeps a rewired transport pointing at the live runtime.
+    onStreamTruncated: () => runtimeRef.current?.noteStreamTruncated(),
+    // Input that was lost rather than delivered (#1307 SC-09). Written to the
+    // session's own atom rather than kept here, so the fact survives the
+    // transport generation that recorded it — a notice that vanished with the
+    // socket would be missing at exactly the reconnect that produced it.
+    onInputDrop: (drop) => setInputDrop(drop),
   });
   const [deviceProfile] = useState(() => detectProfile(window.innerWidth));
   const controller = useTerminal({
@@ -311,11 +390,7 @@ export function useTerminalOrchestration({
 
   useEffect(() => {
     if (terminalState === 'attached') {
-      controller?.flushAllOutbound();
-      const seed = runtime?.getP2pStreamSeed?.();
-      if (seed) {
-        controller?.seedStreamCursor(seed.streamEpoch, seed.streamCursor);
-      }
+      applyAttachSeed(controller, runtime);
     }
   }, [terminalState, controller, runtime]);
 
@@ -340,5 +415,13 @@ export function useTerminalOrchestration({
     fileOps,
     terminalControl,
     onTakeControl: takeControl,
+    /**
+     * Input this Session lost, for the surface to state (#1307 SC-09), and how
+     * to put it away. The dismissal is the whole action: the bytes are already
+     * gone and the client deliberately did not keep them, so there is nothing
+     * to offer but the user's own decision about what to type next.
+     */
+    inputDrop,
+    dismissInputDrop: () => setInputDrop(null),
   };
 }

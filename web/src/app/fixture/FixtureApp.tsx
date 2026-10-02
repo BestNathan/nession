@@ -19,6 +19,7 @@ import { fixtureTranscriptsSurface } from './fixtureTranscripts';
 import { fixtureEnvSurface } from './fixtureEnv';
 import { fixtureFileOps } from './fixtureFileOps';
 import { fixtureGitSurface } from './fixtureGit';
+import { fixtureInputDrop } from './fixtureInputDrop';
 import { fixtureSelectedId } from './fixtureSelection';
 import { fixtureSessions } from './fixtureSessions';
 import { fixtureStaleAgents } from './fixtureStaleAgents';
@@ -88,6 +89,12 @@ export function FixtureApp() {
   // rendering, so the surface below decides what to draw — see
   // `fixtureStaleAgents`, `fixtureSessions`, `fixtureAgents`.
   const staleAgents = fixtureStaleAgents(search);
+  // The delivery-unknown notice (#1307 SC-09). Same shape as `staleAgents`
+  // above: the route names an input the fixture cannot otherwise be given, and
+  // the surface decides what to draw. It has to be reachable from here or it is
+  // in no golden image at all — producing a live one needs an Agent to restart
+  // mid-session, which no fixture route can do.
+  const inputDrop = fixtureInputDrop(search);
   const sessions = useMemo(() => fixtureSessions(search), [search]);
   const agents = useMemo(() => fixtureAgents(search), [search]);
   const connectionStatus = fixtureConnection(search);
@@ -189,7 +196,7 @@ export function FixtureApp() {
         mainShared={mainShared}
         workspaceAvailable={workspaceAvailable}
         terminal={(chrome: TerminalChrome) => (
-          <FixtureTerminal chrome={chrome} experience="app" />
+          <FixtureTerminal chrome={chrome} experience="app" inputDrop={inputDrop} />
         )}
       />
     </div>
