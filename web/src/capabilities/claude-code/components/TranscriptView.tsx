@@ -1,7 +1,7 @@
 import { ArrowLeft } from 'lucide-react';
 import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
-import { clockTime } from '../model/clockTime';
+import { formatClockTime } from '@/shared/lib/format';
 import { TranscriptTimeline } from './TranscriptTimeline';
 import type { ClaudeCodeTranscriptItem } from '../types';
 import type { TranscriptItemsState } from '../hooks/useTranscriptItems';
@@ -75,7 +75,7 @@ function TranscriptList({
                   </span>
                 ) : null}
                 <span className={cn('ml-auto shrink-0 text-muted-foreground', chromeSansRole('metadata'))}>
-                  {clockTime(transcript.updated_at) ?? ''}
+                  {formatClockTime(transcript.updated_at) ?? ''}
                 </span>
               </div>
             </button>
