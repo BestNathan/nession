@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { renderHook, act, cleanup, waitFor } from '@testing-library/react';
+import { render, renderHook, act, cleanup, waitFor } from '@testing-library/react';
 import { createElement, StrictMode, type ReactNode } from 'react';
 import { Provider, createStore } from 'jotai';
 import { useSessionRuntime } from '@/product/terminal/hooks/useSessionRuntime';
@@ -9,14 +9,11 @@ import {
   sessionNameAtom,
   attachInfoAtom,
   orderedUrlsAtom,
-  forcedRelayAtom,
-  isSwitchingAtom,
   manualOverrideAtom,
 } from '@/product/session/state';
 import { routeIntentEpochAtom } from '@/platform/attach/state';
-import { terminalSessionStateAtom, terminalTransportReadyAtom } from '@/product/terminal/state';
 import type { ConnectionState } from '@/platform/socket/types';
-import type { RelayServerHandle } from '@/platform/attach/relayServerConnection';
+import type { RelayServerTransport } from '@/platform/attach/relayServerConnection';
 import type { AttachInfo } from '@/types';
 import { SessionRuntime } from '@/platform/session-runtime/SessionRuntime';
 import { sessionRuntimeRegistry } from '@/platform/session-runtime/SessionRuntimeRegistry';
@@ -76,6 +73,23 @@ function lastWs(): MockWs {
   return instances[instances.length - 1];
 }
 
+/** Count client.attach frames sent on any tracked socket. */
+function countAttachFrames(): number {
+  let count = 0;
+  for (const ws of instances) {
+    for (const call of ws.send.mock.calls) {
+      try {
+        if (JSON.parse(String(call[0])).msg_type === 'agent.attach') {
+          count += 1;
+        }
+      } catch {
+        // non-JSON frame — ignore
+      }
+    }
+  }
+  return count;
+}
+
 function makeAttachInfo(sessionId: string, token: string): AttachInfo {
   return {
     mode: 'p2p',
@@ -94,26 +108,65 @@ function makeStore(sessionId: string, token: string) {
   store.set(sessionNameAtom, sessionId.split(':')[1] ?? sessionId);
   store.set(attachInfoAtom, makeAttachInfo(sessionId, token));
   store.set(orderedUrlsAtom, ['ws://shared-agent/ws']);
-  store.set(terminalSessionStateAtom, 'connecting');
-  store.set(terminalTransportReadyAtom, true);
   return store;
 }
 
-function wrapper(store: ReturnType<typeof createStore>, strict = false) {
+function wrapper(store: ReturnType<typeof createStore>) {
   const W = ({ children }: { children: ReactNode }) =>
-    createElement(Provider, { store }, strict ? createElement(StrictMode, null, children) : children);
+    createElement(Provider, { store }, children);
   return W;
+}
+
+/**
+ * Renders the hook inside a REAL StrictMode replay. StrictMode must be the
+ * root element of the render call: measured on this React build (19.3),
+ * StrictMode nested one level down — e.g. inside a renderHook `wrapper` —
+ * never replays effects, so a wrapper-based StrictMode test mounts once and
+ * proves nothing.
+ */
+function RuntimeHarness({
+  options,
+  onResult,
+}: {
+  options: Parameters<typeof useSessionRuntime>[0];
+  onResult: (r: { runtime: SessionRuntime | null }) => void;
+}) {
+  onResult(useSessionRuntime(options));
+  return null;
+}
+
+function renderStrict(
+  store: ReturnType<typeof createStore>,
+  options: Parameters<typeof useSessionRuntime>[0],
+  onResult: (r: { runtime: SessionRuntime | null }) => void,
+) {
+  return render(
+    createElement(
+      StrictMode,
+      null,
+      createElement(
+        Provider,
+        { store },
+        createElement(RuntimeHarness, { options, onResult }),
+      ),
+    ),
+  );
 }
 
 const SESSION_IDS = ['agent:a', 'agent:b', 'agent:failover-b', 'agent:failover-relay', 'agent:manual-fail', 'agent:relay'];
 
 /** Relay handle built fresh on every call — an unstable context value on purpose. */
-function makeRelayHandle(state: ConnectionState): RelayServerHandle {
+function makeRelayHandle(state: ConnectionState): RelayServerTransport {
   return {
     beginRelay: vi.fn(),
     endRelay: vi.fn(),
     isReady: () => state === 'connected',
     onConnectionStateChange: () => () => {},
+    sendRelayInput: vi.fn(),
+    sendRelayResize: vi.fn(),
+    onRelayOutput: () => () => {},
+    onRelayResize: () => () => {},
+    onRelayInputAck: () => () => {},
   };
 }
 
@@ -232,23 +285,98 @@ describe('useSessionRuntime integration', () => {
     });
   });
 
-  it('StrictMode replay keeps a single runtime for the same session', () => {
+  it('StrictMode replay does not dispose the session runtime (#1309 SC-11)', async () => {
+    // dispose is the assertion because the rendered value cannot see the
+    // defect: under a dispose-and-rebuild the effect replay's setStates
+    // batch, the intermediate runtime never surfaces in a render, and an
+    // identity check on the hook's return passes either way.
+    const disposeSpy = vi.spyOn(SessionRuntime.prototype, 'dispose');
     const store = makeStore('agent:a', 'token-a');
-    const seen: SessionRuntime[] = [];
+    let current: SessionRuntime | null = null;
 
-    renderHook(
-      () => {
-        const rt = useSessionRuntime({ configOwner: true });
-        if (rt.runtime) {
-          seen.push(rt.runtime);
-        }
-        return rt;
-      },
-      { wrapper: wrapper(store, true) },
-    );
+    renderStrict(store, { configOwner: true }, (r) => {
+      current = r.runtime;
+    });
+    await waitFor(() => {
+      expect(current).not.toBeNull();
+    });
+    // Let the transient unmount's deferred dispose fire if it is going to.
+    await act(async () => {
+      await new Promise((resolve) => {
+        setTimeout(resolve, 5);
+      });
+    });
 
-    expect(seen.length).toBeGreaterThan(0);
-    expect(new Set(seen).size).toBe(1);
+    expect(disposeSpy).not.toHaveBeenCalled();
+  });
+
+  it('StrictMode replay builds one socket and sends one attach (#1309 SC-11)', async () => {
+    const store = makeStore('agent:a', 'token-a');
+    let current: SessionRuntime | null = null;
+    renderStrict(store, { configOwner: true }, (r) => {
+      current = r.runtime;
+    });
+    await waitFor(() => {
+      expect(current).not.toBeNull();
+    });
+
+    // Viewport readiness arrives the way the terminal's adapter pushes it;
+    // connecting then starts the attach.
+    act(() => {
+      current!.setTransportReady(true);
+    });
+    act(() => {
+      const ws = lastWs();
+      ws._readyState = WS.OPEN;
+      ws.onopen?.(new Event('open'));
+    });
+    await waitFor(() => {
+      expect(countAttachFrames()).toBe(1);
+    });
+
+    // The replay's transient unmount deferred the runtime's dispose and the
+    // second mount cancelled it. Give the deferred macrotask its chance to
+    // misfire: had the runtime been disposed and rebuilt, a second socket
+    // (and a second attach on it) would exist. The mutation this pins is
+    // disposing eagerly on release.
+    await act(async () => {
+      await new Promise((resolve) => {
+        setTimeout(resolve, 5);
+      });
+    });
+    expect(instances.length).toBe(1);
+    expect(countAttachFrames()).toBe(1);
+  });
+
+  it('StrictMode replay does not end the relay in the transient unmount (#1309 SC-11)', async () => {
+    const store = makeStore('agent:relay', 'token-r');
+    store.set(attachInfoAtom, { mode: 'relay', session_id: 'agent:relay' } as AttachInfo);
+    const serverConnection = makeRelayHandle('connected');
+    let current: SessionRuntime | null = null;
+    renderStrict(store, { configOwner: true, serverConnection }, (r) => {
+      current = r.runtime;
+    });
+    await waitFor(() => {
+      expect(current).not.toBeNull();
+    });
+    act(() => {
+      current!.setTransportReady(true);
+    });
+    await waitFor(() => {
+      expect(serverConnection.beginRelay).toHaveBeenCalledTimes(1);
+    });
+
+    // Same deferred-dispose window as the socket half, but for the leave the
+    // runtime itself now performs: dispose() ends the relay (#1309 SC-08),
+    // so a dispose that fired during the replay would end a relay the
+    // surviving runtime is still using.
+    await act(async () => {
+      await new Promise((resolve) => {
+        setTimeout(resolve, 5);
+      });
+    });
+    expect(serverConnection.endRelay).not.toHaveBeenCalled();
+    expect(serverConnection.beginRelay).toHaveBeenCalledTimes(1);
   });
 
   it('survives a caller that rebuilds its context on every render', async () => {
@@ -284,7 +412,7 @@ describe('useSessionRuntime integration', () => {
     expect(renders.mock.calls.length).toBe(settled);
   });
 
-  it('clears P2P state when forced to relay', async () => {
+  it('clears P2P state when the intent flips to relay', async () => {
     const store = makeStore('agent:a', 'token-a');
     const { result, rerender } = renderHook(
       () => useSessionRuntime({ configOwner: true }),
@@ -296,7 +424,7 @@ describe('useSessionRuntime integration', () => {
     });
 
     act(() => {
-      store.set(forcedRelayAtom, true);
+      store.set(attachInfoAtom, { mode: 'relay', session_id: 'agent:a' });
     });
     rerender();
 
@@ -352,7 +480,9 @@ describe('useSessionRuntime integration', () => {
 
     expect(disconnectSpy).toHaveBeenCalledTimes(1);
     expect(shell.result.current.activeUrl).toBe('ws://b/ws');
-    expect(store.get(forcedRelayAtom)).toBe(false);
+    // Rotation alone never forces relay: the runtime publishes the effective
+    // mode on its own snapshot (#1309 SC-02).
+    expect(shared.getSnapshot().forcedRelay).toBe(false);
 
     disconnectSpy.mockRestore();
     shell.unmount();
@@ -393,7 +523,7 @@ describe('useSessionRuntime integration', () => {
     expect(result.current.activeUrl).toBe('ws://b/ws');
   });
 
-  it('mirrors force-relay from runtime event to forcedRelayAtom', async () => {
+  it('force-relay fallback flips the runtime to relay and clears the P2P mirrors', async () => {
     addressPlanState.urls = ['ws://a/ws', 'ws://b/ws'];
 
     const store = makeStore('agent:failover-relay', 'token-a');
@@ -421,12 +551,13 @@ describe('useSessionRuntime integration', () => {
     });
     rerender();
 
-    expect(store.get(forcedRelayAtom)).toBe(true);
-    rerender();
+    // The fallback is runtime-owned (#1309 SC-02): published on the snapshot,
+    // and the hook's P2P mirrors follow it without any atom in between.
+    expect(result.current.snapshot?.forcedRelay).toBe(true);
     expect(result.current.agentTerminalApi).toBeNull();
   });
 
-  it('mirrors transport-exhausted to failed terminal state on manual route', async () => {
+  it('publishes failed phase on transport-exhausted on manual route', async () => {
     addressPlanState.urls = ['ws://manual/ws'];
 
     const store = makeStore('agent:manual-fail', 'token-a');
@@ -452,8 +583,7 @@ describe('useSessionRuntime integration', () => {
     });
     rerender();
 
-    expect(store.get(terminalSessionStateAtom)).toBe('failed');
-    expect(store.get(isSwitchingAtom)).toBe(false);
+    expect(result.current.snapshot?.phase).toBe('failed');
   });
 
   it('retains runtime in relay mode so attach can drive beginRelay', async () => {
@@ -474,19 +604,19 @@ describe('useSessionRuntime integration', () => {
     expect(result.current.runtime!.sessionId).toBe('agent:relay');
   });
 
-  it('config owner mirrors the fresh runtime snapshot over a pre-set terminal state', async () => {
+  it('exposes the fresh runtime phase on the snapshot — no React mirror to consult', async () => {
     const store = makeStore('agent:a', 'token-a');
-    store.set(terminalSessionStateAtom, 'connecting');
 
-    renderHook(
+    const { result } = renderHook(
       () => useSessionRuntime({ configOwner: true }),
       { wrapper: wrapper(store) },
     );
 
-    // The attach-phase mirror is unconditional: a fresh runtime reports 'idle',
-    // and the atom converges to runtime truth instead of holding a stale value.
+    // A fresh runtime has already selected its session at construction (#1309
+    // SC-01), and the hook's snapshot IS the phase — there is no mirror atom
+    // that could hold a stale value (#1309 SC-02).
     await waitFor(() => {
-      expect(store.get(terminalSessionStateAtom)).toBe('idle');
+      expect(result.current.snapshot?.phase).toBe('connecting');
     });
   });
 
@@ -509,7 +639,12 @@ describe('useSessionRuntime integration', () => {
         relayListeners.add(cb);
         return () => relayListeners.delete(cb);
       },
-    } satisfies RelayServerHandle & { emit(state: ConnectionState): void };
+      sendRelayInput: vi.fn(),
+      sendRelayResize: vi.fn(),
+      onRelayOutput: () => () => {},
+      onRelayResize: () => () => {},
+      onRelayInputAck: () => () => {},
+    } satisfies RelayServerTransport & { emit(state: ConnectionState): void };
 
     const store = makeStore('agent:a', 'token-a');
     const { result } = renderHook(
@@ -522,7 +657,9 @@ describe('useSessionRuntime integration', () => {
     });
 
     act(() => {
-      result.current.runtime!.attachController.dispatch({ type: 'SESSION_SELECTED' });
+      // The viewport's adapter is the only readiness source (#1309 SC-02);
+      // this push stands in for its layout-phase attach report.
+      result.current.runtime!.setTransportReady(true);
     });
     act(() => {
       const ws = lastWs();
@@ -555,20 +692,19 @@ describe('useSessionRuntime integration', () => {
     });
 
     await waitFor(() => {
-      expect(store.get(forcedRelayAtom)).toBe(true);
+      expect(result.current.snapshot?.forcedRelay).toBe(true);
     });
     await waitFor(() => {
       expect(beginRelay).toHaveBeenCalledTimes(1);
     });
     await waitFor(() => {
-      expect(store.get(terminalSessionStateAtom)).toBe('attached');
+      expect(result.current.snapshot?.phase).toBe('attached');
     });
     expect(result.current.agentTerminalApi).toBeNull();
   });
 
   it('applies route-intent snapshot when config owner updates after subscribing', async () => {
     const store = makeStore('agent:a', 'token-a');
-    store.set(terminalSessionStateAtom, 'attached');
 
     const { result, rerender } = renderHook(
       () => useSessionRuntime({ configOwner: true }),
@@ -577,9 +713,10 @@ describe('useSessionRuntime integration', () => {
 
     await waitForRuntime(() => result.current.runtime);
     const rt = result.current.runtime!;
-    rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
     rt.attachController.dispatch({ type: 'ATTACH_OK' });
-    store.set(terminalSessionStateAtom, 'attached');
+    await waitFor(() => {
+      expect(result.current.snapshot?.phase).toBe('attached');
+    });
 
     act(() => {
       store.set(manualOverrideAtom, 'ws://shared-agent/ws');
@@ -588,7 +725,7 @@ describe('useSessionRuntime integration', () => {
     rerender();
 
     await waitFor(() => {
-      expect(store.get(terminalSessionStateAtom)).toBe('connecting');
+      expect(result.current.snapshot?.phase).toBe('connecting');
     });
   });
 });

@@ -290,10 +290,13 @@ src/
 │   ├── server/              # the Server transport plugin + its menu
 │   ├── explorer/            # the file-tree framework (no Nession product semantics)
 │   ├── terminal-runtime/    # React-free runtime: controller, transports, input, xterm
-│   ├── session-runtime/     # SessionRuntime + its registry (acquire/release leases)
+│   ├── session-runtime/     # SessionRuntime (the terminal lifecycle's single
+│   │                        #   writable authority, #1309) + its registry
+│   │                        #   (acquire/release leases, StrictMode-deferred dispose)
 │   └── attach/              # attach state machine, controller, address policy,
 │                            #   relay connection, attach prefs/profile, state/
-│                            #   (state/ = p2p status, route epoch, transport generation)
+│                            #   (state/ = the route-intent epoch only; runtime
+│                            #   facts live in the SessionRuntime, not in atoms)
 ├── shared/hooks/            # generic hooks importable by every layer (useWebSocket,
 │                            #   useMediaQuery, useAddressPlan, useDialogReset)
 ├── shared/lib/              # generic pure helpers (cn, format, encoding, languageId,
@@ -370,6 +373,15 @@ Rules follow #649 (the owner's README holds the detailed table):
   mount; session-list state is deliberately **not** hoisted to a global atom)
 - transport / connection / terminal lifecycle → `platform/<domain>`
   (`socket/`, `attach/state/`, `session-runtime/`, `terminal-runtime/`)
+  - **the terminal session lifecycle has exactly one writer**: the
+    SessionRuntime owns route state, attach state, and I/O state; React and
+    Jotai hold only the attach *intent* (selected session, `attachInfo`,
+    manual route override, `routeIntentEpoch`) and read the result back
+    through the runtime's value-compared snapshot (`useSyncExternalStore`).
+    A runtime fact (phase, connection state, relay fallback, transport
+    generation, viewport readiness) never gets a second writable atom. The
+    full boundary and event flow:
+    `docs/design/terminal/session-runtime-ownership.md` (#1309).
 - **the attachment's own model** — which Session, over which route, with which
   choice → `product/session/state/`. It cannot be `platform`: its route
   derivation reads Session identity, and a platform module may not reach up.

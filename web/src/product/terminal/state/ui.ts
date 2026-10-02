@@ -1,20 +1,9 @@
 // web/src/terminal/state/ui.ts
 import { atom } from 'jotai';
 import { atomFamily } from 'jotai/utils';
-import type { ReconnectBanner } from '@/platform/terminal-runtime/types';
 import type { InputDrop } from '@/platform/terminal-runtime/inputQueue';
 
 export type { ReconnectBanner } from '@/platform/terminal-runtime/types';
-
-export const bannerAtomFamily = atomFamily((_sessionId: string) => {
-  void _sessionId;
-  return atom<ReconnectBanner>('none');
-});
-
-export const bannerAttemptAtomFamily = atomFamily((_sessionId: string) => {
-  void _sessionId;
-  return atom<number>(0);
-});
 
 /**
  * Input this Session lost rather than delivered, or `null` (#1307 SC-09).

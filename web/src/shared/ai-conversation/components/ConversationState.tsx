@@ -105,6 +105,38 @@ export function ConversationFailure({
 }
 
 /**
+ * The provider cannot say whether the conversation is there.
+ *
+ * The third of the three answers this file exists to keep apart. "That
+ * directory has no conversations", "that conversation is gone" and "this host
+ * cannot say right now" are three different sentences to a reader, and only the
+ * first is about their conversation being empty — so rendering this one as
+ * `EmptyConversation` makes a claim the provider explicitly did not make.
+ *
+ * It carries a retry for the same reason the failure state does, and for one
+ * more: the runtime **stops refreshing** on a non-ready answer, so this is the
+ * one degraded state the reader cannot wait their way out of. Without a way to
+ * ask again it is a dead end that only a reload escapes.
+ */
+export function ConversationUnavailable({ onRetry }: { onRetry?: () => void }) {
+  return (
+    <div
+      data-testid="conversation-unavailable"
+      role="status"
+      className={cn('flex flex-wrap items-center gap-2 text-muted-foreground', chromeSansRole('secondary'))}
+    >
+      <AlertCircle aria-hidden className="h-4 w-4 shrink-0" />
+      <span>This conversation cannot be read right now.</span>
+      {onRetry ? (
+        <Button variant="outline" size="xs" type="button" onClick={() => onRetry()}>
+          Retry
+        </Button>
+      ) : null}
+    </div>
+  )
+}
+
+/**
  * Records the model does not name.
  *
  * Counted rather than listed, because the count is the actionable part: a

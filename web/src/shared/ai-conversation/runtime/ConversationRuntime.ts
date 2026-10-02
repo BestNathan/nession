@@ -488,6 +488,14 @@ export class ConversationRuntime<Context> {
             ? (page.error ?? 'The conversation could not be read')
             : null,
       }
+      // A non-ready answer ends the refresh, not merely this read. It is a
+      // *semantic* answer — the provider said the conversation is gone, or that
+      // it cannot say — so the reason the timer or subscription existed no
+      // longer holds, and an armed one goes on polling a state whose only
+      // remaining answers are the same. This is the deliberate opposite of a
+      // thrown poll failure, which `poll()` swallows and retries precisely
+      // because it says nothing about the conversation.
+      this.syncRefresh()
       this.emit()
       return
     }

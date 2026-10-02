@@ -1,4 +1,4 @@
-# Terminal platform requirements (#1094–#1096)
+# Terminal platform requirements (#1094–#1096, #1309)
 
 Upstream: [`VISION.md`](../../../VISION.md) → [`PRINCIPLE.md`](../../../PRINCIPLE.md) → [Terminal Surface](../design-system/patterns/terminal-surface.md).
 
@@ -10,6 +10,7 @@ GitHub requirements (Approved):
 | [#1096](https://github.com/BestNathan/nession/issues/1096) | PTY-faithful Web/App interaction & TUI compatibility | [interaction-semantics.md](interaction-semantics.md) |
 | [#1095](https://github.com/BestNathan/nession/issues/1095) | Multi-client Controller / Observer | [multi-client-ownership.md](multi-client-ownership.md) |
 | [#1094](https://github.com/BestNathan/nession/issues/1094) | Terminal stream, checkpoints & replay | [stream-replay.md](stream-replay.md) |
+| [#1309](https://github.com/BestNathan/nession/issues/1309) | Session runtime = single lifecycle authority | [session-runtime-ownership.md](session-runtime-ownership.md) |
 
 Related: [#1081](https://github.com/BestNathan/nession/issues/1081) (App shell gestures).
 

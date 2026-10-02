@@ -6,7 +6,6 @@ import type { ConnectionOptions } from './types';
 // silently did nothing. Naming the producer makes the next such spelling a
 // compile error.
 import type { TerminalInputAck } from '@/product/terminal';
-import type { ConnectionState } from '@/platform/socket/types';
 import type { TerminalTransport, TerminalInputSeed } from './transport/TerminalTransport';
 import { StreamReconciler, type ResumeReply } from './streamReconciler';
 import type { TerminalBootstrap } from './bootstrap';
@@ -81,7 +80,6 @@ export class ConnectionManager implements TerminalTransport {
   private serverConnection?: ConnectionOptions['serverConnection'];
   private pingTimer: ReturnType<typeof setInterval> | null = null;
   private relayUnsubOutput: (() => void) | null = null;
-  private relayUnsubState: (() => void) | null = null;
   private relayUnsubResize: (() => void) | null = null;
   private relayUnsubInputAck: (() => void) | null = null;
   private p2pUnsubOutput: (() => void) | null = null;
@@ -134,7 +132,6 @@ export class ConnectionManager implements TerminalTransport {
    */
   private onInputDrop: (drop: InputDrop) => void;
 
-  onStateChange: ((state: ConnectionState) => void) | null = null;
   /**
    * Bytes from the agent. `bootstrap` marks the session's history rather than
    * its live output, and carries what the agent said about the snapshot
@@ -144,7 +141,6 @@ export class ConnectionManager implements TerminalTransport {
    */
   onOutput: ((data: Uint8Array, bootstrap?: TerminalBootstrap) => void) | null = null;
   onError: ((error: Error) => void) | null = null;
-  onDisconnect: (() => void) | null = null;
   onResize: ((cols: number, rows: number) => void) | null = null;
 
   constructor(options: ConnectionOptions) {
@@ -320,7 +316,8 @@ export class ConnectionManager implements TerminalTransport {
   /**
    * Send a terminal resize to the agent (client → tmux direction).
    *
-   * Gated on `terminalSessionStateAtom === 'attached'` — while the transport is
+   * Gated on the runtime's attach phase (the `isAttached` reader it hands the
+   * transport) — while the transport is
    * up but client.attach has not yet been acknowledged (state 'connected', or
    * 'reconnecting' during P2P failover), the size is stashed in
    * `pendingResize` (coalesced: only the latest value survives). The stashed
@@ -417,13 +414,10 @@ export class ConnectionManager implements TerminalTransport {
     this.p2pUnsubInputAck?.();
     this.p2pUnsubControlChanged?.();
     this.relayUnsubOutput?.();
-    this.relayUnsubState?.();
     this.relayUnsubResize?.();
     this.relayUnsubInputAck?.();
-    this.onStateChange = null;
     this.onOutput = null;
     this.onError = null;
-    this.onDisconnect = null;
     this.onResize = null;
   }
 
@@ -502,7 +496,7 @@ export class ConnectionManager implements TerminalTransport {
 
     // Pure transport: ConnectionManager sends/receives messages but never
     // initiates protocol actions.  client.attach timing is owned by the
-    // React layer (terminalSessionStateAtom).
+    // SessionRuntime.
     this.pingTimer = setInterval(() => {
       if (this.disposed) { return; }
       // Fire-and-forget, and deliberately not a verdict: this keeps the
@@ -606,20 +600,6 @@ export class ConnectionManager implements TerminalTransport {
     this.relayUnsubInputAck = svc.onRelayInputAck(this.sessionName, (ack) => {
       if (this.disposed) { return; }
       this.applyInputAck(ack);
-    });
-
-    // Only the durable edges are reported: the new transport's
-    // post-handshake 'connected' (old 'authenticated') and the
-    // budget-exhausted 'disconnected'. 'connecting'/'reconnecting' are the
-    // intra-budget loss window, surfaced by the lifecycle hooks — mirroring
-    // the old facade, which collapsed them onto 'connecting' and no-op'd.
-    this.relayUnsubState = svc.onConnectionStateChange((state) => {
-      if (this.disposed) { return; }
-      if (state === 'connected') {
-        this.onStateChange?.('connected');
-      } else if (state === 'disconnected') {
-        this.onStateChange?.('disconnected');
-      }
     });
   }
 }

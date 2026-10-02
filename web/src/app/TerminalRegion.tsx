@@ -13,7 +13,6 @@ import type { ResolvedWorkContext } from '@/product/terminal/capsule/workAwarene
 
 export interface TerminalRegionProps {
   hidden: boolean;
-  onDisconnect: () => void;
   onError: (error: Error) => void;
   /** Which experience's capsule to render — supplied by the shell. */
   experience: CapsuleExperience;
@@ -33,7 +32,6 @@ export interface TerminalRegionProps {
  */
 export function TerminalRegion({
   hidden,
-  onDisconnect,
   onError,
   experience,
   capsuleCapabilities,
@@ -49,12 +47,11 @@ export function TerminalRegion({
     inputDisabled,
     viewportReady,
     terminalState,
-    transportEpoch,
     terminalControl,
     onTakeControl,
     inputDrop,
     dismissInputDrop,
-  } = useTerminalOrchestration({ onDisconnect, onError });
+  } = useTerminalOrchestration({ onError });
 
   return (
     <div
@@ -87,7 +84,6 @@ export function TerminalRegion({
             controller={controller}
             terminalState={terminalState}
             viewportReady={viewportReady}
-            transportEpoch={transportEpoch}
             onOpenWorkspaceFile={onOpenWorkspaceFile}
           />
         </TerminalSurface>

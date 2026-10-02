@@ -189,3 +189,89 @@ export function turnMembership(turns: ConversationTurn[]): Map<string, TurnMembe
   }
   return membership
 }
+
+/**
+ * Every item a turn is made of, in transcript order.
+ *
+ * All three parts rather than `process` alone: identity is carried from whatever
+ * the renderer has already seen, and the opening and the answer are exactly the
+ * items most likely to be that one.
+ */
+function itemsOfTurn(turn: ConversationTurn): AIConversationItem[] {
+  const items: AIConversationItem[] = []
+  if (turn.opening !== null) {
+    items.push(turn.opening)
+  }
+  items.push(...turn.process)
+  if (turn.answer !== null) {
+    items.push(turn.answer)
+  }
+  return items
+}
+
+/**
+ * Keep a turn's key still across a prepend that reveals its opening.
+ *
+ * `turnOf` derives the key from the turn's first item, and for a window that has
+ * always started where it starts that is the right answer. It stops being one the
+ * moment an older page arrives, because a transcript read backwards *begins*
+ * mid-turn: the first item is some tool call, and when `load older` finally
+ * delivers the user message that opened it, the derived key moves from that tool
+ * call to the opener.
+ *
+ * Everything that remembers a turn is keyed by that string — above all the
+ * disclosure override that decides whether the work is folded. So the key moving
+ * silently drops the reader's expansion and collapses the work under them, which
+ * is [#1386]'s defect one level up: that fix protected the `ToolGroup` *inside*
+ * the process window and left the window itself unprotected.
+ *
+ * The identity is history, exactly as a group's is and for the same reason — it
+ * cannot be derived from the items in front of it, because those items are
+ * precisely what changed. So it is carried by the ids the renderer has already
+ * seen, first one wins, which preserves the key the disclosure was recorded
+ * under.
+ *
+ * Reading only — [`rememberTurns`] is the write, and it belongs in an effect
+ * rather than in render, so a render that never commits cannot leave a trace.
+ */
+export function carryTurnKeys(
+  turns: readonly ConversationTurn[],
+  remembered: ReadonlyMap<string, string>,
+): ConversationTurn[] {
+  return turns.map((turn) => {
+    let carried: string | null = null
+    for (const item of itemsOfTurn(turn)) {
+      const held = remembered.get(item.id)
+      if (held !== undefined) {
+        carried = held
+        break
+      }
+    }
+    return carried === null || carried === turn.key ? turn : { ...turn, key: carried }
+  })
+}
+
+/**
+ * Remember which key each turn's items were rendered under.
+ *
+ * Ids that are in no turn any more are forgotten, so the map holds exactly what
+ * is on screen instead of growing with the conversation. A stale id could not be
+ * adopted anyway — an item belongs to one turn — so forgetting costs nothing.
+ */
+export function rememberTurns(
+  turns: readonly ConversationTurn[],
+  remembered: Map<string, string>,
+): void {
+  const live = new Set<string>()
+  for (const turn of turns) {
+    for (const item of itemsOfTurn(turn)) {
+      remembered.set(item.id, turn.key)
+      live.add(item.id)
+    }
+  }
+  for (const id of [...remembered.keys()]) {
+    if (!live.has(id)) {
+      remembered.delete(id)
+    }
+  }
+}
