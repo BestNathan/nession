@@ -41,6 +41,7 @@ import {
 import {
   carryTurnKeys,
   rememberTurns,
+  runningWork,
   turnMembership,
   turnsOf,
   type ConversationTurn,
@@ -174,6 +175,10 @@ function TranscriptContent({
   const workingOf = (turn: ConversationTurn): boolean =>
     turn.answer === null ||
     turn.answer.status === 'streaming' ||
+    // Work still running outranks an answer. A tool the assistant started and
+    // has not finished means the turn is not settled, whatever it said before
+    // starting it — folding here would close the only thing still moving.
+    runningWork(turn) ||
     (turn.key === lastKey && snapshot.partialTail)
 
   const [overrides, setOverrides] = useState(() => new Map<string, boolean>())
