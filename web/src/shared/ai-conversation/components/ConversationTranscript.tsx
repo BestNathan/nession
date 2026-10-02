@@ -39,6 +39,7 @@ import {
   type ConversationRow,
 } from '../model/grouping'
 import { turnMembership, turnsOf, type ConversationTurn } from '../model/turns'
+import { useReaderIntent } from '../runtime/useReaderIntent'
 import { isStreaming } from './streaming'
 import { TurnActions } from './TurnActions'
 import { TurnProcess } from './TurnProcess'
@@ -53,9 +54,6 @@ import {
   OlderError,
   SkippedRecords,
 } from './ConversationState'
-
-/** How close to the top counts as "at the top", in px. */
-const TOP_THRESHOLD = 50
 
 /** Which item a row is anchored to — a group by its first call. */
 function firstItemIdOf(row: ConversationRow): string {
@@ -100,38 +98,10 @@ function TranscriptContent({
   onReload?: () => void
 }) {
   const contentRef = useRef<HTMLDivElement>(null)
-  const [isAtTop, setIsAtTop] = useState(false)
-
-  // Reading backwards is a *state the reader is in*, not a gesture they repeat.
-  //
-  // So the position is tracked as state, and the fetch is driven by a second
-  // effect that watches it. That split is the whole behaviour: a page landing
-  // changes `loadingOlder` and `items.length`, which re-runs the fetch effect,
-  // and a reader who is still at the top gets the next page without having to
-  // scroll again. Driven from inside the scroll handler instead — which is how
-  // this was first written — nothing re-runs when a page lands, and paging back
-  // through a long conversation becomes a series of nudges. Reported on
-  // staging; the symptom is a reader having to jog the transcript to make it
-  // continue.
-  useEffect(() => {
-    const content = contentRef.current
-    const viewport = content?.closest('[data-slot="message-scroller-viewport"]')
-    if (!(viewport instanceof HTMLElement)) {
-      return
-    }
-    const sync = () => setIsAtTop(viewport.scrollTop <= TOP_THRESHOLD)
-    // The *initial* position is deliberately not sampled. On mount the scroller
-    // has not yet moved to the end, so reading it here says "at the top" and
-    // the fetch effect immediately pulls a page of history nobody asked for —
-    // measured in a browser, where opening a conversation rendered five turns
-    // for a newest page of three. Sampling only on scroll means history starts
-    // when the reader actually goes looking for it.
-    viewport.addEventListener('scroll', sync, { passive: true })
-    return () => viewport.removeEventListener('scroll', sync)
-  }, [])
+  const wantsOlder = useReaderIntent(contentRef, snapshot.openId)
 
   useEffect(() => {
-    if (!isAtTop) {
+    if (!wantsOlder) {
       return
     }
     if (!snapshot.hasMore || snapshot.loadingOlder) {
@@ -142,7 +112,7 @@ function TranscriptContent({
     }
     onLoadOlder()
   }, [
-    isAtTop,
+    wantsOlder,
     snapshot.hasMore,
     snapshot.loadingOlder,
     snapshot.items.length,
