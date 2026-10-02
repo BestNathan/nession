@@ -340,6 +340,22 @@ export class ConversationRuntime<Context> {
     if (this.disposed || key === null || cursor === null || this.context === null) {
       return false
     }
+    // A page already on its way answers this call too. Two things make that the
+    // right reading rather than a swallow:
+    //
+    // - the caller's question is "will more history arrive?", not "did this call
+    //   start it" — `true` is what keeps the scroll controller's pending anchor,
+    //   so returning `false` would disarm a fetch that is genuinely coming;
+    // - the cursor does not move until the page lands, so a second fetch would
+    //   re-read the *same* one and then invalidate the first through the
+    //   generation counter — a wasted round trip that also flickers the loader.
+    //
+    // `loadingOlder` is set before `fetchOlder`'s first `await`, so it is already
+    // true by the time this returns and the guard cannot miss a racing call.
+    // `#1363` round 3.
+    if (this.thread.loadingOlder) {
+      return true
+    }
     const id = ++this.olderGeneration
     void this.fetchOlder(key, cursor, id)
     return true

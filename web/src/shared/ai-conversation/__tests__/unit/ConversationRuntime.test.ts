@@ -366,6 +366,48 @@ describe('ConversationRuntime — refresh policy', () => {
     expect(adapter.calls.filter((call) => call.kind === 'read').length).toBe(readsBefore)
   })
 
+  it('does not start a second page while one is already on its way', async () => {
+    // #1363 round 3. The cursor does not move until the page lands, so a second
+    // call would re-read the *same* one and then invalidate the first through
+    // the generation counter — a wasted round trip that flickers the loader.
+    const { runtime, adapter } = setup()
+    runtime.setContext('a:s1')
+    await flush()
+
+    // Both answer `true`: a page is coming, which is what the scroll
+    // controller's anchor decision asks. Only one of them starts it.
+    expect(runtime.loadOlder()).toBe(true)
+    expect(runtime.loadOlder()).toBe(true)
+    await flush()
+
+    const cursorReads = adapter.calls.filter(
+      (call) => call.kind === 'read' && call.cursor !== undefined,
+    )
+    expect(cursorReads).toHaveLength(1)
+  })
+
+  it('asks for the next page again once the last one has landed', async () => {
+    // The guard must not latch: a reader who keeps pulling gets page after page.
+    // Nine items at three per page, because the default six is only *two* pages
+    // and a second pull would have nothing to ask for — which is what this
+    // asserted the first time, wrongly.
+    const { runtime, adapter } = setup({
+      conversations: [{ id: 'c1', title: 'First', activity: 'active', items: transcript(9) }],
+    })
+    runtime.setContext('a:s1')
+    await flush()
+
+    runtime.loadOlder()
+    await flush()
+    runtime.loadOlder()
+    await flush()
+
+    const cursorReads = adapter.calls.filter(
+      (call) => call.kind === 'read' && call.cursor !== undefined,
+    )
+    expect(cursorReads.length).toBeGreaterThan(1)
+  })
+
   it('re-asks both halves only when the reader reloads', async () => {
     const { runtime, adapter } = setup()
     runtime.setContext('a:s1')
