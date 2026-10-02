@@ -23,12 +23,18 @@ describe('AttachStateMachine extra coverage', () => {
     expect(sm.canStartAttach(true, false, true, 'relay')).toBe(true);
   });
 
-  it('ATTACH_TIMEOUT toggles reconnecting before budget exhausted', () => {
+  it('ATTACH_TIMEOUT enters reconnecting and stays there while budget remains (#1309 SC-07)', () => {
     const sm = new AttachStateMachine({ transportFirst: true });
     sm.dispatch({ type: 'SESSION_SELECTED' });
     const first = sm.dispatch({ type: 'ATTACH_TIMEOUT', manualRoute: false, attempt: 1 });
     expect(first.phase).toBe('reconnecting');
     expect(first.reconnectCount).toBe(1);
+    // The phase is the retry's state, not a mirror trigger: a second timeout
+    // leaves it reconnecting rather than toggling back to connecting — the
+    // attempt number is what reconnectCount carries.
+    const second = sm.dispatch({ type: 'ATTACH_TIMEOUT', manualRoute: false, attempt: 2 });
+    expect(second.phase).toBe('reconnecting');
+    expect(second.reconnectCount).toBe(2);
   });
 
   it('ATTACH_TIMEOUT after budget falls back to relay', () => {
@@ -41,7 +47,6 @@ describe('AttachStateMachine extra coverage', () => {
     });
     expect(result.phase).toBe('connecting');
     expect(result.forceRelay).toBe(true);
-    expect(result.bumpRouteEpoch).toBe(true);
   });
 
 

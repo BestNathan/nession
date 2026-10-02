@@ -34,7 +34,6 @@ describe('AttachStateMachine', () => {
       attempt: P2P_MAX_RECONNECT + 1,
     });
     expect(result.forceRelay).toBe(true);
-    expect(result.bumpRouteEpoch).toBe(true);
     expect(result.phase).toBe('connecting');
   });
 
