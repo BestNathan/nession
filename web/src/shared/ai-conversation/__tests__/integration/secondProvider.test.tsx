@@ -159,7 +159,7 @@ describe('a second provider through the shared conversation', () => {
       ],
       refresh: {
         kind: 'push',
-        subscribe: (onChange) => {
+        subscribe: (_context, _conversationId, onChange) => {
           push.notify = onChange
           return () => undefined
         },
@@ -213,7 +213,7 @@ describe('a second provider through the shared conversation', () => {
       partialTail: false,
       refresh: {
         kind: 'push',
-        subscribe: (onChange) => {
+        subscribe: (_context, _conversationId, onChange) => {
           push.notify = onChange
           return () => undefined
         },
