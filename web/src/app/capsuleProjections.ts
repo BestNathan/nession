@@ -104,13 +104,19 @@ export interface CapsuleProjectionBinding {
       semanticKey?: import('@/platform/terminal-runtime/interaction/TerminalInteractionController').TerminalSemanticKey;
     }) => void;
     /**
-     * Deepen into the Workspace, at the item the body last reported or at one
-     * it names (#1046).
+     * The host's routing into the Workspace, for the body's *content* rows —
+     * a conversation candidate that opens itself, at the item it names or the
+     * one the body last reported.
      *
-     * Supplied by the host and rendered by the capability: the host used to draw
-     * this as a footer on every Peek, which made every capability end on the
-     * same borrowed sentence. Whether the action exists, where it sits and what
-     * it carries are the capability's answers.
+     * Routing only. The Workspace *destination* — whether the action exists,
+     * where it sits, what it looks like — is drawn by `PeekHost` itself
+     * (#1347 SC-21: "Peek header and Workspace destination are
+     * Nession-owned"), with presence decided from the app layer's Workspace
+     * view registry. `#1046`'s body-owns-the-action model is superseded on
+     * that point: a body must not render its own "Open in Workspace"
+     * affordance, or every capability ends up re-deciding chrome the host
+     * already owns. What a body may do is navigate from its content — the
+     * row is the capability's, the routing is the host's.
      */
     openWorkspace: (resourceId?: string) => void;
     /**

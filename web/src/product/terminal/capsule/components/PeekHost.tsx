@@ -6,6 +6,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { capsulePeekActionClass } from '@/shared/lib/peekActionClass';
 import { cn } from '@/shared/lib/utils';
 import {
   capsuleIconButtonClass,
@@ -23,11 +24,16 @@ import type {
  * The surface a capability's Terminal content is drawn on (#1046).
  *
  * This is the **host**, and it owns only what is Nession's: the surface and its
- * bounds, the dismissal, the step from Signal to Peek, and the accessibility
- * baseline. It does not own the path into the Workspace — that was a generic
- * footer here, and it is now an action supplied to the body
- * (`actions.openWorkspace`), because whether a capability has somewhere deeper
- * to go and what that looks like is the capability's answer, not the host's.
+ * bounds, the dismissal, the step from Signal to Peek, the accessibility
+ * baseline — and the Workspace destination. `#1347` SC-21 is explicit: "Peek
+ * header and Workspace destination are Nession-owned", and re-review #2 on it
+ * settled that `#1046`'s body-owns-the-action model is superseded on this
+ * point. Whether the destination exists is the app layer's answer (the
+ * Workspace view registry), and its presentation — one action, here, at Peek
+ * depth — is drawn by this host. What stays with the body is *content*
+ * navigation: a row that opens the item it names
+ * (`actions.openWorkspace(resourceId)`), which is the body's scrollable
+ * content using the host's routing, not a second destination action.
  *
  * The name says which half it is. It was `CapabilityProjection`, which read as
  * "the projection of a capability" — the whole thing — while it has only ever
@@ -129,6 +135,31 @@ export function PeekHost({
         openDetail: setDetail,
         disabled,
       })}
+
+      {/*
+        The Workspace destination (#1347 SC-21). Nession-owned: presence comes
+        from the app layer's Workspace view registry (a capability without one
+        — Terminal Keys — supplies no `onOpenWorkspace` and gets no action),
+        placement and presentation are this host's, and the handoff carries
+        the item the body reported, exactly like the body's own content rows.
+
+        Peek only. A Signal is "the smallest identifying state needed" — it
+        informs, and the step to the action is the title's deepening. Git's
+        Signal never drew this; Claude Code's drawing it was precisely the
+        capability-owned inconsistency the review rejected.
+      */}
+      {isPeek && onOpenWorkspace ? (
+        <div className="flex justify-end">
+          <button
+            type="button"
+            data-testid="capsule-capability-open-workspace"
+            onClick={() => onOpenWorkspace(focus)}
+            className={capsulePeekActionClass}
+          >
+            Open in Workspace →
+          </button>
+        </div>
+      ) : null}
 
       {/*
         The child overlay, drawn by base-ui's Dialog so that focus trapping,
