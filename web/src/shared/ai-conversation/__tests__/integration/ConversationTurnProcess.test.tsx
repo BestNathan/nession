@@ -222,6 +222,48 @@ describe('the turn process control', () => {
   })
 })
 
+describe('transcript state across a conversation switch', () => {
+  // Deliberately the same items and therefore the same ids in both
+  // conversations, which is what makes this a test rather than a coincidence.
+  const shared = [
+    userMessage('u1', 'q'),
+    toolItem('t1'),
+    toolItem('t2'),
+    assistantMessage('a1', 'done'),
+  ]
+
+  it('does not carry a disclosure the reader opened in another conversation', () => {
+    // #1363 round 3. Every piece of transcript-local state is keyed by item,
+    // turn and group ids, and those are unique only *within* a conversation —
+    // so opening a second thread that reuses an id used to inherit the first
+    // one's expansion, and the reader saw work already unfolded that they had
+    // never opened here.
+    const { rerender } = render(
+      <ConversationTranscript
+        snapshot={snapshot({ openId: 'c1', items: shared })}
+        providerLabel="Claude"
+        onLoadOlder={() => false}
+      />,
+    )
+
+    fireEvent.click(screen.getByTestId('conversation-turn-process'))
+    expect(rowOf(screen.getByTestId('conversation-tool-group'))).not.toHaveAttribute('hidden')
+
+    rerender(
+      <ConversationTranscript
+        snapshot={snapshot({ openId: 'c2', items: shared })}
+        providerLabel="Claude"
+        onLoadOlder={() => false}
+      />,
+    )
+
+    // Same ids, different conversation: folded again, because nobody opened it
+    // here. Without the `key`, the override recorded under `t1` answers for this
+    // render too.
+    expect(rowOf(screen.getByTestId('conversation-tool-group'))).toHaveAttribute('hidden')
+  })
+})
+
 describe('a turn the reader is inside when its answer settles', () => {
   const streaming = [
     userMessage('u1', 'the question'),
