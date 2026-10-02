@@ -69,6 +69,19 @@ describe('capability projection frame', () => {
     );
   });
 
+  it('carries the containment boundary that keeps a body inside the host (#1347 SC-27)', () => {
+    // Paint containment is what makes the contract's no-portals rule (#1120)
+    // more than a request: `position: fixed` in a body resolves against the
+    // host instead of the viewport, and a body's z-index stays inside the
+    // host's stacking context. jsdom cannot prove the clipping; it can prove
+    // the mechanism is on the element every body is drawn into.
+    renderFrame(projection({ depth: 'peek' }));
+
+    expect(screen.getByTestId('capsule-capability-projection').className).toContain(
+      'contain-paint',
+    );
+  });
+
   it('opens a Signal deeper from its title', async () => {
     const onDeeper = vi.fn();
     renderFrame(projection({ onDeeper }));

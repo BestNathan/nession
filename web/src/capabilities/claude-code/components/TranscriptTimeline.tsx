@@ -10,7 +10,7 @@ import {
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { cn } from '@/shared/lib/utils';
 import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
-import { clockTime } from '../model/clockTime';
+import { formatClockTime } from '@/shared/lib/format';
 import type { ClaudeCodeTranscriptEntry } from '../types';
 
 /**
@@ -148,7 +148,7 @@ function statusOf(entry: Entry): string | null {
 }
 
 function Row({ entry }: { entry: Entry }) {
-  const time = clockTime(entry.timestamp);
+  const time = formatClockTime(entry.timestamp);
   const status = statusOf(entry);
   const body = bodyOf(entry);
   const detail = hasDetail(entry);

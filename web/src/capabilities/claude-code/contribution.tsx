@@ -40,7 +40,7 @@ export const CLAUDE_CODE_TITLE = 'Claude Code';
  */
 const CLAUDE_CODE_COMMANDS = ['claude', 'claude.exe'];
 
-function isClaudeCodeCommand(command: string): boolean {
+export function isClaudeCodeCommand(command: string): boolean {
   return CLAUDE_CODE_COMMANDS.includes(command);
 }
 

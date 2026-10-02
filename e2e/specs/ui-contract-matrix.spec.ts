@@ -107,7 +107,7 @@ for (const row of viewports.filter((v) => v.experience === 'web')) {
   test.describe(`${row.id} ${row.width}×${row.height}`, () => {
     test.use({ viewport: { width: row.width, height: row.height } });
 
-    test('session rows stay clipped; workspace chrome and the menu it discloses stay bounded', async ({ page }) => {
+    test('session rows stay clipped; workspace capsule shows all capabilities', async ({ page }) => {
       await page.goto('/#/fixture');
       await assertSessionRowsClipped(page, 'web', row.id);
 
@@ -115,25 +115,24 @@ for (const row of viewports.filter((v) => v.experience === 'web')) {
       const bar = page.getByTestId('workspace-tool-bar');
       await expect(bar).toBeVisible();
 
-      // Contextual direct chrome stays bounded at every viewport instead of
-      // rendering one permanent slot per registered capability.
+      // Capsule V2 (#1347): Workspace capsule shows ALL capabilities (scrollable).
+      // All capabilities with workspace view bindings are directly visible.
       const nav = page.getByRole('navigation', { name: 'Workspace capabilities' });
-      const direct = nav.locator('button[data-testid^="workspace-tool-"]');
-      expect(await direct.count()).toBeGreaterThan(0);
-      expect(await direct.count()).toBeLessThanOrEqual(2);
+      const allCaps = nav.locator('button[data-testid^="workspace-tool-"]');
+      expect(await allCaps.count()).toBeGreaterThan(0);
 
-      for (let i = 0; i < (await direct.count()); i += 1) {
-        await expect(direct.nth(i)).toBeVisible();
-        await expectSingleLine(direct.nth(i), optsFor(PATTERN_WORKSPACE_NAV, 'web', row.id));
-        await expectVisibleWithin(direct.nth(i), bar, optsFor(PATTERN_WORKSPACE_NAV, 'web', row.id));
+      for (let i = 0; i < (await allCaps.count()); i += 1) {
+        await expect(allCaps.nth(i)).toBeVisible();
+        await expectSingleLine(allCaps.nth(i), optsFor(PATTERN_WORKSPACE_NAV, 'web', row.id));
+        await expectVisibleWithin(allCaps.nth(i), bar, optsFor(PATTERN_WORKSPACE_NAV, 'web', row.id));
       }
 
-      const more = page.getByTestId('workspace-capability-more');
-      await expect(more).toBeVisible();
-      await expectSingleLine(more, optsFor(PATTERN_WORKSPACE_NAV, 'web', row.id));
-      await expectVisibleWithin(more, bar, optsFor(PATTERN_WORKSPACE_NAV, 'web', row.id));
+      const capsule = page.getByTestId('workspace-capability-capsule');
+      await expect(capsule).toBeVisible();
+      await expectSingleLine(capsule, optsFor(PATTERN_WORKSPACE_NAV, 'web', row.id));
+      await expectVisibleWithin(capsule, bar, optsFor(PATTERN_WORKSPACE_NAV, 'web', row.id));
 
-      await assertPopupMenu(page, 'web', row.id, more);
+      // The capsule is a scrollable container showing all capabilities.
     });
 
     test('terminal capsule controls hold the control token height', async ({ page }) => {
@@ -223,7 +222,7 @@ for (const row of viewports.filter((v) => v.experience === 'app')) {
   test.describe(`${row.id} ${row.width}×${row.height}`, () => {
     test.use({ viewport: { width: row.width, height: row.height } });
 
-    test('workspace direct chrome stays bounded and disclosed inside the App bar', async ({ page }) => {
+    test('workspace capsule shows all capabilities in the App bar', async ({ page }) => {
       await page.goto('/#/fixture/app');
       await page.getByTestId('app-header-workspace').first().click();
       await expect(page.getByTestId('files-app-layout')).toBeVisible();
@@ -231,26 +230,26 @@ for (const row of viewports.filter((v) => v.experience === 'app')) {
       const bar = page.getByTestId('workspace-tool-bar');
       await expect(bar).toBeVisible();
 
+      // Capsule V2 (#1347): Workspace capsule shows ALL capabilities (scrollable).
       const nav = page.getByRole('navigation', { name: 'Workspace capabilities' });
-      const direct = nav.locator('button[data-testid^="workspace-tool-"]');
-      expect(await direct.count()).toBeGreaterThan(0);
-      expect(await direct.count()).toBeLessThanOrEqual(2);
+      const allCaps = nav.locator('button[data-testid^="workspace-tool-"]');
+      expect(await allCaps.count()).toBeGreaterThan(0);
 
       // The pattern declares its own App touch floor (touchTarget.compact, #730):
       // this band floats over the terminal, so it is held to 28px rather than the
       // 44px chrome default — and no lower than that.
-      for (let i = 0; i < (await direct.count()); i += 1) {
-        await expect(direct.nth(i)).toBeVisible();
-        await expectTouchTarget(direct.nth(i), optsFor(PATTERN_WORKSPACE_NAV, 'app', row.id));
-        await expectSingleLine(direct.nth(i), optsFor(PATTERN_WORKSPACE_NAV, 'app', row.id));
-        await expectVisibleWithin(direct.nth(i), bar, optsFor(PATTERN_WORKSPACE_NAV, 'app', row.id));
+      for (let i = 0; i < (await allCaps.count()); i += 1) {
+        await expect(allCaps.nth(i)).toBeVisible();
+        await expectTouchTarget(allCaps.nth(i), optsFor(PATTERN_WORKSPACE_NAV, 'app', row.id));
+        await expectSingleLine(allCaps.nth(i), optsFor(PATTERN_WORKSPACE_NAV, 'app', row.id));
+        await expectVisibleWithin(allCaps.nth(i), bar, optsFor(PATTERN_WORKSPACE_NAV, 'app', row.id));
       }
 
-      const more = page.getByTestId('workspace-capability-more');
-      await expect(more).toBeVisible();
-      await expectTouchTarget(more, optsFor(PATTERN_WORKSPACE_NAV, 'app', row.id));
-      await expectSingleLine(more, optsFor(PATTERN_WORKSPACE_NAV, 'app', row.id));
-      await expectVisibleWithin(more, bar, optsFor(PATTERN_WORKSPACE_NAV, 'app', row.id));
+      const capsule = page.getByTestId('workspace-capability-capsule');
+      await expect(capsule).toBeVisible();
+      await expectTouchTarget(capsule, optsFor(PATTERN_WORKSPACE_NAV, 'app', row.id));
+      await expectSingleLine(capsule, optsFor(PATTERN_WORKSPACE_NAV, 'app', row.id));
+      await expectVisibleWithin(capsule, bar, optsFor(PATTERN_WORKSPACE_NAV, 'app', row.id));
     });
 
     test('session rows meet the App touch target and stay clipped', async ({ page }) => {

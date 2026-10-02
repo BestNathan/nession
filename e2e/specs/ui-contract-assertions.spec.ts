@@ -299,30 +299,28 @@ test.describe('real fixture surfaces satisfy their contracts', () => {
     expect(await workSurfaceOverhang(page)).toBeLessThanOrEqual(0);
   });
 
-  test('web: workspace direct chrome is bounded and inside the tool bar', async ({ page }) => {
+  test('web: workspace capsule shows all capabilities and is inside the tool bar', async ({ page }) => {
     await page.goto('/#/fixture/workspace');
     const bar = page.getByTestId('workspace-tool-bar');
     await expect(bar).toBeVisible();
 
-    // Direct chrome is contextual and bounded: the fixture opens on Files, so
-    // Files is the only direct entry. Capability registration must not grow
-    // direct chrome 1:1 with the registry.
+    // Capsule V2 (#1347): Workspace capsule shows ALL capabilities (scrollable).
+    // All capabilities with workspace view bindings are directly visible.
     const nav = page.getByRole('navigation', { name: 'Workspace capabilities' });
-    const direct = nav.locator('button[data-testid^="workspace-tool-"]');
-    expect(await direct.count()).toBeGreaterThan(0);
-    expect(await direct.count()).toBeLessThanOrEqual(2);
+    const allCaps = nav.locator('button[data-testid^="workspace-tool-"]');
+    expect(await allCaps.count()).toBeGreaterThan(0);
 
-    for (let i = 0; i < (await direct.count()); i += 1) {
-      await expect(direct.nth(i)).toBeVisible();
-      await expectSingleLine(direct.nth(i), WEB);
-      await expectVisibleWithin(direct.nth(i), bar, WEB);
+    for (let i = 0; i < (await allCaps.count()); i += 1) {
+      await expect(allCaps.nth(i)).toBeVisible();
+      await expectSingleLine(allCaps.nth(i), WEB);
+      await expectVisibleWithin(allCaps.nth(i), bar, WEB);
     }
 
-    // More is the disclosure path and shares the same bar contract.
-    const more = page.getByTestId('workspace-capability-more');
-    await expect(more).toBeVisible();
-    await expectSingleLine(more, WEB);
-    await expectVisibleWithin(more, bar, WEB);
+    // Capsule V2: the capsule is the scrollable container, not a disclosure trigger.
+    const capsule = page.getByTestId('workspace-capability-capsule');
+    await expect(capsule).toBeVisible();
+    await expectSingleLine(capsule, WEB);
+    await expectVisibleWithin(capsule, bar, WEB);
   });
 
   test('web: capability presence follows what the session was seen running', async ({ page }) => {
@@ -344,20 +342,23 @@ test.describe('real fixture surfaces satisfy their contracts', () => {
     await expectSingleLine(ran, WEB);
     await expectVisibleWithin(ran, bar, WEB);
 
-    // Presence is earned, not granted: a session that never ran it keeps the
-    // capability out of direct chrome — and out of the bar entirely.
+    // Capsule V2 (#1347): ALL capabilities are shown in the scrollable capsule,
+    // regardless of whether the session has run them. The capsule is the
+    // discovery path — no disclosure menu, everything is directly visible.
     await page.goto('/#/fixture/workspace');
-    await expect(page.getByTestId('workspace-tool-claude-code')).toHaveCount(0);
+    await expect(page.getByTestId('workspace-tool-claude-code')).toBeVisible();
   });
 
-  test('web: earning presence does not grow direct chrome past its bound', async ({ page }) => {
+  test('web: all capabilities are visible in the scrollable capsule', async ({ page }) => {
     await page.goto('/#/fixture/workspace?pane=claude.exe');
 
+    // Capsule V2 (#1347): no bound on direct chrome — all capabilities are
+    // shown in the scrollable capsule.
     const nav = page.getByRole('navigation', { name: 'Workspace capabilities' });
-    const direct = nav.locator('button[data-testid^="workspace-tool-"]');
-    expect(await direct.count()).toBeLessThanOrEqual(2);
-    // The ones that did not fit are disclosed, not dropped.
-    await expect(page.getByTestId('workspace-capability-more')).toBeVisible();
+    const allCaps = nav.locator('button[data-testid^="workspace-tool-"]');
+    expect(await allCaps.count()).toBeGreaterThan(0);
+    // All capabilities are visible in the capsule, not disclosed.
+    await expect(page.getByTestId('workspace-capability-capsule')).toBeVisible();
   });
 });
 

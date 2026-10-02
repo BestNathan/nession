@@ -9,6 +9,7 @@ import type {
   CapsuleExperience,
 } from '@/product/terminal/capsule/types';
 import { useTerminalOrchestration } from '@/product/terminal/useTerminalOrchestration';
+import type { ResolvedWorkContext } from '@/product/terminal/capsule/workAwareness';
 
 export interface TerminalRegionProps {
   hidden: boolean;
@@ -21,6 +22,8 @@ export interface TerminalRegionProps {
   onOpenWorkspaceFile?: (path: string, line?: number) => void;
   /** The shell's surface-navigation action beside the capsule (#1204). */
   surfaceAction?: ReactNode;
+  /** Work-awareness context (#1347): whether any capability is working. */
+  workContext?: ResolvedWorkContext;
 }
 
 /**
@@ -35,6 +38,7 @@ export function TerminalRegion({
   capsuleProjection,
   onOpenWorkspaceFile,
   surfaceAction,
+  workContext,
 }: TerminalRegionProps) {
   const {
     sessionId,
@@ -73,6 +77,7 @@ export function TerminalRegion({
           }}
           inputDrop={inputDrop}
           onDismissInputDrop={dismissInputDrop}
+          workContext={workContext}
         >
           <TerminalPane
             sessionId={sessionId}

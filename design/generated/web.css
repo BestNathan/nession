@@ -13,6 +13,7 @@
   --secondary-foreground: oklch(0.2636 0.0063 258.359);
   --muted: oklch(0.9519 0.0013 106.424);
   --muted-foreground: oklch(0.553 0.0118 261.773);
+  --disabled-foreground: oklch(0.648 0.009 265);
   --text-secondary: oklch(0.4571 0.01 271.194);
   --surface: oklch(0.9782 0.0034 247.858);
   --accent: oklch(0.9519 0.0013 106.424);
@@ -212,6 +213,17 @@
   --motion-shell-duration: 180ms;
   --motion-shell-ease: cubic-bezier(0.2, 0, 0, 1);
   --dock-target: 32px;
+  --conversation-row-gap: 8px;
+  --conversation-row-gap-expanded: 16px;
+  --conversation-response-gap: 16px;
+  --conversation-turn-gap: 16px;
+  --conversation-process-to-answer-gap: 8px;
+  --conversation-group-title-gap: 16px;
+  --conversation-group-max-height: min(400px, 50vh);
+  --conversation-group-fade: 24px;
+  --conversation-reading-column-max: 720px;
+  --conversation-bubble-max-width: 70%;
+  --conversation-fold-control-height: 32px;
   --workspace-tree-width: 208px;
   --workspace-tree-font-size: 12.5px;
   --workspace-tree-row-radius: 5px;
@@ -243,6 +255,7 @@
   --secondary-foreground: oklch(0.93 0.006 265);
   --muted: oklch(0.245 0.013 265);
   --muted-foreground: oklch(0.625 0.015 265);
+  --disabled-foreground: oklch(0.48 0.016 265);
   --text-secondary: oklch(0.755 0.012 265);
   --surface: oklch(0.205 0.011 265);
   --accent: oklch(0.245 0.013 265);
@@ -339,6 +352,7 @@
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
+  --color-disabled-foreground: var(--disabled-foreground);
   --color-text-secondary: var(--text-secondary);
   --color-surface: var(--surface);
   --color-accent: var(--accent);
@@ -599,6 +613,8 @@
   --terminal-capsule-projection-mark-width: 0.75rem;
   --motion-terminal-capsule: 280ms cubic-bezier(0.22, 1, 0.36, 1);
   --dock-target: 28px;
+  --conversation-bubble-max-width: 82%;
+  --conversation-group-max-height: min(320px, 42vh);
   --workspace-tree-font-size: 13px;
   --workspace-list-row-title-font-size: 16px;
   --workspace-editor-head-font-size: 13px;
