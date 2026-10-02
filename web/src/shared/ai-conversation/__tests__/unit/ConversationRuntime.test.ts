@@ -40,7 +40,8 @@ describe('ConversationRuntime — opening', () => {
     expect(snapshot.bindingId).toBe('c1')
     expect(snapshot.openId).toBe('c1')
     expect(snapshot.listState).toBe('ready')
-    expect(snapshot.loading).toBe(false)
+    expect(snapshot.listLoading).toBe(false)
+    expect(snapshot.threadLoading).toBe(false)
     expect(ids(runtime)).toEqual(['m3', 'm4', 'm5'])
   })
 
@@ -211,7 +212,7 @@ describe('ConversationRuntime — paging', () => {
     expect(ids(runtime)).toEqual(['m3', 'm4', 'm5'])
     expect(snapshot.olderError).toBe('the page could not be read')
     expect(snapshot.loadingOlder).toBe(false)
-    expect(snapshot.error).toBeNull()
+    expect(snapshot.threadError).toBeNull()
   })
 
   it('does not let a refresh drop an older page that is still arriving', async () => {
@@ -390,7 +391,7 @@ describe('ConversationRuntime — state the surface draws', () => {
     expect(snapshot.openId).toBe('c1')
     expect(snapshot.conversation).toBeNull()
     expect(snapshot.items).toEqual([])
-    expect(snapshot.loading).toBe(false)
+    expect(snapshot.threadLoading).toBe(false)
   })
 
   it('reports a read failure as an error, not as an empty conversation', async () => {
@@ -398,7 +399,7 @@ describe('ConversationRuntime — state the surface draws', () => {
     runtime.setContext('a:s1')
     await flush()
 
-    expect(runtime.getSnapshot().error).toBe('The conversation could not be read')
+    expect(runtime.getSnapshot().threadError).toBe('The conversation could not be read')
   })
 
   it('carries a partial tail and the skipped count through', async () => {
