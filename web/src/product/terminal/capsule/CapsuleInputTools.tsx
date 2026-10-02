@@ -104,7 +104,7 @@ function CapsuleCapabilityMore({ disclosure, workContext }: {
           open={workOverviewOpen}
           onOpenChange={setWorkOverviewOpen}
           workContext={workContext}
-          onSelectCapability={disclosure.onSelect}
+          onSelectCapability={disclosure.onSelectAtPeek ?? disclosure.onSelect}
         />
       )}
     </>

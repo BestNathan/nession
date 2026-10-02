@@ -52,6 +52,13 @@ export {
 export interface CapsuleCapabilityDisclosure {
   entries: readonly CapabilityDisclosureEntry[];
   onSelect: (id: CapabilityId) => void;
+  /**
+   * Select at Peek depth (#1347 SC-20), supplied when the caller can open a
+   * projection directly. The Work Overview prefers it over `onSelect`, which
+   * opens the Signal depth instead. Optional so a disclosure built where no
+   * projection path exists stays valid.
+   */
+  onSelectAtPeek?: (id: CapabilityId) => void;
 }
 
 export interface CapsuleCapabilityPresence {
