@@ -82,7 +82,11 @@ export function buildAcceptanceContext(issue, stage, options = {}) {
     stage: normalizedStage,
     contract_sha256: contractDigest(contract),
     run_id: runId,
-    target_ref: String(options.targetRef ?? '').trim(),
+    target_ref: (() => {
+      const ref = String(options.targetRef ?? '').trim();
+      if (!ref) throw new Error('target_ref is required');
+      return ref;
+    })(),
     deployment: options.deployment ? String(options.deployment).trim() : null,
     criteria,
     requirement_body: String(issue.body ?? ''),
@@ -263,7 +267,12 @@ export function applyAcceptanceResultToBody(body, normalized) {
   return updated;
 }
 
+function labelNames(issue) {
+  return (issue.labels ?? []).map((label) => typeof label === 'string' ? label : label?.name).filter(Boolean);
+}
+
 function fetchIssue(issueNumber) {
+  if (!Number.isSafeInteger(Number(issueNumber)) || Number(issueNumber) <= 0) throw new Error('issue number must be a positive integer');
   const repo = process.env.GITHUB_REPOSITORY;
   if (!repo) throw new Error('GITHUB_REPOSITORY is required');
   const raw = execFileSync(
@@ -274,14 +283,10 @@ function fetchIssue(issueNumber) {
   return JSON.parse(raw);
 }
 
-function writeJson(file, value) {
-  fs.mkdirSync(new URL('.', 'file://' + file).pathname, { recursive: true });
-  fs.writeFileSync(file, JSON.stringify(value, null, 2) + '\n');
-}
-
 function prepareCommand(issueNumber, stage, targetRef, outFile, deployment) {
   const issue = fetchIssue(issueNumber);
   if (String(issue.state).toUpperCase() !== 'OPEN') throw new Error('requirement #' + issueNumber + ' is not open');
+  if (!labelNames(issue).includes('requirement')) throw new Error('issue #' + issueNumber + ' is not labeled requirement');
   const context = buildAcceptanceContext(issue, stage, {
     targetRef,
     deployment,
@@ -300,6 +305,7 @@ function normalizeCommand(contextFile, rawFile, outFile, source) {
 
 function applyCommand(issueNumber, resultFile) {
   const issue = fetchIssue(issueNumber);
+  if (!labelNames(issue).includes('requirement')) throw new Error('issue #' + issueNumber + ' is not labeled requirement');
   const normalized = JSON.parse(fs.readFileSync(resultFile, 'utf8'));
   if (Number(normalized.issue) !== Number(issueNumber)) throw new Error('result targets issue #' + normalized.issue + ', not #' + issueNumber);
   const updated = applyAcceptanceResultToBody(issue.body, normalized);
