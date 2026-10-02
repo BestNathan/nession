@@ -145,10 +145,16 @@ export const tableCases: MarkdownTestCase[] = [
     markdown: '| Code | Description |\n|------|-------------|\n| `fn` | Function    |',
     description: 'Table with inline code',
   },
+  {
+    name: 'table-partial-header',
+    markdown: '| Header 1 | Header 2 |\n|---',
+    description: 'A table whose delimiter row is still arriving renders literally',
+  },
 ];
 
 /**
- * Math: inline and display math with KaTeX.
+ * Math: inline and display math with KaTeX, plus the malformed shapes that
+ * must stay literal rather than flashing a KaTeX error.
  */
 export const mathCases: MarkdownTestCase[] = [
   {
@@ -158,13 +164,107 @@ export const mathCases: MarkdownTestCase[] = [
   },
   {
     name: 'display-math',
+    // Multi-line on purpose: the delimiters on their own lines are the
+    // canonical display form, and they are what walks the flow tokenizer's
+    // line-continuation arm (`\[ ... \]` on one line never reaches it).
+    markdown: 'The equation:\n\n\\[\nx = \\frac{-b \\pm \\sqrt{b^2-4ac}}{2a}\n\\]',
+    description: 'Display math with \\[\\] delimiters on their own lines',
+  },
+  {
+    name: 'display-math-inline-block',
     markdown: 'The equation:\n\n\\[x = \\frac{-b \\pm \\sqrt{b^2-4ac}}{2a}\\]',
-    description: 'Display math with \\[\\] delimiters',
+    description: 'Display math with \\[\\] delimiters on one line',
   },
   {
     name: 'display-math-dollars',
     markdown: '$$\nx^2 + y^2 = z^2\n$$',
     description: 'Display math with $$ delimiters',
+  },
+  {
+    name: 'unclosed-inline-math',
+    markdown: 'This \\(a + b never closes.',
+    description: 'Unclosed \\( — stays literal text, never a KaTeX error',
+  },
+  {
+    name: 'display-math-unterminated-at-eof',
+    markdown: '$$\nx^2 + y^2 = z^2\n',
+    description: 'An unterminated $$ closes at end of document (fence semantics)',
+  },
+];
+
+/**
+ * Tilde in prose: shell paths, durations and ranges are not strikethrough.
+ * Only the explicit double tilde is (#1184 SC-09).
+ */
+export const tildeCases: MarkdownTestCase[] = [
+  {
+    name: 'tilde-dotfile-paths',
+    markdown: 'The settings live in ~/.claude and ~/.config on this machine.',
+    description: 'Dotfile paths with a single tilde are not strikethrough',
+  },
+  {
+    name: 'tilde-duration-and-range',
+    markdown: 'It finished in ~10ms, and 60~70% of the runs passed.',
+    description: 'Approximation and range tildes are not strikethrough',
+  },
+  {
+    name: 'tilde-explicit-strikethrough',
+    markdown: 'This sentence is ~~struck through~~ on purpose.',
+    description: 'The explicit double tilde still strikes through',
+  },
+];
+
+/**
+ * Raw HTML: assistant-authored tags are literal text, never executed and
+ * never silently dropped (#1184 SC-10, decision 7).
+ */
+export const htmlCases: MarkdownTestCase[] = [
+  {
+    name: 'html-tool-call',
+    markdown: '<tool_call>\n{"name": "Read", "path": "web/src/App.tsx"}\n</tool_call>',
+    description: 'XML-like tool tag stays literal text',
+  },
+  {
+    name: 'html-analysis-details',
+    markdown: '<analysis>thinking out loud</analysis>\n\n<details>more</details>',
+    description: 'Reasoning-style tags stay literal text',
+  },
+  {
+    name: 'html-raw-table',
+    markdown: '<table><tr><td>cell</td></tr></table>',
+    description: 'A raw HTML table stays literal, not a rendered table',
+  },
+  {
+    name: 'html-script',
+    markdown: 'Before <script>alert(1)</script> after.',
+    description: 'Script tags render as text and never execute',
+  },
+];
+
+/**
+ * Reference links and footnotes: settled rendering resolves the definitions
+ * the document declares (#1184 SC-14).
+ */
+export const referenceCases: MarkdownTestCase[] = [
+  {
+    name: 'link-reference-resolved',
+    markdown: 'See the [stream replay notes][notes] for the shape.\n\n[notes]: https://example.com/nession',
+    description: 'A defined reference renders as its link',
+  },
+  {
+    name: 'link-reference-missing',
+    markdown: 'See the [stream replay notes][missing] for the shape.',
+    description: 'An undefined reference stays literal text, not an anchor',
+  },
+  {
+    name: 'footnote-resolved',
+    markdown: 'The observer path has no test.[^observer]\n\n[^observer]: Only the attach path is covered.',
+    description: 'A footnote renders a reference and a trailing section',
+  },
+  {
+    name: 'footnote-missing-definition',
+    markdown: 'The observer path has no test.[^missing]',
+    description: 'A footnote call with no definition anywhere stays literal text',
   },
 ];
 
@@ -191,6 +291,16 @@ export const cjkCases: MarkdownTestCase[] = [
     name: 'cjk-mixed',
     markdown: 'Mixed: English and 中文 and 日本語 and 한국어',
     description: 'Mixed CJK and Latin text',
+  },
+  {
+    name: 'cjk-strong-after-punctuation',
+    markdown: '中文**重点。**下一句',
+    description: '#1184 corpus: strong closes after a full-width period',
+  },
+  {
+    name: 'cjk-strong-mid-sentence',
+    markdown: '中文**重点**继续',
+    description: '#1184 corpus: strong between CJK with no surrounding whitespace',
   },
 ];
 
@@ -298,6 +408,9 @@ export const allCases: MarkdownTestCase[] = [
   ...blockCases,
   ...tableCases,
   ...mathCases,
+  ...tildeCases,
+  ...htmlCases,
+  ...referenceCases,
   ...cjkCases,
   ...envVarCases,
   ...openFenceCases,

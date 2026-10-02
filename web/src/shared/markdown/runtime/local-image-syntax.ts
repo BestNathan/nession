@@ -1,4 +1,15 @@
-/** Recover standalone local image references with bare spaces without changing code or source offsets. */
+/**
+ * Recover standalone local image references with bare spaces without changing
+ * code or source offsets.
+ *
+ * Upstream: https://github.com/deepseek-ai/deepseek-harness
+ * Baseline: 21638c56315ae6a2b552d6091945d3144c9af32e
+ * Source: packages/client/ui-primitives/src/markdown/local-image-syntax.ts
+ * License: MIT (see THIRD_PARTY_NOTICES.md)
+ * Adaptation: Adopted and simplified — no `dsh-app://` product vocabulary;
+ * recovered destinations go through Nession's own remote-URL allowlist at
+ * render time and otherwise stay inert alt text.
+ */
 import type { Root, RootContent, PhrasingContent } from 'mdast'
 
 /**

@@ -1,4 +1,15 @@
-/** Extend upstream dollar-only math syntax with TeX delimiters while reusing its token vocabulary. */
+/**
+ * Extend upstream dollar-only math syntax with TeX delimiters while reusing
+ * its token vocabulary.
+ *
+ * Upstream: https://github.com/deepseek-ai/deepseek-harness
+ * Baseline: 21638c56315ae6a2b552d6091945d3144c9af32e
+ * Source: packages/client/ui-primitives/src/markdown/mathCompatibility.ts
+ * License: MIT (see THIRD_PARTY_NOTICES.md)
+ * Adaptation: Adopted; brace style and import extensions only. Note the
+ * single-dollar split lives in the caller's `math()` options, not here — this
+ * extension adds `\(...\)`, `\[...\]` and same-line `$$...$$`.
+ */
 
 import { factorySpace } from 'micromark-factory-space'
 import type {} from 'micromark-extension-math'
@@ -284,6 +295,16 @@ function createMathFlow(marker: number, openMarker: number, closeMarker: number,
 }
 
 const tokenizeNonLazyContinuation: Tokenizer = function (effects, ok, nok) {
+  // Declared *before* `return start`, and that position is load-bearing: the
+  // `return` exits the tokenizer body, so an initializer written after it
+  // never runs and the state `start` returns stays in its temporal dead zone.
+  // A `const lineStart` below the return made every multi-line `\[...\]`
+  // block throw `Cannot access 'lineStart' before initialization` (#1184
+  // browser verification); the arrow keeps `this` as the tokenizer's context.
+  const lineStart = (code: number | null): State | undefined => {
+    return this.parser.lazy[this.now().line] ? nok(code) : ok(code)
+  }
+
   return start
 
   function start(code: number | null): State | undefined {
@@ -295,10 +316,6 @@ const tokenizeNonLazyContinuation: Tokenizer = function (effects, ok, nok) {
     effects.consume(code)
     effects.exit(types.lineEnding)
     return lineStart
-  }
-
-  const lineStart = (code: number | null): State | undefined => {
-    return this.parser.lazy[this.now().line] ? nok(code) : ok(code)
   }
 }
 

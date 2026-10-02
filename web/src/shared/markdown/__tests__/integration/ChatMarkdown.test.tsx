@@ -17,6 +17,9 @@ import {
   blockCases,
   tableCases,
   mathCases,
+  tildeCases,
+  htmlCases,
+  referenceCases,
   cjkCases,
   envVarCases,
   openFenceCases,
@@ -115,6 +118,13 @@ describe('ChatMarkdown fixture tests', () => {
     for (const testCase of tableCases) {
       it(testCase.name, () => {
         const container = renderCase(testCase);
+        if (testCase.name === 'table-partial-header') {
+          // The delimiter row has not arrived: not a table yet, and not an
+          // error either — the source stays visible until it completes.
+          expect(container.querySelector('table')).not.toBeInTheDocument();
+          expect(container.textContent).toContain('| Header 1 | Header 2 |');
+          return;
+        }
         // Verify table elements are present
         expect(container.querySelector('table')).toBeInTheDocument();
         expect(container.querySelectorAll('th').length).toBeGreaterThan(0);
@@ -127,13 +137,101 @@ describe('ChatMarkdown fixture tests', () => {
     for (const testCase of mathCases) {
       it(testCase.name, () => {
         const container = renderCase(testCase);
-        // Verify KaTeX elements are present
-        expect(container.querySelector('.katex')).toBeInTheDocument();
+        // A complete construct renders through KaTeX; an unterminated inline
+        // `\(` stays literal rather than flashing anything. A `$$` block
+        // unterminated at end of document closes there — fence semantics, and
+        // the settled result is authoritative.
+        const literalOnly = testCase.name === 'unclosed-inline-math';
+        expect(container.querySelectorAll('.katex').length > 0).toBe(!literalOnly);
+        expect(container.querySelector('.katex-error')).not.toBeInTheDocument();
       });
     }
   });
 
-  describe('CJK text', () => {
+  describe('tilde in prose (#1184 SC-09)', () => {
+    for (const testCase of tildeCases) {
+      it(testCase.name, () => {
+        const container = renderCase(testCase);
+        const struckThrough = testCase.markdown.includes('~~');
+        // ~/.claude, ~10ms and 60~70% must never become struck-through text;
+        // the explicit double tilde still does.
+        expect(container.querySelectorAll('del').length > 0).toBe(struckThrough);
+      });
+    }
+  });
+
+  describe('raw HTML is literal text (#1184 SC-10)', () => {
+    for (const testCase of htmlCases) {
+      it(testCase.name, () => {
+        const container = renderCase(testCase);
+        // The tag's own markup is visible as text …
+        expect(container.textContent).toContain('<');
+        // … and no element was created for it, so nothing executed.
+        expect(container.querySelector('script')).not.toBeInTheDocument();
+        expect(container.querySelector('details')).not.toBeInTheDocument();
+        expect(container.querySelector('tool_call')).not.toBeInTheDocument();
+        // A raw <table> is not the GFM table renderer's output either.
+        if (testCase.name === 'html-raw-table') {
+          expect(container.querySelector('table')).not.toBeInTheDocument();
+        }
+      });
+    }
+  });
+
+  describe('references and footnotes (#1184 SC-14)', () => {
+    for (const testCase of referenceCases) {
+      it(testCase.name, () => {
+        const container = renderCase(testCase);
+        if (testCase.name === 'link-reference-resolved') {
+          const anchor = container.querySelector('a[href="https://example.com/nession"]');
+          expect(anchor).toBeInTheDocument();
+          expect(anchor).toHaveTextContent('stream replay notes');
+        }
+        if (testCase.name === 'link-reference-missing') {
+          // Unresolved: literal bracketed source text, and nothing clickable.
+          expect(container.querySelector('a')).not.toBeInTheDocument();
+          expect(container.textContent).toContain('[stream replay notes][missing]');
+        }
+        if (testCase.name === 'footnote-resolved') {
+          const reference = container.querySelector('sup a');
+          expect(reference).toHaveTextContent('[1]');
+          const section = container.querySelector('[data-footnotes]');
+          expect(section).toBeInTheDocument();
+          expect(section).toHaveTextContent('Only the attach path is covered.');
+        }
+        if (testCase.name === 'footnote-missing-definition') {
+          // The grammar only emits a footnote call when the document defines
+          // it, so an undefined one never becomes a number or a section.
+          expect(container.querySelector('sup')).not.toBeInTheDocument();
+          expect(container.textContent).toContain('[^missing]');
+          expect(container.querySelector('[data-footnotes]')).not.toBeInTheDocument();
+        }
+      });
+    }
+  });
+
+  describe('links degrade rather than promise (#1184 security)', () => {
+    it('renders a relative destination as text, not an empty-href anchor', () => {
+      const container = renderCase({ name: 'relative', markdown: 'See [the page](/path/to/page) for more.' });
+      expect(container.textContent).toContain('the page');
+      expect(container.querySelector('a')).not.toBeInTheDocument();
+    });
+
+    it('renders a local file destination as text', () => {
+      const container = renderCase({ name: 'local', markdown: 'Open [the module](web/src/App.tsx) please.' });
+      expect(container.textContent).toContain('the module');
+      expect(container.querySelector('a')).not.toBeInTheDocument();
+    });
+
+    it('keeps http(s) destinations clickable', () => {
+      const container = renderCase({ name: 'external', markdown: 'Read [the docs](https://example.com/docs).' });
+      const anchor = container.querySelector('a[href="https://example.com/docs"]');
+      expect(anchor).toBeInTheDocument();
+      expect(anchor).toHaveAttribute('target', '_blank');
+    });
+  });
+
+  describe('CJK text (#1184 SC-07)', () => {
     for (const testCase of cjkCases) {
       it(testCase.name, () => {
         const container = renderCase(testCase);
@@ -141,7 +239,19 @@ describe('ChatMarkdown fixture tests', () => {
         expect(container.textContent).toBeTruthy();
         // Verify emphasis and code are present
         if (testCase.markdown.includes('**')) {
-          expect(container.querySelector('strong')).toBeInTheDocument();
+          const strong = container.querySelector('strong');
+          expect(strong).toBeInTheDocument();
+          // The strong run must close where the author closed it — a
+          // CJK-friendly grammar that swallowed the following sentence would
+          // still produce a <strong> element.
+          if (testCase.name === 'cjk-strong-after-punctuation') {
+            expect(strong).toHaveTextContent('重点。');
+            expect(container.textContent).not.toContain('**');
+          }
+          if (testCase.name === 'cjk-strong-mid-sentence') {
+            expect(strong).toHaveTextContent('重点');
+            expect(container.textContent).not.toContain('**');
+          }
         }
         if (testCase.markdown.includes('`')) {
           expect(container.querySelector('code')).toBeInTheDocument();
@@ -150,14 +260,20 @@ describe('ChatMarkdown fixture tests', () => {
     }
   });
 
-  describe('environment variables', () => {
+  describe('environment variables (#1184 SC-08)', () => {
     for (const testCase of envVarCases) {
       it(testCase.name, () => {
         const container = renderCase(testCase);
-        // Note: Single $ is currently parsed as math (known limitation).
-        // This will be fixed in a future phase to treat $HOME, $PATH, $100 as plain text.
-        // For now, we just verify the content renders without errors.
-        expect(container.querySelector('.markdown')).toBeInTheDocument();
+        // Single dollars are prose, never formulae — the whole point of
+        // turning single-dollar text math off in the Chat profile.
+        expect(container.querySelector('.katex')).not.toBeInTheDocument();
+
+        if (testCase.name === 'env-var-dollar-amount') {
+          expect(container.textContent).toContain('The cost is $100 and $200.');
+        }
+        if (testCase.name === 'env-var-home') {
+          expect(container.textContent).toContain('$HOME');
+        }
 
         // Shell commands with code blocks should render the code block
         if (testCase.name.includes('shell-command')) {
