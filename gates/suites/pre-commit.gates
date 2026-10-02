@@ -1,0 +1,13 @@
+# pre-commit
+# Gate IDs only. Not wired into current hooks/workflows yet.
+dev-workspace-commit
+rust-format
+rust-clippy
+rust-test-unit
+test-isolation
+tmux-socket-isolation
+protocol-integrity
+design-system-fast
+web-eslint
+web-typecheck
+web-test-unit

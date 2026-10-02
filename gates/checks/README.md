@@ -1,12 +1,7 @@
 # Gate checks
 
-Concrete repository Gates live here.
+Concrete Gates live here: `<gate-id> -> gates/checks/<gate-id>.sh`.
 
-Each executable is named exactly from its stable Gate ID:
+The filename stem and declared `GATE_ID` must match exactly. Independently routable checks with different failure/repair semantics use different IDs.
 
-\`\`\`text
-<gate-id> -> gates/checks/<gate-id>.sh
-\`\`\`
-
-Runner logic, suite configuration, diagnostics, and unrelated helper scripts do
-not belong in this directory.
+Use `../run --list`, `../run --describe <id>`, and `../run --validate`. Routing and suite composition do not belong here.

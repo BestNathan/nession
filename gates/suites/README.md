@@ -1,14 +1,7 @@
 # Gate suites
 
-A suite is an ordered list of stable Gate IDs consumed by \`gates/run --suite\`.
+A suite is an ordered list of stable Gate IDs, one per non-comment line.
 
-\`\`\`text
-gates/suites/<suite-name>.gates
-\`\`\`
+Use `./gates/run --suite <name>` or `./gates/run --list-suites`.
 
-Each non-comment line is exactly one Gate ID. Suites contain no commands,
-metadata, repair text, or changed-file conditions.
-
-Production suites are intentionally not declared until the referenced Gate
-adapters exist; otherwise configuration would claim enforcement that is not yet
-real.
+Suites contain no commands, repair text, changed-file conditions, secrets, or environment setup. They are parallel configuration for future cutover; current hooks/workflows do not consume them yet.

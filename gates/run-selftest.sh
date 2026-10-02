@@ -59,6 +59,12 @@ capture() {
   [ "$status" -eq "$expected" ] || fail "expected exit ${expected}, got ${status}; output: $(cat "$outfile")"
 }
 
+capture 0 "$TMP_DIR/validate.out" "$TMP_DIR/repo/gates/run" --validate
+assert_contains "$TMP_DIR/validate.out" '✓ gate catalog: 3 gates, 1 suites'
+
+capture 0 "$TMP_DIR/suites.out" "$TMP_DIR/repo/gates/run" --list-suites
+assert_contains "$TMP_DIR/suites.out" 'sample'
+
 capture 1 "$TMP_DIR/suite.out" "$TMP_DIR/repo/gates/run" --suite sample
 assert_contains "$TMP_DIR/suite.out" '✓ alpha'
 assert_contains "$TMP_DIR/suite.out" '✗ beta'
