@@ -92,6 +92,12 @@ export function CapabilityCapsule({
 
           const Icon = binding.icon;
           const isActive = item.snapshot.id === activeCapabilityId;
+          // `unavailable` is the one state the reader cannot act from. It keeps
+          // its slot — membership must not change under them as the work
+          // changes — and is drawn inert instead: `disabled-foreground` is the
+          // role the design system defines for a control that cannot be used,
+          // held to the 3:1 that keeps it from disappearing rather than to AA.
+          const isUnavailable = item.snapshot.state === 'unavailable';
 
           return (
             <button
@@ -99,6 +105,7 @@ export function CapabilityCapsule({
               ref={isActive ? activeItemRef : undefined}
               id={`workspace-capability-${item.snapshot.id}`}
               type="button"
+              disabled={isUnavailable}
               aria-pressed={isActive}
               aria-label={item.snapshot.title}
               title={item.snapshot.title}
@@ -109,9 +116,11 @@ export function CapabilityCapsule({
               onClick={() => onSelect(item.snapshot.id)}
               className={cn(
                 'relative flex size-[length:var(--dock-target)] shrink-0 items-center justify-center rounded-[var(--radius-control)] transition-colors duration-[var(--motion-shell-duration)] ease-[var(--motion-shell-ease)]',
-                isActive
-                  ? 'text-foreground'
-                  : 'text-muted-foreground hover:text-foreground',
+                isUnavailable
+                  ? 'cursor-default text-disabled-foreground'
+                  : isActive
+                    ? 'text-foreground'
+                    : 'text-muted-foreground hover:text-foreground',
               )}
             >
               <Icon className="size-[length:var(--icon-md)]" aria-hidden />

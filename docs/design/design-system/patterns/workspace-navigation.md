@@ -12,9 +12,17 @@ It is a capability capsule in the bottom Capsule Zone, and it is not a second ap
 
 This pattern previously required that direct chrome be **bounded to the contextually-justified set**, that everything else be disclosed through a `More`/`+` menu, and it stated as a rule that *capability registration never implies permanent navigation*.
 
-**#1347 (Capsule V2) supersedes both.** The Workspace capsule now carries the capability list — every capability that has a Workspace view *and* is not `unavailable` — as one bounded, internally-scrolling horizontal row, and the `+`/menu disclosure is gone from Workspace. The contract's `overflow` moved from `menu` to `scroll` in the same change; the design-source test that pinned it moved with it.
+**#1347 (Capsule V2) supersedes both.** The Workspace capsule now carries the capability list — every capability that has a Workspace view — as one bounded, internally-scrolling horizontal row, and the `+`/menu disclosure is gone from Workspace. The contract's `overflow` moved from `menu` to `scroll` in the same change; the design-source test that pinned it moved with it.
 
-**It supersedes those two rules and no others.** The row is not a licence to advertise everything: "an unavailable capability renders no slot" is *not* part of what #1347 replaced, and it still decides the row's membership. Read the table below before concluding the capsule shows "all capabilities" — it shows all *callable* ones.
+### Membership does not vary with the work (2026-10-02, owner decision)
+
+This is a **second and separate reversal** — not part of #1347's — and it is recorded on its own because it replaces a rule this document carried for longer than Capsule V2 has existed.
+
+An `unavailable` capability (presence `hidden`) used to be **dropped**. The old rule was *"unavailable capabilities render no dead slot"*, and the anti-pattern list called a disabled entry chrome *"advertising something that cannot be opened"*. It now **keeps its slot, drawn inert** on `disabled-foreground` — the role the design system defines for a control the user cannot act with, held to the 3:1 that keeps it from disappearing rather than to AA.
+
+What changed the answer: Capsule V2 put the whole capability list in one row, so dropping a capability now means the row's **membership** changes as the work changes — an entry that vanishes and reappears is how a reader loses track of what the Workspace holds. The row now says "this exists, and you cannot use it here" rather than staying silent.
+
+**What it costs, plainly.** The retired rule was not empty: a Session with no files now shows a permanently inert Files entry. The mitigation is that it is inert and legible as such — not a live control that fails, not a silent absence — and it still carries `data-capability-state="unavailable"` for anything that needs to reason about it.
 
 What the supersession keeps, and what carries the old rules' weight instead:
 
@@ -22,7 +30,7 @@ What the supersession keeps, and what carries the old rules' weight instead:
 |---|---|
 | Direct chrome is bounded | The **capsule** is bounded: it must stay inside the tool bar while its content scrolls. The bound is on the row's width, not on the entry count. |
 | Registration never implies permanent navigation | A capability with no Workspace view contributes **no slot**. Visibility follows the view binding, not the registry. |
-| Unavailable capabilities render no dead slot | **Unchanged by #1347 — and still the row's second membership rule.** `unavailable` resolves to `hidden` presence, and `resolveCapabilityDisclosure` drops `hidden` before either bucket, so no entry is built. `WorkspaceShell.test.tsx` pins it: *does not advertise unavailable capabilities in direct chrome*. |
+| Unavailable capabilities render no dead slot | **Reversed on 2026-10-02 — see the section above.** The capability keeps its slot and is drawn inert. What survives from the old rule is its reason: the entry is *not* a live control that fails, and it is not silent either. |
 | Not a second application shell | Unchanged — the capsule is a bottom-zone control, not a sidebar and not a band above the capability. |
 
 The tradeoff, stated plainly: a Workspace with many capabilities now shows many icons in one row, and that row scrolls. The earlier design preferred a small visible set. That preference is **no longer a rule of this pattern** — the anti-patterns below were narrowed to match, and what remains forbidden is a row that *grows the shell* rather than a row that holds many entries.
@@ -35,7 +43,7 @@ Navigation should be generated from Workspace context and capability state rathe
 
 Must not:
 
-- render a slot for a capability that has no Workspace view, or for one that is `unavailable` — a dead entry advertising something that cannot be opened;
+- render a slot for a capability that has no Workspace view — there is nothing to open and nothing to explain. (An `unavailable` capability *does* keep a slot and is drawn inert — see the membership note above; the difference is that it has a view to be unavailable *in*.)
 - let the row grow the shell: the capsule's width is bounded and its content scrolls, so registering another capability never widens the chrome and never wraps the row onto a second line;
 - force Files master/detail chrome onto unrelated capabilities;
 - allow an extension to define global Workspace navigation independently of Nession;
@@ -55,7 +63,7 @@ Navigation consequences:
 
 | State | Navigation behavior |
 |-------|---------------------|
-| `unavailable` | **No slot.** Resolves to `hidden` presence, which is dropped before the row is built — see the supersession table above. The capability keeps its own not-available state for whatever opens it directly. |
+| `unavailable` | **Its slot, drawn inert and disabled.** Resolves to `hidden` presence; the surface renders it on `disabled-foreground` rather than dropping it — see the membership note above. Reached some other way it still lands on the capability's own not-available state. |
 | `available` | Its slot, carrying `available` |
 | `relevant` | The same slot, carrying `relevant` — state is data on the entry, not a promotion into or out of the row |
 | `active` | Selected state (dot) and scrolled into view; may also have Session-level presence |
@@ -245,8 +253,12 @@ WorkspaceNavigation coordinates access; it does not force these capabilities int
 - A capability strip that **grows the shell** — widening with the registry, or wrapping
   onto a second line. The failure is the growing row, not the number of entries in a
   bounded, scrolling one.
-- A slot for a capability that has no Workspace view, or a disabled entry advertising
-  something that cannot be opened.
+- A slot for a capability that has no Workspace view — nothing to open, nothing to explain.
+  (An inert entry for an `unavailable` capability is *not* this: it has a view, it says so,
+  and it is why this anti-pattern was narrowed on 2026-10-02.)
+- A disabled entry drawn as a live one — an inert control must read as inert. Its
+  treatment is `disabled-foreground` and `disabled`, never a normal entry that silently
+  does nothing when pressed.
 - One extension = one global tab.
 - A Workspace home page that is mostly a grid of feature launch cards.
 - A full-height secondary sidebar that exists only to list capabilities.
@@ -268,7 +280,7 @@ Existing components should migrate incrementally. Do not remove reliable capabil
 
 ## Acceptance for future implementation work
 
-- [ ] A capability contributes no slot when it has no Workspace view **or** when it is `unavailable`.
+- [ ] A capability with no Workspace view contributes no slot; an `unavailable` one keeps its slot, drawn inert and disabled.
 - [ ] Capability state and presence are legible from the entry without changing the row's membership.
 - [ ] Workspace root communicates context, not a global feature catalog.
 - [ ] Extensions cannot independently fragment the global navigation model.
