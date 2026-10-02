@@ -18,6 +18,7 @@ import { useExplorerFileActions } from './hooks/useExplorerFileActions';
 import { useExplorerRegistry } from './hooks/useExplorerRegistry';
 import { useExplorerStore } from './hooks/useExplorerStore';
 import { useExplorerTreeHeight } from './hooks/useExplorerTreeHeight';
+import { useWorkspaceClearancePx } from './hooks/useWorkspaceClearancePx';
 import type { ExplorerDataProvider } from './providers/types';
 import { ExplorerArboristNode } from './renderers/ExplorerArboristNode';
 import type { ExplorerNode } from './types';
@@ -110,6 +111,10 @@ export function Explorer({
   const treeRef = useRef<TreeApi<ArboristNode> | undefined>(undefined);
   const containerRef = useRef<HTMLDivElement>(null);
   const treeHeight = useExplorerTreeHeight(containerRef);
+  // #1347 SC-12: the virtualizer's trailing scroll clearance — the same
+  // published measurement the CSS class spends, in the unit a virtualized
+  // list needs (see the hook for why the class cannot reach this scroller).
+  const clearancePx = useWorkspaceClearancePx(containerRef);
   const fileActions = useExplorerFileActions({
     provider,
     store,
@@ -203,6 +208,7 @@ export function Explorer({
             data={treeData}
             width="100%"
             height={treeHeight}
+            paddingBottom={clearancePx}
             rowHeight={EXPLORER_ROW_HEIGHT}
             indent={16}
             openByDefault={false}
