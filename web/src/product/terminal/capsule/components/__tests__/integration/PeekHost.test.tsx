@@ -103,17 +103,58 @@ describe('capability projection frame', () => {
     expect(onDeeper).not.toHaveBeenCalled();
   });
 
-  it('renders no Workspace action of its own, at either depth', () => {
-    // **The inversion (#1046).** The host used to draw this as a footer on every
-    // Peek, which made every capability end on the same borrowed sentence, and
-    // it decided *for* the capability whether the action existed. It now hands
-    // the action to the body; the host drawing one at any depth is the
-    // regression this asserts against.
+  it('owns the Workspace destination: drawn at Peek, never at Signal (#1347 SC-21)', () => {
+    // **The re-inversion.** `#1046` handed the action to the body; #1347's
+    // "Peek header and Workspace destination are Nession-owned" takes the
+    // presentation back, and re-review #2 settled that #1046 is superseded on
+    // this point. The body drawing its own "Open in Workspace" is now the
+    // regression — and a Signal drawing one at all is the second: a Signal
+    // informs, the step to the action is the title's deepening.
     const { rerender } = renderFrame(projection());
     expect(screen.queryByTestId('capsule-capability-open-workspace')).toBeNull();
 
     rerender(frame(projection({ depth: 'peek' })));
+    expect(screen.getByTestId('capsule-capability-open-workspace')).toBeInTheDocument();
+  });
+
+  it('draws no destination for a capability with no Workspace view', () => {
+    // Presence is the app layer's answer (the Workspace view registry), so a
+    // capability without a view — Terminal Keys — supplies no routing and the
+    // host draws nothing.
+    renderFrame(projection({ depth: 'peek', onOpenWorkspace: undefined }));
+
     expect(screen.queryByTestId('capsule-capability-open-workspace')).toBeNull();
+  });
+
+  it('hands the destination the item the body reported', async () => {
+    // The host-held focus is what makes the handoff land on the right thing
+    // (#826): pick in the body, then the destination carries the pick.
+    const onOpenWorkspace = vi.fn();
+    renderFrame(
+      projection({
+        depth: 'peek',
+        onOpenWorkspace,
+        body: (_focus, setFocus) => (
+          <button type="button" data-testid="pick" onClick={() => setFocus('src/a.ts')}>
+            pick
+          </button>
+        ),
+      }),
+    );
+
+    await userEvent.click(screen.getByTestId('pick'));
+    await userEvent.click(screen.getByTestId('capsule-capability-open-workspace'));
+
+    expect(onOpenWorkspace).toHaveBeenCalledWith('src/a.ts');
+  });
+
+  it('the destination with no selection opens the capability landing page', async () => {
+    const onOpenWorkspace = vi.fn();
+    renderFrame(projection({ depth: 'peek', onOpenWorkspace }));
+
+    await userEvent.click(screen.getByTestId('capsule-capability-open-workspace'));
+
+    expect(onOpenWorkspace).toHaveBeenCalledWith(undefined);
   });
 
   it('hands the body an action that deepens where the body says', async () => {
@@ -170,7 +211,7 @@ describe('capability projection frame', () => {
   it('deepens at the item the body reported, when the action names none', async () => {
     // The host still owns the selection — that is what makes the transition land
     // on the right thing (#826) — and `openWorkspace()` with no argument uses it,
-    // which is what the footer used to do.
+    // which is also what the host's own destination action does.
     //
     // Two clicks, and that is not incidental: the action closes over the focus as
     // of its render, so a body that picks *and* deepens inside one handler would

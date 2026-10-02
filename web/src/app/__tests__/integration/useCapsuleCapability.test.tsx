@@ -263,6 +263,18 @@ describe('capsule emergence', () => {
     expect(onOpenWorkspace).toHaveBeenCalledWith('git', 'src/a.ts');
   });
 
+  it('supplies no Workspace destination for a capability with no Workspace view', () => {
+    // Presence is the app layer's answer — the Workspace view registry — so a
+    // capability without a view (Terminal Keys) gets no routing at all, and the
+    // host's footer is what stays undrawn (#1347 SC-21).
+    const { result, choose } = setup();
+
+    choose('terminal-keys');
+
+    expect(result.current.projection?.id).toBe('terminal-keys');
+    expect(result.current.projection?.onOpenWorkspace).toBeUndefined();
+  });
+
   it('returns to dormant when the Session changes', () => {
     // Q1's decay, and the edge case the requirement names: a projection belongs
     // to the Session that produced it.
