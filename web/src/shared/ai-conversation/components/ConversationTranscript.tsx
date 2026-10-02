@@ -18,7 +18,7 @@
  * a promise.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertCircle } from 'lucide-react'
 import {
   MessageScroller,
@@ -29,10 +29,18 @@ import {
   MessageScrollerViewport,
 } from '@/components/ui/message-scroller'
 import { cn } from '@/shared/lib/utils'
+import { formatWorkDuration } from '@/shared/lib/format'
 import { chromeSansRole } from '@/shared/typography/chromeRoles'
 import type { AIConversationSnapshot } from '../runtime/ConversationRuntime'
-import { carryGroupKeys, groupRows, rememberGroups } from '../model/grouping'
+import {
+  carryGroupKeys,
+  groupRows,
+  rememberGroups,
+  type ConversationRow,
+} from '../model/grouping'
+import { turnMembership, turnsOf, type ConversationTurn } from '../model/turns'
 import { isStreaming } from './streaming'
+import { TurnProcess } from './TurnProcess'
 import { ConversationMessage } from './ConversationMessage'
 import { ToolActivity, UnknownActivity } from './ToolActivity'
 import { ToolGroup } from './ToolGroup'
@@ -46,6 +54,19 @@ import {
 
 /** How close to the top counts as "at the top", in px. */
 const TOP_THRESHOLD = 50
+
+/** Which item a row is anchored to — a group by its first call. */
+function firstItemIdOf(row: ConversationRow): string {
+  return row.kind === 'tools' ? (row.items[0]?.id ?? row.key) : row.item.id
+}
+
+/** The one line a folded turn shows in place of its work. */
+function workLabel(turn: ConversationTurn): string {
+  if (turn.durationMs === null) {
+    return 'Worked'
+  }
+  return `Worked for ${formatWorkDuration(turn.durationMs)}`
+}
 
 function TranscriptContent({
   snapshot,
@@ -121,6 +142,39 @@ function TranscriptContent({
     rememberGroups(rows, remembered.current)
   }, [rows])
 
+  const turns = useMemo(() => turnsOf(snapshot.items), [snapshot.items])
+  const membership = useMemo(() => turnMembership(turns), [turns])
+  // The turn being worked on: the last one, while the page says it is still
+  // being appended to. Everything before it has finished, and a finished turn
+  // folds — that is the "rest" state `conversation.md` describes.
+  const workingKey = snapshot.partialTail ? (turns[turns.length - 1]?.key ?? null) : null
+  const [overrides, setOverrides] = useState(() => new Map<string, boolean>())
+  const isOpen = (turn: ConversationTurn) => overrides.get(turn.key) ?? turn.key === workingKey
+  const toggle = (key: string) => {
+    setOverrides((previous) => {
+      const next = new Map(previous)
+      next.set(key, !(previous.get(key) ?? key === workingKey))
+      return next
+    })
+  }
+
+  // One entry per row, with the turn it belongs to and — for the first row of a
+  // turn's process — the control that opens it. A plan rather than stateful work
+  // during render, because the rows are a flat list and "am I the first of my
+  // turn" is a property of the list, not of the render that draws it.
+  const plan = useMemo(() => {
+    const emitted = new Set<string>()
+    return rows.map((row) => {
+      const entry = membership.get(firstItemIdOf(row))
+      if (entry === undefined || !entry.process) {
+        return { row, turn: null as ConversationTurn | null, control: null as ConversationTurn | null }
+      }
+      const control = emitted.has(entry.turn.key) ? null : entry.turn
+      emitted.add(entry.turn.key)
+      return { row, turn: entry.turn, control }
+    })
+  }, [rows, membership])
+
   const lastIndex = snapshot.items.length - 1
   const lastId = lastIndex >= 0 ? snapshot.items[lastIndex]?.id : undefined
 
@@ -134,7 +188,9 @@ function TranscriptContent({
         snapshot={snapshot}
         providerLabel={providerLabel}
         lastId={lastId}
-        rows={rows}
+        plan={plan}
+        isTurnOpen={isOpen}
+        onToggleTurn={toggle}
         onReload={onReload}
       />
     </MessageScrollerContent>
@@ -153,13 +209,21 @@ function ConversationBody({
   snapshot,
   providerLabel,
   lastId,
-  rows,
+  plan,
+  isTurnOpen,
+  onToggleTurn,
   onReload,
 }: {
   snapshot: AIConversationSnapshot
   providerLabel: string
   lastId: string | undefined
-  rows: ReturnType<typeof groupRows>
+  plan: readonly {
+    row: ConversationRow
+    turn: ConversationTurn | null
+    control: ConversationTurn | null
+  }[]
+  isTurnOpen: (turn: ConversationTurn) => boolean
+  onToggleTurn: (key: string) => void
   onReload?: () => void
 }) {
   if (snapshot.threadError) {
@@ -192,22 +256,40 @@ function ConversationBody({
   }
   return (
     <>
-      {rows.map((row) => (
-        <MessageScrollerItem key={row.key} messageId={row.key}>
-          {row.kind === 'tools' ? (
-            <ToolGroup items={row.items} summary={row.summary} />
-          ) : row.item.kind === 'tool' ? (
-            <ToolActivity item={row.item} />
-          ) : row.item.kind === 'message' ? (
-            <ConversationMessage
-              item={row.item}
-              label={providerLabel}
-              streaming={isStreaming(row.item, row.item.id === lastId, snapshot.partialTail)}
-            />
-          ) : (
-            <UnknownActivity />
+      {plan.map(({ row, turn, control }) => (
+        <Fragment key={row.key}>
+          {control === null ? null : (
+            <MessageScrollerItem messageId={`${control.key}·process`}>
+              <TurnProcess
+                label={workLabel(control)}
+                open={isTurnOpen(control)}
+                onToggle={() => onToggleTurn(control.key)}
+              />
+            </MessageScrollerItem>
           )}
-        </MessageScrollerItem>
+          {/* A folded turn's rows stay mounted and are hidden by attribute: the
+              transcript is a flat list, and unmounting them would take their
+              group identities, their scroll anchors and any focus inside them
+              with it. */}
+          <MessageScrollerItem
+            messageId={row.key}
+            hidden={turn !== null && !isTurnOpen(turn)}
+          >
+            {row.kind === 'tools' ? (
+              <ToolGroup items={row.items} summary={row.summary} />
+            ) : row.item.kind === 'tool' ? (
+              <ToolActivity item={row.item} />
+            ) : row.item.kind === 'message' ? (
+              <ConversationMessage
+                item={row.item}
+                label={providerLabel}
+                streaming={isStreaming(row.item, row.item.id === lastId, snapshot.partialTail)}
+              />
+            ) : (
+              <UnknownActivity />
+            )}
+          </MessageScrollerItem>
+        </Fragment>
       ))}
       <SkippedRecords count={snapshot.skipped} />
     </>
