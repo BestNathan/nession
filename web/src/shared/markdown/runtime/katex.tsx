@@ -13,6 +13,13 @@
  * hast-util-to-jsx-runtime pipeline. The visual arm is the `.katex-html`
  * span tree; the MathML arm serves assistive technology, which reads it by
  * tag name regardless of namespace.
+ *
+ * Upstream: https://github.com/deepseek-ai/deepseek-harness
+ * Baseline: 21638c56315ae6a2b552d6091945d3144c9af32e
+ * Source: packages/client/ui-primitives/src/markdown/katex.tsx
+ * License: MIT (see THIRD_PARTY_NOTICES.md)
+ * Adaptation: Adopted; the error span uses Nession's destructive text token
+ * instead of upstream's inline colour, and imports follow Nession style.
  */
 
 import { createElement, type CSSProperties, type ReactNode } from 'react'
