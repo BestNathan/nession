@@ -159,3 +159,33 @@ export function turnsOf(items: AIConversationItem[]): ConversationTurn[] {
 
   return turns
 }
+
+export interface TurnMembership {
+  turn: ConversationTurn
+  /** Whether the item is inside the turn's process window. */
+  process: boolean
+}
+
+/**
+ * Which turn each item belongs to, and whether it is that turn's work.
+ *
+ * The renderer draws a flat list, so this is how a row finds out what it is part
+ * of without anything being re-parented — which is the whole reason a turn is a
+ * location rather than a container. A caller holding an item's id does not have
+ * to walk the turns again to place it.
+ */
+export function turnMembership(turns: ConversationTurn[]): Map<string, TurnMembership> {
+  const membership = new Map<string, TurnMembership>()
+  for (const turn of turns) {
+    if (turn.opening !== null) {
+      membership.set(turn.opening.id, { turn, process: false })
+    }
+    for (const item of turn.process) {
+      membership.set(item.id, { turn, process: true })
+    }
+    if (turn.answer !== null) {
+      membership.set(turn.answer.id, { turn, process: false })
+    }
+  }
+  return membership
+}

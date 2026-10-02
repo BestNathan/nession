@@ -97,6 +97,29 @@ export function formatRelativeTimeSeconds(ts: number): string {
   return `${days}d ago`;
 }
 
+/**
+ * How long a turn's work took, for the turn's process control.
+ *
+ * Coarse on purpose. The line answers "was that quick, or did it grind?", and a
+ * transcript of `12.4s` answers that no better than `12s` while reading as a
+ * measurement nobody asked for. Sub-second rounds up rather than down: work that
+ * happened is not `0s`.
+ */
+export function formatWorkDuration(ms: number): string {
+  const seconds = Math.max(1, Math.round(ms / 1000));
+  if (seconds < 60) {
+    return `${seconds}s`;
+  }
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) {
+    const rest = seconds % 60;
+    return rest === 0 ? `${minutes}m` : `${minutes}m ${rest}s`;
+  }
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest === 0 ? `${hours}h` : `${hours}h ${rest}m`;
+}
+
 /** Resolve the effective display name for an agent. */
 export function agentDisplayName(agent: { display_name?: string; hostname: string }): string {
   return agent.display_name || agent.hostname;
