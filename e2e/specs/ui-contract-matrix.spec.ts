@@ -128,12 +128,13 @@ for (const row of viewports.filter((v) => v.experience === 'web')) {
         await expectVisibleWithin(direct.nth(i), bar, optsFor(PATTERN_WORKSPACE_NAV, 'web', row.id));
       }
 
-      const more = page.getByTestId('workspace-capability-capsule');
-      await expect(more).toBeVisible();
-      await expectSingleLine(more, optsFor(PATTERN_WORKSPACE_NAV, 'web', row.id));
-      await expectVisibleWithin(more, bar, optsFor(PATTERN_WORKSPACE_NAV, 'web', row.id));
+      const capsule = page.getByTestId('workspace-capability-capsule');
+      await expect(capsule).toBeVisible();
+      await expectSingleLine(capsule, optsFor(PATTERN_WORKSPACE_NAV, 'web', row.id));
+      await expectVisibleWithin(capsule, bar, optsFor(PATTERN_WORKSPACE_NAV, 'web', row.id));
 
-      await assertPopupMenu(page, 'web', row.id, more);
+      // The capsule is a scrollable container, not a popup trigger.
+      // It holds direct capability items that are already asserted above.
     });
 
     test('terminal capsule controls hold the control token height', async ({ page }) => {

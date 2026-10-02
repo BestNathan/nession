@@ -36,16 +36,19 @@ function workspaceContext(overrides: Partial<WorkspaceContext> = {}): WorkspaceC
 }
 
 describe('WorkspaceShell contextual capability presentation', () => {
-  it('renders only the opened capability directly in the capsule', () => {
+  it('renders all capabilities in the scrollable capsule', () => {
     const ctx = workspaceContext();
     render(<WorkspaceShell ctx={ctx} activeCapabilityId="files" />);
 
     expect(screen.getByTestId('mock-files-web')).toBeInTheDocument();
+    // Capsule V2 (#1347): Workspace capsule shows ALL capabilities (scrollable).
+    // This is the reciprocal of Terminal, which shows only the active capability.
     expect(screen.getByTestId('workspace-tool-files')).toBeInTheDocument();
-    expect(screen.queryByTestId('workspace-tool-session')).not.toBeInTheDocument();
+    expect(screen.getByTestId('workspace-tool-session')).toBeInTheDocument();
+    expect(screen.getByTestId('workspace-tool-agent')).toBeInTheDocument();
     expect(screen.queryAllByRole('tab')).toHaveLength(0);
-    // Capsule V2 (#1347): no + button in Workspace — discoverable capabilities
-    // are accessed through other means (Work Overview in Terminal form).
+    // Capsule V2 (#1347): no + button in Workspace — all capabilities are
+    // directly visible in the scrollable capsule.
     expect(
       screen.queryByRole('button', { name: 'More workspace capabilities' }),
     ).not.toBeInTheDocument();
