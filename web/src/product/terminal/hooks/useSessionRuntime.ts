@@ -6,19 +6,21 @@ import {
 } from '@/product/session/state';
 import { p2pStateAtom, routeIntentEpochAtom, transportGenerationAtom } from '@/platform/attach/state';
 import { terminalSessionStateAtom, lastResizeAtom, terminalTransportReadyAtom } from '@/product/terminal/state';
+import { inputDropAtomFamily } from '@/product/terminal/state/ui';
 import { useAddressPlan } from '@/shared/hooks/useAddressPlan';
 import { sessionRuntimeRegistry } from '@/platform/session-runtime/SessionRuntimeRegistry';
 import { createFilesApi, type FileOps } from '@/capabilities/files';
 import { createTerminalAgentApi, type TerminalAgentApi } from '@/product/terminal';
+import { ConnectionManager } from '@/platform/terminal-runtime/ConnectionManager';
 import type { SessionRuntime, SessionRuntimeConfig, SessionRuntimeSnapshot } from '@/platform/session-runtime/SessionRuntime';
 import type { ConnectionState } from '@/platform/socket/types';
-import type { RelayServerHandle } from '@/platform/attach/relayServerConnection';
+import type { RelayServerTransport } from '@/platform/attach/relayServerConnection';
 
 export interface UseSessionRuntimeOptions {
   /** When true, this hook instance drives registry.update (single config owner). */
   configOwner?: boolean;
   /** Relay-mode server connection handle (build via relayServerHandle(service)). Required for hidden-viewport recovery. */
-  serverConnection?: RelayServerHandle;
+  serverConnection?: RelayServerTransport;
   /**
    * Whether the Terminal already holds this session's history (#321) — see
    * `SessionRuntimeConfig.hasSessionOutput`. A reader rather than a boolean, so
@@ -312,6 +314,11 @@ export function useSessionRuntime(options: UseSessionRuntimeOptions): UseSession
   const setP2pState = useSetAtom(p2pStateAtom);
   const setTerminalState = useSetAtom(terminalSessionStateAtom);
   const setTransportGeneration = useSetAtom(transportGenerationAtom);
+  // The session's own record of input that was lost rather than delivered
+  // (#1307 SC-09). Kept in an atom — UI state, not a runtime fact — so the
+  // notice survives the transport generation that recorded it; the runtime
+  // routes the transport's report here through its config.
+  const setInputDrop = useSetAtom(inputDropAtomFamily(sessionId));
 
   const forcedRelay = manualOverride ? false : forcedRelayState;
   const addressPlan = useAddressPlan(attachInfo, { orderedUrls, manualUrl: manualOverride });
@@ -347,6 +354,10 @@ export function useSessionRuntime(options: UseSessionRuntimeOptions): UseSession
       // sits above `core/`, so the dependency has to point this way (#783).
       createFilesApi,
       createTerminalAgentApi,
+      // The runtime decides when a transport exists and which identity it
+      // binds (#1309); the concrete I/O object stays the product layer's.
+      createTransport: (opts) => new ConnectionManager(opts),
+      onInputDrop: (drop) => setInputDrop(drop),
       hasSessionOutput: options.hasSessionOutput,
     };
   }, [
@@ -364,6 +375,7 @@ export function useSessionRuntime(options: UseSessionRuntimeOptions): UseSession
     routeIntentEpoch,
     lastResize,
     transportReady,
+    setInputDrop,
   ]);
 
   const runtime = useRuntimeOwnership(sessionId, attachInfo?.session_id, runtimeConfig);

@@ -1,11 +1,20 @@
 import type { AttachInfo } from '@/types';
 import type { AddressPlan } from '@/shared/hooks/useAddressPlan';
-import type { RelayServerHandle } from '@/platform/attach/relayServerConnection';
+import type { RelayServerTransport } from '@/platform/attach/relayServerConnection';
 import { buildAgentWsUrl, WebSocketService } from '@/platform/socket';
 import type { ConnectionState } from '@/platform/socket/types';
 import { AddressAttachPolicy } from '@/platform/attach/AddressAttachPolicy';
 import { AttachStateMachine, type AttachPhase, type AttachTransitionResult } from '@/platform/attach/AttachStateMachine';
 import { SessionAttachController } from '@/platform/attach/SessionAttachController';
+// Types only, like the capability factories below: the runtime decides WHEN a
+// transport is built and with WHICH identity, but the concrete transport is the
+// caller's — `createTransport` is injected for the same reason
+// `createTerminalAgentApi` is (#783), and a value import of ConnectionManager
+// here would put terminal-runtime's construction details into the layer that
+// owns none of them.
+import type { ConnectionOptions } from '@/platform/terminal-runtime/types';
+import type { TerminalTransport } from '@/platform/terminal-runtime/transport/TerminalTransport';
+import type { InputDrop } from '@/platform/terminal-runtime/inputQueue';
 // Types only. The capability *factories* are injected through
 // SessionRuntimeConfig instead of imported, because `platform` sits below
 // `product` and `capabilities` and may not import either — while the runtime is
@@ -28,8 +37,13 @@ export interface SessionRuntimeConfig {
   routeIntentEpoch: number;
   lastResize?: { cols: number; rows: number } | null;
   transportReady?: boolean;
-  /** Relay-mode server connection — runtime re-begins relay after server reconnect. */
-  serverConnection?: RelayServerHandle | null;
+  /**
+   * Relay-mode server connection — runtime re-begins relay after server
+   * reconnect. The full transport shape rather than the narrow handle because
+   * the runtime hands it to the relay transport it builds; the runtime itself
+   * still uses only the lifecycle members.
+   */
+  serverConnection?: RelayServerTransport | null;
   /**
    * Capability factories the runtime needs for a P2P attach.
    *
@@ -40,6 +54,24 @@ export interface SessionRuntimeConfig {
    */
   createFilesApi: () => FilesPlugin;
   createTerminalAgentApi: (ws: WebSocketService) => TerminalAgentApi;
+  /**
+   * Build the session's I/O transport from runtime-owned facts (#1309).
+   *
+   * The runtime calls this inside {@link SessionRuntime.buildTransport} with
+   * the mode, identity and callbacks it owns; the caller (product/terminal)
+   * turns that into the concrete ConnectionManager. Injecting it keeps the
+   * runtime free of terminal-runtime construction details while making the
+   * runtime the single authority that decides when a transport exists and
+   * which agent API it binds — the property the transportEpoch effect used to
+   * approximate from React.
+   */
+  createTransport: (opts: ConnectionOptions) => TerminalTransport;
+  /**
+   * Told when input the user typed is lost rather than delivered (#1307
+   * SC-09). The runtime routes the fact from the transport it built to the
+   * product surface that states it; the runtime itself keeps no copy.
+   */
+  onInputDrop?: (drop: InputDrop) => void;
   /**
    * Whether the Terminal already holds this session's history (#321).
    *
@@ -175,6 +207,15 @@ export class SessionRuntime {
     controlGeneration?: number;
   } | null = null;
   private connectionUnsub: (() => void) | null = null;
+  /**
+   * The transport most recently handed out by {@link buildTransport}, and the
+   * transport generation it was built at. The pair is what lets the runtime
+   * apply an attach's cursors to the binding that attach belongs to — and
+   * only that binding.
+   */
+  private liveTransport: TerminalTransport | null = null;
+  private liveTransportGeneration = -1;
+  private readonly transportSwapListeners = new Set<() => void>();
   /** Liveness probe for the live P2P transport — see `startLivenessProbe`. */
   private livenessTimer: ReturnType<typeof setInterval> | null = null;
   /**
@@ -221,6 +262,7 @@ export class SessionRuntime {
         // healthy transport must not ask again — the snapshot is a full screen
         // repaint, and re-requesting it on every attach would flicker.
         this.historyMayHaveGap = false;
+        this.applyAttachSeedToLiveTransport();
       }
       if (result.forceRelay) {
         this.applyForceRelay();
@@ -499,6 +541,89 @@ export class SessionRuntime {
     return this.applyCandidateDisconnect();
   }
 
+  /**
+   * Build the session's I/O transport from the facts this runtime owns right
+   * now: the mode, the live agent API of the current transport generation,
+   * the relay handle, the attach gate, and the runtime's own callbacks.
+   *
+   * The transport is tagged with the generation it was built at, which is
+   * what makes the #1309 transport-binding invariant structural rather than
+   * procedural: a transport built for generation N carries generation N's
+   * agent API because both were read from the same object in the same call,
+   * and the swap notification that triggers a rebuild is emitted only AFTER
+   * the new identity is installed — never before (#668's race, closed by
+   * construction instead of by React effect ordering).
+   */
+  buildTransport(): TerminalTransport {
+    const relay = this.config.forcedRelay;
+    const transport = this.config.createTransport({
+      mode: relay ? 'relay' : 'p2p',
+      sessionName: this.config.sessionName,
+      sessionId: this.sessionId,
+      agentApi: relay ? undefined : this.agentTerminalApi ?? undefined,
+      serverConnection: relay ? this.config.serverConnection ?? undefined : undefined,
+      isAttached: () => this.attachState.phase === 'attached',
+      // Input is the moment a dead-but-open socket stops being invisible
+      // (#1264); a stream with a hole is a fact for the owner (#1304); input
+      // that can never arrive is reported, not kept (#1307 SC-09).
+      onInputSent: () => this.probeLivenessNow(),
+      onStreamTruncated: () => this.noteStreamTruncated(),
+      onInputDrop: (drop) => this.config.onInputDrop?.(drop),
+    });
+    this.liveTransport = transport;
+    this.liveTransportGeneration = this.transportGeneration;
+    return transport;
+  }
+
+  /**
+   * Posted synchronously when the runtime has finished swapping the live
+   * transport identity (candidate rotation, route switch, P2P↔relay flip) —
+   * after the new identity is installed, so a listener that rebuilds its
+   * binding inside the callback binds the new generation, never the old one.
+   */
+  subscribeTransportSwap(listener: () => void): () => void {
+    this.transportSwapListeners.add(listener);
+    return () => this.transportSwapListeners.delete(listener);
+  }
+
+  private emitTransportSwap(): void {
+    for (const listener of this.transportSwapListeners) {
+      listener();
+    }
+  }
+
+  /**
+   * Apply what a successful attach stated about the session's cursors, then
+   * let buffered I/O out (#1094, #1307).
+   *
+   * This used to be a React effect on the 'attached' phase, but the runtime
+   * owns both halves of the handoff — the seed (stated by the attach reply)
+   * and the transport it applies to (built here, tagged with the generation
+   * it binds) — so the effect was a courier between two things one owner
+   * already holds. The order is load-bearing and unchanged: the input cursor
+   * is reconciled BEFORE the flush (the flush is numbered against it), the
+   * stream cursor is seeded AFTER it (it fills a timeline the reconciler
+   * owns).
+   */
+  private applyAttachSeedToLiveTransport(): void {
+    const transport = this.liveTransport;
+    if (!transport || this.liveTransportGeneration !== this.attachedTransportGeneration) {
+      return;
+    }
+    const seed = this.p2pAttachSeed;
+    if (seed) {
+      transport.seedInputCursor?.({
+        inputEpoch: seed.inputEpoch,
+        appliedThrough: seed.inputAppliedThrough,
+        controlGeneration: seed.controlGeneration,
+      });
+    }
+    transport.flushAllOutbound();
+    if (seed) {
+      transport.seedStreamCursor?.(seed.streamEpoch, seed.streamCursor);
+    }
+  }
+
   subscribeConnectionState(handler: (state: ConnectionState) => void): () => void {
     this.connectionStateListeners.add(handler);
     return () => {
@@ -522,9 +647,11 @@ export class SessionRuntime {
     this.agentWs = null;
     this.agentTerminalApi = null;
     this.filesApi = null;
+    this.liveTransport = null;
     this.connectionStateListeners.clear();
     this.runtimeEventListeners.clear();
     this.snapshotListeners.clear();
+    this.transportSwapListeners.clear();
   }
 
   private emitConnectionState(state: ConnectionState): void {
@@ -867,12 +994,21 @@ export class SessionRuntime {
     const token = this.config.attachInfo?.connection_token;
 
     if (!url || !this.config.attachInfo || this.config.forcedRelay) {
+      const hadBinding = this.agentWs !== null || this.agentTerminalApi !== null;
       this.teardownConnectionHandler();
       this.attachController.cancelActiveAttach();
       this.agentWs?.dispose();
       this.agentWs = null;
       this.agentTerminalApi = null;
       this.filesApi = null;
+      // Leaving the P2P transport retires its attach seed with it: a later
+      // relay attach must not apply cursors a different transport stated.
+      this.p2pAttachSeed = null;
+      if (hadBinding) {
+        // The binding identity went away (relay flip or full teardown) —
+        // listeners rewire onto whatever buildTransport() produces now.
+        this.emitTransportSwap();
+      }
       return;
     }
 
@@ -912,6 +1048,10 @@ export class SessionRuntime {
     // connect — swallow so it cannot dangle as an unhandled rejection.
     void ws.connect().catch(() => {});
     this.wireConnectionHandler();
+    // The swap is complete only now — new socket, new agent API, handler
+    // wired — so this is the moment bindings may rebuild (never earlier:
+    // a transport built before this point would bind the disposed socket).
+    this.emitTransportSwap();
     if (ws.connectionState === 'connected') {
       this.maybeStartP2PAttach();
     }

@@ -45,7 +45,6 @@ export function TerminalRegion({
     inputDisabled,
     viewportReady,
     terminalState,
-    transportEpoch,
     terminalControl,
     onTakeControl,
     inputDrop,
@@ -82,7 +81,6 @@ export function TerminalRegion({
             controller={controller}
             terminalState={terminalState}
             viewportReady={viewportReady}
-            transportEpoch={transportEpoch}
             onOpenWorkspaceFile={onOpenWorkspaceFile}
           />
         </TerminalSurface>

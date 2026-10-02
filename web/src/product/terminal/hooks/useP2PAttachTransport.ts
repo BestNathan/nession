@@ -2,7 +2,7 @@ import { useSessionRuntime } from '@/product/terminal/hooks/useSessionRuntime';
 import type { AttachInfo } from '@/types';
 import type { AddressPlan } from '@/shared/hooks/useAddressPlan';
 import type { TerminalAgentApi } from '@/product/terminal';
-import type { RelayServerHandle } from '@/platform/attach/relayServerConnection';
+import type { RelayServerTransport } from '@/platform/attach/relayServerConnection';
 
 interface UseP2PAttachTransportOptions {
   attachInfo: AttachInfo | null;
@@ -10,7 +10,7 @@ interface UseP2PAttachTransportOptions {
   orderedUrls: string[] | null;
   manualOverride: string | null;
   /** Relay-mode server connection handle (see relayServerHandle). */
-  serverConnection?: RelayServerHandle;
+  serverConnection?: RelayServerTransport;
   /** Whether the Terminal already holds this session's history (#321). */
   hasSessionOutput?: () => boolean;
 }

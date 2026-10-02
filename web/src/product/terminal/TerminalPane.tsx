@@ -10,11 +10,6 @@ interface TerminalPaneProps {
   controller: TerminalController | null;
   terminalState: TerminalStatus;
   viewportReady: boolean;
-  /**
-   * Bumped when the runtime swaps its live agent-terminal API (post-swap by
-   * construction) — rewires the ConnectionManager to the new socket (#668).
-   */
-  transportEpoch: number;
   onOpenWorkspaceFile?: (path: string, line?: number) => void;
 }
 
@@ -27,7 +22,6 @@ export function TerminalPane({
   controller,
   terminalState,
   viewportReady,
-  transportEpoch,
   onOpenWorkspaceFile,
 }: TerminalPaneProps) {
   const showViewport = Boolean(controller) && viewportReady;
@@ -39,7 +33,6 @@ export function TerminalPane({
         {showViewport ? (
           <TerminalViewport
             controller={controller}
-            transportEpoch={transportEpoch}
             onOpenWorkspaceFile={onOpenWorkspaceFile}
           />
         ) : null}

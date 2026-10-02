@@ -19,6 +19,7 @@ import { useTerminal } from '@/product/terminal/hooks/useTerminal';
 import { TerminalViewport } from '@/product/terminal/components/TerminalViewport';
 import { terminalTransportReadyAtom } from '@/product/terminal/state/transport';
 import type { TerminalTransport } from '@/platform/terminal-runtime/transport/TerminalTransport';
+import type { SessionRuntime } from '@/platform/session-runtime/SessionRuntime';
 
 // xterm.open() requires window.matchMedia in jsdom (same stub as
 // TerminalController.test.ts).
@@ -53,21 +54,40 @@ function makeTransport(): TerminalTransport {
   };
 }
 
-// Module-stable factory — a new identity per render would recreate the
-// controller every render (transportFactory is a useTerminal memo dep).
-function transportFactory(): TerminalTransport {
-  return makeTransport();
+/**
+ * A SessionRuntime stub with the three members useTerminal and the runtime
+ * adapter touch: it builds transports, pushes swap notifications, and takes
+ * readiness/resize facts. One stub per test — a new identity per render would
+ * recreate the controller every render (runtime is a useTerminal memo dep).
+ */
+function makeRuntimeStub(): { runtime: SessionRuntime; emitSwap: () => void } {
+  const swapListeners = new Set<() => void>();
+  const runtime = {
+    buildTransport: () => makeTransport(),
+    subscribeTransportSwap: (listener: () => void) => {
+      swapListeners.add(listener);
+      return () => { swapListeners.delete(listener); };
+    },
+    setTransportReady: () => {},
+    updateViewportSize: () => {},
+  } as unknown as SessionRuntime;
+  return {
+    runtime,
+    emitSwap: () => {
+      for (const listener of [...swapListeners]) { listener(); }
+    },
+  };
 }
 
-function Harness({ sessionId, epoch = 0 }: { sessionId: string; epoch?: number }) {
+function Harness({ sessionId, runtime }: { sessionId: string; runtime: SessionRuntime }) {
   const controller = useTerminal({
     sessionId,
     sessionName: 'sess',
     mode: 'relay',
-    transportFactory,
+    runtime,
     rendererType: 'canvas',
   });
-  return <TerminalViewport controller={controller} transportEpoch={epoch} />;
+  return <TerminalViewport controller={controller} />;
 }
 
 describe('useTerminal + TerminalViewport transport readiness', () => {
@@ -78,25 +98,29 @@ describe('useTerminal + TerminalViewport transport readiness', () => {
   it('publishes transportReady=true when the viewport attaches on first mount', () => {
     const store = getDefaultStore();
     store.set(terminalTransportReadyAtom, false);
+    const { runtime } = makeRuntimeStub();
 
-    render(<Harness sessionId="agent1:sess" />);
+    render(<Harness sessionId="agent1:sess" runtime={runtime} />);
 
     // The layout-phase attach must reach the atom even though no passive
     // effect has run yet (issue #598 — the event used to be lost here).
     expect(store.get(terminalTransportReadyAtom)).toBe(true);
   });
 
-  it('republishes readiness across a transportEpoch bump (same controller)', () => {
+  it('republishes readiness across a transport swap (same controller)', () => {
     const store = getDefaultStore();
     store.set(terminalTransportReadyAtom, false);
+    const { runtime, emitSwap } = makeRuntimeStub();
 
-    const { rerender } = render(<Harness sessionId="agent1:sess" />);
+    render(<Harness sessionId="agent1:sess" runtime={runtime} />);
     expect(store.get(terminalTransportReadyAtom)).toBe(true);
 
-    // transportKey changes (route/socket identity) remount the viewport via the
-    // TerminalViewport layout effect with the SAME controller; readiness must
-    // re-publish after the transient detach (ready=false).
-    rerender(<Harness sessionId="agent1:sess" epoch={1} />);
+    // A route/socket identity change swaps the runtime's transport identity;
+    // the runtime pushes that to the SAME controller through the binding
+    // (#1309), and readiness must re-publish after the transient detach
+    // (ready=false).
+    store.set(terminalTransportReadyAtom, false);
+    emitSwap();
     expect(store.get(terminalTransportReadyAtom)).toBe(true);
   });
 });

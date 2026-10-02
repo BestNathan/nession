@@ -16,7 +16,7 @@ import {
 import { routeIntentEpochAtom } from '@/platform/attach/state';
 import { terminalSessionStateAtom, terminalTransportReadyAtom } from '@/product/terminal/state';
 import type { ConnectionState } from '@/platform/socket/types';
-import type { RelayServerHandle } from '@/platform/attach/relayServerConnection';
+import type { RelayServerTransport } from '@/platform/attach/relayServerConnection';
 import type { AttachInfo } from '@/types';
 import { SessionRuntime } from '@/platform/session-runtime/SessionRuntime';
 import { sessionRuntimeRegistry } from '@/platform/session-runtime/SessionRuntimeRegistry';
@@ -108,12 +108,17 @@ function wrapper(store: ReturnType<typeof createStore>, strict = false) {
 const SESSION_IDS = ['agent:a', 'agent:b', 'agent:failover-b', 'agent:failover-relay', 'agent:manual-fail', 'agent:relay'];
 
 /** Relay handle built fresh on every call — an unstable context value on purpose. */
-function makeRelayHandle(state: ConnectionState): RelayServerHandle {
+function makeRelayHandle(state: ConnectionState): RelayServerTransport {
   return {
     beginRelay: vi.fn(),
     endRelay: vi.fn(),
     isReady: () => state === 'connected',
     onConnectionStateChange: () => () => {},
+    sendRelayInput: vi.fn(),
+    sendRelayResize: vi.fn(),
+    onRelayOutput: () => () => {},
+    onRelayResize: () => () => {},
+    onRelayInputAck: () => () => {},
   };
 }
 
@@ -509,7 +514,12 @@ describe('useSessionRuntime integration', () => {
         relayListeners.add(cb);
         return () => relayListeners.delete(cb);
       },
-    } satisfies RelayServerHandle & { emit(state: ConnectionState): void };
+      sendRelayInput: vi.fn(),
+      sendRelayResize: vi.fn(),
+      onRelayOutput: () => () => {},
+      onRelayResize: () => () => {},
+      onRelayInputAck: () => () => {},
+    } satisfies RelayServerTransport & { emit(state: ConnectionState): void };
 
     const store = makeStore('agent:a', 'token-a');
     const { result } = renderHook(

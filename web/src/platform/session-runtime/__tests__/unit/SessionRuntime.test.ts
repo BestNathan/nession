@@ -3,8 +3,10 @@ import { createFilesApi } from '@/capabilities/files';
 import { createTerminalAgentApi } from '@/product/terminal';
 import { SessionRuntime } from '@/platform/session-runtime/SessionRuntime';
 import { ATTACH_TIMEOUT_MS, P2P_MAX_RECONNECT } from '@/platform/attach/AttachStateMachine';
-import type { RelayServerHandle } from '@/platform/attach/relayServerConnection';
+import type { RelayServerTransport } from '@/platform/attach/relayServerConnection';
 import type { ConnectionState } from '@/platform/socket/types';
+import type { ConnectionOptions } from '@/platform/terminal-runtime/types';
+import type { TerminalInputSeed, TerminalTransport } from '@/platform/terminal-runtime/transport/TerminalTransport';
 import type { AttachInfo } from '@/types';
 
 const OriginalWebSocket = globalThis.WebSocket;
@@ -89,6 +91,45 @@ function makeAttachInfo(): AttachInfo {
   };
 }
 
+/**
+ * A transport the runtime can hand out in tests: records the options it was
+ * built with (which agent API it binds is the whole point of #1309 SC-04)
+ * and vi.fn-tracks the seed/flush surface the runtime applies on attach.
+ */
+interface MockTransport extends TerminalTransport {
+  readonly builtWith: ConnectionOptions;
+  seedInputCursor: ReturnType<typeof vi.fn<(seed: TerminalInputSeed | undefined) => void>>;
+  seedStreamCursor: ReturnType<typeof vi.fn<(streamEpoch: number | undefined, streamCursor: number | undefined) => void>>;
+  flushAllOutbound: ReturnType<typeof vi.fn<() => void>>;
+}
+
+function makeMockTransport(opts: ConnectionOptions): MockTransport {
+  return {
+    mode: opts.mode,
+    builtWith: opts,
+    onOutput: null,
+    onResize: null,
+    onStateChange: null,
+    onError: null,
+    onDisconnect: null,
+    send: vi.fn(),
+    sendResize: vi.fn(),
+    seedStreamCursor: vi.fn<(streamEpoch: number | undefined, streamCursor: number | undefined) => void>(),
+    seedInputCursor: vi.fn<(seed: TerminalInputSeed | undefined) => void>(),
+    flushInputBuffer: vi.fn(),
+    flushPendingResize: vi.fn(),
+    flushAllOutbound: vi.fn<() => void>(),
+    dispose: vi.fn(),
+  };
+}
+
+/** Every transport the runtime built, in build order. */
+let builtTransports: MockTransport[] = [];
+
+function lastTransport(): MockTransport {
+  return builtTransports[builtTransports.length - 1];
+}
+
 function makeConfig(overrides: Partial<ConstructorParameters<typeof SessionRuntime>[0]> = {}) {
   return {
     sessionId: 'agent:s1',
@@ -101,6 +142,11 @@ function makeConfig(overrides: Partial<ConstructorParameters<typeof SessionRunti
     routeIntentEpoch: 0,
     createFilesApi,
     createTerminalAgentApi,
+    createTransport: (opts: ConnectionOptions) => {
+      const transport = makeMockTransport(opts);
+      builtTransports.push(transport);
+      return transport;
+    },
     ...overrides,
   };
 }
@@ -123,7 +169,14 @@ function makeRelayServerConnection(initialState: ConnectionState = 'disconnected
       listeners.add(cb);
       return () => listeners.delete(cb);
     },
-  } satisfies RelayServerHandle & { emit(state: ConnectionState): void };
+    // The relay-I/O half of RelayServerTransport: the runtime never drives it —
+    // that is the transport's half — so inert stubs are the faithful shape here.
+    sendRelayInput: vi.fn(),
+    sendRelayResize: vi.fn(),
+    onRelayOutput: () => () => {},
+    onRelayResize: () => () => {},
+    onRelayInputAck: () => () => {},
+  } satisfies RelayServerTransport & { emit(state: ConnectionState): void };
 }
 
 /** Ids already answered, so a helper cannot settle the same request twice. */
@@ -153,7 +206,7 @@ function countPings(): number {
  * request is a no-op, so a helper that re-answered the oldest ping would leave
  * every later one to time out and would make a healthy transport look dead.
  */
-function answerPending(type: string, replyType: string): number {
+function answerPending(type: string, replyType: string, payload: unknown = {}): number {
   let answered = 0;
   for (const ws of wsInstances) {
     for (const call of ws.send.mock.calls) {
@@ -172,7 +225,7 @@ function answerPending(type: string, replyType: string): number {
       // matches on. Reproducing that is the point: a reply with a different
       // id would prove nothing about correlation.
       ws.onmessage?.({
-        data: JSON.stringify({ msg_type: replyType, id: parsed.id, payload: {} }),
+        data: JSON.stringify({ msg_type: replyType, id: parsed.id, payload }),
       } as MessageEvent);
       answered += 1;
     }
@@ -194,6 +247,7 @@ describe('SessionRuntime', () => {
   beforeEach(() => {
     wsInstances = [];
     answeredIds = new Set();
+    builtTransports = [];
     vi.stubGlobal('WebSocket', class {
       static CONNECTING = 0;
       static OPEN = 1;
@@ -946,5 +1000,150 @@ describe('SessionRuntime', () => {
     // nulls the agent api, and the tick returns early unless the phase is
     // 'attached'). A test that cannot fail is worse than no test: it is the
     // artefact a reviewer stops looking at.
+  });
+
+  describe('transport binding (#1309)', () => {
+    it('posts the swap only after the new generation is installed (SC-04)', () => {
+      const rt = new SessionRuntime(makeConfig());
+      const oldApi = rt.getAgentTerminalApi();
+      const oldGeneration = rt.currentTransportGeneration;
+      expect(oldApi).not.toBeNull();
+
+      const seen: Array<{ api: unknown; boundApi: unknown; generation: number }> = [];
+      rt.subscribeTransportSwap(() => {
+        seen.push({
+          api: rt.getAgentTerminalApi(),
+          boundApi: (rt.buildTransport() as MockTransport).builtWith.agentApi,
+          generation: rt.currentTransportGeneration,
+        });
+      });
+
+      expect(rt.onCandidateDisconnected()).toBe('next-candidate');
+
+      expect(seen).toHaveLength(1);
+      // Everything read inside the notification is already the new
+      // generation's: a binding rebuilt here binds the new agent api and
+      // cannot capture the disposed socket's — #668's race closed by
+      // construction, not by React effect ordering.
+      expect(seen[0].api).not.toBeNull();
+      expect(seen[0].api).not.toBe(oldApi);
+      expect(seen[0].boundApi).toBe(seen[0].api);
+      expect(seen[0].generation).toBe(oldGeneration + 1);
+      rt.dispose();
+    });
+
+    it('posts the swap on both directions of the P2P ↔ relay flip', () => {
+      const serverConnection = makeRelayServerConnection('connected');
+      const rt = new SessionRuntime(makeConfig({ serverConnection }));
+      const p2pApi = rt.getAgentTerminalApi();
+
+      const builds: ConnectionOptions[] = [];
+      rt.subscribeTransportSwap(() => {
+        builds.push((rt.buildTransport() as MockTransport).builtWith);
+      });
+
+      rt.updateContext({ forcedRelay: true });
+      expect(builds).toHaveLength(1);
+      expect(builds[0].mode).toBe('relay');
+      expect(builds[0].agentApi).toBeUndefined();
+      expect(builds[0].serverConnection).toBe(serverConnection);
+
+      rt.updateContext({ forcedRelay: false });
+      expect(builds).toHaveLength(2);
+      expect(builds[1].mode).toBe('p2p');
+      // The P2P rebuild binds a fresh agent api — never the disposed one.
+      expect(builds[1].agentApi).not.toBeUndefined();
+      expect(builds[1].agentApi).not.toBe(p2pApi);
+      expect(builds[1].agentApi).toBe(rt.getAgentTerminalApi());
+      rt.dispose();
+    });
+
+    it('does not post a swap for a context echo that keeps the live socket', () => {
+      const rt = new SessionRuntime(makeConfig());
+      const swaps = vi.fn();
+      rt.subscribeTransportSwap(swaps);
+
+      // The product layer rebuilds the context object on every render; only an
+      // identity change may rewire a binding — otherwise every render would
+      // churn transports.
+      rt.updateContext({});
+      expect(swaps).not.toHaveBeenCalled();
+      rt.dispose();
+    });
+
+    it('applies the attach seed to the live transport in reconcile → flush → seed order (#1094, #1307)', async () => {
+      const rt = new SessionRuntime(makeConfig({ transportReady: true }));
+      rt.buildTransport();
+      rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
+      openWs();
+      await flushMicrotasks();
+
+      answerPending('agent.attach', 'ok', {
+        stream_epoch: 7,
+        stream_cursor: 42,
+        input_epoch: 3,
+        input_applied_through: 11,
+        control_generation: 2,
+      });
+      await flushMicrotasks();
+
+      expect(rt.attachState.phase).toBe('attached');
+      const transport = lastTransport();
+      // The reply's snake_case wire fields land on the binding as one seed.
+      expect(transport.seedInputCursor).toHaveBeenCalledWith({
+        inputEpoch: 3,
+        appliedThrough: 11,
+        controlGeneration: 2,
+      });
+      expect(transport.seedStreamCursor).toHaveBeenCalledWith(7, 42);
+      expect(transport.flushAllOutbound).toHaveBeenCalledTimes(1);
+      // In the order the handoff requires: the input cursor is reconciled
+      // BEFORE the flush (the flush is numbered against it), the stream cursor
+      // is seeded AFTER it.
+      const inputOrder = transport.seedInputCursor.mock.invocationCallOrder[0];
+      const flushOrder = transport.flushAllOutbound.mock.invocationCallOrder[0];
+      const streamOrder = transport.seedStreamCursor.mock.invocationCallOrder[0];
+      expect(inputOrder).toBeLessThan(flushOrder);
+      expect(flushOrder).toBeLessThan(streamOrder);
+      rt.dispose();
+    });
+
+    it('retires the P2P seed with its transport — a relay attach applies no P2P cursors', async () => {
+      const serverConnection = makeRelayServerConnection('connected');
+      const rt = new SessionRuntime(makeConfig({ transportReady: true, serverConnection }));
+      rt.buildTransport();
+      rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
+      openWs();
+      await flushMicrotasks();
+      answerPending('agent.attach', 'ok', { stream_epoch: 7, stream_cursor: 42 });
+      await flushMicrotasks();
+      expect(rt.attachState.phase).toBe('attached');
+      // Sanity: the P2P binding took the seed this test is about to strand.
+      expect(lastTransport().seedStreamCursor).toHaveBeenCalledWith(7, 42);
+
+      // The controller's half of a swap: rebuild the binding on the new
+      // identity. Subscribed now so it sees every swap below.
+      rt.subscribeTransportSwap(() => {
+        rt.buildTransport();
+      });
+      // First candidate drops: the replacement socket reports 'connecting',
+      // which the connection handler surfaces as TRANSPORT_LOST — dispatched
+      // directly here, since this harness drives the policy step synchronously.
+      expect(rt.onCandidateDisconnected()).toBe('next-candidate');
+      rt.attachController.dispatch({ type: 'TRANSPORT_LOST' });
+      // Second candidate drops: relay takes over.
+      expect(rt.onCandidateDisconnected()).toBe('force-relay');
+      await flushMicrotasks();
+
+      expect(rt.attachState.phase).toBe('attached');
+      const relayTransport = lastTransport();
+      expect(relayTransport.builtWith.mode).toBe('relay');
+      // Buffered output still drains — but cursors a different transport
+      // stated must not land on this one.
+      expect(relayTransport.flushAllOutbound).toHaveBeenCalledTimes(1);
+      expect(relayTransport.seedInputCursor).not.toHaveBeenCalled();
+      expect(relayTransport.seedStreamCursor).not.toHaveBeenCalled();
+      rt.dispose();
+    });
   });
 });

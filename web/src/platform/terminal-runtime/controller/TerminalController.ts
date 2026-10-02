@@ -58,6 +58,23 @@ export interface TerminalControllerEvents {
   onTitleChange?: (sessionId: string, title: string) => void;
 }
 
+/**
+ * How the session-lifecycle owner tells this controller its transport
+ * identity was swapped (#1309).
+ *
+ * Structural rather than typed against SessionRuntime: the controller learns
+ * THAT a swap finished and rebuilds from its transport factory (which reads
+ * the owner's current identity), so terminal-runtime stays free of a
+ * session-runtime import — and the subscription is installed in the
+ * constructor, because an effect-installed one can miss a swap that lands
+ * between the layout-phase attach and the passive phase (the same ordering
+ * lesson as #598).
+ */
+export interface TerminalTransportBinding {
+  /** Subscribe to swap notifications; returns the unsubscribe function. */
+  subscribe(listener: () => void): () => void;
+}
+
 export interface TerminalControllerOptions {
   rendererType: 'webgl' | 'canvas';
   fontSize?: number;
@@ -72,6 +89,8 @@ export interface TerminalControllerOptions {
   deviceProfile?: DeviceProfile;
   scrollbackMode?: TerminalScrollbackMode;
   events?: TerminalControllerEvents;
+  /** Lifecycle-owner swap channel — the controller rewires when it fires. */
+  transportBinding?: TerminalTransportBinding;
 }
 
 /**
@@ -120,6 +139,7 @@ export class TerminalController {
   private interaction: TerminalInteractionController | null = null;
   private capsuleOcclusionScroll: CapsuleOcclusionScroll | null = null;
   private titleUnsub: (() => void) | null = null;
+  private transportBindingUnsub: (() => void) | null = null;
   private useMobileIme: boolean;
   private readonly scrollbackMode: TerminalScrollbackMode;
   private attached = false;
@@ -157,6 +177,14 @@ export class TerminalController {
     this.scrollbackMode = options.scrollbackMode ?? 'legacy';
     this.events = options.events;
     this.initInputRouter();
+    // Subscribed at construction, not in an effect: the swap notification is
+    // synchronous with the owner's identity change, so the rewire lands in
+    // the same tick and can never bind a just-disposed transport generation.
+    this.transportBindingUnsub = options.transportBinding?.subscribe(() => {
+      if (this.attached && this._terminal) {
+        this.rewireTransport(this._terminal);
+      }
+    }) ?? null;
   }
 
   /**
@@ -404,6 +432,8 @@ export class TerminalController {
 
   /** Tear down xterm, transport, and GPU resources (controller replacement / unmount). */
   dispose(): void {
+    this.transportBindingUnsub?.();
+    this.transportBindingUnsub = null;
     this.detach();
     this.instance.dispose();
   }
