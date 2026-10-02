@@ -46,18 +46,17 @@ export const terminalViewportInsetClass =
  */
 export function TerminalViewport({
   controller,
-  transportEpoch = 0,
   onOpenWorkspaceFile,
 }: {
   controller: TerminalController | null;
-  /** Bump when the P2P socket identity changes so ConnectionManager rebinds. */
-  transportEpoch?: string | number;
   onOpenWorkspaceFile?: (path: string, line?: number) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const linkHandlerRef = useRef(onOpenWorkspaceFile);
   linkHandlerRef.current = onOpenWorkspaceFile;
 
+  // Mount/unmount only. A transport swap is pushed to the controller by the
+  // SessionRuntime itself (#1309) — no epoch prop, no React-driven rewire.
   useLayoutEffect(() => {
     const container = containerRef.current;
     if (!container || !controller) { return; }
@@ -73,7 +72,7 @@ export function TerminalViewport({
       linkDisposable?.dispose();
       controller.detach();
     };
-  }, [controller, transportEpoch]);
+  }, [controller]);
 
   return (
     <div

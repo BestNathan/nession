@@ -3,15 +3,15 @@ import { describe, it, expect } from 'vitest';
 import { createStore } from 'jotai';
 import type { Session } from '@/types';
 import type { AttachChoice } from '@/product/session/components/AttachDialog';
-import { p2pStateAtom, routeIntentEpochAtom } from '@/platform/attach/state';
+import { routeIntentEpochAtom } from '@/platform/attach/state';
 import {
   sessionIdAtom, sessionNameAtom, attachInfoAtom, orderedUrlsAtom,
-  manualOverrideAtom, forcedRelayAtom, rendererAtom, envRefsAtom,
+  manualOverrideAtom, rendererAtom, envRefsAtom,
   agentIdAtom, addressesAtom, hasActiveSessionAtom, sessionIdFromUrlAtom,
   attachToSessionAtom, disconnectAtom, switchAddressAtom,
   attachDialogSessionAtom, attachDialogIntentAtom,
 } from '@/product/session/state';
-import { terminalSessionStateAtom } from '@/product/terminal/state/session';
+import { leaseRuntimeAtPhase } from '@/test/leaseRuntime';
 
 const navigate = () => {};
 
@@ -42,7 +42,6 @@ describe('base atoms', () => {
     expect(store.get(attachInfoAtom)).toBeNull();
     expect(store.get(orderedUrlsAtom)).toEqual([]);
     expect(store.get(manualOverrideAtom)).toBeNull();
-    expect(store.get(forcedRelayAtom)).toBe(false);
     expect(store.get(rendererAtom)).toBe('webgl');
     expect(store.get(envRefsAtom)).toEqual([]);
     expect(store.get(attachDialogSessionAtom)).toBeNull();
@@ -96,7 +95,6 @@ describe('action atoms', () => {
     store.set(attachToSessionAtom, { session, choice: first, navigate });
     const epochAfterFirst = store.get(routeIntentEpochAtom);
     expect(epochAfterFirst).toBe(0);
-    store.set(terminalSessionStateAtom, 'attached');
 
     const second = makeChoice(session);
     second.attachInfo.connection_token = 'tok2'; // fresh token per dialog confirm
@@ -127,19 +125,17 @@ describe('action atoms', () => {
     store.set(sessionIdAtom, 'agent:sess');
     store.set(sessionNameAtom, 'sess');
     store.set(manualOverrideAtom, 'ws://a/ws');
-    store.set(p2pStateAtom, 'connected');
     store.set(disconnectAtom, navigate);
     expect(store.get(sessionIdAtom)).toBe('');
     expect(store.get(sessionNameAtom)).toBe('');
     expect(store.get(manualOverrideAtom)).toBeNull();
-    expect(store.get(p2pStateAtom)).toBe('disconnected');
   });
 
-  it('switchAddressAtom sets override and resets state', () => {
+  it('switchAddressAtom sets override and bumps the route epoch', () => {
     const store = createStore();
     store.set(switchAddressAtom, 'ws://b/ws');
     expect(store.get(manualOverrideAtom)).toBe('ws://b/ws');
-    expect(store.get(forcedRelayAtom)).toBe(false);
+    expect(store.get(routeIntentEpochAtom)).toBe(1);
   });
 
   it('switchAddressAtom is a no-op when re-selecting the current override', () => {
@@ -149,16 +145,12 @@ describe('action atoms', () => {
     const epochAfterFirst = store.get(routeIntentEpochAtom);
     expect(epochAfterFirst).toBe(1);
 
-    // Simulate connection having come up since the first switch — so the
-    // second switch has a non-idle state to preserve.
-    store.set(terminalSessionStateAtom, 'attached');
-
     // Second switch with the same URL must NOT tear down the connection
-    // (would otherwise flash a spinner for a logical no-op).
+    // (would otherwise flash a spinner for a logical no-op). The epoch is the
+    // teardown signal: it must not move.
     store.set(switchAddressAtom, 'ws://same/ws');
     expect(store.get(manualOverrideAtom)).toBe('ws://same/ws');
     expect(store.get(routeIntentEpochAtom)).toBe(epochAfterFirst); // epoch unchanged
-    expect(store.get(terminalSessionStateAtom)).toBe('attached'); // state preserved
   });
 
   it('switchAddressAtom fires when override changes (null → url, even to same URL Auto resolved to)', () => {
@@ -179,9 +171,6 @@ describe('action atoms', () => {
     const epochInitial = store.get(routeIntentEpochAtom);
     expect(epochInitial).toBe(0);
 
-    // Simulate connection having come up.
-    store.set(terminalSessionStateAtom, 'attached');
-
     // Re-selecting Auto must NOT tear down the connection — would otherwise
     // flash a spinner every time the user clicks the Auto entry they're
     // already on, and is the reported cause of "selecting auto multiple
@@ -189,7 +178,6 @@ describe('action atoms', () => {
     store.set(switchAddressAtom, null);
     expect(store.get(manualOverrideAtom)).toBeNull();
     expect(store.get(routeIntentEpochAtom)).toBe(epochInitial); // epoch unchanged
-    expect(store.get(terminalSessionStateAtom)).toBe('attached'); // state preserved
   });
 
   it('switchAddressAtom is a no-op when explicit → Auto resolves to same URL', () => {
@@ -198,12 +186,13 @@ describe('action atoms', () => {
     store.set(attachToSessionAtom, { session, choice: makeChoice(session), navigate });
     store.set(switchAddressAtom, 'ws://a/ws');
     const epochAfterExplicit = store.get(routeIntentEpochAtom);
-    store.set(terminalSessionStateAtom, 'attached');
+    // No runtime is leased here, so the failed-phase read-back reports
+    // not-failed — clearing the override is all the switch does (#1309: the
+    // runtime, not an atom, is the phase authority).
 
     store.set(switchAddressAtom, null);
     expect(store.get(manualOverrideAtom)).toBeNull();
     expect(store.get(routeIntentEpochAtom)).toBe(epochAfterExplicit);
-    expect(store.get(terminalSessionStateAtom)).toBe('attached');
   });
 
   it('switchAddressAtom reconnects when explicit → Auto picks a different URL', () => {
@@ -226,11 +215,16 @@ describe('action atoms', () => {
     store.set(attachToSessionAtom, { session, choice: makeChoice(session), navigate });
     store.set(switchAddressAtom, 'ws://a/ws');
     const epochAfterExplicit = store.get(routeIntentEpochAtom);
-    store.set(terminalSessionStateAtom, 'failed');
-
-    store.set(switchAddressAtom, null);
-    expect(store.get(manualOverrideAtom)).toBeNull();
-    expect(store.get(routeIntentEpochAtom)).toBe(epochAfterExplicit + 1);
+    // A failed attach phase is a runtime fact (#1309) — put a failed runtime
+    // where the read-back looks for it.
+    const release = leaseRuntimeAtPhase(session.session_id, 'failed');
+    try {
+      store.set(switchAddressAtom, null);
+      expect(store.get(manualOverrideAtom)).toBeNull();
+      expect(store.get(routeIntentEpochAtom)).toBe(epochAfterExplicit + 1);
+    } finally {
+      release();
+    }
   });
 });
 

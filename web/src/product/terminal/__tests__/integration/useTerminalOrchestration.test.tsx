@@ -7,7 +7,7 @@ import type {
 import { createStore, Provider } from 'jotai';
 import { createElement, type ReactNode } from 'react';
 import { useTerminalOrchestration } from '@/product/terminal/useTerminalOrchestration';
-import { attachInfoAtom, sessionIdAtom, sessionNameAtom } from '@/product/session/state';
+import { attachInfoAtom, manualOverrideAtom, sessionIdAtom, sessionNameAtom } from '@/product/session/state';
 import type { TerminalAgentApi } from '@/product/terminal';
 import type { UseTerminalOptions } from '@/product/terminal/hooks/useTerminal';
 import type { ResumeReply } from '@/platform/terminal-runtime/streamReconciler';
@@ -15,6 +15,9 @@ import type { ConnectionState } from '@/platform/socket/types';
 import type { AttachInfo } from '@/types';
 import { TerminalController } from '@/platform/terminal-runtime/controller/TerminalController';
 import type { TerminalTransport } from '@/platform/terminal-runtime/transport/TerminalTransport';
+import { ConnectionManager } from '@/platform/terminal-runtime/ConnectionManager';
+import type { SessionRuntime } from '@/platform/session-runtime/SessionRuntime';
+import { inputDropAtomFamily } from '@/product/terminal/state/ui';
 import type { TerminalSession } from '@/product/terminal/state/session';
 
 // xterm.open() requires window.matchMedia in jsdom — the same local stub
@@ -44,21 +47,21 @@ Object.defineProperty(window, 'matchMedia', {
  * transitions a reconnect produces; and `makeController` lets a test install a
  * real `TerminalController` instead of the usual `null`.
  */
-const { deps, terminalOptions } = vi.hoisted(() => ({
+const { deps } = vi.hoisted(() => ({
   deps: {
     runtime: null as unknown,
     api: null as unknown,
-    snapshot: { phase: 'attached' as 'attached' | 'reconnecting', reconnectCount: 0 },
+    snapshot: { phase: 'attached' as 'attached' | 'reconnecting' | 'failed', reconnectCount: 0 },
+    connectionState: 'connected' as ConnectionState,
     makeController: null as ((factory: () => TerminalTransport) => TerminalController) | null,
   },
-  terminalOptions: { current: null as unknown },
 }));
 
 vi.mock('@/product/terminal/hooks/useP2PAttachTransport', () => ({
   useP2PAttachTransport: () => ({
     waitingForAddressPlan: false,
     agentTerminalApi: deps.api,
-    connectionState: 'connected' as ConnectionState,
+    connectionState: deps.connectionState,
     runtime: deps.runtime,
     snapshot: deps.snapshot,
     fileOps: null,
@@ -66,23 +69,21 @@ vi.mock('@/product/terminal/hooks/useP2PAttachTransport', () => ({
 }));
 
 /**
- * The orchestration hands the transport factory to `useTerminal`, which is the
- * only thing that builds the transport. The mock is where the test takes the
- * factory from — everything downstream of it is the production object.
+ * The real `useTerminal` builds the controller's transports through the
+ * runtime (`runtime.buildTransport()`, #1309). The mock does the same with the
+ * test's runtime harness — everything downstream of the build is the
+ * production object.
  *
- * A test that needs the controller in the loop installs `makeController`; it is
- * handed the orchestration's own factory, so the transport the controller wires
- * is the production `ConnectionManager` and not a stand-in for it.
+ * A test that needs the controller in the loop installs `makeController`; it
+ * is handed a factory over the runtime's own `buildTransport`, so the
+ * transport the controller wires is the production `ConnectionManager` and
+ * not a stand-in for it.
  */
 vi.mock('@/product/terminal/hooks/useTerminal', () => ({
   useTerminal: (options: unknown) => {
-    terminalOptions.current = options;
-    return deps.makeController?.((options as UseTerminalOptions).transportFactory) ?? null;
+    const opts = options as UseTerminalOptions;
+    return deps.makeController?.(() => (opts.runtime as SessionRuntime).buildTransport()) ?? null;
   },
-}));
-
-vi.mock('@/product/terminal/useTerminalAttach', () => ({
-  useTerminalAttach: () => ({ terminalState: 'attached', reconnectCount: 0 }),
 }));
 
 vi.mock('@/shared/hooks/useWebSocket', () => ({
@@ -108,15 +109,6 @@ function makeAttachInfo(): AttachInfo {
       { url: 'ws://a/ws', label: 'A', network_type: 'lan', priority: 10, status: 'reachable' },
     ],
   };
-}
-
-/** The options the orchestration passed to `useTerminal` on its last render. */
-function capturedOptions(): UseTerminalOptions {
-  const options = terminalOptions.current as UseTerminalOptions | null;
-  if (options === null) {
-    throw new Error('useTerminal was never called');
-  }
-  return options;
 }
 
 interface AgentApiHarness {
@@ -239,14 +231,80 @@ interface TerminalSeed {
   streamCursor?: number;
 }
 
+interface RuntimeHarness {
+  runtime: SessionRuntime;
+  probeLivenessNow: ReturnType<typeof vi.fn>;
+  noteStreamTruncated: ReturnType<typeof vi.fn>;
+  /**
+   * The runtime's half of an attach completing: apply the attach's seed to the
+   * live transport, in the real runtime's order (#1309 moved this out of the
+   * React tree — `SessionRuntime.applyAttachSeedToLiveTransport`).
+   */
+  applyAttach: (seed: TerminalSeed) => void;
+}
+
+/**
+ * The runtime the orchestration's collaborators see in these tests. It builds
+ * the REAL `ConnectionManager` — the point of every test below is that nothing
+ * between the keystroke and the wire is a stand-in — with the same options the
+ * production runtime hands it.
+ */
+function makeRuntimeHarness(opts: {
+  store: ReturnType<typeof createStore>;
+  isAttached?: () => boolean;
+}): RuntimeHarness {
+  const probeLivenessNow = vi.fn();
+  const noteStreamTruncated = vi.fn();
+  let live: TerminalTransport | null = null;
+  const runtime = {
+    buildTransport: () => {
+      live = new ConnectionManager({
+        mode: 'p2p',
+        sessionName: 's1',
+        sessionId: 'agent:s1',
+        agentApi: deps.api as TerminalAgentApi,
+        isAttached: opts.isAttached ?? (() => true),
+        onInputSent: () => probeLivenessNow(),
+        onStreamTruncated: () => noteStreamTruncated(),
+        onInputDrop: (drop) => {
+          opts.store.set(inputDropAtomFamily('agent:s1'), drop);
+        },
+      });
+      return live;
+    },
+    subscribeTransportSwap: () => () => {},
+    setTransportReady: () => {},
+    updateViewportSize: () => {},
+  } as unknown as SessionRuntime;
+  return {
+    runtime,
+    probeLivenessNow,
+    noteStreamTruncated,
+    applyAttach: (seed) => {
+      const transport = live;
+      if (transport === null) {
+        throw new Error('applyAttach before the runtime built a transport');
+      }
+      // The production order: reconcile the input cursor BEFORE the flush (the
+      // flush is numbered against it), seed the stream cursor AFTER it.
+      transport.seedInputCursor?.({
+        inputEpoch: seed.inputEpoch,
+        appliedThrough: seed.inputAppliedThrough,
+        controlGeneration: seed.controlGeneration,
+      });
+      transport.flushAllOutbound();
+      transport.seedStreamCursor?.(seed.streamEpoch, seed.streamCursor);
+    },
+  };
+}
+
 const hosts: HTMLDivElement[] = [];
 const controllers: TerminalController[] = [];
 
 /**
  * A session on the production stack: the real `TerminalController`, attached to
- * a real container, over the real `ConnectionManager` the orchestration built
- * from its own `transportFactory` — with input typed through the controller,
- * which is what xterm does.
+ * a real container, over the real `ConnectionManager` the runtime built — with
+ * input typed through the controller, which is what xterm does.
  *
  * The point of the whole arrangement is that nothing between the keystroke and
  * the wire is a stand-in. A harness that restated any of it would be testing
@@ -257,11 +315,17 @@ function startSession(initialSeed: TerminalSeed) {
   const agent = makeAgentApi();
   deps.api = agent.api;
   let seed = initialSeed;
-  deps.runtime = {
-    getP2pAttachSeed: () => seed,
-    probeLivenessNow: vi.fn(),
-    noteStreamTruncated: vi.fn(),
-  };
+
+  const store = createStore();
+  store.set(sessionIdAtom, 'agent:s1');
+  store.set(sessionNameAtom, 's1');
+  store.set(attachInfoAtom, makeAttachInfo());
+
+  const harness = makeRuntimeHarness({
+    store,
+    isAttached: () => deps.snapshot.phase === 'attached',
+  });
+  deps.runtime = harness.runtime;
 
   const host = document.createElement('div');
   document.body.appendChild(host);
@@ -276,18 +340,18 @@ function startSession(initialSeed: TerminalSeed) {
     return built.controller;
   };
 
-  const store = createStore();
-  store.set(sessionIdAtom, 'agent:s1');
-  store.set(sessionNameAtom, 's1');
-  store.set(attachInfoAtom, makeAttachInfo());
   const view = renderHook(
-    () => useTerminalOrchestration({ onDisconnect: vi.fn(), onError: vi.fn() }),
+    () => useTerminalOrchestration({ onError: vi.fn() }),
     { wrapper: wrapper(store) },
   );
   const controller = built.controller;
   if (controller === null) {
     throw new Error('the orchestration never asked for a controller');
   }
+  // The mount attach completing: the runtime applies the seed it stated to the
+  // transport it built. Done outside the hook because #1309 made it the
+  // runtime's half of the handoff, not a React effect's.
+  harness.applyAttach(seed);
 
   return {
     view,
@@ -295,11 +359,12 @@ function startSession(initialSeed: TerminalSeed) {
     agent,
     /** What the runtime states on the next attach. */
     reseed: (next: TerminalSeed) => { seed = next; },
-    /** The transition a P2P reconnect produces. */
+    /** The transition a P2P reconnect produces: re-attach, seed and all. */
     reattach: () => {
       deps.snapshot = { phase: 'reconnecting', reconnectCount: 1 };
       view.rerender();
       deps.snapshot = { phase: 'attached', reconnectCount: 1 };
+      harness.applyAttach(seed);
       view.rerender();
     },
   };
@@ -316,7 +381,52 @@ describe('useTerminalOrchestration', () => {
     }
     hosts.length = 0;
     deps.makeController = null;
+    deps.runtime = null;
+    deps.api = null;
     deps.snapshot = { phase: 'attached', reconnectCount: 0 };
+    deps.connectionState = 'connected';
+  });
+
+  it('derives isSwitching from the manual route and the live connection state, never a stored mirror (#1309 SC-02)', () => {
+    // The old isSwitchingAtom read p2pStateAtom — a Jotai mirror of the
+    // runtime's connection state that could tell a different story than the
+    // transport. The derivation now reads what the orchestration already
+    // holds: the manual route and the runtime's live connection state.
+    const store = createStore();
+    store.set(sessionIdAtom, 'agent:s1');
+    store.set(sessionNameAtom, 's1');
+    store.set(attachInfoAtom, makeAttachInfo());
+    const view = renderHook(
+      () => useTerminalOrchestration({ onError: vi.fn() }),
+      { wrapper: wrapper(store) },
+    );
+
+    // Auto route, transport connected — not switching.
+    expect(view.result.current.isSwitching).toBe(false);
+
+    // A manual route whose transport is still up is not a switch in flight.
+    act(() => { store.set(manualOverrideAtom, 'ws://b/ws'); });
+    expect(view.result.current.isSwitching).toBe(false);
+
+    // The new route's transport still connecting — the switch is in flight.
+    act(() => { deps.connectionState = 'connecting'; });
+    view.rerender();
+    expect(view.result.current.isSwitching).toBe(true);
+
+    // Connected on the new route — done.
+    act(() => { deps.connectionState = 'connected'; });
+    view.rerender();
+    expect(view.result.current.isSwitching).toBe(false);
+
+    // A failed session never reads as switching (the old atom's guard).
+    act(() => {
+      deps.connectionState = 'connecting';
+      deps.snapshot = { phase: 'failed', reconnectCount: 0 };
+    });
+    view.rerender();
+    expect(view.result.current.isSwitching).toBe(false);
+
+    view.unmount();
   });
 
   it('carries a truncation the transport sees through to the session runtime (#1304)', async () => {
@@ -330,23 +440,25 @@ describe('useTerminalOrchestration', () => {
     // the reconciler stating a loss that reaches nobody.
     //
     // So the truncation is driven *through the orchestration*: the transport
-    // below is the real ConnectionManager the options are handed to, not a
-    // stand-in that would only restate the arrow.
-    const runtime = { noteStreamTruncated: vi.fn(), probeLivenessNow: vi.fn() };
+    // below is the real ConnectionManager the runtime builds, not a stand-in
+    // that would only restate the arrow.
     const agent = makeAgentApi();
-    deps.runtime = runtime;
     deps.api = agent.api;
 
     const store = createStore();
     store.set(sessionIdAtom, 'agent:s1');
     store.set(sessionNameAtom, 's1');
     store.set(attachInfoAtom, makeAttachInfo());
+    const harness = makeRuntimeHarness({ store });
+    deps.runtime = harness.runtime;
     const view = renderHook(
-      () => useTerminalOrchestration({ onDisconnect: vi.fn(), onError: vi.fn() }),
+      () => useTerminalOrchestration({ onError: vi.fn() }),
       { wrapper: wrapper(store) },
     );
 
-    const transport = capturedOptions().transportFactory();
+    // Built the way the production caller builds it: through the runtime,
+    // which is what wires the truncation report back to itself (#1309).
+    const transport = harness.runtime.buildTransport();
 
     // The shape the reconciler reads as a hole: two frames with a gap between
     // them, and an agent that says its retained window begins above the
@@ -365,7 +477,7 @@ describe('useTerminalOrchestration', () => {
     });
     await flushMicrotasks();
 
-    expect(runtime.noteStreamTruncated).toHaveBeenCalledTimes(1);
+    expect(harness.noteStreamTruncated).toHaveBeenCalledTimes(1);
 
     transport.dispose();
     view.unmount();

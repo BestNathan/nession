@@ -1,12 +1,10 @@
 // web/src/terminal/controller/TerminalController.ts
 import { Terminal } from '@xterm/xterm';
-import type { ConnectionState } from '@/platform/socket/types';
 import type {
   DeviceProfile,
   InputMode,
   TerminalScrollbackMode,
   TerminalSession,
-  TerminalStatus,
 } from '../types';
 import type { TerminalTransport } from '../transport/TerminalTransport';
 import type { TerminalBootstrap } from '../bootstrap';
@@ -58,6 +56,23 @@ export interface TerminalControllerEvents {
   onTitleChange?: (sessionId: string, title: string) => void;
 }
 
+/**
+ * How the session-lifecycle owner tells this controller its transport
+ * identity was swapped (#1309).
+ *
+ * Structural rather than typed against SessionRuntime: the controller learns
+ * THAT a swap finished and rebuilds from its transport factory (which reads
+ * the owner's current identity), so terminal-runtime stays free of a
+ * session-runtime import — and the subscription is installed in the
+ * constructor, because an effect-installed one can miss a swap that lands
+ * between the layout-phase attach and the passive phase (the same ordering
+ * lesson as #598).
+ */
+export interface TerminalTransportBinding {
+  /** Subscribe to swap notifications; returns the unsubscribe function. */
+  subscribe(listener: () => void): () => void;
+}
+
 export interface TerminalControllerOptions {
   rendererType: 'webgl' | 'canvas';
   fontSize?: number;
@@ -72,6 +87,8 @@ export interface TerminalControllerOptions {
   deviceProfile?: DeviceProfile;
   scrollbackMode?: TerminalScrollbackMode;
   events?: TerminalControllerEvents;
+  /** Lifecycle-owner swap channel — the controller rewires when it fires. */
+  transportBinding?: TerminalTransportBinding;
 }
 
 /**
@@ -82,20 +99,6 @@ export interface TerminalControllerOptions {
  */
 function shouldUseMobileIme(profile: DeviceProfile | undefined): boolean {
   return profile === 'mobile' && typeof window !== 'undefined' && 'ontouchstart' in window;
-}
-
-/** Map a transport ConnectionState onto the domain TerminalStatus. */
-function mapConnectionState(state: ConnectionState): TerminalStatus {
-  switch (state) {
-    case 'connecting':
-      return 'connecting';
-    case 'connected':
-      return 'connected';
-    case 'disconnected':
-      return 'failed';
-    case 'reconnecting':
-      return 'reconnecting';
-  }
 }
 
 /**
@@ -120,6 +123,7 @@ export class TerminalController {
   private interaction: TerminalInteractionController | null = null;
   private capsuleOcclusionScroll: CapsuleOcclusionScroll | null = null;
   private titleUnsub: (() => void) | null = null;
+  private transportBindingUnsub: (() => void) | null = null;
   private useMobileIme: boolean;
   private readonly scrollbackMode: TerminalScrollbackMode;
   private attached = false;
@@ -138,10 +142,8 @@ export class TerminalController {
   events?: TerminalControllerEvents;
 
   /** Callbacks → Jotai */
-  onStateChange: ((status: TerminalStatus) => void) | null = null;
   onTitleChange: ((title: string) => void) | null = null;
   onError: ((err: Error) => void) | null = null;
-  onDisconnect: (() => void) | null = null;
 
   constructor(
     session: TerminalSession,
@@ -157,6 +159,14 @@ export class TerminalController {
     this.scrollbackMode = options.scrollbackMode ?? 'legacy';
     this.events = options.events;
     this.initInputRouter();
+    // Subscribed at construction, not in an effect: the swap notification is
+    // synchronous with the owner's identity change, so the rewire lands in
+    // the same tick and can never bind a just-disposed transport generation.
+    this.transportBindingUnsub = options.transportBinding?.subscribe(() => {
+      if (this.attached && this._terminal) {
+        this.rewireTransport(this._terminal);
+      }
+    }) ?? null;
   }
 
   /**
@@ -258,11 +268,7 @@ export class TerminalController {
       this.markSessionOutput();
     };
     transport.onResize = (cols: number, rows: number) => { terminal.resize(cols, rows); };
-    transport.onStateChange = (state: ConnectionState) => {
-      this.onStateChange?.(mapConnectionState(state));
-    };
     transport.onError = (err: Error) => { this.onError?.(err); };
-    transport.onDisconnect = () => { this.onDisconnect?.(); };
     this.events?.onTransportReady?.(true);
   }
 
@@ -290,9 +296,7 @@ export class TerminalController {
     if (this.transport) {
       this.transport.onOutput = null;
       this.transport.onResize = null;
-      this.transport.onStateChange = null;
       this.transport.onError = null;
-      this.transport.onDisconnect = null;
       this.transport.dispose();
       this.transport = null;
     }
@@ -404,6 +408,8 @@ export class TerminalController {
 
   /** Tear down xterm, transport, and GPU resources (controller replacement / unmount). */
   dispose(): void {
+    this.transportBindingUnsub?.();
+    this.transportBindingUnsub = null;
     this.detach();
     this.instance.dispose();
   }

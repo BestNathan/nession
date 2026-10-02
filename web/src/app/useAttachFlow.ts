@@ -8,7 +8,7 @@ import {
   attachToSessionAtom,
   sessionIdAtom,
 } from '@/product/session/state';
-import { terminalSessionStateAtom } from '@/product/terminal/state/session';
+import { sessionRuntimeRegistry } from '@/platform/session-runtime/SessionRuntimeRegistry';
 import { saveAttachPrefs } from '../platform/attach/attachPrefs';
 import { probeResultsAtom } from '@/product/agent/state';
 import { toast } from 'sonner';
@@ -23,7 +23,6 @@ export function useAttachFlow() {
   const attachToSession = useSetAtom(attachToSessionAtom);
   const probeResults = useAtomValue(probeResultsAtom);
   const clientSessionId = useAtomValue(sessionIdAtom);
-  const terminalState = useAtomValue(terminalSessionStateAtom);
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -63,9 +62,13 @@ export function useAttachFlow() {
     // terminal is healthy there is nothing to do — a fast-path re-attach
     // would tear down the live runtime (route-epoch bump, #668 class). When
     // the terminal FAILED, fall through to the dialog so recovery stays an
-    // explicit user action.
+    // explicit user action. The phase is read at click time from the runtime
+    // — the attach phase's only owner (#1309 SC-01) — not subscribed to,
+    // because a click handler needs the value now, not a re-render earlier.
     if (clientSessionId === session.session_id) {
-      if (terminalState !== 'failed') {
+      const phase =
+        sessionRuntimeRegistry.get(session.session_id)?.getSnapshot().phase ?? 'idle';
+      if (phase !== 'failed') {
         return;
       }
       openAttachDialog(session, 'attach');
@@ -100,7 +103,7 @@ export function useAttachFlow() {
         }
       }
     })();
-  }, [probeResults, confirmAttach, openAttachDialog, clientSessionId, terminalState]);
+  }, [probeResults, confirmAttach, openAttachDialog, clientSessionId]);
 
   /** Session-row Settings entry: dialog in configure mode (persist only). */
   const openAttachSettings = useCallback((session: Session) => {

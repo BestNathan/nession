@@ -2,7 +2,7 @@
 // web/src/terminal/controller/__tests__/TerminalController.test.ts
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { TerminalController } from '@/platform/terminal-runtime/controller/TerminalController';
-import type { TerminalSession, TerminalStatus } from '@/product/terminal/state/session';
+import type { TerminalSession } from '@/product/terminal/state/session';
 import type { TerminalTransport } from '@/platform/terminal-runtime/transport/TerminalTransport';
 import { CapsuleOcclusionScroll } from '@/platform/terminal-runtime/capsule/occlusionScroll';
 
@@ -40,9 +40,7 @@ function makeTransport(): MockTransport {
     flushAllOutbound: vi.fn<() => void>(),
     onOutput: null,
     onResize: null,
-    onStateChange: null,
     onError: null,
-    onDisconnect: null,
     dispose: vi.fn<() => void>(),
   };
 }
@@ -403,7 +401,6 @@ describe('TerminalController', () => {
 
     expect(transport.dispose).toHaveBeenCalled();
     expect(transport.onOutput).toBeNull();
-    expect(transport.onStateChange).toBeNull();
     expect(controller.terminal).toBeNull();
   });
 
@@ -455,38 +452,18 @@ describe('TerminalController', () => {
     expect(controller.terminal!.rows).toBe(50);
   });
 
-  it('maps transport connection state to terminal status', () => {
-    const transport = makeTransport();
-    const controller = new TerminalController(makeSession(), () => transport);
-    controller.attach(host());
-
-    const statuses: TerminalStatus[] = [];
-    controller.onStateChange = (s) => { statuses.push(s); };
-
-    transport.onStateChange!('connected');
-    transport.onStateChange!('disconnected');
-    transport.onStateChange!('reconnecting');
-    transport.onStateChange!('connecting');
-
-    expect(statuses).toEqual(['connected', 'failed', 'reconnecting', 'connecting']);
-  });
-
-  it('wires transport onError and onDisconnect to facade callbacks', () => {
+  it('wires transport onError to the facade callback', () => {
     const transport = makeTransport();
     const controller = new TerminalController(makeSession(), () => transport);
     controller.attach(host());
 
     const onError = vi.fn();
-    const onDisconnect = vi.fn();
     controller.onError = onError;
-    controller.onDisconnect = onDisconnect;
 
     const err = new Error('boom');
     transport.onError!(err);
-    transport.onDisconnect!();
 
     expect(onError).toHaveBeenCalledWith(err);
-    expect(onDisconnect).toHaveBeenCalledTimes(1);
   });
 
   it('surfaces xterm title changes via onTitleChange', async () => {
