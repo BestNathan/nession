@@ -123,6 +123,59 @@ export interface AIReasoningItem {
   status: AIToolStatus
 }
 
+/**
+ * Something the provider said that is not the assistant's work.
+ *
+ * ## Why this arm exists before any provider emits one
+ *
+ * The same recorded exception as [`AIReasoningItem`] above, on the same
+ * grounds — the requirement does not merely allow this, it *names* it. `#1363`
+ * SC-03 lists `status` beside the message, tool and unknown kinds. Without the
+ * arm a provider's notice has nowhere to go but `unknown`, and the semantics
+ * then arrive fused to whichever provider needs them first, which is the
+ * coupling the adapter boundary exists to prevent.
+ *
+ * ## It does not fold, and that was a decision
+ *
+ * Worth stating plainly, because the canonical document states the rule twice
+ * and the two statements disagree. `docs/design/design-system/patterns/
+ * conversation.md` draws `reasoning / status rows` *inside* the process window,
+ * and nine lines later says a status notice "never fold[s] into the process".
+ *
+ * Resolved towards the second, and the diagram was converged in the same
+ * change. A notice is *about* the conversation rather than produced by the
+ * assistant working on it — "this turn was interrupted", "that host went away"
+ * — and a reader folding the work away is asking to see the answer, not to lose
+ * the reason there isn't one. SC-03's own grouping supports this: it lists
+ * `status` with the conversation *states* (error, empty, loading), not with the
+ * content kinds. So `turnsOf` leaves these out of the process window, which is
+ * what the renderer reads to decide what folds.
+ *
+ * ## What is deliberately not here
+ *
+ * No severity. "Notice, warning, error" is a vocabulary nobody has needed yet,
+ * and `content.ts`'s rule — add an arm when a provider demonstrates the need,
+ * not when one is imagined — applies to a field as much as to a type. The
+ * provider's own words carry the tone until something has to be styled by it.
+ *
+ * **Nothing is required of a provider.** An adapter with no notices never emits
+ * one, exactly as it never emits a tool it does not have.
+ */
+export interface AIStatusItem {
+  kind: 'status'
+  /** Stable within the conversation — see [`AIMessageItem.id`](./content.ts). */
+  id: string
+  timestamp?: string | null
+  /**
+   * What the provider said, in its own words.
+   *
+   * Nession owns the row and does not own the sentence. If a provider's text
+   * cannot be shown as given, the answer is a provider that says less — never
+   * this client paraphrasing what it thinks happened.
+   */
+  text: string
+}
+
 export interface AIToolItem {
   kind: 'tool'
   /** Stable within the conversation — see [`AIMessageItem.id`](./content.ts). */
