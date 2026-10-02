@@ -20,6 +20,7 @@ import { Bot } from 'lucide-react';
 import type { CapabilityFacts, CapabilityState } from '@/product/capability';
 import type { WorkspaceViewBinding } from '@/app/workspace/workspaceContext';
 import type { CapsuleProjectionBinding } from '@/app/capsuleProjections';
+import type { CapabilityWorkBinding } from '@/app/workSignals';
 import { ClaudeCodeWorkspace } from './components/ClaudeCodeWorkspace';
 import { ClaudeCodeProjection } from './components/ClaudeCodeProjection';
 
@@ -114,4 +115,29 @@ export const claudeCodeProjection: CapsuleProjectionBinding = {
       openDetail={openDetail}
     />
   ),
+};
+
+/**
+ * What "Claude Code is working" means, contributed to the capsule's work
+ * resolver (#1347 SC-14/19).
+ *
+ * Passive sensing: the agent already reports the pane's foreground command
+ * with every session update, so a pane running Claude Code *is* the work
+ * signal — no explicit API call. The matcher is the same one
+ * `resolveClaudeCodeState` uses, and the summary text is this capability's
+ * sentence to write; the shell aggregates without knowing either.
+ */
+export const claudeCodeWork: CapabilityWorkBinding = {
+  id: CLAUDE_CODE_ID,
+  sense: (facts) => {
+    const command = facts?.sessionForegroundCommand;
+    if (!command || !isClaudeCodeCommand(command)) {
+      return null;
+    }
+    return {
+      capabilityId: CLAUDE_CODE_ID,
+      status: 'working',
+      summary: 'Claude Code is running in this session',
+    };
+  },
 };

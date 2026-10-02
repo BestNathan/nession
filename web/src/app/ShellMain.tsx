@@ -258,7 +258,7 @@ export function ShellMain({
     onSurfaceChange: () => onSurfaceChange('workspace'),
     onOpenWorkspace: openWorkspaceFromCapsule,
   });
-  const workContext = useWorkSignals(selectedSession ?? undefined);
+  const workContext = useWorkSignals(facts);
   const surfaceAction = hasSession && experience === 'web' ? <WebOpenWorkspaceAction onSurfaceChange={onSurfaceChange} /> : undefined;
   const capsuleZoneRef = useRef<HTMLDivElement>(null);
   useCapsuleMorph(surface, capsuleZoneRef);

@@ -1,59 +1,28 @@
 import { useMemo } from 'react';
-import { isClaudeCodeCommand } from '@/capabilities/claude-code';
-import type { Session } from '@/types';
+import type { CapabilityFacts } from '@/product/capability';
 import {
   resolveWorkContext,
-  type WorkSignal,
   type ResolvedWorkContext,
 } from '@/product/terminal/capsule/workAwareness';
+import { collectWorkSignals } from '@/app/workSignals';
 
 /**
- * Collect work signals from capabilities and aggregate into ResolvedWorkContext.
+ * Aggregate capability-contributed work signals into a ResolvedWorkContext.
  *
- * This hook observes capability state and emits work signals when capabilities
- * are actively working. The signals are aggregated into a single context that
- * the capsule consumes to show the work ring.
+ * The shell's half of the work-awareness chain (#1347 SC-14/19): every
+ * registered `CapabilityWorkBinding` senses the same observed facts, and this
+ * resolves whatever comes back. Nothing here names a capability — the signal,
+ * its id and its summary all belong to the contribution (`app/workSignals.ts`
+ * is the registry), so a second capability reports work without this file
+ * changing.
  *
- * **Design:**
- * - Each capability provides its own work signal hook
- * - This hook collects all signals and resolves them
- * - Graceful degradation: if no signals, returns quiet context
+ * The input is the facts object `useCapsuleCapability` already derives, not a
+ * Session: the Workspace panel and the capsule read the same observations, so
+ * they are made once, and "the capability is active in the capsule but quiet
+ * in the ring" cannot happen for the same session.
  *
- * **Success Criteria:**
- * - SC-14: Working from active or passive capability sensing
+ * Graceful degradation: no facts or no signals resolves to the quiet context.
  */
-export function useWorkSignals(session: Session | undefined): ResolvedWorkContext {
-  const claudeCodeSignal = useClaudeCodeWorkSignal(session);
-
-  return useMemo(() => {
-    const signals: WorkSignal[] = [claudeCodeSignal].filter(
-      (signal): signal is WorkSignal => signal !== null,
-    );
-    return resolveWorkContext(signals);
-  }, [claudeCodeSignal]);
-}
-
-/**
- * Claude Code work signal — passive sensing from the pane's foreground command.
- *
- * The agent already reports what the session's pane is running with every
- * session update; when that is a Claude Code process the capability is working,
- * so the signal fires without any explicit API call. The command matcher stays
- * owned by the claude-code capability — the same one `resolveClaudeCodeState`
- * uses — so "Claude is running" means the same thing in both places.
- */
-function useClaudeCodeWorkSignal(
-  session: Session | undefined,
-): WorkSignal | null {
-  const command = session?.foreground_command ?? null;
-  return useMemo(() => {
-    if (!command || !isClaudeCodeCommand(command)) {
-      return null;
-    }
-    return {
-      capabilityId: 'claude-code',
-      status: 'working',
-      summary: 'Claude Code is running in this session',
-    };
-  }, [command]);
+export function useWorkSignals(facts: CapabilityFacts | undefined): ResolvedWorkContext {
+  return useMemo(() => resolveWorkContext(collectWorkSignals(facts)), [facts]);
 }
