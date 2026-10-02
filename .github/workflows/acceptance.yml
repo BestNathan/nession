@@ -83,8 +83,6 @@ jobs:
       criteria_count: ${{ steps.prepare.outputs.criteria_count }}
       source: ${{ steps.source.outputs.source }}
     env:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       ISSUE_NUMBER: ${{ inputs.issue_number }}
       ACCEPTANCE_STAGE: ${{ inputs.stage }}
       ACCEPTANCE_PROVIDER: ${{ inputs.provider }}
@@ -112,12 +110,14 @@ jobs:
         with:
           ref: main
           path: trusted
+          persist-credentials: false
 
       - name: Checkout target ref for read-only verification
         uses: actions/checkout@v4
         with:
           ref: ${{ inputs.target_ref }}
           path: workspace
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:
@@ -151,6 +151,8 @@ jobs:
         working-directory: trusted
         env:
           ACCEPTANCE_RUN_ID: ${{ github.run_id }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           node scripts/acceptance-executor.mjs prepare             "${ISSUE_NUMBER}" "${ACCEPTANCE_STAGE}" "${TARGET_REF}"             "${RUNNER_TEMP}/acceptance-context.json" "${DEPLOYMENT}"
@@ -272,6 +274,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: main
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:
