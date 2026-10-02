@@ -23,12 +23,10 @@ gate_contract_validate() {
       return 2
     fi
   done
-
   if ! [[ "$GATE_ID" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]]; then
     _gate_contract_error "GATE_ID must be kebab-case: ${GATE_ID}"
     return 2
   fi
-
   if ! declare -F gate_check >/dev/null 2>&1; then
     _gate_contract_error "gate_check function is not defined"
     return 2
@@ -75,38 +73,27 @@ gate_require_path() {
   fi
 }
 
-_gate_print_start() {
-  printf '[GATE] %s\n' "$GATE_ID"
-  printf 'name: %s\n' "$GATE_NAME"
-  printf 'command: %s\n' "$GATE_COMMAND"
-  printf 'owner: %s\n' "$GATE_OWNER"
-}
+_gate_print_detail() {
+  local kind="$1"
+  local reason="$2"
+  local repair="$3"
+  local output_file="$4"
 
-_gate_print_pass() {
-  printf '[PASS] %s\n' "$GATE_ID"
-  printf 'success: %s\n' "$GATE_SUCCESS"
-}
-
-_gate_print_fail() {
-  printf '[FAIL] %s\n' "${GATE_ID:-unknown}" >&2
-  printf 'reason: %s\n' "${GATE_RUNTIME_REASON:-${GATE_FAILURE:-repository invariant is false}}" >&2
-  printf 'repair: %s\n' "${GATE_RUNTIME_REPAIR:-${GATE_REPAIR:-repair the gate declaration and rerun}}" >&2
-  if [ -n "${GATE_COMMAND:-}" ]; then
-    printf 'command: %s\n' "$GATE_COMMAND" >&2
-  fi
-}
-
-_gate_print_error() {
-  printf '[ERROR] %s\n' "${GATE_ID:-unknown}" >&2
-  printf 'reason: %s\n' "${GATE_RUNTIME_REASON:-gate could not establish the invariant}" >&2
-  printf 'repair: %s\n' "${GATE_RUNTIME_REPAIR:-restore the gate environment and rerun}" >&2
-  if [ -n "${GATE_COMMAND:-}" ]; then
-    printf 'command: %s\n' "$GATE_COMMAND" >&2
+  printf '[%s] %s\n' "$kind" "$GATE_ID" >&2
+  printf 'name: %s\n' "$GATE_NAME" >&2
+  printf 'reason: %s\n' "$reason" >&2
+  printf 'repair: %s\n' "$repair" >&2
+  printf 'command: %s\n' "$GATE_COMMAND" >&2
+  printf 'owner: %s\n' "$GATE_OWNER" >&2
+  if [ -s "$output_file" ]; then
+    printf 'output:\n' >&2
+    sed 's/^/  /' "$output_file" >&2
   fi
 }
 
 gate_main() {
   local status=0
+  local output_file=""
   GATE_RUNTIME_REASON=""
   GATE_RUNTIME_REPAIR=""
 
@@ -114,7 +101,9 @@ gate_main() {
     :
   else
     status=$?
-    _gate_print_error
+    printf '[ERROR] %s\n' "${GATE_ID:-unknown}" >&2
+    printf 'reason: %s\n' "${GATE_RUNTIME_REASON:-invalid gate contract}" >&2
+    printf 'repair: %s\n' "${GATE_RUNTIME_REPAIR:-fix the gate declaration and rerun}" >&2
     return "$status"
   fi
 
@@ -124,40 +113,37 @@ gate_main() {
       return 0
       ;;
     --help)
-      printf 'usage: %s [--describe] [gate-specific arguments...]\n' "$0"
-      printf '\n'
+      printf 'usage: %s [--describe] [gate-specific arguments...]\n\n' "$0"
       gate_describe
       return 0
       ;;
   esac
 
-  _gate_print_start
+  output_file="$(mktemp "${TMPDIR:-/tmp}/nession-gate-${GATE_ID}.XXXXXX")"
+  trap 'rm -f "$output_file"' RETURN
 
   local caller_cwd="$PWD"
   cd "$GATE_REPO_ROOT"
   set +e
-  gate_check "$@"
+  gate_check "$@" >"$output_file" 2>&1
   status=$?
   set -e
   cd "$caller_cwd"
 
   case "$status" in
     0)
-      _gate_print_pass
+      printf '✓ %s\n' "$GATE_ID"
       return 0
       ;;
     1)
-      _gate_print_fail
+      _gate_print_detail "FAIL" "${GATE_RUNTIME_REASON:-$GATE_FAILURE}" "${GATE_RUNTIME_REPAIR:-$GATE_REPAIR}" "$output_file"
       return 1
       ;;
     *)
-      if [ -z "$GATE_RUNTIME_REASON" ]; then
-        GATE_RUNTIME_REASON="gate command exited with status ${status}; the invariant could not be proven"
-      fi
-      if [ -z "$GATE_RUNTIME_REPAIR" ]; then
-        GATE_RUNTIME_REPAIR="restore the gate tooling/environment, then rerun the exact command above"
-      fi
-      _gate_print_error
+      _gate_print_detail "ERROR" \
+        "${GATE_RUNTIME_REASON:-gate command exited with status ${status}; the invariant could not be proven}" \
+        "${GATE_RUNTIME_REPAIR:-restore the gate tooling/environment, then rerun the exact command above}" \
+        "$output_file"
       return 2
       ;;
   esac

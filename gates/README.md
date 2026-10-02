@@ -1,51 +1,109 @@
 # Repository gates
 
-> **Rollout state: contract only — not cut over.**
+> **Rollout state: runtime contract only — not cut over.**
 >
-> The files introduced by #1242 define the future gate interface. Existing Git
-> hooks, \`justfile\` recipes, GitHub Actions workflows, release checks, and issue
-> guards remain authoritative until a later migration explicitly switches each
-> consumer. Do not delete or bypass an existing check because a candidate gate
-> entrypoint exists.
+> #1242 defines the future repository Gate system. Existing hooks, \`justfile\`,
+> GitHub Actions, release checks, and issue guards remain authoritative until a
+> later migration explicitly switches them.
 
-## Model
+## Directory model
 
-A repository gate is a blocking invariant with one stable executable interface:
-
+\`\`\`text
+gates/
+├── run                 # the only multi-gate runner
+├── run-selftest.sh
+├── checks/             # one stable Gate ID per executable
+│   └── <gate-id>.sh
+├── suites/             # configuration: ordered sets of Gate IDs
+│   └── <suite>.gates
+└── lib/                # shared runtime mechanics, never domain rules
+    ├── common.sh
+    └── common-selftest.sh
 \`\`\`
-router / execution surface
-        |
-        v
-gates/<gate-id>.sh       stable interface + diagnostics
-        |
-        v
-domain implementation    cargo / node / npm / existing scripts
+
+The root \`gates/\` directory is the Gate system. Concrete gates do **not** live
+flat in that directory.
+
+## Core model
+
+- **Gate ID** is the stable API, for example \`protocol-integrity\`.
+- **Gate** is one blocking invariant at \`gates/checks/<gate-id>.sh\`.
+- **Suite** is an ordered set of Gate IDs stored in
+  \`gates/suites/<suite>.gates\`.
+- **Runner** is \`gates/run\`; it resolves IDs, executes every selected Gate,
+  aggregates status, and owns multi-gate presentation.
+- **Router** decides *when/why* a suite or list runs. Hooks/workflows are routers,
+  not rule owners.
+
+## Runner interface
+
+\`\`\`bash
+./gates/run protocol-integrity test-isolation tmux-socket-isolation
+./gates/run --suite pre-commit
+./gates/run --list
+./gates/run --describe protocol-integrity
 \`\`\`
 
-Routers own **when** a gate runs. A gate owns **what success means** and **how a
-failure is repaired**. Domain-specific rule engines can stay in their current
-language/location.
+The runner validates IDs before execution, removes duplicate IDs while preserving
+first occurrence order, and does **not** fail fast by default.
 
-## Contract
+Exit status:
 
-Every production \`gates/<gate-id>.sh\` must:
+- \`0\`: every selected Gate passed;
+- \`1\`: at least one invariant failed and there were no runtime errors;
+- \`2\`: at least one Gate could not evaluate its invariant, or runner/config
+  validation failed.
 
-- use \`#!/usr/bin/env bash\` and \`set -euo pipefail\`;
-- source \`gates/lib/common.sh\`;
-- declare \`GATE_ID\`, \`GATE_NAME\`, \`GATE_COMMAND\`, \`GATE_SUCCESS\`,
-  \`GATE_FAILURE\`, \`GATE_REPAIR\`, and \`GATE_OWNER\`;
-- implement a \`gate_check\` function;
-- finish with \`gate_main "$@"\`;
-- treat \`GATE_COMMAND\` as printable metadata only — never \`eval\` it;
-- return 0 when the invariant is proven, 1 when the invariant is false, and 2+
-  when the gate cannot evaluate the invariant;
-- never mutate source files during a normal check;
-- remain runnable from any caller CWD. \`gate_main\` runs \`gate_check\` from the
-  repository root;
-- use \`gate_invariant_failure\` for a more specific violation reason and
-  \`gate_runtime_error\` for missing/broken tooling;
-- preflight required tools/paths with \`gate_require_command\` /
-  \`gate_require_path\` when that distinction matters.
+## Output model: like a test runner
+
+Successful Gate output is buffered and discarded. Green output is one line:
+
+\`\`\`text
+✓ protocol-integrity
+\`\`\`
+
+A suite stays compact:
+
+\`\`\`text
+✓ rust-format
+✓ rust-clippy
+✗ protocol-integrity
+✓ test-isolation
+
+4 gates: 3 passed, 1 failed, 0 errors
+\`\`\`
+
+Only failed/error Gates expand their complete diagnostics after the summary:
+
+\`\`\`text
+Failures
+========
+
+--- protocol-integrity ---
+[FAIL] protocol-integrity
+name: Protocol integrity
+reason: agent.env.resource is referenced but no runtime answers it
+repair: add/fix the canonical protocol handler or remove the stale call site
+command: node scripts/protocol-gate.mjs
+owner: crates/nession-protocol + protocol consumers
+output:
+  <complete underlying stdout/stderr>
+\`\`\`
+
+## Gate contract
+
+Every \`gates/checks/<gate-id>.sh\` declares:
+
+- \`GATE_ID\`
+- \`GATE_NAME\`
+- \`GATE_COMMAND\`
+- \`GATE_SUCCESS\`
+- \`GATE_FAILURE\`
+- \`GATE_REPAIR\`
+- \`GATE_OWNER\`
+- \`gate_check\`
+
+The filename must equal the stable Gate ID.
 
 Template:
 
@@ -54,7 +112,7 @@ Template:
 set -euo pipefail
 
 GATE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-source "${GATE_DIR}/lib/common.sh"
+source "${GATE_DIR}/../lib/common.sh"
 
 GATE_ID="protocol-integrity"
 GATE_NAME="Protocol integrity"
@@ -72,97 +130,53 @@ gate_check() {
 gate_main "$@"
 \`\`\`
 
-## Standard output and exit semantics
+The contract returns 0 for PASS, 1 for invariant FAIL, and 2+ when correctness
+cannot be evaluated. Missing tools/configuration never become a green skip.
+\`--describe\` prints metadata without executing the Gate.
 
-Start:
+## Suite configuration
 
-\`\`\`text
-[GATE] protocol-integrity
-name: Protocol integrity
-command: node scripts/protocol-gate.mjs
-owner: crates/nession-protocol + protocol consumers
-\`\`\`
-
-Success returns **0**:
+\`gates/suites/<suite>.gates\` contains Gate IDs only, one per line. Blank lines
+and \`#\` comments are allowed.
 
 \`\`\`text
-[PASS] protocol-integrity
-success: all referenced protocol wires have valid producers/consumers
+dev-workspace
+rust-format
+rust-clippy
+test-isolation
+tmux-socket-isolation
+protocol-integrity
 \`\`\`
 
-Invariant failure returns **1**:
+Suite files contain no commands, metadata, repair text, or changed-file routing.
+They are composition only, not a new workflow DSL.
 
-\`\`\`text
-[FAIL] protocol-integrity
-reason: <specific violation, or GATE_FAILURE>
-repair: <specific repair, or GATE_REPAIR>
-command: node scripts/protocol-gate.mjs
-\`\`\`
+## Ownership boundaries
 
-Tooling/environment/contract failure returns **2**:
-
-\`\`\`text
-[ERROR] protocol-integrity
-reason: <why the invariant could not be evaluated>
-repair: <how to restore the gate environment>
-command: node scripts/protocol-gate.mjs
-\`\`\`
-
-Both FAIL and ERROR are blocking. Missing tools/configuration must never become
-a successful skip.
-
-Every gate also supports \`--describe\`. It prints metadata without running the
-check so humans and agents can discover the exact command, owner and repair
-path without reading workflow YAML.
-
-## Rule ownership
-
-A gate entrypoint is not permission to copy a rule.
-
-- Existing Node/Rust/Python/shell validators remain the domain rule owner when
-  that is already the clearest location.
-- \`gates/<id>.sh\` owns repository-facing metadata and execution semantics.
-- Hooks/workflows/just recipes may route/profile gates but may not reproduce
-  gate-specific rule lists or repair logic.
-- A composite runner may call gates; it is never a second rule engine.
-- If two checks have materially different failure meanings or repair paths,
-  prefer two gate IDs over one vague aggregate gate.
-- Cost profiles are allowed only when they are profiles of the same invariant;
-  they must not silently redefine success.
+- \`checks/\`: stable Gate interfaces.
+- \`suites/\`: stable ID composition.
+- \`lib/\`: shared execution/diagnostic mechanics.
+- \`run\`: validation, execution, aggregation, presentation.
+- hooks/workflows: routing only.
+- domain validators: domain rule implementation where appropriate.
 
 ## Self-tests
 
-Custom detection logic must have deterministic known-pass and known-fail
-fixtures. The shared runtime is covered by:
-
 \`\`\`bash
 bash gates/lib/common-selftest.sh
+bash gates/run-selftest.sh
 \`\`\`
 
-The runtime self-test verifies:
+These cover compact PASS, detailed FAIL/ERROR, output buffering, stable ID
+validation, suite parsing/order, duplicate removal, aggregation, discovery, and
+non-repo caller CWD.
 
-- PASS / FAIL / ERROR exit semantics;
-- actionable reason/repair output;
-- invalid contract rejection;
-- \`--describe\` does not execute the gate;
-- execution is independent of caller CWD.
+## Rollout
 
-A migrated domain gate must continue to run the domain validator's existing
-self-test (or add one if it has custom detection logic).
-
-## Rollout plan
-
-#1242 is intentionally split into three phases.
-
-1. **Contract (this phase)** — land this runtime, documentation and baseline
-   inventory. No execution surface changes.
-2. **Parallel adapters** — add real \`gates/<id>.sh\` adapters one by one, prove
-   parity against the current commands/self-tests, and keep the old consumers
-   unchanged. A candidate gate is not authoritative merely because the file
-   exists.
-3. **Cutover** — switch hooks, \`justfile\`, CI, release/closure workflows and
-   skills to route through proven gate entrypoints. Remove shadow rule prose
-   only after parity is demonstrated.
-
-A cutover PR must name exactly which old invocation is replaced, show the
-equivalent gate invocation, and preserve the same or stronger blocking behavior.
+1. **Runtime contract** — land \`run\`, \`checks/\`, \`suites/\`, \`lib/\`,
+   self-tests, docs, and inventory. No consumer changes.
+2. **Parallel adapters** — add real \`gates/checks/<id>.sh\` adapters and prove
+   parity with current commands/self-tests. Current consumers remain authoritative.
+3. **Suite declaration** — add production suites only when their Gate IDs exist.
+4. **Cutover** — switch hooks/just/CI/release/closure to \`gates/run\` and then
+   remove duplicate orchestration/repair prose.
