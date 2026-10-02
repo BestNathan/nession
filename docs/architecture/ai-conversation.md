@@ -46,9 +46,14 @@ provider even by accident.
 
 ## The canonical model
 
-`AIConversationItem` is one of `message`, `tool` or `unknown`; a conversation is
-`AIConversationSummary`. The full definitions are in
+`AIConversationItem` is one of `message`, `tool`, `reasoning` or `unknown`; a
+conversation is `AIConversationSummary`. The full definitions are in
 `model/{conversation,content,activity}.ts` and are the source of truth.
+
+`reasoning` has no provider emitting it yet. It is in the model because the
+requirement names it and the transcript renders it, so the shape is settled here
+rather than invented by the first provider that needs it — the same reasoning
+that put the item union in a shared file instead of in one adapter.
 
 Three properties matter more than the field lists:
 
