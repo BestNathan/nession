@@ -263,10 +263,12 @@ for (const row of viewports.filter((v) => v.experience === 'app')) {
       // scenario and compared to each other, so a change that moves only one of
       // them fails here even though both still "pass" alone.
       //
-      // Height is deliberately NOT compared: the labeled-slot follow-up
-      // (2026-10-03) makes the Capability Form taller than the composer above a
-      // fixed floor — the state that carries names is the taller one. The
-      // family identity is the shape, the semantic radius and the placement.
+      // Height IS compared, and that is a correction (owner, 2026-10-03): the
+      // first labeled build let the entries carry their own vertical mass, the
+      // form grew to 82px over the composer's 56, and it read as a different
+      // object in the same slot. The entries now take `capabilityEntryHeight`
+      // — the composer's own 44px row — so the two states must land on the
+      // same band, and this assertion is what keeps them there.
       // The shape attribute sits on each state's own outer object — the
       // Conversation dock (`terminal-capsule`) and the capability nav.
       const geometryOf = async (testId: string, shapeTestId: string) => {
@@ -294,11 +296,12 @@ for (const row of viewports.filter((v) => v.experience === 'app')) {
         'workspace-capability-capsule',
       );
 
-      // Same shape claim, same semantic radius, same placement above the
-      // viewport bottom — sub-pixel tolerance only.
+      // Same shape claim, same semantic radius, same band, same placement
+      // above the viewport bottom — sub-pixel tolerance only.
       expect(conversation.shape).toBe('capsule');
       expect(capability.shape).toBe('capsule');
       expect(capability.radius).toBe(conversation.radius);
+      expect(Math.abs(capability.height - conversation.height)).toBeLessThanOrEqual(1);
       expect(Math.abs(capability.bottom - conversation.bottom)).toBeLessThanOrEqual(1);
     });
 
@@ -644,6 +647,44 @@ for (const row of viewports.filter((v) => v.experience === 'app')) {
       const shellEdge = Math.round(surface.x + 4);
       await swipeHorizontally(page, { y, fromX: shellEdge, toX: shellEdge + 140 });
       await expect(page.getByTestId('app-layer-sessions')).toBeVisible();
+    });
+
+    test('the capability capsule owns its drag: panning the row never pages (#1347)', async ({ page }) => {
+      await page.goto('/#/fixture/app');
+      await page.getByTestId('app-header-workspace').first().click();
+      await expect(page.getByTestId('files-app-layout')).toBeVisible();
+
+      const layerRoot = page.getByTestId('app-layer-root');
+      await expect(layerRoot).toHaveAttribute('data-layer', 'workspace');
+
+      // The row must actually be wider than its box, or the drag below is not
+      // the row's to keep in the first place.
+      const row = page.getByTestId('workspace-capability-scroll');
+      await expect(row).toBeVisible();
+      expect(await row.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
+
+      const nav = page.getByTestId('workspace-capability-capsule');
+      const box = await row.boundingBox();
+      const navBox = await nav.boundingBox();
+      if (!box || !navBox) {
+        throw new Error('the capability row and its capsule must both be laid out');
+      }
+      const y = Math.round(box.y + box.height / 2);
+
+      // A rightward drag from the middle of the row is the gesture the owner
+      // measured on 2026-10-03: the row panned *and* the shell paged back to
+      // the Terminal. The row is a work surface now (#1049's exclusion,
+      // extended), so the shell must not follow the finger…
+      const middle = Math.round(box.x + box.width / 2);
+      await swipeHorizontally(page, { y, fromX: middle, toX: middle + 140 });
+      await page.waitForTimeout(300);
+      await expect(layerRoot).toHaveAttribute('data-layer', 'workspace');
+
+      // …and the shell's own edge band stays a navigation start over it
+      // (`EDGE_BAND_PX` = 28, measured from the shell). Without this half, a
+      // pager that had simply stopped working would pass the assertion above.
+      await swipeHorizontally(page, { y, fromX: Math.round(navBox.x + 8), toX: Math.round(navBox.x + 148) });
+      await expect(layerRoot).toHaveAttribute('data-layer', 'terminal');
     });
   });
 }

@@ -238,6 +238,10 @@
       "$description": "Fixed slot for one capability entry in the Workspace capsule. The bound is what keeps a long label (Claude Code) from widening the row: the slot stays this wide and the label wraps inside it instead (#1347 follow-up).",
       "value": "72px"
     },
+    "capabilityEntryHeight": {
+      "$description": "One labeled capability entry's height — the standard App control band, so the Capability Form's row IS the Conversation form's row: 44px of entry plus the shell's own pad lands both Capsule states on 56px total (owner correction 2026-10-03: the labeled form had grown to 82px, and \"太高了\"). It is a floor, not a cap — a label that genuinely takes two lines grows the entry by its own line box rather than clipping (no capability does that today; measured 2026-10-03, every title is one line at the labeled sizes).",
+      "value": "2.75rem"
+    },
     "capabilityLabelFontSize": {
       "$description": "Capability entry label, one line. The entry reads icon-over-label; a label that fits one line gets this size.",
       "value": "12px"

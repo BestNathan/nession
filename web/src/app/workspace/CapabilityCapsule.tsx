@@ -9,7 +9,6 @@ import {
   capsuleShellPillRadiusClass,
   capsuleShellSurfaceClass,
 } from '@/product/terminal/capsule/capsuleStyles';
-import { CapsuleIconVisual } from '@/product/terminal/capsule/CapsuleIconVisual';
 import type { CapsuleExperience } from '@/product/terminal/capsule/types';
 
 const workspaceViewBindings = new Map(
@@ -97,9 +96,10 @@ export function CapabilityCapsule({
       data-shell-shape={experience === 'app' ? 'capsule' : 'pill'}
       className={cn(
         // `min-h-[control-md]` matches `CapsuleShell`'s own row: on App that is
-        // the 44px control band the Conversation form uses; the labeled slots
-        // make this form taller than that floor, which is deliberate (the
-        // capability state is the one that carries names).
+        // the 44px control band the Conversation form uses, and the labeled
+        // entries now take it too (`capabilityEntryHeight`), so both Capsule
+        // states land on the same 56px total — the owner's correction of
+        // 2026-10-03, after the labeled form first shipped at 82px.
         //
         // `max-w-full` bounds the nav to its zone: six labeled slots are wider
         // than a phone, and the bound is what makes the INNER row scroll
@@ -172,9 +172,12 @@ interface CapabilityEntryProps {
  * the string, so the rule stays true if a title changes. Both sizes are
  * capsule tokens, so Web and App cannot drift apart.
  *
- * `CapsuleIconVisual` still draws the icon inside the same 36px affordance the
- * Conversation controls use (#1034): the entitlement split — hit target vs
- * painted circle — is unchanged, the label simply sits under it.
+ * The entry is one control band tall (`capabilityEntryHeight`): icon over
+ * label, centred, so the Capability Form's row is the Conversation form's row.
+ * The glyph is drawn bare rather than inside `CapsuleIconVisual`'s painted
+ * circle — that split (#1034) is the icon *button*'s, and a labeled entry is a
+ * tab, not a button: its affordance is the pair, and the band goes to ink and
+ * the name rather than to a ring.
  */
 const CapabilityEntry = forwardRef<HTMLButtonElement, CapabilityEntryProps>(
   function CapabilityEntry(
@@ -227,9 +230,18 @@ const CapabilityEntry = forwardRef<HTMLButtonElement, CapabilityEntryProps>(
         data-capability-presence={presence}
         data-capability-active={isActive ? 'true' : undefined}
         onClick={onSelect}
-        style={{ width: 'var(--terminal-capsule-capability-slot-width)' }}
+        style={{
+          width: 'var(--terminal-capsule-capability-slot-width)',
+          minHeight: 'var(--terminal-capsule-capability-entry-height)',
+        }}
         className={cn(
-          'relative flex shrink-0 flex-col items-center justify-start gap-1 rounded-[var(--radius-control)] px-1 pt-1 pb-2 transition-colors duration-[var(--motion-shell-duration)] ease-[var(--motion-shell-ease)]',
+          // The entry is one control band tall and centres icon-over-label in
+          // it: `capabilityEntryHeight` is the Conversation form's own row, so
+          // the two Capsule states sit at the same height (owner correction,
+          // 2026-10-03 — the labeled form had grown to 82px). A floor rather
+          // than a cap: a two-line label grows the entry by its line box
+          // instead of clipping.
+          'relative flex shrink-0 flex-col items-center justify-center gap-[length:var(--terminal-capsule-control-gap)] rounded-[var(--radius-control)] px-1 transition-colors duration-[var(--motion-shell-duration)] ease-[var(--motion-shell-ease)]',
           isUnavailable
             ? 'cursor-default text-disabled-foreground'
             : isActive
@@ -237,7 +249,12 @@ const CapabilityEntry = forwardRef<HTMLButtonElement, CapabilityEntryProps>(
               : 'text-muted-foreground hover:text-foreground',
         )}
       >
-        <CapsuleIconVisual>{icon}</CapsuleIconVisual>
+        {/* The glyph is drawn bare — the painted circle `CapsuleIconVisual`
+            belongs to icon *buttons*, and a labeled entry's affordance is the
+            icon-plus-name pair itself. Bare also spends the band on ink rather
+            than on chrome: 20px of glyph (icon-md) where the circle version
+            showed 16px inside 36px of ring. */}
+        {icon}
         <span
           ref={labelRef}
           data-testid={`${testId}-label`}
