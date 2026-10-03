@@ -6,7 +6,7 @@
   <img alt="Nession Repository Telemetry — repository health and rolling engineering efficiency" src="https://raw.githubusercontent.com/BestNathan/nession/metrics/repo-metrics-light.svg?sanitize=true&v=2">
 </picture>
 
-<sub>Generated every 4 hours from <code>main</code> · rolling 7d · <a href="https://raw.githubusercontent.com/BestNathan/nession/metrics/metrics.json">raw metrics</a></sub>
+<sub>Generated every 4 hours from <code>main</code> · rolling 7d / 30d · <a href="https://raw.githubusercontent.com/BestNathan/nession/metrics/metrics.json">raw metrics</a></sub>
 
 > An intelligent workspace for continuous work across devices, environments, and compute nodes.
 
