@@ -72,13 +72,17 @@ test('the Terminal destination action sits left of the capability dock (#1204)',
     return;
   }
 
-  // Immediately left of the dock, vertically centered against it.
+  // Immediately left of the dock, vertically centered against it. The pair
+  // shares the center line, not a height: the dock's height follows its
+  // labeled slots (icon over name, #1347), and the #1204 geometry rules ask
+  // this action for adjacency and centering — never for matching the dock's
+  // extent. The equality asserted here before the labels belonged to the
+  // icon-only dock and would re-pin a shape the design retired.
   const gap = dockBox.x - (actionBox.x + actionBox.width);
   expect(gap).toBeGreaterThan(0);
   expect(gap).toBeLessThanOrEqual(16);
   const actionCenter = actionBox.y + actionBox.height / 2;
   expect(Math.abs(actionCenter - (dockBox.y + dockBox.height / 2))).toBeLessThanOrEqual(8);
-  expect(Math.abs(actionBox.height - dockBox.height)).toBeLessThanOrEqual(1);
 });
 
 test('the sessions sidebar is present in the resting shell', async ({ page }) => {
