@@ -14,7 +14,7 @@
  * parse as the canonical result.
  */
 
-import { memo, useRef, type ReactNode } from 'react';
+import { memo, useId, useRef, type ReactNode } from 'react';
 import { IncrementalMarkdownParser } from './incremental.ts';
 import { parseGfm, parseGfmWithMath } from './parser.ts';
 import {
@@ -47,8 +47,15 @@ class StreamingRenderer {
   private lastText: string | null = null;
   private lastRendered: ReactNode[] = [];
 
-  /** @param labels - Localized Markdown chrome baked into cached elements. */
-  constructor(private readonly labels: MarkdownLabels) {}
+  /**
+   * @param labels - Localized Markdown chrome baked into cached elements.
+   * @param footnoteScope - Prefix for this document's footnote ids; fixed for
+   * the message's lifetime so frozen elements keep the ids they were given.
+   */
+  constructor(
+    private readonly labels: MarkdownLabels,
+    private readonly footnoteScope: string,
+  ) {}
 
   /**
    * Render the current accumulated text. Idempotent per text value.
@@ -85,6 +92,7 @@ class StreamingRenderer {
       const frozenContext: MarkdownRenderContext = {
         streaming: false,
         labels: this.labels,
+        footnoteScope: this.footnoteScope,
         targets: frameTargets,
         // Both are used by reference: the numbering assigned in this pass is
         // final, and later frames continue from it.
@@ -101,6 +109,7 @@ class StreamingRenderer {
     const tailContext: MarkdownRenderContext = {
       streaming: true,
       labels: this.labels,
+      footnoteScope: this.footnoteScope,
       targets: frameTargets,
       footnoteOrder: [...this.frozenFootnoteOrder],
       footnoteCounts: new Map(this.frozenFootnoteCounts),
@@ -126,6 +135,7 @@ class StreamingRenderer {
 function renderSettled(
   text: string,
   labels: MarkdownLabels,
+  footnoteScope: string,
 ): ReactNode[] {
   const root = parseGfmWithMath(text);
   const targets = createReferenceTargets();
@@ -133,6 +143,7 @@ function renderSettled(
   const context: MarkdownRenderContext = {
     streaming: false,
     labels,
+    footnoteScope,
     targets,
     footnoteOrder: [],
     footnoteCounts: new Map(),
@@ -169,14 +180,20 @@ export const MarkdownText = memo(function MarkdownText({
   labels,
 }: MarkdownTextProps): ReactNode {
   const rendererRef = useRef<StreamingRenderer | null>(null);
+  // One component instance is one Markdown document. `useId` gives this
+  // instance an id React keeps stable across every render — including the
+  // streaming → settled switch — which is exactly the lifetime a footnote's
+  // DOM id needs: scoped to the message, so two messages' footnotes cannot
+  // collide, and unchanged when the message settles.
+  const footnoteScope = `${useId().replace(/[^a-zA-Z0-9_-]/g, '')}-`;
 
   if (rendererRef.current === null || rendererRef.current['labels'] !== labels) {
-    rendererRef.current = new StreamingRenderer(labels);
+    rendererRef.current = new StreamingRenderer(labels, footnoteScope);
   }
 
   const elements = streaming
     ? rendererRef.current.render(text)
-    : renderSettled(text, labels);
+    : renderSettled(text, labels, footnoteScope);
 
   return <div className="markdown">{elements}</div>;
 });
