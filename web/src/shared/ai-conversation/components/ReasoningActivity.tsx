@@ -60,7 +60,7 @@ export function ReasoningActivity({ item }: { item: AIReasoningItem }) {
             className="flex shrink-0 items-center"
             data-testid="conversation-reasoning-running"
           >
-            <Loader aria-hidden className="h-3.5 w-3.5 animate-spin" />
+            <Loader aria-hidden className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" />
             <span className="sr-only">still thinking</span>
           </span>
         ) : null}

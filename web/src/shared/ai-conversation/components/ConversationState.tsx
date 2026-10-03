@@ -32,7 +32,7 @@ export function LoadingOlder() {
         chromeSansRole('metadata'),
       )}
     >
-      <Loader aria-hidden className="h-3.5 w-3.5 animate-spin" />
+      <Loader aria-hidden className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" />
       Loading earlier messages…
     </p>
   )
