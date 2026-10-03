@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSessionCapabilityFacts } from '@/app/useSessionCapabilityFacts';
+import { collectWorkSignals } from '@/app/workSignals';
 import {
   resolveCapsuleCapabilities,
   type CapsuleCapabilityContribution,
@@ -65,6 +66,13 @@ export function useCapsuleCapability(
 
   const resolution = resolveCapsuleCapabilities({ ...input, facts });
   const presences = resolveCapabilityPresences(resolution.snapshots, { surface: 'capsule' });
+  // Which capabilities the same facts sense as *working* (#1347 SC-34): their
+  // ambient representation is the Work Ring, so the observed-command path must
+  // not also materialize a Signal for them. One observation, one spontaneous
+  // representation — the user's choice still emerges whatever it names.
+  const working = collectWorkSignals(facts)
+    .filter((signal) => signal.status === 'working')
+    .map((signal) => signal.capabilityId);
   const active = resolveCapabilityProjection({
     snapshots: resolution.snapshots,
     presences,
@@ -75,6 +83,7 @@ export function useCapsuleCapability(
     chosen: emergence.chosen,
     opened: emergence.opened,
     dismissed: emergence.dismissed,
+    working,
   });
 
   /**

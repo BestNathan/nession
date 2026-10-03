@@ -2,7 +2,10 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { TerminalCapsule } from '@/product/terminal/capsule/TerminalCapsule';
-import type { CapsuleCapabilityDisclosure } from '@/product/terminal/capsule/types';
+import type {
+  CapsuleCapabilityDisclosure,
+  CapsuleCapabilityProjection,
+} from '@/product/terminal/capsule/types';
 import type { ResolvedWorkContext } from '@/product/terminal/capsule/workAwareness';
 
 vi.mock('@/product/terminal/hooks/useCommandHistory', () => ({
@@ -87,6 +90,44 @@ describe('Context Disclosure', () => {
     expect(screen.queryByTestId('capsule-context-all')).not.toBeInTheDocument();
     await userEvent.click(git);
     expect(caps.onSelect).toHaveBeenCalledWith('git');
+  });
+
+  it('keeps an explicitly opened Peek when the sense disappears (SC-36)', async () => {
+    // The other half of the lifecycle. Emergence itself is the hook's
+    // (`useCapsuleCapability.test.tsx`); the claim here is that the capsule
+    // does not take back a projection the user opened when the sense under it
+    // goes away — the ring and the disclosure answer to sensing, a screen the
+    // user asked for does not.
+    const caps = disclosure();
+    const projection: CapsuleCapabilityProjection = {
+      id: 'claude-code',
+      title: 'Claude Code',
+      depth: 'peek',
+      body: () => <p data-testid="projection-body">peek</p>,
+      onDismiss: vi.fn(),
+    };
+    const { rerender } = render(
+      <TerminalCapsule
+        experience="web"
+        sendText={vi.fn()}
+        capabilityDisclosure={caps}
+        capabilityProjection={projection}
+        workContext={workContext()}
+      />,
+    );
+    expect(screen.getByTestId('capsule-capability-projection')).toBeInTheDocument();
+
+    rerender(
+      <TerminalCapsule
+        experience="web"
+        sendText={vi.fn()}
+        capabilityDisclosure={caps}
+        capabilityProjection={projection}
+        workContext={{ status: 'quiet', summaries: [] }}
+      />,
+    );
+
+    expect(screen.getByTestId('capsule-capability-projection')).toBeInTheDocument();
   });
 
   it('dismisses itself when the sensed work ends while it is open (SC-36)', async () => {
