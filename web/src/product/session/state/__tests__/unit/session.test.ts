@@ -7,7 +7,7 @@ import { routeIntentEpochAtom } from '@/platform/attach/state';
 import {
   sessionIdAtom, sessionNameAtom, attachInfoAtom, orderedUrlsAtom,
   manualOverrideAtom, rendererAtom, envRefsAtom,
-  agentIdAtom, addressesAtom, hasActiveSessionAtom, sessionIdFromUrlAtom,
+  agentIdAtom, addressesAtom, hasActiveSessionAtom,
   attachToSessionAtom, disconnectAtom, switchAddressAtom,
   attachDialogSessionAtom, attachDialogIntentAtom,
 } from '@/product/session/state';
@@ -45,7 +45,6 @@ describe('base atoms', () => {
     expect(store.get(rendererAtom)).toBe('webgl');
     expect(store.get(envRefsAtom)).toEqual([]);
     expect(store.get(attachDialogSessionAtom)).toBeNull();
-    expect(store.get(sessionIdFromUrlAtom)).toBeNull();
   });
 });
 

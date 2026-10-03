@@ -1,10 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { renderHook, waitFor } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { act, renderHook, waitFor } from '@testing-library/react';
+import { MemoryRouter, useNavigate } from 'react-router-dom';
 import { Provider, createStore } from 'jotai';
 import type { ReactNode } from 'react';
 import { useDeepLink } from '@/app/useDeepLink';
-import { sessionIdAtom } from '@/product/session/state';
+import { attachToSessionAtom, sessionIdAtom } from '@/product/session/state';
+import type { AttachChoice } from '@/product/session/components/AttachDialog';
 import type { Session } from '@/types';
 
 vi.mock('@/app/useDeepLinkRestore', () => ({
@@ -149,5 +150,66 @@ describe('useDeepLink', () => {
       // Should trigger attach flow to the new session
       expect(requestAttach).toHaveBeenCalledWith(session2);
     });
+  });
+
+  it('does not bounce back to the old session when attachToSession navigates (#1396)', async () => {
+    const store = createStore();
+    store.set(sessionIdAtom, 'a1:s1'); // attached to s1, viewing /terminal/a1:s1
+
+    const session2 = makeSession('a1:s2');
+    const choice: AttachChoice = {
+      mode: 'auto',
+      attachInfo: { mode: 'p2p', session_id: 'a1:s2' },
+      orderedUrls: ['ws://agent/ws'],
+      latencies: [],
+      selectedUrl: null,
+      renderer: 'webgl',
+      envRefs: [],
+    };
+
+    // attachToSessionAtom writes sessionIdAtom=B and navigates in one jotai
+    // write; the URL param and the attach atom land in the same commit.
+    let doAttach: () => void = () => {};
+    function Harness() {
+      const navigate = useNavigate();
+      doAttach = () => {
+        store.set(attachToSessionAtom, { session: session2, choice, navigate });
+      };
+      return null;
+    }
+
+    function SwitchWrapper({ children }: { children: ReactNode }) {
+      return (
+        <Provider store={store}>
+          <MemoryRouter initialEntries={['/terminal/a1%3As1']}>
+            {children}
+            <Harness />
+          </MemoryRouter>
+        </Provider>
+      );
+    }
+
+    renderHook(
+      () => useDeepLink({
+        sessions: [makeSession(), session2],
+        sessionsLoaded: true,
+        loadingSessions: false,
+        confirmAttach,
+        onRestoreSession,
+        requestAttach,
+      }),
+      { wrapper: SwitchWrapper },
+    );
+
+    act(() => {
+      doAttach();
+    });
+
+    // The switch converges on s2 (URL caught up → selection syncs)…
+    await waitFor(() => {
+      expect(onRestoreSession).toHaveBeenCalledWith(session2);
+    });
+    // …and never treats the propagation window as "URL wants s1".
+    expect(requestAttach).not.toHaveBeenCalled();
   });
 });
