@@ -174,13 +174,13 @@
       ],
       "web": {
         "overflow": "scroll",
-        "wrap": false,
+        "wrap": true,
         "alignY": "middle",
         "justify": "start"
       },
       "app": {
         "overflow": "scroll",
-        "wrap": false,
+        "wrap": true,
         "alignY": "middle",
         "touchTargetToken": "experience.app.touchTarget.min",
         "justify": "start",

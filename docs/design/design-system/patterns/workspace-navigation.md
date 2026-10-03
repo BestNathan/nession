@@ -176,7 +176,9 @@ it: the band is root-only on whichever page owns it.
 
 ### Web: the capability capsule
 
-Capability navigation on Web is a **capsule** of rounded icon targets in the bottom
+Capability navigation on Web is a **capsule** of labeled slots — icon over name, one
+fixed-width slot each, a long name wrapping inside its slot at the smaller label
+size (owner follow-up, 2026-10-03) — in the bottom
 Capsule Zone, with a dot marking the open one. It carries every capability that has a
 Workspace view and is not `unavailable` (#1347). The capsule's width is bounded and the
 row scrolls internally, so the shell does not grow when an extension registers.

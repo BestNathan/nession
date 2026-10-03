@@ -2,6 +2,7 @@ import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { WorkspaceShell } from '@/app/workspace/WorkspaceShell';
 import { SurfaceDestinationAction } from '@/product/workspace/patterns/SurfaceDestinationAction';
+import { CapsuleExchangeContext } from '@/platform/motion/capsuleExchange';
 import type { WorkspaceContext } from '@/app/workspace/workspaceContext';
 
 // The Web experience's Files layout is stubbed rather than the whole binding:
@@ -56,6 +57,62 @@ describe('WorkspaceShell contextual capability presentation', () => {
       'data-navigation-mode',
       'contextual',
     );
+  });
+
+  it('renders entries in registration order, marking the active one in place', () => {
+    // Owner follow-up (2026-10-03): activation is not placement. The opened
+    // capability keeps its registration position and is only marked — the row
+    // does not reshuffle itself under the reader's thumb as the work changes.
+    const ctx = workspaceContext();
+    render(<WorkspaceShell ctx={ctx} activeCapabilityId="env" />);
+
+    const slots = [
+      ...screen
+        .getByTestId('workspace-capability-scroll')
+        .querySelectorAll('button[data-testid^="workspace-tool-"]'),
+    ].map((entry) => entry.getAttribute('data-testid'));
+
+    expect(slots).toEqual([
+      'workspace-tool-files',
+      'workspace-tool-session',
+      'workspace-tool-agent',
+      'workspace-tool-env',
+      'workspace-tool-claude-code',
+      'workspace-tool-git',
+    ]);
+    const env = screen.getByTestId('workspace-tool-env');
+    expect(env).toHaveAttribute('data-capability-active', 'true');
+    expect(env).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('labels every entry under its icon', () => {
+    const ctx = workspaceContext();
+    render(<WorkspaceShell ctx={ctx} activeCapabilityId="files" />);
+
+    expect(screen.getByTestId('workspace-tool-files-label')).toHaveTextContent('Files');
+    expect(screen.getByTestId('workspace-tool-claude-code-label')).toHaveTextContent(
+      'Claude Code',
+    );
+  });
+
+  it('arrives with the capsule exchange while a swipe carries the layer in', () => {
+    // The incoming half of the App handoff (see `capsuleExchange`): mid-swipe
+    // the bar trails the finger's pace and fades in; at rest there is no
+    // exchange and the bar carries no inline style at all.
+    const ctx = workspaceContext();
+    const { rerender } = render(<WorkspaceShell ctx={ctx} activeCapabilityId="files" />);
+    expect(screen.getByTestId('workspace-tool-bar').getAttribute('style')).toBeNull();
+
+    rerender(
+      <CapsuleExchangeContext.Provider value={{ progress: 0.5 }}>
+        <WorkspaceShell ctx={ctx} activeCapabilityId="files" />
+      </CapsuleExchangeContext.Provider>,
+    );
+    const bar = screen.getByTestId('workspace-tool-bar');
+    expect(bar).toHaveAttribute('data-capsule-exchange', 'arriving');
+    expect(bar.style.transform).toBe('translateX(14px)');
+    expect(bar.style.opacity).toBe('0.5');
+    expect(bar.style.pointerEvents).toBe('none');
   });
 
   // Capsule V2 (#1347): discoverable capabilities are no longer shown in Workspace.

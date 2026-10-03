@@ -1,10 +1,9 @@
-import { useRef, useEffect } from 'react';
+import { forwardRef, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { cn } from '@/shared/lib/utils';
 import type { CapabilityId } from '@/product/capability';
 import { WORKSPACE_VIEW_BINDINGS } from '@/app/workspace/viewBindings';
 import type { WorkspacePresentationItem } from '@/app/workspace/presentation';
 import {
-  capsuleIconButtonClass,
   capsuleShellCapsuleRadiusClass,
   capsuleShellInnerPadClass,
   capsuleShellPillRadiusClass,
@@ -127,51 +126,136 @@ export function CapabilityCapsule({
           const isUnavailable = item.snapshot.state === 'unavailable';
 
           return (
-            <button
+            <CapabilityEntry
               key={item.snapshot.id}
               ref={isActive ? activeItemRef : undefined}
               id={`workspace-capability-${item.snapshot.id}`}
-              type="button"
-              disabled={isUnavailable}
-              aria-pressed={isActive}
-              aria-label={item.snapshot.title}
               title={item.snapshot.title}
-              data-testid={`workspace-tool-${item.snapshot.id}`}
-              data-capability-state={item.snapshot.state}
-              data-capability-presence={item.presence.level}
-              data-capability-active={isActive ? 'true' : undefined}
-              onClick={() => onSelect(item.snapshot.id)}
-              className={cn(
-                // The capsule's own control vocabulary, not a dock-local size:
-                // `control-md` hit target with the `control-visual-size` circle
-                // drawn inside it (#1034), so a capability entry is the same
-                // object as a Conversation entry — 44/36 on App, 32/32 on Web.
-                capsuleIconButtonClass,
-                'relative inline-flex items-center justify-center transition-colors duration-[var(--motion-shell-duration)] ease-[var(--motion-shell-ease)]',
-                isUnavailable
-                  ? 'cursor-default text-disabled-foreground'
-                  : isActive
-                    ? 'text-foreground'
-                    : 'text-muted-foreground hover:text-foreground',
-              )}
-            >
-              <CapsuleIconVisual>
-                <Icon className="size-[length:var(--icon-md)]" aria-hidden />
-              </CapsuleIconVisual>
-              {/* Active capability marked with dot indicator — same visual language
-                  as the previous dock, but now inside a capsule shape. The dot is
-                  always rendered so the row's geometry does not shift between states. */}
-              <span
-                aria-hidden
-                className={cn(
-                  'absolute bottom-0.5 size-1 rounded-full',
-                  isActive ? 'bg-foreground' : 'bg-transparent',
-                )}
-              />
-            </button>
+              testId={`workspace-tool-${item.snapshot.id}`}
+              state={item.snapshot.state}
+              presence={item.presence.level}
+              isActive={isActive}
+              isUnavailable={isUnavailable}
+              icon={<Icon className="size-[length:var(--icon-md)]" aria-hidden />}
+              onSelect={() => onSelect(item.snapshot.id)}
+            />
           );
         })}
       </div>
     </nav>
   );
 }
+
+interface CapabilityEntryProps {
+  id: string;
+  title: string;
+  testId: string;
+  state: string;
+  presence: string;
+  isActive: boolean;
+  isUnavailable: boolean;
+  icon: ReactNode;
+  onSelect: () => void;
+}
+
+/**
+ * One capability, as icon-over-label in a fixed-width slot.
+ *
+ * The slot is what bounds the row (the owner's follow-up to Capsule V2): a
+ * long label wraps inside its slot instead of widening it, and a wrapped label
+ * drops to the smaller type — measured by its own line count, not guessed from
+ * the string, so the rule stays true if a title changes. Both sizes are
+ * capsule tokens, so Web and App cannot drift apart.
+ *
+ * `CapsuleIconVisual` still draws the icon inside the same 36px affordance the
+ * Conversation controls use (#1034): the entitlement split — hit target vs
+ * painted circle — is unchanged, the label simply sits under it.
+ */
+const CapabilityEntry = forwardRef<HTMLButtonElement, CapabilityEntryProps>(
+  function CapabilityEntry(
+    { id, title, testId, state, presence, isActive, isUnavailable, icon, onSelect },
+    ref,
+  ) {
+    const labelRef = useRef<HTMLSpanElement>(null);
+    const [wrapped, setWrapped] = useState(false);
+
+    /**
+     * The font pick is by rendered line count: measure at the one-line size and
+     * keep the smaller size once the label takes more than one line box. Never
+     * evaluated back upward — the smaller size may fit on one line again, and
+     * flipping back would oscillate the row.
+     *
+     * The count comes from a Range over the text, not from the span's own
+     * client rects: `line-clamp` makes the span a `-webkit-box`, whose client
+     * rects collapse to the single box — the range still reports one rect per
+     * rendered line (the same measurement the e2e contract helper uses).
+     */
+    useLayoutEffect(() => {
+      const el = labelRef.current;
+      if (!el || wrapped) {
+        return;
+      }
+      const range = document.createRange();
+      // jsdom has no layout and no `Range.getClientRects` (the same reason the
+      // scroll-into-view above is feature-checked); the browser path is the
+      // one that measures, and browser verification is what proves it.
+      if (typeof range.getClientRects !== 'function') {
+        return;
+      }
+      range.selectNodeContents(el);
+      if (range.getClientRects().length > 1) {
+        setWrapped(true);
+      }
+    }, [wrapped, title]);
+
+    return (
+      <button
+        ref={ref}
+        id={id}
+        type="button"
+        disabled={isUnavailable}
+        aria-pressed={isActive}
+        aria-label={title}
+        title={title}
+        data-testid={testId}
+        data-capability-state={state}
+        data-capability-presence={presence}
+        data-capability-active={isActive ? 'true' : undefined}
+        onClick={onSelect}
+        style={{ width: 'var(--terminal-capsule-capability-slot-width)' }}
+        className={cn(
+          'relative flex shrink-0 flex-col items-center justify-start gap-1 rounded-[var(--radius-control)] px-1 pt-1 pb-2 transition-colors duration-[var(--motion-shell-duration)] ease-[var(--motion-shell-ease)]',
+          isUnavailable
+            ? 'cursor-default text-disabled-foreground'
+            : isActive
+              ? 'text-foreground'
+              : 'text-muted-foreground hover:text-foreground',
+        )}
+      >
+        <CapsuleIconVisual>{icon}</CapsuleIconVisual>
+        <span
+          ref={labelRef}
+          data-testid={`${testId}-label`}
+          className={cn(
+            'line-clamp-2 text-center leading-tight',
+            wrapped
+              ? 'text-[length:var(--terminal-capsule-capability-label-wrapped-font-size)]'
+              : 'text-[length:var(--terminal-capsule-capability-label-font-size)]',
+          )}
+        >
+          {title}
+        </span>
+        {/* Active capability marked with dot indicator — same visual language
+            as the previous dock, but now inside a capsule shape. The dot is
+            always rendered so the row's geometry does not shift between states. */}
+        <span
+          aria-hidden
+          className={cn(
+            'absolute bottom-0.5 size-1 rounded-full',
+            isActive ? 'bg-foreground' : 'bg-transparent',
+          )}
+        />
+      </button>
+    );
+  },
+);
