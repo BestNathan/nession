@@ -56,3 +56,45 @@ Every large instruction surface is classified before removal. A duplicate is rem
 - Root/scoped `CLAUDE.md` are symlinks to canonical `AGENTS.md`.
 - `.agents/skills` points to the existing physical `.claude/skills` owner.
 - Existing Nession automation keeps its current `.claude/skills` paths, avoiding an unrelated router migration.
+
+
+## Previous Skill section matrix
+
+This is the section-level classification used for the Skill rewrite.
+
+| Skill | Previous major sections | Destination after migration |
+|---|---|---|
+| nession-development | Overview; root/worktree/branch Iron Laws; Worktree workflow | concise development entrypoint; root keeps only universal read-only-main rule |
+| nession-development | Local Development; tests; Testing Gates; error reporting; test DB | development entrypoint + executable Gates/checkers; environment setup moves to `nession-env` |
+| nession-development | Version Bumping; Development Cycle; PR Workflow | development entrypoint delegates release-specific policy to `nession-cicd` |
+| nession-development | Playwright Functional Verification | `nession-web-design` owns browser/visual workflow |
+| nession-development | Batch Development by Label; Quick Reference; Common Mistakes | concise batch/stop conditions in development entrypoint |
+| nession-cicd | Overview; Deployment Monitoring; Iron Laws | CI/CD entrypoint + root/development link for worktrees |
+| nession-cicd | Development Flow; release staging->main; merge strategy | CI/CD entrypoint; live workflow files remain executable truth |
+| nession-cicd | ArgoCD/GitOps; version bump; direct-to-main; main/staging movement | CI/CD entrypoint + `.github/AGENTS.md` + workflow owners |
+| nession-cicd | Requirement Acceptance; issue auto-close | `nession-acceptance` + deterministic validator; CI/CD only routes it |
+| nession-cicd | Pipeline architecture; troubleshooting | CI/CD entrypoint uses failing boundary classification and live workflows |
+| nession-code-review | review modes; baseline; invariant; data path | concise review entrypoint |
+| nession-code-review | concurrency checklist; lifecycle/reconnect | review entrypoint + nearest runtime scoped owner |
+| nession-code-review | protocol review | `crates/nession-protocol/AGENTS.md` + `docs/architecture/protocol.md` |
+| nession-code-review | tests-as-proof; issue comparison; severity; evidence | concise review entrypoint |
+| nession-code-review | issue lifecycle; fix ordering; Nession-specific heuristics | owner-specific guidance + concise stop/output workflow |
+| nession-writing-requirements | classify; hard rules; automated audit | concise issue-authoring entrypoint + `scripts/issue-contract.mjs` |
+| nession-writing-requirements | executable acceptance | `nession-acceptance` + acceptance validator |
+| nession-writing-requirements | Requirement body/commands/conversation history | concise canonical templates/workflow |
+| nession-writing-requirements | Bug path; labels; lifecycle; edge cases | concise canonical bug workflow + issue validator |
+| nession-web-design | purpose/trigger/owner/progressive reading | concise Web Design entrypoint |
+| nession-web-design | layer model | `web/AGENTS.md` + `docs/architecture/web.md` |
+| nession-web-design | token/component/shadcn decisions | design entrypoint + `design/AGENTS.md` + existing shadcn reference |
+| nession-web-design | primitive/pattern/layout/extension | `docs/design/*` + concise decision workflow |
+| nession-web-design | third-party boundary; validation/browser/failure loop | concise Web Design entrypoint + executable design Gate |
+| nession-web-design | task recipes/checklist | collapsed into decision flow/completion criteria |
+| nession-env | languages/CLI tools/plugins/MCP/one-shot setup | concise environment bootstrap using repository version/config owners |
+| nession-env | Common Issues | generic missing-prerequisite diagnosis order; tool-specific truth remains with tool/config |
+| nession-acceptance | lifecycle/run/contract/result/verification | retained as a small dedicated acceptance workflow |
+| nession-gates | Iron laws; start every change; normal workflow; failure reading | concise Gate entrypoint |
+| nession-gates | is-this-a-Gate; authoring; suites; routers | concise Gate entrypoint + `gates/README.md` live mechanics |
+| nession-gates | quality-system changes; code review; acceptance relation | concise Gate entrypoint linking other owners |
+| nession-gates | quick table/relationships | removed as duplication; task routing lives in root and owners |
+
+No previous major Skill section is intentionally left without a destination.
