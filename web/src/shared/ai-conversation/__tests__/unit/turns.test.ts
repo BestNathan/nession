@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { carryTurnKeys, rememberTurns, runningWork, turnsOf } from '../../model/turns'
-import { assistantMessage, toolItem, unknownItem, userMessage } from '../fixtures/items'
+import { carryTurnKeys, isWorking, rememberTurns, runningWork, turnsOf } from '../../model/turns'
+import type { AIConversationItem } from '../../model/conversation'
+import {
+  assistantMessage,
+  statusItem,
+  toolItem,
+  unknownItem,
+  userMessage,
+} from '../fixtures/items'
 
 const ids = (items: { id: string }[]) => items.map((item) => item.id)
 
@@ -60,12 +67,65 @@ describe('turnsOf', () => {
     expect(ids(turns[1]?.process ?? [])).toEqual(['t1'])
   })
 
-  it('keeps a provider’s unmodelled rows in the process window', () => {
-    // Not the answer, not the question — so it folds with the work rather than
-    // being dropped or promoted.
-    const turns = turnsOf([userMessage('u1', 'q'), unknownItem('x1'), assistantMessage('a1', 'a')])
+  it('keeps an unmodelled row in the transcript without calling it work', () => {
+    // This test used to assert the opposite — that an unmodelled row folds with
+    // the work — and it was pinning a contradiction rather than a decision:
+    // `isWork` says `unknown` is not work, while `process`, built by exclusion,
+    // put it in the window anyway (#1363 round 4).
+    //
+    // `conversation.md`'s anatomy settles it. Its process window is "tool
+    // activity rows, reasoning rows", and the rule that follows names the rows
+    // that must *not* fold: "rows that are **not** the assistant's work". A
+    // record we cannot model is not evidence of work — that is what `unknown`
+    // means — so folding it under a control reading "Worked" would classify it
+    // by the one thing the model refuses to guess.
+    //
+    // Where it goes instead is nowhere: not the answer, not the process, and
+    // still in `items`, which is what preserves its order and keeps the row on
+    // screen. `turnMembership` is what carries that to the renderer — an item
+    // with no window is never hidden.
+    const [turn] = turnsOf([
+      userMessage('u1', 'q'),
+      unknownItem('x1'),
+      assistantMessage('a1', 'a'),
+    ])
 
-    expect(ids(turns[0]?.process ?? [])).toEqual(['x1'])
+    expect(turn?.process).toEqual([])
+    expect(turn?.answer?.id).toBe('a1')
+  })
+
+  it('does not let a notice the assistant did not produce extend “Worked for”', () => {
+    // Two individually reasonable follow-ups met here: #1402 broadened the
+    // duration to every timestamped item, and #1404 then added a canonical item
+    // that is timestamped and explicitly *not* work. The label's verb decided
+    // it — a notice ten minutes after the answer is not ten more minutes of
+    // work, and the reader has no way to tell that from the number.
+    const [turn] = turnsOf([
+      { ...userMessage('u1', 'q'), timestamp: '2026-10-02T10:00:00.000Z' },
+      { ...assistantMessage('a1', 'a'), timestamp: '2026-10-02T10:01:00.000Z' },
+      {
+        ...statusItem('s1', 'connection closed'),
+        timestamp: '2026-10-02T10:10:00.000Z',
+      } as AIConversationItem,
+    ])
+
+    expect(turn?.durationMs).toBe(60_000)
+  })
+
+  it('does not let an unmodelled row extend it either', () => {
+    // The same line the fold draws. An `unknown` is not work, so it is not
+    // minutes worked — the two readings have to agree or the label and the
+    // window it opens are describing different turns.
+    const [turn] = turnsOf([
+      { ...userMessage('u1', 'q'), timestamp: '2026-10-02T10:00:00.000Z' },
+      { ...assistantMessage('a1', 'a'), timestamp: '2026-10-02T10:01:00.000Z' },
+      {
+        ...unknownItem('x1'),
+        timestamp: '2026-10-02T10:10:00.000Z',
+      } as AIConversationItem,
+    ])
+
+    expect(turn?.durationMs).toBe(60_000)
   })
 
   it('measures a duration only from timestamps the provider stated', () => {
@@ -181,6 +241,54 @@ describe('runningWork', () => {
     }
 
     expect(runningWork(turn)).toBe(false)
+  })
+})
+
+describe('isWorking', () => {
+  // The canonical phase, and the whole point of it is that there is one. Each
+  // case here is a state the process disclosure and the turn's actions used to
+  // answer independently, which let one frame say "still working" and "here is
+  // the finished answer to copy" at the same time (#1363 round 4).
+  const phaseOf = (...items: AIConversationItem[]) => {
+    const [turn] = turnsOf(items)
+    if (turn === undefined) {
+      throw new Error('no turn')
+    }
+    return isWorking(turn)
+  }
+
+  it('is true with no answer at all', () => {
+    // A question whose work has been folded is a hole, not a rest state.
+    expect(phaseOf(userMessage('u1', 'q'), toolItem('t1'))).toBe(true)
+  })
+
+  it('is true while the answer is still streaming', () => {
+    expect(
+      phaseOf(userMessage('u1', 'q'), assistantMessage('a1', 'half', 'streaming')),
+    ).toBe(true)
+  })
+
+  it('is true when the answer is in but the work is not', () => {
+    expect(
+      phaseOf(
+        userMessage('u1', 'q'),
+        toolItem('t1', { status: 'running' }),
+        assistantMessage('a1', 'done so far'),
+      ),
+    ).toBe(true)
+  })
+
+  it('is false once the work has stopped and the answer is not streaming', () => {
+    expect(
+      phaseOf(userMessage('u1', 'q'), toolItem('t1'), assistantMessage('a1', 'done')),
+    ).toBe(false)
+  })
+
+  it('is false for an answer with no status and no work', () => {
+    // A provider that states nothing is believed: no status is not "streaming",
+    // and a turn with a final answer and nothing running has settled. Guessing
+    // otherwise would leave every such provider's last turn permanently open.
+    expect(phaseOf(userMessage('u1', 'q'), assistantMessage('a1', 'done'))).toBe(false)
   })
 })
 

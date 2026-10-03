@@ -40,8 +40,8 @@ import {
 } from '../model/grouping'
 import {
   carryTurnKeys,
+  isWorking,
   rememberTurns,
-  runningWork,
   turnMembership,
   turnsOf,
   type ConversationTurn,
@@ -172,14 +172,15 @@ function TranscriptContent({
    * believed; the page's mid-record flag is the fallback, and it only speaks for
    * the turn the page ended in.
    */
+  // `isWorking` is the model's phase (see `turns.ts`), and the page adds the one
+  // signal the model cannot know: a read that ended mid-record says the last
+  // turn is still being written, whatever its items claim.
+  //
+  // Work still running outranks an answer. A tool the assistant started and has
+  // not finished means the turn is not settled, whatever it said before
+  // starting it — folding here would close the only thing still moving.
   const workingOf = (turn: ConversationTurn): boolean =>
-    turn.answer === null ||
-    turn.answer.status === 'streaming' ||
-    // Work still running outranks an answer. A tool the assistant started and
-    // has not finished means the turn is not settled, whatever it said before
-    // starting it — folding here would close the only thing still moving.
-    runningWork(turn) ||
-    (turn.key === lastKey && snapshot.partialTail)
+    isWorking(turn) || (turn.key === lastKey && snapshot.partialTail)
 
   const [overrides, setOverrides] = useState(() => new Map<string, boolean>())
   const isOpen = (turn: ConversationTurn) => overrides.get(turn.key) ?? workingOf(turn)
@@ -247,6 +248,7 @@ function TranscriptContent({
         lastId={lastId}
         plan={plan}
         isTurnOpen={isOpen}
+        isTurnWorking={workingOf}
         onToggleTurn={toggle}
         onReload={onReload}
       />
@@ -268,6 +270,7 @@ function ConversationBody({
   lastId,
   plan,
   isTurnOpen,
+  isTurnWorking,
   onToggleTurn,
   onReload,
 }: {
@@ -281,6 +284,8 @@ function ConversationBody({
     actions: ConversationTurn | null
   }[]
   isTurnOpen: (turn: ConversationTurn) => boolean
+  /** The same phase the fold uses — an action is for a turn that has settled. */
+  isTurnWorking: (turn: ConversationTurn) => boolean
   onToggleTurn: (key: string) => void
   onReload?: () => void
 }) {
@@ -364,9 +369,23 @@ function ConversationBody({
               <UnknownActivity />
             )}
           </MessageScrollerItem>
+          {/* The slot is reserved as soon as there is an answer row, and the
+              action inside it waits for the turn to settle.
+              *
+              * Splitting those two is what makes the fix for `#1363` round 4
+              * safe rather than a new geometry bug: the row keeps its height
+              * either way, which is the rule the component's own doc states —
+              * "nothing that appears on hover, on focus, or as a result of
+              * streaming may move the content below it". Waiting instead for
+              * the phase to settle *by not rendering the row* would appear
+              * exactly as a result of streaming, and move everything under it. */}
           {actions === null ? null : (
             <MessageScrollerItem messageId={`${actions.key}·actions`}>
-              <TurnActions text={answerText(actions)} label="answer" />
+              <TurnActions
+                text={answerText(actions)}
+                label="answer"
+                settled={!isTurnWorking(actions)}
+              />
             </MessageScrollerItem>
           )}
         </Fragment>
