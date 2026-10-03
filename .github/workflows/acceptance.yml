@@ -1,0 +1,297 @@
+name: Acceptance
+
+on:
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: Requirement Issue number
+        required: true
+        type: string
+      stage:
+        description: Acceptance stage
+        required: true
+        type: choice
+        options:
+          - pre-merge
+          - staging
+          - post-merge
+      provider:
+        description: Acceptance Agent provider when deterministic evidence is not supplied
+        required: true
+        default: cursor
+        type: choice
+        options:
+          - cursor
+          - deepseek
+      target_ref:
+        description: Commit/ref/deployment source being accepted
+        required: false
+        default: main
+        type: string
+      deployment:
+        description: Optional environment/deployment identity
+        required: false
+        default: ''
+        type: string
+      deterministic_result_json:
+        description: Optional structured criteria result; when supplied no model is invoked
+        required: false
+        default: ''
+        type: string
+
+  workflow_call:
+    inputs:
+      issue_number:
+        required: true
+        type: string
+      stage:
+        required: true
+        type: string
+      provider:
+        required: false
+        default: cursor
+        type: string
+      target_ref:
+        required: true
+        type: string
+      deployment:
+        required: false
+        default: ''
+        type: string
+      deterministic_result_json:
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: acceptance-${{ inputs.issue_number }}-${{ inputs.stage }}
+  cancel-in-progress: false
+
+jobs:
+  execute:
+    name: Execute acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: ${{ inputs.provider == 'deepseek' && 'deepseek' || 'cursor' }}
+    permissions:
+      contents: read
+      issues: read
+    outputs:
+      criteria_count: ${{ steps.prepare.outputs.criteria_count }}
+      source: ${{ steps.source.outputs.source }}
+    env:
+      ISSUE_NUMBER: ${{ inputs.issue_number }}
+      ACCEPTANCE_STAGE: ${{ inputs.stage }}
+      ACCEPTANCE_PROVIDER: ${{ inputs.provider }}
+      TARGET_REF: ${{ inputs.target_ref }}
+      DEPLOYMENT: ${{ inputs.deployment }}
+      DETERMINISTIC_RESULT_JSON: ${{ inputs.deterministic_result_json }}
+
+      CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
+      CURSOR_MODEL: ${{ vars.CURSOR_MODEL || 'composer-2.5' }}
+      CURSOR_MODEL_FAST: ${{ vars.CURSOR_MODEL_FAST || 'true' }}
+      CURSOR_SDK_VERSION: ${{ vars.CURSOR_SDK_VERSION || 'latest' }}
+
+      ACCEPTANCE_MAX_TURNS: ${{ vars.ACCEPTANCE_MAX_TURNS || '20' }}
+      ACCEPTANCE_CLAUDE_MODEL: ${{ vars.ACCEPTANCE_CLAUDE_MODEL || 'claude-sonnet-5' }}
+      ANTHROPIC_BASE_URL: ${{ vars.ANTHROPIC_BASE_URL || secrets.ANTHROPIC_BASE_URL }}
+      ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      ANTHROPIC_MODEL: ${{ vars.ANTHROPIC_MODEL }}
+      ANTHROPIC_DEFAULT_SONNET_MODEL: ${{ vars.ANTHROPIC_DEFAULT_SONNET_MODEL }}
+    steps:
+      # The acceptance harness is always loaded from trusted main. Target code is
+      # checked out separately and is never allowed to replace the updater/gate.
+      - name: Checkout trusted Acceptance harness
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: trusted
+          persist-credentials: false
+
+      - name: Checkout target ref for read-only verification
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.target_ref }}
+          path: workspace
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Self-test trusted Acceptance tooling
+        working-directory: trusted
+        run: |
+          node scripts/requirement-acceptance.mjs self-test
+          node scripts/acceptance-executor.mjs self-test
+          node scripts/acceptance-agent.mjs self-test
+
+      - name: Validate invocation
+        run: |
+          set -euo pipefail
+          if ! [[ "${ISSUE_NUMBER}" =~ ^[0-9]+$ ]] || [[ "${ISSUE_NUMBER}" -le 0 ]]; then
+            echo "Invalid issue number: ${ISSUE_NUMBER}" >&2
+            exit 1
+          fi
+          case "${ACCEPTANCE_STAGE}" in
+            pre-merge|staging|post-merge) ;;
+            *) echo "Unsupported acceptance stage: ${ACCEPTANCE_STAGE}" >&2; exit 1 ;;
+          esac
+          case "${ACCEPTANCE_PROVIDER}" in
+            cursor|deepseek) ;;
+            *) echo "Unsupported Acceptance provider: ${ACCEPTANCE_PROVIDER}" >&2; exit 1 ;;
+          esac
+
+      - name: Prepare stage-specific immutable acceptance context
+        id: prepare
+        working-directory: trusted
+        env:
+          ACCEPTANCE_RUN_ID: ${{ github.run_id }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          node scripts/acceptance-executor.mjs prepare             "${ISSUE_NUMBER}" "${ACCEPTANCE_STAGE}" "${TARGET_REF}"             "${RUNNER_TEMP}/acceptance-context.json" "${DEPLOYMENT}"
+          count="$(jq '.criteria | length' "${RUNNER_TEMP}/acceptance-context.json")"
+          echo "criteria_count=${count}" >> "${GITHUB_OUTPUT}"
+          echo "has_criteria=$([[ "${count}" -gt 0 ]] && echo true || echo false)" >> "${GITHUB_OUTPUT}"
+
+      - name: Use supplied deterministic evidence
+        if: inputs.deterministic_result_json != ''
+        run: |
+          set -euo pipefail
+          printf '%s\n' "${DETERMINISTIC_RESULT_JSON}" > "${RUNNER_TEMP}/acceptance-raw.json"
+
+      - name: Produce empty result when requested stage has no criteria
+        if: inputs.deterministic_result_json == '' && steps.prepare.outputs.has_criteria == 'false'
+        run: printf '%s\n' '{"criteria":[]}' > "${RUNNER_TEMP}/acceptance-raw.json"
+
+      - name: Verify selected provider configuration
+        if: inputs.deterministic_result_json == '' && steps.prepare.outputs.has_criteria == 'true'
+        run: |
+          set -euo pipefail
+          case "${ACCEPTANCE_PROVIDER}" in
+            cursor)
+              [[ -n "${CURSOR_API_KEY}" ]] || {
+                echo 'Cursor Environment is missing CURSOR_API_KEY; no provider fallback is allowed.' >&2
+                exit 1
+              }
+              ;;
+            deepseek)
+              [[ -n "${ANTHROPIC_BASE_URL}" ]] || {
+                echo 'DeepSeek Environment is missing ANTHROPIC_BASE_URL; no provider fallback is allowed.' >&2
+                exit 1
+              }
+              [[ -n "${ANTHROPIC_AUTH_TOKEN}" || -n "${ANTHROPIC_API_KEY}" ]] || {
+                echo 'DeepSeek Environment is missing ANTHROPIC_AUTH_TOKEN or ANTHROPIC_API_KEY.' >&2
+                exit 1
+              }
+              ;;
+          esac
+
+      - name: Install selected provider runtime
+        if: inputs.deterministic_result_json == '' && steps.prepare.outputs.has_criteria == 'true'
+        run: |
+          set -euo pipefail
+          case "${ACCEPTANCE_PROVIDER}" in
+            cursor)
+              sdk_root="${RUNNER_TEMP}/cursor-sdk"
+              mkdir -p "${sdk_root}"
+              npm install --prefix "${sdk_root}" "@cursor/sdk@${CURSOR_SDK_VERSION}"
+              echo "CURSOR_SDK_ROOT=${sdk_root}" >> "${GITHUB_ENV}"
+              ;;
+            deepseek)
+              npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION:-latest}"
+              claude --version
+              ;;
+          esac
+        env:
+          CLAUDE_CODE_VERSION: ${{ vars.CLAUDE_CODE_VERSION || 'latest' }}
+
+      - name: Run read-only Acceptance Agent
+        if: inputs.deterministic_result_json == '' && steps.prepare.outputs.has_criteria == 'true'
+        working-directory: trusted
+        run: |
+          set -euo pipefail
+          node scripts/acceptance-agent.mjs             "${RUNNER_TEMP}/acceptance-context.json" "${ACCEPTANCE_PROVIDER}"             "${GITHUB_WORKSPACE}/workspace" "${RUNNER_TEMP}/acceptance-raw.json"
+
+      - name: Select structured-result source
+        id: source
+        run: |
+          if [[ -n "${DETERMINISTIC_RESULT_JSON}" ]]; then
+            source=deterministic-caller
+          elif [[ "${{ steps.prepare.outputs.has_criteria }}" == "false" ]]; then
+            source=no-criteria
+          else
+            source="agent-${ACCEPTANCE_PROVIDER}"
+          fi
+          echo "source=${source}" >> "${GITHUB_OUTPUT}"
+
+      - name: Normalize and freeze machine-readable result
+        working-directory: trusted
+        run: |
+          set -euo pipefail
+          node scripts/acceptance-executor.mjs normalize-result             "${RUNNER_TEMP}/acceptance-context.json"             "${RUNNER_TEMP}/acceptance-raw.json"             "${RUNNER_TEMP}/acceptance-result.json"             "${{ steps.source.outputs.source }}"
+          jq . "${RUNNER_TEMP}/acceptance-result.json"
+          {
+            echo "## Acceptance execution"
+            echo
+            echo "- Issue: #${ISSUE_NUMBER}"
+            echo "- Stage: \`${ACCEPTANCE_STAGE}\`"
+            echo "- Target ref: \`${TARGET_REF}\`"
+            echo "- Source: \`${{ steps.source.outputs.source }}\`"
+            echo "- Criteria: ${{ steps.prepare.outputs.criteria_count }}"
+            echo "- Workflow status: **structured result produced**"
+            echo
+            echo "Requirement-level Pass/Pending/Fail/N/A values are data; they do not change workflow infrastructure status."
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload structured Acceptance Result
+        uses: actions/upload-artifact@v4
+        with:
+          name: acceptance-result-${{ inputs.issue_number }}-${{ inputs.stage }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/acceptance-result.json
+          if-no-files-found: error
+          retention-days: 30
+
+  update-issue:
+    name: Deterministic Issue updater
+    needs: execute
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      ISSUE_NUMBER: ${{ inputs.issue_number }}
+    steps:
+      - name: Checkout trusted updater
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Self-test deterministic updater
+        run: |
+          node scripts/requirement-acceptance.mjs self-test
+          node scripts/acceptance-executor.mjs self-test
+
+      - name: Download structured Acceptance Result
+        uses: actions/download-artifact@v4
+        with:
+          name: acceptance-result-${{ inputs.issue_number }}-${{ inputs.stage }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/acceptance-result
+
+      - name: Apply Acceptance Report and checkbox projection
+        run: |
+          set -euo pipefail
+          node scripts/acceptance-executor.mjs apply             "${ISSUE_NUMBER}" "${RUNNER_TEMP}/acceptance-result/acceptance-result.json"
