@@ -134,11 +134,14 @@ function sourceStats(cutoffIso) {
   };
 }
 
-function commitStats(cutoffIso) {
+function commitStats(cutoff7dIso, cutoff30dIso) {
   return {
     total: Number(git(['rev-list', '--count', 'HEAD'])),
     last_7d: Number(
-      git(['rev-list', '--count', `--since=${cutoffIso}`, 'HEAD']),
+      git(['rev-list', '--count', `--since=${cutoff7dIso}`, 'HEAD']),
+    ),
+    last_30d: Number(
+      git(['rev-list', '--count', `--since=${cutoff30dIso}`, 'HEAD']),
     ),
   };
 }
@@ -172,25 +175,38 @@ async function searchCount(repository, qualifier, token) {
   return payload.total_count ?? 0;
 }
 
-async function issueAndPrStats(repository, cutoffIso, token) {
+async function issueAndPrStats(
+  repository,
+  cutoff7dIso,
+  cutoff30dIso,
+  token,
+) {
   const [
     issuesTotal,
     issuesOpen,
     issuesCreated7d,
     issuesClosed7d,
+    issuesCreated30d,
+    issuesClosed30d,
     prsTotal,
     prsOpen,
     prsCreated7d,
     prsMerged7d,
+    prsCreated30d,
+    prsMerged30d,
   ] = await Promise.all([
     searchCount(repository, 'is:issue', token),
     searchCount(repository, 'is:issue is:open', token),
-    searchCount(repository, `is:issue created:>=${cutoffIso}`, token),
-    searchCount(repository, `is:issue closed:>=${cutoffIso}`, token),
+    searchCount(repository, `is:issue created:>=${cutoff7dIso}`, token),
+    searchCount(repository, `is:issue closed:>=${cutoff7dIso}`, token),
+    searchCount(repository, `is:issue created:>=${cutoff30dIso}`, token),
+    searchCount(repository, `is:issue closed:>=${cutoff30dIso}`, token),
     searchCount(repository, 'is:pr', token),
     searchCount(repository, 'is:pr is:open', token),
-    searchCount(repository, `is:pr created:>=${cutoffIso}`, token),
-    searchCount(repository, `is:pr is:merged merged:>=${cutoffIso}`, token),
+    searchCount(repository, `is:pr created:>=${cutoff7dIso}`, token),
+    searchCount(repository, `is:pr is:merged merged:>=${cutoff7dIso}`, token),
+    searchCount(repository, `is:pr created:>=${cutoff30dIso}`, token),
+    searchCount(repository, `is:pr is:merged merged:>=${cutoff30dIso}`, token),
   ]);
 
   return {
@@ -199,20 +215,25 @@ async function issueAndPrStats(repository, cutoffIso, token) {
       open: issuesOpen,
       created_7d: issuesCreated7d,
       closed_7d: issuesClosed7d,
+      created_30d: issuesCreated30d,
+      closed_30d: issuesClosed30d,
     },
     pull_requests: {
       total: prsTotal,
       open: prsOpen,
       created_7d: prsCreated7d,
       merged_7d: prsMerged7d,
+      created_30d: prsCreated30d,
+      merged_30d: prsMerged30d,
     },
   };
 }
 
-async function workflowStats(repository, cutoffMs, token) {
+async function workflowStats(repository, cutoff7dMs, cutoff30dMs, token) {
   let page = 1;
   let total = 0;
   let last_7d = 0;
+  let last_30d = 0;
 
   while (true) {
     const payload = await githubJson(
@@ -223,26 +244,27 @@ async function workflowStats(repository, cutoffMs, token) {
 
     if (page === 1) total = payload.total_count ?? runs.length;
 
-    let sawOlder = false;
+    let sawOlderThan30d = false;
     for (const run of runs) {
       const created = Date.parse(run.created_at);
       if (Number.isNaN(created)) continue;
-      if (created >= cutoffMs) last_7d += 1;
-      else sawOlder = true;
+      if (created >= cutoff7dMs) last_7d += 1;
+      if (created >= cutoff30dMs) last_30d += 1;
+      else sawOlderThan30d = true;
     }
 
-    if (sawOlder || runs.length < 100) break;
+    if (sawOlderThan30d || runs.length < 100) break;
 
     page += 1;
     if (page > 100) {
       fail(
-        'workflow-run pagination exceeded 10,000 recent runs',
-        'narrow the collection strategy.',
+        'workflow-run pagination exceeded 10,000 runs in the 30d window',
+        'narrow the collection strategy or aggregate workflow activity from a durable store.',
       );
     }
   }
 
-  return { total, last_7d };
+  return { total, last_7d, last_30d };
 }
 
 function readJson(path, label) {
@@ -493,35 +515,41 @@ function renderSvg(metrics, theme) {
     {
       label: 'Code Churn · 7d',
       primary: '',
-      secondary: 'source additions / deletions',
+      secondary:
+        `30d +${formatNumber(efficiency.source_churn_30d.additions)} / ` +
+        `−${formatNumber(efficiency.source_churn_30d.deletions)}`,
       kind: 'churn',
     },
     {
       label: 'Commits',
       primary: formatNumber(efficiency.commits.total),
-      secondary: `+${formatNumber(efficiency.commits.last_7d)} in 7d`,
+      secondary:
+        `+${formatNumber(efficiency.commits.last_7d)} 7d · ` +
+        `+${formatNumber(efficiency.commits.last_30d)} 30d`,
       kind: 'accent',
     },
     {
       label: 'Issues',
       primary: `${formatNumber(efficiency.issues.open)} open`,
       secondary:
-        `+${formatNumber(efficiency.issues.created_7d)} / ` +
-        `−${formatNumber(efficiency.issues.closed_7d)} in 7d`,
+        `7d +${formatNumber(efficiency.issues.created_7d)}/−${formatNumber(efficiency.issues.closed_7d)} · ` +
+        `30d +${formatNumber(efficiency.issues.created_30d)}/−${formatNumber(efficiency.issues.closed_30d)}`,
       kind: 'accent',
     },
     {
       label: 'Pull Requests',
       primary: `${formatNumber(efficiency.pull_requests.open)} open`,
       secondary:
-        `+${formatNumber(efficiency.pull_requests.created_7d)} / ` +
-        `${formatNumber(efficiency.pull_requests.merged_7d)} merged 7d`,
+        `7d +${formatNumber(efficiency.pull_requests.created_7d)}/${formatNumber(efficiency.pull_requests.merged_7d)}m · ` +
+        `30d +${formatNumber(efficiency.pull_requests.created_30d)}/${formatNumber(efficiency.pull_requests.merged_30d)}m`,
       kind: 'accent',
     },
     {
       label: 'Workflow Activity',
       primary: formatNumber(efficiency.workflow_runs.total),
-      secondary: `+${formatNumber(efficiency.workflow_runs.last_7d)} in 7d`,
+      secondary:
+        `+${formatNumber(efficiency.workflow_runs.last_7d)} 7d · ` +
+        `+${formatNumber(efficiency.workflow_runs.last_30d)} 30d`,
       kind: 'accent',
     },
   ];
@@ -544,7 +572,7 @@ function renderSvg(metrics, theme) {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="1180" height="316" viewBox="0 0 1180 316" role="img" aria-labelledby="title desc">
   <title id="title">Nession Repository Telemetry</title>
-  <desc id="desc">Current repository health and rolling seven-day engineering efficiency for Nession.</desc>
+  <desc id="desc">Current repository health and rolling seven-day and thirty-day engineering efficiency for Nession.</desc>
   <style>
     text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
     .heading { font-size: 18px; font-weight: 650; fill: ${palette.text}; }
@@ -566,7 +594,7 @@ function renderSvg(metrics, theme) {
   <line x1="16" y1="177" x2="1164" y2="177" stroke="${palette.border}"/>
 
   <text x="16" y="200" class="group">ENGINEERING EFFICIENCY</text>
-  <text x="1164" y="200" text-anchor="end" class="subtitle">rolling 7d · throughput &amp; repository flow</text>
+  <text x="1164" y="200" text-anchor="end" class="subtitle">rolling 7d / 30d · throughput &amp; repository flow</text>
   ${efficiencySvg}
 </svg>
 `;
@@ -614,10 +642,23 @@ function runSelfTest() {
     },
     efficiency: {
       source_churn: { additions: 500, deletions: 300 },
-      commits: { total: 1000, last_7d: 50 },
-      issues: { open: 20, created_7d: 10, closed_7d: 8 },
-      pull_requests: { open: 2, created_7d: 30, merged_7d: 28 },
-      workflow_runs: { total: 3000, last_7d: 400 },
+      source_churn_30d: { additions: 1800, deletions: 1200 },
+      commits: { total: 1000, last_7d: 50, last_30d: 210 },
+      issues: {
+        open: 20,
+        created_7d: 10,
+        closed_7d: 8,
+        created_30d: 42,
+        closed_30d: 36,
+      },
+      pull_requests: {
+        open: 2,
+        created_7d: 30,
+        merged_7d: 28,
+        created_30d: 112,
+        merged_30d: 105,
+      },
+      workflow_runs: { total: 3000, last_7d: 400, last_30d: 1500 },
     },
   };
 
@@ -628,6 +669,8 @@ function runSelfTest() {
     'Rust 84%',
     'server 21',
     '+500',
+    '30d +1,800 / −1,200',
+    '+210 30d',
   ]) {
     if (!svg.includes(required)) {
       fail(
@@ -673,8 +716,10 @@ async function main() {
     );
   }
 
-  const cutoff = new Date(now.getTime() - 7 * DAY_MS);
-  const cutoffIso = cutoff.toISOString().replace('.000Z', 'Z');
+  const cutoff7d = new Date(now.getTime() - 7 * DAY_MS);
+  const cutoff30d = new Date(now.getTime() - 30 * DAY_MS);
+  const cutoff7dIso = cutoff7d.toISOString().replace('.000Z', 'Z');
+  const cutoff30dIso = cutoff30d.toISOString().replace('.000Z', 'Z');
   const outputDir = resolve(
     process.env.METRICS_OUTPUT_DIR || 'repo-metrics-out',
   );
@@ -683,13 +728,14 @@ async function main() {
   );
   const commitSha = git(['rev-parse', 'HEAD']);
 
-  const source = sourceStats(cutoffIso);
+  const source7d = sourceStats(cutoff7dIso);
+  const source30d = sourceStats(cutoff30dIso);
   const health = loadHealth(healthDir, commitSha);
   const protocols = protocolStats();
-  const commits = commitStats(cutoffIso);
+  const commits = commitStats(cutoff7dIso, cutoff30dIso);
   const [{ issues, pull_requests }, workflow_runs] = await Promise.all([
-    issueAndPrStats(repository, cutoffIso, token),
-    workflowStats(repository, cutoff.getTime(), token),
+    issueAndPrStats(repository, cutoff7dIso, cutoff30dIso, token),
+    workflowStats(repository, cutoff7d.getTime(), cutoff30d.getTime(), token),
   ]);
 
   const metrics = {
@@ -699,14 +745,16 @@ async function main() {
     commit_sha: commitSha,
     generated_at: now.toISOString(),
     repository: assembleRepository(
-      source.repository,
+      source7d.repository,
       health,
       protocols,
     ),
     efficiency: {
       window: '7d',
-      window_start: cutoff.toISOString(),
-      source_churn: source.churn,
+      window_start: cutoff7d.toISOString(),
+      window_30d_start: cutoff30d.toISOString(),
+      source_churn: source7d.churn,
+      source_churn_30d: source30d.churn,
       commits,
       issues,
       pull_requests,
@@ -735,8 +783,10 @@ async function main() {
       `${formatNumber(metrics.repository.protocols.units.total)} protocol units`,
   );
   console.log(
-    `  Efficiency: +${formatNumber(metrics.efficiency.source_churn.additions)} / ` +
-      `−${formatNumber(metrics.efficiency.source_churn.deletions)} source lines in 7d`,
+    `  Efficiency: 7d +${formatNumber(metrics.efficiency.source_churn.additions)} / ` +
+      `−${formatNumber(metrics.efficiency.source_churn.deletions)} · ` +
+      `30d +${formatNumber(metrics.efficiency.source_churn_30d.additions)} / ` +
+      `−${formatNumber(metrics.efficiency.source_churn_30d.deletions)} source lines`,
   );
 }
 
