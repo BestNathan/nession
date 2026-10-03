@@ -46,10 +46,11 @@ interface CapsuleInputTrailingActionsProps {
  */
 function CapsuleCapabilityMore({ workContext }: { workContext?: ResolvedWorkContext }) {
   const isWorking = workContext?.status === 'working';
-  const { contextOpen, setContextOpen } = useCapsuleContext();
+  const { contextOpen, setContextOpen, contextTriggerRef } = useCapsuleContext();
 
   return (
     <button
+      ref={contextTriggerRef}
       type="button"
       aria-label="More capabilities"
       aria-expanded={contextOpen}

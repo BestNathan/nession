@@ -22,6 +22,8 @@ export interface ContextCapsuleProps {
   workContext?: ResolvedWorkContext;
   /** Close the surface. The lower Capsule is not this component's to move. */
   onDismiss: () => void;
+  /** The `+` that opened this surface — where focus goes when it closes. */
+  triggerRef: React.RefObject<HTMLButtonElement | null>;
 }
 
 /**
@@ -45,7 +47,7 @@ export interface ContextCapsuleProps {
  * The trigger (`+`) is not here: it lives in the composer row and points at this
  * surface with `aria-controls`.
  */
-export function ContextCapsule({ disclosure, workContext, onDismiss }: ContextCapsuleProps) {
+export function ContextCapsule({ disclosure, workContext, onDismiss, triggerRef }: ContextCapsuleProps) {
   const rows = useMemo(
     () =>
       resolveContextRows(
@@ -66,6 +68,29 @@ export function ContextCapsule({ disclosure, workContext, onDismiss }: ContextCa
   useEffect(() => {
     firstRowRef.current?.focus();
   }, []);
+
+  // …and leaves it again when the surface closes, back on the control that
+  // opened it. The menu primitive did this for free and the Capsule inherited
+  // the obligation with the surface: without it every dismissal — Escape, a
+  // pointer outside, the trigger, or picking a row — drops focus on `body`, and
+  // a keyboard user restarts from the top of the document.
+  //
+  // Guarded, because "dismissed" is not the same as "the user is done with the
+  // surface": a sense that ends while someone is typing in the composer (SC-36)
+  // unmounts this component too, and yanking focus out of the field they are
+  // using would be worse than the bug. Focus is only taken back when it would
+  // otherwise be lost — still inside the surface, or already fallen to `body`
+  // because the focused row just left the DOM.
+  useEffect(
+    () => () => {
+      const active = document.activeElement;
+      const stranded = active === null || active === document.body || surfaceRef.current?.contains(active);
+      if (stranded) {
+        triggerRef.current?.focus();
+      }
+    },
+    [surfaceRef, triggerRef],
+  );
 
   useDismissOnEscapeAndOutside(surfaceRef, onDismiss);
 

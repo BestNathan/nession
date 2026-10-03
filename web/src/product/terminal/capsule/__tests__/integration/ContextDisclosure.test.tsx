@@ -299,4 +299,98 @@ describe('Context Disclosure', () => {
     });
     expect(screen.queryByTestId('capsule-context-item-claude-code')).not.toBeInTheDocument();
   });
+
+  // The focus contract of the approved interaction, and the one thing the menu
+  // primitive used to provide for free. A keyboard user who opens this list and
+  // changes their mind must not be dropped at the top of the document with
+  // their place gone.
+  //
+  // One case per way out, rather than a loop with one assertion: they are four
+  // different code paths that only happen to converge, and a loop reports the
+  // first one it breaks on and silently skips the rest.
+  describe.each([
+    ['Escape', () => fireEvent.keyDown(document, { key: 'Escape' })],
+    ['a pointer outside', () => fireEvent.pointerDown(document.body)],
+    // `fireEvent`, not `userEvent`: a user-level click focuses the button it
+    // clicks, so it would leave focus on the trigger and this case would pass
+    // whether or not the surface restores anything. The real sequence is the
+    // surface's own focus-in (focus is on a row), then the tap — which is what
+    // `fireEvent` reproduces, and the only version of this that can fail.
+    ['the trigger again', () => fireEvent.click(screen.getByTestId('capsule-capability-more'))],
+  ])('dismissed by %s', (_name, dismiss) => {
+    it('hands focus back to the trigger, not to the body', async () => {
+      render(
+        <TerminalCapsule
+          experience="web"
+          sendText={vi.fn()}
+          capabilityDisclosure={disclosure()}
+          workContext={workContext()}
+        />,
+      );
+
+      const trigger = screen.getByTestId('capsule-capability-more');
+      await userEvent.click(trigger);
+      // Focus really does enter the surface, so this is about where it lands on
+      // the way out and not about a surface that never had it.
+      expect(await screen.findByTestId('capsule-context-item-claude-code')).toHaveFocus();
+
+      await dismiss();
+
+      await waitFor(() => {
+        expect(screen.queryByTestId('capsule-context-disclosure')).not.toBeInTheDocument();
+      });
+      expect(trigger).toHaveFocus();
+    });
+  });
+
+  it('hands focus back to the trigger when a row deepens the surface into a Peek', async () => {
+    // The same loss on the one dismissal a user is most likely to perform.
+    render(
+      <TerminalCapsule
+        experience="web"
+        sendText={vi.fn()}
+        capabilityDisclosure={disclosure()}
+        workContext={workContext()}
+      />,
+    );
+
+    const trigger = screen.getByTestId('capsule-capability-more');
+    await userEvent.click(trigger);
+    await userEvent.click(await screen.findByTestId('capsule-capability-picker-git'));
+
+    expect(screen.queryByTestId('capsule-context-disclosure')).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+  });
+
+  it('leaves focus alone when a sense ends under a user who has moved on (SC-36)', async () => {
+    // The guard, and the reason this is not simply "restore on unmount": a
+    // sense can end while the user is typing in the composer, which unmounts
+    // the same component. Focus belongs where the user put it.
+    const caps = disclosure();
+    const { rerender } = render(
+      <TerminalCapsule experience="web" sendText={vi.fn()} capabilityDisclosure={caps} workContext={workContext()} />,
+    );
+
+    await userEvent.click(screen.getByTestId('capsule-capability-more'));
+    await screen.findByTestId('capsule-context-item-claude-code');
+
+    // The user has moved on: the composer holds focus.
+    const field = screen.getByTestId('capsule-ghost-input');
+    field.focus();
+    expect(field).toHaveFocus();
+
+    rerender(
+      <TerminalCapsule
+        experience="web"
+        sendText={vi.fn()}
+        capabilityDisclosure={caps}
+        workContext={{ status: 'quiet', summaries: [] }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('capsule-context-disclosure')).not.toBeInTheDocument();
+    });
+    expect(field).toHaveFocus();
+  });
 });
