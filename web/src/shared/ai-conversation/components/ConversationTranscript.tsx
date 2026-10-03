@@ -418,8 +418,33 @@ export function ConversationTranscript({
   onReload?: () => void
 }) {
   const loadOlder = useCallback(() => onLoadOlder(), [onLoadOlder])
+  // Scoped to the conversation, not merely to this component — and to the
+  // **whole scroller**, not only the transcript inside it.
+  //
+  // Everything this subtree holds is keyed by item, turn and group ids, and
+  // those are unique only *within* a conversation: without the key, two threads
+  // that reuse an id inherit each other's expansion and focus (`#1363` round 3).
+  // The scroll owner is the same fact one level up. `MessageScrollerProvider`
+  // owns opening position, tail-follow, prepend anchoring and the jump-to-bottom
+  // control, so a reader who scrolled away from the live edge in one
+  // conversation carried that released follow into the next one — and
+  // `defaultScrollPosition="end"`, which is applied at the *provider's*
+  // lifecycle, was never given a conversation to apply to (`#1363` round 4).
+  //
+  // A `key` rather than a reset-on-change effect, because an effect runs *after*
+  // the render that already drew the new conversation with the old state; with
+  // `key` the state never exists in a render it does not belong to.
+  //
+  // Prepends and refreshes do not change the key, which is exactly the
+  // distinction the review drew: preserving state across a prepend and dropping
+  // it across a switch are requirements pulling opposite ways, so the boundary
+  // has to be the conversation and nothing coarser.
+  //
+  // The key is the runtime's `conversationKey` rather than `openId`, because an
+  // id is not an identity across providers or contexts.
+  const conversationKey = snapshot.conversationKey ?? 'no-conversation'
   return (
-    <MessageScrollerProvider autoScroll defaultScrollPosition="end">
+    <MessageScrollerProvider key={conversationKey} autoScroll defaultScrollPosition="end">
       <MessageScroller>
         {/*
           The viewport spends the Workspace's capsule clearance. A transcript in
@@ -435,24 +460,6 @@ export function ConversationTranscript({
           className={workspaceScrollClearanceClass}
         >
           <TranscriptContent
-            // Scoped to the conversation, not merely to this component. Every
-            // piece of state below — the disclosure overrides, both identity
-            // maps, the focus pin — is keyed by item, turn and group ids, and
-            // those are unique only *within* a conversation. Without this, two
-            // threads that reuse an id inherit each other's expansion and
-            // focus. `#1363` round 3.
-            //
-            // A `key` rather than a reset-on-change effect, because an effect
-            // runs *after* the render that already drew the new conversation
-            // with the old state; with `key` the state never exists in a render
-            // it does not belong to.
-            //
-            // Prepends and refreshes do not change `openId`, which is exactly
-            // the distinction the review drew: preserving state across a prepend
-            // and dropping it across a switch are requirements pulling opposite
-            // ways, so the boundary has to be the conversation and nothing
-            // coarser.
-            key={snapshot.openId ?? 'no-conversation'}
             snapshot={snapshot}
             providerLabel={providerLabel}
             onLoadOlder={loadOlder}
