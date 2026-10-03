@@ -42,6 +42,72 @@ function requestedModel() {
   };
 }
 
+function cursorSdkPlatformPackage(platform = process.platform, arch = process.arch) {
+  return `@cursor/sdk-${platform}-${arch}`;
+}
+
+function cursorRipgrepBinary(platform = process.platform) {
+  return platform === 'win32' ? 'rg.exe' : 'rg';
+}
+
+function executablePath(file) {
+  try {
+    fs.accessSync(file, fs.constants.X_OK);
+    return path.resolve(file);
+  } catch {
+    return null;
+  }
+}
+
+function resolveExecutableOnPath(binary, searchPath = process.env.PATH || '') {
+  for (const directory of searchPath.split(path.delimiter).filter(Boolean)) {
+    const resolved = executablePath(path.join(directory, binary));
+    if (resolved) return resolved;
+  }
+  return null;
+}
+
+function resolveBundledCursorRipgrepPath(root = process.env.CURSOR_SDK_ROOT) {
+  if (!root) return null;
+  const requireFromRoot = createRequire(path.join(root, 'package.json'));
+  const sdkEntry = requireFromRoot.resolve('@cursor/sdk');
+  const packageName = cursorSdkPlatformPackage();
+  let manifest;
+  try {
+    manifest = requireFromRoot.resolve(`${packageName}/package.json`, {
+      paths: [path.dirname(sdkEntry)],
+    });
+  } catch {
+    return null;
+  }
+  return executablePath(path.join(path.dirname(manifest), 'bin', cursorRipgrepBinary()));
+}
+
+function ensureCursorRipgrepPath() {
+  const configured = process.env.CURSOR_RIPGREP_PATH;
+  if (configured) {
+    if (!path.isAbsolute(configured)) {
+      throw new Error(`CURSOR_RIPGREP_PATH must be absolute: ${configured}\nFix: unset it to use the bundled Cursor SDK ripgrep, or set it to an absolute rg executable path.`);
+    }
+    const resolved = executablePath(configured);
+    if (!resolved) {
+      throw new Error(`CURSOR_RIPGREP_PATH is not executable: ${configured}\nFix: unset it to use the bundled Cursor SDK ripgrep, or point it at an executable rg binary.`);
+    }
+    return resolved;
+  }
+
+  const bundled = resolveBundledCursorRipgrepPath();
+  const fromPath = resolveExecutableOnPath(cursorRipgrepBinary());
+  const resolved = bundled || fromPath;
+  if (!resolved) {
+    const packageName = cursorSdkPlatformPackage();
+    throw new Error(`Cursor SDK ripgrep bootstrap failed: no executable rg was found in ${packageName} or PATH.\nFix: reinstall @cursor/sdk under CURSOR_SDK_ROOT so its platform package is present, or set CURSOR_RIPGREP_PATH to an absolute rg executable path.`);
+  }
+
+  process.env.CURSOR_RIPGREP_PATH = resolved;
+  return resolved;
+}
+
 function normalizeCursorSdkModule(loaded) {
   if (loaded?.Cursor && loaded?.Agent) return loaded;
   if (loaded?.default?.Cursor && loaded?.default?.Agent) return loaded.default;
@@ -49,6 +115,7 @@ function normalizeCursorSdkModule(loaded) {
 }
 
 async function loadCursorSdk() {
+  ensureCursorRipgrepPath();
   const root = process.env.CURSOR_SDK_ROOT;
   const requireFromRoot = createRequire(path.join(root, 'package.json'));
   const entry = requireFromRoot.resolve('@cursor/sdk');
@@ -294,6 +361,10 @@ async function runCursorAgent(issue, outDir) {
 }
 
 function selfTest() {
+  assert.equal(cursorSdkPlatformPackage('linux', 'x64'), '@cursor/sdk-linux-x64');
+  assert.equal(cursorSdkPlatformPackage('darwin', 'arm64'), '@cursor/sdk-darwin-arm64');
+  assert.equal(cursorRipgrepBinary('win32'), 'rg.exe');
+  assert.equal(cursorRipgrepBinary('linux'), 'rg');
   assert.equal(normalizeCursorSdkModule({ Cursor: {}, Agent: {} }).Cursor != null, true);
   assert.equal(normalizeCursorSdkModule({ default: { Cursor: {}, Agent: {} } }).Agent != null, true);
   const restrictedTools = ['read', 'grep', 'glob', 'ls', 'mcp'];
@@ -311,7 +382,7 @@ function selfTest() {
   const candidate = candidateIssue({ labels: [{ name: 'in-progress' }] }, 'Bug: example', 'body', ['bug', 'web']);
   assert.equal(candidate.title, 'Bug: example');
   assert.deepEqual(labelNames(candidate).sort(), ['bug', 'in-progress', 'web']);
-  console.log('issue-audit-cursor self-test: 10 cases passed');
+  console.log('issue-audit-cursor self-test: 14 cases passed');
 }
 
 async function main() {
