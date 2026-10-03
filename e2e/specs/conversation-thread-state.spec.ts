@@ -29,6 +29,16 @@ test.use({ viewport: { width: 1440, height: 900 } });
  * contents that a provider answering `unavailable` explicitly did not make.
  * Asserting only that the unavailable row appears would pass on a surface that
  * rendered *both*.
+ *
+ * ## The second path: a Turn's two phases
+ *
+ * Round 4 named a gate that could not tell "folds correctly" from "never folds":
+ * the App walk asserted the fold against a transcript whose Turn never settles,
+ * so the assertion could only ever have been passing for the wrong reason or
+ * failing for the right one. The two tests at the bottom of this file are the
+ * pair that fixes it — the same control, two corpora, opposite states — and
+ * they are here rather than in the visual walk because a phase is a behaviour,
+ * not a picture. Neither takes a screenshot, so neither owns a baseline.
  */
 
 test('an unreadable thread says so rather than claiming to be empty', async ({ page }) => {
@@ -59,4 +69,63 @@ test('the unreadable thread offers a way to ask again', async ({ page }) => {
   const notice = page.getByTestId('conversation-unavailable');
   await expect(notice).toBeVisible();
   await expect(notice.getByRole('button', { name: 'Retry' })).toBeVisible();
+});
+
+test('a settled Turn folds its work, and the control opens it again', async ({ page }) => {
+  // The `settled` corpus is the fixture's only Turn that *can* fold: its tools
+  // have all finished and its last item is the assistant's answer. Asserting
+  // the closure here is asserting the phase, not an element.
+  await page.goto('/#/fixture/workspace?capability=claude-code&conversation=settled');
+
+  await expect(page.getByTestId('claude-code-workspace')).toBeVisible();
+
+  const control = page.getByTestId('conversation-turn-process').first();
+  await expect(control).toBeVisible();
+  // The label is the same line in both phases ("Worked for 3m" here, "Worked
+  // for 6m30s" on `ready`), so it proves this is the work line and nothing
+  // more. The phase lives in `aria-expanded`, and deliberately not in copy:
+  // the two corpora differ by state, not by wording.
+  await expect(control).toContainText('Worked');
+  await expect(control).toHaveAttribute('aria-expanded', 'false');
+
+  // Folded means hidden, not unmounted: the rows keep their place in the flat
+  // list so their scroll anchors and group identities survive (#1386). Both
+  // halves are asserted, because `toBeHidden()` on its own passes just as well
+  // on a component that threw the row away — which is the bug, not the rule.
+  //
+  // The row to assert is the **group**, not a `conversation-tool`. This corpus
+  // has two adjacent tools, so they arrive as one group — an inner disclosure
+  // with a fold of its own. `conversation.md` puts the outer fold above the
+  // inner one on visibility, so the turn's control is what decides whether the
+  // group is on screen; the group's own control decides what is inside it.
+  // Asserting a tool row here would be driving the inner control with the outer
+  // one's gesture, which is how this test failed the first time it ran in CI.
+  const group = page.getByTestId('conversation-tool-group').first();
+  await expect(group).toHaveCount(1);
+  await expect(group).toBeHidden();
+
+  await control.click();
+
+  await expect(control).toHaveAttribute('aria-expanded', 'true');
+  await expect(group).toBeVisible();
+});
+
+test('a working Turn does not fold, and says so before anyone clicks', async ({ page }) => {
+  // The `ready` corpus ends in running work, so after #1409 it is a Turn that
+  // has not settled — the answer is the last assistant message no work follows,
+  // and work does follow. Its process is open *by state*, with no gesture and
+  // no screenshot to make it so.
+  //
+  // Without this half the pair is only half a gate: a surface that never folds
+  // would satisfy the test above by opening on click, and one that always folds
+  // would satisfy this one by accident. Together they pin the phase as the
+  // thing the control follows.
+  await page.goto('/#/fixture/workspace?capability=claude-code&conversation=ready');
+
+  const control = page.getByTestId('conversation-turn-process').first();
+  await expect(control).toBeVisible();
+  await expect(control).toHaveAttribute('aria-expanded', 'true');
+
+  // Not merely expanded — the work is on screen without a click.
+  await expect(page.getByTestId('conversation-tool').first()).toBeVisible();
 });
