@@ -2,13 +2,13 @@
 // Functional assertions run first; screenshots are the drift gate afterward.
 // Baseline update: CI=true npx playwright test fixture-visual --update-snapshots=all
 import { expect, test, type Locator } from '@playwright/test';
+import { openCapsuleCapability } from '../helpers/capsule';
 import {
   FIXTURE_SCREENSHOT,
   expectChromeRegion,
   freezeFixtureClock,
   gotoFixtureApp,
   gotoFixtureShell,
-  openCapsuleCapability,
   gotoFixtureWorkspace,
   openFixtureFile,
   waitForFixtureTerminal,
