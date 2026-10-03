@@ -99,6 +99,16 @@ The `+` affordance is the explicit entry for **peeking** at a capability from th
 
 Once a capability has been selected, triggered, or has earned contextual presence, Nession may materialize a temporary Signal or Peek adjacent to the capsule while keeping the resting capsule itself unchanged.
 
+> **An observation is expressed once (owner decision, 2026-10-03; #1347 SC-34).**
+> The 2026-10-03 review measured one fact — "the pane is running Claude Code" —
+> arriving three times: an auto-materialized Signal from the observed-command
+> path, the Work Ring from the work sense, and the Work Disclosure. A sensed
+> observation now has exactly **one** ambient representation: the Work Ring.
+> The observed-command path stands down for a capability whose sensed work is
+> `working`, and the user's own step — tapping `+`, choosing a sensed row — is
+> what materializes a Signal or Peek. `selected` and `triggered` above still
+> materialize; `earned contextual presence` alone does not.
+
 This refines the 2026-09-16 #748 decision:
 
 - **still valid:** capability state must not become permanent resting-capsule chrome;

@@ -10,7 +10,9 @@ function snapshot(id: CapabilityId, state: CapabilityState): CapabilitySnapshot 
   return { id, title: id, scope: {}, state };
 }
 
-type EmergenceOverrides = Partial<Pick<EmergenceInput, 'chosen' | 'opened' | 'dismissed' | 'projectable'>>;
+type EmergenceOverrides = Partial<
+  Pick<EmergenceInput, 'chosen' | 'opened' | 'dismissed' | 'projectable' | 'working'>
+>;
 
 /**
  * Resolve through the real presence policy rather than hand-writing levels, so
@@ -43,6 +45,38 @@ describe('nothing emerges on its own (Q1)', () => {
     const snapshots = [snapshot('git', 'available'), snapshot('claude-code', 'active')];
 
     expect(resolve(snapshots)).toEqual({ capabilityId: 'claude-code', depth: 'signal' });
+  });
+
+  it('stands down for a capability whose sensed work is working (SC-34)', () => {
+    // The same fact that lights the Work Ring must not also materialize a
+    // Signal: one observation, one spontaneous representation. The `working`
+    // list is the resolved work sense the caller already computes.
+    const snapshots = [snapshot('claude-code', 'active')];
+
+    expect(resolve(snapshots, { working: ['claude-code'] })).toBeUndefined();
+  });
+
+  it('still emerges a working capability the user chose (SC-34)', () => {
+    // Explicit disclosure is a decision, not another echo of the same sense —
+    // "until the user explicitly discloses/deepens" is the second half of the
+    // criterion.
+    const snapshots = [snapshot('claude-code', 'active')];
+
+    expect(resolve(snapshots, { working: ['claude-code'], chosen: 'claude-code' })).toEqual({
+      capabilityId: 'claude-code',
+      depth: 'signal',
+    });
+  });
+
+  it('leaves an active capability with no work sense to emerge as before', () => {
+    // Only the capability that actually reports work stands down; another
+    // capability that is merely `active` keeps the automatic path.
+    const snapshots = [snapshot('claude-code', 'active'), snapshot('git', 'active')];
+
+    expect(resolve(snapshots, { working: ['claude-code'] })).toEqual({
+      capabilityId: 'git',
+      depth: 'signal',
+    });
   });
 
   it('never emerges a capability that cannot be drawn', () => {

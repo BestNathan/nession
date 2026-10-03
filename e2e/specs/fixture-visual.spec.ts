@@ -623,9 +623,11 @@ test.describe('App 390×844', () => {
     await gotoFixtureApp(page, '?pane=claude.exe');
     await waitForFixtureTerminal(page);
 
-    // Sensing is ambient: the ring appears, and nothing opens by itself.
+    // Sensing is ambient: the ring appears, and nothing opens by itself —
+    // neither the disclosure nor a Signal for the same observation (SC-34).
     await expect(page.getByTestId('work-ring')).toBeVisible();
     await expect(page.getByTestId('capsule-context-disclosure')).toHaveCount(0);
+    await expect(page.getByTestId('capsule-capability-projection')).toHaveCount(0);
 
     await page.getByTestId('capsule-capability-more').click();
 

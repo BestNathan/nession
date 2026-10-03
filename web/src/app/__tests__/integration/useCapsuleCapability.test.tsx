@@ -75,7 +75,7 @@ describe('capsule emergence', () => {
   });
 
   it('emerges a Peek directly when chosen at Peek depth (#1347 SC-20)', () => {
-    // The Work Overview selects through `onSelectAtPeek`: the capability is
+    // The Context Disclosure's sensed rows select through `onSelectAtPeek`: the capability is
     // already the subject of the surface the user is leaving, so skipping the
     // Signal it would otherwise open at is the point, not a shortcut.
     const { result, chooseAtPeek, onSurfaceChange } = setup();
@@ -118,55 +118,25 @@ describe('capsule emergence', () => {
     expect(result.current.projection).toBeUndefined();
   });
 
-  it('emerges on its own for a capability the Session is observed running', () => {
-    // Q1's second input, live for the first time: nobody chose anything, and a
-    // pane running `claude.exe` gets a Signal anyway.
-    const { result, onSurfaceChange } = setup({ session: session('s1', 'claude.exe') });
-
-    expect(result.current.projection?.id).toBe('claude-code');
-    expect(result.current.projection?.depth).toBe('signal');
-    // Emerging is not opening: the work surface is not taken.
-    expect(onSurfaceChange).not.toHaveBeenCalled();
-  });
-
-  it('dismisses a Signal that emerged from the running branch (#1165)', () => {
-    // `onDismiss` used to record the dismissal from `current.chosen`, which is
-    // null here because nobody chose anything. So nothing was added to
-    // `dismissed`, the next render re-emerged the same Signal, and the ✕ looked
-    // dead — it fired and was undone in the same frame.
-    const { result } = setup({ session: session('s1', 'claude.exe') });
-
-    expect(result.current.projection?.id).toBe('claude-code');
-
-    act(() => result.current.projection?.onDismiss());
+  it('does not emerge on its own for work the capsule already senses (SC-34)', () => {
+    // The owner's 2026-10-03 decision, and a reversal of what this test used to
+    // assert: a pane running `claude.exe` lights the *Work Ring* — that is the
+    // ambient representation — and the observed-command path must stand down,
+    // or one fact arrives three times (auto Signal, ring, disclosure).
+    const { result, chooseAtPeek, onSurfaceChange } = setup({
+      session: session('s1', 'claude.exe'),
+    });
 
     expect(result.current.projection).toBeUndefined();
-  });
 
-  it('deepens a Signal that emerged from the running branch (#1165)', () => {
-    // The title offers the step because the capability declared a Peek, but the
-    // step used to read `chosen` and so moved nothing for an observed
-    // capability — and the running branch reports `signal` unconditionally.
-    const { result } = setup({ session: session('s1', 'claude.exe') });
-
-    act(() => result.current.projection?.onDeeper?.());
+    // …and the user's own move still deepens it: choosing the sensed row in
+    // the Context Disclosure opens the Peek directly (SC-20).
+    chooseAtPeek('claude-code');
 
     expect(result.current.projection?.id).toBe('claude-code');
     expect(result.current.projection?.depth).toBe('peek');
-  });
-
-  it('closes a Peek that emerged from the running branch back to its Signal (#1165)', () => {
-    const { result } = setup({ session: session('s1', 'claude.exe') });
-
-    act(() => result.current.projection?.onDeeper?.());
-    act(() => result.current.projection?.onDismiss());
-
-    expect(result.current.projection?.id).toBe('claude-code');
-    expect(result.current.projection?.depth).toBe('signal');
-
-    act(() => result.current.projection?.onDismiss());
-
-    expect(result.current.projection).toBeUndefined();
+    // Deepening is not opening the surface: the work surface is not taken.
+    expect(onSurfaceChange).not.toHaveBeenCalled();
   });
 
   it('gives a capability with nothing to add at Peek no deeper step', () => {
