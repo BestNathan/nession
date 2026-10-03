@@ -185,6 +185,8 @@ describe('fixture conversation surface', () => {
       '\\int_0^1',
       '<tool_call>',
       '| observer |',
+      '| :--- | :---: | ---: |',
+      '- The first item is its own paragraph.',
       '[stream replay notes][notes]',
       '[^observer]',
       '[notes]: https://example.com/nession',

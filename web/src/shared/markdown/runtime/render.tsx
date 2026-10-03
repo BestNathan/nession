@@ -92,6 +92,12 @@ export interface MarkdownRenderContext {
   footnoteOrder: string[];
   /** References rendered per identifier; drives a repeated reference's anchor id. */
   footnoteCounts: Map<string, number>;
+  /**
+   * Prefix for this document's footnote/reference DOM ids. One ChatMarkdown
+   * instance is one document; the scope keeps two messages' footnotes from
+   * colliding, and stays fixed across the streaming → settled switch.
+   */
+  footnoteScope: string;
 }
 
 function sanitizeUrl(url: string): string {
@@ -328,10 +334,14 @@ function renderList(
   context: MarkdownRenderContext,
 ): ReactNode {
   const Tag = node.ordered ? 'ol' : 'ul';
+  // Loose is a property of the *list*, decided once and threaded into every
+  // item: a blank line between two items makes the whole list loose, so an
+  // item that looks tight on its own still keeps its paragraphs.
+  const loose = listLoose(node);
   return createElement(
     Tag,
     { key, start: node.start ?? undefined },
-    renderChildren(node.children, context),
+    node.children.map((item, index) => renderListItem(item, loose, index, context)),
   );
 }
 
@@ -342,11 +352,14 @@ function renderListItem(
   context: MarkdownRenderContext,
 ): ReactNode {
   const children = node.children.map((child, index) => {
-    const rendered = renderNode(child, index, context);
     if (!loose && child.type === 'paragraph') {
-      return <span key={index}>{rendered}</span>;
+      // A tight item's paragraph *is* the item: its inline content renders
+      // directly in the `<li>`, with no `<p>` to gain block spacing from —
+      // and no wrapper element either, which is what upstream's
+      // `mdast-util-to-hast` unwrapping produces.
+      return <Fragment key={index}>{renderChildren(child.children, context)}</Fragment>;
     }
-    return rendered;
+    return renderNode(child, index, context);
   });
 
   return (
@@ -359,8 +372,18 @@ function renderListItem(
   );
 }
 
+/**
+ * Whether a list is loose: its own `spread` (blank lines between items) or any
+ * item that is spread or holds more than a lone paragraph. CommonMark makes
+ * this a list-level fact — every item follows the one decision.
+ */
+function listLoose(list: Md.List): boolean {
+  return (list.spread ?? false) || list.children.some(listItemLoose);
+}
+
 function listItemLoose(node: Md.ListItem): boolean {
-  return node.children.length > 1 || node.children.some((child) => child.type !== 'paragraph');
+  return node.spread
+    ?? (node.children.length > 1 || node.children.some((child) => child.type !== 'paragraph'));
 }
 
 function renderTable(
@@ -370,6 +393,12 @@ function renderTable(
 ): ReactNode {
   const header = node.children[0];
   const body = node.children.slice(1);
+  // GFM mdast carries the column alignment on the *table* (`align`, one entry
+  // per column); a cell has no `align` of its own. Reading it off the cells
+  // silently dropped every `|:--|:-:|--:|` marker, so an aligned table drew
+  // with default alignment and nothing failed (#1184 round-2 review).
+  const columnAlign = node.align ?? [];
+  const alignAt = (index: number): 'left' | 'center' | 'right' | undefined => columnAlign[index] ?? undefined;
 
   return (
     // `tableScroll` is the port's own responsive wrapper: it owns the
@@ -380,27 +409,21 @@ function renderTable(
       <table>
         <thead>
           <tr>
-            {header.children.map((cell, index) => {
-              const align = (cell as Md.TableCell & { align?: 'left' | 'center' | 'right' | null }).align;
-              return (
-                <th key={index} align={align ?? undefined}>
-                  {renderChildren(cell.children, context)}
-                </th>
-              );
-            })}
+            {header.children.map((cell, index) => (
+              <th key={index} align={alignAt(index)}>
+                {renderChildren(cell.children, context)}
+              </th>
+            ))}
           </tr>
         </thead>
         <tbody>
           {body.map((row, rowIndex) => (
             <tr key={rowIndex}>
-              {row.children.map((cell, cellIndex) => {
-                const align = (cell as Md.TableCell & { align?: 'left' | 'center' | 'right' | null }).align;
-                return (
-                  <td key={cellIndex} align={align ?? undefined}>
-                    {renderChildren(cell.children, context)}
-                  </td>
-                );
-              })}
+              {row.children.map((cell, cellIndex) => (
+                <td key={cellIndex} align={alignAt(cellIndex)}>
+                  {renderChildren(cell.children, context)}
+                </td>
+              ))}
             </tr>
           ))}
         </tbody>
@@ -499,14 +522,23 @@ function renderImageReference(
   return renderImage(definition.url, node.alt ?? '', key);
 }
 
-/** DOM id of footnote `number`'s section entry. */
-function footnoteSectionItemId(number: number): string {
-  return `fn-${number}`;
+/**
+ * DOM id of footnote `number`'s section entry, scoped to its document.
+ *
+ * The scope is what keeps two messages' footnotes apart: every ChatMarkdown
+ * numbers from 1, so an unscoped `fn-1` would be duplicated in a conversation
+ * and a later message's `href="#fn-1"` could jump into an earlier message's
+ * section (#1184 round-2 review). The scope must not change between a
+ * message's streaming and settled renders — `useId` is stable for the
+ * component instance, which is exactly that lifetime.
+ */
+function footnoteSectionItemId(scope: string, number: number): string {
+  return `${scope}fn-${number}`;
 }
 
 /** DOM id of one reference to footnote `number`; `occurrence` counts from 1. */
-function footnoteReferenceId(number: number, occurrence: number): string {
-  return occurrence === 1 ? `fnref-${number}` : `fnref-${number}-${occurrence}`;
+function footnoteReferenceId(scope: string, number: number, occurrence: number): string {
+  return occurrence === 1 ? `${scope}fnref-${number}` : `${scope}fnref-${number}-${occurrence}`;
 }
 
 function renderFootnoteReference(
@@ -523,7 +555,10 @@ function renderFootnoteReference(
 
   return (
     <sup key={key}>
-      <a id={footnoteReferenceId(number, occurrence)} href={`#${footnoteSectionItemId(number)}`}>
+      <a
+        id={footnoteReferenceId(context.footnoteScope, number, occurrence)}
+        href={`#${footnoteSectionItemId(context.footnoteScope, number)}`}
+      >
         [{number}]
       </a>
     </sup>
@@ -545,7 +580,9 @@ export function renderFootnoteSection(context: MarkdownRenderContext): ReactNode
     const definition = context.targets.footnotes.get(id);
     if (definition === undefined) {continue;}
     const number = context.footnoteOrder.indexOf(id) + 1;
-    const backref = <a href={`#${footnoteReferenceId(number, 1)}`} aria-label="Back to reference">↩</a>;
+    const backref = (
+      <a href={`#${footnoteReferenceId(context.footnoteScope, number, 1)}`} aria-label="Back to reference">↩</a>
+    );
     const children = definition.children;
     const last = children[children.length - 1];
     // The back-link rides the body's last paragraph, where it reads as the end
@@ -559,7 +596,7 @@ export function renderFootnoteSection(context: MarkdownRenderContext): ReactNode
       body.push(' ', backref);
     }
     items.push(
-      <li key={id} id={footnoteSectionItemId(number)}>
+      <li key={id} id={footnoteSectionItemId(context.footnoteScope, number)}>
         {body}
       </li>,
     );

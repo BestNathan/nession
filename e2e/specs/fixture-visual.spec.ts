@@ -178,6 +178,15 @@ test.describe('Web 1440×900', () => {
     expect(await conversation.locator('.katex').count()).toBeGreaterThanOrEqual(2);
     await expect(conversation.locator('.katex-error')).toHaveCount(0);
 
+    // SC-18: the alignment markers reach the DOM on every column, and a loose
+    // list keeps each item's paragraph while the tight list above it keeps
+    // none — a count of 2 is exactly the loose list's two items.
+    await expect(conversation.locator('th[align="center"]')).toHaveCount(1);
+    await expect(conversation.locator('td[align="right"]')).toHaveCount(2);
+    // Scoped to the bullet list: the footnote section is its own `ol` whose
+    // body paragraph is also an `li p`.
+    await expect(conversation.locator('ul li p')).toHaveCount(2);
+
     // SC-14: settled resolution — the reference, the footnote and its section.
     await expect(conversation.locator('a[href="https://example.com/nession"]')).toHaveText(
       'stream replay notes',

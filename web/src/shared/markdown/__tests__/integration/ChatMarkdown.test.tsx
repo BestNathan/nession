@@ -85,7 +85,7 @@ describe('ChatMarkdown fixture tests', () => {
     }
   });
 
-  describe('lists', () => {
+  describe('lists (#1184 SC-18)', () => {
     for (const testCase of listCases) {
       it(testCase.name, () => {
         const container = renderCase(testCase);
@@ -94,6 +94,27 @@ describe('ChatMarkdown fixture tests', () => {
         expect(hasList).toBeInTheDocument();
         if (testCase.name.includes('task')) {
           expect(container.querySelectorAll('input[type="checkbox"]')).toHaveLength(3);
+        }
+
+        // Tight semantics: an item that is only a paragraph renders that
+        // paragraph's content directly in the `<li>` — no `<p>` to pick up
+        // block spacing. Loose semantics: every item keeps its `<p>`. The
+        // distinction is the whole of SC-18's list half, and "a ul exists"
+        // cannot see either side of it.
+        const loose = testCase.name.startsWith('loose-');
+        expect(container.querySelectorAll('li p').length > 0).toBe(loose);
+        if (testCase.name === 'loose-list') {
+          // The list is loose because of the blank lines *between* items —
+          // each item on its own looks tight, which is what a per-item
+          // decision gets wrong.
+          const items = container.querySelectorAll('li');
+          expect(items).toHaveLength(3);
+          for (const item of items) {
+            expect(item.querySelector('p'), item.textContent ?? '').not.toBeNull();
+          }
+        }
+        if (testCase.name === 'ordered-list-non-one-start') {
+          expect(container.querySelector('ol')).toHaveAttribute('start', '3');
         }
       });
     }
@@ -129,6 +150,24 @@ describe('ChatMarkdown fixture tests', () => {
         expect(container.querySelector('table')).toBeInTheDocument();
         expect(container.querySelectorAll('th').length).toBeGreaterThan(0);
         expect(container.querySelectorAll('td').length).toBeGreaterThan(0);
+
+        if (testCase.name === 'table-with-alignment') {
+          // GFM stores column alignment on the table; every cell in a column
+          // carries it. Reading it off the cells dropped the markers silently
+          // (#1184 SC-18), so this asserts each column, header and body.
+          const header = [...container.querySelectorAll('thead th')];
+          expect(header.map((cell) => cell.getAttribute('align'))).toEqual([
+            'left',
+            'center',
+            'right',
+          ]);
+          const bodyRow = container.querySelector('tbody tr');
+          expect([...(bodyRow?.children ?? [])].map((cell) => cell.getAttribute('align'))).toEqual([
+            'left',
+            'center',
+            'right',
+          ]);
+        }
       });
     }
   });

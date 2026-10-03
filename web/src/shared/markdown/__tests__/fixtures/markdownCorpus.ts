@@ -103,6 +103,24 @@ export const listCases: MarkdownTestCase[] = [
     markdown: '- [x] Completed\n- [ ] Not completed\n- [ ] Another task',
     description: 'Task list with checkboxes',
   },
+  {
+    // Blank lines *between* items make the whole list loose: every item then
+    // keeps its paragraph. The items themselves look tight, which is exactly
+    // the shape a per-item decision renders wrong (#1184 SC-18).
+    name: 'loose-list',
+    markdown: '- First item\n\n- Second item\n\n- Third item',
+    description: 'Loose list: blank lines between items',
+  },
+  {
+    name: 'loose-list-inner-item',
+    markdown: '- First paragraph of one item.\n\n  Second paragraph of the same item.\n\n- Next item',
+    description: 'Loose list: an item with two paragraphs',
+  },
+  {
+    name: 'ordered-list-non-one-start',
+    markdown: '3. Third\n4. Fourth',
+    description: 'Ordered list starting at a number other than one',
+  },
 ];
 
 /**
