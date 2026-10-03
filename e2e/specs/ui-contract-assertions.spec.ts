@@ -27,6 +27,11 @@ import { patternBlock } from '../helpers/ui-assert/contracts';
 test.skip(!process.env.CI, 'local only — runs in CI workflow only');
 
 const WEB = { pattern: 'pattern.workspace-navigation', experience: 'web' as const, viewport: 'web.standard-desktop' };
+// The single-line proof needs a pattern that still enforces it. workspace-navigation
+// stopped doing so when its entries became labeled slots (`wrap: true`, owner
+// follow-up 2026-10-03) — a name may take two lines inside its slot — so the
+// proof uses session-header, which inherits the chrome category unchanged.
+const HEADER_WEB = { pattern: 'pattern.session-header', experience: 'web' as const, viewport: 'web.standard-desktop' };
 const ITEM_WEB = { pattern: 'pattern.session-item', experience: 'web' as const, viewport: 'web.standard-desktop' };
 const ITEM_APP = { pattern: 'pattern.session-item', experience: 'app' as const, viewport: 'app.standard-phone' };
 
@@ -63,13 +68,13 @@ test.describe('assertion helpers detect deliberate violations', () => {
       <div id="root" style="width: 300px; font-size: 16px; line-height: 20px;">
         <span>one line of text</span>
       </div>`);
-    await expectSingleLine(page.locator('#root'), WEB); // passes
+    await expectSingleLine(page.locator('#root'), HEADER_WEB); // passes
 
     await page.setContent(`
       <div id="root" style="width: 300px; font-size: 16px; line-height: 20px;">
         <div>first line</div><div>second line</div>
       </div>`);
-    await rejectsWith(expectSingleLine(page.locator('#root'), WEB), 'single-line');
+    await rejectsWith(expectSingleLine(page.locator('#root'), HEADER_WEB), 'single-line');
   });
 
   test('single-line is skipped when the contract allows wrap (session-item)', async ({ page }) => {

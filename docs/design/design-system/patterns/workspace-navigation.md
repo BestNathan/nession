@@ -206,10 +206,14 @@ destination circles, unlike Web's reciprocal pair, and that difference is
 experience presentation, not a divergence in the Capsule's identity.
 
 What the two states **share** is the outer geometry: the floating surface and
-elevation, the semantic capsule radius (`--radius-capsule`), the `control-md`
-vertical mass, the App dock's bottom and safe-area-aware placement, and the
-shell's inner padding rhythm. What they **do not** share is content — a composer
-on one, the capability row on the other.
+elevation, the semantic capsule radius (`--radius-capsule`), the App dock's
+bottom and safe-area-aware placement, and the shell's inner padding rhythm.
+What they **do not** share is content — a composer on one, the labeled
+capability slots on the other — and, since the labeled-slot follow-up
+(2026-10-03), the vertical mass follows the content: the Capability Form is
+taller than the composer above the same `control-md` floor, because it is the
+state that carries names. The relational assertion (SC-30) compares the shape,
+the semantic radius and the placement, not the height.
 
 Two questions the previous revision left open, now settled by the same decision:
 
@@ -296,7 +300,7 @@ Existing components should migrate incrementally. Do not remove reliable capabil
 - [ ] Extensions cannot independently fragment the global navigation model.
 - [ ] Web/App may present the same capability differently while preserving semantic state.
 - [ ] The App entries meet the chrome touch floor (`experience.app.touchTarget.min`, 44px) — the pattern declares no compact override since the 2026-10-03 Capsule-family decision — enforced by the viewport matrix.
-- [ ] The App Capability Form and Conversation Form share one outer geometry (radius, vertical mass, dock placement), asserted relationally rather than each alone (#1347 SC-30).
+- [ ] The App Capability Form and Conversation Form share one outer geometry (radius, shape claim, dock placement — not height, which follows content), asserted relationally rather than each alone (#1347 SC-30).
 - [ ] The capsule appears only at capability-root depth, and is absent over capability-owned detail.
 - [ ] Files-specific layout remains local to Files.
 - [ ] The capsule stays inside the tool bar at every viewport, and its row scrolls internally.

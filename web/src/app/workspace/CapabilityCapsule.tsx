@@ -97,9 +97,14 @@ export function CapabilityCapsule({
       data-shell-shape={experience === 'app' ? 'capsule' : 'pill'}
       className={cn(
         // `min-h-[control-md]` matches `CapsuleShell`'s own row: on App that is
-        // the 44px control band the Conversation form uses, so the two states
-        // have the same vertical mass; on Web it is a no-op at today's density.
-        'pointer-events-auto flex min-h-[length:var(--control-md)] items-center',
+        // the 44px control band the Conversation form uses; the labeled slots
+        // make this form taller than that floor, which is deliberate (the
+        // capability state is the one that carries names).
+        //
+        // `max-w-full` bounds the nav to its zone: six labeled slots are wider
+        // than a phone, and the bound is what makes the INNER row scroll
+        // (SC-06) instead of the capsule overhanging the tool bar.
+        'pointer-events-auto flex min-h-[length:var(--control-md)] max-w-full items-center',
         capsuleShellSurfaceClass,
         experience === 'app' ? capsuleShellCapsuleRadiusClass : capsuleShellPillRadiusClass,
         capsuleShellInnerPadClass,
