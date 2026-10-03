@@ -49,6 +49,11 @@ describe('isWorkSurface', () => {
       '<div data-testid="terminal-capsule"><div data-testid="capsule-shell"></div></div>',
       '[data-testid="capsule-shell"]',
     ],
+    [
+      'the capability capsule row',
+      '<nav data-testid="workspace-capability-capsule"><div data-testid="workspace-capability-scroll"><button data-testid="workspace-tool-files"></button></div></nav>',
+      '[data-testid="workspace-tool-files"]',
+    ],
   ];
 
   it.each(matched)('reports %s as a work surface', (_name, html, selector) => {
@@ -84,7 +89,10 @@ describe('isWorkSurface', () => {
   });
 
   it('exposes the exclusion list as one selector', () => {
-    expect(WORK_SURFACE_SELECTOR.split(', ')).toHaveLength(5);
+    // The count is here to make an addition deliberate: every member is a
+    // surface that owns touch behaviour, and the cases above say why each one
+    // is on the list.
+    expect(WORK_SURFACE_SELECTOR.split(', ')).toHaveLength(6);
     expect(element('<div class="cm-editor"></div>', '.cm-editor').matches(WORK_SURFACE_SELECTOR)).toBe(true);
   });
 });

@@ -281,6 +281,79 @@ const ITEMS: MessageItemV1[] = [
   },
 ];
 
+/**
+ * A Turn whose work has all finished and whose last word is the assistant's.
+ *
+ * `ITEMS` cannot be this, and after `#1409` that is not a detail: the answer is
+ * the last assistant message **that no work follows**, and four items follow
+ * `i5` — so the transcript above is a Turn that is still *working*, whatever
+ * the clock says. That is exactly right for the open process, and exactly wrong
+ * for the fold: a fold this fixture never performs cannot be told apart from a
+ * fold that is broken, and the App walk in `e2e/specs/fixture-visual.spec.ts`
+ * spent its life asserting the second while driving the first.
+ *
+ * So the two phases are two corpora. This one settles every tool and puts the
+ * answer after them, which is the only shape `#1363` SC-17/18 folds.
+ */
+const SETTLED_ITEMS: MessageItemV1[] = [
+  {
+    id: 's1',
+    kind: 'message',
+    role: 'user',
+    timestamp: '2026-09-01T12:10:00Z',
+    content: [
+      {
+        type: 'text',
+        text: 'Which test covers the ownership handoff, and did it pass?',
+      },
+    ],
+  },
+  {
+    id: 's2',
+    kind: 'tool',
+    timestamp: '2026-09-01T12:11:00Z',
+    tool: {
+      call_id: 'call-settled-1',
+      name: 'Read',
+      status: 'success',
+      summary: 'crates/nession-agent/src/tmux/cmd.rs',
+      output: {
+        text: 'pub fn output_blocking(&self, args: &[&str]) -> Result<Output> {',
+        kind: 'text',
+        truncated: false,
+      },
+    },
+  },
+  {
+    id: 's3',
+    kind: 'tool',
+    timestamp: '2026-09-01T12:12:00Z',
+    tool: {
+      call_id: 'call-settled-2',
+      name: 'Bash',
+      status: 'success',
+      summary: 'cargo test -p nession-agent -- ownership',
+      output: {
+        text: 'running 3 tests\ntest ownership::observer_keeps_the_keyboard ... ok\ntest result: ok. 3 passed; 0 failed',
+        kind: 'text',
+        truncated: true,
+      },
+    },
+  },
+  {
+    id: 's4',
+    kind: 'message',
+    role: 'assistant',
+    timestamp: '2026-09-01T12:13:00Z',
+    content: [
+      {
+        type: 'text',
+        text: '`ownership::observer_keeps_the_keyboard` covers it, and it passed.',
+      },
+    ],
+  },
+];
+
 /** The item a `messages` answer carries whole — no client join by id (#1222). */
 function itemOf(conversationId: string): ConversationItemV1 | undefined {
   return [...CONVERSATIONS, RICH_CONVERSATION].find((c) => c.id === conversationId);
@@ -516,6 +589,17 @@ function conversationsFor(scenario: string): ConversationsResponse | undefined {
         binding: { conversation_id: BOUND_ID, activity: 'active' },
         has_more: false,
       };
+    case 'settled':
+      // The same directory as `ready`, bound to the same conversation: a
+      // finished Turn is a property of the *thread*, not of the list. See
+      // `SETTLED_ITEMS` for why the transcript needs a corpus of its own.
+      return {
+        state: 'ready',
+        cwd: '/Users/dev/code/nession-capsule',
+        items: CONVERSATIONS,
+        binding: { conversation_id: BOUND_ID, activity: 'active' },
+        has_more: false,
+      };
     case 'paged':
       // `ready`, plus a messages unit that admits an older page exists. See
       // `messagesFor`: the paging lives entirely on the messages answer — the
@@ -531,6 +615,26 @@ function conversationsFor(scenario: string): ConversationsResponse | undefined {
     default:
       return undefined;
   }
+}
+
+/**
+ * The page shape the single-phase scenarios answer with: live, one page, and
+ * nothing behind it.
+ *
+ * Extracted so a scenario that differs only in *which* transcript it carries
+ * says only that — `ready` and `settled` are one envelope around two corpora,
+ * and spelling it twice is how the two would drift.
+ */
+function activePage(conversation: ConversationItemV1, items: MessageItemV1[]): MessagesResponse {
+  return {
+    state: 'ready',
+    conversation,
+    activity: 'active',
+    items,
+    has_more: false,
+    partial_tail: false,
+    skipped: 0,
+  };
 }
 
 /**
@@ -583,15 +687,7 @@ function messagesFor(
         skipped: 0,
       };
     case 'ready':
-      return {
-        state: 'ready',
-        conversation: named,
-        activity: 'active',
-        items: ITEMS,
-        has_more: false,
-        partial_tail: false,
-        skipped: 0,
-      };
+      return activePage(named, ITEMS);
     case 'paged': {
       // The only scenario with history behind the newest page. The cursor is
       // the paging contract: the newest page hands out `PAGED_CURSOR`, and
@@ -637,6 +733,10 @@ function messagesFor(
       }
       return undefined;
     }
+    case 'settled':
+      // The other phase: everything settled and the answer last, which is the
+      // Turn SC-17/18 folds. `ready` ends in running work and cannot.
+      return activePage(named, SETTLED_ITEMS);
     case 'inactive':
       // The same transcript as `ready`, and that is the point: a fixture that
       // gave this state no items would leave a reader unable to tell the two

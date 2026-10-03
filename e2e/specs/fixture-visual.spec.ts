@@ -907,13 +907,19 @@ test.describe('App 390×844', () => {
     // The tool call is a collapsed row here too (#1005 criterion 10), and the
     // fixture's second one errors — so the failure treatment is in the picture.
     //
-    // A finished turn folds its work behind its process control (#1363 SC-17/18),
-    // so the rows are not on screen until the reader opens them. Asserting the
-    // fold and then opening it keeps this walk about what it says it is about —
-    // the App's own layout drawing work rows and a failure — instead of asserting
-    // a default the pattern no longer has.
-    await expect(page.getByTestId('conversation-tool').first()).toBeHidden();
-    await page.getByTestId('conversation-turn-process').first().click();
+    // This transcript's Turn is **working**, not finished: four items follow its
+    // last assistant message, one of them a tool that never stopped, and #1409
+    // made that mean something — the answer is the last assistant message *no
+    // work follows*, so trailing work leaves the Turn open. The process is
+    // therefore already expanded and the rows are already on screen. That is
+    // what this walk photographs.
+    //
+    // The settled half — work that has all finished, behind a final answer —
+    // is asserted against the fixture's `settled` scenario in
+    // `conversation-thread-state.spec.ts`. It used to be asserted *here*, on a
+    // transcript that could not reach it, which is a gate that cannot tell
+    // "folds correctly" from "never folds" (#1363 round 4).
+    await expect(page.getByTestId('conversation-turn-process').first()).toBeVisible();
     await expect(page.getByTestId('conversation-tool').first()).toBeVisible();
 
     await expect(page).toHaveScreenshot('app-claude-code-conversation.png', {
