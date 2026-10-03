@@ -25,6 +25,7 @@ Use this skill as the review coordinator. Do not duplicate workflows owned elsew
 | Review finds a bug or unmet requirement that must be tracked | `nession-writing-requirements` |
 | User asks to fix / implement the findings | `nession-development` |
 | Release / staging → main / deployment questions | `nession-cicd` |
+| Gate contract / repository quality invariant / Gate failure | `nession-gates` |
 | UI / interaction implementation review needs design-system rules | `nession-web-design` |
 | Bug mechanism is not yet confirmed | follow systematic-debugging phases before claiming Root Cause |
 

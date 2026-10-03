@@ -12,6 +12,8 @@ description: Use when troubleshooting CI/CD pipeline failures for nession, modif
 - **Staging** (`staging.yml`): merge to staging triggers full build + deploy to staging
 - **Release** (`release.yml`): merge to main triggers release build + deploy to production
 
+Gate semantics are owned by `nession-gates`. CI/CD workflows are routers/execution surfaces: they may prepare environment and choose Gate IDs/suites, but must not become a second owner of Gate rules, success/failure meaning, or repair guidance.
+
 One additional governance workflow protects requirement closure:
 - **Requirement Acceptance** (`requirement-acceptance.yml`): PRs to `main` validate **merge readiness** for every closing `requirement` issue; explicit `post-merge` Pending criteria may be deferred. Completed requirement closure is stricter and is guarded after the fact.
 
