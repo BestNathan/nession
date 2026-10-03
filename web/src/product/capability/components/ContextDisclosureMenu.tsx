@@ -153,7 +153,10 @@ export function ContextDisclosureMenu({
               <DropdownMenuSubTrigger data-testid="capsule-context-all">
                 {labels.all}
               </DropdownMenuSubTrigger>
-              <DropdownMenuSubContent className="w-52">
+              <DropdownMenuSubContent
+                className="w-52"
+                data-testid="capsule-context-all-menu"
+              >
                 <CapabilityEntryRows
                   entries={entries}
                   onSelect={onSelect}

@@ -77,11 +77,42 @@ async function assertPopupMenu(
   await trigger.click();
   // The capsule's `+` leads with sensed capabilities while any exist (#1347
   // SC-37/40) — on App, that includes context-sensed Terminal Keys — so the
-  // ordinary rows this helper measures live one explicit step down. The
-  // session row's menu has no such step, hence the conditional.
+  // ordinary rows this helper measures live one explicit step down. The session
+  // row's menu has no such step, hence the conditional.
   const allCapabilities = page.getByTestId('capsule-context-all');
   if ((await allCapabilities.count()) > 0) {
+    const root = page.getByTestId('capsule-context-disclosure');
+    await expect(root).toBeVisible();
     await allCapabilities.click();
+
+    const submenu = page.getByTestId('capsule-context-all-menu');
+    await expect(submenu).toBeVisible();
+    await waitForSettledBox(submenu);
+
+    // The ordinary rows, one level down, are what this pattern describes. The
+    // sensed row above them is two lines by design — identity over reason
+    // (#1347 SC-19), measured 232×50.8 — so it is not a `control.sm` row and
+    // holding it to the token height would assert a row this contract does not
+    // describe. It keeps the guarantee that matters for a row of any height:
+    // the touch floor, asserted on the root below.
+    const submenuItems = submenu.getByRole('menuitem');
+    const submenuCount = await submenuItems.count();
+    expect(submenuCount).toBeGreaterThan(0);
+    for (let i = 0; i < submenuCount; i += 1) {
+      await expectTokenHeight(submenuItems.nth(i), opts);
+      await expectSingleLine(submenuItems.nth(i), opts);
+    }
+    await expectNoUnexpectedOverflow(submenu, opts);
+    await expectTouchTargetsWithin(submenu, opts);
+    await expectTouchTargetsWithin(root, opts);
+
+    // Close before returning, the way the flat path does: this menu opens
+    // upward, over the session header the caller clicks next.
+    await page.keyboard.press('Escape');
+    await expect(submenu).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('menu')).toHaveCount(0);
+    return;
   }
   const menu = page.getByRole('menu');
   await expect(menu).toBeVisible();
