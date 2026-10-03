@@ -75,6 +75,11 @@ async function assertPopupMenu(
   const opts = optsFor(PATTERN_POPUP_MENU, experience, viewportId);
 
   await trigger.click();
+  // Wait for the popup before asking what shape it has: `count()` on a list
+  // React has not mounted reads 0, and the branch below would then measure the
+  // root — whose first row is the sensed one, the 50.8px reading this branch
+  // exists to avoid — or wait for rows behind a step it decided not to take.
+  await expect(page.getByRole('menu').first()).toBeVisible();
   // The capsule's `+` leads with sensed capabilities while any exist (#1347
   // SC-37/40) — on App, that includes context-sensed Terminal Keys — so the
   // ordinary rows this helper measures live one explicit step down. The session

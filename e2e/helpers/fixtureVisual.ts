@@ -175,11 +175,20 @@ export async function gotoFixtureWorkspace(page: Page): Promise<void> {
  */
 export async function openCapsuleCapability(page: Page, id: string): Promise<void> {
   await page.getByTestId('capsule-capability-more').click();
+
+  // Wait for the list to *be* there before asking which shape it has. `count()`
+  // on a surface React has not mounted yet reads 0 — the helper then skips the
+  // step it should have taken, and the click below waits out its 30s timeout
+  // for a row that is behind that step. Measured on CI: the same three cases
+  // pass or time out depending on how fast the popup mounts (#1441).
+  const picker = page.getByTestId(`capsule-capability-picker-${id}`);
   const all = page.getByTestId('capsule-context-all');
-  if ((await all.count()) > 0) {
+  await expect(all.or(picker).first()).toBeVisible();
+
+  if (await all.isVisible()) {
     await all.click();
   }
-  await page.getByTestId(`capsule-capability-picker-${id}`).click();
+  await picker.click();
 }
 
 export async function gotoFixtureApp(page: Page, search = ''): Promise<void> {
