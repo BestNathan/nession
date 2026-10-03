@@ -112,10 +112,15 @@ test('workspace-navigation: self-scrolling overflow both experiences, no pinned 
   assert.equal(merged.web.overflow, 'scroll');
   assert.equal(merged.web.justify, 'start');
   assert.equal(merged.web.heightToken, undefined, 'strip height is layout-derived, not token-pinned');
-  assert.equal(merged.web.wrap, false, 'single-line entries via category.chrome');
+  // Labeled slots: a long name wraps to two lines inside its fixed-width slot,
+  // so the pattern overrides the chrome category's single-line default and the
+  // single-line guarantee lives on the slot's line clamp (owner follow-up,
+  // 2026-10-03). The row itself stays one horizontal row of slots.
+  assert.equal(merged.web.wrap, true, 'labeled slots may wrap inside the slot');
   assert.equal(merged.app.overflow, 'scroll');
   assert.equal(merged.app.justify, 'start');
   assert.equal(merged.app.heightToken, undefined);
+  assert.equal(merged.app.wrap, true);
   // Owner decision 2026-10-03 (#1347 SC-08 / SC-29): on App this band is one
   // state of the same Capsule as the Conversation form, so its entries carry
   // the standard App control band (`control.md` hit target, `control.visualSize`

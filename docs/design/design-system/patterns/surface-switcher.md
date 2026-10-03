@@ -92,9 +92,12 @@ Geometry rules (#1204 §1, §3):
   adds no terminal row loss, and no second hook may shrink the terminal for it.
 - **Workspace:** the circle shares the dock's bottom-center floating group as a
   separate `nav` (surface navigation) adjacent to — never merged into — the
-  capability `nav`. When a pushed detail depth hides the capability dock, the
-  circle stays at the same bottom position; it never moves to a top-right
-  overlay, and a full-surface modal/sheet may still capture it.
+  capability `nav`, and centered against it. The dock's height follows its
+  labeled slots (icon over name, #1347), so the circle centers rather than
+  matches extent — a taller labeled dock must not stretch the action, and a
+  shorter one must not shrink it. When a pushed detail depth hides the
+  capability dock, the circle stays at the same bottom position; it never moves
+  to a top-right overlay, and a full-surface modal/sheet may still capture it.
 - **Pointer ownership:** no transparent full-surface wrapper. Only the button's
   own hit target consumes pointer events; everything outside the real bottom
   controls stays interactive.

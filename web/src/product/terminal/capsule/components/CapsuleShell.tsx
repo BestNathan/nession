@@ -1,5 +1,9 @@
 import { cn } from '@/shared/lib/utils';
 import {
+  capsuleExchangeStyle,
+  useCapsuleExchange,
+} from '@/platform/motion/capsuleExchange';
+import {
   capsuleShellAppDockBottomClass,
   capsuleShellAppOuterClass,
   capsuleShellCapsuleRadiusClass,
@@ -63,6 +67,15 @@ export function CapsuleShell({
   const isApp = experience === 'app';
   const usePillShape = !isApp && layout === 'flat';
 
+  // The App's capsule handoff (see `capsuleExchange`): while a swipe carries
+  // the Workspace over the Terminal, the Conversation form steps aside and
+  // fades with the finger. The whole dock moves as one object — shell,
+  // projection and adjacent action together — and X-only transforms leave
+  // `useCapsuleDockClearance`'s vertical measurement untouched. On Web there
+  // is no exchange and the endpoints apply no style at all.
+  const exchange = useCapsuleExchange();
+  const exchangeStyle = capsuleExchangeStyle(exchange, 'yielding');
+
   const shell = (
     <div
       ref={shellRef}
@@ -104,6 +117,8 @@ export function CapsuleShell({
       data-layout={layout}
       data-dock-height={dockHeightFromLayout(layout)}
       data-shell-shape={usePillShape ? 'pill' : 'capsule'}
+      data-capsule-exchange={exchangeStyle ? 'yielding' : undefined}
+      style={exchangeStyle}
       className={cn(
         'absolute z-30 flex flex-col',
         isApp ? capsuleShellAppOuterClass : capsuleShellWebOuterClass,
