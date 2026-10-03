@@ -10,32 +10,48 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import type { Code, RootContent } from 'mdast'
+import type { Code } from 'mdast'
 import { IncrementalMarkdownParser, type PositionedBlock } from '../../incremental'
 import { parseGfm } from '../../parser'
 import { allCases } from '../../../__tests__/fixtures/markdownCorpus'
 
-/** Everything a block renders from: its value, or its children's recursively. */
-function blockContent(node: RootContent): string {
-  if ('value' in node && typeof node.value === 'string') {return node.value}
-  if ('children' in node) {return node.children.map(blockContent).join('\u0000')}
-  return ''
-}
-
 /**
- * A block's full signature: the stream-stable key plus type and content. Two
- * lists with equal signatures render the same document at the same offsets —
- * which is the equivalence an incremental parse owes a fresh one.
+ * A node with positions stripped: every field a renderer reads, and nothing
+ * about where the source happened to sit. Positions are the one thing the
+ * incremental parse cannot compare directly — a frozen block's are relative to
+ * the slice it was parsed from — so they are normalized away here while the
+ * identity they carry (the absolute start offset) is asserted separately as
+ * the block key.
+ *
+ * The comparison is deliberately the *whole* subtree, not a text projection:
+ * heading depth, a link's url and title, a reference identifier, a code
+ * fence's lang and meta, a list's ordered/start/spread/checked, a table's
+ * alignment and every other semantic field are exactly where a divergence can
+ * hide while the visible text stays identical (#1184 round-2 review).
  */
-function signature(blocks: readonly PositionedBlock[]): string[] {
-  return blocks.map((block) => `${block.key}:${block.node.type}:${blockContent(block.node)}`)
+function withoutPositions(value: unknown): unknown {
+  if (Array.isArray(value)) {return value.map(withoutPositions)}
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .filter(([key]) => key !== 'position')
+        .map(([key, child]) => [key, withoutPositions(child)]),
+    )
+  }
+  return value
 }
 
-/** The signature a one-shot parse of the same source produces. */
-function freshSignature(text: string): string[] {
-  return parseGfm(text).children.map((node, index) =>
-    `${node.position?.start.offset ?? -(index + 1)}:${node.type}:${blockContent(node)}`,
-  )
+/** The full semantic tree of a block list, each block keyed by its source offset. */
+function semanticSignature(blocks: readonly PositionedBlock[]): unknown {
+  return blocks.map((block) => ({ key: block.key, node: withoutPositions(block.node) }))
+}
+
+/** The same signature a one-shot parse of the source produces. */
+function freshSemanticSignature(text: string): unknown {
+  return parseGfm(text).children.map((node, index) => ({
+    key: node.position?.start.offset ?? -(index + 1),
+    node: withoutPositions(node),
+  }))
 }
 
 /** A grammar that records how many characters each update made it parse. */
@@ -66,7 +82,8 @@ describe('IncrementalMarkdownParser', () => {
           for (let end = chunkSize; end < testCase.markdown.length; end += chunkSize) {
             const text = testCase.markdown.slice(0, end)
             const { frozen, tail } = parser.update(text)
-            expect(signature([...frozen, ...tail]), `${testCase.name} @ ${end}`).toEqual(freshSignature(text))
+            expect(semanticSignature([...frozen, ...tail]), `${testCase.name} @ ${end}`)
+              .toEqual(freshSemanticSignature(text))
           }
         }
       })
@@ -160,12 +177,14 @@ describe('IncrementalMarkdownParser', () => {
 
       const replaced = parser.update('# B\n\nq1\n\nq2\n\nq3')
       expect(replaced.generation).toBe(1)
-      expect(signature([...replaced.frozen, ...replaced.tail])).toEqual(freshSignature('# B\n\nq1\n\nq2\n\nq3'))
+      expect(semanticSignature([...replaced.frozen, ...replaced.tail]))
+        .toEqual(freshSemanticSignature('# B\n\nq1\n\nq2\n\nq3'))
 
       // A third, unrelated rewrite bumps again — reset is not a one-off.
       const again = parser.update('Entirely different ending.')
       expect(again.generation).toBe(2)
-      expect(signature([...again.frozen, ...again.tail])).toEqual(freshSignature('Entirely different ending.'))
+      expect(semanticSignature([...again.frozen, ...again.tail]))
+        .toEqual(freshSemanticSignature('Entirely different ending.'))
     })
 
     it('does not bump the generation for an append', () => {
