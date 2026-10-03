@@ -181,7 +181,10 @@ fixed-width slot each, a long name wrapping inside its slot at the smaller label
 size (owner follow-up, 2026-10-03) — in the bottom
 Capsule Zone, with a dot marking the open one. It carries every capability that has a
 Workspace view and is not `unavailable` (#1347). The capsule's width is bounded and the
-row scrolls internally, so the shell does not grow when an extension registers.
+row scrolls internally, so the shell does not grow when an extension registers. The
+glyph is drawn bare (`icon-md`): the painted 36px circle is the icon *button*'s
+affordance, and a labeled entry is a tab whose affordance is the icon-plus-name pair;
+the entry's own band is `capabilityEntryHeight` (40px on Web).
 
 **No shell band above the capability area.** `workspace.md` is explicit that a
 capability's own layout belongs to the capability — Files' master/detail *"belongs
@@ -207,13 +210,21 @@ experience presentation, not a divergence in the Capsule's identity.
 
 What the two states **share** is the outer geometry: the floating surface and
 elevation, the semantic capsule radius (`--radius-capsule`), the App dock's
-bottom and safe-area-aware placement, and the shell's inner padding rhythm.
+bottom and safe-area-aware placement, the shell's inner padding rhythm — and,
+after the owner correction of 2026-10-03, the band itself. The labeled entries
+take `capabilityEntryHeight`, the same 44px row the composer uses, so both
+states measure **56px** on App; the shape claim, the semantic radius, the
+placement and the height are all compared relationally (SC-30). The correction
+is a correction: the first labeled build let the entries carry their own
+vertical mass and the form grew to 82px, which read as a different object
+sitting in the same slot ("太高了").
+
 What they **do not** share is content — a composer on one, the labeled
-capability slots on the other — and, since the labeled-slot follow-up
-(2026-10-03), the vertical mass follows the content: the Capability Form is
-taller than the composer above the same `control-md` floor, because it is the
-state that carries names. The relational assertion (SC-30) compares the shape,
-the semantic radius and the placement, not the height.
+capability slots on the other. A label that genuinely needs two lines may
+still grow its entry by its own line box rather than clip, but no shipped
+capability does that (measured 2026-10-03: every title is one line at the
+labeled sizes), so the band holds in practice and the relational assertion
+holds with it.
 
 Two questions the previous revision left open, now settled by the same decision:
 
@@ -300,7 +311,8 @@ Existing components should migrate incrementally. Do not remove reliable capabil
 - [ ] Extensions cannot independently fragment the global navigation model.
 - [ ] Web/App may present the same capability differently while preserving semantic state.
 - [ ] The App entries meet the chrome touch floor (`experience.app.touchTarget.min`, 44px) — the pattern declares no compact override since the 2026-10-03 Capsule-family decision — enforced by the viewport matrix.
-- [ ] The App Capability Form and Conversation Form share one outer geometry (radius, shape claim, dock placement — not height, which follows content), asserted relationally rather than each alone (#1347 SC-30).
+- [ ] The App Capability Form and Conversation Form share one outer geometry — radius, shape claim, dock placement **and the 56px band** (`capabilityEntryHeight` = the composer's `control-md` row) — asserted relationally rather than each alone (#1347 SC-30).
+- [ ] The capability capsule's row owns its horizontal drags: panning it never pages the shell, and only the shell's own edge bands remain a navigation start over it.
 - [ ] The capsule appears only at capability-root depth, and is absent over capability-owned detail.
 - [ ] Files-specific layout remains local to Files.
 - [ ] The capsule stays inside the tool bar at every viewport, and its row scrolls internally.
