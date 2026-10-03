@@ -29,7 +29,7 @@ describe('buildWorkspacePresentationModel', () => {
       openedCapabilityId: 'session',
     });
 
-    expect(model.primary.map((item) => item.snapshot.id)).toEqual(['session']);
+    expect(model.direct.map((item) => item.snapshot.id)).toEqual(['session']);
     expect(model.discoverable.map((item) => item.snapshot.id)).toEqual([]);
     expect(model.opened?.snapshot.id).toBe('session');
     // Carried, not dropped: a surface renders these inert rather than letting
@@ -37,7 +37,7 @@ describe('buildWorkspacePresentationModel', () => {
     expect(model.unavailable.map((item) => item.snapshot.id)).toEqual(['files']);
   });
 
-  it('keeps the opened capability direct and bounds additional contextual presence', () => {
+  it('keeps the opened capability direct, bounded by the cap, and in registration order', () => {
     const snapshots = [
       snapshot('files', 'available'),
       snapshot('git', 'relevant'),
@@ -53,8 +53,10 @@ describe('buildWorkspacePresentationModel', () => {
       directLimit: 2,
     });
 
-    expect(model.primary.map((item) => item.snapshot.id)).toEqual(['files']);
-    expect(model.contextual.map((item) => item.snapshot.id)).toEqual(['git']);
+    // One list, registration order. The opened capability's privilege is its
+    // slot, not its position — the row no longer reshuffles on activation
+    // (owner follow-up, 2026-10-03).
+    expect(model.direct.map((item) => item.snapshot.id)).toEqual(['files', 'git']);
     expect(model.discoverable.map((item) => item.snapshot.id)).toEqual([
       'docker',
       'kubernetes',
@@ -76,20 +78,20 @@ describe('buildWorkspacePresentationModel', () => {
 
     expect(model.opened?.snapshot.id).toBe('files');
     expect(model.opened?.presence.level).toBe('hidden');
-    expect(model.primary).toEqual([]);
+    expect(model.direct).toEqual([]);
     expect(model.discoverable.map((item) => item.snapshot.id)).toEqual(['session']);
     // It is explanatory context *and* an inert entry — the surface shows which
     // capability the reader is stuck on without letting it rank as chrome.
     expect(model.unavailable.map((item) => item.snapshot.id)).toEqual(['files']);
   });
 
-  it('ranks a stronger presence ahead of registration order', () => {
+  it('ranks a stronger presence ahead of registration order for the slot cap', () => {
     const snapshots = [
       snapshot('git', 'relevant'),
       snapshot('docker', 'available'),
     ];
-    // Presence levels are inputs here: this pins the Workspace *ordering* rule
-    // (a stronger level outranks registration order), not how a state maps to a
+    // Presence levels are inputs here: this pins the Workspace *membership*
+    // rule (a stronger level wins the bounded slot), not how a state maps to a
     // level — that mapping is the presence policy's, tested in presence.test.ts.
     const presences: CapabilityPresence[] = [
       { capabilityId: 'git', surface: 'workspace', level: 'contextual' },
@@ -102,7 +104,28 @@ describe('buildWorkspacePresentationModel', () => {
       directLimit: 1,
     });
 
-    expect(model.contextual.map((item) => item.snapshot.id)).toEqual(['docker']);
+    expect(model.direct.map((item) => item.snapshot.id)).toEqual(['docker']);
     expect(model.discoverable.map((item) => item.snapshot.id)).toEqual(['git']);
+  });
+
+  it('hands the direct list back in registration order even when the pinned one leads', () => {
+    // `resolveCapabilityDisclosure` leads with the pinned capability; the model
+    // deliberately undoes that ordering, because placement is registration's
+    // and the opened entry is marked in place.
+    const snapshots = [
+      snapshot('files', 'relevant'),
+      snapshot('git', 'relevant'),
+      snapshot('env', 'relevant'),
+    ];
+    const presences = resolveCapabilityPresences(snapshots, { surface: 'workspace' });
+
+    const model = buildWorkspacePresentationModel({
+      snapshots,
+      presences,
+      openedCapabilityId: 'env',
+      directLimit: 3,
+    });
+
+    expect(model.direct.map((item) => item.snapshot.id)).toEqual(['files', 'git', 'env']);
   });
 });

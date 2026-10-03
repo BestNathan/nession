@@ -4,45 +4,87 @@
     "$description": "Chrome typography roles (#1216). A role names the text's job and owns the coherent size / weight / leading treatment for that job at Web density. Family (product sans vs technical mono) stays with the text's meaning at the call site — a path is mono at the code role's metrics, not mono because the role is smaller. Workload renderers (xterm, CodeMirror, Markdown document prose) stay on their own surfaces.",
     "title": {
       "$description": "The surface's own name when Web chrome renders a page header or pushed detail title.",
-      "size": { "value": "16px" },
-      "weight": { "ref": "domain.typography.role.title.weight" },
-      "lineHeight": { "value": "1.25" }
+      "size": {
+        "value": "16px"
+      },
+      "weight": {
+        "ref": "domain.typography.role.title.weight"
+      },
+      "lineHeight": {
+        "value": "1.25"
+      }
     },
     "primary": {
       "$description": "Work / local primary — highest within its region. Session name, active file, focused input.",
-      "size": { "value": "14px" },
-      "weight": { "ref": "domain.typography.role.primary.weight" },
-      "lineHeight": { "value": "1.3" }
+      "size": {
+        "value": "14px"
+      },
+      "weight": {
+        "ref": "domain.typography.role.primary.weight"
+      },
+      "lineHeight": {
+        "value": "1.3"
+      }
     },
     "body": {
       "$description": "Ordinary readable product text and controls — button labels, menu items, filters.",
-      "size": { "value": "13px" },
-      "weight": { "ref": "domain.typography.role.body.weight" },
-      "lineHeight": { "value": "1.35" }
+      "size": {
+        "value": "13px"
+      },
+      "weight": {
+        "ref": "domain.typography.role.body.weight"
+      },
+      "lineHeight": {
+        "value": "1.35"
+      }
     },
     "secondary": {
       "$description": "Supporting but fully readable. Section headings, tree rows, infrastructure rows.",
-      "size": { "value": "12.5px" },
-      "weight": { "ref": "domain.typography.role.secondary.weight" },
-      "lineHeight": { "value": "1.3" }
+      "size": {
+        "value": "12.5px"
+      },
+      "weight": {
+        "ref": "domain.typography.role.secondary.weight"
+      },
+      "lineHeight": {
+        "value": "1.3"
+      }
     },
     "metadata": {
       "$description": "Quiet factual context. Agent/location, recency, status details — never outweighs the thing it describes.",
-      "size": { "value": "11.5px" },
-      "weight": { "ref": "domain.typography.role.metadata.weight" },
-      "lineHeight": { "value": "1.3" }
+      "size": {
+        "value": "11.5px"
+      },
+      "weight": {
+        "ref": "domain.typography.role.metadata.weight"
+      },
+      "lineHeight": {
+        "value": "1.3"
+      }
     },
     "caption": {
       "$description": "Lowest deliberate readable hierarchy — keyboard hints, tiny helper copy, sidebar service state.",
-      "size": { "value": "11px" },
-      "weight": { "ref": "domain.typography.role.caption.weight" },
-      "lineHeight": { "value": "1.3" }
+      "size": {
+        "value": "11px"
+      },
+      "weight": {
+        "ref": "domain.typography.role.caption.weight"
+      },
+      "lineHeight": {
+        "value": "1.3"
+      }
     },
     "code": {
       "$description": "Chrome-side technical identity — paths, commands, env keys. Not xterm/CodeMirror workload glyphs.",
-      "size": { "value": "12.5px" },
-      "weight": { "ref": "domain.typography.role.code.weight" },
-      "lineHeight": { "value": "1.35" }
+      "size": {
+        "value": "12.5px"
+      },
+      "weight": {
+        "ref": "domain.typography.role.code.weight"
+      },
+      "lineHeight": {
+        "value": "1.35"
+      }
     }
   },
   "control": {
@@ -240,6 +282,18 @@
     },
     "captionFontSize": {
       "ref": "primitive.typography.size"
+    },
+    "capabilitySlotWidth": {
+      "$description": "Fixed slot for one capability entry in the Workspace capsule. The bound is what keeps a long label (Claude Code) from widening the row: the slot stays this wide and the label wraps inside it instead (#1347 follow-up).",
+      "value": "72px"
+    },
+    "capabilityLabelFontSize": {
+      "$description": "Capability entry label, one line. The entry reads icon-over-label; a label that fits one line gets this size.",
+      "value": "12px"
+    },
+    "capabilityLabelWrappedFontSize": {
+      "$description": "Capability entry label, two lines. Same slot, smaller type — a wrapped label at the one-line size would crowd the icon and outweigh its neighbours (#1347 follow-up). The entry picks between the two by its own measured line count.",
+      "value": "10px"
     },
     "quickKeyFontSize": {
       "ref": "primitive.typography.size"
