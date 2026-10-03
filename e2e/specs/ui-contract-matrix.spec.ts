@@ -315,15 +315,29 @@ for (const row of viewports.filter((v) => v.experience === 'app')) {
       // same band, and this assertion is what keeps them there.
       // The shape attribute sits on each state's own outer object — the
       // Conversation dock (`terminal-capsule`) and the capability nav.
+      //
+      // Every axis the criterion names is read here, not just the three it
+      // started with: SC-29/30 say surface, elevation, radius, vertical mass,
+      // inset and spacing rhythm, and the two states drifting on *shadow* or
+      // *padding* while radius and height still matched would have passed the
+      // first version of this test.
       const geometryOf = async (testId: string, shapeTestId: string) => {
         const el = page.getByTestId(testId);
         await expect(el).toBeVisible();
         const measured = await el.evaluate((node) => {
           const rect = node.getBoundingClientRect();
+          const style = getComputedStyle(node);
           return {
-            radius: getComputedStyle(node).borderRadius,
+            radius: style.borderRadius,
             height: rect.height,
             bottom: window.innerHeight - rect.bottom,
+            insetLeft: rect.left,
+            insetRight: window.innerWidth - rect.right,
+            background: style.backgroundColor,
+            shadow: style.boxShadow,
+            backdrop: style.backdropFilter,
+            padLeft: style.paddingLeft,
+            padRight: style.paddingRight,
           };
         });
         const shape = await page.getByTestId(shapeTestId).getAttribute('data-shell-shape');
@@ -340,13 +354,26 @@ for (const row of viewports.filter((v) => v.experience === 'app')) {
         'workspace-capability-capsule',
       );
 
-      // Same shape claim, same semantic radius, same band, same placement
-      // above the viewport bottom — sub-pixel tolerance only.
+      // The surface is compared as *computed values on both sides*, not against
+      // a literal: the claim is that the two states are one object, and a
+      // literal would keep passing if the token behind both of them changed.
       expect(conversation.shape).toBe('capsule');
       expect(capability.shape).toBe('capsule');
       expect(capability.radius).toBe(conversation.radius);
+      expect(capability.background).toBe(conversation.background);
+      expect(capability.shadow).toBe(conversation.shadow);
+      expect(capability.backdrop).toBe(conversation.backdrop);
+      expect(capability.padLeft).toBe(conversation.padLeft);
+      expect(capability.padRight).toBe(conversation.padRight);
+
+      // …and the geometry the two *land on*. One assertion per axis rather than
+      // an object comparison, so a failure names the axis that moved: both
+      // states are laid out from the same tokens, and a whole pixel of
+      // difference is already the drift this test exists to catch.
       expect(Math.abs(capability.height - conversation.height)).toBeLessThanOrEqual(1);
       expect(Math.abs(capability.bottom - conversation.bottom)).toBeLessThanOrEqual(1);
+      expect(Math.abs(capability.insetLeft - conversation.insetLeft)).toBeLessThanOrEqual(1);
+      expect(Math.abs(capability.insetRight - conversation.insetRight)).toBeLessThanOrEqual(1);
     });
 
     test('session rows meet the App touch target and stay clipped', async ({ page }) => {

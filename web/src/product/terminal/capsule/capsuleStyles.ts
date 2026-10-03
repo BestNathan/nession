@@ -21,6 +21,7 @@
  * renders on Web is a runtime property of the component tree, but the binding
  * name is the author's own statement of it.
  */
+import type { CapsuleExperience, ComposerLayout } from '@/product/terminal/capsule/types';
 
 /** Shared by textarea + ghost overlay so glyphs stay locked. */
 export const capsuleFieldTypeClass =
@@ -110,9 +111,54 @@ export const capsuleShellCapsuleRadiusClass = 'rounded-[var(--radius-capsule)]';
 /** Single-row web pill ends */
 export const capsuleShellPillRadiusClass = 'rounded-[var(--terminal-capsule-shell-pill-radius)]';
 
-/** Inner (interactive) shell: full-width, clips children to the capsule corners. */
-export const capsuleShellInnerClass =
-  'pointer-events-auto w-full overflow-hidden';
+/**
+ * The one derivation of a Capsule's outer geometry (#1347 SC-29/SC-30).
+ *
+ * The Conversation Form and the Capability Form are one object in two states,
+ * and the relational assertion that keeps them so compares their *rendered*
+ * geometry — so their class lists have to come from one place. They were written
+ * twice, which is how the Capability Form kept a 9999px pill and the retired
+ * 28px dock band for as long as it did: each site was self-consistent, and only
+ * a comparison *between* them could see the drift.
+ *
+ * Shared: the control band's vertical mass, the surface treatment, the radius
+ * family (the shape picks which), the inner padding rhythm, the hit area, and
+ * the clipping that keeps a scrolling child inside the corners.
+ *
+ * Not shared: **width**. The Terminal shell is stretched by its dock; the
+ * Workspace nav shares a row with the Web surface action and sizes to its own
+ * content inside the bar. That is a fact about each one's parent rather than
+ * about the Capsule, so it stays a parameter — and it is why the relational
+ * assertion compares where each one *lands* (its insets) instead of the width
+ * either one declares.
+ */
+export interface CapsuleOuterGeometry {
+  shape: 'capsule' | 'pill';
+  shellClass: string;
+}
+
+export function capsuleOuterGeometry(
+  experience: CapsuleExperience,
+  layout: ComposerLayout = 'flat',
+  width: 'stretch' | 'intrinsic' = 'stretch',
+): CapsuleOuterGeometry {
+  const shape: CapsuleOuterGeometry['shape'] =
+    experience === 'app' || layout !== 'flat' ? 'capsule' : 'pill';
+
+  return {
+    shape,
+    // Plain strings, one axis each, so the whole object reads at once. They
+    // cannot collide: the shape picks exactly one radius, and the width is
+    // exactly one of the two.
+    shellClass: [
+      'pointer-events-auto flex min-h-[length:var(--control-md)] items-center overflow-hidden',
+      width === 'stretch' ? 'w-full' : 'max-w-full',
+      capsuleShellSurfaceClass,
+      shape === 'pill' ? capsuleShellPillRadiusClass : capsuleShellCapsuleRadiusClass,
+      capsuleShellInnerPadClass,
+    ].join(' '),
+  };
+}
 
 /**
  * Web outer frame — margins, then a bound, then centred.

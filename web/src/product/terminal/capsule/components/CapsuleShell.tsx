@@ -4,14 +4,10 @@ import {
   useCapsuleExchange,
 } from '@/platform/motion/capsuleExchange';
 import {
+  capsuleOuterGeometry,
   capsuleShellAppDockBottomClass,
   capsuleShellAppOuterClass,
-  capsuleShellCapsuleRadiusClass,
   capsuleShellDockBottomClass,
-  capsuleShellInnerClass,
-  capsuleShellInnerPadClass,
-  capsuleShellPillRadiusClass,
-  capsuleShellSurfaceClass,
   capsuleShellWebOuterClass,
 } from '@/product/terminal/capsule/capsuleStyles';
 import type {
@@ -65,7 +61,9 @@ export function CapsuleShell({
   children,
 }: CapsuleShellProps) {
   const isApp = experience === 'app';
-  const usePillShape = !isApp && layout === 'flat';
+  // One derivation for both Capsule states (#1347 SC-29/SC-30) — see
+  // `capsuleOuterGeometry`, which also states why width is not part of it.
+  const geometry = capsuleOuterGeometry(experience, layout);
 
   // The App's capsule handoff (see `capsuleExchange`): while a swipe carries
   // the Workspace over the Terminal, the Conversation form steps aside and
@@ -86,16 +84,12 @@ export function CapsuleShell({
          intra-capsule composer FLIP. */
       data-morph-id="capsule-shell"
       className={cn(
-        'flex min-h-[length:var(--control-md)] items-center',
-        capsuleShellInnerClass,
+        geometry.shellClass,
         // In the adjacent row the shell shares the dock's width with the
-        // action: `flex-1` (basis 0%) supersedes the `w-full` inside
-        // `capsuleShellInnerClass` for a flex item, so the capsule yields the
-        // action's width rather than overflowing the group (#1204 §8).
+        // action: `flex-1` (basis 0%) supersedes the derived `w-full` for a flex
+        // item, so the capsule yields the action's width rather than
+        // overflowing the group (#1204 §8).
         adjacentAction && 'min-w-0 flex-1',
-        capsuleShellSurfaceClass,
-        usePillShape ? capsuleShellPillRadiusClass : capsuleShellCapsuleRadiusClass,
-        capsuleShellInnerPadClass,
       )}
     >
       <div
@@ -116,7 +110,7 @@ export function CapsuleShell({
       data-disabled={disabled ? 'true' : undefined}
       data-layout={layout}
       data-dock-height={dockHeightFromLayout(layout)}
-      data-shell-shape={usePillShape ? 'pill' : 'capsule'}
+      data-shell-shape={geometry.shape}
       data-capsule-exchange={exchangeStyle ? 'yielding' : undefined}
       style={exchangeStyle}
       className={cn(

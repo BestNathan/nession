@@ -8,11 +8,18 @@
   "web": {
     "overflow": "scroll",
     "justify": "start",
-    "wrap": true
+    "wrap": true,
+    "radiusToken": "semantic.radius-capsule",
+    "pillRadiusToken": "experience.web.terminalCapsule.shellPillRadius",
+    "minHeightToken": "experience.web.control.md",
+    "padXToken": "experience.web.terminalCapsule.shellPadX"
   },
   "app": {
     "overflow": "scroll",
     "justify": "start",
-    "wrap": true
+    "wrap": true,
+    "radiusToken": "semantic.radius-capsule",
+    "minHeightToken": "experience.app.control.md",
+    "padXToken": "experience.app.terminalCapsule.shellPadX"
   }
 }
