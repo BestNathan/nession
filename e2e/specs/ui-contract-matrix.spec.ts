@@ -24,7 +24,7 @@ import {
   expectVisibleWithin,
   waitForSettledBox,
 } from '../helpers/ui-assert/assertions';
-import { loadContracts, type Experience } from '../helpers/ui-assert/contracts';
+import { loadContracts, patternBlock, type Experience } from '../helpers/ui-assert/contracts';
 import { swipeHorizontally } from '../helpers/shell';
 import { waitForFixtureTerminal } from '../helpers/fixtureVisual';
 
