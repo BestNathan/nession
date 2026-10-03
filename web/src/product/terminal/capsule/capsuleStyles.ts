@@ -208,6 +208,10 @@ export const contextCapsuleDockClass = 'mb-[length:var(--context-capsule-margin-
 export const contextCapsuleSurfaceClass = [
   'pointer-events-auto flex h-[length:var(--context-capsule-height)] w-full flex-col overflow-hidden',
   'rounded-[var(--radius-capsule)]',
+  // The surface carries the padding, not the rows: `pattern.context-capsule`
+  // pins `padXToken` here, and it is what insets a row's hover and focus ring
+  // from the Capsule's own edge instead of painting them against it.
+  'px-[length:var(--terminal-capsule-shell-pad-x)] py-[length:var(--terminal-capsule-shell-pad-y)]',
   capsuleShellSurfaceClass,
 ].join(' ');
 
@@ -221,7 +225,7 @@ export const contextCapsuleScrollClass = 'min-h-0 flex-1 overflow-y-auto overscr
  */
 export const contextCapsuleRowClass = [
   'flex w-full min-h-[length:var(--context-capsule-row-height)] items-center gap-[length:var(--terminal-capsule-control-gap)]',
-  'px-[length:var(--terminal-capsule-shell-pad-x)] text-left transition-colors',
+  'rounded-[var(--radius-control)] text-left transition-colors',
   // `ring-inset`, because a row is full-bleed inside a scrolling container: an
   // outset ring is clipped on every side but the last row's, which drew a stray
   // underline under the first row when focus moved into the list (caught in the

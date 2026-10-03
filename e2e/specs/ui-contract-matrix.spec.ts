@@ -37,6 +37,7 @@ const PATTERN_SESSION_ITEM = 'pattern.session-item';
 const PATTERN_WORKSPACE_NAV = 'pattern.workspace-navigation';
 const PATTERN_TERMINAL_CAPSULE = 'pattern.terminal-capsule';
 const PATTERN_POPUP_MENU = 'pattern.popup-menu';
+const PATTERN_CONTEXT_CAPSULE = 'pattern.context-capsule';
 
 function optsFor(pattern: string, experience: Experience, viewport: string) {
   return { pattern, experience, viewport } as const;
@@ -75,50 +76,6 @@ async function assertPopupMenu(
   const opts = optsFor(PATTERN_POPUP_MENU, experience, viewportId);
 
   await trigger.click();
-  // Wait for the popup before asking what shape it has: `count()` on a list
-  // React has not mounted reads 0, and the branch below would then measure the
-  // root — whose first row is the sensed one, the 50.8px reading this branch
-  // exists to avoid — or wait for rows behind a step it decided not to take.
-  await expect(page.getByRole('menu').first()).toBeVisible();
-  // The capsule's `+` leads with sensed capabilities while any exist (#1347
-  // SC-37/40) — on App, that includes context-sensed Terminal Keys — so the
-  // ordinary rows this helper measures live one explicit step down. The session
-  // row's menu has no such step, hence the conditional.
-  const allCapabilities = page.getByTestId('capsule-context-all');
-  if ((await allCapabilities.count()) > 0) {
-    const root = page.getByTestId('capsule-context-disclosure');
-    await expect(root).toBeVisible();
-    await allCapabilities.click();
-
-    const submenu = page.getByTestId('capsule-context-all-menu');
-    await expect(submenu).toBeVisible();
-    await waitForSettledBox(submenu);
-
-    // The ordinary rows, one level down, are what this pattern describes. The
-    // sensed row above them is two lines by design — identity over reason
-    // (#1347 SC-19), measured 232×50.8 — so it is not a `control.sm` row and
-    // holding it to the token height would assert a row this contract does not
-    // describe. It keeps the guarantee that matters for a row of any height:
-    // the touch floor, asserted on the root below.
-    const submenuItems = submenu.getByRole('menuitem');
-    const submenuCount = await submenuItems.count();
-    expect(submenuCount).toBeGreaterThan(0);
-    for (let i = 0; i < submenuCount; i += 1) {
-      await expectTokenHeight(submenuItems.nth(i), opts);
-      await expectSingleLine(submenuItems.nth(i), opts);
-    }
-    await expectNoUnexpectedOverflow(submenu, opts);
-    await expectTouchTargetsWithin(submenu, opts);
-    await expectTouchTargetsWithin(root, opts);
-
-    // Close before returning, the way the flat path does: this menu opens
-    // upward, over the session header the caller clicks next.
-    await page.keyboard.press('Escape');
-    await expect(submenu).toHaveCount(0);
-    await page.keyboard.press('Escape');
-    await expect(page.getByRole('menu')).toHaveCount(0);
-    return;
-  }
   const menu = page.getByRole('menu');
   await expect(menu).toBeVisible();
   // `toBeVisible` resolves on the animation's first frame, where a 44px row
@@ -143,6 +100,82 @@ async function assertPopupMenu(
 
   await page.keyboard.press('Escape');
   await expect(menu).toHaveCount(0);
+}
+
+/**
+ * Open the Context Capsule from `+` and hold it to `pattern.context-capsule`
+ * (#1347 SC-41–44).
+ *
+ * Three claims, and the third is the one the criteria are actually about:
+ *
+ * 1. the surface is the size the contract pins, with the contract's radius,
+ *    padding and row band — a Capsule, not a menu;
+ * 2. it owns its own scroll, so a long list scrolls rather than pushing the
+ *    Capsule Zone around;
+ * 3. opening it does not move the Conversation Capsule below it, and the gap
+ *    between the two *is* the inter-Capsule token. The lower capsule's box is
+ *    read before and after, because "it stays put" is the criterion and a
+ *    screenshot cannot prove a negative.
+ */
+async function assertContextCapsule(
+  page: import('@playwright/test').Page,
+  experience: Experience,
+  viewportId: string,
+): Promise<void> {
+  const opts = optsFor(PATTERN_CONTEXT_CAPSULE, experience, viewportId);
+  const block = patternBlock(PATTERN_CONTEXT_CAPSULE, experience);
+
+  const shellBefore = await page.getByTestId('capsule-shell').boundingBox();
+  expect(shellBefore).not.toBeNull();
+
+  await page.getByTestId('capsule-capability-more').click();
+
+  const surface = page.getByTestId('capsule-context-disclosure');
+  await expect(surface).toBeVisible();
+  await waitForSettledBox(surface);
+
+  await expectTokenHeight(surface, opts);
+  await expectRadius(surface, opts);
+  await expectPaddingX(surface, opts);
+  await expectNoUnexpectedOverflow(surface, opts);
+
+  const rows = surface.locator('[data-context-row]');
+  const rowCount = await rows.count();
+  expect(rowCount).toBeGreaterThan(0);
+  for (let i = 0; i < rowCount; i += 1) {
+    // The row band is a floor, not a fixed height: a sensed row carries a title
+    // and a line of reason, and growing for that is the design — the contract
+    // pins `rowHeightToken` as the band every row starts from.
+    const box = await rows.nth(i).boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.height).toBeGreaterThanOrEqual((block.rowHeightTokenPx ?? 0) - 1);
+    await expectTouchTargetsWithin(rows.nth(i), opts);
+  }
+
+  // The lower Capsule is the anchor: same box, and the gap between the two is
+  // the token rather than a measured guess (#1347 SC-41/SC-43).
+  const shellAfter = await page.getByTestId('capsule-shell').boundingBox();
+  const surfaceBox = await surface.boundingBox();
+  expect(shellAfter).toEqual(shellBefore);
+
+  // The gap *is* the surface's own bottom margin — read from the element and
+  // compared to the space actually measured. No literal: the claim is that the
+  // distance between the pair is the token applied to the upper surface, not
+  // something the dock's layout contributed, and that is exactly what a
+  // measured-gap-equals-computed-margin comparison says. A second claim rides
+  // along: the margin is not zero, so the two surfaces are not touching.
+  const marginBottomPx = await page.evaluate(() => {
+    const el = document.querySelector('[data-testid="capsule-context-disclosure"]');
+    return el instanceof HTMLElement ? Number.parseFloat(getComputedStyle(el).marginBottom) : Number.NaN;
+  });
+  expect(marginBottomPx).toBeGreaterThan(0);
+  const gap = shellAfter!.y - (surfaceBox!.y + surfaceBox!.height);
+  expect(Math.abs(gap - marginBottomPx)).toBeLessThanOrEqual(1);
+
+  await page.keyboard.press('Escape');
+  await expect(surface).toHaveCount(0);
+  // Closing removes only the upper Capsule.
+  expect(await page.getByTestId('capsule-shell').boundingBox()).toEqual(shellBefore);
 }
 
 // ── Web experience ─────────────────────────────────────────────────────────
@@ -177,6 +210,13 @@ for (const row of viewports.filter((v) => v.experience === 'web')) {
       await expectVisibleWithin(capsule, bar, optsFor(PATTERN_WORKSPACE_NAV, 'web', row.id));
 
       // The capsule is a scrollable container showing all capabilities.
+    });
+
+    test('the Context Capsule is a stacked Capsule, not a menu (#1347 SC-41–44)', async ({ page }) => {
+      await page.goto('/#/fixture');
+      await expect(page.getByTestId('terminal-capsule')).toBeVisible();
+
+      await assertContextCapsule(page, 'web', row.id);
     });
 
     test('terminal capsule controls hold the control token height', async ({ page }) => {
@@ -395,14 +435,12 @@ for (const row of viewports.filter((v) => v.experience === 'app')) {
     test('a collapsed control opens a menu of App-density rows', async ({ page }) => {
       await page.goto('/#/fixture/app');
 
-      // The capsule's `+` — `CapabilityDisclosureMenu`, the list #1066 found
-      // already shipping 28px rows inside a 44px floor.
-      await assertPopupMenu(page, 'app', row.id, page.getByTestId('capsule-capability-more'));
-
-      // The session row's `…` — the menu the issue was measured on, and a
-      // different trigger path: the capsule is inside the Terminal layer, the
-      // row inside the Sessions one, so a container that only worked for one of
-      // them would fail here.
+      // The session row's `…` — the menu #1066 was measured on. The capsule's
+      // `+` used to be asserted here too, because it opened
+      // `CapabilityDisclosureMenu` and was the other list shipping 28px rows
+      // inside a 44px floor. It opens the Context Capsule now, which is a
+      // Capsule rather than a menu and is held to its own pattern below — so
+      // this helper serves real menus only.
       await page.getByTestId('app-header-sessions').first().click();
       const rowLocator = page.getByTestId('session-item-row').first();
       await expect(rowLocator).toBeVisible();
@@ -412,6 +450,14 @@ for (const row of viewports.filter((v) => v.experience === 'app')) {
         row.id,
         rowLocator.getByRole('button', { name: /^Session actions for/ }),
       );
+    });
+
+    test('the Context Capsule is a stacked Capsule, not a menu (#1347 SC-41–44)', async ({ page }) => {
+      await page.goto('/#/fixture/app');
+      await expect(page.getByTestId('app-layer-terminal')).toBeInViewport();
+      await expect(page.getByTestId('capsule-capability-more')).toBeVisible();
+
+      await assertContextCapsule(page, 'app', row.id);
     });
 
     test('terminal capsule controls meet the App touch target', async ({ page }) => {
