@@ -6,6 +6,7 @@ import { ComposerMeasureMirror } from '@/product/terminal/capsule/components/Com
 import { CapsuleProvider } from '@/product/terminal/capsule/state/CapsuleProvider';
 import { useComposerMeasure } from '@/product/terminal/capsule/state/useComposerMeasure';
 import { useCapsuleState } from '@/product/terminal/capsule/state/useCapsuleState';
+import { ContextCapsule } from '@/product/terminal/capsule/components/ContextCapsule';
 import { PeekHost } from '@/product/terminal/capsule/components/PeekHost';
 import {
   layoutFromLineCount,
@@ -152,6 +153,32 @@ export function TerminalCapsule({
     onLineCountChange: handleLineCountChange,
   });
 
+  /**
+   * The dock's one upper layer (#1347 SC-43): the Context Capsule while it is
+   * open, otherwise the capability Peek, otherwise nothing.
+   *
+   * One slot rather than two, deliberately. The owner's model is that selecting
+   * a row *deepens this layer* — the list becomes the Peek — so two slots would
+   * allow a state the design does not have (a list with a Peek above it), and
+   * the inter-Capsule gap would have to be re-derived for it. It also means the
+   * lower capsule is untouched by construction: nothing here renders inside it.
+   */
+  const upperLayer =
+    restState.contextOpen && capabilityDisclosure ? (
+      <ContextCapsule
+        disclosure={capabilityDisclosure}
+        workContext={workContext}
+        onDismiss={() => restState.setContextOpen(false)}
+      />
+    ) : capabilityProjection ? (
+      <PeekHost
+        projection={capabilityProjection}
+        sendText={sendText}
+        sendPhysKey={sendPhysKey}
+        disabled={disabled}
+      />
+    ) : null;
+
   return (
     <CapsuleProvider
       value={{
@@ -173,16 +200,7 @@ export function TerminalCapsule({
         contentRef={contentRef}
         measureMirror={<ComposerMeasureMirror mirrorRef={measureMirrorRef} />}
         adjacentAction={adjacentAction}
-        projection={
-          capabilityProjection ? (
-            <PeekHost
-              projection={capabilityProjection}
-              sendText={sendText}
-              sendPhysKey={sendPhysKey}
-              disabled={disabled}
-            />
-          ) : null
-        }
+        projection={upperLayer}
       >
         <InputComposer
           ref={inputRowRef}

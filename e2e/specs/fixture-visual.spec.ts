@@ -602,15 +602,15 @@ test.describe('App 390×844', () => {
     await waitForFixtureTerminal(page);
 
     await page.getByTestId('capsule-capability-more').click();
-    // The surface is portalled and opens upward (`side="top"`), so this is the
-    // assertion that the screenshot below is of an open entry rather than of a
-    // capsule whose `+` happened to be tapped. On App it leads with context:
-    // Terminal Keys is sensed there (SC-37) and the ordinary list stays one
-    // explicit step down (SC-35).
+    // This is the assertion that the screenshot below is of an open surface
+    // rather than of a capsule whose `+` happened to be tapped. On App the list
+    // leads with context — Terminal Keys is sensed there (SC-37) — and the
+    // ordinary entries follow it in the same list (SC-35 as amended: one list,
+    // no second step).
     const sensed = page.getByTestId('capsule-context-item-terminal-keys');
     await expect(sensed).toBeVisible();
     await expect(sensed).toContainText('Touch controls for Terminal');
-    await expect(page.getByTestId('capsule-context-all')).toBeVisible();
+    await expect(page.getByTestId('capsule-capability-picker-claude-code')).toBeVisible();
 
     await expect(page).toHaveScreenshot('app-capability-entry.png', {
       fullPage: true,
@@ -640,33 +640,34 @@ test.describe('App 390×844', () => {
     await expect(sensed).toBeVisible();
     await expect(sensed).toContainText('Claude Code');
     await expect(sensed).toContainText('Working in this session');
-    // The ordinary list is one explicit step down rather than gone (SC-35).
-    await expect(page.getByTestId('capsule-context-all')).toBeVisible();
+    // The ordinary entries are in this same list rather than a step away
+    // (SC-35 as amended).
+    await expect(page.getByTestId('capsule-capability-picker-git')).toBeVisible();
     // Nothing about this is a modal: no dialog role, no backdrop (SC-33).
     await expect(page.locator('[role="dialog"]')).toHaveCount(0);
 
-    // …and it is attached to the control that opened it, not centered in the
-    // viewport: the surface settles just above the `+` trigger. Measured
-    // against the trigger, not `terminal-capsule` — that testid is the whole
-    // dock host (176px of zone at 390×844), so a comparison against its top
-    // would measure the zone, not the attachment.
-    //
-    // Polled, not sampled once: the popup is portalled and positioned a frame
-    // after it becomes visible, and a single read can catch it at its
-    // pre-position default.
-    const gapToTrigger = async () =>
+    // …and it is the upper half of a stacked pair rather than a surface parked
+    // somewhere else: the gap between it and the Conversation Capsule below it
+    // is the inter-Capsule token (#1347 SC-43), and the lower Capsule has not
+    // moved to make room (#1347 SC-41).
+    const pairGeometry = async () =>
       page.evaluate(() => {
-        const menu = document.querySelector('[data-testid="capsule-context-disclosure"]');
-        const trigger = document.querySelector('[data-testid="capsule-capability-more"]');
-        if (!(menu instanceof HTMLElement) || !(trigger instanceof HTMLElement)) {
+        const surface = document.querySelector('[data-testid="capsule-context-disclosure"]');
+        const shell = document.querySelector('[data-testid="capsule-shell"]');
+        if (!(surface instanceof HTMLElement) || !(shell instanceof HTMLElement)) {
           return null;
         }
-        return trigger.getBoundingClientRect().top - menu.getBoundingClientRect().bottom;
+        return {
+          gap: shell.getBoundingClientRect().top - surface.getBoundingClientRect().bottom,
+          surfaceHeight: surface.getBoundingClientRect().height,
+        };
       });
 
-    await expect.poll(gapToTrigger).toBeGreaterThanOrEqual(0);
-    // …and attached, not parked somewhere else on the screen.
-    await expect.poll(gapToTrigger).toBeLessThanOrEqual(24);
+    // 8px is `--context-capsule-margin-bottom` (0.5rem); read as a range so the
+    // assertion is about the pair being stacked by a token rather than about a
+    // sub-pixel rounding.
+    await expect.poll(async () => (await pairGeometry())?.gap ?? -1).toBeGreaterThanOrEqual(7);
+    await expect.poll(async () => (await pairGeometry())?.gap ?? -1).toBeLessThanOrEqual(9);
 
     await expect(page).toHaveScreenshot('app-work-context-disclosure.png', {
       fullPage: true,

@@ -16,8 +16,10 @@ import {
   type CapabilityFacts,
   type CapabilityId,
 } from '@/product/capability';
-import type { CapsuleCapabilityProjection } from '@/product/terminal/capsule/types';
-import type { SensedCapabilityItem } from '@/product/capability/components/ContextDisclosureMenu';
+import type {
+  CapsuleCapabilityProjection,
+  SensedCapabilityItem,
+} from '@/product/terminal/capsule/types';
 
 export interface CapsuleCapability {
   facts: CapabilityFacts | undefined;

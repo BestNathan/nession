@@ -378,6 +378,25 @@
       "value": "0.75rem"
     }
   },
+  "contextCapsule": {
+    "$owner": "pattern.context-capsule",
+    "marginBottom": {
+      "$description": "The inter-Capsule gap: the deliberate space between the upper Context Capsule and the resting Conversation Capsule below it (#1347 SC-43). The same value as projectionMarginBottom so a list-to-Peek swap does not jump the gap, but a separate leaf because the two pairs may diverge — a Peek is read while typing, the list is a place you stop.",
+      "value": "0.5rem"
+    },
+    "height": {
+      "$description": "FIXED height of the upper Context Capsule, identical in every sense state — quiet, working, context-only (#1347 SC-44). Content beyond it scrolls inside the surface, and a short list leaves the surface this tall: the stability is the point, because the lower Capsule must not move as rows come and go. Lower than Web's for the same reason the projection's ceiling is: the App capsule sits closer to the bottom edge and has less room above it.",
+      "value": "16rem"
+    },
+    "rowHeight": {
+      "$description": "One capability row in the Context Capsule: capability icon, title, and one line of reason for a sensed capability (#1347 SC-19/SC-42). 44px on both experiences — two lines of text need at least 40, and on App this is exactly the touch floor, so a row is a legal App target by construction.",
+      "value": "2.75rem"
+    },
+    "markerSize": {
+      "$description": "The presence mark beside an ordinary row's title: a capability the session actually needs. The same 5px as the shell's status dot on purpose — both are 'a quiet mark beside text' rather than a badge — but a separate leaf, because that one answers service health while this answers capability presence, and the design system's rule is that an equal resolved value does not make two names interchangeable.",
+      "value": "5px"
+    }
+  },
   "motion": {
     "terminalCapsule": {
       "value": "280ms cubic-bezier(0.22, 1, 0.36, 1)"

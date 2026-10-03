@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
+import type { LucideIcon } from 'lucide-react';
 import type { CapabilityDisclosureEntry, CapabilityId } from '@/product/capability';
-import type { SensedCapabilityItem } from '@/product/capability/components/ContextDisclosureMenu';
 
 export type CapsuleExperience = 'web' | 'app';
 
@@ -50,8 +50,36 @@ export {
  * The capsule reports presence; opening a capability stays the app's business,
  * so the app supplies both the entries and what selecting one does.
  */
+/**
+ * One capability row's display identity in the Context Capsule (#1347 SC-19).
+ *
+ * The registry's entry plus the glyph the **app layer** resolved from the
+ * capability's own binding — the glyph cannot be looked up here, because the
+ * only thing that knows it is `app/workspace/viewBindings`, and product code
+ * does not reach into the app layer. Absent is legal: a capability with no view
+ * binding has no glyph to contribute, and the row keeps the slot empty so
+ * titles stay aligned.
+ */
+export type CapsuleCapabilityEntry = CapabilityDisclosureEntry & { icon?: LucideIcon };
+
+/**
+ * One sensed capability, as the Context Capsule renders it (#1347 SC-19).
+ *
+ * Built by the composition that knows both halves — the sense (a work signal, a
+ * context signal) and the capability's display identity — because neither the
+ * sensing layer nor the capability owns both. `title` and `icon` are the
+ * capability's *display* identity, never its raw id as product copy; `reason` is
+ * the one line saying why it is here.
+ */
+export interface SensedCapabilityItem {
+  capabilityId: CapabilityId;
+  title: string;
+  icon?: LucideIcon;
+  reason: string;
+}
+
 export interface CapsuleCapabilityDisclosure {
-  entries: readonly CapabilityDisclosureEntry[];
+  entries: readonly CapsuleCapabilityEntry[];
   /**
    * Context-sensed capabilities, already resolved to display items (#1347
    * SC-37/40). The composer of this object knows the surface's experience and

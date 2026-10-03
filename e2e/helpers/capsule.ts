@@ -1,39 +1,30 @@
 import { expect, type Page } from '@playwright/test';
 
 /**
- * Open a capability from the capsule's `+`, wherever the surface puts it.
+ * Open a capability from the capsule's `+`.
  *
- * Two things about the Context Disclosure make a spec's guess about *which* row
- * it will find wrong half the time, and both are load-bearing product behaviour
- * rather than test noise:
+ * The list is one surface with two kinds of row (#1347 SC-35 as amended): a
+ * capability the session senses right now is listed first under its own name
+ * (`capsule-context-item-…`, with a reason), everything else follows under the
+ * picker name (`capsule-capability-picker-…`). A spec says *which capability*
+ * it wants; which half of the list that capability lands in is the product's
+ * business — it depends on the experience (Terminal Keys is sensed on App and
+ * ordinary on Web) and on what is running.
  *
- * - **The experience decides the shape.** Terminal Keys is context-sensed on App
- *   with a Session (#1347 SC-37) and an ordinary entry everywhere else — so a
- *   spec that names the App row times out on Web's default viewport, and one
- *   that names the ordinary row has to take a step on App.
- * - **The surface mounts asynchronously.** Asking the DOM what shape it has
- *   immediately after the click reads an empty tree: `count()` returns 0, the
- *   helper skips a step it should have taken, and the click that follows waits
- *   out its 30s timeout for a row behind that step. Measured on CI: the same
- *   three cases pass or time out depending on how fast the popup mounts.
- *
- * So the shape is discovered by *waiting for whichever layer arrived first*,
- * and the id is opened from the layer that is actually there. It lives here
- * rather than beside the fixture routes because both the fixture specs and the
- * real-stack terminal specs drive the same control.
+ * Two things this deliberately does not do. It does not assume a step: the
+ * two-layer disclosure it was written for had an `All capabilities` submenu,
+ * and a helper that still looked for one would wait forever now. And it does
+ * not ask the DOM what shape it has before the surface has mounted — a
+ * `count()` immediately after the click reads an empty tree, and the click that
+ * follows then times out on a row that was always going to appear (#1441).
  */
 export async function openCapsuleCapability(page: Page, id: string): Promise<void> {
   await page.getByTestId('capsule-capability-more').click();
 
-  // Whichever surface arrived: the ordinary rows when nothing is sensed, or the
-  // sensed list — whose ordinary rows sit one step down behind `All
-  // capabilities` while a sense is active.
-  const picker = page.getByTestId(`capsule-capability-picker-${id}`);
-  const all = page.getByTestId('capsule-context-all');
-  await expect(all.or(picker).first()).toBeVisible();
+  const row = page
+    .getByTestId(`capsule-capability-picker-${id}`)
+    .or(page.getByTestId(`capsule-context-item-${id}`));
 
-  if (await all.isVisible()) {
-    await all.click();
-  }
-  await picker.click();
+  await expect(row.first()).toBeVisible();
+  await row.first().click();
 }

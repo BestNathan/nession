@@ -132,27 +132,44 @@ Signal/Peek should answer what matters **now**. Full history, management, config
 
 A Terminal-local capability such as Terminal Keys may stop at its Peek and have no Workspace projection. On App it is *context-sensed* — a touch device with a Terminal is what makes it relevant (SC-37) — and it is not work: it never lights the Work Ring.
 
-### The `+` opens one Context Disclosure (owner decision, 2026-10-03)
+### The `+` opens the Context Capsule (owner decision, 2026-10-04)
 
-The `+` is one control with one surface, in both states (#1347 SC-18 / SC-33 /
-SC-35):
+The `+` is one control with one surface, in every sense state (#1347 SC-18 /
+SC-33 / SC-35 / SC-41–44). Its own pattern is
+[context-capsule.md](context-capsule.md); what belongs here is how it sits on
+this one.
 
 ```text
-quiet     +  -> Capabilities        (the ordinary list)
-working   ⊕  -> Working now         (sensed capabilities, display identity + reason)
-                ────────────────
-                All capabilities ›  (the same surface, one step down)
+              ┌─ Context Capsule (fixed height) ──┐
+              │ sensed first, catalog below       │
+              │ — one list, one scroll            │
+              └───────────────────────────────────┘
+                            ↕ one token
+              ╭─ Conversation Capsule ────────────╮
+              │ [+]  input …                  ↑   │
+              ╰───────────────────────────────────╯
 ```
 
-It is the *same class* of surface as the capability list it grew from — anchored
-to the `+`, floating over the work, `side="top"` — and never a Dialog: no
-backdrop, no centered modal geometry, no focus trap, no modal close chrome. The
-first layer shows what Nession currently senses, with the capability's display
-identity and a reason line (never a raw capability id); selecting a sensed row
-opens that capability directly at Peek. `All capabilities` is the secondary,
-in-surface route to ordinary discovery, so working never takes the list away.
-When the sense that opened the surface disappears, the surface dismisses itself;
-a Peek the user opened explicitly is theirs to close.
+**Opening adds a surface; it does not change the capsule.** The lower Capsule
+stays visible, unchanged and spatially stable — the same box it had before the
+tap and after the close — and the upper one is a sibling above it, one token
+away. That is the correction the owner made on 2026-10-04, and it is why the
+surface is rendered inside the capsule's own dock rather than anchored to the
+`+`: a popup would leave the lower Capsule behind during the App's
+Conversation↔Capability exchange, and it could not be a sibling at all.
+
+The list is **one list**: what Nession currently senses, first (work-sensed, then
+context-sensed), each row carrying the capability's display identity and a
+reason line — never a raw capability id — and the ordinary catalog below them in
+the same scroll. There is no `All capabilities` step. A sensed row opens that
+capability directly at Peek, and the Peek takes this same upper slot, so
+selecting deepens the surface rather than stacking a third one.
+
+It is never a Dialog and never a menu: no backdrop, no centered modal geometry,
+no focus trap, no generic menu sizing. Its height is fixed and identical in
+every sense state — the pair does not resize as rows come and go — and overflow
+scrolls inside it. When the sense that opened the surface disappears, the
+surface dismisses itself; a Peek the user opened explicitly is theirs to close.
 
 ## Input modes
 

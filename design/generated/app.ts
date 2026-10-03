@@ -137,6 +137,12 @@ export const terminalCapsule = {
   projectionItemPadY: "0.125rem",
   projectionMarkWidth: "0.75rem",
 } as const;
+export const contextCapsule = {
+  marginBottom: "0.5rem",
+  height: "16rem",
+  rowHeight: "2.75rem",
+  markerSize: 5,
+} as const;
 export const motion = {
   terminalCapsule: "280ms cubic-bezier(0.22, 1, 0.36, 1)",
 } as const;

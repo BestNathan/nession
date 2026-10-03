@@ -102,7 +102,7 @@ Once a capability has been selected, triggered, or has earned contextual presenc
 > **An observation is expressed once (owner decision, 2026-10-03; #1347 SC-34).**
 > The 2026-10-03 review measured one fact — "the pane is running Claude Code" —
 > arriving three times: an auto-materialized Signal from the observed-command
-> path, the Work Ring from the work sense, and the Work Disclosure. A sensed
+> path, the Work Ring from the work sense, and the Context Capsule. A sensed
 > observation now has exactly **one** ambient representation: the Work Ring.
 > The observed-command path stands down for a capability whose sensed work is
 > `working`, and the user's own step — tapping `+`, choosing a sensed row — is
@@ -152,7 +152,7 @@ Eligibility is declared by the capability, beside the body that does the peeking
 > property ("no Workspace projection") is already expressed by the capability
 > simply having no Workspace view binding. What the separate family cost was a
 > second selection path, a second state story, and no way to be *sensed*, at
-> exactly the moment the Context Disclosure was being built to speak one
+> exactly the moment the Context Capsule was being built to speak one
 > protocol for every capability. Terminal Keys is a **Peek**: it is sensed by
 > context on App (SC-37), a sensed row opens it directly at Peek, and the
 > ordinary list walks Signal -> Peek like any other.

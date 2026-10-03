@@ -3,12 +3,7 @@ import { cn } from '@/shared/lib/utils';
 import type { CapabilityId } from '@/product/capability';
 import { WORKSPACE_VIEW_BINDINGS } from '@/app/workspace/viewBindings';
 import type { WorkspacePresentationItem } from '@/app/workspace/presentation';
-import {
-  capsuleShellCapsuleRadiusClass,
-  capsuleShellInnerPadClass,
-  capsuleShellPillRadiusClass,
-  capsuleShellSurfaceClass,
-} from '@/product/terminal/capsule/capsuleStyles';
+import { capsuleOuterGeometry } from '@/product/terminal/capsule/capsuleStyles';
 import type { CapsuleExperience } from '@/product/terminal/capsule/types';
 
 const workspaceViewBindings = new Map(
@@ -85,6 +80,18 @@ export function CapabilityCapsule({
     }
   }, [activeCapabilityId]);
 
+  // Width is the one axis the derivation leaves to its consumer, because it is
+  // a fact about the parent bar rather than about the Capsule: on App this nav
+  // is the bar's only child, so it stretches to the bar's own inset — the same
+  // horizontal edge the Conversation Form lands on, at every width. On Web the
+  // bar also holds the surface action (`#1204`), so the nav sizes to its
+  // content there and the row scrolls inside it (SC-06) instead.
+  const geometry = capsuleOuterGeometry(
+    experience,
+    'flat',
+    experience === 'app' ? 'stretch' : 'intrinsic',
+  );
+
   return (
     <nav
       aria-label="Workspace capabilities"
@@ -93,21 +100,19 @@ export function CapabilityCapsule({
          carries the same id, so a surface switch slides each from the
          other's former place. */
       data-morph-id="capsule-shell"
-      data-shell-shape={experience === 'app' ? 'capsule' : 'pill'}
+      data-shell-shape={geometry.shape}
       className={cn(
-        // `min-h-[control-md]` matches `CapsuleShell`'s own row: on App that is
-        // the 44px control band the Conversation form uses, and the labeled
-        // entries now take it too (`capabilityEntryHeight`), so both Capsule
-        // states land on the same 56px total — the owner's correction of
-        // 2026-10-03, after the labeled form first shipped at 82px.
+        // The Capability Form wears the Conversation Form's geometry, from the
+        // same derivation `CapsuleShell` uses (#1347 SC-29/SC-30): on App the
+        // 44px control band the composer's own row takes, the labeled entries
+        // inside it (`capabilityEntryHeight`), and the shared surface, radius
+        // family, padding and clipping. The owner's 2026-10-03 correction, after
+        // the labeled form first shipped at 82px.
         //
-        // `max-w-full` bounds the nav to its zone: six labeled slots are wider
-        // than a phone, and the bound is what makes the INNER row scroll
-        // (SC-06) instead of the capsule overhanging the tool bar.
-        'pointer-events-auto flex min-h-[length:var(--control-md)] max-w-full items-center',
-        capsuleShellSurfaceClass,
-        experience === 'app' ? capsuleShellCapsuleRadiusClass : capsuleShellPillRadiusClass,
-        capsuleShellInnerPadClass,
+        // The bound is what makes the INNER row scroll instead of the capsule
+        // overhanging the tool bar (SC-06); which bound depends on the bar, and
+        // the derivation call above states why.
+        geometry.shellClass,
       )}
     >
       <div

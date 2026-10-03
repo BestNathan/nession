@@ -167,7 +167,10 @@ test('a pattern may declare its own touch floor without changing the category', 
 
 test('every merged pattern keeps provenance and experience blocks', () => {
   const merged = mergeContracts(REAL, TOKENS);
-  assert.equal(Object.keys(merged).length, 6);
+  // The count is read from the sources rather than written here: the set of
+  // patterns *is* the files in `design/contracts/patterns/`, and a literal made
+  // every new pattern edit a test whose subject is provenance.
+  assert.equal(Object.keys(merged).length, Object.keys(REAL.patterns).length);
   for (const pattern of Object.values(merged)) {
     assert.match(pattern.id, /^pattern\./);
     assert.match(pattern.patternRef, /^docs\/design\/design-system\/patterns\/.*\.md$/);
@@ -305,11 +308,14 @@ test('file/id mismatch fails', () => {
 
 // ── real-directory smoke ────────────────────────────────────────────────────
 
-test('committed sources validate clean and merge to 6 patterns', () => {
+test('committed sources validate clean and merge to every declared pattern', () => {
   const { errors, index } = validateTree(REAL, TOKENS);
   assert.deepEqual(errors, []);
   assert.ok(index.has('experience.app.touchTarget.min'));
-  assert.equal(Object.keys(mergeContracts(REAL, TOKENS)).length, 6);
+  assert.equal(
+    Object.keys(mergeContracts(REAL, TOKENS)).length,
+    Object.keys(REAL.patterns).length,
+  );
 });
 
 test('real viewport matrix carries the canonical web/app rows', () => {
