@@ -1,532 +1,137 @@
 ---
 name: nession-cicd
-description: Use when troubleshooting CI/CD pipeline failures for nession, modifying the GitHub Actions workflow, investigating failed Docker builds or k8s deployments, or understanding the CI → ArgoCD deploy chain. Enforces: project root stays on latest main (read-only); all branch work in .claude/worktrees/.
+description: Use when changing or troubleshooting Nession GitHub Actions, staging/release flow, deployment, version promotion, Docker/GitOps automation, or failed CI/deploy runs.
 ---
 
 # Nession CI/CD
 
-## Overview
+This Skill owns **CI, staging, release, and deployment execution**. Workflows are routers; domain rules remain with their scripts/Gates/scoped owners.
 
-**CI builds images. You don't.** Development happens locally. Three workflows handle deployment:
-- **Quality Gate** (`quality.yml`): PR to staging triggers rust-check + web-check
-- **Staging** (`staging.yml`): merge to staging triggers full build + deploy to staging
-- **Release** (`release.yml`): merge to main triggers release build + deploy to production
+Read `.github/AGENTS.md` before editing workflows and `nession-gates` when changing Gate routing.
 
-Gate semantics are owned by `nession-gates`. CI/CD workflows are routers/execution surfaces: they may prepare environment and choose Gate IDs/suites, but must not become a second owner of Gate rules, success/failure meaning, or repair guidance.
+## 1. First classify the problem
 
-One additional governance workflow protects requirement closure:
-- **Requirement Acceptance** (`requirement-acceptance.yml`): PRs to `main` validate **merge readiness** for every closing `requirement` issue; explicit `post-merge` Pending criteria may be deferred. Completed requirement closure is stricter and is guarded after the fact.
+Identify the failing boundary before editing:
 
-```
-Local dev → verify locally
-  → branch off main → PR to staging → quality gate passes → merge to staging
-  → staging builds + deploys to staging environment → validate `pre-merge` + `staging` criteria
-  → audit what is being released → PR staging → main with every `Closes #N` → merge-ready gate → --merge
-  → run any deferred `post-merge` criteria after their merge/deploy/observation condition becomes available
-  → only fully accepted requirements may remain closed as completed
-  → version bump if warranted → release builds multi-arch images → ArgoCD syncs to production
-```
+- repository quality / Gate;
+- workflow setup/tooling;
+- build/package;
+- staging deployment;
+- requirement acceptance;
+- release/version promotion;
+- GitOps/ArgoCD rollout.
 
-**Every merge is `--merge`.** Nothing is ever rebased or squashed — `--rebase` rewrites commits and orphans the branch tip, `--squash` collapses N commits into one unmatched patch; both leave a class of re-conflicting orphans behind. See **Why every merge is `--merge`**.
+Do not “fix CI” by weakening the domain invariant that CI exposed.
 
-## Deployment Monitoring
+## 2. Development rules
 
-Use `scripts/deploy-watch.sh` to monitor deployments end-to-end:
+Workflow changes still happen in a worktree from latest `main`; use `nession-development`.
 
-```bash
-# After merging PR to staging — watch staging build + rollout
-./scripts/deploy-watch.sh staging
+Do not build/push release Docker images manually as a substitute for CI. Local development builds are for diagnosis, not release publication.
 
-# After merging to main + version bump — watch release + prod rollout
-./scripts/deploy-watch.sh prod
-```
+## 3. Current workflow owners
 
-**What it does:**
-- Watches the appropriate GitHub Actions workflow (staging.yml for staging, release.yml for prod)
-- Shows only key phases (Check → Versions → Build → Docker → Merge → Kustomize)
-- On CI failure: shows the failed job's log tail and suggests fixes based on error patterns
-- On CI success: monitors k8s rollout status for all 3 deployments with pod health checks
-- Exits non-zero on any failure so it can be used in scripts/CI
+Treat the files themselves as live truth:
 
-**Prerequisites:** `gh`, `kubectl`, `jq`
+- `.github/workflows/quality.yml`
+- `.github/workflows/staging.yml`
+- `.github/workflows/release.yml`
+- `.github/workflows/e2e.yml`
+- `.github/workflows/requirement-acceptance.yml`
+- `.github/workflows/acceptance.yml`
+- `.github/workflows/deploy.yml`
 
-## ⛔ Iron Laws
+When this Skill and workflow YAML disagree, inspect history/intent and repair the stale prose; do not copy the YAML's rule lists into this Skill.
 
-### Never build Docker locally
+## 4. Quality failures
 
-```
-NEVER BUILD DOCKER IMAGES LOCALLY
-```
-
-**No exceptions:**
-- Don't `docker build` for nession
-- Don't `docker push` to GHCR
-- Don't manually update k8s manifests for image tags
-- Don't manually create multi-arch manifests
-- If k8s is broken, fix CI or roll back via GHCR — don't patch images by hand
-
-CI is the single source of truth for all container images.
-
-**Nothing is ever pruned.** The repo is public, so GHCR storage and GitHub Releases are unmetered — there are no cleanup jobs and none should be added. Every hash-tagged staging image, every version-tagged production image, and all 53+ releases are retained indefinitely, which is what makes "roll back via GHCR" reliable: any previously built tag is still pullable.
-
-### Project root = latest main; all dev in worktrees
-
-```
-项目根目录 = origin/main 只读镜像。禁止在根目录开发或提交。
-所有分支工作（feat/fix/chore/docs/版本 bump/workflow 修复）必须在 .claude/worktrees/ 下的 worktree 中进行。
-```
-
-Before any new worktree:
+For a named Gate failure:
 
 ```bash
-git fetch origin && git checkout main && git pull --ff-only origin main
-EnterWorktree name: "feat/<slug>"
-# manual: git worktree add -b feat/<slug> .claude/worktrees/feat-<slug> origin/main
+./gates/run --describe <gate-id>
+./gates/run <gate-id>
 ```
 
-See `nession-development` for the full worktree lifecycle.
+Follow reason/repair/owner. Use `nession-gates` for Gate design or routing changes.
 
-## Development Flow
+For workflow-runtime failure, inspect the exact run/job/step and separate:
 
-### 1. Develop and verify locally
+- product/test failure;
+- missing dependency/tool;
+- Actions permissions/trust boundary;
+- cache/artifact problem;
+- runner outage/transient provider issue.
 
-```bash
-# Start server (auto-reload on change)
-cargo run -p nession-server
+Do not blind-retry deterministic failures.
 
-# Start agent (in another terminal)
-cargo run -p nession-agent
+## 5. Requirement acceptance
 
-# Start web UI (in another terminal)
-cd web && npm run dev
-```
+Acceptance execution belongs to `nession-acceptance`; issue structure belongs to `nession-writing-requirements`.
 
-Verify business logic and flows against the running local services. Do NOT deploy to k8s to test.
+The GitHub workflow is only the router around the canonical acceptance validator. In `pull_request_target`, never execute untrusted PR-head code with credentials.
 
-### 2. Version bump → see nession-development
+## 6. Staging and release
 
-Version bumping (minor vs patch, which files to update) is covered in the nession-development skill. Use that skill for all version decisions. CI automatically reads versions from `Cargo.toml` and `web/package.json` on merge.
+Before promotion:
 
-### 3. Push and create PR
+1. identify the exact commit/PR being promoted;
+2. verify required quality/acceptance evidence;
+3. verify version policy if the release changes version;
+4. merge using the repository's current required merge strategy;
+5. observe the resulting workflow and deployment until the requested boundary is proven.
 
-Work happens in a worktree (not project root). From the worktree:
+Do not assume an old staging/main relationship; inspect current workflow triggers and branch state.
 
-```bash
-git add -A
-git commit -m "feat: description"
-git push -u origin feat/description
-gh pr create --base staging --title "feat: description" --body "..."
-```
+Version consistency is enforced by `release-version-consistency`. Version files must move together when a bump is required.
 
-**Do NOT push directly to main or staging.** All changes go through PRs targeting `staging`.
+## 7. Deployment / GitOps
 
-**Exception — `.github/workflows/*` changes:** GitHub Actions workflows only take effect from the default branch (main). When modifying `.github/workflows/*`, cherry-pick the workflow commit into a **separate worktree** off `origin/main`, fast-track as its own PR, and merge to main immediately.
+CI owns image publication. GitOps owns desired deployment state.
 
-```
-# 正确流程 — workflow 变更在 worktree 中，独立合入 main
-git fetch origin && git checkout main && git pull --ff-only origin main
-EnterWorktree name: "chore/workflow-fix"
-git cherry-pick <workflow-commit-hash>
-git push -u origin chore/workflow-fix
-gh pr create --title "chore: ..." --body "..."
-gh pr merge <N> --merge
-```
+Do not manually mutate production desired state merely to make a rollout “look fixed”. Diagnose whether the failure is:
 
-**Merging feature branches (auto-merge to staging):**
+- image/build;
+- manifest/GitOps state;
+- ArgoCD sync;
+- Kubernetes scheduling/runtime;
+- application health.
 
-For `feat/**` and `fix/**` branches, the flow is **refresh root main → worktree off origin/main → PR to staging → quality gate → merge to staging → staging deploy → validate → PR staging → main with `--merge`**.
+Keep one owner per layer.
 
-```bash
-# 1. Push → create PR targeting staging
-git push origin <branch-name>
-gh pr create --base staging --title "feat: ..." --body "..."
+## 8. Monitoring a change
 
-# 2. Auto-merge to staging when quality gate passes
-gh pr merge <PR-NUMBER> --auto --merge
+After a merge/release, report the concrete workflow run, status, failing/passing job, and deployed revision when relevant.
 
-# 3. Watch staging workflow + rollout
-./scripts/deploy-watch.sh staging
+Do not claim deployment success from “workflow green” if the user asked for runtime rollout proof.
 
-# 4. After staging validation, open the release PR (see "Release: staging → main")
-```
+## 9. Router design
 
-**`--merge`, never `--rebase` or `--squash`.** `--merge` records the head branch's tip as a second parent, so every landed commit stays in the target's ancestry with its **original SHA** — nothing is ever orphaned, no matter how long-lived the target is. `--rebase` always rewrites and orphans the branch tip; `--squash` collapses N commits into one whose patch-id matches nothing. Both failure classes are measured below under **Why every merge is `--merge`**. Two consequences:
+A workflow may prepare environment, select Gates, invoke canonical validators, publish artifacts, or perform authorized deployment.
 
-- **Commit messages are the permanent record.** `--merge` writes `MERGE_MESSAGE` + `PR_TITLE`, never the PR body, and each commit keeps its own message. (Measured before the all-merge rule: PR #301 rebase-merged as `673664f` kept the commit's own message while the (different, Chinese) PR body was discarded; squash-merged PR #303 became `3a35e20` whose message *is* `PR_TITLE` + `PR_BODY`.) The repo still has `squash_merge_commit_message = PR_BODY` configured, but nothing squashes any more.
-- **Clean up the branch locally before merging.** `wip`/`fixup` commits land verbatim. Squash them with `git rebase -i` on the branch, not with a squash-merge.
+It must not duplicate:
 
+- protocol rule lists;
+- design rule lists;
+- acceptance semantics;
+- coverage thresholds;
+- repair prose already owned by a Gate.
 
-**Auto-merge to staging is safe** because staging is the integration environment — not production. The quality gate (rust-check + web-check) ensures code correctness. Human validation happens on staging before the staging → main merge.
+## 10. Common repair rules
 
-**`--auto` only works when the PR has a check to wait on.** Feature PRs to staging trigger the quality gate, so `--auto` is fine. `chore/**` PRs trigger no CI, so GitHub immediately reports `CLEAN` and rejects auto-merge with `GraphQL: Pull request is in clean status (enablePullRequestAutoMerge)`. Merge those directly, without `--auto`.
+- stale base/head evidence -> rerun on the intended head, not an arbitrary newer one;
+- missing tool -> fix setup, not the quality rule;
+- permissions failure -> repair trust/permissions boundary;
+- deterministic test failure -> fix code/test owner;
+- deployment failed after successful build -> investigate GitOps/Kubernetes/app runtime separately.
 
-### Release: staging → main
+## Stop conditions
 
-```bash
-# 1. Audit what is about to ship, and find the issues it resolves
-gh pr list --state merged --base staging --limit 20
-gh issue list --state open
+Pause the destructive/publishing action when:
 
-# 2. Open the release PR. Every issue needs its own Closes line.
-gh pr create --base main --head staging \
-  --title "chore: release (staging → main)" \
-  --body "$(cat <<'BODY'
-## 变更内容
-- feat: ... (#PR)
-- fix: ... (#PR)
+- release authority was not requested;
+- the exact head cannot be identified;
+- a credentialed workflow would execute untrusted code;
+- “fix” requires bypassing a required Gate;
+- production mutation would replace the repository's GitOps owner.
 
-## 测试报告
-- staging 验收: ...
-
-Closes #<ISSUE>
-Closes #<ISSUE>
-BODY
-)"
-
-# 3. MUST be --merge
-gh pr merge <PR-NUMBER> --merge
-
-# 4. Version bump if warranted (see "Version bump"), then wait for release.yml
-./scripts/deploy-watch.sh prod
-```
-
-### Why every merge is `--merge`
-
-**`--merge` records the head branch's tip as a second parent**, so every landed branch stays reachable from the target with its original SHAs — no orphaned commits anywhere, no force push. That is the whole point of the rule: a feature branch merged into `staging` keeps its original SHAs in `staging`'s ancestry, so the orphan class below never starts.
-
-**`--rebase` rewrites and orphans, so no merge in this flow may use it.** GitHub's rebase-merge *always* rewrites the commits and leaves the head branch pointing at the originals. It rewrites even when nothing requires it: measured on PR #305, whose branch was already a linear descendant of `main`, the landed commit `787f8be` and the branch tip `39825da` had the **identical tree** `deaf21f4` and differed only because the committer date moved 12:14:04 → 12:16:43. There is no configuration that makes it fast-forward.
-
-The class this rule eliminates was measured on the 0.29.0 release — at that point the release itself was rebase-merged, so the rebased commits landed on `main` while their originals stayed on `staging`. Such orphans are *usually* harmless — a later rebase skips them by patch-id:
-
-| Orphan on `staging` | patch-id | Twin on `main` | patch-id | Next release |
-|---|---|---|---|---|
-| `67afd56` | `e56a93b449d8` | `62a5731` | `e56a93b449d8` | skipped, harmless |
-| `aeb25f8` | `fdf7df10c5d8` | `8d0125d` | `be13108ebd0b` | **re-applies, conflicts** |
-
-Both rows are from the single 0.29.0 release. The second diverged because that commit's release rebase **resolved a conflict**, so what landed on `main` is not the same patch as what `staging` still holds. Such an orphan re-conflicts on *every* subsequent release until someone drops it by hand. Confirmed in a controlled repro: identical patch-id → rebase skips the orphan and replays only the new work; divergent patch-id → the orphan replays and collides.
-
-So the choice is not "rebase is broken" — it is that rebase makes correctness depend on patch-id de-duplication continuing to hold, while `--merge` removes the class outright. Feature branches used to keep using `--rebase` because they were dead after merge and orphaning them was free; the all-merge rule closes that too — an orphaned commit is only "free" until a conflict changes its patch-id, and nothing in the flow needs that risk. Every merge is `--merge`, feature-to-staging included.
-
-**`--squash` is wrong for a further reason:** N commits collapse into one whose combined patch-id matches nothing, so a later replay re-applies all N. Measured historically: release PR #268 was squash-merged and the next release conflicted on `web/src/terminal/DeviceProfile.ts` — a file the offending PR never touched.
-
-### ArgoCD tracks the `gitops` orphan branch (since issue #592 cutover, 2026-09-05)
-
-Desired state left `main` entirely — the `gitops` branch holds the app-of-apps
-(`argocd/`), the env-agnostic base and one overlay per environment. The
-self-managed `nession-root` Application owns the children:
-
-| App | path (on `gitops`) | notes |
-|---|---|---|
-| `nession` | `environments/production/nession` | zero-copy PVs; promotion needs Environment approval |
-| `nession-staging` | `environments/staging/nession` | retained legacy staging env, byte-identical to the old overlay |
-| `nession-staging-01` | `environments/staging-01/nession` | on-demand SHA deploys (`deploy.yml`) |
-| `nession-preprod` | `environments/preprod/nession` | dormant |
-
-Deploys are bot commits (`deploy(<env>): <ref>`) written by
-`scripts/gitops-commit.sh` from `staging.yml` / `release.yml` / `deploy.yml` —
-never a kustomize commit on `main`. Rollback is `git revert` of a deploy
-commit on `gitops`; ArgoCD syncs back.
-
-**Two deploy lanes** (owner model 2026-09-05, issue #592):
-
-- **Staging lane — any sha.** `staging` auto-deploys on every staging-branch
-  push (`staging.yml` → `deploy-staging-gitops`). `deploy.yml` deploys any
-  env dir at **any commit whose ghcr images exist** — merging to staging
-  builds `{server,agent,ui}-<sha7>` (quality gate already ran), so a small
-  fix merged to staging can be pulled onto `staging-01` and validated
-  standalone before the next release.
-- **Release lane — needs a version.** `production` deploys only via
-  `release.yml` `promote-production` at SemVer tags, behind GitHub
-  Environment `production` approval. `gitops-commit.sh` refuses non-SemVer
-  refs for production, and a manual `deploy.yml` against `production` fails
-  with that refusal — production never carries arbitrary SHAs.
-
-**If the release PR reports `mergeable: false`, do NOT back-merge `main` into `staging`.** Move the conflict onto a throwaway worktree off `origin/main`:
-
-```bash
-git fetch origin && git checkout main && git pull --ff-only origin main
-git worktree add -b chore/release-<sha> .claude/worktrees/chore-release-<sha> origin/main
-cd .claude/worktrees/chore-release-<sha>
-git cherry-pick <staging-commit>...          # resolve conflicts here
-git push -u origin chore/release-<sha>
-gh pr create --base main --head chore/release-<sha> --title "chore: release (...)" --body "..."
-gh pr merge <PR-NUMBER> --merge
-```
-
-Measured 2026-08-17: `staging → main` reported `mergeable: false` (conflict on `k8s/overlays/staging/kustomization.yaml`); `mergeable: false` blocks `--merge`, `--rebase` and `--squash` alike, so switching method never routes around a real conflict. The cherry-pick branch (PR #300) merged cleanly and `staging` was never touched. Under this flow the conflict should not arise at all — see the `k8s/overlays/**` rule below for the one thing that causes it.
-
-**Verify before merging** that the release is actually mergeable:
-
-```bash
-gh pr view <PR> --json mergeable,mergeStateStatus
-gh api repos/BestNathan/nession/pulls/<PR> --jq '{mergeable,rebaseable,mergeable_state}'
-```
-
-**`--squash` is wrong here for a second reason:** N commits collapse into one whose combined patch-id matches nothing, so a later replay re-applies all N. Measured historically: release PR #268 was squash-merged and the next release conflicted on `web/src/terminal/DeviceProfile.ts` — a file the offending PR never touched.
-
-### Version bump
-
-A bump is a **separate PR after the release merged**, not part of it. Create it in a worktree off latest `origin/main`:
-
-```bash
-git fetch origin && git checkout main && git pull --ff-only origin main
-EnterWorktree name: "chore/bump-version-X.Y.Z"
-# Bump version in all four files: Cargo.toml, Cargo.lock,
-# web/package.json, web/package-lock.json
-git add -A && git commit -m "chore: bump version to X.Y.Z"
-git push -u origin chore/bump-version-X.Y.Z
-gh pr create --base main --title "chore: bump version to X.Y.Z" --body "Version bump"
-gh pr merge <PR-NUMBER> --merge  # Direct merge, no --auto (no checks to wait on)
-```
-
-Not every release needs one. Decide by what shipped: user-visible feature → minor, fix only → patch, docs/chore only → none.
-
-**But "none" means the release never reaches production.** 15 of `release.yml`'s 16 jobs carry `if: needs.version-check.outputs.version_changed == 'true'` — `version-check` is the only ungated job. The release PR itself changes no version file, so `version-check` reports `false` and everything downstream skips — no images, no GitHub Release, no production deploy commit, nothing for ArgoCD to sync. Measured on release PR #287: `version-check: success`, everything else `skipped`.
-
-So the rule is:
-
-| Release contains | Bump |
-|---|---|
-| runtime changes under `crates/` or `web/src/` | **mandatory** — skip it and production silently stays on the old images |
-| tests, docs, CI config only | optional |
-
-One escape hatch exists: if the git tag `v<version>` does not resolve, `version-check` sets `version_changed=true` regardless, so a failed release can be retried at the same version without bumping (issue #71).
-
-**All four files must land on the same version.** `release.yml` tags server/agent from `Cargo.toml` and ui from `web/package.json` but gates both on one `version_changed`. Bumping only `web/package.json` would re-push `server-<old>` / `agent-<old>` over already-released tags and then try to create a Release at the existing `v<old>` tag. `version-check` now hard-fails on a mismatch rather than letting that through.
-
-### Direct-to-main path
-
-Work that touches **no build input** skips `staging` — still use a worktree, not project root:
-
-```bash
-git fetch origin && git checkout main && git pull --ff-only origin main
-EnterWorktree name: "docs/<slug>"    # or chore/<slug>
-git add -A && git commit -m "docs: ..."
-git push -u origin docs/<slug>
-gh pr create --base main --title "docs: ..." --body "..."
-gh pr merge <PR-NUMBER> --merge      # no --auto: no checks to wait on
-```
-
-Applies to `docs/**`, `chore/**` (config, deps, cleanup), `.github/workflows/*`, `scripts/**`, and the `justfile`. Note that no k8s manifests live on `main` any more — deployment desired state is on the `gitops` branch and is written only by `scripts/gitops-commit.sh`.
-
-**Hard boundary: anything under `crates/` or `web/src/` must go through `staging`.** `quality.yml` only runs on PRs targeting `staging`, so a PR to `main` has no CI gate at all — the only protection is the local pre-commit hook. Routing code changes straight to `main` would ship them with no independent verification and no staging soak.
-
-Two consequences to accept:
-
-- Direct-to-main changes never pass through `staging`, so `staging` sits without them until they reach it: a feature branch cut from `main` carries them in when it merges, and the next release merges `staging` into `main` regardless. Nothing is pushed between the two by hand.
-- `.github/workflows/*` changes only take effect from the default branch, which is why they were already on this path. Note that `push`-triggered workflows use the workflow file *at the pushed commit*, so `staging.yml` behaviour on `staging` still reflects `staging`'s copy until `main`'s commits arrive there — a workflow fix merged to `main` does not change staging builds until then.
-
-**⚠ Never put an empty commit on `staging`.** Empty commits have no patch-id, so nothing can de-duplicate them, and they ride into `main` on the release as noise. Use `gh workflow run` to trigger workflows, not `git commit --allow-empty`. Drop an existing one with `git rebase -i origin/staging`.
-
-### How `main` and `staging` move relative to each other
-
-Since issue #592 (2026-09-05) deploy commits live on the `gitops` orphan branch, never on `main` — so `main` and `staging` only differ by unreleased feature work and direct-to-main work. The old mechanism (staging.yml writing kustomize commits to `main`) and its whole conflict class (0.29.0, overlay snapshots riding feature branches into release PRs) are gone: `main` is no longer a deploy target for anything.
-
-| Step | Method | Effect |
-|------|--------|--------|
-| `feature → staging` | `--merge` | Records the head tip as a second parent — original SHAs stay in `staging`'s ancestry. No orphans anywhere. |
-| `staging → main` | `--merge` | Same — and the release PR's diff is exactly the unreleased work. |
-
-The two refs sit at different commits between releases, and that is the normal state: `staging` carries unreleased feature work, `main` carries direct-to-main work plus whatever shipped last. The release PR is the only thing that moves work between them.
-
-### Branch base
-
-A PR's diff is computed against `merge-base(base, head)`, so the base decides what the reviewer sees.
-
-New work comes off `main` by default. The exception is work that depends on code already on `staging` but not yet released — `main` does not have those commits, so it must come off `origin/staging`. Measured — with a feature on `staging` but not yet released, a follow-up fix branched from `main` **conflicts**, while the same fix branched from `origin/staging` applies cleanly as a single commit:
-
-> Follow-up work on code that is on `staging` but not yet released → worktree off `origin/staging` (not root reset).
-
-The mirror-image mistake is a branch cut from `main` but targeting `staging` while `main` is *ahead*: it drags `main`'s extra commits into `staging` with it. Measured: a `docs/**` branch cut from `main` dragged 5 of `main`'s commits into `staging`. That is also how the two refs re-converge without anyone pushing between them — a branch cut from `main` carries `main`'s commits into `staging` when it merges. (Those dragged commits are de-duplicated at the release, so they are noise in review rather than a correctness problem.)
-
-`EnterWorktree` bases on `origin/main` by default. For the staging exception, use manual `git worktree add … origin/staging` — do not reset project root away from `main`.
-
-### Executable Requirement Acceptance
-
-`.github/workflows/acceptance.yml` is the reusable/manual executor for stage-specific Requirement acceptance. Callers pass `issue_number`, explicit `stage`, and the exact `target_ref`; a deterministic structured result may be supplied to skip model verification. Otherwise the read-only Acceptance Agent may reuse the Cursor/DeepSeek provider environments.
-
-The workflow freezes a structured result before mutation, then a separate trusted job with `issues: write` updates the Acceptance Report and checkbox projection. Requirement-level `Fail` / `Pending` remains data rather than an Actions infrastructure failure. The existing Requirement Acceptance merge/close gate remains authoritative.
-
-Full lifecycle and result contract: `.claude/skills/nession-acceptance/SKILL.md`.
-
-### Issue auto-close
-
-Before a main-targeting PR may close a `requirement`, it must be **merge-ready**; merge readiness is intentionally weaker than final acceptance:
-
-1. every Success Criterion has a stable `SC-xx` id and a matching Acceptance Report row;
-2. each row is staged as `pre-merge`, `staging`, or `post-merge` (legacy three-column reports are treated as `staging`);
-3. every `pre-merge` and `staging` criterion is checked `[x]`, `Pass` / justified `N/A`, and has concrete evidence;
-4. `Fail` blocks merge at every stage;
-5. an unchecked `post-merge` criterion may remain `Pending` only when its evidence already states the blocking merge/deployment/observation condition and planned verification.
-
-The **Requirement Acceptance** workflow runs `scripts/requirement-acceptance.mjs pr-gate`
-for PRs targeting `main`. If a closing requirement is not merge-ready, the check fails and
-the workflow **closes the PR**. Fix the merge-readiness evidence first, then reopen the PR;
-the `reopened` event runs the same gate again. Do not relabel ordinary work as `post-merge`
-to bypass the gate: the stage is the earliest environment in which the criterion can honestly be proven.
-
-A second `issues: closed` guard runs **final closure** validation. Final closure never defers:
-every criterion at every stage must be checked and `Pass` / justified `N/A` with evidence.
-If a release merge auto-closes an issue while explicit `post-merge` criteria are still Pending,
-the guard reopens it with a `Post-merge acceptance pending` diagnostic; this is an expected
-continuation of acceptance, not a failed release. `Close as not planned` remains the cancellation path.
-
-This gate intentionally does **not** run on feature/fix PRs to `staging`: staging is the
-environment where browser/device/deployment criteria are often verified.
-
-Put every `Closes #N` in the **`staging` → `main` release PR body**. Nowhere else.
-
-GitHub interprets closing keywords "only when the pull request targets the repository's *default* branch"; otherwise "these keywords are ignored, no links are created". So:
-
-```
-feat → staging PR body:  Closes #N   → IGNORED, no link, issue stays open
-staging → main PR body:  Closes #N   → linked at PR creation, closed on merge
-```
-
-Measured: PR #257 had a correctly formatted `Closes #256` on its own line with base `staging`, and `closingIssuesReferences` was **0** — not even a UI link. That is why auto-close never worked here before; issues #240, #239 and #177 were all closed by hand.
-
-Because the keyword now rides a PR body targeting the default branch, the merge method is irrelevant and the issue **does** get a proper linked-PR entry in its sidebar — unlike the older commit-message approach, where GitHub notes "the pull request that contains the commit will not be listed as a linked pull request".
-
-This is why the release PR needs an audit step: nothing upstream carries the issue reference for you, so an issue not listed in the release PR body stays open after shipping.
-
-```bash
-gh pr view <RELEASE-PR> --json closingIssuesReferences   # verify before merging
-```
-
-**The PR body is review material, not git history.** `--merge` writes `MERGE_MESSAGE` + `PR_TITLE` to the merge commit, never the PR body, and each commit keeps its own message — so the body never enters history by any path. Still keep the body a change record — 变更内容 + 测试报告, plus `Closes #N` on the release PR — because it is what a reviewer and the release audit read. Screenshots go in a PR comment (`gh pr comment`) rather than the body, now purely so the body stays scannable.
-
-**PR 状态判断（详见 nession-development PR Workflow）：**
-
-```
-当前分支的 PR?
-├─ 没有 → git push + gh pr create
-├─ OPEN → gh pr edit 更新（继续迭代）
-└─ MERGED → ⛔ 分支已死，新建分支 + 新 PR
-```
-
-**⚠ 已合并的 PR 不能 `gh pr edit` 追加 commit。** 合并后分支即死，如需继续修改，必须从最新 main 创建新分支和新 PR。
-
-### 4. Merge to staging triggers build + deploy
-
-When the PR is merged to staging, GitHub Actions (`staging.yml`) automatically:
-1. Reads versions from `Cargo.toml` + `package.json` and computes the short git hash
-2. Builds web UI (`npm ci && npm run build`)
-3. Builds Rust binaries natively for amd64 AND arm64
-4. Creates multi-arch Docker images tagged with **hash** (`server-{sha}`, `agent-{sha}`, `ui-{sha}`)
-5. `deploy-staging-gitops` writes `deploy(staging): <sha>` to `gitops/environments/staging` via `scripts/gitops-commit.sh`
-6. ArgoCD detects the gitops change and syncs the staging environment
-
-**After staging validation**, open the release PR (`staging` → `main`, merged with `--merge`) and bump the version if warranted. The `release.yml` workflow then:
-1. Builds version-tagged Docker images (`server-{version}`, `agent-{version}`, `ui-{version}`)
-2. Creates GitHub Release with native binaries
-3. `promote-production` waits for GitHub Environment `production` approval, then writes `deploy(production): <version>` to `gitops/environments/production`
-4. ArgoCD syncs to production k8s
-
-**No manual steps after merge** (except approving the production Environment). CI → ArgoCD is fully automatic.
-
-## Quick Reference
-
-### Image Tags (managed by CI, not you)
-
-| Image | Primary Tag (always) | Version Alias (on version change) | Source |
-|-------|---------------------|-----------------------------------|--------|
-| server | `server-{sha}` | `server-{version}` | Git hash / `Cargo.toml` |
-| agent | `agent-{sha}` | `agent-{version}` | Git hash / `Cargo.toml` |
-| ui | `ui-{sha}` | `ui-{version}` | Git hash / `web/package.json` |
-
-**Staging uses hash tags** (`server-{sha}`). **Release uses version tags** (`server-{version}`).
-**K8s always deploys immutable tags** for traceable deployments.
-
-### Key Files
-
-| File | Purpose |
-|------|---------|
-| `Cargo.toml` | Workspace version (Rust binaries) |
-| `web/package.json` | Web UI version |
-| `.github/workflows/quality.yml` | PR quality gate (rust-check + web-check) |
-| `.github/workflows/staging.yml` | Staging build + deploy (push to staging) |
-| `.github/workflows/release.yml` | Release build + deploy (push to main) |
-| `.github/workflows/deploy.yml` | Manual SHA deploy to any gitops env (dispatch) |
-| `scripts/gitops-commit.sh` | The only gitops writer (deploy commits) |
-| `gitops` branch `environments/<env>/nession/kustomization.yaml` | Per-env image tags (deploy commits) |
-
-### Observing Deployments
-
-```bash
-# Check CI run status
-gh run list --limit 3
-
-# Watch pods after deploy
-kubectl get pods -n nession -w
-
-# Check deployed image versions
-kubectl get pods -n nession -o jsonpath='{range .items[*]}{.metadata.name}: {.spec.containers[*].image}{"\n"}{end}'
-
-# Force rollout (only if ArgoCD didn't auto-sync)
-kubectl rollout restart deployment -n nession
-```
-
-## CI Pipeline Architecture
-
-```
-PR to staging:
-  → quality.yml: rust-check + web-check (gate for merge)
-
-Merge to staging:
-  → staging.yml:
-  → versions job: read Cargo.toml + package.json + short SHA
-  → build-web: npm ci && npm run build (arch-independent, always)
-  → build-amd64 + build-arm64 (parallel): cargo zigbuild --release
-  → docker: build + push hash-tagged images (server-{sha}-{arch}, etc.)
-  → merge: docker buildx imagetools create (multi-arch manifests)
-  → deploy-staging-gitops: scripts/gitops-commit.sh staging <sha>
-    (gitops commit "deploy(staging): <sha>")
-  → ArgoCD: auto-sync staging environment from gitops
-
-Merge to main (release PR merged with --merge, then optional version bump):
-  → release.yml:
-  → version-check: only runs if version changed in Cargo.toml/package.json
-  → build + docker: version-tagged images (server-{version}-{arch}, etc.)
-  → merge: multi-arch version manifests
-  → build-macos: native macOS binaries
-  → create-release: GitHub Release with all binaries
-  → promote-production (Environment `production` approval gate):
-    scripts/gitops-commit.sh production <version>
-  → ArgoCD: auto-sync production from gitops
-```
-
-## Common Mistakes
-
-| Mistake | Reality |
-|---------|---------|
-| `docker build` for nession | **Forbidden.** CI builds images. |
-| Developing in project root | **Forbidden.** Root = latest `main` mirror. Use `.claude/worktrees/`. |
-| `git checkout -b` in project root | **Forbidden.** Refresh root main, then `EnterWorktree` or `git worktree add`. |
-| "I'll just patch the k8s image tag" | k8s is read-only for you. Fix the CI or roll back via GHCR tags. |
-| Building locally to "test the Docker image" | Test locally with `cargo run`. |
-| Major version bumps (1.x) | Nession is pre-1.0. Only minor and patch exist. |
-| **PR 已合并还往分支推 commit** | **FORBIDDEN.** 合并后分支已死。新建分支 + 新 PR。 |
-| **用 `gh pr edit` 更新已合并的 PR** | 没用的。已合并的 PR 不会因为新 commit 重新打开。 |
-
-## Troubleshooting
-
-### CI Job Fails
-
-```bash
-gh run view <run_id> --log-failed 2>&1 | tail -30
-gh run rerun <run_id> --failed
-```
-
-### Pods Not Starting After Deploy
-
-```bash
-kubectl describe pod <pod-name> -n nession | grep -A10 "Events:"
-```
-
-### Stale Pods Stuck on Old Images
-
-```bash
-kubectl delete pod <pod-name> -n nession
-# If old ReplicaSet keeps creating pods:
-kubectl scale rs <old-rs-name> -n nession --replicas=0
-```
+Use the current workflow files as executable truth and keep this Skill focused on the operational decision flow.

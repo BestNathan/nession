@@ -1,97 +1,48 @@
 ---
 name: nession-writing-requirements
-description: Use when the user requests a feature, change, or enhancement to Nession and requirements need documenting, OR when the user reports a bug/缺陷 that should be recorded or tracked. Use when the user says "我需要一个需求文档", "记录一下需求", "create a requirement", "帮我记录个 bug", "报个 bug 到 issue", "这个 bug 提个 issue", or mentions tracking requirements or bugs in GitHub Issues. Do NOT use for implementation planning (use brainstorming after this) or for bugs the user wants fixed immediately with no record (that is plain superpowers:systematic-debugging).
+description: Use when creating/updating Nession Requirement or Bug GitHub issues, documenting user requests, maintaining Success Criteria/Acceptance Report structure, labels, or conversation history.
 ---
 
 # Nession Writing Requirements
 
-Requirements and bug analyses live in GitHub Issues, not in the repo. Repo: `BestNathan/nession`.
+This Skill owns **issue structure and requirement capture**. It does not own implementation, Gate semantics, or execution of acceptance.
 
-## Classify first
+- implementation -> `nession-development`
+- acceptance execution -> `nession-acceptance`
+- Gate semantics -> `nession-gates`
 
-| Input | Path |
-|---|---|
-| New capability, behavior change, "希望能…" | **Requirement** → `superpowersexy:clarifying-requirements` |
-| "should work but doesn't", "X 之后 Y 不刷新", crash, wrong output | **Bug** → `superpowers:systematic-debugging` |
-| Ambiguous | Ask which. |
+The executable structural owner is `scripts/issue-contract.mjs`.
 
-Mixed message (requirement + bug together) → run both paths, one issue each.
+## 1. Classify first
 
-Write issue bodies in the reporter's language; keep the section headers below, plus code identifiers, file paths and this skill's own vocabulary (`unverified`, `Investigation Status`), in English.
+Choose exactly one kind:
 
-## Hard rules
+- **Requirement** — requested product/engineering behavior/change.
+- **Bug** — observed behavior contradicts the intended/current contract.
 
-- In a hurry ≠ skip the analysis. "直接记一下" means record it efficiently, not record a guess.
-- Analysis precedes filing. Never file first and backfill the analysis.
-- An unconfirmed mechanism goes under **Investigation Status**, marked unverified — never under **Root Cause**.
-- The reporter's scope ("mobile only", "P2P only") is a claim to verify, not a fact. Title by the strongest **verified** fact, never by reported scope and never by an unverified hypothesis.
-- A reporter's stated cause that turns out false goes in **Investigation Status** as a verified fact, and gets said out loud in B5. Don't quietly drop it.
-- One requirement = one issue. Changes edit in place, never a new issue.
-- `bug` is lowercase. Never create `BUG`.
-- `Closes #N` belongs only in the `staging → main` release PR body.
-- Every Requirement Success Criterion uses a stable ID: `SC-01`, `SC-02`, ... . IDs survive wording edits so implementation, staging verification and release acceptance can refer to the same criterion.
-- Every Success Criterion has an acceptance **Stage**: `pre-merge`, `staging`, or `post-merge`. Choose the earliest stage where the criterion can be honestly verified; never mark something `post-merge` merely to bypass a merge gate.
-- A checked criterion means **accepted**, not merely implemented. Do not change `[ ]` to `[x]` until the criterion has an explicit acceptance conclusion and concrete evidence.
-- Every Requirement issue carries an `## Acceptance Report` with exactly one row per Success Criterion. New requirements start at `Pending`. Merge readiness may defer only explicit `post-merge` Pending rows with actionable verification evidence; completed closure still requires every criterion to be `Pass` or justified `N/A` with evidence.
-- `Close as not planned` is the cancellation path. It does not claim the implementation met the requirement and therefore does not require acceptance.
+Use one or more area labels appropriate to the affected owner.
 
-## Automated Issue Audit
+Before creating a new issue, search for an existing issue that already owns the same problem.
 
-GitHub issue events are audited by `.github/workflows/issue-audit.yml`.
+## 2. Requirement format
 
-- `scripts/issue-contract.mjs` is the deterministic structural contract for Bug/Requirement issue bodies and labels.
-- Cursor is the default semantic repair provider (`cursor` GitHub Environment + `CURSOR_API_KEY`); manual dispatch may explicitly select `deepseek` for comparison/rollback.
-- Cursor audits use Composer 2.5 with `fast=true` by default, verify that model capability from Cursor's model catalog, and never silently fall back to Auto or another provider.
-- Cursor receives only repository read/search built-ins; target issue mutation is exposed through harness-owned custom tools bound to the selected issue number.
-- A structurally valid issue stops before any LLM call.
-- A structurally invalid issue from an OWNER/MEMBER/COLLABORATOR may be repaired by Claude Code through the `deepseek` GitHub Environment.
-- External-author issues never unlock model credentials automatically; use the workflow's manual dispatch after review.
-- The audit agent must read this skill, may only repair the target issue, and must never implement code, push/merge, or close the issue.
-- Each LLM invocation records token/cost telemetry as an Actions artifact and step summary.
-- **Existing-issue audit mode is bounded normalization, not a restart of B0/B1.** The issue already exists, so do not dedupe it again or spend the run trying to prove an unconfirmed root cause. Preserve the reporter's evidence, use **Investigation Status** when mechanism is unverified, inspect only enough static code to provide honest Location / hypothesis context, then repair the issue.
-- Runtime reproduction, broad end-to-end tracing, and deeper hypothesis testing belong to the later bug investigation/fix workflow; the audit agent must not consume its whole turn budget doing that work.
-
-Keep this skill and the deterministic contract aligned. A format change is incomplete until both are updated and their self-tests pass.
-
-## Executable Acceptance
-
-After implementation, do not manually hand-edit accepted checkboxes/report rows as the normal path. Use the repository Acceptance workflow described by `.claude/skills/nession-acceptance/SKILL.md`:
+Title:
 
 ```text
-Issue Audit -> implementation -> stage-specific Acceptance
-            -> deterministic Issue updater
-            -> Requirement Acceptance gate / close guard -> closure
+Requirement: <concise outcome>
 ```
 
-Gate semantics, runner behavior, and anti-bypass rules live in `nession-gates`; this skill owns the Requirement/Success-Criteria structure, not the Gate execution contract.
-
-Acceptance evaluates only the explicitly requested `pre-merge`, `staging`, or `post-merge` rows. The Acceptance Agent is read-only and emits structured data; only the deterministic updater may project Pass / justified N/A to `[x]` and write Acceptance Report evidence. Existing merge/closure validation remains the final deterministic gate.
-
----
-
-# Requirement path
-
-1. **`superpowersexy:clarifying-requirements`** — run the clarification process in full
-2. **Skip its local-file step** (`docs/superpowers/requirement/...`) — the document becomes the issue body
-3. **Ensure labels exist** (see Labels)
-4. **Create the issue** — including its `## Product alignment` section (see Issue body below); an unticked box is a finding to state, not a formality to skip
-5. **Append the conversation record**
-6. **User reviews**, iterate as needed
-7. **`superpowers:brainstorming`**
-
-### Issue body
+Body must contain:
 
 ```markdown
-## Requirements: [Topic]
+## Requirements: <Topic>
 
-[Full document from clarifying-requirements:
- Background / Goals / Non-Goals / Scope / Constraints /
- Success Criteria / Edge Cases / Open Questions]
+<problem, desired behavior, constraints, design decisions>
 
-Success Criteria MUST be rendered as stable checklist IDs:
+### Success Criteria
 
-- [ ] SC-01 [criterion]
-- [ ] SC-02 [criterion]
+- [ ] SC-01 <observable criterion>
+- [ ] SC-02 <observable criterion>
 
 ## Acceptance Report
 
@@ -100,258 +51,129 @@ Success Criteria MUST be rendered as stable checklist IDs:
 | SC-01 | pre-merge | Pending | implementation pending |
 | SC-02 | staging | Pending | implementation pending |
 
-Create exactly one Pending row for every Success Criterion and classify the earliest honest verification stage:
-
-- `pre-merge`: unit/integration/static/local verification can prove it before merge;
-- `staging`: requires the deployed staging environment; it must pass before release to `main`;
-- `post-merge`: cannot be proven until the relevant merge/deployment/observation window exists.
-
-Replace Pending with Pass / Fail / justified N/A once the criterion is actually verified and replace the placeholder with concrete evidence (test, workflow run, screenshot/PR comment, environment observation, or other auditable proof). Only Pass / justified N/A rows may be checked `[x]`. A `post-merge` row may remain unchecked + Pending when merging, but its evidence must already state the blocking event/environment and the planned verification.
-
 ## Product alignment
 
-- [ ] Does this move Nession toward `VISION.md`?
-- [ ] Does it obey `PRINCIPLE.md`?
-- [ ] Were the relevant `docs/design/*` documents checked for consistency?
-- [ ] If it deviates from a canonical design decision, is the deviation stated here or in a linked follow-up?
+- [ ] Does this move Nession toward VISION.md?
+- [ ] Does it obey PRINCIPLE.md?
+- [ ] Were relevant docs/design/* sources checked?
+- [ ] Is any deviation explicit?
 
 ---
 **Status:** Draft | In Discussion | Approved
-**Created:** [YYYY-MM-DD]
-**Author:** [user]
 ```
 
-**On the alignment box you cannot tick.** The first three are the questions `VISION.md`
-and `PRINCIPLE.md` exist to force; if one cannot be ticked honestly, that is a finding, not
-a formality — say so in the body and let it shape the requirement. The fourth box is the one
-that decays fastest: a deviation is easy to make and easy to leave unrecorded (see the
-decision-E episode on #702), so write it down where the next reader will look.
+Every Success Criterion has a stable `SC-xx` ID and exactly one Acceptance Report row.
 
-### Commands
+Stages are `pre-merge`, `staging`, or `post-merge`.
 
-```bash
-gh issue create --repo BestNathan/nession \
-  --title "Requirement: [Topic]" \
-  --body "[document]" \
-  --label requirement --label web --label ui --label ux
+Results are `Pending`, `Pass`, `Fail`, or justified `N/A`.
 
-gh issue comment [N] --repo BestNathan/nession --body "[conversation record]"
+## 3. Good Success Criteria
+
+A criterion states an externally verifiable outcome, not an implementation todo.
+
+Good:
+
+- exact behavior/state transition;
+- compatibility or non-regression boundary;
+- measurable UI/interaction result;
+- deterministic validation evidence.
+
+Bad:
+
+- “code looks clean”;
+- “refactor completed” without behavior;
+- duplicating the implementation plan as checkboxes;
+- ambiguous “works correctly”.
+
+Use `post-merge` only when the criterion genuinely cannot be proven before merge/deploy/observation.
+
+## 4. Bug format
+
+Title:
+
+```text
+Bug: <observed failure>
 ```
 
-### Conversation record format
+Required sections:
+
+```markdown
+## Description
+## Reproduction
+## Root Cause
+## Impact
+## Fix Direction
+## Location
+```
+
+If root cause is not verified, use `## Investigation Status` instead of `## Root Cause`. Never include both.
+
+A Bug issue should distinguish verified facts from hypotheses.
+
+## 5. Product alignment
+
+For user-facing Requirements, read `VISION.md`, `PRINCIPLE.md`, and relevant `docs/design/*` before finalizing.
+
+Do not use current implementation limitations as product requirements unless the constraint is intentional.
+
+## 6. Conversation history
+
+When requirements evolve, preserve meaningful decisions in an issue comment rather than repeatedly bloating the canonical body.
+
+Recommended comment:
 
 ```markdown
 ## Conversation History
 
-### [YYYY-MM-DD HH:MM] — Initial Request
-**User:** [verbatim]
-**Agent:** [restatement]
-**User:** [confirmation / correction]
+### YYYY-MM-DD — Initial Request
+**User:** ...
 
-### [YYYY-MM-DD HH:MM] — Round N: [topic]
-**Agent:** [questions]
-**User:** [answers]
+**Agent:** ...
 
-### [YYYY-MM-DD HH:MM] — Requirements Finalized
+### YYYY-MM-DD — Decision
+...
 ```
 
-### Handling changes
+The issue body should remain the current canonical requirement, not a chronological transcript.
+
+## 7. Changes after creation
+
+When the user changes a requirement:
+
+1. update the canonical issue body;
+2. update/add affected SC rows;
+3. preserve already-valid acceptance evidence only when the criterion meaning did not change;
+4. add a conversation-history comment describing the decision;
+5. keep Status accurate.
+
+If criterion meaning changes materially, old evidence must not silently count as proof.
+
+## 8. Acceptance relationship
+
+This Skill defines criteria and report structure.
+
+`nession-acceptance` executes stage-specific acceptance and updates evidence. The deterministic requirement-acceptance validator decides merge/closure eligibility.
+
+Do not duplicate validator semantics here beyond the public table vocabulary.
+
+## 9. Validate
+
+Before considering an issue well-formed, run/use the canonical issue contract validator where applicable:
 
 ```bash
-gh issue edit [N] --repo BestNathan/nession --body "[updated document]"   # edit in place
-gh issue comment [N] --repo BestNathan/nession --body "[change discussion]"
+node scripts/issue-contract.mjs self-test
 ```
 
-Update specification Status as it moves: Draft → In Discussion → Approved.
+For an existing issue, use the repository's issue-audit workflow/tooling.
 
-Acceptance is a separate lifecycle dimension. After implementation, evaluate every Success Criterion at its declared Stage and update its Acceptance Report row only when that stage is runnable. Before merge, all `pre-merge` and `staging` criteria must be accepted; explicit `post-merge` criteria may remain Pending with actionable evidence describing what they are waiting for and how they will be verified. A requirement is ready for completed closure only when **every** criterion at every stage is checked and every row is Pass or justified N/A with concrete evidence.
+## Stop conditions
 
----
+Do not finalize when:
 
-# Bug path
-
-1. **B0 dedupe** — scan all open issues, not just `--label bug`
-2. **B1 analyze** — `superpowers:systematic-debugging` Phases 1–3
-3. **B2 create issue** — title `Bug: [summary]`
-4. **B3 label** — `bug` + every applicable area
-5. **B4 append the investigation trail**
-6. **B5 ask the user**: fix now (Phase 4) or stop here — and hand back the one question that collapses the hypothesis ranking (e.g. "do preset commands fail too?")
-
-### B0 dedupe
-
-```bash
-gh issue list --repo BestNathan/nession --state open --limit 100 \
-  --json number,title,labels --jq '.[] | "\(.number)\t[\(.labels|map(.name)|join(","))]\t\(.title)"'
-```
-
-| Result | Action |
-|---|---|
-| Duplicate | Comment on the existing issue, don't create |
-| Overlapping, not duplicate | File separately, cross-reference `#N` both ways |
-| Closed issue, same symptom | Mention `#N` in the new issue |
-
-### B1 analyze
-
-**Phase 1** Read the code, trace the data flow to where the bad behavior originates, check recent changes
-**Phase 2** Find the working equivalent path, list the differences
-**Phase 3** State the root-cause hypothesis explicitly, test it minimally against the code
-
-**Floor:** trace the reported path end to end (sender → transport → receiver), plus one working-path comparison.
-**Ceiling:** static evidence only. Demo stacks, intermittent-race repro, instrumentation → defer to **Fix Direction** as the next step. The ceiling governs **filing**, not fixing — once the user picks "fix now" in B5, the local demo stack and Playwright verification required by `nession-development` apply in full.
-
-Output must separate **verified facts** (with file:line) from **hypotheses** (marked unverified).
-
-Root cause not confirmed (can't reproduce, environment unavailable) → write **Investigation Status**: what was checked, what was ruled out, remaining hypotheses ranked, all marked unverified.
-
-### B2 issue body
-
-```markdown
-## Description
-[reporter's words, verbatim]
-
-## Reproduction
-[steps — mark whether reported or locally verified]
-
-## Root Cause
-[confirmed mechanism + file:line]
-[or Investigation Status: verified facts / ruled out / ranked hypotheses (unverified)]
-
-## Impact
-
-## Fix Direction
-[confirmed → the fix; unconfirmed → the next investigation step]
-
-## Location
-- file:line
-```
-
-```bash
-gh issue create --repo BestNathan/nession \
-  --title "Bug: [summary]" \
-  --label bug --label terminal --label web --label ui \
-  --body "[analysis]"
-
-gh issue comment [N] --repo BestNathan/nession \
-  --body "[investigation trail: what was checked, what was ruled out, in order]"
-```
-
----
-
-# Labels
-
-**Kind — exactly one:** `requirement` | `bug`
-
-**Workflow — at most one:** `in-progress` (agent claim lock; see `nession-development` § Claim before you build)
-
-**Area — every one that applies:**
-
-| Label | Roughly |
-|---|---|
-| `terminal` | terminal / xterm / tmux behavior, anywhere in the tree |
-| `web` | `web/src/**` |
-| `ui` / `ux` | renders wrong / behaves or communicates wrong |
-| `backend` | roll-up for any Rust-side work |
-| `server` `agent` `cli` `protocol` | `crates/nession-{server,agent,cli,common}/**` |
-| `infra` | Docker, `deploy/**`, shipped `*.toml` configs, deployment desired state (the `gitops` branch — no k8s manifests live on `main`) |
-| `ci` | workflows, `scripts/**`, `justfile`, git hooks |
-| `test` | coverage and test infrastructure |
-| `documentation` | a written convention must change |
-
-### Three rules
-
-1. **Apply every label that applies; when unsure, apply it.** `--label` is AND, never OR, so a single-label pull is only complete if labels are generous. Don't deliberate over whether one *quite* fits.
-2. **Label the mechanism AND the affected surface.** A server-side defect that freezes the browser list carries `backend`+`server` *and* `web`+`ux`. Never the surface alone. Mechanism unconfirmed → label every area your ranked hypotheses name; **only those** — an area you never considered is not a labeling reason.
-3. **Narrow when the root cause lands.** Drop the areas whose hypotheses lost; keep the confirmed mechanism, its roll-up, and the surface.
-
-```
-Bug: terminal toolbar quick command does nothing    → bug, terminal, web, ui, ux
-Bug: server drops session events after agent reconnect → bug, backend, agent, server, protocol, web, ux
-Bug: nession-cli PTY size not synced after resize   → bug, terminal, cli, backend, protocol, ui, ux
-Requirement: group session list by agent, collapsible → requirement, web, ui, ux
-Requirement: gitops deploy commits written by CI    → requirement, ci, infra, documentation
-```
-
-Examples show shape only. **The rules win over the examples** — if your analysis names an area an example omits, apply it.
-
-### Bootstrap (once)
-
-```bash
-create_label() {
-  gh label create "$1" --repo BestNathan/nession --color "$2" --description "$3" 2>/dev/null || echo "exists: $1"
-}
-create_label requirement 0E8A16 "Feature requirements and specifications"
-create_label terminal 1D76DB "Terminal / xterm / tmux behavior"
-create_label web      1D76DB "web/src — React frontend"
-create_label ui       5DADE2 "Visual appearance, layout, styling"
-create_label ux       5DADE2 "Interaction, flow, error feedback"
-create_label backend  0E8A16 "Roll-up: any Rust-side work"
-create_label server   2EA043 "crates/nession-server"
-create_label agent    2EA043 "crates/nession-agent"
-create_label cli      2EA043 "crates/nession-cli"
-create_label protocol A371F7 "crates/nession-common — protocol, shared types"
-create_label infra    6E7781 "Docker, k8s, deploy"
-create_label ci       6E7781 "CI workflows, scripts, justfile, git hooks"
-create_label test     D4A72C "Test coverage and test infrastructure"
-create_label in-progress FBBA52 "An agent is actively working on this issue"
-# bug / documentation are GitHub defaults — already exist
-```
-
-Missing label? Create it now. Never drop a label to save a command.
-
----
-
-# Lifecycle
-
-**Requirement:** Draft → In Discussion → Approved → **claimed (`in-progress`)** → implementation → pre-merge verification → staging verification → **Mergeable** (only explicit post-merge criteria may remain Pending) → release/merge → post-merge verification → **Acceptance Passed** → Closed. Specification Status lives in the body; acceptance lives in the Success Criteria + Acceptance Report. Merge readiness and final acceptance are different states; completed closure may not happen until every stage passes.
-
-**Bug:** Filed with analysis → on confirmation, one edit updates the body *and* narrows the labels → **claimed (`in-progress`)** → fix PR references it → claim released → closed by the release PR's `Closes #N`.
-
-```bash
-gh issue edit [N] --repo BestNathan/nession --remove-label server --remove-label protocol
-```
-
-# Edge cases
-
-| Situation | Action |
-|---|---|
-| No `gh` | Save to `docs/superpowers/requirement/YYYY-MM-DD-<topic>.md` (that directory exists; create `docs/superpowers/bug/` alongside it if you need one) and tell the user |
-| Already mid-debug | Don't restart the investigation — take the Phase 1–3 findings to B2 |
-| User wants the fix now | File first, then Phase 4 on a `fix/` branch. Never fix silently and retro-file |
-| Conversation record > 65536 chars | Summarize early rounds, keep recent ones verbatim |
-| Which issue was it? | `gh issue list --repo BestNathan/nession --label requirement --search "<keywords>"` |
-
-# Quick reference
-
-Create / comment / edit commands are in the path steps above. Not there:
-
-| Action | Command |
-|---|---|
-| List labels | `gh label list --repo BestNathan/nession` |
-| Pull one area | `gh issue list --repo BestNathan/nession --label terminal --state open` |
-| Area + kind | `gh issue list --repo BestNathan/nession --label terminal --label bug --state open` |
-| OR several areas | `gh issue list --repo BestNathan/nession --search "label:server,agent,protocol state:open"` |
-| Check claim on #N | `gh issue view [N] --json title,state,labels,comments` |
-| Claim issue | `gh issue edit [N] --add-label in-progress` |
-| Release claim | `gh issue edit [N] --remove-label in-progress` |
-| Add labels | `gh issue edit [N] --repo BestNathan/nession --add-label terminal --add-label ui` |
-| Narrow labels | `gh issue edit [N] --repo BestNathan/nession --remove-label server` |
-| Find by title | `gh issue list --repo BestNathan/nession --label requirement --search "<keywords>"` |
-
-# Red flags — stop and start over
-
-- Writing to a local file instead of creating an issue
-- Issue has a kind label but no area labels
-- Skipping clarifying-requirements (requirements) or systematic-debugging (bugs)
-- **Root Cause** contains a guess; or every section but **Description** is unverified
-- Issue scoped to the mode / platform / version the reporter named, without checking whether the mechanism depends on it
-- A second issue for the same requirement
-- Root cause confirmed but speculative labels never removed
-- "File it now, analyze later"
-
-# Relationships
-
-```
-requirement → clarifying-requirements ┐
-                                      ├→ GitHub Issue → brainstorming → writing-plans → executing-plans
-bug         → systematic-debugging   ┘                  (bug optionally continues into Phase 4)
-```
+- kind is unclear;
+- there is no area owner;
+- Success Criteria are implementation tasks instead of outcomes;
+- Acceptance rows do not match SC IDs;
+- a Bug root cause is stated as fact without evidence;
+- product-facing behavior conflicts with Vision/Principles without an explicit decision.

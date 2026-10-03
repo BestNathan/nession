@@ -1,840 +1,192 @@
 ---
 name: nession-development
-description: Use when developing Nession features, writing or running tests, deciding how to bump versions (minor vs patch), creating pull requests, or onboarding to the Nession development workflow. Use when starting work from existing GitHub Issues — "把 terminal 相关的 issue 拉出来一起做", "这个 sprint 处理哪些 issue", pulling issues by label, or planning a batch of issues across branches. Enforces: project root stays on latest main (read-only); all development in .claude/worktrees/.
+description: Use when implementing Nession features/fixes, working from issues, creating worktrees/branches/PRs, running development verification, or deciding the normal code-change workflow.
 ---
 
 # Nession Development
 
-## Overview
+This Skill owns the **develop -> verify -> publish** workflow. It does not own Gate semantics, release policy, UI design rules, environment installation, or subsystem architecture.
 
-Monorepo (Rust workspace + React web UI). Develop locally with `cargo run`/`npm run dev`, test with `cargo test`, version bump in `Cargo.toml` + `web/package.json`, submit changes via PR. Never build Docker images locally — CI handles that.
+Load related Skills only when needed:
 
-**⚠ UI/交互改动必须用 Playwright 验证**：任何涉及 WebUI 视觉、交互、布局、终端行为的改动，必须在本地运行完整栈（server + agent + web），通过 Playwright MCP 在浏览器中验证功能正确后才算完成。仅靠单元测试和类型检查不够。
+- Gate selection/failures -> `nession-gates`
+- CI/staging/release/deploy -> `nession-cicd`
+- UI/design/browser proof -> `nession-web-design`
+- missing tools/setup -> `nession-env`
+- review -> `nession-code-review`
 
-**Starting from issues rather than a fresh idea?** See "Batch Development by Label" below — it covers pulling an area's issues, ordering them by file-overlap risk, and deciding what shares a branch.
+Always read the nearest scoped `AGENTS.md` for files you change.
 
-## ⛔ Iron Law: Project Root = Latest Main Only
+## 1. Start from latest main
 
-```
-项目根目录 = origin/main 的只读镜像。
-根目录永远 checkout 在 main 上，且工作区必须干净。
-根目录禁止：改文件、提交、切 feature 分支、跑 cargo/npm 做功能开发。
-```
+The repository root is a read-only latest-`main` mirror.
 
-**每次开新 worktree 前，先在根目录刷新 main：**
-
-```bash
-git fetch origin
-git checkout main
-git pull --ff-only origin main
-git status   # 必须 clean
-```
-
-根目录允许的操作：`git fetch`、`git checkout main`、`git pull --ff-only`、`git worktree *`、读代码/文档。
-
-## ⛔ Iron Law: All Development in Worktrees
-
-```
-主分支 (main) 是只读的。
-绝对不要在 main 上直接开发、修改、或提交任何代码。
-所有开发（feat/fix/chore/docs/版本 bump/发布 cherry-pick）必须在 worktree 中进行。
-```
-
-| 规则 | 说明 |
-|------|------|
-| **根目录 = main 镜像** | 根目录只用来同步 main 和创建 worktree，不做开发 |
-| **main 是只读的** | 永远不要在 main 上提交；worktree 里 `git branch --show-current` 不能是 `main` |
-| **所有开发在 worktree 中进行** | 使用 `EnterWorktree` 或 `git worktree add` 到 `.claude/worktrees/` |
-| **一个功能 = 一个 worktree** | 每个 feature/bugfix/release 都从 origin/main 创建独立的 worktree |
-| **合并后 worktree 即死** | PR 合并后，对应的 worktree 和分支不再使用 |
-
-## ⛔ Iron Law: Branch Naming Must Trigger CI/CD
-
-```
-分支名必须匹配 feat/<slug> 或 fix/<slug>，否则 CI 不会触发。
-EnterWorktree 的 name 参数必须使用完整前缀。
-```
-
-**CI 触发规则：** `.github/workflows/quality.yml` 在 PR 目标为 `staging` 时触发；`.github/workflows/staging.yml` 在 push 到 `staging` 分支时触发。feat/fix 分支的 PR 必须目标为 `staging`。
-
-| ✅ 正确 | ❌ 错误 | 后果 |
-|---------|---------|------|
-| `feat/agent-display-name` | `worktree-feat+agent-display-name` | CI 不触发 |
-| `feat/add-login` | `feat_add_login` | CI 不触发 |
-| `fix/oom-on-attach` | `bugfix/oom` | CI 不触发 |
-
-**创建 worktree 时：**
-```bash
-# ✅ 正确 — EnterWorktree 传入完整分支名
-EnterWorktree name: "feat/<slug>"
-
-# ❌ 错误 — 使用随机名或 worktree- 前缀
-EnterWorktree name: "my-feature"
-```
-
-**如果分支名已错误：**
-```bash
-git branch -m <旧名> feat/<正确名>   # 本地重命名
-git push -u origin feat/<正确名>      # 推送正确分支
-git push origin --delete <旧名>       # 删除旧远程分支
-gh pr close <旧PR号>                  # 关闭旧 PR
-gh pr create --title "..." --body "..."  # 创建新 PR
-```
-
-## 1. Worktree 开发流程
-
-### 为什么必须用 Worktree
-
-- **隔离工作目录** — 不污染 main，不阻塞 main 上的 checkout/pull
-- **并行开发** — 多个 feature 可以同时进行，互不干扰
-- **自动清理** — worktree 未被修改时自动删除，干净不留痕
-
-### 创建 Worktree 开始开发
-
-**Step 0 — 刷新根目录 main（在 project root 执行）：**
+Before new work:
 
 ```bash
 git fetch origin
 git checkout main
 git pull --ff-only origin main
-git status   # 必须 clean
+git status
 ```
 
-**Step 1 — 创建 worktree（不要在根目录里 `git checkout -b`）：**
+The root must be clean. Do not edit, commit, create a feature branch, or run feature-development builds there.
+
+## 2. Create an isolated worktree
+
+Every feat/fix/chore/docs/version change uses its own worktree under `.claude/worktrees/`.
+
+Preferred in Claude Code:
+
+```text
+EnterWorktree name: "feat/<slug>"
+```
+
+Manual:
 
 ```bash
-# Claude Code / Cursor — 推荐
-EnterWorktree name: "feat/<slug>"
-
-# 手动 — 从已刷新的根目录
 git worktree add -b feat/<slug> .claude/worktrees/feat-<slug> origin/main
 cd .claude/worktrees/feat-<slug>
 ```
 
-⚠ Claude Code 的 **subagent**（Agent 工具派生的后台代理）无法调用 `EnterWorktree`——直接用上面的手动 `git worktree add` 命令，产物与规范命令完全一致（位置、分支名、base 都相同）。
+Use `fix/<slug>` for fixes. Use `chore/` / `docs/` where appropriate.
 
-**依赖 staging 上尚未发布代码时** — base 用 `origin/staging`，仍在 `.claude/worktrees/` 下创建，不要在根目录 reset：
+Only base on `origin/staging` when the change genuinely depends on unreleased staging code.
 
-```bash
-git worktree add -b fix/<slug> .claude/worktrees/fix-<slug> origin/staging
-cd .claude/worktrees/fix-<slug>
-```
-
-### 验证当前环境
-
-开始任何开发前，必须确认你**不在 main 上**：
+Verify:
 
 ```bash
-git branch --show-current   # 必须显示 feat/<slug>，绝对不能是 "main"
+git branch --show-current   # never main
+git status
 ```
 
-### 完成开发后
+## 3. Discover owners before editing
+
+Before implementation:
+
+1. read the nearest scoped `AGENTS.md`;
+2. inspect the issue/requirement and current implementation;
+3. discover relevant Gates with `./gates/run --list`;
+4. use `./gates/run --describe <id>` for likely invariants;
+5. identify the canonical code/doc owner instead of adding parallel policy.
+
+Do not reconstruct protocol/design/Gate rules from old comments or workflow YAML.
+
+## 4. Implement narrowly
+
+Keep one logical responsibility per change. Preserve unrelated work.
+
+For Rust/Web commands, use existing `just` targets and package scripts instead of inventing alternatives.
+
+Useful local entrypoints:
 
 ```bash
-# 1. 推送分支，创建 PR
-git push -u origin feat/<slug>
-gh pr create --title "feat: <description>" --body "..."
-
-# 2. PR 合并后 — 回到根目录刷新 main，清理 worktree
-cd <project-root>
-git fetch origin && git checkout main && git pull --ff-only origin main
-git worktree remove .claude/worktrees/feat-<slug>
-git worktree prune
-git branch -d feat/<slug>
-```
-
-**Claude Code 方式** — PR 合并后使用 `ExitWorktree` 退出并清理（action: "remove"）。
-
-### ⚠ 常见违规
-
-| 违规行为 | 正确做法 |
-|----------|----------|
-| 在项目根目录改代码 / 提交 | **禁止。** 根目录只做 main 镜像；所有开发进 worktree |
-| 在项目根目录 `git checkout -b` | 先刷新根目录 main，再 `EnterWorktree` 或 `git worktree add` |
-| 根目录 main 落后 origin/main | `git fetch && git checkout main && git pull --ff-only origin main` |
-| 多个 feature 共用一个 worktree | 每个 feature 独立 worktree，互不干扰 |
-| PR 合并后还在旧分支上继续推 commit | 旧 worktree/分支已死，新建 worktree 从最新 origin/main 开始 |
-| **分支名不是 `feat/` 或 `fix/` 前缀** | **CI 不会触发！必须用 `feat/<slug>` 或 `fix/<slug>`** |
-| **EnterWorktree 未传完整分支名** | 传入 `feat/<slug>` 而非裸名，保证 CI 能触发 |
-
-### 自动化 enforcement
-
-| 时机 | 机制 | 检查内容 |
-|------|------|----------|
-| `git commit` | `pre-commit` → `scripts/check-dev-workspace.sh commit` | 禁止在项目根目录提交；禁止在 `main` 上提交 |
-| `git push` | `pre-push` → `scripts/check-dev-workspace.sh push` | 同上 |
-| 开新任务前 | `just check-workspace` | 根目录是否在 `main`、是否干净、是否落后 `origin/main` |
-
-脚本**不能**阻止在根目录改文件（未 commit 前无 hook 可拦）——`session` 模式供 Agent/人工自查。
-
-## 2. Local Development
-
-Three terminals, from repo root:
-
-```bash
-# Terminal 1 — server (WebSocket :19090; no HTTP locally)
-cargo run -p nession-server
-
-# Terminal 2 — agent (needs tmux on the host)
-cargo run -p nession-agent
-
-# Terminal 3 — web UI (Vite dev server :13000, proxies /ws → :19090)
-cd web && npm run dev
-```
-
-The UI is at `http://localhost:13000`.
-
-```bash
-cargo build                    # All Rust crates
-cd web && npm run build        # Production web build → web/dist/
-cargo fmt -- --check           # Check formatting
-cargo clippy -- -D warnings    # Lint
-cd web && npx tsc --noEmit     # TypeScript check
-cd web && npm run lint         # ESLint
-```
-
-### Local Build Cache
-
-Each worktree keeps a **private `target/`**; a new one is warm-seeded from the main
-worktree by filesystem copy-on-write (dependency artifacts only), and all local builds
-route through `scripts/rustc-wrapper.sh` to a machine-wide sccache.
-
-**A worktree does not reuse another worktree's compilation**, and neither does `main`
-reuse a worktree's — sccache keys include absolute paths, and Rust key normalization is
-not complete upstream (#986). Do not expect "a new worktree compiles from zero".
-
-```bash
-just build-cache-status    # what is configured
-just build-cache-verify    # what actually happens, incl. cross-checkout hit/miss
-```
-
-**📋 Full guide:** [`references/local-build-cache.md`](references/local-build-cache.md)
-— the three layers, **when sccache will not hit** (and why), how to read the probe, and
-how to reset the counters safely. Consult it before concluding the cache is broken.
-
-### shadcn/ui Component Conventions
-
-**Before building any new UI pattern, check if shadcn has a primitive for it.**
-
-**📋 Full inventory:** [`references/shadcn-components.md`](references/shadcn-components.md) — installed primitives, custom-component-to-shadcn mapping, priority queue for uninstalled components, golden rules. Always consult this before hand-rolling a layout pattern.
-
-**Golden rules (condensed):**
-1. **Check the inventory first** — shadcn likely has a primitive for tabs, tooltips, resizable panels, command palettes, etc.
-2. **Install via CLI only** — `npx shadcn@latest add <name> --yes`, never hand-write shadcn components
-3. **Custom wrappers are the intended pattern** — thin domain wrappers over shadcn primitives (e.g., `ConnectionStatusBadge` wraps `Badge`)
-4. **Destructive confirms → AlertDialog** (not Dialog)
-5. **Hand-rolled tab strips → use shadcn Tabs** (duplicated in 5 sites)
-6. **Raw resize listeners → use shadcn Resizable** (currently in SidePanel)
-
-**Installed (25 primitives):** AlertDialog, Badge, Button, Card, Checkbox, Collapsible, ContextMenu, Dialog, DropdownMenu, Input, Label, Popover, Progress, Resizable, ScrollArea, Select, Separator, Sheet, Skeleton, Sonner, Tabs, Textarea, Toggle, ToggleGroup, Tooltip — plus 2 custom wrappers (ConnectionStatusBadge, RefreshButton). Built on `@base-ui/react`; `alert-dialog` is the only Radix one. Four (Resizable, Sheet, Sonner, Toggle) currently have no importer.
-
-**Not installed, most likely to be wanted:** Command, Table, Breadcrumb, Avatar, Accordion, HoverCard
-
-## 3. Tests
-
-Rust unit tests go in `#[cfg(test)]` modules inside `src/` or standalone files under `crates/*/tests/`. All async, using `#[tokio::test]`. On the web side there **is** a test runner — Vitest, split into `unit` and `integration` projects (`just web-test`, or `npm test` in `web/`) — alongside `tsc --noEmit` and `eslint`. Run it through the npm script or `just`, not a bare `vitest run` at the repo root.
-
-```bash
-cargo test                  # All tests (unit + integration)
-cargo test -p nession-server  # Single crate
-cargo test --test '*'       # Integration tests only
-```
-
-### Testing Gates
-
-`nession-gates` is the canonical skill for Gate semantics, discovery, execution, failure repair, authoring, suites, and anti-bypass rules. Use `./gates/run --describe <id>` instead of reverse-engineering hook/workflow commands. The table below documents the underlying checks/thresholds; when a canonical Gate exists, prefer its Gate ID.
-
-Before merging any PR, these MUST pass:
-
-| Gate | Command | Threshold |
-|------|---------|-----------|
-| Unit + integration tests | `just test` | 100% pass |
-| Coverage (Rust) | `just coverage` | per-crate, see table below |
-| Clippy (no allow) | `cargo clippy --workspace -- -D warnings` | 0 warnings, **zero** `#[allow]` |
-| Formatting | `cargo fmt --all -- --check` | clean |
-| Web unit tests | `cd web && npm test` | 100% pass |
-| Web coverage | `just web-coverage` | lines 80 / functions 72 / statements 78 / branches 65 |
-| TypeScript | `cd web && npx tsc --noEmit` | 0 errors |
-| ESLint | `cd web && npm run lint` | 0 warnings |
-| Build | `cd web && npm run build` | success |
-
-Rust coverage thresholds are per-crate and live in `scripts/check-coverage.sh` — that file is the only source of truth:
-
-| Crate | Threshold |
-|-------|-----------|
-| `nession-common` / `nession-server` | 80% line |
-| `nession-agent` | 80% line (79% on macOS — control-mode tests are skipped there) |
-| `nession-cli` | 40% line (untestable command paths excluded) |
-| `nession-claude-code` | 55% line — a **floor, not a target**; `check-coverage.sh` carries a "raise to 80%" debt note with no issue behind it |
-
-Web thresholds live in `web/vite.config.ts` and are not a flat number: lines 80 / functions 72 / **statements 78** / branches 65. Note that CI's `web-check` runs `just web-lint` + `just web-test` but **not** `just web-coverage`, so web coverage is gated only by the local pre-push hook.
-
-The tool is `cargo-llvm-cov`, not tarpaulin:
-
-```bash
-# Install (once)
-cargo install cargo-llvm-cov
-
-# Per-crate threshold check (what the hook and CI run)
-just coverage
-
-# Narrow to specific crates
-./scripts/check-coverage.sh nession-common nession-agent
-```
-
-### Error Reporting Convention
-
-**All failures in scripts and code MUST include: (1) what happened (原因), (2) how to fix it (解决方案).** Keep it short — just enough to guide the next action.
-
-**Scripts (shell/just):**
-
-```bash
-# ❌ Bad — no clue what's wrong
-echo "✗ test failed"
-
-# ✅ Good — cause + fix
-echo "✗ node_modules/ not found in web/"
-echo "  Fix: cd web && npm install"
-```
-
-Each script's failure output must answer: *"I see this error. What do I type next?"*
-
-**Rust error messages (anyhow/context):**
-
-```rust
-// ❌ Bad — caller doesn't know how to recover
-fn load_identity(path: &Path) -> Result<String> {
-    std::fs::read_to_string(path).context("failed to read")?;
-}
-
-// ✅ Good — tells caller what to do
-fn load_identity(path: &Path) -> Result<String> {
-    std::fs::read_to_string(path)
-        .with_context(|| format!("identity file missing; run agent once to create {path:?}"))?;
-}
-
-// ❌ Bad — bare "not found" is useless
-anyhow::bail!("not found")
-
-// ✅ Good — actionable
-anyhow::bail!("agent not registered; has the agent connected? run: nession-agent --config ...")
-```
-
-**CLI/log output:**
-
-```
-# ❌ Bad
-Error: Connection refused
-
-# ✅ Good
-Error: Connection refused (server_url: ws://localhost:19090)
-  Fix: start the server → cargo run -p nession-server
-       check the URL → verify agent-config.toml server_url field
-```
-
-**The rule:** After any failed command, the user should be able to fix it by reading the output — no need to open source code or search logs.
-
-### Test Database
-
-Integration tests use SQLite with unique temporary databases. Each test MUST clean up its own DB file:
-
-```rust
-let db_path = format!("./test_{}.db", uuid::Uuid::new_v4());
-// ... run test ...
-std::fs::remove_file(&db_path).ok();
-```
-
-## 4. Version Bumping
-
-Single version across all components. `Cargo.toml` and `web/package.json` must always agree.
-
-| Change | Bump | Example |
-|--------|------|---------|
-| New feature, behavior change | Minor | `0.3.1` → `0.4.0` |
-| Bug fix, small tweak | Patch | `0.3.1` → `0.3.2` |
-
-**When in doubt, choose patch.** **Four** files must be updated, and they must all agree:
-
-| File | What to change |
-|------|----------------|
-| `Cargo.toml` | `[workspace.package]` → `version = "0.4.0"` |
-| `Cargo.lock` | the `version` entry of each workspace crate (5 of them) |
-| `web/package.json` | top-level `"version": "0.4.0"` |
-| `web/package-lock.json` | **two** places: the top-level `"version"` and `packages[""].version` |
-
-`Cargo.lock` is not optional — leaving it stale means the next `cargo` invocation rewrites it and dirties the working tree. Refresh it with `cargo metadata --format-version 1 --offline >/dev/null` after editing `Cargo.toml`.
-
-⚠ In `web/package-lock.json`, only change the two entries that belong to `nession-web`. Transitive dependencies can coincidentally carry the same version string (e.g. `@ts-morph/common` was also at `0.27.0`) — a blind find-and-replace corrupts the lockfile.
-
-On merge to main, CI reads the version from `Cargo.toml` and `web/package.json` and creates version-tagged Docker images automatically.
-
-## 5. Development Cycle
-
-**main 只读 → 刷新根目录 main → 创建 worktree → 开发 → PR → staging 验收 → 合并到 main 发布 → 清理 worktree → 旧 worktree 已死 → 重复**
-
-```bash
-# STEP 0: 在项目根目录刷新 main
-git fetch origin && git checkout main && git pull --ff-only origin main
-
-# STEP 1: 创建隔离 worktree（不要在根目录开发）
-EnterWorktree name: "feat/<slug>"
-# manual: git worktree add -b feat/<slug> .claude/worktrees/feat-<slug> origin/main
-
-# STEP 2: Develop, test, commit each logical unit
-
-# STEP 3: Verify before push
+cargo build
 cargo test
-cargo clippy -- -D warnings
-cargo fmt --all -- --check
-cd web && npm run build && npm run lint && cd ..
-
-# STEP 3.5: Playwright verification (MANDATORY for UI/interaction changes)
-# Start the full local stack and use Playwright MCP browser tools
-# to functionally verify the change in a real browser.
-# See "Playwright Functional Verification" section above.
-
-# STEP 4: Push and create PR targeting staging
-git push -u origin feat/<slug>
-gh pr create --base staging --title "feat: <description>" --body "..."
-
-# STEP 5: After merge to staging — cleanup. OLD WORKTREE IS DEAD.
-cd <project-root>
-git fetch origin && git checkout main && git pull --ff-only origin main
-git worktree remove .claude/worktrees/feat-<slug>
-git worktree prune
-git branch -d feat/<slug>
+just web-lint
+just web-test
 ```
 
-**⚠ CRITICAL: PR merged = worktree dead.** Never push more commits to a merged branch. Follow-up work — even a one-line fix — starts from a **new worktree** off latest main.
+Environment/setup details belong to `nession-env`.
 
-### PR Workflow
+Local build-cache behavior is documented in `references/local-build-cache.md`.
 
-Before pushing, **always check** the PR state for the current branch:
+## 5. Verify Gate-first
+
+While iterating, run the narrowest relevant Gate(s).
+
+Examples:
 
 ```bash
-# Check ALL PRs for this branch (open + merged)
-gh pr list --head "$(git branch --show-current)" --state all --json number,state,title,url
+./gates/run rust-format rust-clippy
+./gates/run protocol-integrity protocol-codegen-drift
+./gates/run web-eslint web-typecheck web-test-unit
 ```
 
-Then follow the decision tree:
+Before handoff, run the broader stage-appropriate suite or the repository's current authoritative router. Read `gates/README.md` for rollout state.
 
-```
-当前分支的 PR 状态?
-├─ 没有 PR → git push + gh pr create（正常流程）
-├─ 有 OPEN PR → gh pr edit 更新同一个 PR（继续迭代）
-└─ 有 MERGED PR → ⛔ 分支已死！新建分支 + 新 PR
-```
+Never:
 
-| PR 状态 | 操作 | 原因 |
-|---------|------|------|
-| **无 PR** | `git push` + `gh pr create` | 正常新功能 |
-| **OPEN** (未合并) | `gh pr edit` 更新已有 PR | 同一个 PR 继续 review |
-| **MERGED** (已合并) | ⛔ 新建 branch/worktree + 新 PR | 已合并的分支已死，不能再推 commit |
+- use `--no-verify`;
+- weaken lint/test/coverage/design/protocol rules to land the change;
+- convert missing tooling into a green skip;
+- delete a Gate/suite entry merely because it fails.
 
-**⚠ 常见错误：PR 已合并后继续 `gh pr edit` 往同一个 PR 推 commit**
+## 6. UI / interaction changes
 
-已合并的 PR 无法通过 `gh pr edit` 追加 commit。GitHub 不会自动重新打开它。正确做法：
+For visual, layout, interaction, terminal-in-browser, responsive, design-system, or shadcn changes, load `nession-web-design`.
+
+The UI workflow owns browser/visual verification. Do not duplicate its viewport/baseline/design rules here.
+
+## 7. Tests
+
+Tests prove behavior at the cheapest meaningful layer.
+
+- regressions should fail on the original defect;
+- shared test state must use isolated ports/files/home;
+- do not introduce sleeps/polling when deterministic synchronization exists;
+- do not lower coverage thresholds or broad-exclude code to pass;
+- use existing test helpers and scoped owners.
+
+Static test/tmux/protocol rules are owned by their checkers/Gates, not this Skill.
+
+## 8. Commit and PR
+
+Before commit:
 
 ```bash
-# ❌ 错误 — PR 已合并，再推 commit 也进不了同一个 PR
-git commit -m "more changes"
-git push                    # commit 推到了已死的远程分支
-gh pr edit <old-pr> --body "..."  # 这个 PR 已经合并了！
+git status
+git diff --check
+```
 
-# ✅ 正确 — 刷新根目录 main，新建 worktree，创建全新 PR
+Use Conventional Commit subjects: `feat:`, `fix:`, `refactor:`, `chore:`, `docs:`.
+
+Push the worktree branch and open the PR against the branch required by the current repository flow. Check current CI/CD ownership in `nession-cicd`; do not rely on remembered historical branch policy.
+
+PR evidence should state:
+
+- what changed;
+- which relevant Gates/tests ran;
+- UI/browser evidence when required;
+- known unverified gaps.
+
+## 9. After merge
+
+A merged worktree/branch is finished. Do not keep developing on it.
+
+Refresh root `main`, remove the worktree, prune, and start any follow-up from a fresh branch.
+
+```bash
 git fetch origin
-EnterWorktree name: "fix/<new-slug>"
-# manual: git worktree add -b fix/<new-slug> .claude/worktrees/fix-<new-slug> origin/main
-# ... 开发 ...
-git push -u origin fix/<new-slug>
-gh pr create --title "..." --body "..."
+git checkout main
+git pull --ff-only origin main
+git worktree remove .claude/worktrees/<name>
+git worktree prune
 ```
 
-**If an open PR already exists** → update it with `gh pr edit`:
+## Batch issue work
 
-```bash
-gh pr edit <PR-NUMBER> --title "..." --body "..."
-```
+When asked to handle multiple issues:
 
-**If no open PR exists** → create a new one:
+1. pull by explicit label/scope rather than keyword guesses;
+2. check for existing PR/branch/claim;
+3. order by file/owner overlap;
+4. default to one issue -> one branch/PR unless one implementation genuinely closes multiple issues;
+5. report the batch plan before mutating shared areas.
 
-```bash
-git push origin <branch-name>
-gh pr create --base staging --title "feat: description" --body "..."
-```
+## Stop conditions
 
-**When development is complete**, use auto-merge to merge the feature branch to staging automatically once the quality gate passes:
+Stop and resolve ownership before continuing when:
 
-```bash
-# Enable auto-merge for feat/fix PRs targeting staging
-gh pr merge <PR-NUMBER> --auto --merge
-```
+- the task requires editing root `main`;
+- two instruction/rule owners conflict;
+- a proposed bypass is the only way to make a Gate green;
+- a change depends on unreleased behavior but its base is unclear;
+- a UI change has no realistic validation path.
 
-**⚠ No `Closes #N` in a feat→staging PR body.** Closing keywords are ignored unless the PR targets the default branch, so it would silently do nothing. Every `Closes #N` goes in the `staging` → `main` release PR body instead. See the `nession-cicd` skill.
+## References
 
-**Auto-merge to staging is safe** — staging is the integration environment. The quality gate ensures correctness. Human validation happens on staging before the staging → main merge.
-
-**Acceptance is criterion-staged, not one global boolean.** Before a release PR may merge, run every `pre-merge` and `staging` criterion and record Pass/N/A evidence. A criterion may remain Pending only when its Acceptance Report stage is explicitly `post-merge` and its evidence states the merge/deploy/observation condition plus the planned verification. `Implementation Complete` / `Mergeable` are not `Accepted`.
-
-**After staging validation**, release `staging` → `main`, and bump if warranted:
-
-```bash
-# 1. Audit what ships and each Requirement's Acceptance Report, then open the release PR
-gh pr list --state merged --base staging --limit 20
-gh pr create --base main --head staging --title "chore: release (staging → main)" --body "..."
-# acceptance-pr-gate requires pre-merge/staging criteria to pass; explicit post-merge Pending may remain
-gh pr merge <PR-NUMBER> --merge      # MUST be --merge
-
-# 2. Version bump, only if this release warrants one (in a worktree)
-EnterWorktree name: "chore/bump-version-X.Y.Z"
-# Bump version in all four files (see "Version Bumping" above)
-git add -A && git commit -m "chore: bump version to X.Y.Z"
-git push -u origin chore/bump-version-X.Y.Z
-gh pr create --base main --title "chore: bump version to X.Y.Z" --body "Version bump"
-gh pr merge <PR-NUMBER> --merge  # No --auto: chore/** has no checks, auto-merge is rejected
-
-# 3. Wait for release.yml's promote-production (pauses at Environment
-#    approval) to write the gitops deploy commit, then ArgoCD rollout
-./scripts/deploy-watch.sh prod
-```
-
-**Everything is `--merge`. Nothing is ever rebased or squashed.** Every merge records the head branch's tip as a second parent, so every landed branch stays in the target's ancestry with its original SHAs — no orphaned commits anywhere, no force push. `--rebase` always rewrites commits and leaves the branch tip orphaned, a class that has re-conflicted at release (see `nession-cicd` for the measurements), so **no** merge in this flow may use it, feature-to-staging included. If the release PR reports `mergeable: false`, do **not** back-merge `main` into `staging` — cherry-pick onto a branch off `main`, resolve there, and PR that. See `nession-cicd` for the measurements.
-
-### PR Body Template
-
-**The PR body is review material, not git history.** `--merge` writes `MERGE_MESSAGE` + `PR_TITLE`, never the PR body, and each commit keeps its own message — the body never enters history by any path. (Measured before the all-merge rule: rebase-merged PR #301 → `673664f` kept the commit's own message and discarded the body.) So write real commit messages — they are the permanent record — and use the body to tell a reviewer what changed and how it was verified. Screenshots go in a PR comment so the body stays scannable. `Closes #N` does **not** belong here — it goes in the release PR.
-
-```markdown
-## 变更内容
-- [简述改了什么]
-- **Product alignment**: 写 "无偏离",或说明本 PR 偏离了哪个 canonical 决定(`VISION.md` / `PRINCIPLE.md` / `docs/design/*` / 上游 issue 的 Resolved Decisions)以及为什么
-
-## 测试报告
-- `cargo test`: <N> passed, 0 failed
-- `just coverage`: all crates above threshold (see scripts/check-coverage.sh)
-- `cargo fmt --all -- --check`: OK
-- `cargo clippy -- -D warnings`: 0 errors
-- `npm test`: <N> passed
-- `just web-coverage`: <X>% stmts (thresholds: lines 80 / functions 72 / statements 78 / branches 65)
-- `npx tsc --noEmit`: 0 errors
-- `npm run lint`: 0 warnings
-- `npm run build`: success
-```
-
-Note the issue this addresses somewhere in 变更内容 so the release PR audit can pick it up — but keep the `Closes #N` keyword out of feat→staging bodies. It only functions in the release PR, whose body carries one `Closes #N` line per issue being shipped.
-
-**Why the Product alignment line is in the body and not just in the upstream issue.** Writing it in the issue is not enough: the deviation gets made later, in the PR, by whoever is implementing — and that person may never re-read the requirement's Resolved Decisions. That is exactly what happened when a workspace refactor overturned #702's decision E: the requirement said deviations must be explained, the issue had a box for it, and the PR still shipped without a word. The box that gets filled in is the one in front of the person making the change.
-
-Quality gate triggers on PR to staging. After merge to staging, CI builds
-Docker images and `deploy-staging-gitops` writes `deploy(staging): <sha>` to
-the `gitops` branch (ArgoCD consumes gitops, not main — issue #592). Two
-deploy lanes: **staging lane accepts any sha with built images** (merge to
-staging builds them — use `deploy.yml` to pull a specific commit onto
-`staging-01` for standalone validation); **production is release-lane only**
-(SemVer, behind Environment approval). After staging validation, the
-`staging → main` release PR merges with `--merge`; `release.yml` only builds if a version file changed, so
-a release carrying runtime changes needs the follow-up bump PR to reach
-production. See `nession-cicd`.
-
-**Monitor deployment:** Use `./scripts/deploy-watch.sh staging` after merging PR to staging, or `./scripts/deploy-watch.sh prod` after merging to main. See `nession-cicd` skill for details.
-
-### Playwright Functional Verification
-
-**⚠ CRITICAL: Any change involving WebUI interaction, layout, terminal behavior, or visual appearance MUST be verified in a real browser via Playwright MCP before the change is considered complete.** Tests and type checks catch logic errors but cannot verify visual correctness, interaction flows, or terminal rendering — only a real browser can.
-
-This is NOT optional. This is NOT just for screenshots. This is functional verification.
-
-**When Playwright verification is required:**
-
-| Change type | Example | Must verify? |
-|-------------|---------|-------------|
-| Terminal behavior | Font scaling, resize, input handling, ANSI rendering | ✅ YES |
-| UI layout/styling | CSS changes, responsive breakpoints, component sizing | ✅ YES |
-| User interaction | Button clicks, form submissions, modal dialogs, keyboard shortcuts | ✅ YES |
-| Connection/state | Login flow, reconnection banner, error states | ✅ YES |
-| New components | Any new React component | ✅ YES |
-| Pure logic (no UI surface) | websocket.ts protocol parsing, utility functions | ❌ No (tests suffice) |
-| Config/CI changes | package.json, vite.config.ts, GitHub Actions | ❌ No |
-
-**Setup — start the full local stack:**
-
-```bash
-# Use isolated HOME so env/DB files don't pollute ~/.nession
-# Terminal 1 — server (WebSocket :19090; no HTTP locally)
-HOME=/tmp/nession-demo cargo run -p nession-server
-
-# Terminal 2 — agent (needs tmux)
-HOME=/tmp/nession-demo cargo run -p nession-agent -- agent-config.toml
-
-# Terminal 3 — web (Vite :13000, proxies /ws → :19090)
-cd web && npm run dev
-```
-
-**Verification workflow:**
-
-```
-代码改动 → 启动本地栈 → Playwright 浏览器验证 → 通过 → 继续
-                                      ↓ 失败
-                                   修复 → 重新验证
-```
-
-**Playwright MCP tool reference:**
-
-| Tool | Purpose | Example |
-|------|---------|---------|
-| `mcp__playwright__browser_navigate` | Open a URL | `http://localhost:13000` |
-| `mcp__playwright__browser_snapshot` | Inspect page structure (acc tree) | Find elements, check text content |
-| `mcp__playwright__browser_take_screenshot` | Capture visual state | Before/after comparisons |
-| `mcp__playwright__browser_click` | Click elements | Buttons, links, toggles |
-| `mcp__playwright__browser_type` | Type into fields | Form inputs, terminal text |
-| `mcp__playwright__browser_fill_form` | Batch form fill | Login form |
-| `mcp__playwright__browser_resize` | Resize viewport | Test responsive behavior |
-| `mcp__playwright__browser_press_key` | Press keyboard keys | Test keyboard shortcuts |
-| `mcp__playwright__browser_evaluate` | Run JS in page | `localStorage.clear()` |
-| `mcp__playwright__browser_console_messages` | Read browser console | Check for JS errors |
-| `mcp__playwright__browser_network_requests` | Inspect network traffic | Verify WebSocket messages |
-
-**What to verify (checklist):**
-
-- [ ] **正常流程** — 核心功能在浏览器中按预期工作
-- [ ] **交互状态** — 按钮、输入框、模态框有正确的 hover/focus/active 状态
-- [ ] **响应式** — `browser_resize` 切换不同视口宽度（375px 手机 / 768px 平板 / 1280px 桌面），布局不出错
-- [ ] **终端渲染** — ANSI 颜色、光标、滚动均正常
-- [ ] **连接状态** — 断开/重连 banner 显示正确
-- [ ] **控制台** — 浏览器 console 无 error/warning（`browser_console_messages`）
-- [ ] **网络** — WebSocket 消息类型符合预期，无不必要的消息
-- [ ] **视觉基线** — 改动是否影响 `e2e/specs/__snapshots__/fixture-visual.spec.ts/` 里 golden 截图覆盖的 chrome？影响则必须同批重生成（见下）
-
-**视觉基线同批更新（intentional UI 变化）**
-
-`FIXTURE_SCREENSHOT.maxDiffPixelRatio` 现在是 **`0.002`**，是**推导**出来的而不是挑的（#1038）：旧的 `0.02` 宽到一整页**完全不同的内容**也才差 2.58%，根本分不出「capsule 挪了」和「这是另一个屏幕」—— #708 换了 Workspace 工具条而 baseline 还在显示旧 chrome（#714），就是这么来的。推导过程与实测噪声下限写在 `e2e/helpers/fixtureVisual.ts`。对你的影响：chrome 变化现在会**报红**而不是静默通过，所以要在同一批里更新 baseline（先看 diff 再落），而不是等到以后才发现。
-
-原则见 `docs/design/design-system/validation.md` 与 `docs/design/migration.md`；操作是：
-
-- 只能在 CI 重生成（本地禁止跑 e2e）：`CI=true npx playwright test fixture-visual --update-snapshots=all`，然后提交新的 golden 图。**`=all` 不是可选项**：不带值时模式是 `changed`，仍按 `maxDiffPixelRatio` 比较，只重写超出容差的那几张 —— 小于比率的漂移会被静默跳过，日志里也不会留痕。
-- **不得靠放宽 `maxDiffPixelRatio` 变绿**；解释不了的差异要查原因。
-- 已经发出去的漂移单独开 issue，不要留给下一个人重新发现。
-
-**Collecting screenshots (posted as a PR comment, not in the body):**
-
-After functional verification passes, take screenshots of key states:
-
-- Before/after state for each changed feature
-- Empty states (no data, no results)
-- Loading states (skeletons, spinners)
-- Error states (error banners, toasts)
-- Key interactions (modal open/close, terminal output)
-
-Save to `.playwright-mcp/screenshots/` (gitignored). Post them as a **PR comment** rather than in the body, so the body stays a scannable change record. (Under the older squash flow the body became the commit message and image markdown would land in git history; nothing squashes now and no current merge method writes the body to a commit, so this is a readability convention rather than a hard constraint.)
-
-**Upload them with `--attach` — do not paste a local path.** A path like
-`.playwright-mcp/screenshots/x.png` is gitignored, so on GitHub it renders as a
-broken image. `gh` uploads the file to GitHub's attachment storage and **rewrites
-the matching markdown reference in the body in place**, keeping its position:
-
-The body reference and the `--attach` argument must be the **same string**, or
-`gh` cannot tell they are the same file and will append a duplicate at the end.
-Easiest is to run from the screenshots directory:
-
-```bash
-cd .playwright-mcp/screenshots
-gh pr comment <PR-NUMBER> --body "## 核心功能截图
-
-Before:
-
-![capsule before](./capsule-before.png)
-
-After:
-
-![capsule after](./capsule-after.png)" \
-  --attach ./capsule-before.png \
-  --attach ./capsule-after.png
-```
-
-- Reference a file the body does **not** mention and it is appended at the end
-  instead — so write the markdown first and the images land where you put them.
-- Alt text comes from the body, or from `--attach './x.png#Some alt text'`
-  (quote it, or the shell eats the `#`).
-- Repeat `--attach` for more files; up to 50 per call. png / jpg / jpeg / gif /
-  webp / svg, and mp4 / mov / webm (video has no alt text).
-- The same flag exists on `gh pr create`, `gh pr edit`, `gh issue create`,
-  `gh issue edit`, `gh issue comment` — so issue reports can carry evidence too.
-- **Requires push/write access to the repo**; GitHub Enterprise Server is limited.
-
-⚠ **The flag needs gh ≥ 2.101.0** (2026-09). On an older binary `--attach` is
-simply absent from `--help` and it looks like the capability does not exist —
-check `gh --version`, and `brew upgrade gh` if it is behind.
-
-## Batch Development by Label
-
-The label taxonomy (kind + area) is defined in **`nession-writing-requirements`**. Labels are generous and overlapping, so a single-label pull should be complete.
-
-### 0. Claim before you build (mandatory)
-
-Multiple agents can pick the same issue if nobody marks it. **`in-progress` is the claim lock** — add it before any worktree or code, remove it when the PR merges or you abandon the issue.
-
-**Do not filter `in-progress` out of list pulls.** Show every open issue; mark claimed ones in the output so the user can see status at a glance:
-
-```bash
-gh issue list --repo BestNathan/nession --label terminal --state open \
-  --json number,title,labels --jq '.[] | "\(.number)\t\(if ([.labels[].name] | index("in-progress")) then "🔒" else "  " end)\t[\(.labels|map(.name)|join(","))]\t\(.title)"'
-```
-
-**When the user names a specific issue (e.g. "做 #345") — check claim first:**
-
-```bash
-gh issue view 345 --repo BestNathan/nession --json title,state,labels,comments \
-  --jq '{title, state, claimed: ([.labels[].name] | index("in-progress") != null), claim: ([.comments[] | select(.body | test("🤖 \\*\\*Claimed\\*\\*"))] | last | {body, createdAt, author: .author.login})}'
-```
-
-| Result | Action |
-|---|---|
-| Not claimed | Proceed to claim (below), then worktree |
-| Claimed | **Stop.** Show the user: issue title, claim comment (branch, time, agent), and ask whether to wait or take over a stale claim. Do **not** open a worktree or write code. |
-| Stale claim (>48h, no linked PR) | Show claim info, ask user whether to take over. Only re-claim after explicit approval. |
-
-**Claim (first action after the user approves working on an unclaimed #N):**
-
-```bash
-# Re-check — another agent may have claimed since you last looked
-gh issue view N --repo BestNathan/nession --json labels --jq '.labels[].name' | grep -qx in-progress \
-  && echo "Already claimed — show claim info to user" && exit 1
-
-gh issue edit N --repo BestNathan/nession --add-label in-progress
-gh issue comment N --repo BestNathan/nession --body "$(cat <<'EOF'
-🤖 **Claimed** — agent starting work.
-
-- **Branch:** feat/<slug> (or fix/<slug>)
-- **Claimed at:** YYYY-MM-DD HH:MM UTC+8
-
-Remove `in-progress` when the PR merges to staging, or comment here if abandoning.
-EOF
-)"
-```
-
-Then create the worktree. **Never** open a worktree for an issue you have not claimed.
-
-**Release the claim:**
-
-| Outcome | Action |
-|---|---|
-| PR merged to `staging` | `gh issue edit N --remove-label in-progress` (PR body already notes the issue number) |
-| Abandoned / blocked | Comment why, then `--remove-label in-progress` |
-| Stale claim takeover | Comment that you are taking over, then re-claim with a fresh comment |
-
-**⛔ Never** start implementation on a claimed issue unless the user explicitly approves a takeover (stale or otherwise).
-
-### 1. Pull by label, never by keyword
-
-```bash
-gh issue list --repo BestNathan/nession --label terminal --state open \
-  --json number,title,labels --jq '.[] | "\(.number)\t\(if ([.labels[].name] | index("in-progress")) then "🔒" else "  " end)\t[\(.labels|map(.name)|join(","))]\t\(.title)"'
-
-gh issue list --repo BestNathan/nession --label terminal --label bug --state open   # AND
-gh issue list --repo BestNathan/nession --search "label:server,agent,protocol state:open"   # OR
-```
-
-**⛔ Never scope a batch by keyword search.** Measured: `gh search issues ... terminal` omitted #170 (26 mentions of tmux, zero of "terminal") and included #207 (Filebrowser). It fails in both directions.
-
-### 2. Backfill labels before trusting the pull
-
-Empty or suspiciously small result = labels are missing, not work.
-
-```bash
-# Issues with no area label at all
-gh issue list --repo BestNathan/nession --state open --limit 100 \
-  --json number,title,labels --jq '.[] | select([.labels[].name] | any(IN("terminal","web","ui","ux","backend","server","agent","cli","protocol","infra","ci","test","documentation")) | not) | "\(.number)\t\(.title)"'
-
-gh issue edit 170 --repo BestNathan/nession --add-label terminal --add-label agent --add-label backend
-```
-
-Backfill → re-pull → then plan.
-
-### 3. Order by file overlap
-
-List the files each issue will touch, then group:
-
-| Overlap | Arrangement |
-|---|---|
-| Disjoint (`web/src/product/terminal/**` vs `crates/nession-agent/**`) | Parallel lanes, independent worktrees |
-| Same directory, different files | Sequential in one lane, rebase each on the previous |
-| Same file, same function | One branch |
-| One issue governs the other's verification (coverage excludes vs the refactor they measure) | Sequential, the governing issue **last** |
-
-Parallelism only holds for disjoint files. Same-directory parallel work conflicts — and a parallel refactor can dodge the conflict via a new-path copy and silently revert the other's fix.
-
-### 4. One issue = one branch = one PR (default)
-
-**Merge into one PR only when:** same root cause (one fix closes all), or same file and same function so splitting conflicts on every rebase.
-
-**Not reasons to merge:** same area label; "it seems faster".
-
-```bash
-EnterWorktree name: "fix/<slug>"
-# develop → gates → Playwright (mandatory for UI/interaction changes)
-gh pr create --base staging --title "fix: ..." --body "..."
-gh pr merge <N> --auto --merge
-```
-
-Note the issue number in 变更内容. `Closes #N` goes only in the release PR — one line per issue in the batch.
-
-### 5. Report the plan before building
-
-Per issue: number, title, files touched, lane, order within the lane. The user is approving the grouping and ordering.
-
-State what the pull did not cover: which issues were excluded and why, and which labels were judgment rather than evidence.
-
-## Quick Reference
-
-| Task | Command |
-|------|---------|
-| Pull an area's open issues | `gh issue list --label terminal --state open` (🔒 in jq output = `in-progress`) |
-| Pull area + kind | `gh issue list --label terminal --label bug --state open` |
-| OR several areas | `gh issue list --search "label:server,agent,protocol state:open"` |
-| Check claim on #N | `gh issue view <N> --json title,state,labels,comments` |
-| Claim issue | `gh issue edit <N> --add-label in-progress` + claim comment |
-| Release claim | `gh issue edit <N> --remove-label in-progress` |
-| Backfill area labels | `gh issue edit <N> --add-label terminal --add-label web` |
-| Create worktree (CC) | `EnterWorktree name: "feat/<slug>"` |
-| Refresh root main | `git fetch && git checkout main && git pull --ff-only origin main` |
-| Create worktree (manual) | `git worktree add -b feat/<slug> .claude/worktrees/feat-<slug> origin/main` |
-| Verify not on main | `git branch --show-current` (in worktree, not root) |
-| Run all tests | `just test` |
-| Coverage | `just coverage` (Rust) / `just web-coverage` (web) |
-| TypeScript | `cd web && npx tsc --noEmit` |
-| Web build | `cd web && npm run build` |
-| Start server | `cargo run -p nession-server` |
-| Start UI dev | `cd web && npm run dev` |
-| Version bump | Edit all four: `Cargo.toml`, `Cargo.lock`, `web/package.json`, `web/package-lock.json` |
-| Cleanup worktree | `git worktree remove <path> && git worktree prune` |
-| Check PR state | `gh pr list --head $(git branch --show-current) --state all` |
-| Update existing PR | `gh pr edit <N> --title "..." --body "..."` |
-| Create PR | `gh pr create --title "feat: ..." --body "..."` |
-
-## Common Mistakes
-
-| Mistake | Reality |
-|---------|---------|
-| **Editing or committing in project root** | **FORBIDDEN.** Root = latest `main` mirror only. All work in `.claude/worktrees/`. |
-| **Committing on `main` directly** | **FORBIDDEN.** Even in a worktree, `git branch --show-current` must not be `main`. |
-| **feat/fix PR 直接提交到 main** | **FORBIDDEN.** feat/fix PR 必须提交到 staging。只有 staging → main 的发布 PR 才直接提交到 main。 |
-| **在项目根目录切分支开发** | **FORBIDDEN.** 根目录禁止 `git checkout -b`。用 `EnterWorktree` 或 `git worktree add`。 |
-| **PR 合并后继续往旧分支推 commit** | **FORBIDDEN.** PR 合并 = worktree/分支已死。任何后续修改都必须从最新 main 创建新 worktree。 |
-| **PR 已合并还用 `gh pr edit` 更新** | **FORBIDDEN.** 已合并的 PR 不能追加 commit。必须新建分支 + 新 PR。 |
-| `docker build` for Nession | **Forbidden.** CI does that. |
-| Pushing to main directly | Always use a feature branch + PR. |
-| Reusing a merged branch/worktree | **DEAD.** PR merged = branch/worktree dead. Always create a new worktree from latest main. |
-| Bumping only one version file | Both `Cargo.toml` and `web/package.json` must match. |
-| Forgetting `cargo fmt`/`cargo clippy` before push | CI may reject the PR. |
-| Integration tests leaving temp DB files | Each test must clean up its own DB. |
-| PR missing test report or screenshots | All three sections are required. Screenshots MUST be collected via Playwright MCP (not manual screenshots). |
-| **Skipping Playwright verification for UI changes** | **FORBIDDEN.** Any UI/interaction change MUST be verified in a real browser with Playwright MCP before pushing. Tests alone are not enough for visual correctness. |
-| `#[allow(clippy::*)]` in Rust | **FORBIDDEN.** Every clippy lint must be fixed properly. |
-| **Scoping a batch by keyword search** | **Measured to fail both ways** — missed #170 (tmux, no "terminal"), pulled #207 (Filebrowser). Pull by label. |
-| Planning a batch off a pull without backfilling labels | An empty/small result means labels are missing, not that work is missing. Backfill, re-pull, then plan. |
-| Bundling issues into one PR because they share an area label | Same label ≠ same work. One issue = one PR unless same root cause or same function. |
-| Running two worktrees over the same directory in parallel | They conflict, and a parallel refactor can silently revert the other's fix. Sequence same-directory work. |
-| **Starting work without claiming the issue** | **FORBIDDEN.** Add `in-progress` + claim comment before the worktree. |
-| **Starting work on a claimed issue without checking** | Query claim status first. If claimed, show info to the user — do not silently proceed. |
-| **Working on an issue another agent claimed** | **FORBIDDEN** unless the user explicitly approves takeover. |
-| **Leaving `in-progress` after merge or abandon** | Release the label. Stale claims block every other agent. |
+- `references/local-build-cache.md` — local Rust cache/worktree mechanics
+- `references/shadcn-components.md` — current shadcn inventory/reference
+- root `AGENTS.md` — repository-wide laws
+- nearest scoped `AGENTS.md` — subsystem invariants
