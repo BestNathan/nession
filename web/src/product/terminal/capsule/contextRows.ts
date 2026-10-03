@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react';
-import type { CapabilityId } from '@/product/capability';
+import type { CapabilityId, CapabilityState } from '@/product/capability';
 import type { ResolvedWorkContext } from '@/product/terminal/capsule/workAwareness';
 import type { CapsuleCapabilityEntry, SensedCapabilityItem } from '@/product/terminal/capsule/types';
 
@@ -28,6 +28,13 @@ export interface ContextRow {
   icon?: LucideIcon;
   /** One line saying why this row is here. Sensed rows only. */
   reason?: string;
+  /**
+   * The lifecycle state the ordinary row draws (#1347 SC-19's neighbourhood:
+   * "state is drawn on the entry rather than expressed by its absence"). Sensed
+   * rows carry none — being sensed *is* the statement, and the reason line says
+   * it in words.
+   */
+  state?: CapabilityState;
   kind: ContextRowKind;
 }
 
@@ -70,6 +77,7 @@ export function resolveContextRows(
       capabilityId: entry.id,
       title: entry.title,
       icon: entry.icon,
+      state: entry.state,
       kind: 'ordinary',
     });
   }

@@ -67,18 +67,27 @@ describe('Context Disclosure', () => {
     expect(caps.onSelect).not.toHaveBeenCalled();
   });
 
-  it('keeps the ordinary list behind `All capabilities` while working (SC-35)', async () => {
+  it('keeps the sensed rows first and the ordinary ones in the same list (SC-35)', async () => {
+    // The owner amended this criterion on 2026-10-04: there is no secondary
+    // path and no `All capabilities` step, so every capability is one row away
+    // in the list the user is already looking at. What survives from the
+    // original wording is the ordering — sensed capability first, and the
+    // catalog below it rather than above.
     const caps = disclosure();
     render(
       <TerminalCapsule experience="web" sendText={vi.fn()} capabilityDisclosure={caps} workContext={workContext()} />,
     );
 
     await userEvent.click(screen.getByTestId('capsule-capability-more'));
-    expect(await screen.findByTestId('capsule-context-item-claude-code')).toBeInTheDocument();
-    // The ordinary entries are not in the first layer any more…
-    expect(screen.queryByTestId('capsule-capability-picker-git')).not.toBeInTheDocument();
-    // …they are one explicit step away, in the same surface.
-    expect(screen.getByTestId('capsule-context-all')).toBeInTheDocument();
+
+    const sensed = await screen.findByTestId('capsule-context-item-claude-code');
+    const ordinary = screen.getByTestId('capsule-capability-picker-git');
+    expect(screen.queryByTestId('capsule-context-all')).not.toBeInTheDocument();
+
+    // Document order is what "first" means to a reader and to a screen reader
+    // alike: `compareDocumentPosition` returns FOLLOWING when the second node
+    // comes after the first.
+    expect(sensed.compareDocumentPosition(ordinary) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('senses a context capability without lighting the Work Ring (SC-37)', async () => {
@@ -125,7 +134,6 @@ describe('Context Disclosure', () => {
 
     await userEvent.click(screen.getByTestId('capsule-capability-more'));
     const git = await screen.findByTestId('capsule-capability-picker-git');
-    expect(screen.queryByTestId('capsule-context-all')).not.toBeInTheDocument();
     await userEvent.click(git);
     expect(caps.onSelect).toHaveBeenCalledWith('git');
   });
@@ -168,6 +176,76 @@ describe('Context Disclosure', () => {
     expect(screen.getByTestId('capsule-capability-projection')).toBeInTheDocument();
   });
 
+  it('adds a surface above the shell instead of replacing it (SC-41/SC-43)', async () => {
+    const caps = disclosure();
+    render(
+      <TerminalCapsule experience="web" sendText={vi.fn()} capabilityDisclosure={caps} workContext={workContext()} />,
+    );
+
+    // The shape of the thing: a sibling inside the same dock, above the shell.
+    const dock = screen.getByTestId('terminal-capsule');
+    const shellBefore = screen.getByTestId('capsule-shell');
+    // The shell's *own* description — the attributes that decide its box. Not
+    // its subtree: the `+` inside it reports `aria-expanded`, and that is the
+    // trigger telling the truth about the surface, not the shell moving.
+    const boxOf = (el: HTMLElement) => ({
+      className: el.className,
+      dataset: { ...el.dataset },
+      style: el.getAttribute('style'),
+    });
+    const shellBox = boxOf(shellBefore);
+
+    await userEvent.click(screen.getByTestId('capsule-capability-more'));
+
+    const surface = await screen.findByTestId('capsule-context-disclosure');
+    expect(dock.contains(surface)).toBe(true);
+    // Above, not replacing: the shell element is the same node with the same
+    // box, and the surface precedes it in document order — which is what puts it
+    // on top in a bottom-anchored `flex-col` dock.
+    expect(screen.getByTestId('capsule-shell')).toBe(shellBefore);
+    expect(
+      surface.compareDocumentPosition(shellBefore) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(boxOf(shellBefore)).toEqual(shellBox);
+    // …and the trigger knows the surface is up.
+    expect(screen.getByTestId('capsule-capability-more')).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  it('keeps the shell in place when a row deepens the surface to a Peek (SC-43)', async () => {
+    const caps = disclosure();
+    const projection: CapsuleCapabilityProjection = {
+      id: 'claude-code',
+      title: 'Claude Code',
+      depth: 'peek',
+      body: () => <p data-testid="projection-body">peek</p>,
+      onDismiss: vi.fn(),
+    };
+    const { rerender } = render(
+      <TerminalCapsule experience="web" sendText={vi.fn()} capabilityDisclosure={caps} workContext={workContext()} />,
+    );
+
+    await userEvent.click(screen.getByTestId('capsule-capability-more'));
+    await userEvent.click(await screen.findByTestId('capsule-context-item-claude-code'));
+
+    // The row was dispatched (existing cases assert which callback), and the
+    // lower Capsule is still the anchor: the Peek takes the *upper* slot, so
+    // the shell that was there before the row is the shell that is there after.
+    const shellAfter = screen.getByTestId('capsule-shell');
+    rerender(
+      <TerminalCapsule
+        experience="web"
+        sendText={vi.fn()}
+        capabilityDisclosure={caps}
+        capabilityProjection={projection}
+        workContext={workContext()}
+      />,
+    );
+    expect(screen.getByTestId('capsule-capability-projection')).toBeInTheDocument();
+    expect(screen.getByTestId('capsule-shell')).toBe(shellAfter);
+    // …and the list is gone, because the two are one slot rather than a stack.
+    expect(screen.queryByTestId('capsule-context-disclosure')).not.toBeInTheDocument();
+  });
+
   it('dismisses itself when the sensed work ends while it is open (SC-36)', async () => {
     const caps = disclosure();
     const { rerender } = render(
@@ -187,17 +265,14 @@ describe('Context Disclosure', () => {
     );
 
     await screen.findByTestId('capsule-capability-more');
-    expect(screen.queryByTestId('capsule-context-item-claude-code')).not.toBeInTheDocument();
 
-    // The guarantee is that the surface closes, not that React has already torn
-    // the portal down: base-ui keeps the popup mounted through its exit
-    // transition and jsdom never runs that to completion, so "in the document"
-    // reads the animation's last frame — which is why this passed locally and
-    // failed on CI's timing. Absent, or present and already closed, both say
-    // the thing the criterion says; the row above is the structural half.
+    // The surface is gone, and that is now the whole assertion: it is an
+    // in-flow sibling of the shell, not a portalled popup, so there is no exit
+    // transition leaving a `data-closed` node behind for the assertion to
+    // mistake for "still open".
     await waitFor(() => {
-      const popup = screen.queryByTestId('capsule-context-disclosure');
-      expect(popup === null || popup.hasAttribute('data-closed')).toBe(true);
+      expect(screen.queryByTestId('capsule-context-disclosure')).not.toBeInTheDocument();
     });
+    expect(screen.queryByTestId('capsule-context-item-claude-code')).not.toBeInTheDocument();
   });
 });

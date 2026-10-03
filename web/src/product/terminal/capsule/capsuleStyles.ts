@@ -185,6 +185,73 @@ export const capsuleShellDockBottomClass =
 export const capsuleShellAppDockBottomClass =
   'bottom-[max(var(--terminal-capsule-shell-inset),var(--terminal-capsule-shell-safe-area))]';
 
+/**
+ * The upper Context Capsule (#1347 SC-41–44) — the second surface in the dock,
+ * above the shell.
+ *
+ * Its gap is a margin rather than a positioned offset, which is what makes "the
+ * lower Capsule does not move" structural: the dock is a bottom-anchored
+ * `flex flex-col`, so growing upward cannot move what is below it, and the gap
+ * is the one token between them.
+ */
+export const contextCapsuleDockClass = 'mb-[length:var(--context-capsule-margin-bottom)]';
+
+/**
+ * The surface itself: the shell's own treatment (one Capsule language), a FIXED
+ * height that no sense state can change (SC-44), and clipping so the scrolling
+ * row inside cannot paint past the corners.
+ *
+ * The radius is `semantic.radius-capsule` on both experiences rather than the
+ * Web shell's pill: a pill radius is what a 32px one-row box wears, and this is
+ * a tall multi-row surface. It is also what `pattern.context-capsule` pins.
+ */
+export const contextCapsuleSurfaceClass = [
+  'pointer-events-auto flex h-[length:var(--context-capsule-height)] w-full flex-col overflow-hidden',
+  'rounded-[var(--radius-capsule)]',
+  capsuleShellSurfaceClass,
+].join(' ');
+
+/** The list owns its scroll and hands every other gesture back (SC-42). */
+export const contextCapsuleScrollClass = 'min-h-0 flex-1 overflow-y-auto overscroll-contain';
+
+/**
+ * One row: a whole-row control, two lines tall by design (title + reason), with
+ * the icon slot reserved whether or not a glyph arrived so the titles stay
+ * aligned down the list.
+ */
+export const contextCapsuleRowClass = [
+  'flex w-full min-h-[length:var(--context-capsule-row-height)] items-center gap-[length:var(--terminal-capsule-control-gap)]',
+  'px-[length:var(--terminal-capsule-shell-pad-x)] text-left transition-colors',
+  // `ring-inset`, because a row is full-bleed inside a scrolling container: an
+  // outset ring is clipped on every side but the last row's, which drew a stray
+  // underline under the first row when focus moved into the list (caught in the
+  // screenshot, invisible to every assertion about the row's box).
+  'hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset',
+].join(' ');
+
+/** The icon column, present even when empty so titles share one edge. */
+export const contextCapsuleIconSlotClass = 'flex size-[length:var(--icon-md)] shrink-0 items-center justify-center';
+
+/**
+ * The presence mark's column, and the mark inside it.
+ *
+ * The column is always present so titles share one edge whether or not a dot is
+ * drawn; the mark is drawn only for a capability the session actually needs
+ * (`relevant` / `active`), which is the same rule the Capability Form's entries
+ * follow.
+ */
+export const contextCapsuleMarkerSlotClass =
+  'flex size-[length:var(--context-capsule-marker-size)] shrink-0 justify-center';
+
+export const contextCapsuleMarkerClass =
+  'size-[length:var(--context-capsule-marker-size)] rounded-full bg-foreground';
+
+export const contextCapsuleTitleClass =
+  'truncate text-[length:var(--terminal-capsule-font-size)] text-foreground';
+
+export const contextCapsuleReasonClass =
+  'truncate text-[length:var(--terminal-capsule-caption-font-size)] text-muted-foreground';
+
 export const capsuleComposerGridGapClass = 'gap-[length:var(--terminal-capsule-row-gap)]';
 
 export const capsuleComposerRowGapYClass = 'gap-y-[length:var(--terminal-capsule-toolbar-row-gap)]';
