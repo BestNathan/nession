@@ -6,14 +6,21 @@
  * refresh, reconciliation — is the runtime's, and everything a surface *draws*
  * comes from the snapshot this returns.
  *
- * ## Why the context is keyed, not compared
+ * ## Why the key does not stand in for the context
  *
  * A surface builds its context inline (`{ agentId, sessionId }`), so the object
- * is new on every render and an effect depending on it would run forever. The
- * adapter's `contextKey` is the stable answer to "is this the same conversation
- * space", so the effect depends on *that*, and the latest context object is
- * held in a ref for the call itself. This is the same reason the runtime asks
- * the adapter for a key rather than comparing contexts itself.
+ * is new on every render — and the effect that hands it to the runtime runs
+ * every render for that reason. It used to depend on `adapter.contextKey`
+ * instead, to keep a per-render object out of a dependency list, and that
+ * quietly made the key stand in for the value: a provider whose context carries
+ * a token, a lease or a client handle may change one without moving the
+ * conversation space, and the runtime went on asking with the context it had
+ * replaced (`#1363` round 4).
+ *
+ * Keying is still how the runtime decides *identity* — a new key resets the
+ * conversation space and a same-key value does not — but that decision belongs
+ * to `setContext`, which sees both, rather than to a dependency list that can
+ * only see one.
  *
  * ## Why disposal is safe to be StrictMode-double-invoked
  *
@@ -23,7 +30,7 @@
  * `setContext` re-arms.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { AIConversationAdapter } from '../adapter/types'
 import { ConversationRuntime, type AIConversationSnapshot } from './ConversationRuntime'
 import { useConversationSnapshot } from './useConversationSnapshot'
@@ -72,13 +79,20 @@ export function useAIConversation<Context>(
     setEntry({ adapter, runtime: new ConversationRuntime(adapter) })
   }
   const { runtime } = entry
-  const contextRef = useRef(context)
-  contextRef.current = context
-  const key = context === null ? null : adapter.contextKey(context)
 
+  // Depending on the *value*, not on the key derived from it.
+  //
+  // A surface builds its context inline, so this effect runs on every render
+  // where the object is new — which it always is. That is affordable now
+  // because `setContext` answers a same-key value by replacing what the next
+  // adapter call receives and nothing else, so the common case is one
+  // assignment. Depending on the key instead was the defect: a provider whose
+  // context carries a token, a lease or a client handle can change one without
+  // moving the conversation space, and the runtime went on polling with the
+  // context it had replaced (`#1363` round 4).
   useEffect(() => {
-    runtime.setContext(contextRef.current)
-  }, [runtime, key])
+    runtime.setContext(context)
+  }, [runtime, context])
 
   useEffect(() => () => runtime.dispose(), [runtime])
 
