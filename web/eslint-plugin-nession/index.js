@@ -8,6 +8,7 @@ import noSfOverlayVars from './rules/no-sf-overlay-vars.js';
 import noReverseImports from './rules/no-reverse-imports.js';
 import noUiProductImports from './rules/no-ui-product-imports.js';
 import noDeepCapabilityImports from './rules/no-deep-capability-imports.js';
+import noCapabilityPortals from './rules/no-capability-portals.js';
 
 const metadataPath = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -28,6 +29,7 @@ const plugin = {
     'no-reverse-imports': noReverseImports,
     'no-ui-product-imports': noUiProductImports,
     'no-deep-capability-imports': noDeepCapabilityImports,
+    'no-capability-portals': noCapabilityPortals,
   },
 };
 

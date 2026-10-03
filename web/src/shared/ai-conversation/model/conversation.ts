@@ -11,7 +11,7 @@
  */
 
 import type { AIMessageItem } from './content'
-import type { AIReasoningItem, AIToolItem } from './activity'
+import type { AIReasoningItem, AIStatusItem, AIToolItem } from './activity'
 
 // Re-exported here so `model/` reads as one vocabulary to everything outside
 // it: a consumer imports the model from one path, and the internal split by
@@ -26,6 +26,7 @@ export type {
 } from './content'
 export type {
   AIReasoningItem,
+  AIStatusItem,
   AIToolCategory,
   AIToolItem,
   AIToolPayload,
@@ -79,6 +80,7 @@ export type AIConversationItem =
   | AIMessageItem
   | AIToolItem
   | AIReasoningItem
+  | AIStatusItem
   | AIUnknownItem
 
 /**

@@ -11,6 +11,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { cn } from '@/shared/lib/utils';
 import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
 import { formatClockTime } from '@/shared/lib/format';
+import { workspaceScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
 import type { ClaudeCodeTranscriptEntry } from '../types';
 
 /**
@@ -236,7 +237,7 @@ export function TranscriptTimeline({
 }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="transcript-timeline">
-      <div className="min-h-0 flex-1 overflow-y-auto" data-testid="transcript-timeline-scroll">
+      <div className={cn('min-h-0 flex-1 overflow-y-auto', workspaceScrollClearanceClass)} data-testid="transcript-timeline-scroll">
         {items.length === 0 ? (
           <p className={cn('px-3 py-6 text-muted-foreground', chromeSansRole('secondary'))} data-testid="transcript-empty">
             {emptyLine}

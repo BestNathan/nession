@@ -65,7 +65,7 @@ describe('SurfaceDestinationAction (#1204)', () => {
     expect(onOpen).toHaveBeenCalledTimes(1);
   });
 
-  it('projects a capability glyph as a badge when one is supplied (#1347 SC-25)', () => {
+  it('replaces its inner glyph with a projected capability identity (#1347 SC-25)', () => {
     render(
       <SurfaceDestinationAction
         destination="terminal"
@@ -74,18 +74,25 @@ describe('SurfaceDestinationAction (#1204)', () => {
       />,
     );
 
-    const badge = screen.getByTestId('surface-action-glyph');
-    expect(badge).toBeInTheDocument();
+    const projected = screen.getByTestId('surface-action-glyph');
+    expect(projected).toBeInTheDocument();
     expect(screen.getByTestId('glyph-icon')).toBeInTheDocument();
-    // Decorative: the badge is hidden from assistive technology, so the
+    // Replace inner glyph, never a badge: the projection is the only icon in
+    // the circle — the destination's own icon is not drawn alongside it.
+    expect(projected.parentElement?.querySelectorAll('svg')).toHaveLength(1);
+    // Decorative: the projection is hidden from assistive technology, so the
     // action's accessible name stays the destination's.
-    expect(badge).toHaveAttribute('aria-hidden', 'true');
+    expect(projected).toHaveAttribute('aria-hidden', 'true');
   });
 
-  it('renders no badge without a glyph', () => {
+  it('renders its own destination icon when no glyph is projected', () => {
     render(<SurfaceDestinationAction destination="terminal" onOpen={vi.fn()} />);
 
     expect(screen.queryByTestId('surface-action-glyph')).not.toBeInTheDocument();
+    // The default icon is the only icon in the circle.
+    expect(
+      screen.getByTestId('surface-action-open-terminal').querySelectorAll('svg'),
+    ).toHaveLength(1);
   });
 
   it('a projected glyph cannot alter the destination (#1347 SC-26)', async () => {

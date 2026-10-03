@@ -377,10 +377,6 @@
       "value": "cubic-bezier(0.2, 0, 0, 1)"
     }
   },
-  "dockTarget": {
-    "$description": "Web dock targets: pointer input, so the control-md band applies.",
-    "value": "32px"
-  },
   "conversation": {
     "$owner": "pattern.conversation",
     "$description": "Web density for an AI conversation transcript (#1363). The rhythm is the design: work rows sit close together so a long process reads as one block, and the answer is separated from that block by the loose gap so it reads as the thing you came for. Only the measurements live here — the hierarchy that motivates them is owned by the pattern doc.",

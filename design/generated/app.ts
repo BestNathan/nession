@@ -57,7 +57,6 @@ export const panel = {
 } as const;
 export const touchTarget = {
   min: 44,
-  compact: 28,
 } as const;
 export const shell = {
   iconButtonSize: 44,
@@ -137,7 +136,6 @@ export const terminalCapsule = {
 export const motion = {
   terminalCapsule: "280ms cubic-bezier(0.22, 1, 0.36, 1)",
 } as const;
-export const dockTarget = 28 as const;
 export const conversation = {
   bubbleMaxWidth: "82%",
   groupMaxHeight: "min(320px, 42vh)",

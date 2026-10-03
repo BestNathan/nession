@@ -6,6 +6,7 @@ import type { DomainState } from '@/product/session/model/domainState';
 import type { Agent } from '@/types';
 import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
+import { workspaceScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
 
 export interface AgentDetailProps {
   agent: Agent;
@@ -20,7 +21,7 @@ export function AgentDetail({ agent, state }: AgentDetailProps) {
   return (
     <div
       data-testid="agent-detail"
-      className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4"
+      className={cn('flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4', workspaceScrollClearanceClass)}
     >
       <div>
         <h2 className={chromeSansRole('primary')}>{name}</h2>

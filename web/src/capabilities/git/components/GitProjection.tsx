@@ -1,4 +1,3 @@
-import { capsulePeekActionClass } from '@/shared/lib/peekActionClass';
 import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import { useGitStatus } from '../hooks/useGitStatus';
@@ -28,21 +27,11 @@ export function GitProjection({
   sessionId,
   depth,
   onFocusChange,
-  onOpenWorkspace,
 }: {
   agentId: string | undefined;
   sessionId: string | undefined;
   depth: 'signal' | 'peek';
   onFocusChange?: (resourceId?: string) => void;
-  /**
-   * Hand the picked file to the Workspace (#1046).
-   *
-   * Git's Peek renders its own action rather than the host drawing one, because
-   * *this* capability is the one that knows it has a diff worth landing on —
-   * and with no argument it lands on whatever the user picked, which is the
-   * focus the host still holds.
-   */
-  onOpenWorkspace?: (resourceId?: string) => void;
 }) {
   const { status, loading, error } = useGitStatus({ agentId, sessionId });
 
@@ -67,7 +56,6 @@ export function GitProjection({
       status={status.status}
       root={status.root}
       onFocusChange={onFocusChange}
-      onOpenWorkspace={onOpenWorkspace}
     />
   );
 }
@@ -110,12 +98,10 @@ function GitPeekBody({
   status,
   root,
   onFocusChange,
-  onOpenWorkspace,
 }: {
   status: GitStatus;
   root: string;
   onFocusChange?: (resourceId?: string) => void;
-  onOpenWorkspace?: (resourceId?: string) => void;
 }) {
   const worktree = worktreeName(root);
   const { staged, unstaged } = stagedSplit(status);
@@ -170,19 +156,6 @@ function GitPeekBody({
         <p data-testid="git-peek-more" className={cn('text-muted-foreground', chromeSansRole('caption'))}>
           and {rest} more
         </p>
-      ) : null}
-
-      {onOpenWorkspace ? (
-        <div className="flex justify-end">
-          <button
-            type="button"
-            data-testid="capsule-capability-open-workspace"
-            onClick={() => onOpenWorkspace()}
-            className={capsulePeekActionClass}
-          >
-            Open in Workspace →
-          </button>
-        </div>
       ) : null}
     </div>
   );

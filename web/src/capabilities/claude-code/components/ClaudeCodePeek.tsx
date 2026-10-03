@@ -103,12 +103,11 @@ export function ClaudeCodePeek({
         </p>
       )}
 
-      {/* Local action on the left, deepening on the right, because they are
-          different kinds of thing: one keeps you in the Terminal and the other
-          leaves it. `#1120` asks for exactly that distinction, and putting them
-          in one row is what makes it visible rather than documented. */}
-      <div className="flex items-center justify-between gap-2">
-        {conversation.bound ? (
+      {/* The local action — it keeps you in the Terminal. The one that
+          leaves it is the Workspace destination, and that is the host's to
+          draw (#1347 SC-21), not this body's. */}
+      {conversation.bound ? (
+        <div className="flex items-center gap-2">
           <button
             type="button"
             data-testid="claude-code-peek-view-conversation"
@@ -122,22 +121,8 @@ export function ClaudeCodePeek({
           >
             View conversation
           </button>
-        ) : (
-          // Keeps the Workspace action on the right whether or not there is a
-          // local one — a row that reflows by state reads as two layouts.
-          <span />
-        )}
-        {onOpenWorkspace ? (
-          <button
-            type="button"
-            data-testid="capsule-capability-open-workspace"
-            onClick={() => onOpenWorkspace()}
-            className={capsulePeekActionClass}
-          >
-            Open in Workspace →
-          </button>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
     </div>
   );
 }

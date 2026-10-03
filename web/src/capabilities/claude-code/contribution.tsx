@@ -20,6 +20,8 @@ import { Bot } from 'lucide-react';
 import type { CapabilityFacts, CapabilityState } from '@/product/capability';
 import type { WorkspaceViewBinding } from '@/app/workspace/workspaceContext';
 import type { CapsuleProjectionBinding } from '@/app/capsuleProjections';
+import type { CapabilityWorkBinding } from '@/app/workSignals';
+import type { CapabilityConversationBinding } from '@/app/conversationIdentities';
 import { ClaudeCodeWorkspace } from './components/ClaudeCodeWorkspace';
 import { ClaudeCodeProjection } from './components/ClaudeCodeProjection';
 
@@ -114,4 +116,50 @@ export const claudeCodeProjection: CapsuleProjectionBinding = {
       openDetail={openDetail}
     />
   ),
+};
+
+/**
+ * What "Claude Code is working" means, contributed to the capsule's work
+ * resolver (#1347 SC-14/19).
+ *
+ * Passive sensing: the agent already reports the pane's foreground command
+ * with every session update, so a pane running Claude Code *is* the work
+ * signal — no explicit API call. The matcher is the same one
+ * `resolveClaudeCodeState` uses, and the summary text is this capability's
+ * sentence to write; the shell aggregates without knowing either.
+ */
+export const claudeCodeWork: CapabilityWorkBinding = {
+  id: CLAUDE_CODE_ID,
+  sense: (facts) => {
+    const command = facts?.sessionForegroundCommand;
+    if (!command || !isClaudeCodeCommand(command)) {
+      return null;
+    }
+    return {
+      capabilityId: CLAUDE_CODE_ID,
+      status: 'working',
+      summary: 'Claude Code is running in this session',
+    };
+  },
+};
+
+/**
+ * This capability's conversational identity, projected into the Workspace's
+ * Terminal-return circle while the conversation is live (#1347 SC-25).
+ *
+ * The matcher is the same one the presence state and the work signal use —
+ * one definition of "Claude is running", so the ring, the chip and the
+ * destination glyph can never disagree about the same pane. The glyph is the
+ * view's own icon: one icon per capability, drawn in place of the circle's
+ * Terminal icon (*replace inner glyph*, never a badge).
+ */
+export const claudeCodeConversation: CapabilityConversationBinding = {
+  id: CLAUDE_CODE_ID,
+  sense: (facts) => {
+    const command = facts?.sessionForegroundCommand;
+    if (!command || !isClaudeCodeCommand(command)) {
+      return null;
+    }
+    return { capabilityId: CLAUDE_CODE_ID, glyph: claudeCodeView.icon };
+  },
 };

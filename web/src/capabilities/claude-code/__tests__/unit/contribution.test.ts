@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { resolveClaudeCodeState } from '../../contribution';
+import {
+  claudeCodeConversation,
+  claudeCodeView,
+  claudeCodeWork,
+  resolveClaudeCodeState,
+} from '../../contribution';
 import type { CapabilityFacts, CapabilityState } from '@/product/capability';
 
 const SESSION = 'a1:work';
@@ -50,5 +55,75 @@ describe('claude-code capability state from session facts', () => {
 
   it('falls back to available when the agent reports no foreground command', () => {
     expect(state({ sessionForegroundCommand: null })).toBe('available');
+  });
+});
+
+/**
+ * The work contribution (#1347 SC-14/19): the capability owns what "working"
+ * means for it — matcher, status and summary — and the shell's resolver only
+ * aggregates. Quiet is the absence of a signal, never a `{status:'quiet'}`
+ * entry, or the Work Overview would fill with non-work.
+ */
+describe('claude-code work signal', () => {
+  it('reports working while the pane runs Claude Code', () => {
+    expect(claudeCodeWork.sense({ sessionForegroundCommand: 'claude.exe' })).toEqual({
+      capabilityId: 'claude-code',
+      status: 'working',
+      summary: 'Claude Code is running in this session',
+    });
+  });
+
+  it('matches the bare command name too', () => {
+    expect(claudeCodeWork.sense({ sessionForegroundCommand: 'claude' })?.status).toBe(
+      'working',
+    );
+  });
+
+  it('emits nothing for an unrelated command', () => {
+    expect(claudeCodeWork.sense({ sessionForegroundCommand: 'bash' })).toBeNull();
+  });
+
+  it('emits nothing without facts', () => {
+    expect(claudeCodeWork.sense(undefined)).toBeNull();
+  });
+
+  it('answers from the same matcher as the presence state', () => {
+    // One definition of "Claude is running" — the ring and the presence chip
+    // cannot disagree about the same pane.
+    expect(claudeCodeWork.sense({ sessionForegroundCommand: 'node' })).toBeNull();
+  });
+});
+
+/**
+ * The conversational-identity contribution (#1347 SC-25): while the
+ * conversation is live, the Workspace's Terminal-return circle draws this
+ * capability's glyph in place of its Terminal icon. The capability owns the
+ * matcher and the glyph; the shell only asks the registry.
+ */
+describe('claude-code conversation identity', () => {
+  it('projects its identity while the pane runs Claude Code', () => {
+    expect(
+      claudeCodeConversation.sense({ sessionForegroundCommand: 'claude.exe' }),
+    ).toEqual({ capabilityId: 'claude-code', glyph: claudeCodeView.icon });
+  });
+
+  it('matches the bare command name too', () => {
+    expect(
+      claudeCodeConversation.sense({ sessionForegroundCommand: 'claude' })?.capabilityId,
+    ).toBe('claude-code');
+  });
+
+  it('projects nothing for an unrelated command', () => {
+    expect(claudeCodeConversation.sense({ sessionForegroundCommand: 'bash' })).toBeNull();
+  });
+
+  it('projects nothing without facts', () => {
+    expect(claudeCodeConversation.sense(undefined)).toBeNull();
+  });
+
+  it('answers from the same matcher as the presence state and the work signal', () => {
+    // One definition of "Claude is running" — the chip, the ring and the
+    // destination glyph cannot disagree about the same pane.
+    expect(claudeCodeConversation.sense({ sessionForegroundCommand: 'node' })).toBeNull();
   });
 });

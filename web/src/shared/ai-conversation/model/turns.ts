@@ -37,7 +37,12 @@
  * messages at all, which is a legitimate thing for a provider to do.
  */
 
-import type { AIMessageItem, AIConversationItem } from './conversation'
+import type {
+  AIMessageItem,
+  AIReasoningItem,
+  AIConversationItem,
+  AIToolItem,
+} from './conversation'
 
 export interface ConversationTurn {
   /**
@@ -70,6 +75,17 @@ function messageOf(item: AIConversationItem): AIMessageItem | null {
 
 function isUser(item: AIConversationItem): boolean {
   return messageOf(item)?.role === 'user'
+}
+
+/**
+ * Whether an item is the assistant *working*, as opposed to something it said.
+ *
+ * `unknown` is deliberately not work: an unmodelled record is not evidence that
+ * anything is still happening, and treating it as such would end the turn for
+ * any provider that trails one.
+ */
+function isWork(item: AIConversationItem): item is AIToolItem | AIReasoningItem {
+  return item.kind === 'tool' || item.kind === 'reasoning'
 }
 
 function timeOf(item: AIConversationItem): number | null {
@@ -110,20 +126,35 @@ function turnOf(items: AIConversationItem[]): ConversationTurn {
   const firstMessage = messageOf(first)
   const opening = firstMessage !== null && firstMessage.role === 'user' ? firstMessage : null
 
-  // The answer is the *last* assistant message. Everything before it is
-  // progress towards it; anything after it — a trailing notice, a status row —
-  // is not the answer either, and stays in the process window so the renderer
-  // can keep it out of the fold (`conversation.md`: notices never fold).
+  // The answer is the last assistant message **that no work follows**.
+  //
+  // "The last assistant message" alone was the rule, and it is wrong in the case
+  // a live turn produces constantly: the assistant says something and then goes
+  // back to work. That message is progress towards an answer nobody has written
+  // yet, and calling it the answer *ends the turn* — the fold closes, the copy
+  // action appears, and work that is still happening is drawn as finished.
+  // `#1363` round 3.
+  //
+  // A message the assistant is still streaming is never the answer either, but
+  // that is the renderer's `workingOf` to decide; here it is only about order.
   let answer: AIMessageItem | null = null
   for (const item of items) {
     const message = messageOf(item)
     if (message !== null && message.role === 'assistant') {
       answer = message
+    } else if (answer !== null && isWork(item)) {
+      answer = null
     }
   }
 
+  // A status notice is not the assistant's work, so it is not inside the window
+  // a fold closes over — see `AIStatusItem` for why that reading won over the
+  // other one the canonical document offers. Leaving it out of `process` is the
+  // whole mechanism: the renderer folds by turn membership, so an item with
+  // none is never hidden.
   const process = items.filter(
-    (item, index) => item !== answer && !(opening !== null && index === 0),
+    (item, index) =>
+      item !== answer && item.kind !== 'status' && !(opening !== null && index === 0),
   )
 
   return {
@@ -164,6 +195,23 @@ export function turnsOf(items: AIConversationItem[]): ConversationTurn[] {
   flush()
 
   return turns
+}
+
+/**
+ * Whether the turn's work is still running.
+ *
+ * The other half of the same finding, and the one that survives a final answer:
+ * a turn can have an answer *and* a work item that has not finished — the
+ * assistant replied, and a tool it started is still going. Such a turn is not
+ * settled, and treating it as settled folds away the only thing still moving.
+ *
+ * Read from the canonical items rather than from what the provider said about
+ * the answer, because a provider that reports a tool's `running` state has
+ * already told us everything this needs, and one that does not simply never
+ * reports it. Nothing here is provider-specific.
+ */
+export function runningWork(turn: ConversationTurn): boolean {
+  return turn.process.some((item) => isWork(item) && item.status === 'running')
 }
 
 export interface TurnMembership {

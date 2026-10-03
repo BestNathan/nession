@@ -1,5 +1,7 @@
+import { useRef } from 'react';
 import { resolveCapabilityPresences, type CapabilityId } from '@/product/capability';
 import { cn } from '@/shared/lib/utils';
+import { useWorkspaceCapsuleClearance } from '@/app/workspace/hooks/useWorkspaceCapsuleClearance';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import { resolveWorkspaceCapabilities } from '@/app/workspace/capabilities';
 import {
@@ -13,7 +15,7 @@ import type {
   WorkspaceViewBinding,
 } from '@/app/workspace/workspaceContext';
 import { CapabilityCapsule } from '@/app/workspace/CapabilityCapsule';
-import { capsuleZoneClass } from '@/product/terminal/capsule/CapsuleZone';
+import { capsuleZoneAppClass, capsuleZoneClass } from '@/product/terminal/capsule/CapsuleZone';
 
 const workspaceViewBindings = new Map<string, WorkspaceViewBinding>(
   WORKSPACE_VIEW_BINDINGS.map((view) => [view.id, view]),
@@ -111,6 +113,11 @@ export function WorkspaceShell({
   pushed = false,
   surfaceAction,
 }: WorkspaceShellProps) {
+  // SC-12: the shell is the Workspace's occlusion owner — see the hook for why
+  // it measures the tool bar rather than the Terminal's composer.
+  const shellRef = useRef<HTMLDivElement>(null);
+  useWorkspaceCapsuleClearance(shellRef);
+
   const resolution = resolveWorkspaceCapabilities(ctx);
   const presences = resolveCapabilityPresences(resolution.snapshots, {
     surface: 'workspace',
@@ -157,6 +164,7 @@ export function WorkspaceShell({
 
   return (
     <div
+      ref={shellRef}
       data-testid="workspace-shell"
       data-capability-diagnostics={resolution.diagnostics.length}
       /* The Workspace region's ground is the canvas, not a tint of it.
@@ -170,7 +178,13 @@ export function WorkspaceShell({
          declared and consumed by nothing until here. */
       className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-workspace-background"
     >
-      <div data-testid="workspace-tool-content" className="min-h-0 flex-1 overflow-hidden">
+      {/* `flex flex-col` so the region constrains its single view instead of
+          letting it size to its content: a view built as `flex-1 min-h-0`
+          (AgentDetail, GitWorkspace) is a flex item here, and without the
+          container a tall view overflowed the region — clipped by
+          `overflow-hidden`, with no scroll to reach its end, which is the
+          thing SC-12 assumes can always happen. */}
+      <div data-testid="workspace-tool-content" className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {ctx.experience === 'app' ? (
           ActiveAppLayout ? (
             <ActiveAppLayout ctx={ctx} depth={depth} />
@@ -193,7 +207,13 @@ export function WorkspaceShell({
         <div
           data-testid="workspace-tool-bar"
           data-navigation-mode="contextual"
-          className={cn(capsuleZoneClass, 'gap-[length:var(--shell-space-2)]')}
+          className={cn(
+            // #1347 SC-08 / SC-29: on App the zone sits where the Conversation
+            // capsule does (the App dock placement); on Web it keeps the shared
+            // zone's own bottom offset.
+            ctx.experience === 'app' ? capsuleZoneAppClass : capsuleZoneClass,
+            'gap-[length:var(--shell-space-2)]',
+          )}
         >
           {showSurfaceAction ? <SurfaceNavigation>{surfaceAction}</SurfaceNavigation> : null}
           {showDock ? (
@@ -201,6 +221,7 @@ export function WorkspaceShell({
               items={allCapsuleItems}
               activeCapabilityId={activeCapabilityId}
               onSelect={ctx.onToolChange}
+              experience={ctx.experience}
             />
           ) : null}
         </div>

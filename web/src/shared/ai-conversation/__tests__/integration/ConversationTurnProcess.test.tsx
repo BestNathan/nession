@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
 import { ConversationTranscript } from '../../components/ConversationTranscript'
 import type { AIConversationSnapshot } from '../../runtime/ConversationRuntime'
-import { assistantMessage, toolItem, userMessage } from '../fixtures/items'
+import { assistantMessage, statusItem, toolItem, userMessage } from '../fixtures/items'
 
 /**
  * The turn's process control: one line per turn, folding the work behind it.
@@ -190,11 +190,77 @@ describe('the turn process control', () => {
     expect(screen.getByTestId('conversation-turn-process')).toHaveTextContent('Worked for 30s')
   })
 
+  it('draws a status notice without folding it into the work', () => {
+    // #1363 SC-03: a provider's notice is a row of the transcript, not `unknown`
+    // and not part of the assistant's work. The second half is the load-bearing
+    // half — a notice that folded away with the process would vanish exactly
+    // when a reader folds the work to look at the answer, which is when "why
+    // there isn't one" matters most.
+    renderTranscript({
+      items: [
+        userMessage('u1', 'q'),
+        toolItem('t1'),
+        toolItem('t2'),
+        statusItem('s1', 'The host went away mid-turn'),
+        assistantMessage('a1', 'a'),
+      ],
+    })
+
+    // Settled, so the work is folded.
+    expect(rowOf(screen.getByTestId('conversation-tool-group'))).toHaveAttribute('hidden')
+
+    const notice = screen.getByTestId('conversation-status')
+    expect(notice).toHaveTextContent('The host went away mid-turn')
+    expect(rowOf(notice)).not.toHaveAttribute('hidden')
+  })
+
   it('says only that it worked when the provider did not timestamp it', () => {
     renderTranscript({ items: [userMessage('u1', 'q'), toolItem('t1'), assistantMessage('a1', 'a')] })
 
     // Not "Worked for 0s": a provider that states no time has stated no time.
     expect(screen.getByTestId('conversation-turn-process')).toHaveTextContent('Worked')
+  })
+})
+
+describe('transcript state across a conversation switch', () => {
+  // Deliberately the same items and therefore the same ids in both
+  // conversations, which is what makes this a test rather than a coincidence.
+  const shared = [
+    userMessage('u1', 'q'),
+    toolItem('t1'),
+    toolItem('t2'),
+    assistantMessage('a1', 'done'),
+  ]
+
+  it('does not carry a disclosure the reader opened in another conversation', () => {
+    // #1363 round 3. Every piece of transcript-local state is keyed by item,
+    // turn and group ids, and those are unique only *within* a conversation —
+    // so opening a second thread that reuses an id used to inherit the first
+    // one's expansion, and the reader saw work already unfolded that they had
+    // never opened here.
+    const { rerender } = render(
+      <ConversationTranscript
+        snapshot={snapshot({ openId: 'c1', items: shared })}
+        providerLabel="Claude"
+        onLoadOlder={() => false}
+      />,
+    )
+
+    fireEvent.click(screen.getByTestId('conversation-turn-process'))
+    expect(rowOf(screen.getByTestId('conversation-tool-group'))).not.toHaveAttribute('hidden')
+
+    rerender(
+      <ConversationTranscript
+        snapshot={snapshot({ openId: 'c2', items: shared })}
+        providerLabel="Claude"
+        onLoadOlder={() => false}
+      />,
+    )
+
+    // Same ids, different conversation: folded again, because nobody opened it
+    // here. Without the `key`, the override recorded under `t1` answers for this
+    // render too.
+    expect(rowOf(screen.getByTestId('conversation-tool-group'))).toHaveAttribute('hidden')
   })
 })
 
@@ -255,6 +321,23 @@ describe('a turn the reader is inside when its answer settles', () => {
     // focus has to still be *in* it, not merely near it.
     expect(rowOf(screen.getByTestId('conversation-tool-group'))).not.toHaveAttribute('hidden')
     expect(document.activeElement).toBe(inner)
+  })
+
+  it('keeps a turn open while its work is still running, answer or not', () => {
+    // #1363 round 3, the contradiction it named: the assistant answered *and* a
+    // tool it started is still going. An answer alone would settle the turn and
+    // fold away the only thing still moving, so liveness reads the canonical
+    // work items rather than only what the provider said about the message.
+    renderTranscript({
+      items: [
+        userMessage('u1', 'q'),
+        toolItem('t1', { status: 'running' }),
+        toolItem('t2', { status: 'running' }),
+        assistantMessage('a1', 'started it'),
+      ],
+    })
+
+    expect(rowOf(screen.getByTestId('conversation-tool-group'))).not.toHaveAttribute('hidden')
   })
 
   it('still folds a settled turn nobody is inside', () => {

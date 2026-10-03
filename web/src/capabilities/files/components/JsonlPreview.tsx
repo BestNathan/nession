@@ -5,6 +5,7 @@ import { JsonlRecord as JsonlRecordRow } from './JsonlRecord';
 import { readScrollportHeight, syncJsonlScrollportHeight } from './jsonlScrollport';
 import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
+import { workspaceScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
 
 /** Bootstrap only — real height comes from measureElement + ResizeObserver (#1199 review). */
 const ESTIMATE_BEFORE_MEASURE_PX = 96;
@@ -78,7 +79,11 @@ export function JsonlPreview({ content }: JsonlPreviewProps) {
   const virtualItems = scrollportReady ? virtualizer.getVirtualItems() : [];
 
   return (
-    <div ref={parentRef} data-testid="jsonl-preview-scroll" className="overflow-y-auto h-full min-w-0">
+    <div
+      ref={parentRef}
+      data-testid="jsonl-preview-scroll"
+      className={cn('overflow-y-auto h-full min-w-0', workspaceScrollClearanceClass)}
+    >
       <div
         style={{
           height: scrollportReady ? `${virtualizer.getTotalSize()}px` : undefined,

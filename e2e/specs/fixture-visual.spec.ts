@@ -147,6 +147,56 @@ test.describe('Web 1440×900', () => {
     await expectChromeRegion(page, 'claude-code-view-tabs', 'web-claude-code-view-tabs.png');
   });
 
+  // #1184's acceptance corpus, in the surface the requirement photographs it
+  // from. Each assertion here is a *negative* dialect guarantee — `$HOME` is
+  // not a formula, `60~70%` is not strikethrough, `<tool_call>` is not an
+  // element — and the canonical conversation contains none of those shapes: a
+  // regression that swallowed them would leave every other baseline
+  // byte-identical, which is the #714 failure shape this case exists to
+  // prevent.
+  test('Claude Code conversation, Chat dialect corpus', async ({ page }) => {
+    await page.goto('/#/fixture/workspace?capability=claude-code&conversation=rich');
+
+    await expect(page.getByTestId('claude-code-workspace')).toBeVisible();
+    const conversation = page.getByTestId('conversation-open');
+    await expect(conversation).toBeVisible();
+
+    // SC-08 / SC-09: shell prose stays prose.
+    await expect(conversation).toContainText('$HOME resolved to at launch');
+    await expect(conversation).toContainText('$100 in the worst case');
+    await expect(conversation).toContainText('~10ms');
+    await expect(conversation).toContainText('60~70% of that is the render');
+    await expect(conversation.locator('del')).toHaveCount(0);
+
+    // SC-07: the CJK strong run closes where the author closed it.
+    await expect(conversation.locator('strong', { hasText: '重点。' })).toBeVisible();
+
+    // SC-10: the tag is literal text on screen.
+    await expect(conversation).toContainText('<tool_call>');
+
+    // Both approved math forms render through KaTeX, and nothing errored.
+    expect(await conversation.locator('.katex').count()).toBeGreaterThanOrEqual(2);
+    await expect(conversation.locator('.katex-error')).toHaveCount(0);
+
+    // SC-14: settled resolution — the reference, the footnote and its section.
+    await expect(conversation.locator('a[href="https://example.com/nession"]')).toHaveText(
+      'stream replay notes',
+    );
+    await expect(conversation.locator('sup a')).toHaveText('[1]');
+    await expect(conversation.locator('[data-footnotes]')).toContainText(
+      'Only the attach path is covered',
+    );
+
+    // A local destination stays text until a resolver vouches for it.
+    await expect(conversation).toContainText('PeekHost.tsx');
+    await expect(conversation.locator('a', { hasText: 'PeekHost.tsx' })).toHaveCount(0);
+
+    await expect(page).toHaveScreenshot('web-claude-code-chat-dialect.png', {
+      fullPage: true,
+      ...FIXTURE_SCREENSHOT,
+    });
+  });
+
   test('Claude Code conversation list', async ({ page }) => {
     // `unbound`: several conversations at this cwd and no answer about which
     // is the Session's. The fixture names one and leaves another untitled, so
@@ -874,6 +924,48 @@ test.describe('App 390×844', () => {
     // The App draws this view with its own layout, so its strip gets its own
     // region rather than borrowing Web's (#1332).
     await expectChromeRegion(page, 'claude-code-view-tabs', 'app-claude-code-view-tabs.png');
+  });
+
+  // #1184 SC-16 names the Peek overlay — the conversation read from the
+  // Terminal without leaving it — and the narrow viewport the Chat dialect has
+  // to stay readable at. Both were in no image at all: the walk below is the
+  // only one that opens the overlay, and it is photographed at the canonical
+  // 390-wide App size.
+  test('Claude Code Peek conversation, Chat dialect corpus', async ({ page }) => {
+    await gotoFixtureApp(page, '?conversation=rich');
+    await waitForFixtureTerminal(page);
+
+    await page.getByTestId('capsule-capability-more').click();
+    await page.getByTestId('capsule-capability-picker-claude-code').click();
+    // The title is the step from Signal to Peek, the same walk `app-git-peek`
+    // documents; `claude-code-peek-body` below is what says this is a Peek.
+    await page.getByTestId('capsule-capability-title').click();
+    await expect(page.getByTestId('claude-code-peek-body')).toBeVisible();
+
+    await expect(page).toHaveScreenshot('app-claude-code-chat-dialect-peek.png', {
+      fullPage: true,
+      ...FIXTURE_SCREENSHOT,
+    });
+
+    await page.getByTestId('claude-code-peek-view-conversation').click();
+    const overlay = page.getByTestId('conversation-overlay');
+    await expect(overlay).toBeVisible();
+
+    // The same dialect guarantees as Web's case, at 390 wide: prose dollars and
+    // tildes intact, the footnote section resolved, math rendered.
+    await expect(overlay).toContainText('$HOME resolved to at launch');
+    await expect(overlay).toContainText('60~70% of that is the render');
+    await expect(overlay.locator('del')).toHaveCount(0);
+    await expect(overlay.locator('[data-footnotes]')).toContainText(
+      'Only the attach path is covered',
+    );
+    await expect(overlay.locator('.katex').first()).toBeVisible();
+    await expect(overlay.locator('.katex-error')).toHaveCount(0);
+
+    await expect(page).toHaveScreenshot('app-claude-code-chat-dialect.png', {
+      fullPage: true,
+      ...FIXTURE_SCREENSHOT,
+    });
   });
 });
 

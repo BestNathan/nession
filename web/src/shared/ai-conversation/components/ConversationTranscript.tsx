@@ -41,6 +41,7 @@ import {
 import {
   carryTurnKeys,
   rememberTurns,
+  runningWork,
   turnMembership,
   turnsOf,
   type ConversationTurn,
@@ -52,6 +53,7 @@ import { TurnActions } from './TurnActions'
 import { TurnProcess } from './TurnProcess'
 import { ConversationMessage } from './ConversationMessage'
 import { ReasoningActivity } from './ReasoningActivity'
+import { StatusNotice } from './StatusNotice'
 import { ToolActivity, UnknownActivity } from './ToolActivity'
 import { ToolGroup } from './ToolGroup'
 import {
@@ -173,6 +175,10 @@ function TranscriptContent({
   const workingOf = (turn: ConversationTurn): boolean =>
     turn.answer === null ||
     turn.answer.status === 'streaming' ||
+    // Work still running outranks an answer. A tool the assistant started and
+    // has not finished means the turn is not settled, whatever it said before
+    // starting it — folding here would close the only thing still moving.
+    runningWork(turn) ||
     (turn.key === lastKey && snapshot.partialTail)
 
   const [overrides, setOverrides] = useState(() => new Map<string, boolean>())
@@ -346,6 +352,8 @@ function ConversationBody({
               <ToolActivity item={row.item} />
             ) : row.item.kind === 'reasoning' ? (
               <ReasoningActivity item={row.item} />
+            ) : row.item.kind === 'status' ? (
+              <StatusNotice item={row.item} />
             ) : row.item.kind === 'message' ? (
               <ConversationMessage
                 item={row.item}
@@ -395,6 +403,24 @@ export function ConversationTranscript({
       <MessageScroller>
         <MessageScrollerViewport preserveScrollOnPrepend>
           <TranscriptContent
+            // Scoped to the conversation, not merely to this component. Every
+            // piece of state below — the disclosure overrides, both identity
+            // maps, the focus pin — is keyed by item, turn and group ids, and
+            // those are unique only *within* a conversation. Without this, two
+            // threads that reuse an id inherit each other's expansion and
+            // focus. `#1363` round 3.
+            //
+            // A `key` rather than a reset-on-change effect, because an effect
+            // runs *after* the render that already drew the new conversation
+            // with the old state; with `key` the state never exists in a render
+            // it does not belong to.
+            //
+            // Prepends and refreshes do not change `openId`, which is exactly
+            // the distinction the review drew: preserving state across a prepend
+            // and dropping it across a switch are requirements pulling opposite
+            // ways, so the boundary has to be the conversation and nothing
+            // coarser.
+            key={snapshot.openId ?? 'no-conversation'}
             snapshot={snapshot}
             providerLabel={providerLabel}
             onLoadOlder={loadOlder}

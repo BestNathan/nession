@@ -29,6 +29,7 @@ export default tseslint.config(
       'nession/no-reverse-imports': 'error', // Enforce layered architecture import direction
       'nession/no-ui-product-imports': 'error', // components/ui stays generic (see the rule's header)
       'nession/no-deep-capability-imports': 'error', // a capability is reached through its index (#801)
+      'nession/no-capability-portals': 'error', // a Peek body stays inside the host (#1347 SC-27)
 
       // ── Code quality limits ──────────────────────────────────────────
       complexity:    ['error', 20],

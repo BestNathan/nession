@@ -150,6 +150,56 @@ describe('fixture conversation surface', () => {
     expect(prose.some((text) => text.includes('```'))).toBe(true);
   });
 
+  it('models the #1184 Chat dialect corpus, so a golden can reach it', async () => {
+    // Each fragment is a *negative* guarantee of the Chat profile — a `$HOME`
+    // that must stay prose, a raw tag that must stay literal — and the
+    // canonical conversation contains none of them. A fixture that quietly
+    // lost one would leave every existing golden byte-identical, which is the
+    // #714 failure shape: the gate keeps passing while the feature is gone.
+    const rich = fixtureConversationSurface('?conversation=rich');
+    const list = await rich.request<ConversationsResponse>('claude-code.conversations', {});
+    const boundId = list.binding?.conversation_id as string;
+    expect(boundId).toBeDefined();
+
+    const response = await rich.request<MessagesResponse>('claude-code.messages', {
+      conversation_id: boundId,
+    });
+    expect(response.state).toBe('ready');
+    // Settled: SC-14's references and footnotes resolve in the full parse, and
+    // a streaming tail would leave them literal in the golden instead.
+    expect(response.partial_tail).toBe(false);
+
+    const text = (response.items ?? [])
+      .flatMap((item) => (item.kind === 'message' ? item.content : []))
+      .flatMap((part) => (part.type === 'text' ? [part.text] : []))
+      .join('\n');
+    for (const fragment of [
+      '$HOME',
+      '$100',
+      '~/.claude',
+      '60~70%',
+      '中文**重点。**下一句',
+      '\\(E = mc^2\\)',
+      '\\int_0^1',
+      '<tool_call>',
+      '| observer |',
+      '[stream replay notes][notes]',
+      '[^observer]',
+      '[notes]: https://example.com/nession',
+      '[PeekHost.tsx](web/src/product/terminal/capsule/PeekHost.tsx)',
+    ]) {
+      expect(text, `the rich corpus should carry ${fragment}`).toContain(fragment);
+    }
+
+    // And the corpus is not the canonical page under another name: the
+    // scenario answers its own conversation, and the canonical ids are
+    // `not_found` under it rather than substituted (#1222's rule).
+    const other = await rich.request<MessagesResponse>('claude-code.messages', {
+      conversation_id: 'c0a1b2c3-1111-4222-8333-444455556666',
+    });
+    expect(other.state).toBe('not_found');
+  });
+
   it('models the unbound and no-conversation states, not just the happy one', async () => {
     // Unbound is the state `#1005` forbids guessing in — a list and no binding,
     // which is *not* a state of its own anymore (#1222) — and an empty list is
