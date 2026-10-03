@@ -92,14 +92,22 @@ test('a settled Turn folds its work, and the control opens it again', async ({ p
   // list so their scroll anchors and group identities survive (#1386). Both
   // halves are asserted, because `toBeHidden()` on its own passes just as well
   // on a component that threw the row away — which is the bug, not the rule.
-  const firstTool = page.getByTestId('conversation-tool').first();
-  await expect(firstTool).toHaveCount(1);
-  await expect(firstTool).toBeHidden();
+  //
+  // The row to assert is the **group**, not a `conversation-tool`. This corpus
+  // has two adjacent tools, so they arrive as one group — an inner disclosure
+  // with a fold of its own. `conversation.md` puts the outer fold above the
+  // inner one on visibility, so the turn's control is what decides whether the
+  // group is on screen; the group's own control decides what is inside it.
+  // Asserting a tool row here would be driving the inner control with the outer
+  // one's gesture, which is how this test failed the first time it ran in CI.
+  const group = page.getByTestId('conversation-tool-group').first();
+  await expect(group).toHaveCount(1);
+  await expect(group).toBeHidden();
 
   await control.click();
 
   await expect(control).toHaveAttribute('aria-expanded', 'true');
-  await expect(firstTool).toBeVisible();
+  await expect(group).toBeVisible();
 });
 
 test('a working Turn does not fold, and says so before anyone clicks', async ({ page }) => {
