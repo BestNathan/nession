@@ -62,6 +62,15 @@ capture() {
 capture 0 "$TMP_DIR/validate.out" "$TMP_DIR/repo/gates/run" --validate
 assert_contains "$TMP_DIR/validate.out" '✓ gate catalog: 3 gates, 1 suites'
 
+cat >"$TMP_DIR/repo/gates/checks/broken.sh" <<'EOF_BROKEN'
+#!/usr/bin/env bash
+if then
+EOF_BROKEN
+chmod +x "$TMP_DIR/repo/gates/checks/broken.sh"
+capture 2 "$TMP_DIR/syntax.out" "$TMP_DIR/repo/gates/run" --validate
+assert_contains "$TMP_DIR/syntax.out" '[ERROR] gate shell syntax invalid: broken'
+rm -f "$TMP_DIR/repo/gates/checks/broken.sh"
+
 capture 0 "$TMP_DIR/suites.out" "$TMP_DIR/repo/gates/run" --list-suites
 assert_contains "$TMP_DIR/suites.out" 'sample'
 
