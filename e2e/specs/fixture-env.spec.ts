@@ -187,15 +187,17 @@ test.describe('App 390×844', () => {
     await gotoEnvCapability(page);
 
     // Root: the navigator, the header naming the capability, the dock offering
-    // peer switching — valid here and nowhere deeper.
+    // peer switching — valid at every depth since the owner's 2026-10-03
+    // decision (#1347; see `fixture-app`'s "one navigation bar per depth").
     await expect(page.getByTestId('app-page-header')).toContainText('Environment');
     await expect(page.getByTestId('workspace-tool-bar')).toBeVisible();
 
     await page.getByTestId(STAGING_ROW).click();
     await expect(page.getByTestId('env-profile-detail')).toBeVisible();
     await expect(page.getByTestId('app-page-header')).toContainText('staging.env');
-    // A peer switcher over a pushed page is a second navigation owner.
-    await expect(page.getByTestId('workspace-tool-bar')).toHaveCount(0);
+    // The dock stays over a pushed page; the navigator it was pushed from does
+    // not, and the one Back is still the route out.
+    await expect(page.getByTestId('workspace-tool-bar')).toHaveCount(1);
     await expect(page.getByTestId('env-navigator')).toHaveCount(0);
 
     await page.getByTestId('app-page-back').click();

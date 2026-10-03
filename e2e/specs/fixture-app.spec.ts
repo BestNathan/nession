@@ -292,25 +292,30 @@ test('the Workspace owns one navigation bar per depth (#1051)', async ({ page })
 
   // Depth 2 — the pushed file. Still one header and one leave; the title is now
   // the pushed page's, and the one leave returns to the capability root rather
-  // than to the Terminal. The dock is gone: a peer-capability switcher over a
-  // pushed page is a second navigation owner, answering to a depth it has no
-  // place at.
+  // than to the Terminal. The dock *stays*: the owner's 2026-10-03 decision
+  // (#1347) keeps the capsule at every Workspace depth, because losing the
+  // capability context the moment a file opens measured worse than a switcher
+  // over a pushed page. What #1051 was protecting survives where it still means
+  // leaving — the one Back above, named for the parent, and the shell's swipe
+  // standing down for it.
   await openFixtureFile(page);
   await expect(page.getByTestId('app-page-header')).toContainText('App.tsx');
 
   await expect.poll(() => paintedCount(page, WORKSPACE_HEADERS)).toBe(1);
   await expect.poll(() => paintedCount(page, WORKSPACE_LEAVES)).toBe(1);
-  await expect.poll(() => paintedCount(page, WORKSPACE_DOCK)).toBe(0);
+  await expect.poll(() => paintedCount(page, WORKSPACE_DOCK)).toBe(1);
   await expect(page.getByTestId('app-page-back')).toHaveAccessibleName('Back to Files');
 
   await page.screenshot({ path: 'test-results/canonical-app-workspace-pushed.png', fullPage: true });
 
   // …and the one leave from the viewer returns to the directory that held the
-  // file, not straight to the capability root (#1140).
+  // file, not straight to the capability root (#1140). Still a pushed depth, so
+  // the dock is still there — depth is what the Back's name reports, not what
+  // the dock keys on.
   await page.getByTestId('app-page-back').click();
   await expect(page.getByTestId('files-app-list')).toBeVisible();
   await expect(page.getByTestId('app-page-header')).toContainText('src');
-  await expect.poll(() => paintedCount(page, WORKSPACE_DOCK)).toBe(0);
+  await expect.poll(() => paintedCount(page, WORKSPACE_DOCK)).toBe(1);
 
   await page.getByTestId('app-page-back').click();
   await expect(page.getByTestId('app-page-header')).toContainText('web');
