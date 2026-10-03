@@ -857,9 +857,13 @@ test.describe('App 390×844', () => {
   // #1202's App half: the Environment detail pushed over the navigator. This
   // is the screen that proves the capability navigates through the shell's
   // depth control rather than its own chrome — the header names the profile,
-  // the dock is gone, and the masked row reads the same as on Web. Driven
-  // through the capability picker for the same reason the conversation walk
-  // is: the App reaches a capability view that way.
+  // and the masked row reads the same as on Web. Driven through the capability
+  // picker for the same reason the conversation walk is: the App reaches a
+  // capability view that way.
+  //
+  // The dock used to be asserted *gone* here (#1051). It is present now: owner
+  // decision 2026-10-03 — the capsule stays at every Workspace depth, and the
+  // depth's scrollers clear it.
   test('Workspace / Environment, pushed detail', async ({ page }) => {
     await gotoFixtureApp(page);
     await page.getByTestId('app-header-workspace').first().click();
@@ -871,7 +875,7 @@ test.describe('App 390×844', () => {
 
     await page.getByTestId('env-profile-row-server::staging.env').click();
     await expect(page.getByTestId('app-page-header')).toContainText('staging.env');
-    await expect(page.getByTestId('workspace-tool-bar')).toHaveCount(0);
+    await expect(page.getByTestId('workspace-tool-bar')).toBeVisible();
     await expect(page.getByTestId('env-var-masked-API_KEY')).toBeVisible();
 
     await expect(page).toHaveScreenshot('app-env-detail.png', {

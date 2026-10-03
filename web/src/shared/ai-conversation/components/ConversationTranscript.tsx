@@ -29,6 +29,7 @@ import {
   MessageScrollerViewport,
 } from '@/components/ui/message-scroller'
 import { cn } from '@/shared/lib/utils'
+import { workspaceScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance'
 import { formatWorkDuration } from '@/shared/lib/format'
 import { chromeSansRole } from '@/shared/typography/chromeRoles'
 import type { AIConversationSnapshot } from '../runtime/ConversationRuntime'
@@ -420,7 +421,19 @@ export function ConversationTranscript({
   return (
     <MessageScrollerProvider autoScroll defaultScrollPosition="end">
       <MessageScroller>
-        <MessageScrollerViewport preserveScrollOnPrepend>
+        {/*
+          The viewport spends the Workspace's capsule clearance. A transcript in
+          the Terminal resolves that var to nothing — it is published on the
+          Workspace shell, and the overlay is not under it — so this is the
+          Workspace transcript's clearance and costs the Terminal none
+          (`workspaceScrollClearanceClass` falls back to 0px). Without it the
+          last turn sits under the capsule at every Workspace depth, which the
+          App measured on 2026-10-03.
+        */}
+        <MessageScrollerViewport
+          preserveScrollOnPrepend
+          className={workspaceScrollClearanceClass}
+        >
           <TranscriptContent
             // Scoped to the conversation, not merely to this component. Every
             // piece of state below — the disclosure overrides, both identity
