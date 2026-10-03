@@ -381,10 +381,16 @@ async function lastNonEmptyLine(page: import('@playwright/test').Page): Promise<
   return lines[lines.length - 1] ?? '';
 }
 
-/** Tap the capsule's ↑ — the App/mobile key path, not a keyboard event. */
+/**
+ * Tap the capsule's ↑ — the App/mobile key path, not a keyboard event.
+ *
+ * On App, Terminal Keys is context-sensed (#1347 SC-37), so the primary path
+ * is its sensed row in the Context Disclosure, which opens the Peek directly
+ * (SC-38).
+ */
 async function tapCapsuleArrowUp(page: import('@playwright/test').Page): Promise<void> {
   await page.getByTestId('capsule-capability-more').click();
-  await page.getByTestId('capsule-capability-picker-terminal-keys').click();
+  await page.getByTestId('capsule-context-item-terminal-keys').click();
   await page.getByTestId('phys-key-↑').click();
 }
 

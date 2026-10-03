@@ -75,6 +75,14 @@ async function assertPopupMenu(
   const opts = optsFor(PATTERN_POPUP_MENU, experience, viewportId);
 
   await trigger.click();
+  // The capsule's `+` leads with sensed capabilities while any exist (#1347
+  // SC-37/40) — on App, that includes context-sensed Terminal Keys — so the
+  // ordinary rows this helper measures live one explicit step down. The
+  // session row's menu has no such step, hence the conditional.
+  const allCapabilities = page.getByTestId('capsule-context-all');
+  if ((await allCapabilities.count()) > 0) {
+    await allCapabilities.click();
+  }
   const menu = page.getByRole('menu');
   await expect(menu).toBeVisible();
   // `toBeVisible` resolves on the animation's first frame, where a 44px row

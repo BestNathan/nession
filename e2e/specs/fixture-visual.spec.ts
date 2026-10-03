@@ -8,6 +8,7 @@ import {
   freezeFixtureClock,
   gotoFixtureApp,
   gotoFixtureShell,
+  openCapsuleCapability,
   gotoFixtureWorkspace,
   openFixtureFile,
   waitForFixtureTerminal,
@@ -555,8 +556,7 @@ test.describe('App 390×844', () => {
     await gotoFixtureApp(page);
     await waitForFixtureTerminal(page);
 
-    await page.getByTestId('capsule-capability-more').click();
-    await page.getByTestId('capsule-capability-picker-git').click();
+    await openCapsuleCapability(page, 'git');
 
     await expect(page.getByTestId('capsule-capability-projection')).toBeVisible();
     await expect(page.getByTestId('git-signal-body')).toContainText('worktree: nession-capsule');
@@ -576,8 +576,7 @@ test.describe('App 390×844', () => {
     await gotoFixtureApp(page);
     await waitForFixtureTerminal(page);
 
-    await page.getByTestId('capsule-capability-more').click();
-    await page.getByTestId('capsule-capability-picker-git').click();
+    await openCapsuleCapability(page, 'git');
     // The title is the step from Signal to Peek, and it goes inert once there —
     // so `git-peek-body` below is what says this is a Peek rather than a Signal
     // whose title happened to be tapped.
@@ -603,10 +602,15 @@ test.describe('App 390×844', () => {
     await waitForFixtureTerminal(page);
 
     await page.getByTestId('capsule-capability-more').click();
-    // The list is portalled and opens upward (`side="top"`), so this is the
+    // The surface is portalled and opens upward (`side="top"`), so this is the
     // assertion that the screenshot below is of an open entry rather than of a
-    // capsule whose `+` happened to be tapped.
-    await expect(page.getByTestId('capsule-capability-picker-terminal-keys')).toBeVisible();
+    // capsule whose `+` happened to be tapped. On App it leads with context:
+    // Terminal Keys is sensed there (SC-37) and the ordinary list stays one
+    // explicit step down (SC-35).
+    const sensed = page.getByTestId('capsule-context-item-terminal-keys');
+    await expect(sensed).toBeVisible();
+    await expect(sensed).toContainText('Touch controls for Terminal');
+    await expect(page.getByTestId('capsule-context-all')).toBeVisible();
 
     await expect(page).toHaveScreenshot('app-capability-entry.png', {
       fullPage: true,
@@ -674,17 +678,22 @@ test.describe('App 390×844', () => {
     await expect(page.getByTestId('capsule-capability-projection')).toBeVisible();
   });
 
-  test('Terminal Keys accessory', async ({ page }) => {
+  test('Terminal Keys Peek', async ({ page }) => {
     await gotoFixtureApp(page);
     await waitForFixtureTerminal(page);
 
+    // The sensed row opens it *directly at Peek* (SC-38): no Signal step and no
+    // accessory family — the same sensed -> Context Disclosure -> Peek protocol
+    // every other capability walks.
     await page.getByTestId('capsule-capability-more').click();
-    await page.getByTestId('capsule-capability-picker-terminal-keys').click();
+    await page.getByTestId('capsule-context-item-terminal-keys').click();
 
     // Both halves of §5, and the reason this shot exists: the keys are above a
     // composer that is still there. A baseline of the key row alone would keep
     // passing for a composer that had been replaced by it.
-    await expect(page.getByTestId('capsule-capability-projection')).toBeVisible();
+    const projection = page.getByTestId('capsule-capability-projection');
+    await expect(projection).toBeVisible();
+    await expect(projection).toHaveAttribute('data-depth', 'peek');
     await expect(page.getByTestId('capsule-ghost-input')).toBeVisible();
 
     await expect(page).toHaveScreenshot('app-terminal-keys.png', {
@@ -1014,8 +1023,7 @@ test.describe('App 390×844', () => {
     await gotoFixtureApp(page, '?conversation=rich');
     await waitForFixtureTerminal(page);
 
-    await page.getByTestId('capsule-capability-more').click();
-    await page.getByTestId('capsule-capability-picker-claude-code').click();
+    await openCapsuleCapability(page, 'claude-code');
     // The title is the step from Signal to Peek, the same walk `app-git-peek`
     // documents; `claude-code-peek-body` below is what says this is a Peek.
     await page.getByTestId('capsule-capability-title').click();

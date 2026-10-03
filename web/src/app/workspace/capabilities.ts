@@ -24,6 +24,10 @@ export function workspaceCapabilityContext(ctx: WorkspaceContext): CapabilityCon
     sessionId: ctx.session?.session_id,
     locationId: ctx.agent?.agent_id ?? ctx.session?.agent_id,
     surface: 'workspace',
+    // Context sense reads the device (#1347 SC-37): Terminal Keys exists where
+    // there is no physical keyboard, and only the composer knows which
+    // experience is asking.
+    experience: ctx.experience,
     facts: ctx.facts,
   };
 }
@@ -134,7 +138,10 @@ function terminalKeysProvider(workspaceContext: WorkspaceContext): CapabilityDef
     title: TERMINAL_KEYS_TITLE,
     resolve: (context) => ({
       scope: resolveScope(context, workspaceContext),
-      state: resolveTerminalKeysState(context.sessionId),
+      // The whole context, not just the id: the keys are context-sensed, and
+      // "there is a touch device with a Terminal" is not a fact about the
+      // Session (SC-37).
+      state: resolveTerminalKeysState(context),
     }),
   };
 }

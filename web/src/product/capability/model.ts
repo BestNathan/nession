@@ -38,6 +38,17 @@ export interface CapabilityFacts {
 
 export interface CapabilityContext extends CapabilityScope {
   surface?: CapabilitySurface;
+  /**
+   * Which experience is asking (#1347 SC-37).
+   *
+   * Some capabilities are context-sensed rather than work-sensed: Terminal Keys
+   * exists because a touch device with an active Terminal has no physical keys
+   * — a fact about the *device*, not about the session's pane. That is why it
+   * arrives here, beside `surface`, rather than through `facts`: facts are
+   * observations of the session, and this one observes the surface the user is
+   * holding.
+   */
+  experience?: 'web' | 'app';
   facts?: CapabilityFacts;
 }
 
