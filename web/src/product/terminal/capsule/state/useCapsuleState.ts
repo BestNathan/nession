@@ -31,6 +31,16 @@ export interface CapsuleState {
    */
   contextOpen: boolean;
   setContextOpen: (open: boolean) => void;
+  /**
+   * The control that opens the Context Capsule (#1347's focus contract).
+   *
+   * Publishing the element here rather than letting the surface look it up is
+   * what keeps the two ends apart on purpose: the trigger is in the composer
+   * row and the surface is in the dock, and neither file imports the other.
+   * Dismissal is what needs it — focus goes back to the control that opened the
+   * surface, the way the menu primitive used to do before the Capsule owned it.
+   */
+  contextTriggerRef: React.RefObject<HTMLButtonElement | null>;
   disabled: boolean;
   send: () => void;
   copyInput: () => Promise<void>;
@@ -46,6 +56,7 @@ export function useCapsuleState({
   const [contextOpen, setContextOpenState] = useState(false);
   const layoutRef = useRef(composerLayout);
   layoutRef.current = composerLayout;
+  const contextTriggerRef = useRef<HTMLButtonElement>(null);
   const { addEntry } = useCommandHistory();
 
   const setComposerLayout = useCallback((layout: ComposerLayout) => {
@@ -107,6 +118,7 @@ export function useCapsuleState({
       historyOpen: openPopover === 'history',
       contextOpen,
       setContextOpen,
+      contextTriggerRef,
       disabled,
       send,
       copyInput,

@@ -169,6 +169,7 @@ export function TerminalCapsule({
         disclosure={capabilityDisclosure}
         workContext={workContext}
         onDismiss={() => restState.setContextOpen(false)}
+        triggerRef={restState.contextTriggerRef}
       />
     ) : capabilityProjection ? (
       <PeekHost
