@@ -107,10 +107,10 @@ export function useCapsuleCapability(
   );
 
   /**
-   * Choose at Peek depth (#1347 SC-20): WorkOverview selection opens Peek.
+   * Choose at Peek depth (#1347 SC-20): a sensed row in the Context Disclosure opens Peek.
    *
    * Same as `choose` but sets `opened: true` so the capability emerges at Peek
-   * depth instead of Signal. Used by WorkOverview to satisfy SC-20.
+   * depth instead of Signal. Used by the Context Disclosure's sensed rows (SC-20).
    */
   const chooseAtPeek = useCallback(
     (id: CapabilityId) => {

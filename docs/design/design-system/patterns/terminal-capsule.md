@@ -132,6 +132,28 @@ Signal/Peek should answer what matters **now**. Full history, management, config
 
 A Terminal-local capability such as Terminal Keys may stop at an interactive accessory and have no Workspace projection.
 
+### The `+` opens one Context Disclosure (owner decision, 2026-10-03)
+
+The `+` is one control with one surface, in both states (#1347 SC-18 / SC-33 /
+SC-35):
+
+```text
+quiet     +  -> Capabilities        (the ordinary list)
+working   ⊕  -> Working now         (sensed capabilities, display identity + reason)
+                ────────────────
+                All capabilities ›  (the same surface, one step down)
+```
+
+It is the *same class* of surface as the capability list it grew from — anchored
+to the `+`, floating over the work, `side="top"` — and never a Dialog: no
+backdrop, no centered modal geometry, no focus trap, no modal close chrome. The
+first layer shows what Nession currently senses, with the capability's display
+identity and a reason line (never a raw capability id); selecting a sensed row
+opens that capability directly at Peek. `All capabilities` is the secondary,
+in-surface route to ordinary discovery, so working never takes the list away.
+When the sense that opened the surface disappears, the surface dismisses itself;
+a Peek the user opened explicitly is theirs to close.
+
 ## Input modes
 
 The current implementation may support terminal-oriented modes such as direct input, command/physical-key controls, history, paste, copy, and send.

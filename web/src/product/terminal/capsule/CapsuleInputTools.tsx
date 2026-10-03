@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { CapsuleHistoryPopover } from '@/product/terminal/capsule/CapsuleHistoryPopover';
 import { CapsuleInputActionButtons } from '@/product/terminal/capsule/CapsuleInputActionButtons';
 import {
@@ -7,8 +6,10 @@ import {
 } from '@/product/terminal/capsule/capsuleStyles';
 import { CapsuleIconVisual } from '@/product/terminal/capsule/CapsuleIconVisual';
 import { Plus } from 'lucide-react';
-import { CapabilityDisclosureMenu } from '@/product/capability/components/CapabilityDisclosureMenu';
-import { WorkOverview } from '@/product/terminal/capsule/WorkOverview';
+import {
+  ContextDisclosureMenu,
+  type SensedCapabilityItem,
+} from '@/product/capability/components/ContextDisclosureMenu';
 import { cn } from '@/shared/lib/utils';
 import type {
   CapsuleCapabilityDisclosure,
@@ -38,34 +39,40 @@ interface CapsuleInputTrailingActionsProps {
  * and the list opens as a popover, so the band stays a single line however many
  * capabilities exist and whatever states they are in.
  *
- * **Capsule V2 (#1347):** When working, the `+` button shows a partial work ring
- * and clicking it opens the Work Overview modal (SC-18) instead of the capability
- * disclosure menu. The Work Overview uses structured plugin data and Nession-owned
- * rendering (SC-19). Selecting a capability opens its Peek (SC-20).
+ * **Capsule V2 (#1347, work-awareness review 2026-10-03):** one Context
+ * Disclosure serves both states. While something is working, `+` wears the
+ * partial Work Ring and opens the disclosure with the sensed capabilities
+ * first (SC-18/SC-35); while quiet it opens the ordinary list. The rows use
+ * capability display identity and reason, never a raw id (SC-19), and a sensed
+ * row opens its capability directly at Peek depth (SC-20). The old Work
+ * Overview Dialog is superseded — a modal was never this surface's class
+ * (SC-33).
  */
 function CapsuleCapabilityMore({ disclosure, workContext }: {
   disclosure: CapsuleCapabilityDisclosure;
   workContext?: ResolvedWorkContext;
 }) {
-  const [workOverviewOpen, setWorkOverviewOpen] = useState(false);
   const isWorking = workContext?.status === 'working';
+  const sensed = sensedWorkItems(workContext, disclosure.entries);
 
-  // When working, clicking + opens Work Overview (SC-18); otherwise opens
-  // the capability disclosure menu.
-  const handleTriggerClick = () => {
-    if (isWorking && workContext) {
-      setWorkOverviewOpen(true);
-    }
-  };
-
+  // One trigger, one surface (#1347 SC-18/SC-33/SC-35): the Context Disclosure
+  // is anchored to `+` in both states — sensed-first while something is
+  // working, the ordinary list while quiet. Sensing never opens it; the Work
+  // Ring is the whole ambient representation (SC-34), and this tap is the
+  // user's own deepening.
   return (
-    <>
-      {isWorking ? (
+    <ContextDisclosureMenu
+      sensed={sensed}
+      entries={disclosure.entries}
+      onSelect={disclosure.onSelect}
+      onChooseSensed={disclosure.onSelectAtPeek ?? disclosure.onSelect}
+      labels={{ sensed: 'Working now', all: 'All capabilities', capabilities: 'Capabilities' }}
+      testIdPrefix="capsule-capability-picker"
+      trigger={
         <button
           type="button"
-          aria-label="View active work"
+          aria-label="More capabilities"
           data-testid="capsule-capability-more"
-          onClick={handleTriggerClick}
           className={cn(
             capsuleIconButtonClass,
             'relative inline-flex items-center justify-center bg-transparent hover:bg-transparent',
@@ -76,39 +83,41 @@ function CapsuleCapabilityMore({ disclosure, workContext }: {
           </CapsuleIconVisual>
           <WorkRing working={isWorking} />
         </button>
-      ) : (
-        <CapabilityDisclosureMenu
-          entries={disclosure.entries}
-          onSelect={disclosure.onSelect}
-          label="Capabilities"
-          testIdPrefix="capsule-capability-picker"
-          trigger={
-            <button
-              type="button"
-              aria-label="More capabilities"
-              data-testid="capsule-capability-more"
-              className={cn(
-                capsuleIconButtonClass,
-                'relative inline-flex items-center justify-center bg-transparent hover:bg-transparent',
-              )}
-            >
-              <CapsuleIconVisual>
-                <Plus className="size-[length:var(--icon-md)]" />
-              </CapsuleIconVisual>
-            </button>
-          }
-        />
-      )}
-      {workContext && (
-        <WorkOverview
-          open={workOverviewOpen}
-          onOpenChange={setWorkOverviewOpen}
-          workContext={workContext}
-          onSelectCapability={disclosure.onSelectAtPeek ?? disclosure.onSelect}
-        />
-      )}
-    </>
+      }
+    />
   );
+}
+
+/**
+ * The sensed section's items: working summaries resolved to the capability's
+ * display identity (#1347 SC-19).
+ *
+ * A summary whose capability has no disclosure entry is dropped rather than
+ * rendered as its raw id — the row's copy is Nession's, and an id is not copy.
+ */
+function sensedWorkItems(
+  workContext: ResolvedWorkContext | undefined,
+  entries: CapsuleCapabilityDisclosure['entries'],
+): SensedCapabilityItem[] {
+  if (!workContext) {
+    return [];
+  }
+  const byId = new Map(entries.map((entry) => [entry.id, entry]));
+  return workContext.summaries.flatMap((summary) => {
+    if (summary.status !== 'working') {
+      return [];
+    }
+    const entry = byId.get(summary.capabilityId);
+    return entry
+      ? [
+          {
+            capabilityId: summary.capabilityId,
+            title: entry.title,
+            reason: summary.summary,
+          },
+        ]
+      : [];
+  });
 }
 
 /**
