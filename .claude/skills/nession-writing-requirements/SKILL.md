@@ -53,6 +53,18 @@ GitHub issue events are audited by `.github/workflows/issue-audit.yml`.
 
 Keep this skill and the deterministic contract aligned. A format change is incomplete until both are updated and their self-tests pass.
 
+## Executable Acceptance
+
+After implementation, do not manually hand-edit accepted checkboxes/report rows as the normal path. Use the repository Acceptance workflow described by `.claude/skills/nession-acceptance/SKILL.md`:
+
+```text
+Issue Audit -> implementation -> stage-specific Acceptance
+            -> deterministic Issue updater
+            -> Requirement Acceptance gate / close guard -> closure
+```
+
+Acceptance evaluates only the explicitly requested `pre-merge`, `staging`, or `post-merge` rows. The Acceptance Agent is read-only and emits structured data; only the deterministic updater may project Pass / justified N/A to `[x]` and write Acceptance Report evidence. Existing merge/closure validation remains the final deterministic gate.
+
 ---
 
 # Requirement path

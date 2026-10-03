@@ -131,6 +131,21 @@ export class SyntheticAdapter implements AIConversationAdapter<string> {
    */
   failRead = false
 
+  /**
+   * Force every *cursor* read to answer non-`ready`, carrying this message.
+   *
+   * The sibling of `failOlder`, and the distinction is the whole point: a
+   * thrown read says nothing about the conversation, while a non-ready *answer*
+   * says something about it — `error`, `not_found`, `unavailable`. Only the
+   * thrown half had a fixture, so a runtime that folded a semantic failure into
+   * "end of history" had nothing in this file that could tell it apart.
+   *
+   * Cursor-scoped rather than reusing `forcedReadState` because the failure has
+   * to arrive on a transcript that was *readable* first: a provider that never
+   * answered the newest page never had a window to lose.
+   */
+  forcedOlder: { state: AIConversationPage['state']; error?: string } | null = null
+
   private readonly options: SyntheticAdapterOptions
   private readonly gates: Gate[] = []
 
@@ -212,11 +227,15 @@ export class SyntheticAdapter implements AIConversationAdapter<string> {
     // the gate would make two overlapping requests return the same page, and a
     // test could then never tell which of them the runtime applied.
     const conversation = this.options.conversations.find((c) => c.id === conversationId)
+    const forcedOlder = cursor === undefined ? null : this.forcedOlder
     const state =
-      this.forcedReadState ?? this.options.readState ?? (conversation ? 'ready' : 'not_found')
+      forcedOlder?.state ??
+      this.forcedReadState ??
+      this.options.readState ??
+      (conversation ? 'ready' : 'not_found')
     if (state !== 'ready' || !conversation) {
       await this.waitFor('read', cursor)
-      return { state, items: [], partialTail: false, skipped: 0 }
+      return { state, items: [], partialTail: false, skipped: 0, error: forcedOlder?.error }
     }
     const page = this.pageOf(conversation, cursor)
     await this.waitFor('read', cursor)
