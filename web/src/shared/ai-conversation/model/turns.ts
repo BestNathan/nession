@@ -109,9 +109,19 @@ function timeOf(item: AIConversationItem): number | null {
  * Taken from any timestamped item in the turn, not from the answer alone: a turn
  * whose answer has no timestamp but whose tools do still has a measurable
  * duration, and requiring the answer's would silently drop it.
+ *
+ * Not from *every* item, though, and the difference is the label's verb. A
+ * status notice is not the assistant's work — that is why it does not fold —
+ * so a provider that reports "connection closed" ten minutes after the answer
+ * must not turn `Worked for 1m` into `Worked for 11m`. An unmodelled record is
+ * not work either, for the reason `isWork` gives. The duration domain is the
+ * turn's participants and its work, which is the same line the fold draws.
  */
 function durationOf(items: AIConversationItem[]): number | null {
-  const times = items.map(timeOf).filter((time): time is number => time !== null)
+  const times = items
+    .filter((item) => item.kind !== 'status' && item.kind !== 'unknown')
+    .map(timeOf)
+    .filter((time): time is number => time !== null)
   if (times.length < 2) {
     return null
   }
@@ -152,9 +162,23 @@ function turnOf(items: AIConversationItem[]): ConversationTurn {
   // other one the canonical document offers. Leaving it out of `process` is the
   // whole mechanism: the renderer folds by turn membership, so an item with
   // none is never hidden.
+  //
+  // An unmodelled record is the same case, and this used to contradict itself
+  // about it: `isWork` says `unknown` is not work, while `process` — built by
+  // exclusion — put it in the window anyway (`#1363` round 4). The canonical
+  // anatomy settles it, and not by preference: its process window is "tool
+  // activity rows, reasoning rows", and the rule that follows names what must
+  // not fold — "rows that are **not** the assistant's work". A record we
+  // cannot model is not evidence of work any more than it is evidence of
+  // anything, so folding it under a control reading "Worked" would be the
+  // classification the model exists to refuse. It keeps its place in the
+  // transcript and is drawn as what it is: unmodelled.
   const process = items.filter(
     (item, index) =>
-      item !== answer && item.kind !== 'status' && !(opening !== null && index === 0),
+      item !== answer &&
+      item.kind !== 'status' &&
+      item.kind !== 'unknown' &&
+      !(opening !== null && index === 0),
   )
 
   return {
@@ -212,6 +236,29 @@ export function turnsOf(items: AIConversationItem[]): ConversationTurn[] {
  */
 export function runningWork(turn: ConversationTurn): boolean {
   return turn.process.some((item) => isWork(item) && item.status === 'running')
+}
+
+/**
+ * Whether the turn has not settled yet.
+ *
+ * The canonical phase, and the only place it is decided. The renderer needs it
+ * twice — the process is open while a turn is working, and the turn's actions
+ * are not available until it is not — and those two used to derive their
+ * answers separately, which is how the same frame could show an open process
+ * *and* a Copy button on an answer that was still being written (`#1363`
+ * round 4).
+ *
+ * Three signals, none of them provider-specific: an answer that has not been
+ * written, an answer the provider says is still streaming, and work it says is
+ * still running. A provider that reports none of them simply never reaches the
+ * streaming arm, which is the same shape as `runningWork`.
+ *
+ * The page's own `partialTail` is deliberately *not* here. It is a property of
+ * the read rather than of the turn, so it belongs to whoever holds the page —
+ * the renderer composes the two rather than the model learning about reads.
+ */
+export function isWorking(turn: ConversationTurn): boolean {
+  return turn.answer === null || turn.answer.status === 'streaming' || runningWork(turn)
 }
 
 export interface TurnMembership {

@@ -131,6 +131,67 @@ describe('a turn’s actions', () => {
     await waitFor(() => expect(copyToClipboard).toHaveBeenCalledWith('kept'))
   })
 
+  it('reserves the row for a turn that has not settled, without lighting it', () => {
+    // #1363 round 4: the actions and the process disclosure used to derive the
+    // turn's phase separately, so the same frame could keep a process open —
+    // "this turn is still working" — and offer a Copy button on an answer that
+    // was still being written. "Actions close a turn" was the component's own
+    // sentence; the predicate never checked whether the turn had closed.
+    //
+    // Both halves are asserted, and the first is not decoration: the row is
+    // reserved either way, because `conversation.md` forbids anything that
+    // appears "as a result of streaming" from moving the content below it. The
+    // fix is to withhold the action, not the space.
+    renderTranscript([
+      userMessage('u1', 'q'),
+      assistantMessage('a1', 'still writing', 'streaming'),
+    ])
+
+    const row = screen.getByTestId('conversation-turn-actions')
+    expect(row).toBeDefined()
+    expect(screen.queryByRole('button', { name: /copy/i })).toBeNull()
+  })
+
+  it('withholds the action while a tool the assistant started is still running', () => {
+    // The other phase, and the one an answer alone cannot express: the assistant
+    // finished a sentence and went back to work. The process is open above it —
+    // `isWorking` is what keeps both facts from disagreeing.
+    renderTranscript([
+      userMessage('u1', 'q'),
+      toolItem('t1', { status: 'running' }),
+      assistantMessage('a1', 'done so far'),
+    ])
+
+    expect(screen.getByTestId('conversation-turn-process')).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByTestId('conversation-turn-actions')).toBeDefined()
+    expect(screen.queryByRole('button', { name: /copy/i })).toBeNull()
+  })
+
+  it('lights the reserved row when the same items settle, without remounting it', () => {
+    // The row's identity is what the geometry rule rides on: a settle that
+    // remounted it would drop focus, and one that drew a second row would move
+    // the content under it. So the assertion is the *element*, held across the
+    // phase change — not merely that a button appeared.
+    const working = [userMessage('u1', 'q'), assistantMessage('a1', 'still writing', 'streaming')]
+    const { rerender } = renderTranscript(working)
+
+    const before = screen.getByTestId('conversation-turn-actions')
+    expect(screen.queryByRole('button', { name: /copy/i })).toBeNull()
+
+    const settled = [userMessage('u1', 'q'), assistantMessage('a1', 'still writing', 'settled')]
+    rerender(
+      <ConversationTranscript
+        snapshot={snapshot({ items: settled })}
+        providerLabel="Claude"
+        onLoadOlder={() => false}
+      />,
+    )
+
+    const after = screen.getByTestId('conversation-turn-actions')
+    expect(after).toBe(before)
+    expect(screen.getByRole('button', { name: /copy/i })).toBeDefined()
+  })
+
   it('does not offer a provider’s unmodelled record as the answer', () => {
     // The answer is the last *message*; a trailing unknown row is not one, so a
     // turn whose only trailing content is unknown has nothing to copy.
