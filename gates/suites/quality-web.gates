@@ -1,0 +1,13 @@
+# quality-web
+# Gate IDs only. Not wired into current hooks/workflows yet.
+repo-health-selftest
+repo-metrics-selftest
+protocol-integrity
+issue-contract-selftest
+issue-audit-agent-selftest
+issue-audit-cursor-selftest
+design-system-full
+web-eslint
+web-typecheck
+web-test-unit
+web-test-integration
