@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { fixtureConversationSurface } from '@/app/fixture/fixtureConversation';
 import { FIXTURE_AGENTS } from '@/app/fixture/fixtureData';
+import { toItem } from '@/capabilities/claude-code/conversation/normalizers';
+import { runningWork, turnsOf } from '@/shared/ai-conversation/model/turns';
 import type { ConversationsResponse } from '@/generated/protocol/claude-code/conversations/v1';
 import type { MessagesResponse } from '@/generated/protocol/claude-code/messages/v1';
 
@@ -273,6 +275,49 @@ describe('fixture conversation surface', () => {
         cursor: 'not-a-cursor',
       }),
     ).rejects.toThrow(/no page handed out/);
+  });
+
+  it('carries both phases of a Turn, so a fold gate can tell them apart', async () => {
+    // #1363 round 4: the App walk asserted "a finished turn folds" against a
+    // transcript whose Turn never finishes, so the assertion was describing a
+    // phase the fixture could not reach. The fixture now carries both, and this
+    // is where that is checked *without* a browser — the e2e that drives them
+    // is CI-only, so a scenario that quietly stopped being settled would go
+    // unnoticed until a runner said so.
+    //
+    // Read through the real model rather than by inspecting `times`/`status`
+    // fields: the question is whether `turnsOf` calls this turn settled, and
+    // the only honest way to ask is to ask it.
+    //
+    // The items go through the adapter on the way, because the two shapes are
+    // not the same one: the wire carries a tool's status under `tool.status`
+    // and the model carries it on the item. Skipping `toItem` made this test
+    // fail once already — `runningWork` read `undefined` off every tool and
+    // reported a running Turn as settled.
+    const itemsOf = async (scenario: string) => {
+      const target = fixtureConversationSurface(`?conversation=${scenario}`);
+      const list = await target.request<ConversationsResponse>('claude-code.conversations', {});
+      const boundId = list.binding?.conversation_id as string;
+      const page = await target.request<MessagesResponse>('claude-code.messages', {
+        conversation_id: boundId,
+      });
+      return (page.items ?? []).map(toItem);
+    };
+
+    const settled = turnsOf(await itemsOf('settled'));
+    expect(settled).toHaveLength(1);
+    // An answer at all is what "settled" means: `answer` is the last assistant
+    // message no work follows, so a null one is a Turn still in progress.
+    expect(settled[0]?.answer).not.toBeNull();
+    expect(runningWork(settled[0]!)).toBe(false);
+    // And it has work to fold — a corpus with no process rows would satisfy
+    // every assertion above while giving the fold control nothing to hide.
+    expect(settled[0]?.process.length).toBeGreaterThan(0);
+
+    const working = turnsOf(await itemsOf('ready'));
+    expect(working).toHaveLength(1);
+    expect(working[0]?.answer).toBeNull();
+    expect(runningWork(working[0]!)).toBe(true);
   });
 
   it('answers not_found for a conversation id it does not know', async () => {
