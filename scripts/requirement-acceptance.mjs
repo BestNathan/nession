@@ -10,7 +10,7 @@ const PLACEHOLDER_EVIDENCE = new Set([
   '', '-', 'none', 'n/a', 'na', 'pending', 'tbd', 'todo', 'implementation pending',
 ]);
 
-function extractSection(body, heading) {
+export function extractSection(body, heading) {
   const lines = String(body ?? '').replace(/\r\n?/g, '\n').split('\n');
   const wanted = heading.trim().toLowerCase();
   let start = -1;
@@ -60,7 +60,7 @@ function splitMarkdownRow(line) {
   return cells;
 }
 
-function parseSuccessCriteria(section) {
+export function parseSuccessCriteria(section) {
   const errors = [];
   const criteria = new Map();
   if (section == null) {
@@ -92,7 +92,7 @@ function parseSuccessCriteria(section) {
   return { criteria, errors };
 }
 
-function parseAcceptanceReport(section) {
+export function parseAcceptanceReport(section) {
   const errors = [];
   const rows = new Map();
   if (section == null) {
