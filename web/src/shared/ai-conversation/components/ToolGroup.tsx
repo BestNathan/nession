@@ -78,7 +78,7 @@ export function ToolGroup({
         </span>
         {summary.running > 0 ? (
           <span className="flex shrink-0 items-center" data-testid="conversation-tool-group-running">
-            <Loader aria-hidden className="h-3.5 w-3.5 animate-spin" />
+            <Loader aria-hidden className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" />
             <span className="sr-only">{summary.running} still running</span>
           </span>
         ) : null}

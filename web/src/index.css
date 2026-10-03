@@ -235,4 +235,24 @@ html {
   .shell {
     --motion-shell-duration: 0ms;
   }
+
+  /*
+   * This block covers motion that reads the duration token. It does **not**
+   * cover Tailwind's own animation utilities, because they are not
+   * token-driven: `animate-spin` compiles to a literal
+   * `animation: spin 1s linear infinite`, so a component can keep spinning
+   * under `prefers-reduced-motion: reduce` while every Nession token says the
+   * duration is zero (#1363 round 4).
+   *
+   * The fix is per component — `motion-reduce:animate-none` on each spinner —
+   * rather than a blanket `animation: none` here. A rule broad enough to catch
+   * every `animate-*` in the tree would also reach the third-party renderers
+   * (xterm, CodeMirror) that own their own timing, and silencing those is not
+   * this rule's business.
+   *
+   * Every spinner in the conversation framework carries the variant today:
+   * `ToolGroup`, `ReasoningActivity` and `ConversationState`. Each one keeps a
+   * text equivalent beside the icon — `sr-only` where the icon is the only
+   * visual — so the state survives the animation being switched off.
+   */
 }
