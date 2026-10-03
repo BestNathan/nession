@@ -6,11 +6,9 @@ import {
 } from '@/product/terminal/capsule/capsuleStyles';
 import { CapsuleIconVisual } from '@/product/terminal/capsule/CapsuleIconVisual';
 import { Plus } from 'lucide-react';
-import {
-  ContextDisclosureMenu,
-  type SensedCapabilityItem,
-} from '@/product/capability/components/ContextDisclosureMenu';
+import { ContextDisclosureMenu } from '@/product/capability/components/ContextDisclosureMenu';
 import { cn } from '@/shared/lib/utils';
+import { sensedWorkItems } from '@/product/terminal/capsule/contextRows';
 import type {
   CapsuleCapabilityDisclosure,
 } from '@/product/terminal/capsule/types';
@@ -93,38 +91,6 @@ function CapsuleCapabilityMore({ disclosure, workContext }: {
       }
     />
   );
-}
-
-/**
- * The sensed section's items: working summaries resolved to the capability's
- * display identity (#1347 SC-19).
- *
- * A summary whose capability has no disclosure entry is dropped rather than
- * rendered as its raw id — the row's copy is Nession's, and an id is not copy.
- */
-function sensedWorkItems(
-  workContext: ResolvedWorkContext | undefined,
-  entries: CapsuleCapabilityDisclosure['entries'],
-): SensedCapabilityItem[] {
-  if (!workContext) {
-    return [];
-  }
-  const byId = new Map(entries.map((entry) => [entry.id, entry]));
-  return workContext.summaries.flatMap((summary) => {
-    if (summary.status !== 'working') {
-      return [];
-    }
-    const entry = byId.get(summary.capabilityId);
-    return entry
-      ? [
-          {
-            capabilityId: summary.capabilityId,
-            title: entry.title,
-            reason: summary.summary,
-          },
-        ]
-      : [];
-  });
 }
 
 /**

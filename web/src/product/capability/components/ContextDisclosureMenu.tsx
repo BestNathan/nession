@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactElement } from 'react';
-import { ChevronRight, type LucideIcon } from 'lucide-react';
+import { ChevronRight } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -14,6 +14,9 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/shared/lib/utils';
 import type { CapabilityId } from '@/product/capability';
+import type { SensedCapabilityItem } from '@/product/terminal/capsule/types';
+
+export type { SensedCapabilityItem };
 import { capsuleCaptionTextClass } from '@/product/terminal/capsule/capsuleStyles';
 import {
   CapabilityEntryRows,
@@ -29,13 +32,6 @@ import {
  * capability's *display* identity, never its raw id as product copy (#1347
  * SC-19); `reason` is the one line saying why it is here.
  */
-export interface SensedCapabilityItem {
-  capabilityId: CapabilityId;
-  title: string;
-  icon?: LucideIcon;
-  reason: string;
-}
-
 export interface ContextDisclosureLabels {
   /** Heading over the sensed section, e.g. "Working now". */
   sensed: string;
