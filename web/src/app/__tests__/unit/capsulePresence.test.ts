@@ -73,7 +73,7 @@ describe('capsule capability presence', () => {
     }
   });
 
-  it('keeps the built-in Terminal-local accessory listed', () => {
+  it('keeps the built-in Terminal-local Peek listed', () => {
     // The other side of the rule, and the reason eligibility is a declared role
     // rather than "has a Peek contribution" alone: Terminal Keys is not a
     // Workspace capability and has no Workspace view to be confused with. The

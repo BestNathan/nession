@@ -4,7 +4,8 @@ import { CapsuleChainBar } from '@/product/terminal/capsule/CapsuleChainBar';
 import { usePhysKeyChain } from '@/product/terminal/capsule/usePhysKeyChain';
 
 /**
- * Terminal Keys — the accessory itself (`#826` §7).
+ * Terminal Keys — the key row itself (`#826` §7, and a Peek since the accessory
+ * family was retired by `#1347` SC-38).
  *
  * Left function and combination keys, right directional keys, above a composer
  * that is still there. Both of §7's requirements fall out of it being a

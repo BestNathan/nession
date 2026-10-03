@@ -14,8 +14,8 @@
  * is.
  *
  * No JSX here on purpose — `react-refresh/only-export-components` wants a file
- * to export either components or things, and this one is things. The accessory
- * is `TerminalKeysProjection`. The body must still mount it with
+ * to export either components or things, and this one is things. The key row is
+ * `TerminalKeysProjection`. The body must still mount it with
  * `createElement` — calling the component function directly would run its hooks
  * on the Peek host's fiber, and switching from a real Peek (Git) to Terminal
  * Keys would change that host's hook count and crash on the next interaction.
@@ -81,12 +81,12 @@ export const terminalKeysProjection: CapsuleProjectionBinding = {
   id: TERMINAL_KEYS_ID,
   // A Terminal-local capability with a Peek and no Workspace view (#1046), and
   // since 2026-10-03 no longer a family of its own: the accessory variant is
-  // gone (`SC-38`), so selecting it — from a sensed row or the ordinary list —
+  // retired (`SC-38`), so selecting it — from a sensed row or the ordinary list —
   // walks the same disclosure -> Peek protocol every other capability does.
   entry: 'peek',
   // The keys are tapped, not typed into, and the soft keyboard is the one thing
   // that would make them unusable: it covers the row the user is reaching for,
-  // and it takes the vertical space the accessory needs. So this one projection
+  // and it takes the vertical space the key row needs. So this one projection
   // claims input focus while it is up (#1034 §5) — the capsule blurs the field
   // when it appears and steps it out when the field is tapped back.
   //
@@ -95,7 +95,7 @@ export const terminalKeysProjection: CapsuleProjectionBinding = {
   // so taking the keyboard from them would be a regression, not a consistency
   // fix. Nothing here names the capsule; nothing in the capsule names this.
   ownsInputFocus: true,
-  // Nothing to add at Peek and no Workspace view to open: the accessory is the
+  // Nothing to add at Peek and no Workspace view to open: the key row is the
   // capability in full, which is the lower bound `capability-emergence.md`
   // allows a Terminal-local capability to stop at.
   body: ({ sendText, sendPhysKey, disabled }) =>

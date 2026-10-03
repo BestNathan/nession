@@ -81,6 +81,44 @@ describe('Context Disclosure', () => {
     expect(screen.getByTestId('capsule-context-all')).toBeInTheDocument();
   });
 
+  it('senses a context capability without lighting the Work Ring (SC-37)', async () => {
+    // The ring answers `working`, and Terminal Keys is not working — it is
+    // relevant because the device has no keyboard. So the same surface lists it
+    // while the ring stays absent: the two senses share a protocol, not a
+    // state. Rendered through the real capsule because the ring is the capsule's
+    // (the disclosure itself never mentions one).
+    const caps = disclosure({
+      sensedContext: [
+        {
+          capabilityId: 'terminal-keys',
+          title: 'Terminal Keys',
+          reason: 'Touch controls for Terminal',
+        },
+      ],
+    });
+    render(
+      <TerminalCapsule
+        experience="app"
+        sendText={vi.fn()}
+        capabilityDisclosure={caps}
+        workContext={{ status: 'quiet', summaries: [] }}
+      />,
+    );
+
+    await userEvent.click(screen.getByTestId('capsule-capability-more'));
+
+    const item = await screen.findByTestId('capsule-context-item-terminal-keys');
+    expect(item).toHaveTextContent('Terminal Keys');
+    expect(item).toHaveTextContent('Touch controls for Terminal');
+    expect(screen.queryByTestId('work-ring')).not.toBeInTheDocument();
+
+    // …and it is selection, not decoration: the row walks the same
+    // sensed -> direct-Peek path a work-sensed row does (SC-38/SC-40).
+    await userEvent.click(item);
+    expect(caps.onSelectAtPeek).toHaveBeenCalledWith('terminal-keys');
+    expect(caps.onSelect).not.toHaveBeenCalled();
+  });
+
   it('is the ordinary capability list when nothing is sensed', async () => {
     const caps = disclosure();
     render(<TerminalCapsule experience="web" sendText={vi.fn()} capabilityDisclosure={caps} />);
