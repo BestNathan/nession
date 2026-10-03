@@ -239,6 +239,10 @@ check-git-diff-base:
 check-test-concurrency:
     ./scripts/check-test-concurrency.sh
 
+# Repository instruction architecture contract (#1437).
+check-instructions:
+    ./gates/run instruction-contract
+
 # Requirement acceptance validator self-test (#1237).
 # The workflow invokes the same script; rules live in one place.
 requirement-acceptance-selftest:
