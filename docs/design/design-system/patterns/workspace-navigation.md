@@ -144,35 +144,40 @@ App should prefer native spatial and push/pop interaction:
 - system/back navigation returns through capability detail before leaving Workspace;
 - nested navigation must not fight the top-level `Sessions ← Terminal → Workspace` spatial model.
 
-### The dock is the root's, not the stack's (`#1051`)
+### The capsule is present at every depth (owner decision, 2026-10-03 — supersedes `#1051`'s dock rule)
 
-The capability switcher is the **capability root's** control. It is present where
-switching between peer Workspace capabilities is conceptually valid — at the root — and
-it is absent once the user pushes into capability-owned detail.
+**Supersession.** `#1051` said the switcher was the capability *root's* control: visible
+at the root, absent over a pushed detail, on the reasoning that a peer-capability
+switcher over a detail would be a second navigation owner beside that depth's Back.
+
+The owner overturned the dock half of that on 2026-10-03, having used it: in the App
+Files flow the capsule disappeared the moment a file was opened, so the Workspace lost
+its capability context exactly when the user was deepest in a capability. The rule is
+now:
 
 ```text
-Files root       -> dock visible
-open App.tsx     -> dock hidden; the page belongs to Files' own navigation stack
+Files root       -> capsule visible
+open App.tsx     -> capsule visible; the detail's Back is still its only leave
 ```
 
-The reason is the one-navigation-bar rule
-([interaction/app.md](../../interaction/app.md#one-navigation-bar-per-depth)): a pushed
-detail has its own header and its own Back, so a peer-capability switcher floating over
-it would be a second navigation owner answering to a depth it has no place at. It would
-also put "switch capability" and "leave this file" within one thumb reach of each other
-while meaning opposite things.
+What survives from `#1051` is the **leave** rule, which was always the load-bearing
+half: a pushed depth's own Back is that depth's one route out, and the shell's swipe
+stands down while it is offered (`shellMayPage`). *Leaving* is one owner per depth;
+*switching capabilities* is not leaving, and the capsule is a bottom-zone control, not
+a bar for the depth.
 
-Two consequences for the rest of the App:
+Two consequences, replacing the old pair:
 
-- The bottom clearance the dock needs is the **root's** clearance. A pushed detail must
-  not reserve permanent padding for a dock that is not there.
+- The bottom clearance the capsule needs is **every depth's** clearance. A pushed
+  detail's scrollers reserve the same trailing padding the root's do — the workspace
+  publishes one measured inset (`--workspace-content-bottom-inset`, from the bar's own
+  geometry) and every Workspace scroller spends it, so the last line of a file, the
+  last turn of a transcript and the last search hit can all be scrolled above the
+  capsule.
 - The Workspace capsule has **no `+`** (#1347): its targets are the capability list
   itself, and they are built from capability snapshots, so the row cannot become a
   resource-creation affordance. (The Conversation capsule on Terminal keeps its `+`
   as work disclosure — that is `terminal-capsule.md`'s control, a different owner.)
-
-This narrows the open question recorded below (where the band floats) without settling
-it: the band is root-only on whichever page owns it.
 
 ### Web: the capability capsule
 
@@ -246,11 +251,12 @@ Two questions the previous revision left open, now settled by the same decision:
   viewport matrix enforces `category.chrome`'s
   `experience.app.touchTarget.min` (44px) on every App viewport.
 
-`#748`'s yielding rule survives in the shape the one-Capsule model gives it: on
-the Workspace, the root capsule is absent over capability-owned detail (see
-"the dock is the root's"), so it neither shifts nor shrinks — it leaves with the
-navigation it belongs to. The Conversation Form keeps its own sizing from
-`terminal-capsule.md`.
+`#748`'s yielding rule survives in the shape the one-Capsule model gives it: the
+Capability Form does not shrink or shift for a pushed depth — it stays, at the
+same band, over the detail (owner decision 2026-10-03, "the capsule is present
+at every depth"); the depth's own content is what moves, clearing the capsule
+with its trailing scroll padding. The Conversation Form keeps its own sizing
+from `terminal-capsule.md`.
 
 The narrowest supported App viewport is `app.narrow-phone` (375×812, from
 `design/contracts/viewports.json`), and the family is verified there: both
@@ -313,6 +319,6 @@ Existing components should migrate incrementally. Do not remove reliable capabil
 - [ ] The App entries meet the chrome touch floor (`experience.app.touchTarget.min`, 44px) — the pattern declares no compact override since the 2026-10-03 Capsule-family decision — enforced by the viewport matrix.
 - [ ] The App Capability Form and Conversation Form share one outer geometry — radius, shape claim, dock placement **and the 56px band** (`capabilityEntryHeight` = the composer's `control-md` row) — asserted relationally rather than each alone (#1347 SC-30).
 - [ ] The capability capsule's row owns its horizontal drags: panning it never pages the shell, and only the shell's own edge bands remain a navigation start over it.
-- [ ] The capsule appears only at capability-root depth, and is absent over capability-owned detail.
+- [ ] The capsule is present at every Workspace depth, pushed detail included, and each depth's scrollers can bring their last line above it (owner decision 2026-10-03, superseding `#1051`'s dock rule).
 - [ ] Files-specific layout remains local to Files.
 - [ ] The capsule stays inside the tool bar at every viewport, and its row scrolls internally.

@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { EditorSelection, type Extension } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import CodeMirror from '@uiw/react-codemirror';
+import { cn } from '@/shared/lib/utils';
+import { workspaceScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
 import { EDITOR_METRICS, EDITOR_THEME } from '../model/editorTheme';
 import {
   ensureLangsModule,
@@ -79,7 +81,16 @@ export function CodeMirrorEditor({
 
   return (
     <div
-      className="h-full w-full overflow-auto [&_.cm-editor]:h-full [&_.cm-scroller]:!overflow-auto"
+      // The editor is a Workspace scroller wherever the Workspace hosts it, so
+      // it spends the capsule clearance like every other one. The padding goes
+      // on this host rather than on `.cm-scroller`: the editor fills the host's
+      // content box, so the scroller's reachable end stops above the padded
+      // edge — and CodeMirror keeps its own metrics untouched (the renderer
+      // boundary measures the scroller's own font and line height).
+      className={cn(
+        'h-full w-full overflow-auto [&_.cm-editor]:h-full [&_.cm-scroller]:!overflow-auto',
+        workspaceScrollClearanceClass,
+      )}
       data-testid="codemirror-editor"
     >
       <CodeMirror

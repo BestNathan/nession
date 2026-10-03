@@ -80,6 +80,23 @@ export interface AIConversationSnapshot {
    */
   openId: string | null
   /**
+   * The open conversation as one value a surface can key a subtree by.
+   *
+   * `openId` alone is not an identity. The adapter contract scopes a
+   * conversation to a provider *and* a context, so two providers may both have
+   * a conversation called `c1`, and the same provider may have a `c1` in two
+   * contexts. A React `key` built from the id alone would then tell a surface
+   * that two different conversations are the same one — and the state keyed
+   * below it (scroll position, disclosure, focus) would cross between them
+   * (`#1363` round 4).
+   *
+   * Composed here because the runtime is the only thing that holds all three
+   * parts: the adapter it was built for, the context key, and the selection.
+   * `null` when nothing is open — a surface still has to name that state, and
+   * `'no-conversation'` is a different value from any real one.
+   */
+  conversationKey: string | null
+  /**
    * The provider's own word for what it could answer about the open
    * conversation.
    *
@@ -188,6 +205,7 @@ const EMPTY_SNAPSHOT: AIConversationSnapshot = {
   conversations: [],
   bindingId: null,
   openId: null,
+  conversationKey: null,
   state: null,
   conversation: null,
   activity: null,
@@ -201,6 +219,22 @@ const EMPTY_SNAPSHOT: AIConversationSnapshot = {
   olderError: null,
   listError: null,
   threadError: null,
+}
+
+/**
+ * Distinguishes one runtime from another, for as long as the page lives.
+ *
+ * A provider is identified by the *runtime*, not by its adapter object: the
+ * hook builds a runtime per adapter and swaps them, so the same component can
+ * be pointed at two providers in its lifetime. Two providers that share a
+ * context key and an `openId` are still two different conversations, and
+ * without this the key below could not tell them apart.
+ */
+let runtimeIdentities = 0
+
+function nextRuntimeIdentity(): number {
+  runtimeIdentities += 1
+  return runtimeIdentities
 }
 
 function message(error: unknown, fallback: string): string {
@@ -233,6 +267,8 @@ function olderPageMessage(page: AIConversationPage): string {
 export class ConversationRuntime<Context> {
   private readonly adapter: AIConversationAdapter<Context>
   private readonly scheduler: ConversationScheduler
+  /** This runtime's part of a conversation's identity — see `conversationKey`. */
+  private readonly identity = nextRuntimeIdentity()
   private readonly listeners = new Set<() => void>()
   private snapshot: AIConversationSnapshot = EMPTY_SNAPSHOT
 
@@ -443,6 +479,20 @@ export class ConversationRuntime<Context> {
   }
 
   // ── internals ────────────────────────────────────────────────────────────
+
+  /**
+   * The open conversation as one key, or `null` when nothing is open.
+   *
+   * Three parts, because two of them are not enough to be an identity: the
+   * runtime (which provider), the context key (which conversation *space*),
+   * and the id. See `AIConversationSnapshot.conversationKey`.
+   */
+  private conversationKey(openId: string | null): string | null {
+    if (openId === null || this.contextKey === null) {
+      return null
+    }
+    return `${this.identity}\u0000${this.contextKey}\u0000${openId}`
+  }
 
   /** The selection if it belongs to this context, else the provider's binding. */
   private openId(): string | null {
@@ -808,6 +858,7 @@ export class ConversationRuntime<Context> {
       conversations: this.list.conversations,
       bindingId: this.list.bindingId,
       openId,
+      conversationKey: this.conversationKey(openId),
       state: this.thread.state,
       conversation: this.thread.conversation,
       activity: this.thread.activity,
