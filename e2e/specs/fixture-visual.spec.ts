@@ -630,23 +630,28 @@ test.describe('App 390×844', () => {
     // Nothing about this is a modal: no dialog role, no backdrop (SC-33).
     await expect(page.locator('[role="dialog"]')).toHaveCount(0);
 
-    // …and it is attached to the capsule, not centered in the viewport: the
-    // surface's bottom edge sits at the capsule's top band.
-    const geometry = await page.evaluate(() => {
-      const menu = document.querySelector('[data-testid="capsule-context-disclosure"]');
-      const capsule = document.querySelector('[data-testid="terminal-capsule"]');
-      if (!(menu instanceof HTMLElement) || !(capsule instanceof HTMLElement)) {
-        return null;
-      }
-      return {
-        menuBottom: menu.getBoundingClientRect().bottom,
-        capsuleTop: capsule.getBoundingClientRect().top,
-      };
-    });
-    if (!geometry) {
-      throw new Error('the disclosure and the capsule must both be laid out');
-    }
-    expect(geometry.menuBottom).toBeLessThanOrEqual(geometry.capsuleTop + 1);
+    // …and it is attached to the control that opened it, not centered in the
+    // viewport: the surface settles just above the `+` trigger. Measured
+    // against the trigger, not `terminal-capsule` — that testid is the whole
+    // dock host (176px of zone at 390×844), so a comparison against its top
+    // would measure the zone, not the attachment.
+    //
+    // Polled, not sampled once: the popup is portalled and positioned a frame
+    // after it becomes visible, and a single read can catch it at its
+    // pre-position default.
+    const gapToTrigger = async () =>
+      page.evaluate(() => {
+        const menu = document.querySelector('[data-testid="capsule-context-disclosure"]');
+        const trigger = document.querySelector('[data-testid="capsule-capability-more"]');
+        if (!(menu instanceof HTMLElement) || !(trigger instanceof HTMLElement)) {
+          return null;
+        }
+        return trigger.getBoundingClientRect().top - menu.getBoundingClientRect().bottom;
+      });
+
+    await expect.poll(gapToTrigger).toBeGreaterThanOrEqual(0);
+    // …and attached, not parked somewhere else on the screen.
+    await expect.poll(gapToTrigger).toBeLessThanOrEqual(24);
 
     await expect(page).toHaveScreenshot('app-work-context-disclosure.png', {
       fullPage: true,
