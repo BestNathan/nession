@@ -287,6 +287,10 @@
       "$description": "Fixed slot for one capability entry in the Workspace capsule. The bound is what keeps a long label (Claude Code) from widening the row: the slot stays this wide and the label wraps inside it instead (#1347 follow-up).",
       "value": "72px"
     },
+    "capabilityEntryHeight": {
+      "$description": "One labeled capability entry's height on Web. Deliberately above `control-md` (32px): the entry stacks icon over label, and this is the band where the pair fits without crowding — 40px of entry in the pill's 6px shell pad, against the Web composer's 32px row. A floor, not a cap: a two-line label grows the entry by its own line box rather than clipping.",
+      "value": "2.5rem"
+    },
     "capabilityLabelFontSize": {
       "$description": "Capability entry label, one line. The entry reads icon-over-label; a label that fits one line gets this size.",
       "value": "12px"

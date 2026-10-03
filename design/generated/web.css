@@ -170,6 +170,7 @@
   --terminal-capsule-terminal-clearance-gap: 0.375rem;
   --terminal-capsule-caption-font-size: 1rem;
   --terminal-capsule-capability-slot-width: 72px;
+  --terminal-capsule-capability-entry-height: 2.5rem;
   --terminal-capsule-capability-label-font-size: 12px;
   --terminal-capsule-capability-label-wrapped-font-size: 10px;
   --terminal-capsule-quick-key-font-size: 1rem;
@@ -465,6 +466,7 @@
   --spacing-terminal-capsule-terminal-clearance-gap: var(--terminal-capsule-terminal-clearance-gap);
   --spacing-terminal-capsule-caption-font-size: var(--terminal-capsule-caption-font-size);
   --spacing-terminal-capsule-capability-slot-width: var(--terminal-capsule-capability-slot-width);
+  --spacing-terminal-capsule-capability-entry-height: var(--terminal-capsule-capability-entry-height);
   --spacing-terminal-capsule-capability-label-font-size: var(--terminal-capsule-capability-label-font-size);
   --spacing-terminal-capsule-capability-label-wrapped-font-size: var(--terminal-capsule-capability-label-wrapped-font-size);
   --spacing-terminal-capsule-quick-key-font-size: var(--terminal-capsule-quick-key-font-size);
@@ -575,6 +577,7 @@
   --terminal-capsule-terminal-clearance-gap: 0.375rem;
   --terminal-capsule-caption-font-size: 1rem;
   --terminal-capsule-capability-slot-width: 72px;
+  --terminal-capsule-capability-entry-height: 2.75rem;
   --terminal-capsule-capability-label-font-size: 12px;
   --terminal-capsule-capability-label-wrapped-font-size: 10px;
   --terminal-capsule-popover-width: 22rem;

@@ -35,6 +35,13 @@ export const WORK_SURFACE_SELECTOR = [
   'textarea',
   // The capsule composer, which owns its own drag, IME, and keyboard gestures.
   '[data-testid="terminal-capsule"]',
+  // The capability capsule's row, which is a horizontal scroller: its entries
+  // are wider than a phone, so it pans by touch. A shell page claimed there
+  // would spend the row's first horizontal pixels and move the surface at the
+  // same time — measured on the Workspace root 2026-10-03, the row scrolled
+  // *and* the pager paged. The row owns its drags; the shell's edge bands are
+  // the bounded exception, exactly as they are over the terminal.
+  '[data-testid="workspace-capability-capsule"]',
 ].join(', ');
 
 /**
