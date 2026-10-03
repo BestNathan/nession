@@ -1,5 +1,6 @@
 # quality-web
 # Gate IDs only. Not wired into current hooks/workflows yet.
+instruction-contract
 repo-health-selftest
 repo-metrics-selftest
 protocol-integrity

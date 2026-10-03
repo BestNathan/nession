@@ -44,4 +44,4 @@ Suite files contain Gate IDs only: no commands, repair prose, changed-file rules
 
 ## Rollout boundary
 
-This directory does not modify `.githooks/*`, `justfile`, or GitHub Actions workflows. Existing mechanisms remain authoritative until a separate cutover proves parity.
+Legacy repository checks have not been wholesale cut over to Gate suites yet; existing mechanisms remain authoritative for those checks until parity is proven. New deterministic invariants may adopt `gates/run` directly. `instruction-contract` is the first such live Gate: instruction changes run it in pre-commit and Quality Gate while the broader legacy migration remains incremental.
