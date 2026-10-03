@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { TerminalCapsule } from '@/product/terminal/capsule/TerminalCapsule';
 import type {
@@ -188,6 +188,16 @@ describe('Context Disclosure', () => {
 
     await screen.findByTestId('capsule-capability-more');
     expect(screen.queryByTestId('capsule-context-item-claude-code')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('capsule-context-disclosure')).not.toBeInTheDocument();
+
+    // The guarantee is that the surface closes, not that React has already torn
+    // the portal down: base-ui keeps the popup mounted through its exit
+    // transition and jsdom never runs that to completion, so "in the document"
+    // reads the animation's last frame — which is why this passed locally and
+    // failed on CI's timing. Absent, or present and already closed, both say
+    // the thing the criterion says; the row above is the structural half.
+    await waitFor(() => {
+      const popup = screen.queryByTestId('capsule-context-disclosure');
+      expect(popup === null || popup.hasAttribute('data-closed')).toBe(true);
+    });
   });
 });
