@@ -163,34 +163,6 @@ export async function gotoFixtureWorkspace(page: Page): Promise<void> {
  * canonical screen the golden baselines capture, which is why the parameter is
  * optional rather than a second helper.
  */
-/**
- * Open a capability from the capsule's `+` in either state (#1347 SC-37/40).
- *
- * The Context Disclosure leads with sensed capabilities and keeps the ordinary
- * list one explicit step down (`All capabilities`); while nothing is sensed —
- * on Web always, since a physical keyboard makes Terminal Keys optional rather
- * than sensed — the list is the first layer itself. The helper takes the step
- * when the surface offers it, so a spec says *what* it wants rather than which
- * layer it happens to be on.
- */
-export async function openCapsuleCapability(page: Page, id: string): Promise<void> {
-  await page.getByTestId('capsule-capability-more').click();
-
-  // Wait for the list to *be* there before asking which shape it has. `count()`
-  // on a surface React has not mounted yet reads 0 — the helper then skips the
-  // step it should have taken, and the click below waits out its 30s timeout
-  // for a row that is behind that step. Measured on CI: the same three cases
-  // pass or time out depending on how fast the popup mounts (#1441).
-  const picker = page.getByTestId(`capsule-capability-picker-${id}`);
-  const all = page.getByTestId('capsule-context-all');
-  await expect(all.or(picker).first()).toBeVisible();
-
-  if (await all.isVisible()) {
-    await all.click();
-  }
-  await picker.click();
-}
-
 export async function gotoFixtureApp(page: Page, search = ''): Promise<void> {
   await page.goto(`/#/fixture/app${search}`);
   await page.getByTestId('app-layer-root').waitFor();

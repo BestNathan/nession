@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { openCapsuleCapability } from '../helpers/capsule';
 import { waitForShell } from '../helpers/shell';
 
 // __dirname (not import.meta): Playwright transforms specs to CJS — this
@@ -382,15 +383,16 @@ async function lastNonEmptyLine(page: import('@playwright/test').Page): Promise<
 }
 
 /**
- * Tap the capsule's ↑ — the App/mobile key path, not a keyboard event.
+ * Tap the capsule's ↑ — the capsule's own control, not a keyboard event.
  *
- * On App, Terminal Keys is context-sensed (#1347 SC-37), so the primary path
- * is its sensed row in the Context Disclosure, which opens the Peek directly
- * (SC-38).
+ * The key is what this drives: `phys-key-↑` inside the Terminal Keys Peek. How
+ * the Peek is *reached* is the experience's business — the sensed row on App
+ * (#1347 SC-37), the ordinary entry on the default Web viewport these specs run
+ * at — so the opening step is the shared helper rather than a hardcoded row.
+ * #1440 hardcoded the App row here and timed out on Web.
  */
 async function tapCapsuleArrowUp(page: import('@playwright/test').Page): Promise<void> {
-  await page.getByTestId('capsule-capability-more').click();
-  await page.getByTestId('capsule-context-item-terminal-keys').click();
+  await openCapsuleCapability(page, 'terminal-keys');
   await page.getByTestId('phys-key-↑').click();
 }
 
