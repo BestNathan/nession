@@ -73,6 +73,48 @@ Ask in order:
 4. Is it detailed knowledge/rationale? Put it in docs or Skill references.
 5. Is it needed by nearly every task? Only then add it to root `AGENTS.md`.
 
+## Adding a scoped instruction
+
+Create a scoped `AGENTS.md` only when a subtree owns durable rules that should apply automatically to work inside that subtree.
+
+Checklist:
+
+1. name the path-local responsibility;
+2. confirm the rule does not belong to an existing parent scope/Skill/executable owner;
+3. add canonical `<scope>/AGENTS.md`;
+4. add sibling `<scope>/CLAUDE.md -> AGENTS.md`;
+5. link detailed rationale instead of copying a handbook;
+6. add the scope to `scripts/instruction-contract.mjs`;
+7. run `./gates/run instruction-contract`.
+
+Do not create a scope merely to distribute line count.
+
+## Creating or refactoring a Skill
+
+A Skill entrypoint should contain:
+
+- trigger-oriented `name` / `description`;
+- task workflow and decision points;
+- stop conditions;
+- links to scoped/canonical owners;
+- commands needed by that workflow.
+
+Move large inventories, architecture explanation, historical rationale, and subsystem-specific rule tables to existing canonical docs/owners or a `references/` file when no better owner exists.
+
+Before adding a new Skill, confirm an existing Skill cannot own the workflow without mixing unrelated responsibilities.
+
+After changing Skills:
+
+```bash
+./gates/run instruction-contract
+```
+
+The physical content root remains `.claude/skills` during this compatibility phase; do not create a second editable copy under `.agents/skills`.
+
+## Representative loading proof
+
+See [instruction-scenarios.md](instruction-scenarios.md) for general development, Web UI, protocol, CI failure, Requirement Acceptance, and code-review load sets.
+
 ## Budgets
 
 The instruction contract enforces:
