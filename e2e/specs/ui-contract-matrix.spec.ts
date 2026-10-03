@@ -657,17 +657,16 @@ for (const row of viewports.filter((v) => v.experience === 'app')) {
       const layerRoot = page.getByTestId('app-layer-root');
       await expect(layerRoot).toHaveAttribute('data-layer', 'workspace');
 
-      // The row must actually be wider than its box, or the drag below is not
-      // the row's to keep in the first place.
+      // Whether the row overflows is a property of the viewport, not of this
+      // rule: at `app.landscape-phone` (844 wide) six slots fit and there is
+      // nothing to pan, while the drag below must still be the row's — the
+      // entries are controls, not a page-start. So the row's own scroll extent
+      // is not asserted; the observable here is the layer.
       const row = page.getByTestId('workspace-capability-scroll');
       await expect(row).toBeVisible();
-      expect(await row.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
-
-      const nav = page.getByTestId('workspace-capability-capsule');
       const box = await row.boundingBox();
-      const navBox = await nav.boundingBox();
-      if (!box || !navBox) {
-        throw new Error('the capability row and its capsule must both be laid out');
+      if (!box) {
+        throw new Error('the capability row must be laid out');
       }
       const y = Math.round(box.y + box.height / 2);
 
@@ -680,10 +679,23 @@ for (const row of viewports.filter((v) => v.experience === 'app')) {
       await page.waitForTimeout(300);
       await expect(layerRoot).toHaveAttribute('data-layer', 'workspace');
 
-      // …and the shell's own edge band stays a navigation start over it
-      // (`EDGE_BAND_PX` = 28, measured from the shell). Without this half, a
-      // pager that had simply stopped working would pass the assertion above.
-      await swipeHorizontally(page, { y, fromX: Math.round(navBox.x + 8), toX: Math.round(navBox.x + 148) });
+      // …and the shell still pages from a start that IS navigation — its own
+      // header band, whose left edge is chrome at every App viewport (the
+      // capsule's own left edge is only inside the 28px band in portrait, and
+      // the file list swallows the drag in landscape, so neither is a stable
+      // anchor here). Without this half, a pager that had simply stopped
+      // working would pass the assertion above. The narrower case — the edge
+      // band over a work surface — is `#1081`'s test, measured on the xterm.
+      const shell = await layerRoot.boundingBox();
+      const header = await page.getByTestId('app-header-sessions').boundingBox();
+      if (!shell || !header) {
+        throw new Error('the App shell and its header must be laid out');
+      }
+      await swipeHorizontally(page, {
+        y: Math.round(header.y + header.height / 2),
+        fromX: Math.round(shell.x + 6),
+        toX: Math.round(shell.x + 156),
+      });
       await expect(layerRoot).toHaveAttribute('data-layer', 'terminal');
     });
   });
