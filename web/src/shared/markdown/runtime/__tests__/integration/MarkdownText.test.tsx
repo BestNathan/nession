@@ -105,6 +105,51 @@ describe('Chat Markdown lifecycle', () => {
     })
   })
 
+  describe('footnote id scope (#1184 SC-14)', () => {
+    it('keeps two messages’ footnotes apart in one document', () => {
+      // Every message numbers from 1, so without a per-document scope both
+      // references carry `fn-1` and a later message's link can jump into an
+      // earlier message's section. Rendering one ChatMarkdown at a time — all
+      // the round-1 tests did — cannot see this.
+      const { container } = render(
+        <div>
+          <ChatMarkdown text={'First.[^a]\n\n[^a]: A body.'} />
+          <ChatMarkdown text={'Second.[^b]\n\n[^b]: B body.'} />
+        </div>,
+      )
+
+      const ids = [...container.querySelectorAll('[id]')].map((element) => element.id)
+      expect(ids.length).toBeGreaterThan(0)
+      expect(new Set(ids).size).toBe(ids.length)
+
+      const messages = [...container.querySelectorAll('.markdown')]
+      expect(messages).toHaveLength(2)
+      for (const message of messages) {
+        const reference = message.querySelector('sup a')
+        const entry = message.querySelector('[data-footnotes] li')
+        expect(reference).not.toBeNull()
+        expect(entry).not.toBeNull()
+        // The href names the entry in *this* message, not the other one.
+        expect(reference?.getAttribute('href')).toBe(`#${entry?.id}`)
+        expect(message.querySelector(`[id="${entry?.id}"]`)).toBe(entry)
+      }
+    })
+
+    it('holds the scope steady from streaming to settled', () => {
+      // The scope lives as long as the message does: a settled re-render must
+      // not repoint anchors that were already on screen.
+      const text = 'First.[^a]\n\n[^a]: A body.'
+      const { container, rerender } = render(<ChatMarkdown text={text} streaming />)
+      const live = container.querySelector('sup a')
+      expect(live).not.toBeNull()
+
+      rerender(<ChatMarkdown text={text} />)
+      const settled = container.querySelector('sup a')
+      expect(settled?.id).toBe(live?.id)
+      expect(settled?.getAttribute('href')).toBe(live?.getAttribute('href'))
+    })
+  })
+
   describe('streaming footnote state (#1184 SC-14)', () => {
     it('numbers footnotes in first-reference order across the freeze boundary', () => {
       const text = 'First.[^a]\n\n[^a]: A body.\n\nSecond.[^b]\n\n[^b]: B body.'
@@ -117,14 +162,17 @@ describe('Chat Markdown lifecycle', () => {
       expect(section).toHaveTextContent('B body.')
     })
 
-    it('links each reference to its section entry', () => {
+    it('links each reference to its section entry, and back', () => {
       const text = 'First.[^a]\n\n[^a]: A body.'
       const { container } = render(<ChatMarkdown text={text} />)
 
       const reference = container.querySelector('sup a')
+      const backref = container.querySelector('[data-footnotes] li a')
       const entry = container.querySelector('[data-footnotes] li')
+      // Both directions of the jump stay inside this document: the reference
+      // lands on the entry, and the entry's back-link lands on the reference.
       expect(reference).toHaveAttribute('href', `#${entry?.id}`)
-      expect(container.querySelector('[data-footnotes] li a')).toHaveAttribute('href', '#fnref-1')
+      expect(backref).toHaveAttribute('href', `#${reference?.id}`)
     })
   })
 })
