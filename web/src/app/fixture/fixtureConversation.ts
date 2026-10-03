@@ -589,10 +589,17 @@ function conversationsFor(scenario: string): ConversationsResponse | undefined {
         binding: { conversation_id: BOUND_ID, activity: 'active' },
         has_more: false,
       };
+    // Two scenarios share this answer, and each differs somewhere else:
+    // `list-stale` fails a *later* list read (see `threadOpened`), and
+    // `settled` binds the same conversation to a finished Turn (see
+    // `SETTLED_ITEMS`). The directory is `ready`'s in both cases — a finished
+    // Turn is a property of the thread, not of the list.
+    //
+    // The comment is above the labels rather than inside the first one: a case
+    // that holds only a comment is not empty to `no-fallthrough`, and this is a
+    // fall-through on purpose.
+    case 'list-stale':
     case 'settled':
-      // The same directory as `ready`, bound to the same conversation: a
-      // finished Turn is a property of the *thread*, not of the list. See
-      // `SETTLED_ITEMS` for why the transcript needs a corpus of its own.
       return {
         state: 'ready',
         cwd: '/Users/dev/code/nession-capsule',
@@ -674,11 +681,17 @@ function messagesFor(
     };
   }
   switch (scenario) {
+    case 'list-stale':
     case 'thread-unavailable':
       // The read the list above promised and could not make. `items: []` here
       // is the provider being honest, not a conversation that is empty — and
       // the surface must not turn one into the other, which is the whole point
       // of the state.
+      //
+      // `list-stale` shares the answer, and not for atmosphere: the only
+      // control in this surface that reloads *both* halves is the Retry a
+      // non-ready thread offers, so without it the list refresh above could
+      // never be asked for. See `threadOpened`.
       return {
         state: 'unavailable',
         items: [],
@@ -847,6 +860,25 @@ function listFor(scope: ConfigScope): ListResponse {
 export function fixtureConversationSurface(search: string): PluginSurface {
   const scenario = new URLSearchParams(search).get('conversation') ?? 'ready';
 
+  /**
+   * Whether the reader has opened a conversation yet.
+   *
+   * `list-stale` answers the directory normally until the thread has been read,
+   * and fails every list read after that. The trigger is the reader's own
+   * action rather than a count of list reads, and it has to be: this app reads
+   * the list twice on mount in development (StrictMode double-invokes the
+   * effect, and only in development), so "fail after the first list read" would
+   * answer the same scenario differently in the two environments the fixture
+   * runs in — rows in the production build the E2E uses, an error screen in the
+   * dev server a human uses.
+   *
+   * It is also the state worth reaching, in the review's own words: the list
+   * loaded, the reader opened a thread, and the *refresh* is what failed. A
+   * scenario that failed the first read would be a different screen — the one
+   * `ListStateGuard` already draws.
+   */
+  let threadOpened = false;
+
   // The same directory the git surface publishes, built from the same
   // `manifestsOf`, so this route cannot present a capability directory the app
   // would not — resolution happens against it before a request is sent.
@@ -860,6 +892,9 @@ export function fixtureConversationSurface(search: string): PluginSurface {
       // The ids are the contracts', not literals: a renamed wire would then
       // fail here rather than silently answering nothing.
       if (type === PROTOCOL) {
+        if (scenario === 'list-stale' && threadOpened) {
+          return Promise.reject(new Error('the conversations could not be listed'));
+        }
         const response = conversationsFor(scenario);
         if (response === undefined) {
           return Promise.reject(
@@ -870,6 +905,7 @@ export function fixtureConversationSurface(search: string): PluginSurface {
         return Promise.resolve(response as T);
       }
       if (type === MESSAGES_PROTOCOL) {
+        threadOpened = true;
         const conversationId = payload.conversation_id;
         if (typeof conversationId !== 'string') {
           return Promise.reject(

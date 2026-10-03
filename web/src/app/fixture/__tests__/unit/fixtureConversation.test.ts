@@ -277,6 +277,28 @@ describe('fixture conversation surface', () => {
     ).rejects.toThrow(/no page handed out/);
   });
 
+  it('models a list refresh that fails only after a thread was opened', async () => {
+    // The state `ListStateGuard` cannot draw: rows on screen and a refresh that
+    // did not arrive. The trigger is the reader's own action, and this pins
+    // that — a read *count* would answer the same scenario differently in the
+    // two environments the fixture runs in, because the dev server's StrictMode
+    // reads the list twice on mount and the production build the E2E serves
+    // reads it once.
+    const stale = fixtureConversationSurface('?conversation=list-stale');
+
+    const first = await stale.request<ConversationsResponse>('claude-code.conversations', {});
+    const items = first.items ?? [];
+    expect(items.length).toBeGreaterThan(1);
+
+    // Opening a thread is what makes the list stale.
+    const boundId = first.binding?.conversation_id as string;
+    await stale.request<MessagesResponse>('claude-code.messages', { conversation_id: boundId });
+
+    await expect(
+      stale.request<ConversationsResponse>('claude-code.conversations', {}),
+    ).rejects.toThrow(/could not be listed/);
+  });
+
   it('carries both phases of a Turn, so a fold gate can tell them apart', async () => {
     // #1363 round 4: the App walk asserted "a finished turn folds" against a
     // transcript whose Turn never finishes, so the assertion was describing a
@@ -317,8 +339,7 @@ describe('fixture conversation surface', () => {
     const working = turnsOf(await itemsOf('ready'));
     expect(working).toHaveLength(1);
     expect(working[0]?.answer).toBeNull();
-    expect(runningWork(working[0]!)).toBe(true);
-  });
+    expect(runningWork(working[0]!)).toBe(true);  });
 
   it('answers not_found for a conversation id it does not know', async () => {
     // The unit's only selection mechanism is the explicit id, and an unknown
