@@ -52,6 +52,45 @@
     }
   ],
   "patterns": {
+    "pattern.context-capsule": {
+      "id": "pattern.context-capsule",
+      "patternRef": "docs/design/design-system/patterns/context-capsule.md",
+      "extends": [
+        "category.chrome"
+      ],
+      "web": {
+        "overflow": "scroll",
+        "wrap": true,
+        "alignY": "middle",
+        "justify": "start",
+        "radiusToken": "semantic.radius-capsule",
+        "heightToken": "experience.web.contextCapsule.height",
+        "rowHeightToken": "experience.web.contextCapsule.rowHeight",
+        "padXToken": "experience.web.terminalCapsule.shellPadX",
+        "scrollOwner": true,
+        "heightTokenPx": 288,
+        "padXTokenPx": 12,
+        "rowHeightTokenPx": 44,
+        "radiusTokenCss": "calc(var(--radius) * 2.2)"
+      },
+      "app": {
+        "overflow": "scroll",
+        "wrap": true,
+        "alignY": "middle",
+        "touchTargetToken": "experience.app.touchTarget.min",
+        "justify": "start",
+        "radiusToken": "semantic.radius-capsule",
+        "heightToken": "experience.app.contextCapsule.height",
+        "rowHeightToken": "experience.app.contextCapsule.rowHeight",
+        "padXToken": "experience.app.terminalCapsule.shellPadX",
+        "scrollOwner": true,
+        "heightTokenPx": 256,
+        "touchTargetTokenPx": 44,
+        "padXTokenPx": 10,
+        "rowHeightTokenPx": 44,
+        "radiusTokenCss": "calc(var(--radius) * 2.2)"
+      }
+    },
     "pattern.popup-menu": {
       "id": "pattern.popup-menu",
       "patternRef": "docs/design/design-system/patterns/popup-menu.md",

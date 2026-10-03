@@ -40,6 +40,11 @@ const BLOCK_FIELDS = {
   // a 36px drawn circle apart from the 44px box holding it, which on App the
   // height token alone cannot do (control.sm == control.md == 44px).
   visualSizeToken: 'token',
+  // The other measurable *inside* the block, and the one a list repeats:
+  // `context-capsule`'s rows carry two lines (title + reason) and are taller
+  // than any control band on purpose, so `heightToken` (the surface) and
+  // `visualSizeToken` (what a control paints) both name the wrong thing.
+  rowHeightToken: 'token',
   visibility: 'visibility',
 };
 
@@ -51,6 +56,7 @@ const TOKEN_TARGET_FIELDS = new Set([
   'maxWidthToken',
   'padXToken',
   'visualSizeToken',
+  'rowHeightToken',
 ]);
 
 /** Fields emitted as a resolved CSS expression (`<field>Css`), not as px. */

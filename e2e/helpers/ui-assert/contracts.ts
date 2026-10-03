@@ -52,6 +52,14 @@ export interface ContractBlock {
    */
   visualSizeToken?: string;
   visualSizeTokenPx?: number;
+  /**
+   * Height of a row a *list* repeats, where that row is deliberately not the
+   * block's own band — `context-capsule`'s sensed rows carry a title and a line
+   * of reason. Resolved to px like `heightToken`; asserted per row, since the
+   * surface's own height says nothing about the rows inside it.
+   */
+  rowHeightToken?: string;
+  rowHeightTokenPx?: number;
   visibility?: { mode: string; breakpoint?: string };
 }
 
