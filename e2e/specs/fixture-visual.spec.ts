@@ -605,6 +605,59 @@ test.describe('App 390×844', () => {
     });
   });
 
+  // #1347 work-awareness review (2026-10-03): the same `+` while something is
+  // working. No canonical route could reach this state — the fixture's selected
+  // Session runs `bash` — so `?pane=claude.exe` names the input the work sense
+  // resolves from, and the sensed-first Context Disclosure gets coverage that
+  // can fail (SC-18/SC-33/SC-35).
+  test('Context Disclosure while working: sensed first, anchored, never a modal', async ({ page }) => {
+    await gotoFixtureApp(page, '?pane=claude.exe');
+    await waitForFixtureTerminal(page);
+
+    // Sensing is ambient: the ring appears, and nothing opens by itself.
+    await expect(page.getByTestId('work-ring')).toBeVisible();
+    await expect(page.getByTestId('capsule-context-disclosure')).toHaveCount(0);
+
+    await page.getByTestId('capsule-capability-more').click();
+
+    // The sensed capability is the first layer, by display identity and reason.
+    const sensed = page.getByTestId('capsule-context-item-claude-code');
+    await expect(sensed).toBeVisible();
+    await expect(sensed).toContainText('Claude Code');
+    await expect(sensed).toContainText('Working in this session');
+    // The ordinary list is one explicit step down rather than gone (SC-35).
+    await expect(page.getByTestId('capsule-context-all')).toBeVisible();
+    // Nothing about this is a modal: no dialog role, no backdrop (SC-33).
+    await expect(page.locator('[role="dialog"]')).toHaveCount(0);
+
+    // …and it is attached to the capsule, not centered in the viewport: the
+    // surface's bottom edge sits at the capsule's top band.
+    const geometry = await page.evaluate(() => {
+      const menu = document.querySelector('[data-testid="capsule-context-disclosure"]');
+      const capsule = document.querySelector('[data-testid="terminal-capsule"]');
+      if (!(menu instanceof HTMLElement) || !(capsule instanceof HTMLElement)) {
+        return null;
+      }
+      return {
+        menuBottom: menu.getBoundingClientRect().bottom,
+        capsuleTop: capsule.getBoundingClientRect().top,
+      };
+    });
+    if (!geometry) {
+      throw new Error('the disclosure and the capsule must both be laid out');
+    }
+    expect(geometry.menuBottom).toBeLessThanOrEqual(geometry.capsuleTop + 1);
+
+    await expect(page).toHaveScreenshot('app-work-context-disclosure.png', {
+      fullPage: true,
+      ...FIXTURE_SCREENSHOT,
+    });
+
+    // Selecting the sensed row opens its Peek directly — no Signal step (SC-20).
+    await sensed.click();
+    await expect(page.getByTestId('capsule-capability-projection')).toBeVisible();
+  });
+
   test('Terminal Keys accessory', async ({ page }) => {
     await gotoFixtureApp(page);
     await waitForFixtureTerminal(page);

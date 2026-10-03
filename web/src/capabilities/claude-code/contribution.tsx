@@ -138,7 +138,10 @@ export const claudeCodeWork: CapabilityWorkBinding = {
     return {
       capabilityId: CLAUDE_CODE_ID,
       status: 'working',
-      summary: 'Claude Code is running in this session',
+      // The disclosure row already says "Claude Code" — the reason line is
+      // the capability's answer to *why it is here*, not the title again
+      // (owner's copy in the 2026-10-03 interaction diagram).
+      summary: 'Working in this session',
     };
   },
 };

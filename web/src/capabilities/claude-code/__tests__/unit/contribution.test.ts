@@ -69,7 +69,7 @@ describe('claude-code work signal', () => {
     expect(claudeCodeWork.sense({ sessionForegroundCommand: 'claude.exe' })).toEqual({
       capabilityId: 'claude-code',
       status: 'working',
-      summary: 'Claude Code is running in this session',
+      summary: 'Working in this session',
     });
   });
 

@@ -20,6 +20,7 @@ import { fixtureEnvSurface } from './fixtureEnv';
 import { fixtureFileOps } from './fixtureFileOps';
 import { fixtureGitSurface } from './fixtureGit';
 import { fixtureInputDrop } from './fixtureInputDrop';
+import { fixturePaneCommand } from './fixturePaneCommand';
 import { fixtureSelectedId } from './fixtureSelection';
 import { fixtureSessions } from './fixtureSessions';
 import { fixtureStaleAgents } from './fixtureStaleAgents';
@@ -111,8 +112,14 @@ export function FixtureApp() {
   );
 
   const selectedId = fixtureSelectedId(search);
-  const selectedSession =
-    sessions.find((s) => s.session_id === selectedId) ?? null;
+  // The pane's reported foreground command (`fixturePaneCommand`): the input
+  // the work sense resolves from, so `?pane=claude.exe` is the canonical screen
+  // as if the agent had reported Claude Code in the pane.
+  const paneCommand = fixturePaneCommand(search);
+  const selectedSession = useMemo(() => {
+    const base = sessions.find((s) => s.session_id === selectedId) ?? null;
+    return base && paneCommand ? { ...base, foreground_command: paneCommand } : base;
+  }, [sessions, selectedId, paneCommand]);
   const selectedAgent = agents.find(
     (a) => a.agent_id === selectedSession?.agent_id,
   );

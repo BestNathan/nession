@@ -51,38 +51,63 @@ export function CapabilityDisclosureMenu({
     <DropdownMenu>
       <DropdownMenuTrigger render={trigger} />
       <DropdownMenuContent side="top" align="center" className="w-52">
-        <DropdownMenuGroup>
-          <DropdownMenuLabel>{label}</DropdownMenuLabel>
-          {entries.map((entry) => {
-            const Icon = entry.icon;
-            // `available` is listed so it stays reachable; only a capability the
-            // session actually needs is marked. The marker slot is always
-            // present so titles stay aligned whether or not a dot is drawn.
-            const perceived = entry.state === 'relevant' || entry.state === 'active';
-            return (
-              <DropdownMenuItem
-                key={entry.id}
-                data-testid={`${testIdPrefix}-${entry.id}`}
-                data-capability-state={entry.state}
-                onClick={() => onSelect(entry.id)}
-              >
-                <span aria-hidden className="flex w-1.5 shrink-0 justify-center">
-                  {perceived ? <span className="size-1.5 rounded-full bg-foreground" /> : null}
-                </span>
-                {Icon ? <Icon /> : null}
-                <span
-                  className={cn(
-                    'min-w-0 flex-1 truncate',
-                    perceived ? 'text-foreground' : 'text-muted-foreground',
-                  )}
-                >
-                  {entry.title}
-                </span>
-              </DropdownMenuItem>
-            );
-          })}
-        </DropdownMenuGroup>
+        <CapabilityEntryRows entries={entries} onSelect={onSelect} testIdPrefix={testIdPrefix} label={label} />
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+/**
+ * The rows themselves, so surfaces that are one *class* of disclosure — the
+ * capsule's `+` in both its quiet and working shapes, and any anchored
+ * surface that lists capabilities — share one list implementation instead of
+ * growing a second one beside it (see `CapsuleContextDisclosure`).
+ *
+ * Callers own the surrounding `DropdownMenuContent`; this renders the group
+ * (optional label + rows) and nothing else.
+ */
+export function CapabilityEntryRows({
+  entries,
+  onSelect,
+  testIdPrefix,
+  label,
+}: {
+  entries: readonly CapabilityDisclosureMenuEntry[];
+  onSelect: (id: CapabilityId) => void;
+  testIdPrefix: string;
+  label?: string;
+}) {
+  return (
+    <DropdownMenuGroup>
+      {label ? <DropdownMenuLabel>{label}</DropdownMenuLabel> : null}
+      {entries.map((entry) => {
+        const Icon = entry.icon;
+        // `available` is listed so it stays reachable; only a capability the
+        // session actually needs is marked. The marker slot is always
+        // present so titles stay aligned whether or not a dot is drawn.
+        const perceived = entry.state === 'relevant' || entry.state === 'active';
+        return (
+          <DropdownMenuItem
+            key={entry.id}
+            data-testid={`${testIdPrefix}-${entry.id}`}
+            data-capability-state={entry.state}
+            onClick={() => onSelect(entry.id)}
+          >
+            <span aria-hidden className="flex w-1.5 shrink-0 justify-center">
+              {perceived ? <span className="size-1.5 rounded-full bg-foreground" /> : null}
+            </span>
+            {Icon ? <Icon /> : null}
+            <span
+              className={cn(
+                'min-w-0 flex-1 truncate',
+                perceived ? 'text-foreground' : 'text-muted-foreground',
+              )}
+            >
+              {entry.title}
+            </span>
+          </DropdownMenuItem>
+        );
+      })}
+    </DropdownMenuGroup>
   );
 }
