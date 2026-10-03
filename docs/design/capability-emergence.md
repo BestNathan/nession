@@ -140,13 +140,22 @@ Examples may include:
 
 > **A capability is eligible for the capsule entry only if it contributes a useful Terminal-local Peek. Availability in Workspace is not enough.**
 
-Eligibility is declared by the capability, beside the body that does the peeking, as one of three roles:
+Eligibility is declared by the capability, beside the body that does the peeking, as one of two roles:
 
 | role | listed | why |
 |---|---|---|
 | **Peek** | yes | it can be reached from where the user already is |
-| **Accessory** | yes | a built-in Terminal-local accessory; it has no Workspace view to be confused with, and it keeps the entry from being empty on a node whose only Peek-capable capability is unavailable |
 | **Signal** | no | it emerges by observation when Nession resolves it as relevant, but explicit discovery is not offered for a depth with nothing behind it |
+
+> **The Accessory role retired on 2026-10-03 (#1347 SC-38).** It existed for
+> Terminal Keys — a built-in with no Workspace view — and its distinguishing
+> property ("no Workspace projection") is already expressed by the capability
+> simply having no Workspace view binding. What the separate family cost was a
+> second selection path, a second state story, and no way to be *sensed*, at
+> exactly the moment the Context Disclosure was being built to speak one
+> protocol for every capability. Terminal Keys is a **Peek**: it is sensed by
+> context on App (SC-37), a sensed row opens it directly at Peek, and the
+> ordinary list walks Signal -> Peek like any other.
 
 The examples above are therefore a list of **capabilities**, not of entry items. Git, Terminal Keys and Claude Code are all listed.
 
@@ -358,7 +367,7 @@ Terminal Keys is a Terminal-local capability.
 
 ```text
 Terminal Keys
-  terminal: interactive accessory
+  terminal: context-sensed Peek (App/touch)
   workspace: none
 ```
 

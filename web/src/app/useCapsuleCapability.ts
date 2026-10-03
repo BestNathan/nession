@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSessionCapabilityFacts } from '@/app/useSessionCapabilityFacts';
+import { collectContextSignals } from '@/app/contextSignals';
 import { collectWorkSignals } from '@/app/workSignals';
 import {
   resolveCapsuleCapabilities,
@@ -11,10 +12,12 @@ import { WORKSPACE_VIEW_BINDINGS } from '@/app/workspace/viewBindings';
 import {
   resolveCapabilityPresences,
   resolveCapabilityProjection,
+  type CapabilityDisclosureEntry,
   type CapabilityFacts,
   type CapabilityId,
 } from '@/product/capability';
 import type { CapsuleCapabilityProjection } from '@/product/terminal/capsule/types';
+import type { SensedCapabilityItem } from '@/product/capability/components/ContextDisclosureMenu';
 
 export interface CapsuleCapability {
   facts: CapabilityFacts | undefined;
@@ -185,6 +188,13 @@ export function useCapsuleCapability(
               entries: resolution.entries,
               onSelect: choose,
               onSelectAtPeek: chooseAtPeek,
+              sensedContext: resolveSensedContext(
+                resolution.entries,
+                {
+                  sessionId: input.session?.session_id,
+                  experience: input.experience,
+                },
+              ),
             },
           }
         : {},
@@ -231,4 +241,32 @@ export function useCapsuleCapability(
           }
         : undefined,
   };
+}
+
+/**
+ * Context-sensed capabilities, resolved to the disclosure's display items
+ * (#1347 SC-37/40).
+ *
+ * The same shape as the work-sensed items the capsule builds from
+ * `workContext`: a signal says *which* capability and *why*, and its display
+ * identity comes from the disclosure entries — a sensed item with no entry is
+ * dropped rather than shown as a raw id, exactly as the work half does.
+ */
+function resolveSensedContext(
+  entries: readonly CapabilityDisclosureEntry[],
+  context: { sessionId?: string; experience?: 'web' | 'app' },
+): SensedCapabilityItem[] {
+  const byId = new Map(entries.map((entry) => [entry.id, entry]));
+  return collectContextSignals(context).flatMap((signal) => {
+    const entry = byId.get(signal.capabilityId);
+    return entry
+      ? [
+          {
+            capabilityId: signal.capabilityId,
+            title: entry.title,
+            reason: signal.summary,
+          },
+        ]
+      : [];
+  });
 }

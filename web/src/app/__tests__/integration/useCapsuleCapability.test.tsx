@@ -13,7 +13,7 @@ function session(id: string, foregroundCommand: string | null = null): Session {
   } as Session;
 }
 
-function setup(overrides: { session?: Session | null } = {}) {
+function setup(overrides: { session?: Session | null; experience?: 'web' | 'app' } = {}) {
   const onToolChange = vi.fn();
   const onSurfaceChange = vi.fn();
   const onOpenWorkspace = vi.fn();
@@ -23,7 +23,7 @@ function setup(overrides: { session?: Session | null } = {}) {
     agents: [],
     domain: null,
     fileOps: {} as never,
-    experience: 'web' as const,
+    experience: overrides.experience ?? ('web' as const),
     onToolChange,
     onSurfaceChange,
     onOpenWorkspace,
@@ -139,19 +139,33 @@ describe('capsule emergence', () => {
     expect(onSurfaceChange).not.toHaveBeenCalled();
   });
 
-  it('gives a capability with nothing to add at Peek no deeper step', () => {
-    // `onDeeper` absent is how "the Terminal stops here" is said, and the frame
-    // turns it into an inert title rather than an empty Peek.
-    //
-    // Claude Code was this test's subject until #1120 gave it a Peek, at which
-    // point it was asserting the absence of the feature. What has no deeper
-    // step now is the built-in accessory: it has no Workspace view, so there is
-    // nothing behind it to open.
+  it('walks the ordinary Signal -> Peek protocol for Terminal Keys (SC-38)', () => {
+    // This test used to assert the opposite — the accessory had no deeper step
+    // because it *was* its own body. The 2026-10-03 review retired that family
+    // (SC-38): Terminal Keys has a Peek like any other capability, so the
+    // ordinary list opens its Signal and the title offers the step into it.
     const { result, choose } = setup();
     choose('terminal-keys');
 
     expect(result.current.projection?.id).toBe('terminal-keys');
-    expect(result.current.projection?.onDeeper).toBeUndefined();
+    expect(result.current.projection?.depth).toBe('signal');
+
+    act(() => result.current.projection?.onDeeper?.());
+
+    expect(result.current.projection?.depth).toBe('peek');
+  });
+
+  it('senses Terminal Keys by context on App, and only there (SC-37)', () => {
+    // Context sense, not work sense: the disclosure lists it because the device
+    // has no keyboard. It must not need — or set — any work signal, and Web
+    // (a physical keyboard) must not sense it at all.
+    const app = setup({ experience: 'app' });
+    expect(app.result.current.capabilities.disclosure?.sensedContext).toEqual([
+      { capabilityId: 'terminal-keys', title: 'Terminal Keys', reason: 'Touch controls for Terminal' },
+    ]);
+
+    const web = setup({ experience: 'web' });
+    expect(web.result.current.capabilities.disclosure?.sensedContext).toEqual([]);
   });
 
   it('carries the capability’s own answer about the soft keyboard', () => {

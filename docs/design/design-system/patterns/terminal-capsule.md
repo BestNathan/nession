@@ -63,7 +63,7 @@ The exact ordering is experience-specific. The semantic regions are:
 | Capability Signal | Minimal current-state projection that explains why a capability matters now; temporary and subordinate to Terminal |
 | Capability Peek | Small Session-scoped summary opened from a Signal or capability entry; intentionally incomplete and usually offers a path into Workspace |
 | Primary action | Send / execute current intent |
-| Terminal-local accessory | Contextual Terminal-only interaction such as Terminal Keys; does not imply a Workspace view |
+| Terminal-local capability | Contextual Terminal-only interaction such as Terminal Keys; does not imply a Workspace view. (It is a Peek like any other since 2026-10-03 — the separate "accessory" family retired, `capability-emergence.md`.) |
 
 ## Contextual capability presence
 
@@ -130,7 +130,7 @@ full capability surface
 
 Signal/Peek should answer what matters **now**. Full history, management, configuration, large diffs, graphs, forms, and complex multi-step workflows belong in Workspace.
 
-A Terminal-local capability such as Terminal Keys may stop at an interactive accessory and have no Workspace projection.
+A Terminal-local capability such as Terminal Keys may stop at its Peek and have no Workspace projection. On App it is *context-sensed* — a touch device with a Terminal is what makes it relevant (SC-37) — and it is not work: it never lights the Work Ring.
 
 ### The `+` opens one Context Disclosure (owner decision, 2026-10-03)
 

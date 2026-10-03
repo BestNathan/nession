@@ -53,7 +53,14 @@ function CapsuleCapabilityMore({ disclosure, workContext }: {
   workContext?: ResolvedWorkContext;
 }) {
   const isWorking = workContext?.status === 'working';
-  const sensed = sensedWorkItems(workContext, disclosure.entries);
+  // One sensed section, two senses (#1347 SC-40): work-sensed items first —
+  // "what you are running" outranks "what this device affords" — then the
+  // context-sensed ones the disclosure's composer resolved. Ordering here is
+  // the surface's; neither registry orders the other.
+  const sensed = [
+    ...sensedWorkItems(workContext, disclosure.entries),
+    ...(disclosure.sensedContext ?? []),
+  ];
 
   // One trigger, one surface (#1347 SC-18/SC-33/SC-35): the Context Disclosure
   // is anchored to `+` in both states — sensed-first while something is

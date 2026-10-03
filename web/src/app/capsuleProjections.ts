@@ -38,20 +38,25 @@ export interface CapsuleProjectionBinding {
    *
    * - `'peek'` — it contributes a Terminal-local Peek. This is the only thing
    *   that earns a capability explicit discovery: "availability in Workspace is
-   *   not enough".
-   * - `'accessory'` — a built-in Terminal-local accessory rather than a
-   *   Workspace capability. It has no Workspace view to be confused with, so
-   *   the rule above does not exclude it; it is the entry's own family, and
-   *   `#1046`'s edge case keeps it listed so that a node with no Peek-capable
-   *   capability does not present an empty menu.
+   *   not enough". Terminal Keys is one of these: it has a Peek and no
+   *   Workspace view, which is a *shape* a Peek entry already expresses.
    * - `'signal'` — a Terminal Signal and no Peek. It is **not** listed: it
    *   still emerges by observation when Nession resolves it as relevant, but it
    *   is not offered for explicit selection. Claude Code is the reference case,
    *   and `#1046` is explicit that a Signal-only binding is insufficient for
    *   explicit discovery; it returns to the entry when the plugin contributes a
    *   Peek.
+   *
+   * There was a third, `'accessory'`, for Terminal Keys — a family of its own
+   * on the reasoning that a built-in with no Workspace view should not be
+   * confused with a capability. The 2026-10-03 review retired it (#1347
+   * SC-38): the accessory had its own selection path, its own state story and
+   * no way to be *sensed*, so one capability spoke a protocol of its own while
+   * the Context Disclosure was being built to speak one for all of them. The
+   * distinguishing property it carried — no Workspace destination — is already
+   * expressed by the capability simply having no Workspace view binding.
    */
-  entry: 'peek' | 'accessory' | 'signal';
+  entry: 'peek' | 'signal';
   /**
    * Whether this projection claims the soft keyboard while it is up (#1034).
    *

@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import type { CapabilityDisclosureEntry, CapabilityId } from '@/product/capability';
+import type { SensedCapabilityItem } from '@/product/capability/components/ContextDisclosureMenu';
 
 export type CapsuleExperience = 'web' | 'app';
 
@@ -51,6 +52,13 @@ export {
  */
 export interface CapsuleCapabilityDisclosure {
   entries: readonly CapabilityDisclosureEntry[];
+  /**
+   * Context-sensed capabilities, already resolved to display items (#1347
+   * SC-37/40). The composer of this object knows the surface's experience and
+   * the session; the capsule merges these with the work-sensed items and shows
+   * one sensed section — it never learns *why* an item is there.
+   */
+  sensedContext?: readonly SensedCapabilityItem[];
   onSelect: (id: CapabilityId) => void;
   /**
    * Select at Peek depth (#1347 SC-20), supplied when the caller can open a

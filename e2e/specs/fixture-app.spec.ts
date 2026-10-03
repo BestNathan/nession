@@ -1,6 +1,6 @@
 // e2e/specs/fixture-app.spec.ts
 import { expect, test, type Page } from '@playwright/test';
-import { openFixtureFile } from '../helpers/fixtureVisual';
+import { openCapsuleCapability, openFixtureFile } from '../helpers/fixtureVisual';
 
 // Local runs are forbidden: the webServer stack compiles and runs
 // nession-server/agent (which operate tmux), and globalSetup executes
@@ -94,8 +94,7 @@ test('an emerged capability does not reflow the terminal (#826)', async ({ page 
 
   const dormant = await geometry();
 
-  await page.getByTestId('capsule-capability-more').click();
-  await page.getByTestId('capsule-capability-picker-git').click();
+  await openCapsuleCapability(page, 'git');
   await expect(page.getByTestId('capsule-capability-projection')).toBeVisible();
 
   const emerged = await geometry();
