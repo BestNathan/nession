@@ -55,6 +55,11 @@ validate_gate() {
   local path desc declared field
   path="$(gate_path "$id")"
   [ -x "$path" ] || { printf '[ERROR] unknown gate: %s\n' "$id" >&2; return 2; }
+  local syntax_output=""
+  if ! syntax_output="$(bash -n "$path" 2>&1)"; then
+    printf '[ERROR] gate shell syntax invalid: %s\n%s\n' "$id" "$syntax_output" >&2
+    return 2
+  fi
   if ! desc="$("$path" --describe 2>&1)"; then
     printf '[ERROR] gate contract cannot be described: %s\n%s\n' "$id" "$desc" >&2
     return 2
