@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { TerminalCapsule } from '@/product/terminal/capsule/TerminalCapsule';
 import type {
@@ -243,6 +243,30 @@ describe('Context Disclosure', () => {
     expect(screen.getByTestId('capsule-capability-projection')).toBeInTheDocument();
     expect(screen.getByTestId('capsule-shell')).toBe(shellAfter);
     // …and the list is gone, because the two are one slot rather than a stack.
+    expect(screen.queryByTestId('capsule-context-disclosure')).not.toBeInTheDocument();
+  });
+
+  it('closes on the trigger again, and on a pointer outside (#1347 SC-43)', async () => {
+    const caps = disclosure();
+    render(
+      <TerminalCapsule experience="web" sendText={vi.fn()} capabilityDisclosure={caps} workContext={workContext()} />,
+    );
+
+    // The trigger toggles. This is worth asserting rather than assuming: the
+    // outside-pointerdismissal listens on `document`, so without the guard that
+    // ignores a pointer landing on the trigger, one tap would dismiss on
+    // pointerdown and toggle on click — closing it twice and reopening it once.
+    const trigger = screen.getByTestId('capsule-capability-more');
+    await userEvent.click(trigger);
+    expect(await screen.findByTestId('capsule-context-disclosure')).toBeInTheDocument();
+    await userEvent.click(trigger);
+    expect(screen.queryByTestId('capsule-context-disclosure')).not.toBeInTheDocument();
+
+    // …and a pointer anywhere else closes it, because nothing else would: this
+    // surface is not a popup, so no primitive dismisses it for us.
+    await userEvent.click(trigger);
+    expect(await screen.findByTestId('capsule-context-disclosure')).toBeInTheDocument();
+    fireEvent.pointerDown(document.body);
     expect(screen.queryByTestId('capsule-context-disclosure')).not.toBeInTheDocument();
   });
 
