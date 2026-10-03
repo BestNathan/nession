@@ -169,6 +169,9 @@
   --terminal-capsule-shell-pill-radius: 9999px;
   --terminal-capsule-terminal-clearance-gap: 0.375rem;
   --terminal-capsule-caption-font-size: 1rem;
+  --terminal-capsule-capability-slot-width: 72px;
+  --terminal-capsule-capability-label-font-size: 12px;
+  --terminal-capsule-capability-label-wrapped-font-size: 10px;
   --terminal-capsule-quick-key-font-size: 1rem;
   --terminal-capsule-phys-key-font-size: 1rem;
   --terminal-capsule-popover-width: 20rem;
@@ -461,6 +464,9 @@
   --spacing-terminal-capsule-shell-pill-radius: var(--terminal-capsule-shell-pill-radius);
   --spacing-terminal-capsule-terminal-clearance-gap: var(--terminal-capsule-terminal-clearance-gap);
   --spacing-terminal-capsule-caption-font-size: var(--terminal-capsule-caption-font-size);
+  --spacing-terminal-capsule-capability-slot-width: var(--terminal-capsule-capability-slot-width);
+  --spacing-terminal-capsule-capability-label-font-size: var(--terminal-capsule-capability-label-font-size);
+  --spacing-terminal-capsule-capability-label-wrapped-font-size: var(--terminal-capsule-capability-label-wrapped-font-size);
   --spacing-terminal-capsule-quick-key-font-size: var(--terminal-capsule-quick-key-font-size);
   --spacing-terminal-capsule-phys-key-font-size: var(--terminal-capsule-phys-key-font-size);
   --spacing-terminal-capsule-popover-width: var(--terminal-capsule-popover-width);
@@ -568,6 +574,9 @@
   --terminal-capsule-shell-pill-radius: 9999px;
   --terminal-capsule-terminal-clearance-gap: 0.375rem;
   --terminal-capsule-caption-font-size: 1rem;
+  --terminal-capsule-capability-slot-width: 72px;
+  --terminal-capsule-capability-label-font-size: 12px;
+  --terminal-capsule-capability-label-wrapped-font-size: 10px;
   --terminal-capsule-popover-width: 22rem;
   --terminal-capsule-popover-viewport-inset: 1rem;
   --terminal-capsule-popover-max-height: 45vh;

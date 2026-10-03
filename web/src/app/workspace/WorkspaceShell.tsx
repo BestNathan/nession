@@ -1,4 +1,8 @@
 import { useRef } from 'react';
+import {
+  capsuleExchangeStyle,
+  useCapsuleExchange,
+} from '@/platform/motion/capsuleExchange';
 import { resolveCapabilityPresences, type CapabilityId } from '@/product/capability';
 import { cn } from '@/shared/lib/utils';
 import { useWorkspaceCapsuleClearance } from '@/app/workspace/hooks/useWorkspaceCapsuleClearance';
@@ -7,6 +11,7 @@ import { resolveWorkspaceCapabilities } from '@/app/workspace/capabilities';
 import {
   buildWorkspacePresentationModel,
   type WorkspacePresentationItem,
+  type WorkspacePresentationModel,
 } from '@/app/workspace/presentation';
 import { WORKSPACE_VIEW_BINDINGS } from '@/app/workspace/viewBindings';
 import type {
@@ -61,6 +66,28 @@ const NO_DEPTH_CONTROL: WorkspaceDepthControl = { setPush: () => undefined };
 function bindingFor(item: WorkspacePresentationItem): WorkspaceViewBinding | undefined {
   return workspaceViewBindings.get(item.snapshot.id);
 }
+
+/**
+ * The capsule row: every capability that holds a slot, in registration order.
+ *
+ * Membership comes from the presentation model (which groups a capability's
+ * slot by presence); placement comes from the binding registry, so the row
+ * never reorders itself around the open capability (see the call site).
+ */
+function resolveCapsuleItems(
+  presentation: WorkspacePresentationModel,
+): WorkspacePresentationItem[] {
+  const itemById = new Map(
+    [...presentation.direct, ...presentation.discoverable, ...presentation.unavailable]
+      .filter(bindingFor)
+      .map((item) => [item.snapshot.id, item]),
+  );
+  return WORKSPACE_VIEW_BINDINGS.flatMap((view) => {
+    const item = itemById.get(view.id);
+    return item ? [item] : [];
+  });
+}
+
 
 /**
  * Surface navigation (#1204): the destination action's own `nav`, adjacent to
@@ -118,6 +145,14 @@ export function WorkspaceShell({
   const shellRef = useRef<HTMLDivElement>(null);
   useWorkspaceCapsuleClearance(shellRef);
 
+  // The App's capsule handoff, incoming half: while the swipe carries this
+  // layer in, the Capability Form arrives slightly behind the finger's pace
+  // and settles into the slot the Conversation form is leaving. X-only and
+  // endpoint-inert, so a settled Workspace carries no style and
+  // `useWorkspaceCapsuleClearance`'s vertical measurement is untouched.
+  const exchange = useCapsuleExchange();
+  const exchangeStyle = capsuleExchangeStyle(exchange, 'arriving');
+
   const resolution = resolveWorkspaceCapabilities(ctx);
   const presences = resolveCapabilityPresences(resolution.snapshots, {
     surface: 'workspace',
@@ -143,15 +178,16 @@ export function WorkspaceShell({
     resolution.snapshots.find((snapshot) => snapshot.id === activeCapabilityId)?.title ??
     activeCapabilityId;
 
-  const directItems = [...presentation.primary, ...presentation.contextual].filter(bindingFor);
-  const discoverableItems = presentation.discoverable.filter(bindingFor);
-  // Capabilities the reader cannot act with here keep a slot too, rendered inert
-  // rather than dropped — membership that changes as the work changes is how a
-  // reader loses track of what the Workspace holds.
-  const unavailableItems = presentation.unavailable.filter(bindingFor);
-  // Capsule V2 (#1347): Workspace capsule shows ALL capabilities (scrollable).
-  // This is the reciprocal of Terminal, which shows only the active capability.
-  const allCapsuleItems = [...directItems, ...discoverableItems, ...unavailableItems];
+  // Capsule V2 (#1347): Workspace capsule shows ALL capabilities (scrollable) —
+  // the reciprocal of Terminal, which shows only the active capability.
+  //
+  // The row renders **registration order**, and the open capability is only
+  // *marked* (selected state + dot), never moved. The owner's follow-up settled
+  // this: activation is not placement, so the entry under the thumb stays where
+  // it was and a row does not reshuffle itself as the work changes. The
+  // presentation model still decides *membership* (which capabilities hold
+  // slots at all); placement here is the binding registry's own order.
+  const allCapsuleItems = resolveCapsuleItems(presentation);
   const hasNavigation = allCapsuleItems.length > 0;
   // `#1051`: the dock is the *capability root's* switcher. A pushed detail has
   // its own page and its own Back, so a global capability switcher over it would
@@ -207,6 +243,8 @@ export function WorkspaceShell({
         <div
           data-testid="workspace-tool-bar"
           data-navigation-mode="contextual"
+          data-capsule-exchange={exchangeStyle ? 'arriving' : undefined}
+          style={exchangeStyle}
           className={cn(
             // #1347 SC-08 / SC-29: on App the zone sits where the Conversation
             // capsule does (the App dock placement); on Web it keeps the shared

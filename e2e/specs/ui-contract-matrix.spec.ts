@@ -237,12 +237,15 @@ for (const row of viewports.filter((v) => v.experience === 'app')) {
 
       // The entries carry the standard App control band — the pattern declares
       // no compact override since the 2026-10-03 Capsule-family decision — so
-      // the contract's resolved target is the chrome floor (44px).
+      // the contract's resolved target is the chrome floor (44px). Their
+      // visibility is asserted on the *capsule container* below, not per
+      // entry: six labeled slots are wider than a phone, and the row scrolling
+      // internally instead of cramming is exactly what SC-06 requires, so an
+      // entry scrolled out of the capsule's viewport is the design working.
       for (let i = 0; i < (await allCaps.count()); i += 1) {
-        await expect(allCaps.nth(i)).toBeVisible();
+        await expect(allCaps.nth(i)).toBeAttached();
         await expectTouchTarget(allCaps.nth(i), optsFor(PATTERN_WORKSPACE_NAV, 'app', row.id));
         await expectSingleLine(allCaps.nth(i), optsFor(PATTERN_WORKSPACE_NAV, 'app', row.id));
-        await expectVisibleWithin(allCaps.nth(i), bar, optsFor(PATTERN_WORKSPACE_NAV, 'app', row.id));
       }
 
       const capsule = page.getByTestId('workspace-capability-capsule');
@@ -259,6 +262,11 @@ for (const row of viewports.filter((v) => v.experience === 'app')) {
       // Form. This is the relational assertion — both states measured in one
       // scenario and compared to each other, so a change that moves only one of
       // them fails here even though both still "pass" alone.
+      //
+      // Height is deliberately NOT compared: the labeled-slot follow-up
+      // (2026-10-03) makes the Capability Form taller than the composer above a
+      // fixed floor — the state that carries names is the taller one. The
+      // family identity is the shape, the semantic radius and the placement.
       // The shape attribute sits on each state's own outer object — the
       // Conversation dock (`terminal-capsule`) and the capability nav.
       const geometryOf = async (testId: string, shapeTestId: string) => {
@@ -286,12 +294,11 @@ for (const row of viewports.filter((v) => v.experience === 'app')) {
         'workspace-capability-capsule',
       );
 
-      // Same shape claim, same semantic radius, same vertical mass, same
-      // placement above the viewport bottom — sub-pixel tolerance only.
+      // Same shape claim, same semantic radius, same placement above the
+      // viewport bottom — sub-pixel tolerance only.
       expect(conversation.shape).toBe('capsule');
       expect(capability.shape).toBe('capsule');
       expect(capability.radius).toBe(conversation.radius);
-      expect(Math.abs(capability.height - conversation.height)).toBeLessThanOrEqual(1);
       expect(Math.abs(capability.bottom - conversation.bottom)).toBeLessThanOrEqual(1);
     });
 
