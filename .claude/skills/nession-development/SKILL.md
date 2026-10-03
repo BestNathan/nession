@@ -242,6 +242,8 @@ cargo test --test '*'       # Integration tests only
 
 ### Testing Gates
 
+`nession-gates` is the canonical skill for Gate semantics, discovery, execution, failure repair, authoring, suites, and anti-bypass rules. Use `./gates/run --describe <id>` instead of reverse-engineering hook/workflow commands. The table below documents the underlying checks/thresholds; when a canonical Gate exists, prefer its Gate ID.
+
 Before merging any PR, these MUST pass:
 
 | Gate | Command | Threshold |

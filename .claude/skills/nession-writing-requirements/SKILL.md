@@ -63,6 +63,8 @@ Issue Audit -> implementation -> stage-specific Acceptance
             -> Requirement Acceptance gate / close guard -> closure
 ```
 
+Gate semantics, runner behavior, and anti-bypass rules live in `nession-gates`; this skill owns the Requirement/Success-Criteria structure, not the Gate execution contract.
+
 Acceptance evaluates only the explicitly requested `pre-merge`, `staging`, or `post-merge` rows. The Acceptance Agent is read-only and emits structured data; only the deterministic updater may project Pass / justified N/A to `[x]` and write Acceptance Report evidence. Existing merge/closure validation remains the final deterministic gate.
 
 ---
