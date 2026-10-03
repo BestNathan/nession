@@ -116,15 +116,17 @@ describe('FixtureApp', () => {
     expect(screen.queryByLabelText('Close file')).not.toBeInTheDocument();
     expect(screen.getByTestId('app-page-back')).toHaveAccessibleName('Back to Files');
 
-    // The dock is the capability root's switcher, so it is not here.
-    expect(screen.queryByTestId('workspace-tool-bar')).not.toBeInTheDocument();
+    // The capsule stays at this depth too (owner decision 2026-10-03,
+    // superseding #1051's dock rule): one *leave* per depth, but the
+    // capability switcher is not a leave and does not disappear with it.
+    expect(screen.getByTestId('workspace-tool-bar')).toBeInTheDocument();
 
     // Back from the viewer returns to the directory that held the file (#1140),
     // not straight to the capability root.
     await user.click(screen.getByTestId('app-page-back'));
     expect(screen.getByTestId('files-app-layout')).toBeInTheDocument();
     expect(screen.getByTestId('app-page-header')).toHaveTextContent('src');
-    expect(screen.queryByTestId('workspace-tool-bar')).not.toBeInTheDocument();
+    expect(screen.getByTestId('workspace-tool-bar')).toBeInTheDocument();
 
     await user.click(screen.getByTestId('app-page-back'));
     expect(screen.getByTestId('app-page-header')).toHaveTextContent('web');

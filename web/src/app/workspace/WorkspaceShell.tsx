@@ -40,16 +40,11 @@ export interface WorkspaceShellProps {
    */
   depth?: WorkspaceDepthControl;
   /**
-   * Whether the open view has pushed a depth over its capability root. Gates
-   * the dock, which belongs to the root — see `showDock` below.
-   */
-  pushed?: boolean;
-  /**
    * The Web's "Open Terminal" destination action (#1204), composed beside the
-   * capability dock. It is *surface* navigation, not a capability: it stays
-   * when `pushed` hides the dock, and it never becomes a dock entry. Rendered
-   * for the Web experience only — the App leaves a Workspace depth through its
-   * page header's Back.
+   * capability dock. It is *surface* navigation, not a capability: it never
+   * becomes a dock entry, and it sits beside the dock at every depth (owner
+   * decision 2026-10-03 — see `showDock`). Rendered for the Web experience
+   * only — the App leaves a Workspace depth through its page header's Back.
    */
   surfaceAction?: React.ReactNode;
 }
@@ -137,7 +132,6 @@ export function WorkspaceShell({
   ctx,
   activeCapabilityId,
   depth = NO_DEPTH_CONTROL,
-  pushed = false,
   surfaceAction,
 }: WorkspaceShellProps) {
   // SC-12: the shell is the Workspace's occlusion owner — see the hook for why
@@ -189,13 +183,24 @@ export function WorkspaceShell({
   // slots at all); placement here is the binding registry's own order.
   const allCapsuleItems = resolveCapsuleItems(presentation);
   const hasNavigation = allCapsuleItems.length > 0;
-  // `#1051`: the dock is the *capability root's* switcher. A pushed detail has
-  // its own page and its own Back, so a global capability switcher over it would
-  // be a second navigation owner answering to a depth it does not belong to.
-  const showDock = hasNavigation && !pushed;
-  // `#1204`: the surface-leave action answers to a different axis than the
-  // dock — a pushed depth hides *capability* navigation, never the route back
-  // to the peer surface. Web only; the App's leave is its page header's Back.
+  // Owner decision 2026-10-03, superseding `#1051`'s dock half: **the capsule
+  // is present at every Workspace depth.** The old rule hid it over a pushed
+  // detail on the reasoning that a switcher there would be "a second
+  // navigation owner"; measured on the App Files flow, the cost of that was a
+  // capsule you lose the moment you open a file, and a Workspace whose
+  // capability context vanishes exactly when you are deepest in a capability.
+  // What `#1051` still owns is the *leave*: a pushed depth's own Back is its
+  // one route out, and the shell's swipe stands down for it (`shellMayPage`
+  // in `AppLayers` / `useSwipePager`). Leaving is one owner per depth; being
+  // able to switch capabilities is not leaving.
+  //
+  // The dock's clearance follows from this: the pushed depth's scrollers must
+  // clear it exactly as the root's do (`--workspace-content-bottom-inset`,
+  // published from this bar's own geometry — see `useWorkspaceCapsuleClearance`).
+  const showDock = hasNavigation;
+  // `#1204`: the surface-leave action never becomes a dock entry, and it stays
+  // beside the dock at every depth. Web only; the App's leave is its page
+  // header's Back.
   const showSurfaceAction = ctx.experience === 'web' && surfaceAction !== undefined;
 
   return (

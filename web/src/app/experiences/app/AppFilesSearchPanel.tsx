@@ -43,7 +43,11 @@ export function AppFilesSearchPanel({
           aria-label="Search files"
         />
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto px-[var(--shell-space-3)] pb-[var(--shell-space-3)]">
+      {/* Bottom padding is the larger of the panel's own spacing and the
+          capsule clearance: the search depth is a Workspace depth like any
+          other, and its last hit must be able to scroll above the capsule
+          (owner decision 2026-10-03). */}
+      <div className="min-h-0 flex-1 overflow-y-auto px-[var(--shell-space-3)] pb-[max(var(--shell-space-3),var(--workspace-content-bottom-inset,0px))]">
         <p className={cn('pb-[var(--shell-space-2)] uppercase tracking-wide text-muted-foreground', metadataAppClass)}>
           Files
         </p>

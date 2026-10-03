@@ -181,18 +181,17 @@ describe('WorkspaceShell surface navigation (#1204)', () => {
     ).toBeTruthy();
   });
 
-  it('keeps the surface action when a pushed depth hides the capability dock', () => {
+  it('keeps both the surface action and the capsule — the shell has no depth gate', () => {
+    // Owner decision 2026-10-03, superseding #1051's dock rule: the capsule is
+    // present at every Workspace depth, so the shell takes no `pushed` prop and
+    // there is no state in which this row renders without it. The surface
+    // action sits beside it, unchanged.
     const ctx = workspaceContext();
-    render(
-      <WorkspaceShell
-        ctx={ctx}
-        activeCapabilityId="files"
-        pushed
-        surfaceAction={openTerminal}
-      />,
-    );
+    render(<WorkspaceShell ctx={ctx} activeCapabilityId="files" surfaceAction={openTerminal} />);
 
-    expect(screen.queryByRole('navigation', { name: 'Workspace capabilities' })).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('navigation', { name: 'Workspace capabilities' }),
+    ).toBeInTheDocument();
     expect(screen.getByTestId('surface-action-open-terminal')).toBeInTheDocument();
   });
 

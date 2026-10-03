@@ -489,6 +489,39 @@ for (const row of viewports.filter((v) => v.experience === 'app')) {
       expect(rows.filter((row) => row.trim() !== '').length).toBeGreaterThanOrEqual(9);
     });
 
+    test('a pushed detail keeps the capsule, and its content clears it (#1347)', async ({ page }) => {
+      await page.goto('/#/fixture/app');
+      await page.getByTestId('app-header-workspace').first().click();
+      // Push a file detail: this is the App Files flow the owner measured on
+      // 2026-10-03 — before the decision, opening a file took the capsule away
+      // and left the editor's last line under where it had been.
+      await page.getByTestId('file-row-web').click();
+      await page.getByTestId('file-row-web/src').click();
+      await page.getByTestId('file-row-web/src/App.tsx').click();
+
+      const nav = page.getByTestId('workspace-capability-capsule');
+      await expect(nav).toBeVisible();
+
+      // The scroller's reachable end sits above the capsule — the same measured
+      // inset the capability root spends, so *any* last line can be brought
+      // clear of the bar rather than only short files passing by luck.
+      const geometry = await page.evaluate(() => {
+        const host = document.querySelector('[data-testid="codemirror-editor"]');
+        const capsule = document.querySelector('[data-testid="workspace-capability-capsule"]');
+        if (!(host instanceof HTMLElement) || !(capsule instanceof HTMLElement)) {
+          return null;
+        }
+        const padBottom = Number.parseFloat(getComputedStyle(host).paddingBottom);
+        const contentBoxBottom = host.getBoundingClientRect().bottom - padBottom;
+        return { padBottom, contentBoxBottom, capsuleTop: capsule.getBoundingClientRect().top };
+      });
+      if (!geometry) {
+        throw new Error('the pushed detail must lay out an editor and the capsule');
+      }
+      expect(geometry.padBottom).toBeGreaterThan(0);
+      expect(geometry.contentBoxBottom).toBeLessThanOrEqual(geometry.capsuleTop + 1);
+    });
+
     test('a pushed Workspace detail keeps its own leave (#1081)', async ({ page }) => {
       await page.goto('/#/fixture/app');
       const layerRoot = page.getByTestId('app-layer-root');
