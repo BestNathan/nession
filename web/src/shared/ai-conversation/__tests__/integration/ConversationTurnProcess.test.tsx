@@ -20,11 +20,17 @@ import { assistantMessage, statusItem, toolItem, userMessage } from '../fixtures
  */
 
 function snapshot(overrides: Partial<AIConversationSnapshot> = {}): AIConversationSnapshot {
+  const openId = overrides.openId ?? 'c1'
   return {
     listState: 'ready',
     conversations: [],
     bindingId: 'c1',
-    openId: 'c1',
+    openId,
+    // The runtime derives this from its own identity, the context key and
+    // the open id. A fixture has only the last, and a key that follows
+    // `openId` is enough to make a conversation switch look like one —
+    // which is the only thing this fixture needs it to do.
+    conversationKey: openId === null ? null : `fixture:${openId}`,
     state: 'ready',
     conversation: null,
     activity: 'inactive',
@@ -261,6 +267,73 @@ describe('transcript state across a conversation switch', () => {
     // here. Without the `key`, the override recorded under `t1` answers for this
     // render too.
     expect(rowOf(screen.getByTestId('conversation-tool-group'))).toHaveAttribute('hidden')
+  })
+
+  it('gives the scroll owner a new lifecycle when the conversation does', () => {
+    // #1363 round 4. `#1414` keyed `TranscriptContent`, which resets everything
+    // that component holds — but the tree is
+    // `Provider > Root > Viewport > Content`, and the **provider** is what owns
+    // opening position, tail-follow, prepend anchoring and the jump-to-bottom
+    // control. So a reader who scrolled away from the live edge in one
+    // conversation carried that released follow into the next one, and
+    // `defaultScrollPosition="end"` — applied at the provider's lifecycle —
+    // never got a conversation to apply to.
+    //
+    // Asserted as element identity because that *is* the mechanism: a `key` that
+    // changed nothing would leave the same node in place with the same state.
+    const { rerender } = render(
+      <ConversationTranscript
+        snapshot={snapshot({ openId: 'c1', items: shared })}
+        providerLabel="Claude"
+        onLoadOlder={() => false}
+      />,
+    )
+    const first = screen.getByTestId('conversation-turn-process').ownerDocument.querySelector(
+      '[data-slot="message-scroller-viewport"]',
+    )
+
+    rerender(
+      <ConversationTranscript
+        snapshot={snapshot({ openId: 'c2', items: shared })}
+        providerLabel="Claude"
+        onLoadOlder={() => false}
+      />,
+    )
+
+    const second = screen.getByTestId('conversation-turn-process').ownerDocument.querySelector(
+      '[data-slot="message-scroller-viewport"]',
+    )
+    expect(second).not.toBe(first)
+  })
+
+  it('leaves the scroll owner alone when the same conversation grows', () => {
+    // The complement, and the reason the key is the conversation rather than
+    // "anything that changed": a prepend is the one moment the scroll position
+    // *must* survive, because the anchor the reader is holding is in the items
+    // above. A key that reset on every item change would pass the test above and
+    // make paging jump to the top.
+    const { rerender } = render(
+      <ConversationTranscript
+        snapshot={snapshot({ openId: 'c1', items: shared })}
+        providerLabel="Claude"
+        onLoadOlder={() => false}
+      />,
+    )
+    const first = document.querySelector('[data-slot="message-scroller-viewport"]')
+
+    rerender(
+      <ConversationTranscript
+        snapshot={snapshot({
+          openId: 'c1',
+          hasMore: true,
+          items: [userMessage('u0', 'earlier'), ...shared],
+        })}
+        providerLabel="Claude"
+        onLoadOlder={() => false}
+      />,
+    )
+
+    expect(document.querySelector('[data-slot="message-scroller-viewport"]')).toBe(first)
   })
 })
 

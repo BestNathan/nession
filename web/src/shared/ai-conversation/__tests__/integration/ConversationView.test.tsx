@@ -12,11 +12,17 @@ function summary(overrides: Partial<AIConversationSummary> = {}): AIConversation
 }
 
 function snapshot(overrides: Partial<AIConversationSnapshot> = {}): AIConversationSnapshot {
+  const openId = overrides.openId ?? null
   return {
     listState: 'ready',
     conversations: [],
     bindingId: null,
-    openId: null,
+    openId,
+    // The runtime derives this from its own identity, the context key and
+    // the open id. A fixture has only the last, and a key that follows
+    // `openId` is enough to make a conversation switch look like one —
+    // which is the only thing this fixture needs it to do.
+    conversationKey: openId === null ? null : `fixture:${openId}`,
     state: null,
     conversation: null,
     activity: null,

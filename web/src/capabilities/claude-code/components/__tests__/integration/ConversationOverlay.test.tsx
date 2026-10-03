@@ -23,6 +23,7 @@ const snapshot: AIConversationSnapshot = {
   conversations: [],
   bindingId: null,
   openId: 'claude-1',
+  conversationKey: 'fixture:claude-1',
   state: 'ready',
   conversation: { id: 'claude-1', activity: 'active' },
   activity: 'active',
