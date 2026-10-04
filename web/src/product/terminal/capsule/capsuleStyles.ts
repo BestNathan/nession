@@ -104,6 +104,45 @@ export const capsuleFloatingSurfaceClass =
 
 export const capsuleShellSurfaceClass = capsuleFloatingSurfaceClass;
 
+/**
+ * Canonical visual grammar for the dock's one upper Capsule slot (#1446).
+ *
+ * Context and Peek are two contents of the same product region. Their content
+ * density may differ, but the outer object does not: one material, one capsule
+ * radius, one elevation language, and one width supplied by CapsuleShell.
+ *
+ * Keep surface decisions here. Consumers may add content/layout classes, but
+ * must not fork radius/material/elevation/host typography locally.
+ */
+export const capsuleUpperSurfaceClass = cn(
+  'pointer-events-auto flex w-full flex-col rounded-[var(--radius-capsule)]',
+  capsuleFloatingSurfaceClass,
+);
+
+/** One gap for every content that occupies the upper slot. */
+export const capsuleUpperDockClass =
+  'mb-[length:var(--context-capsule-margin-bottom)]';
+
+/** Nession-owned upper-surface header anatomy. */
+export const capsuleUpperHeaderClass =
+  'flex items-center justify-between gap-[length:var(--terminal-capsule-projection-item-gap)]';
+
+/** The upper surface's own name: chrome typography, never composer typography. */
+export const capsuleUpperTitleClass = cn(
+  'min-w-0 flex-1 truncate text-left text-foreground',
+  chromeSansRole('body'),
+);
+
+/** 44px App hit target with the visual affordance painted on the inner node. */
+export const capsuleUpperCloseButtonClass = cn(
+  capsuleIconButtonClass,
+  'flex items-center justify-center text-muted-foreground transition-colors hover:text-foreground',
+);
+
+/** Product-owned styling for the child detail launched from a Peek body. */
+export const capsuleDetailDialogClass =
+  'flex max-h-[calc(100dvh-2rem)] flex-col overflow-hidden rounded-[var(--radius-capsule)] sm:max-w-lg';
+
 export const capsuleShellInnerPadClass =
   'px-[length:var(--terminal-capsule-shell-pad-x)] py-[length:var(--terminal-capsule-shell-pad-y)]';
 
@@ -196,7 +235,7 @@ export const capsuleShellAppDockBottomClass =
  * `flex flex-col`, so growing upward cannot move what is below it, and the gap
  * is the one token between them.
  */
-export const contextCapsuleDockClass = 'mb-[length:var(--context-capsule-margin-bottom)]';
+export const contextCapsuleDockClass = capsuleUpperDockClass;
 
 /**
  * The surface itself: the shell's own treatment (one Capsule language), a height
@@ -215,15 +254,14 @@ export const contextCapsuleDockClass = 'mb-[length:var(--context-capsule-margin-
  * Web shell's pill: a pill radius is what a 32px one-row box wears, and this is
  * a multi-row surface. It is also what `pattern.context-capsule` pins.
  */
-export const contextCapsuleSurfaceClass = [
-  'pointer-events-auto flex max-h-[length:var(--context-capsule-max-height)] w-full flex-col overflow-hidden',
-  'rounded-[var(--radius-capsule)]',
+export const contextCapsuleSurfaceClass = cn(
+  capsuleUpperSurfaceClass,
+  'max-h-[length:var(--context-capsule-max-height)] overflow-hidden',
   // The surface carries the padding, not the rows: `pattern.context-capsule`
   // pins `padXToken` here, and it is what insets a row's hover and focus ring
   // from the Capsule's own edge instead of painting them against it.
   'px-[length:var(--terminal-capsule-shell-pad-x)] py-[length:var(--terminal-capsule-shell-pad-y)]',
-  capsuleShellSurfaceClass,
-].join(' ');
+);
 
 /** The list owns its scroll and hands every other gesture back (SC-42). */
 export const contextCapsuleScrollClass = 'min-h-0 flex-1 overflow-y-auto overscroll-contain';
@@ -383,12 +421,13 @@ export const capsuleInlineFieldRowClass =
  * deleted (its one documented consumer was this frame), and the capsule tier
  * now covers the capsule and the surface that stands in for it.
  */
-export const capsuleProjectionClass =
-  'pointer-events-auto flex flex-col gap-[length:var(--terminal-capsule-projection-gap)] rounded-[var(--radius-capsule)] border border-border/60 bg-background/95 p-[length:var(--terminal-capsule-projection-pad)] shadow-[var(--elevation-floating)] backdrop-blur';
+export const capsuleProjectionClass = cn(
+  capsuleUpperSurfaceClass,
+  'gap-[length:var(--terminal-capsule-projection-gap)] p-[length:var(--terminal-capsule-projection-pad)]',
+);
 
-/** Above the capsule, never over it: the resting capsule's box does not move. */
-export const capsuleProjectionDockClass =
-  'mb-[length:var(--terminal-capsule-projection-margin-bottom)]';
+/** Above the capsule, never over it: every upper-slot content uses one gap. */
+export const capsuleProjectionDockClass = capsuleUpperDockClass;
 
 /**
  * The ceiling, and it scrolls its own overflow (#826 Q5).
@@ -399,8 +438,7 @@ export const capsuleProjectionDockClass =
 export const capsuleProjectionScrollClass =
   'max-h-[length:var(--terminal-capsule-projection-max-height)] overflow-y-auto';
 
-export const capsuleProjectionTextClass =
-  'font-sans text-[length:var(--terminal-capsule-projection-font-size)] leading-[length:var(--terminal-capsule-projection-line-height)]';
+export const capsuleProjectionTextClass = chromeSansRole('body');
 
 export const capsuleProjectionItemClass =
   'flex w-full items-center gap-[length:var(--terminal-capsule-projection-item-gap)] rounded px-[length:var(--terminal-capsule-projection-item-pad-x)] py-[length:var(--terminal-capsule-projection-item-pad-y)] text-left transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
