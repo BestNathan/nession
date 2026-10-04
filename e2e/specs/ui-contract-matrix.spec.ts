@@ -181,6 +181,18 @@ async function assertContextCapsule(
     await expectTouchTargetsWithin(rows.nth(i), opts);
   }
 
+  // Every row starts at the same column. The band was asserted and the left
+  // edge was not, which is how a marker slot rendered only on ordinary rows
+  // put their titles 6px right of a sensed row's (measured x=50 against
+  // x=44) without a single gate noticing.
+  let firstRowLeft: number | null = null;
+  for (let i = 0; i < (await rows.count()); i += 1) {
+    const rowBox = await rows.nth(i).boundingBox();
+    expect(rowBox).not.toBeNull();
+    firstRowLeft ??= rowBox!.x;
+    expect(Math.abs(rowBox!.x - firstRowLeft)).toBeLessThanOrEqual(1);
+  }
+
   // The lower Capsule is the anchor: same box, and the gap between the two is
   // the token rather than a measured guess (#1347 SC-41/SC-43).
   const shellAfter = await page.getByTestId('capsule-shell').boundingBox();
@@ -289,7 +301,8 @@ async function assertRowOpensDetail(
 
   const peek = page.getByTestId('capsule-capability-projection');
   await expect(peek).toBeVisible();
-  await expect(peek).toHaveAttribute('data-depth', 'peek');
+  // The `data-depth` assertion that stood here went with the attribute it read:
+  // one depth meant one value, so it could no longer witness the step.
 
   // Git and Claude Code have Workspace views, so one of them is always reachable
   // here; Terminal Keys would not be, and has no business being the first

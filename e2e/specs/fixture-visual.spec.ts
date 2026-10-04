@@ -98,10 +98,12 @@ test.describe('Web 1440×900', () => {
 
     await page.getByTestId('capsule-capability-more').click();
     await page.getByTestId('capsule-capability-picker-git').click();
-    // The row is already the step to Peek — picking a capability opens its
-    // detail — so there is no title click here any more. `git-peek-body` is what
-    // says this is a Peek rather than a Signal.
-    await expect(page.getByTestId('capsule-capability-projection')).toHaveAttribute('data-depth', 'peek');
+    // The row is already the step to the detail — picking a capability opens
+    // it, so there is no title click here any more. Visibility is the whole
+    // assertion now: the attribute that used to witness the step
+    // (`data-depth`) went with the depth axis, and `git-peek-body` below is
+    // what says the open surface is Git's own body rather than the frame.
+    await expect(page.getByTestId('capsule-capability-projection')).toBeVisible();
 
     await expect(page.getByTestId('git-peek-body')).toBeVisible();
     // The capability's own Workspace action, which the Host no longer draws
@@ -549,50 +551,21 @@ test.describe('App 390×844', () => {
     });
   });
 
-  // #838: a capability emerging beside the capsule. It had no fixture route
-  // until the capsule rendered in one — `terminal ?? <TerminalRegion/>` meant
-  // neither fixture drew a composer at all.
-  test('Capability Signal on the Terminal', async ({ page }) => {
-    await gotoFixtureApp(page);
-    await waitForFixtureTerminal(page);
-
-    // A Signal is reached by stepping back out of the Peek now — picking a row
-    // opens the detail, so there is no longer a selection that lands on Signal
-    // directly. This is also the only place the Signal -> Peek step is exercised
-    // in a real browser, so the walk is asserted rather than only photographed.
-    await openCapsuleCapability(page, 'git');
-    await expect(page.getByTestId('capsule-capability-projection')).toHaveAttribute('data-depth', 'peek');
-    await page.getByTestId('capsule-capability-dismiss').click();
-
-    await expect(page.getByTestId('capsule-capability-projection')).toBeVisible();
-    await expect(page.getByTestId('git-signal-body')).toContainText('worktree: nession-capsule');
-
-    await expect(page).toHaveScreenshot('app-capability-signal.png', {
-      fullPage: true,
-      ...FIXTURE_SCREENSHOT,
-    });
-
-    // …and the title is still the step from Signal to Peek. It goes inert once
-    // there, so the depth attribute is what says the step happened.
-    await page.getByTestId('capsule-capability-title').click();
-    await expect(page.getByTestId('capsule-capability-projection')).toHaveAttribute('data-depth', 'peek');
-    await expect(page.getByTestId('git-peek-body')).toBeVisible();
-  });
-
-  // #1102: the Peek is the surface #1046 creates — the Signal's second depth —
-  // and until this test it was in no image at all. Every capsule state *around*
-  // it was captured (the Signal above, the entry and the accessory below) and
-  // the one the requirement is about was not, so a regression inside the Peek
-  // had nothing that could fail.
+  // #1102: the Peek is the surface #1046 creates, and until this test it was in
+  // no image at all. Every capsule state *around* it was captured (the entry
+  // and the accessory below) and the one the requirement is about was not, so a
+  // regression inside the Peek had nothing that could fail.
   test('Git Peek on the Terminal', async ({ page }) => {
     await gotoFixtureApp(page);
     await waitForFixtureTerminal(page);
 
     await openCapsuleCapability(page, 'git');
-    // The row is already the step to Peek — picking a capability opens its
-    // detail — so there is no title click here any more. `git-peek-body` is what
-    // says this is a Peek rather than a Signal.
-    await expect(page.getByTestId('capsule-capability-projection')).toHaveAttribute('data-depth', 'peek');
+    // The row is already the step to the detail — picking a capability opens
+    // it, so there is no title click here any more. Visibility is the whole
+    // assertion now: the attribute that used to witness the step (`data-depth`)
+    // went with the depth axis, and `git-peek-body` below is what says the open
+    // surface is Git's own body rather than the frame.
+    await expect(page.getByTestId('capsule-capability-projection')).toBeVisible();
 
     await expect(page.getByTestId('git-peek-body')).toBeVisible();
     // The capability's own Workspace action, which the Host no longer draws
@@ -606,9 +579,9 @@ test.describe('App 390×844', () => {
     });
   });
 
-  // #1034's other three capsule states. Resting and the capability Signal were
-  // the two with baselines; the entry, Terminal Keys and the multiline composer
-  // had none, so a change to any of them had no image that could fail.
+  // #1034's other three capsule states. Resting had the only baseline; the
+  // entry, Terminal Keys and the multiline composer had none, so a change to
+  // any of them had no image that could fail.
   test('Capability entry', async ({ page }) => {
     await gotoFixtureApp(page);
     await waitForFixtureTerminal(page);
@@ -640,7 +613,7 @@ test.describe('App 390×844', () => {
     await waitForFixtureTerminal(page);
 
     // Sensing is ambient: the ring appears, and nothing opens by itself —
-    // neither the disclosure nor a Signal for the same observation (SC-34).
+    // neither the disclosure nor a projection for the same observation (SC-34).
     await expect(page.getByTestId('work-ring')).toBeVisible();
     await expect(page.getByTestId('capsule-context-disclosure')).toHaveCount(0);
     await expect(page.getByTestId('capsule-capability-projection')).toHaveCount(0);
@@ -686,7 +659,7 @@ test.describe('App 390×844', () => {
       ...FIXTURE_SCREENSHOT,
     });
 
-    // Selecting the sensed row opens its Peek directly — no Signal step (SC-20).
+    // Selecting the sensed row opens its Peek directly (SC-20).
     await sensed.click();
     await expect(page.getByTestId('capsule-capability-projection')).toBeVisible();
   });
@@ -695,9 +668,9 @@ test.describe('App 390×844', () => {
     await gotoFixtureApp(page);
     await waitForFixtureTerminal(page);
 
-    // The sensed row opens it *directly at Peek* (SC-38): no Signal step and no
-    // accessory family — the same sensed -> Context Disclosure -> Peek protocol
-    // every other capability walks.
+    // The sensed row opens it *directly at Peek* (SC-38): no accessory family —
+    // the same sensed -> Context Disclosure -> Peek protocol every other
+    // capability walks.
     await page.getByTestId('capsule-capability-more').click();
     await page.getByTestId('capsule-context-item-terminal-keys').click();
 
@@ -706,7 +679,6 @@ test.describe('App 390×844', () => {
     // passing for a composer that had been replaced by it.
     const projection = page.getByTestId('capsule-capability-projection');
     await expect(projection).toBeVisible();
-    await expect(projection).toHaveAttribute('data-depth', 'peek');
     await expect(page.getByTestId('capsule-ghost-input')).toBeVisible();
 
     await expect(page).toHaveScreenshot('app-terminal-keys.png', {
@@ -1037,9 +1009,10 @@ test.describe('App 390×844', () => {
     await waitForFixtureTerminal(page);
 
     await openCapsuleCapability(page, 'claude-code');
-    // The step to Peek happens on the row itself now — the walk `app-git-peek`
-    // documents — and `claude-code-peek-body` below is what says this is a Peek.
-    await expect(page.getByTestId('capsule-capability-projection')).toHaveAttribute('data-depth', 'peek');
+    // The step happens on the row itself — the walk `app-git-peek` documents —
+    // and `claude-code-peek-body` below is what says the open surface is this
+    // capability's body.
+    await expect(page.getByTestId('capsule-capability-projection')).toBeVisible();
     await expect(page.getByTestId('claude-code-peek-body')).toBeVisible();
 
     await expect(page).toHaveScreenshot('app-claude-code-chat-dialect-peek.png', {
