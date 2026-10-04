@@ -143,7 +143,19 @@ Identify:
 - stale acceptance evidence;
 - follow-ups that belong in separate issues.
 
-## 13. Output format
+## 13. Issue lifecycle after review
+
+When findings must be recorded or an existing Requirement/Bug is still incomplete, load `nession-writing-requirements`.
+
+Issue lifecycle after review is owned by that Skill. In particular, review findings are deduped by **invariant / Success Criterion**, not by symptom keywords:
+
+- same invariant still unmet -> reopen/comment the existing issue and preserve its Acceptance history;
+- same symptom with a different confirmed root cause -> new Bug referencing the old issue;
+- independent behavior/design decision -> new Requirement.
+
+Do not split one unfinished invariant across multiple issues merely because the original issue is closed.
+
+## 14. Output format
 
 Lead with findings, highest severity first.
 
