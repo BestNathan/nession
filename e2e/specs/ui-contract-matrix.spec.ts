@@ -181,16 +181,24 @@ async function assertContextCapsule(
     await expectTouchTargetsWithin(rows.nth(i), opts);
   }
 
-  // Every row starts at the same column. The band was asserted and the left
-  // edge was not, which is how a marker slot rendered only on ordinary rows
-  // put their titles 6px right of a sensed row's (measured x=50 against
-  // x=44) without a single gate noticing.
-  let firstRowLeft: number | null = null;
+  // Every row's *title* starts at the same column. The row boxes cannot say
+  // this: `rows` selects the row button, and every row is a `w-full` sibling of
+  // the one scroll container, so their `x` is one number by construction — an
+  // assertion on it passes for any markup, including the markup this check
+  // exists to catch. The ragged edge was inside the row: with the marker column
+  // rendered only on ordinary rows, a sensed row's title sat at x=44 and an
+  // ordinary one's at x=50 — the 5px marker column plus one
+  // `--terminal-capsule-control-gap` — and nothing measured it. The title span
+  // now follows that column on every row (`ContextCapsule.tsx`), so comparing
+  // the titles is the assertion that would have failed then. The 1px tolerance
+  // is for fractional layout rounding; the defect it guards is a whole column
+  // wide.
+  let firstTitleLeft: number | null = null;
   for (let i = 0; i < (await rows.count()); i += 1) {
-    const rowBox = await rows.nth(i).boundingBox();
-    expect(rowBox).not.toBeNull();
-    firstRowLeft ??= rowBox!.x;
-    expect(Math.abs(rowBox!.x - firstRowLeft)).toBeLessThanOrEqual(1);
+    const titleBox = await rows.nth(i).getByTestId('capsule-row-title').boundingBox();
+    expect(titleBox).not.toBeNull();
+    firstTitleLeft ??= titleBox!.x;
+    expect(Math.abs(titleBox!.x - firstTitleLeft)).toBeLessThanOrEqual(1);
   }
 
   // The lower Capsule is the anchor: same box, and the gap between the two is

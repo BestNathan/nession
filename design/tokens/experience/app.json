@@ -358,7 +358,7 @@
       "value": "16rem"
     },
     "projectionFontSize": {
-      "$description": "One step below the capsule's own scale. A Signal is the smallest identifying state, not the composer's text, so it must not arrive at the field's size.",
+      "$description": "One step below the capsule's own scale. The Peek draws the smallest identifying state, not the composer's text, so it must not arrive at the field's size.",
       "value": "0.75rem"
     },
     "projectionLineHeight": {

@@ -210,7 +210,12 @@ function ContextRowButton({
             So every title renders at full strength, and the mark is what tells
             a needed capability from a merely listed one — presence is drawn,
             not coloured. */}
-        <span className={contextCapsuleTitleClass}>{row.title}</span>
+        {/* The title carries its own hook because the row button cannot stand in
+            for it: the button is `w-full`, so every row's box starts at the same
+            edge whatever the marker column does — the ragged edge this list had
+            was here, in the first column of text, and only a hook on the title
+            can measure it (`ui-contract-matrix.spec.ts`). */}
+        <span data-testid="capsule-row-title" className={contextCapsuleTitleClass}>{row.title}</span>
         {row.reason === undefined ? null : (
           <span className={contextCapsuleReasonClass}>{row.reason}</span>
         )}
