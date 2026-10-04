@@ -397,29 +397,18 @@ export const capsuleInlineFieldRowClass =
   'flex items-center gap-[length:var(--terminal-capsule-popover-gap)]';
 
 /**
- * An emerged capability projection — the Peek frame (`#826`).
+ * An emerged capability projection — the Peek content in the Upper Capsule
+ * slot (#826, #1446).
  *
- * Its own token group rather than borrowed popover values: a projection is a
- * smaller, less permanent surface than a popover, and pointing at the popover's
- * geometry would have made the two move together for no reason. The typography
- * is a step below the capsule's own scale, because a Peek that arrived at the
- * composer's text size would read as a second composer.
+ * The projection-specific tokens below now own only what is genuinely
+ * content/density-specific: gap, padding and the height ceiling. The outer
+ * visual object is not a projection family anymore. Context and Peek replace
+ * each other in one product slot, so material, radius, elevation and dock gap
+ * come from `capsuleUpperSurfaceClass` / `capsuleUpperDockClass`.
  *
- * **The radius is the capsule's** (owner decision, 2026-10-04). It has been
- * three different values on the way here: `var(--radius-lg)`, the generic
- * shadcn-scale corner a menu or a card also wears; then
- * `terminalCapsule.projectionRadius`, a leaf declared in both experience files
- * for exactly this frame; now `radius-capsule`, the same token the resting
- * capsule below it resolves.
- *
- * That last step is the point. The Peek does not sit beside the capsule — it
- * takes the capsule's slot, one gap above it, and a surface that replaces
- * another in place reads as a *different family* when its corner does not
- * match. 12px against 22px was visible; the 2px between this and the
- * `radius-floating` tier the hierarchy had assigned the Peek was not. So the
- * hierarchy changed rather than the value being nudged: `radius-floating` is
- * deleted (its one documented consumer was this frame), and the capsule tier
- * now covers the capsule and the surface that stands in for it.
+ * Host typography follows the same rule. The title/actions use canonical chrome
+ * roles, while capability bodies choose the roles their own content needs. The
+ * composer's writing size is therefore not inherited as Peek chrome.
  */
 export const capsuleProjectionClass = cn(
   capsuleUpperSurfaceClass,
