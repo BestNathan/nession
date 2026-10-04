@@ -31,7 +31,6 @@ function disclosure(overrides: Partial<CapsuleCapabilityDisclosure> = {}): Capsu
       { id: 'git', title: 'Git', state: 'available' },
     ],
     onSelect: vi.fn(),
-    onSelectAtPeek: vi.fn(),
     ...overrides,
   };
 }
@@ -62,9 +61,8 @@ describe('Context Disclosure', () => {
     expect(item).not.toHaveTextContent('claude-code');
 
     await userEvent.click(item);
-    // Directly at Peek, not Signal (SC-20).
-    expect(caps.onSelectAtPeek).toHaveBeenCalledWith('claude-code');
-    expect(caps.onSelect).not.toHaveBeenCalled();
+    // One selection path for every row, and it opens the detail (SC-20).
+    expect(caps.onSelect).toHaveBeenCalledWith('claude-code');
   });
 
   it('keeps the sensed rows first and the ordinary ones in the same list (SC-35)', async () => {
@@ -121,11 +119,10 @@ describe('Context Disclosure', () => {
     expect(item).toHaveTextContent('Touch controls for Terminal');
     expect(screen.queryByTestId('work-ring')).not.toBeInTheDocument();
 
-    // …and it is selection, not decoration: the row walks the same
-    // sensed -> direct-Peek path a work-sensed row does (SC-38/SC-40).
+    // …and it is selection, not decoration: the row selects through the same
+    // path a work-sensed or ordinary row does (SC-38/SC-40).
     await userEvent.click(item);
-    expect(caps.onSelectAtPeek).toHaveBeenCalledWith('terminal-keys');
-    expect(caps.onSelect).not.toHaveBeenCalled();
+    expect(caps.onSelect).toHaveBeenCalledWith('terminal-keys');
   });
 
   it('is the ordinary capability list when nothing is sensed', async () => {

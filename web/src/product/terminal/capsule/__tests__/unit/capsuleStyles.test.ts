@@ -8,6 +8,9 @@ import {
   capsulePhysKeyRowClass,
   capsulePopoverPanelClass,
   capsuleProjectionClass,
+  contextCapsuleReasonClass,
+  contextCapsuleSurfaceClass,
+  contextCapsuleTitleClass,
 } from '@/product/terminal/capsule/capsuleStyles';
 
 describe('capsuleStyles', () => {
@@ -76,5 +79,33 @@ describe('capsuleStyles', () => {
     expect(capsuleIconVisualClass).not.toContain('var(--control-md)');
     expect(capsuleIconButtonClass).not.toMatch(/\bbg-/);
     expect(capsuleIconButtonClass).not.toMatch(/hover:bg-/);
+  });
+
+  it('ceils the Context Capsule rather than fixing its height', () => {
+    // **Asserted on the token name, for the reason above.** The question this
+    // answers is *which* constraint the surface declares — `max-h-` on the
+    // ceiling token, or `h-` on a height — and a rendered-value assertion cannot
+    // tell them apart in the case that matters: when the content is taller than
+    // the ceiling both resolve to the ceiling, so a pixel check would pass on a
+    // `height` that had quietly come back. The measured half of this claim (a
+    // short list is *shorter* than the ceiling, and all three sense states agree)
+    // is in `e2e/specs/ui-contract-matrix.spec.ts`, where it can be measured.
+    expect(contextCapsuleSurfaceClass).toContain(
+      'max-h-[length:var(--context-capsule-max-height)]',
+    );
+    expect(contextCapsuleSurfaceClass).not.toContain('--context-capsule-height');
+  });
+
+  it('leads both row lines so the pair fits one row band', () => {
+    // The row band is `min-h`, so it is only a band if two lines fit inside it.
+    // Both line classes set a font-size and nothing else, so they used to
+    // inherit the document's 1.5 — 48px for the pair against a 44px band — and a
+    // sensed row measured 4px prouder than an ordinary one. Naming the leading
+    // explicitly is what makes every row exactly one band; the measurement is in
+    // the e2e, this is the "and it is our own token doing it" half.
+    for (const line of [contextCapsuleTitleClass, contextCapsuleReasonClass]) {
+      expect(line).toContain('leading-[length:var(--context-capsule-row-line-height)]');
+      expect(line).toMatch(/\btruncate\b/);
+    }
   });
 });

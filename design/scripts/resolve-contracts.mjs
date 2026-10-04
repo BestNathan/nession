@@ -16,6 +16,12 @@ const BLOCK_FIELDS = {
   wrap: 'boolean',
   heightToken: 'token',
   minHeightToken: 'token',
+  // A ceiling, not a box: the surface takes its content's natural height and
+  // clamps only here (`pattern.context-capsule`). It belongs in this vocabulary
+  // beside heightToken/minHeightToken because the three are one family — what
+  // the block always is, what it is at least, what it is at most — and the
+  // absence of this member was the only gap in it.
+  maxHeightToken: 'token',
   overflow: 'enum:clip,menu,sheet,scroll,wrap',
   alignY: 'enum:top,middle,bottom',
   justify: 'enum:start,center,end,space-between,space-around',
@@ -51,6 +57,7 @@ const BLOCK_FIELDS = {
 const TOKEN_TARGET_FIELDS = new Set([
   'heightToken',
   'minHeightToken',
+  'maxHeightToken',
   'touchTargetToken',
   'minWidthToken',
   'maxWidthToken',
