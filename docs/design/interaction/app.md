@@ -108,10 +108,10 @@ The resting capsule does not change when a capability becomes available, relevan
 The App uses the disclosure model from [capability-emergence.md](../capability-emergence.md):
 
 ```text
-Dormant -> Signal -> Peek -> Workspace
+Dormant -> Peek -> Workspace
 ```
 
-`+` remains the explicit Nession capability entry. After the user selects a capability, or after context gives it a strong reason to emerge, the App may show a temporary Signal/Peek above the capsule.
+`+` remains the explicit Nession capability entry. After the user chooses a capability — from `+`, or from a sensed row leading its list — the App may show a temporary Peek above the capsule.
 
 For example:
 
@@ -126,14 +126,14 @@ Git becomes relevant
     -> Open Workspace for full Git
 ```
 
-Selecting through `+` lands on the Peek, not on a Signal: choosing a capability
-is asking to look at it, so the detail is what the explicit entry opens
-(`capability-emergence.md` — `+` is "the explicit entry for *peeking*"). A Signal
-is what Nession shows on its own when a capability earns presence without being
-asked, and what a dismissed Peek steps back to; it is not a step the user
-selects their way into.
+Selecting through `+` — or choosing a sensed row that leads its list — lands on
+the Peek: choosing a capability is asking to look at it, so the detail is what
+the choice opens (`capability-emergence.md` — `+` is "the explicit entry for
+*peeking*"). There is no shallower depth behind it any more: the Signal was
+removed on 2026-10-04 because it could not be selected into, and nothing shows
+a capability on its own. A dismissed Peek returns to dormant, not to a Signal.
 
-Signal/Peek is session-scoped and intentionally shallow. Rich state, history, management, and capability-specific workflows belong in Workspace.
+The Peek is session-scoped and intentionally shallow. Rich state, history, management, and capability-specific workflows belong in Workspace.
 
 Opening Workspace must preserve the originating Session and capability context. Closing/dismissing returns the user to the same Terminal without rebuilding context.
 
@@ -291,7 +291,7 @@ App presentation should normally map it as follows:
 - `unavailable`: no presence;
 - `available`: optionally discoverable in Workspace / explicit expansion;
 - `relevant`: contextual Workspace or capsule affordance may appear;
-- `active`: may be marked/discoverable in `+`, and may project a temporary Signal/Peek without changing the resting capsule.
+- `active`: may be marked/discoverable in `+`, and may project a temporary Peek once the user chooses it, without changing the resting capsule.
 
 Exact detection is implementation-specific.
 

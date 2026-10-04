@@ -58,7 +58,7 @@ The key downstream interpretation of the Principles is:
 | [product-model.md](product-model.md) | Canonical | Product concepts and relationships: Workspace, Workspace Location, Session, Terminal, Agent, contextual capabilities |
 | [information-architecture.md](information-architecture.md) | Canonical | Session-first IA, progressive disclosure, contextual capability presence, Workspace depth |
 | [workspace.md](workspace.md) | Canonical | Logical Workspace semantics, locations, capability contribution and visibility rules |
-| [capability-emergence.md](capability-emergence.md) | Canonical | Progressive capability disclosure across Terminal and Workspace; Signal / Peek / Workspace depth and context-preserving deepening |
+| [capability-emergence.md](capability-emergence.md) | Canonical | Progressive capability disclosure across Terminal and Workspace; Peek / Workspace depth and context-preserving deepening |
 | [interaction/web.md](interaction/web.md) | Canonical | Web realization of the product model |
 | [interaction/app.md](interaction/app.md) | Canonical | App spatial model, gestures, capsule, contextual capability surfaces |
 | [visual-language.md](visual-language.md) | Canonical | What dominates and recedes; typography, surfaces, density, emphasis |

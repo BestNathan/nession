@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import type { LucideIcon } from 'lucide-react';
 import type { CapabilityId, CapabilityState } from '@/product/capability';
 import type { CapsuleDetail } from '@/product/terminal/capsule/types';
 import { CLAUDE_CODE_ID, claudeCodeProjection } from '@/capabilities/claude-code';
@@ -12,7 +13,7 @@ import {
  * How a capability supplies its Terminal projection body.
  *
  * The capability contributes **content**; the capsule draws the frame and
- * Nession decides whether anything appears at all and at which depth. That is
+ * Nession decides whether anything appears at all. That is
  * the split `workspace-navigation.md` draws — "Extensions contribute
  * capability. Nession decides whether, where, and how" — and it is why this is
  * a body renderer rather than a component free to place itself.
@@ -25,38 +26,18 @@ import {
 export interface CapsuleProjectionBinding {
   id: CapabilityId;
   /**
-   * What this binding contributes to the capsule, which is what decides whether
-   * the capability entry may offer it (#1046).
+   * The capability's glyph in the Terminal.
    *
-   * Capsule eligibility is a statement about the **Terminal**, not about the
-   * capability having a view somewhere: the entry lists what can be reached
-   * from where the user already is. So the role is declared here, beside the
-   * body that does the reaching, and it is **required** — a new binding cannot
-   * arrive without saying which of the three it is. That is the property
-   * `supportsPeek?: boolean` did not have: absent meant "no" for a capability
-   * that had never considered the question, and "not yet" for one that had.
-   *
-   * - `'peek'` — it contributes a Terminal-local Peek. This is the only thing
-   *   that earns a capability explicit discovery: "availability in Workspace is
-   *   not enough". Terminal Keys is one of these: it has a Peek and no
-   *   Workspace view, which is a *shape* a Peek entry already expresses.
-   * - `'signal'` — a Terminal Signal and no Peek. It is **not** listed: it
-   *   still emerges by observation when Nession resolves it as relevant, but it
-   *   is not offered for explicit selection. Claude Code is the reference case,
-   *   and `#1046` is explicit that a Signal-only binding is insufficient for
-   *   explicit discovery; it returns to the entry when the plugin contributes a
-   *   Peek.
-   *
-   * There was a third, `'accessory'`, for Terminal Keys — a family of its own
-   * on the reasoning that a built-in with no Workspace view should not be
-   * confused with a capability. The 2026-10-03 review retired it (#1347
-   * SC-38): the accessory had its own selection path, its own state story and
-   * no way to be *sensed*, so one capability spoke a protocol of its own while
-   * the Context Disclosure was being built to speak one for all of them. The
-   * distinguishing property it carried — no Workspace destination — is already
-   * expressed by the capability simply having no Workspace view binding.
+   * This surface's own declaration, not a lookup performed against the
+   * capability's Workspace view binding: the capsule lists a capability that
+   * has no Workspace view at all (Terminal Keys), and a row that cannot find
+   * an icon draws an empty column where the others draw identity. What the
+   * value is, is the capability's to decide — one whose view declares the same
+   * glyph references it (`icon: gitView.icon`) rather than restating it, so
+   * there is one Git glyph in the tree; one with nothing to reference declares
+   * its own.
    */
-  entry: 'peek' | 'signal';
+  icon: LucideIcon;
   /**
    * Whether this projection claims the soft keyboard while it is up (#1034).
    *
@@ -64,7 +45,7 @@ export interface CapsuleProjectionBinding {
    * A projection the user *taps* to drive the terminal — Terminal Keys — cannot
    * share the screen with an IME: the keyboard would cover the accessory it is
    * competing with, and every key the user wants is behind it. A projection that
-   * is meant to be read *while* typing — Git's Signal and Peek, for a
+   * is meant to be read *while* typing — Git's Peek, for a
    * `git commit` in progress — has the opposite requirement, and taking the
    * keyboard away from it would be the bug.
    *
@@ -81,11 +62,10 @@ export interface CapsuleProjectionBinding {
   body: (props: {
     agentId: string | undefined;
     sessionId: string | undefined;
-    depth: 'signal' | 'peek';
     /**
      * The lifecycle state Nession resolved for this capability.
      *
-     * The second implementation asked for it. Claude Code's Signal says
+     * The second implementation asked for it. Claude Code's body says
      * "running now" or "ran earlier", and that is the capability layer's
      * decision — a body re-deriving it from the same facts would be a second
      * copy of `resolveClaudeCodeState` free to disagree with the one the
@@ -149,7 +129,7 @@ export interface CapsuleProjectionBinding {
  * Only these are offered in the capability entry, and choosing one of them opens
  * its Peek. Everything else keeps the behaviour it had: choosing it opens its
  * Workspace view. A capability absent from this list is not broken — it simply
- * has no shallower depth to deepen into, which is exactly what
+ * has no Terminal projection of its own, which is exactly what
  * `capability-emergence.md` means by a Terminal-local capability stopping at the
  * Terminal.
  */
@@ -164,26 +144,32 @@ export function projectionBindingFor(id: CapabilityId): CapsuleProjectionBinding
 }
 
 /**
- * Capabilities that have a Terminal depth, for the entry to mark.
+ * The capability's **Terminal projection** glyph, or undefined for one with no
+ * projection.
  *
- * The capability entry shows every reachable capability; this says which of them
- * will emerge beside the capsule rather than switching surface, so the
- * difference is discoverable before the tap rather than as a surprise.
+ * Named for the registry it reads: `projectionIconFor('files')` is undefined
+ * because Files has a Workspace view and no Terminal projection — this is not
+ * "the capability's icon", which the Workspace view binding answers.
+ *
+ * Resolves through `projectionBindingFor` rather than repeating its lookup:
+ * there is one rule for "which binding speaks for this id", and a second
+ * `.find` here would be a copy free to disagree with it.
+ */
+export function projectionIconFor(id: CapabilityId): LucideIcon | undefined {
+  return projectionBindingFor(id)?.icon;
+}
+
+/**
+ * Every capability that can be drawn beside the capsule.
+ *
+ * This was two lists. `#1046` split "can be drawn" from "is worth offering"
+ * so a Signal-only binding could emerge on its own without being offered for
+ * explicit selection — and with Signal gone, every binding declares a Peek,
+ * so the filter that expressed the difference excluded nothing. One list,
+ * because there is one answer.
  */
 export const CAPSULE_PROJECTION_IDS: readonly CapabilityId[] = CAPSULE_PROJECTIONS.map(
   (binding) => binding.id,
 );
-
-/**
- * Capabilities the entry may offer, which is **not** the list above.
- *
- * `CAPSULE_PROJECTION_IDS` answers "can be drawn beside the capsule"; this
- * answers "is worth offering". They differ by exactly the Signal-only
- * bindings, and that difference is the whole of `#1046`: a capability that can
- * emerge when it becomes relevant is not thereby one the entry should list.
- */
-export const CAPSULE_ENTRY_IDS: readonly CapabilityId[] = CAPSULE_PROJECTIONS.filter(
-  (binding) => binding.entry !== 'signal',
-).map((binding) => binding.id);
 
 export { CLAUDE_CODE_ID, GIT_ID, TERMINAL_KEYS_ID };

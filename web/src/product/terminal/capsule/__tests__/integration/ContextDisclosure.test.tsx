@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { Bot, GitBranch, Keyboard } from 'lucide-react';
 import { TerminalCapsule } from '@/product/terminal/capsule/TerminalCapsule';
 import type {
   CapsuleCapabilityDisclosure,
@@ -26,9 +27,12 @@ vi.mock('@/product/terminal/hooks/useCommandHistory', () => ({
 
 function disclosure(overrides: Partial<CapsuleCapabilityDisclosure> = {}): CapsuleCapabilityDisclosure {
   return {
+    // The glyphs are part of an entry now (`capsulePresence` fills them from
+    // the capability's Terminal binding), so the fixture carries them too: a
+    // hand-built entry without one would be a state the product cannot reach.
     entries: [
-      { id: 'claude-code', title: 'Claude Code', state: 'active' },
-      { id: 'git', title: 'Git', state: 'available' },
+      { id: 'claude-code', title: 'Claude Code', state: 'active', icon: Bot },
+      { id: 'git', title: 'Git', state: 'available', icon: GitBranch },
     ],
     onSelect: vi.fn(),
     ...overrides,
@@ -88,6 +92,113 @@ describe('Context Disclosure', () => {
     expect(sensed.compareDocumentPosition(ordinary) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
+  it('starts every row at the same column', async () => {
+    // jsdom has no layout, so this cannot measure the 6px the bug produced.
+    // What it pins is the cause: the marker column renders on every row, so
+    // the icon and title columns begin at the same offset whether or not a
+    // dot is drawn. The pixel consequence is measured in the browser, not
+    // here — which is the general split for this surface, not a claim about
+    // any one spec.
+    // Mutation: render the slot only for `row.kind === 'ordinary'` — must fail.
+    const caps = disclosure();
+    render(
+      <TerminalCapsule experience="web" sendText={vi.fn()} capabilityDisclosure={caps} workContext={workContext()} />,
+    );
+
+    await userEvent.click(screen.getByTestId('capsule-capability-more'));
+    await screen.findByTestId('capsule-context-item-claude-code');
+
+    // The fixture's two rows are the two kinds the bug treated differently: a
+    // sensed row and an ordinary one.
+    const rows = [...document.querySelectorAll('[data-context-row]')];
+    const markers = screen.getAllByTestId('capsule-row-marker');
+    expect(rows).toHaveLength(2);
+    expect(markers).toHaveLength(rows.length);
+    // Not merely "one per row": each row *begins* with the column, which is
+    // what "the same column" has to mean for the icon and title after it.
+    for (const [index, row] of rows.entries()) {
+      expect(row.firstElementChild).toBe(markers[index]);
+    }
+  });
+
+  it('draws each capability its own glyph', async () => {
+    // Mutation: drop `<Icon />` from the icon slot — must fail.
+    const caps = disclosure();
+    render(
+      <TerminalCapsule experience="web" sendText={vi.fn()} capabilityDisclosure={caps} workContext={workContext()} />,
+    );
+
+    await userEvent.click(screen.getByTestId('capsule-capability-more'));
+
+    const [sensedGlyph, ordinaryGlyph] = [
+      await screen.findByTestId('capsule-context-item-claude-code'),
+      screen.getByTestId('capsule-capability-picker-git'),
+    ].map((row) => row.querySelector('svg'));
+    // Every row draws one — the column was reserved and filled by nothing.
+    expect(sensedGlyph).not.toBeNull();
+    expect(ordinaryGlyph).not.toBeNull();
+    // …and the rows are not all drawing the same one: `<Icon />` is each row's
+    // own entry's glyph, not a single stand-in for all of them.
+    expect(sensedGlyph?.innerHTML).not.toBe(ordinaryGlyph?.innerHTML);
+  });
+
+  it('never greys out a row title, including an available one', async () => {
+    // SC-35: every non-sensed capability remains reachable; a muted title
+    // reads as disabled, which is the opposite of reachable — and this list
+    // has no disabled state to express at all: the entries come from
+    // `disclosure.discoverable`, and `capsulePresence` keeps a capability the
+    // registry calls `unavailable` out of it entirely. So no title has a
+    // reason to be dimmed.
+    //
+    // Every row, not just the available one: the removed condition only ever
+    // applied to ordinary rows — the base carried its own
+    // `row.kind === 'ordinary' &&`, and the `unavailable` form it became could
+    // not match at all — but a conditional that mutes one state is the same
+    // defect whichever half of the list it lands on.
+    // Mutation: restore `!perceived && 'text-muted-foreground'`, or mute a
+    // single half, e.g. `row.kind === 'ordinary' && 'text-muted-foreground'` —
+    // must fail.
+    const caps = disclosure();
+    render(
+      <TerminalCapsule experience="web" sendText={vi.fn()} capabilityDisclosure={caps} workContext={workContext()} />,
+    );
+
+    await userEvent.click(screen.getByTestId('capsule-capability-more'));
+    await screen.findByTestId('capsule-context-item-claude-code');
+
+    const rows = [...document.querySelectorAll<HTMLElement>('[data-context-row]')];
+    // The premise, read off the rows themselves: the fixture carries both
+    // halves the old condition treated alike — a sensed row (`work`, which
+    // deliberately carries no `state`: being sensed *is* the statement) and an
+    // ordinary `available` one — so a green run is not one where the list
+    // happened to hold nothing the conditional reaches.
+    expect(rows.map((row) => row.dataset.contextRow).sort()).toEqual(['ordinary', 'work']);
+    expect(screen.getByTestId('capsule-capability-picker-git')).toHaveAttribute(
+      'data-capability-state',
+      'available',
+    );
+    // The title line specifically, not the row: the reason line is muted by
+    // design (`contextCapsuleReasonClass`). Paired by position — the sensed
+    // row first (SC-35) — and anchored by the *text* each row renders rather
+    // than by the title's own colour class: `cn` is tailwind-merge, so a muted
+    // class does not sit beside `text-foreground`, it replaces it, and a
+    // class-based locator would miss the very defect it is looking for
+    // (observed while checking this test's mutation: it failed at the locator,
+    // `expected null not to be null`, instead of at the assertion). `getByText`
+    // throws when the pairing is wrong, so a reorder cannot pass vacuously.
+    const expectedTitles = ['Claude Code', 'Git'];
+    expect(rows).toHaveLength(expectedTitles.length);
+    for (const [index, row] of rows.entries()) {
+      const title = within(row).getByText(expectedTitles[index]);
+      // Named, because a loop reports one failure at a time: without the row
+      // in the message, "the title is muted" does not say which one.
+      expect(
+        title.className,
+        `row ${index} (${row.dataset.contextRow}) title`,
+      ).not.toContain('text-muted-foreground');
+    }
+  });
+
   it('senses a context capability without lighting the Work Ring (SC-37)', async () => {
     // The ring answers `working`, and Terminal Keys is not working — it is
     // relevant because the device has no keyboard. So the same surface lists it
@@ -99,6 +210,7 @@ describe('Context Disclosure', () => {
         {
           capabilityId: 'terminal-keys',
           title: 'Terminal Keys',
+          icon: Keyboard,
           reason: 'Touch controls for Terminal',
         },
       ],
@@ -145,7 +257,6 @@ describe('Context Disclosure', () => {
     const projection: CapsuleCapabilityProjection = {
       id: 'claude-code',
       title: 'Claude Code',
-      depth: 'peek',
       body: () => <p data-testid="projection-body">peek</p>,
       onDismiss: vi.fn(),
     };
@@ -213,7 +324,6 @@ describe('Context Disclosure', () => {
     const projection: CapsuleCapabilityProjection = {
       id: 'claude-code',
       title: 'Claude Code',
-      depth: 'peek',
       body: () => <p data-testid="projection-body">peek</p>,
       onDismiss: vi.fn(),
     };

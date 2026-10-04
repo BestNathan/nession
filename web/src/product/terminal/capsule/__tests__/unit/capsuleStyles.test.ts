@@ -96,16 +96,38 @@ describe('capsuleStyles', () => {
     expect(contextCapsuleSurfaceClass).not.toContain('--context-capsule-height');
   });
 
-  it('leads both row lines so the pair fits one row band', () => {
-    // The row band is `min-h`, so it is only a band if two lines fit inside it.
-    // Both line classes set a font-size and nothing else, so they used to
-    // inherit the document's 1.5 — 48px for the pair against a 44px band — and a
-    // sensed row measured 4px prouder than an ordinary one. Naming the leading
-    // explicitly is what makes every row exactly one band; the measurement is in
-    // the e2e, this is the "and it is our own token doing it" half.
-    for (const line of [contextCapsuleTitleClass, contextCapsuleReasonClass]) {
-      expect(line).toContain('leading-[length:var(--context-capsule-row-line-height)]');
-      expect(line).toMatch(/\btruncate\b/);
+  it('sets both row lines in the design language roles, not the capsule font size', () => {
+    // Measured on staging 2026-10-04: every line in the row was 16px — the
+    // title and the reason were the same size, distinguished only by colour —
+    // because both classes refed `terminalCapsule.fontSize` /
+    // `captionFontSize`, and both of those resolve to `primitive.typography`.
+    // The design language has a ramp for exactly this job; the `body` role's
+    // note on Web names "button labels, menu items, filters".
+    for (const cls of [contextCapsuleTitleClass, contextCapsuleReasonClass]) {
+      expect(cls).toContain('--typography-');
+      expect(cls).not.toContain('--terminal-capsule-');
     }
+    expect(contextCapsuleTitleClass).toContain('var(--typography-body-size)');
+    expect(contextCapsuleTitleClass).toContain('var(--typography-body-weight)');
+    expect(contextCapsuleReasonClass).toContain('var(--typography-caption-size)');
+    expect(contextCapsuleReasonClass).toContain('var(--typography-caption-weight)');
+  });
+
+  it('keeps the two lines inside one row band without a capsule leading token', () => {
+    // The pair already fits on the role sizes: 14 + 11.5 at the inherited 1.5
+    // is 38.25px on App (13 + 11 is 36px on Web), against a 44px band. The role
+    // leadings only tighten it, to 34.55px / 31.85px. So a capsule-local leading
+    // is not what holds the band — it would be a second answer to a question the
+    // roles already answer.
+    expect(contextCapsuleTitleClass).not.toContain('--context-capsule-row-line-height');
+    expect(contextCapsuleReasonClass).not.toContain('--context-capsule-row-line-height');
+  });
+
+  it('truncates both row lines', () => {
+    // A long capability name must ellipsise, not wrap: the row is a `min-h`
+    // floor, so a wrapped title would grow it past its 44px band.
+    // Mutation: drop `truncate` from either class — must fail.
+    expect(contextCapsuleTitleClass).toMatch(/\btruncate\b/);
+    expect(contextCapsuleReasonClass).toMatch(/\btruncate\b/);
   });
 });

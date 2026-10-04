@@ -21,6 +21,7 @@
  * Keys would change that host's hook count and crash on the next interaction.
  */
 import { createElement } from 'react';
+import { Keyboard } from 'lucide-react';
 import type { CapabilityState } from '@/product/capability';
 import type { CapabilityContextBinding } from '@/app/contextSignals';
 import type { CapsuleProjectionBinding } from '@/app/capsuleProjections';
@@ -79,11 +80,14 @@ export const terminalKeysContext: CapabilityContextBinding = {
 
 export const terminalKeysProjection: CapsuleProjectionBinding = {
   id: TERMINAL_KEYS_ID,
+  // The one capability here with no Workspace view to borrow a glyph from —
+  // which is exactly the case `CapsuleProjectionBinding.icon` exists for: the
+  // Terminal row draws identity for these keys or the column stays empty.
+  icon: Keyboard,
   // A Terminal-local capability with a Peek and no Workspace view (#1046), and
   // since 2026-10-03 no longer a family of its own: the accessory variant is
   // retired (`SC-38`), so selecting it — from a sensed row or the ordinary list —
   // opens its Peek, the same single step every other capability takes.
-  entry: 'peek',
   // The keys are tapped, not typed into, and the soft keyboard is the one thing
   // that would make them unusable: it covers the row the user is reaching for,
   // and it takes the vertical space the key row needs. So this one projection
@@ -91,9 +95,9 @@ export const terminalKeysProjection: CapsuleProjectionBinding = {
   // when it appears and steps it out when the field is tapped back.
   //
   // The flag is deliberately *not* on Git's projection, and that asymmetry is
-  // the design: Signal and Peek are read while you go on typing (`git commit`),
-  // so taking the keyboard from them would be a regression, not a consistency
-  // fix. Nothing here names the capsule; nothing in the capsule names this.
+  // the design: a Peek is read while you go on typing (`git commit`), so taking
+  // the keyboard from it would be a regression, not a consistency fix. Nothing
+  // here names the capsule; nothing in the capsule names this.
   ownsInputFocus: true,
   // Nothing to add at Peek and no Workspace view to open: the key row is the
   // capability in full, which is the lower bound `capability-emergence.md`

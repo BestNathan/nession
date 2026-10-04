@@ -12,33 +12,30 @@ import {
 import type { GitStatus } from '../types';
 
 /**
- * What Git says about itself in the Terminal, at the depth Nession chose.
+ * What Git says about itself in the Terminal.
  *
  * Only the body. The frame — title, dismissal, and the path into Workspace —
  * belongs to the capsule, because those are Nession's decisions about
  * placement, not Git's about content (`workspace-navigation.md`: "Extensions
  * contribute capability. Nession decides whether, where, and how").
  *
- * Both depths read the same `useGitStatus`, so a Signal and the Peek opened
- * from it cannot report different repositories.
+ * One form, and one read of `useGitStatus`: there is no second body beside it
+ * that could report a different repository for the same Session.
  */
 export function GitProjection({
   agentId,
   sessionId,
-  depth,
   onFocusChange,
 }: {
   agentId: string | undefined;
   sessionId: string | undefined;
-  depth: 'signal' | 'peek';
   onFocusChange?: (resourceId?: string) => void;
 }) {
   const { status, loading, error } = useGitStatus({ agentId, sessionId });
 
-  // A Signal that cannot say anything is not worth the space it takes from the
-  // work surface. The failure states have readable copy in the Workspace, which
-  // is where someone can act on them (`capability-emergence.md`: a Signal is
-  // "the smallest identifying state needed").
+  // A projection that cannot say anything is not worth the space it takes from
+  // the work surface. The failure states have readable copy in the Workspace,
+  // which is where someone can act on them.
   if (loading) {
     return <p className={cn('text-muted-foreground', chromeSansRole('caption'))}>Reading repository…</p>;
   }
@@ -49,9 +46,7 @@ export function GitProjection({
     return <p className={cn('text-muted-foreground', chromeSansRole('caption'))}>{describeUnavailable(status).title}</p>;
   }
 
-  return depth === 'signal' ? (
-    <GitSignalBody status={status.status} root={status.root} />
-  ) : (
+  return (
     <GitPeekBody
       status={status.status}
       root={status.root}
@@ -60,30 +55,10 @@ export function GitProjection({
   );
 }
 
-/**
- * L1 — the smallest identifying state.
- *
- * Branch, where the work tree is, and how far it has drifted. Not a toolbar and
- * not a list of actions.
- */
-function GitSignalBody({ status, root }: { status: GitStatus; root: string }) {
-  const worktree = worktreeName(root);
-  const identity = [status.detached ? 'Detached HEAD' : status.branch, worktree && `worktree: ${worktree}`]
-    .filter(Boolean)
-    .join(' · ');
-
-  return (
-    <div data-testid="git-signal-body" className="flex flex-col gap-0.5">
-      <p className={cn('truncate text-foreground', chromeSansRole('metadata'))}>{identity}</p>
-      <p className={cn('truncate text-muted-foreground', chromeSansRole('caption'))}>{describeStatus(status)}</p>
-    </div>
-  );
-}
-
 const PEEK_FILES = 4;
 
 /**
- * L2 — what is happening here, and is it worth going deeper.
+ * What is happening here, and is it worth going deeper.
  *
  * "Peek may show a short changed-file summary because those files explain the
  * current state. It should not render a full diff, commit graph, branch

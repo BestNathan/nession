@@ -25,7 +25,7 @@ interface CapsuleShellProps {
   contentRef?: React.Ref<HTMLDivElement>;
   measureMirror?: React.ReactNode;
   /**
-   * Something emerging above the capsule — a capability Signal or Peek.
+   * Something emerging above the capsule — a capability's Peek.
    *
    * A slot rather than a capability concept: the shell renders what it is
    * given and knows nothing about what it means. It sits outside the shell

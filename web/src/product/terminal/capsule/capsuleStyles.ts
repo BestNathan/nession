@@ -21,6 +21,8 @@
  * renders on Web is a runtime property of the component tree, but the binding
  * name is the author's own statement of it.
  */
+import { cn } from '@/shared/lib/utils';
+import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import type { CapsuleExperience, ComposerLayout } from '@/product/terminal/capsule/types';
 
 /** Shared by textarea + ghost overlay so glyphs stay locked. */
@@ -231,11 +233,17 @@ export const contextCapsuleScrollClass = 'min-h-0 flex-1 overflow-y-auto overscr
  * the icon slot reserved whether or not a glyph arrived so the titles stay
  * aligned down the list.
  *
- * `min-h` is a floor, so the row band is only uniform if the two lines fit
- * inside it — which is what `rowLineHeight` is for on the text below. Without an
- * explicit leading they inherited the document's 1.5 (24px a line at this
- * experience's 1rem text, so 48px for the pair) and a sensed row measured 4px
- * taller than an ordinary one, changing the list's rhythm with the sense state.
+ * `min-h` is a floor, so the band is only uniform if both lines fit inside it —
+ * that is a rule about the pair, not about the box. It once needed a
+ * capsule-local leading to hold: with only a font-size set, both lines inherited
+ * the document's 1.5, and at the capsule's own 1rem text the pair measured 48px
+ * against the 44px band, so a sensed row stood 4px prouder than an ordinary one
+ * and the list's rhythm changed with the sense state. The pair fits now because
+ * of the role *sizes*: 14 + 11.5 at the same inherited 1.5 is 38.25px (Web 36px),
+ * already inside the band, and the role leadings only tighten that to 34.55px /
+ * 31.85px. The leading is still what retires `rowLineHeight` — the roles supply
+ * one, so a capsule-local one would be a second answer to a question already
+ * answered — but the band does not depend on it.
  */
 export const contextCapsuleRowClass = [
   'flex w-full min-h-[length:var(--context-capsule-row-height)] items-center gap-[length:var(--terminal-capsule-control-gap)]',
@@ -265,20 +273,31 @@ export const contextCapsuleMarkerClass =
   'size-[length:var(--context-capsule-marker-size)] rounded-full bg-foreground';
 
 /**
- * The row's two lines, and the leading that keeps the pair inside one band.
+ * The row's two lines, set in the design language's roles rather than the
+ * capsule's own font size.
  *
- * `leading-` is not decoration here: with only a font-size set, both lines
- * inherited the document's line-height, and the pair came to 48px against a
- * 44px row. One `rowLineHeight` on both lines puts them at 40px — the size the
- * band was chosen for (see the token's own note) — so an ordinary row and a
- * sensed row are the same height and the list does not change rhythm as senses
- * come and go.
+ * Both classes used to name `--terminal-capsule-font-size` /
+ * `--terminal-capsule-caption-font-size`, and **both of those leaves ref the
+ * one `primitive.typography.size`** — so on both experiences they emitted the
+ * same 16px, the title and the reason were separated by colour alone, and the
+ * list carried no typographic hierarchy at all (measured line by line on
+ * staging 2026-10-04: all four rows' initial cap height was 12px). The design
+ * language keeps a ramp for exactly this job, and the row was using none of it.
+ *
+ * `body` is the role written for it — the role's note on Web names "button
+ * labels, menu items, filters" — and the reason takes `caption`. The roles
+ * supply the leading too, which is what retires `contextCapsule.rowLineHeight`:
+ * the pair was already inside the band on the role sizes (14 + 11.5 at the
+ * inherited 1.5 is 38.25px on App, 36px on Web), so what a capsule-local leading
+ * would duplicate is the roles' own answer, not the fit — the role leadings only
+ * tighten the pair to 34.55px / 31.85px.
  */
-export const contextCapsuleTitleClass =
-  'truncate text-[length:var(--terminal-capsule-font-size)] leading-[length:var(--context-capsule-row-line-height)] text-foreground';
+export const contextCapsuleTitleClass = cn('truncate text-foreground', chromeSansRole('body'));
 
-export const contextCapsuleReasonClass =
-  'truncate text-[length:var(--terminal-capsule-caption-font-size)] leading-[length:var(--context-capsule-row-line-height)] text-muted-foreground';
+export const contextCapsuleReasonClass = cn(
+  'truncate text-muted-foreground',
+  chromeSansRole('caption'),
+);
 
 export const capsuleComposerGridGapClass = 'gap-[length:var(--terminal-capsule-row-gap)]';
 
@@ -340,12 +359,12 @@ export const capsuleInlineFieldRowClass =
   'flex items-center gap-[length:var(--terminal-capsule-popover-gap)]';
 
 /**
- * An emerged capability projection — the Signal and Peek frame (`#826`).
+ * An emerged capability projection — the Peek frame (`#826`).
  *
  * Its own token group rather than borrowed popover values: a projection is a
  * smaller, less permanent surface than a popover, and pointing at the popover's
  * geometry would have made the two move together for no reason. The typography
- * is a step below the capsule's own scale, because a Signal that arrived at the
+ * is a step below the capsule's own scale, because a Peek that arrived at the
  * composer's text size would read as a second composer.
  *
  * **The radius is part of that group now (#1110).** It was the one value here

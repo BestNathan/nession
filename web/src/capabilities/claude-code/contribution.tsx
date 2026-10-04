@@ -91,9 +91,8 @@ export const claudeCodeView: WorkspaceViewBinding = {
 /**
  * How Claude Code says something in the Terminal.
  *
- * **Both depths.** It is the capability whose state comes from observation, so
- * it is the one that emerges on its own — a pane running `claude.exe` gets the
- * Signal without anyone choosing it, which is Q1's second input made real.
+ * It is the capability whose state comes from observation: a pane running
+ * `claude.exe` reports `active`, which is Q1's second input made real.
  *
  * It **is** offered for selection, which it was not before `#1120`. The
  * argument for withholding it was that its richer surface is the Workspace
@@ -105,12 +104,14 @@ export const claudeCodeView: WorkspaceViewBinding = {
  */
 export const claudeCodeProjection: CapsuleProjectionBinding = {
   id: CLAUDE_CODE_ID,
-  entry: 'peek',
-  body: ({ agentId, sessionId, depth, state, openWorkspace, openDetail }) => (
+  // The Terminal row's glyph, referenced from the view's own icon rather than
+  // restated: one value, so the two surfaces cannot drift into two pictures of
+  // the same capability — see `CapsuleProjectionBinding.icon`.
+  icon: claudeCodeView.icon,
+  body: ({ agentId, sessionId, state, openWorkspace, openDetail }) => (
     <ClaudeCodeProjection
       agentId={agentId}
       sessionId={sessionId}
-      depth={depth}
       state={state}
       onOpenWorkspace={openWorkspace}
       openDetail={openDetail}
@@ -153,8 +154,9 @@ export const claudeCodeWork: CapabilityWorkBinding = {
  * The matcher is the same one the presence state and the work signal use —
  * one definition of "Claude is running", so the ring, the chip and the
  * destination glyph can never disagree about the same pane. The glyph is the
- * view's own icon: one icon per capability, drawn in place of the circle's
- * Terminal icon (*replace inner glyph*, never a badge).
+ * view's own icon — the Terminal projection references the same symbol rather
+ * than declaring a second one — so there is one icon per capability, drawn in
+ * place of the circle's Terminal icon (*replace inner glyph*, never a badge).
  */
 export const claudeCodeConversation: CapabilityConversationBinding = {
   id: CLAUDE_CODE_ID,

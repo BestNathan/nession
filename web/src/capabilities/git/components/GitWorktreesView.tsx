@@ -15,7 +15,7 @@ import type { WorkspaceContext } from '@/app/workspace/workspaceContext';
  * ## Identity versus inventory
  *
  * The header already says *which checkout this Session is in*, and the Terminal
- * Signal says it before that. This answers a question neither can: *what other
+ * Peek says it before that. This answers a question neither can: *what other
  * places does this repository have*. The Session's own entry is therefore
  * marked, so the two agree instead of competing — and the row is not a control,
  * because moving the Session to another checkout is a Session action and this

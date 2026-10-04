@@ -117,17 +117,17 @@ unavailable -> available -> relevant -> active
 
 - unavailable/merely available capabilities should not create permanent Terminal chrome;
 - the resting capsule stays unchanged across capability states;
-- relevant/active capabilities may be discovered through `+` and then project a temporary Signal or Peek adjacent to the capsule;
-- Signal/Peek stays shallow and current-state-oriented;
+- relevant/active capabilities may be discovered through `+` and, once chosen, project a temporary Peek adjacent to the capsule;
+- the Peek stays shallow and current-state-oriented;
 - full capability UI opens explicitly through Workspace contextual depth with originating Session/resource context preserved.
 
 The canonical depth model is defined in [capability-emergence.md](../../capability-emergence.md):
 
 ```text
-Dormant -> Signal -> Peek -> Workspace
+Dormant -> Peek -> Workspace
 ```
 
-For example, Git may surface branch/worktree/change counts in a Signal, then a short changed-file Peek. Full diff/history/branch/worktree management belongs in Workspace.
+For example, choosing Git opens a Peek that surfaces branch/worktree/change counts and then a short changed-file list. Full diff/history/branch/worktree management belongs in Workspace.
 
 ## Resize and typography
 

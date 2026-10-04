@@ -56,7 +56,7 @@ export function FixtureApp() {
 
   // A capability projection has to be reachable from a fixture to be captured,
   // and until #838 the capsule did not render here at all. This stub is what
-  // lets a Signal draw real content offline; installed for the route's lifetime
+  // lets a Peek draw real content offline; installed for the route's lifetime
   // and released on unmount. Nothing emerges by default, so the canonical
   // screenshots are unaffected unless a case opens one.
   useEffect(() => gitApi.install(fixtureGitSurface('')), []);

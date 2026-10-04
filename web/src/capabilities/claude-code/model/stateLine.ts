@@ -6,10 +6,9 @@ import type { CapabilityState } from '@/product/capability';
  * `active` is the pane running it right now; `relevant` is that it ran here
  * earlier — the distinction `resolveClaudeCodeState` already draws.
  *
- * Lives in `model/` rather than beside one of its callers because **both**
- * depths draw it: the Signal and the Peek are one surface at two depths, and a
- * copy per file is the first place they could come to disagree about what
- * "running" means.
+ * Lives in `model/` rather than beside the body that draws it: it is the
+ * capability's own word for what a state means, so the next surface that shows
+ * one reads the same sentence rather than inventing a second.
  */
 export function stateLine(state: CapabilityState): string {
   return state === 'active' ? 'Running in this Session' : 'Ran in this Session earlier';

@@ -24,13 +24,13 @@ import type {
  * The surface a capability's Terminal content is drawn on (#1046).
  *
  * This is the **host**, and it owns only what is Nession's: the surface and its
- * bounds, the dismissal, the step from Signal to Peek, the accessibility
- * baseline — and the Workspace destination. `#1347` SC-21 is explicit: "Peek
- * header and Workspace destination are Nession-owned", and re-review #2 on it
- * settled that `#1046`'s body-owns-the-action model is superseded on this
- * point. Whether the destination exists is the app layer's answer (the
- * Workspace view registry), and its presentation — one action, here, at Peek
- * depth — is drawn by this host. What stays with the body is *content*
+ * bounds, the dismissal, the accessibility baseline — and the Workspace
+ * destination. `#1347` SC-21 is explicit: "Peek header and Workspace
+ * destination are Nession-owned", and re-review #2 on it settled that `#1046`'s
+ * body-owns-the-action model is superseded on this point. Whether the
+ * destination exists is the app layer's answer (the Workspace view registry),
+ * and its presentation — one action, here — is drawn by this host. What stays
+ * with the body is *content*
  * navigation: a row that opens the item it names
  * (`actions.openWorkspace(resourceId)`), which is the body's scrollable
  * content using the host's routing, not a second destination action.
@@ -42,10 +42,6 @@ import type {
  * Nothing here touches the resting capsule: this renders *above* it, as a
  * sibling, so the capsule's own geometry is byte-identical whether a projection
  * is present or not (#748, still valid per `capability-emergence.md`).
- *
- * Depth is a parameter, not internal state. Which depth is showing was decided
- * before this mounted (Q1–Q3), so a component that could also change it would
- * be a second, weaker copy of that decision.
  */
 export function PeekHost({
   projection,
@@ -68,15 +64,12 @@ export function PeekHost({
   // capability supplies content and nothing else, exactly as it does for the
   // body itself.
   const [detail, setDetail] = useState<CapsuleDetail | null>(null);
-  const { depth, title, onDeeper, onDismiss, onOpenWorkspace } = projection;
-  const isPeek = depth === 'peek';
-  const hasDeeper = Boolean(onDeeper);
+  const { title, onDismiss, onOpenWorkspace } = projection;
 
   return (
     <div
       data-testid="capsule-capability-projection"
       data-capability={projection.id}
-      data-depth={projection.depth}
       className={cn(
         capsuleProjectionClass,
         capsuleProjectionDockClass,
@@ -94,23 +87,15 @@ export function PeekHost({
       )}
     >
       <div className="flex items-center justify-between gap-[length:var(--terminal-capsule-projection-item-gap)]">
-        <button
-          type="button"
+        {/* The title names the projection. It is not a control: there is only
+            one depth, so there is nothing behind it to open — it used to be the
+            Signal's way in. */}
+        <h2
           data-testid="capsule-capability-title"
-          // At Signal depth the title is the way in; at Peek it is already as
-          // deep as the Terminal goes, and a capability with no Peek has
-          // nothing behind it to open.
-          onClick={isPeek || !hasDeeper ? undefined : () => onDeeper?.()}
-          disabled={isPeek || !hasDeeper}
-          className={cn(
-            'min-w-0 flex-1 truncate text-left font-semibold text-foreground',
-            !isPeek &&
-              hasDeeper &&
-              'rounded transition-colors hover:text-foreground/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-          )}
+          className="min-w-0 flex-1 truncate text-left font-semibold text-foreground"
         >
           {title}
-        </button>
+        </h2>
         <button
           type="button"
           data-testid="capsule-capability-dismiss"
@@ -142,13 +127,8 @@ export function PeekHost({
         — Terminal Keys — supplies no `onOpenWorkspace` and gets no action),
         placement and presentation are this host's, and the handoff carries
         the item the body reported, exactly like the body's own content rows.
-
-        Peek only. A Signal is "the smallest identifying state needed" — it
-        informs, and the step to the action is the title's deepening. Git's
-        Signal never drew this; Claude Code's drawing it was precisely the
-        capability-owned inconsistency the review rejected.
       */}
-      {isPeek && onOpenWorkspace ? (
+      {onOpenWorkspace ? (
         <div className="flex justify-end">
           <button
             type="button"
