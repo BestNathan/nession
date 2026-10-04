@@ -830,6 +830,22 @@ export function iconFor(id: CapabilityId): LucideIcon | undefined {
 
 （`Bot` / `GitBranch` 从 `lucide-react` import。）
 
+**并补回一条 Task 6 丢掉的断言。** Task 6 的实现者自查时发现：被它替换掉的旧测试里有一条 `toMatch(/\btruncate\b/)`，而计划给的两条替换测试没有覆盖它 —— 于是现在把 `truncate` 从两个 class 里删掉，**所有门禁都会放行**（标题不再截断，长能力名会撑破行）。`truncate` 仍在 class 里，但没人看着它。
+
+补在 `capsuleStyles.test.ts`：
+
+```ts
+  it('truncates both row lines', () => {
+    // Task 6 replaced a test that asserted this and the replacement did not,
+    // so between the two of them a mutation deleting `truncate` from both
+    // classes passed every gate — a long capability name would then push the
+    // row wider instead of ellipsising.
+    // Mutation: drop `truncate` from either class — must fail.
+    expect(contextCapsuleTitleClass).toMatch(/\btruncate\b/);
+    expect(contextCapsuleReasonClass).toMatch(/\btruncate\b/);
+  });
+```
+
 - [ ] **Step 6: 跑测试**
 
 Run: `cd web && npx vitest run --project integration src/product/terminal/capsule && npx vitest run --project unit src/app/__tests__/unit/capsulePresence.test.ts`
