@@ -197,16 +197,24 @@ export const capsuleShellAppDockBottomClass =
 export const contextCapsuleDockClass = 'mb-[length:var(--context-capsule-margin-bottom)]';
 
 /**
- * The surface itself: the shell's own treatment (one Capsule language), a FIXED
- * height that no sense state can change (SC-44), and clipping so the scrolling
- * row inside cannot paint past the corners.
+ * The surface itself: the shell's own treatment (one Capsule language), a height
+ * CEILING rather than a height, and clipping so the scrolling row inside cannot
+ * paint past the corners.
+ *
+ * It takes its content's height and clamps only at the ceiling, so a list of
+ * three capabilities is three rows tall instead of reserving the rows it does
+ * not have. SC-44 still holds, but no longer by construction: the flat list
+ * renders every capability, so the three sense states differ in row *order* and
+ * never in row *count* — which is why the pair does not resize as senses come
+ * and go. That invariant is asserted rather than assumed (the contract's
+ * `maxHeightToken` plus the equal-height comparison across states).
  *
  * The radius is `semantic.radius-capsule` on both experiences rather than the
  * Web shell's pill: a pill radius is what a 32px one-row box wears, and this is
- * a tall multi-row surface. It is also what `pattern.context-capsule` pins.
+ * a multi-row surface. It is also what `pattern.context-capsule` pins.
  */
 export const contextCapsuleSurfaceClass = [
-  'pointer-events-auto flex h-[length:var(--context-capsule-height)] w-full flex-col overflow-hidden',
+  'pointer-events-auto flex max-h-[length:var(--context-capsule-max-height)] w-full flex-col overflow-hidden',
   'rounded-[var(--radius-capsule)]',
   // The surface carries the padding, not the rows: `pattern.context-capsule`
   // pins `padXToken` here, and it is what insets a row's hover and focus ring
@@ -222,6 +230,12 @@ export const contextCapsuleScrollClass = 'min-h-0 flex-1 overflow-y-auto overscr
  * One row: a whole-row control, two lines tall by design (title + reason), with
  * the icon slot reserved whether or not a glyph arrived so the titles stay
  * aligned down the list.
+ *
+ * `min-h` is a floor, so the row band is only uniform if the two lines fit
+ * inside it — which is what `rowLineHeight` is for on the text below. Without an
+ * explicit leading they inherited the document's 1.5 (24px a line at this
+ * experience's 1rem text, so 48px for the pair) and a sensed row measured 4px
+ * taller than an ordinary one, changing the list's rhythm with the sense state.
  */
 export const contextCapsuleRowClass = [
   'flex w-full min-h-[length:var(--context-capsule-row-height)] items-center gap-[length:var(--terminal-capsule-control-gap)]',
@@ -250,11 +264,21 @@ export const contextCapsuleMarkerSlotClass =
 export const contextCapsuleMarkerClass =
   'size-[length:var(--context-capsule-marker-size)] rounded-full bg-foreground';
 
+/**
+ * The row's two lines, and the leading that keeps the pair inside one band.
+ *
+ * `leading-` is not decoration here: with only a font-size set, both lines
+ * inherited the document's line-height, and the pair came to 48px against a
+ * 44px row. One `rowLineHeight` on both lines puts them at 40px — the size the
+ * band was chosen for (see the token's own note) — so an ordinary row and a
+ * sensed row are the same height and the list does not change rhythm as senses
+ * come and go.
+ */
 export const contextCapsuleTitleClass =
-  'truncate text-[length:var(--terminal-capsule-font-size)] text-foreground';
+  'truncate text-[length:var(--terminal-capsule-font-size)] leading-[length:var(--context-capsule-row-line-height)] text-foreground';
 
 export const contextCapsuleReasonClass =
-  'truncate text-[length:var(--terminal-capsule-caption-font-size)] text-muted-foreground';
+  'truncate text-[length:var(--terminal-capsule-caption-font-size)] leading-[length:var(--context-capsule-row-line-height)] text-muted-foreground';
 
 export const capsuleComposerGridGapClass = 'gap-[length:var(--terminal-capsule-row-gap)]';
 

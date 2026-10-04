@@ -154,8 +154,8 @@ Eligibility is declared by the capability, beside the body that does the peeking
 > second selection path, a second state story, and no way to be *sensed*, at
 > exactly the moment the Context Capsule was being built to speak one
 > protocol for every capability. Terminal Keys is a **Peek**: it is sensed by
-> context on App (SC-37), a sensed row opens it directly at Peek, and the
-> ordinary list walks Signal -> Peek like any other.
+> context on App (SC-37), and it opens at Peek from the ordinary list exactly as
+> it does from a sensed row — one step, the same as any other capability.
 
 The examples above are therefore a list of **capabilities**, not of entry items. Git, Terminal Keys and Claude Code are all listed.
 

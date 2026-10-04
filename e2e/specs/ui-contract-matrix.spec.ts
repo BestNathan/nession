@@ -19,6 +19,7 @@ import {
   expectRadius,
   expectSingleLine,
   expectTokenHeight,
+  expectTokenMaxHeight,
   expectTouchTarget,
   expectTouchTargetsWithin,
   expectVisibleWithin,
@@ -106,13 +107,16 @@ async function assertPopupMenu(
  * Open the Context Capsule from `+` and hold it to `pattern.context-capsule`
  * (#1347 SC-41–44).
  *
- * Three claims, and the third is the one the criteria are actually about:
+ * Four claims, and the last two are the ones the criteria are actually about:
  *
- * 1. the surface is the size the contract pins, with the contract's radius,
- *    padding and row band — a Capsule, not a menu;
+ * 1. the surface is within the contract's height CEILING and shorter than it, so
+ *    it is sized by its content rather than by a box — with the contract's
+ *    radius, padding and row band. A Capsule, not a menu;
  * 2. it owns its own scroll, so a long list scrolls rather than pushing the
  *    Capsule Zone around;
- * 3. opening it does not move the Conversation Capsule below it, and the gap
+ * 3. every row is exactly one row band, so the list does not change rhythm with
+ *    the sense state;
+ * 4. opening it does not move the Conversation Capsule below it, and the gap
  *    between the two *is* the inter-Capsule token. The lower capsule's box is
  *    read before and after, because "it stays put" is the criterion and a
  *    screenshot cannot prove a negative.
@@ -134,28 +138,52 @@ async function assertContextCapsule(
   await expect(surface).toBeVisible();
   await waitForSettledBox(surface);
 
-  await expectTokenHeight(surface, opts);
+  await expectTokenMaxHeight(surface, opts);
   await expectRadius(surface, opts);
   await expectPaddingX(surface, opts);
   await expectNoUnexpectedOverflow(surface, opts);
+
+  const surfaceBox = await surface.boundingBox();
+  expect(surfaceBox).not.toBeNull();
+
+  // The half `expectTokenMaxHeight` structurally cannot see. A surface whose
+  // content is taller than its ceiling measures the ceiling whether the class is
+  // `max-h-` or `h-`, so "at most the ceiling" passes on a fixed height too —
+  // and this fixture lists three capabilities, well under the ceiling, so a
+  // content-sized surface comes in strictly shorter. If this ever fails, either
+  // the fixture grew past the ceiling (adjust the assertion, deliberately) or
+  // `max-h-` quietly became `h-` again, which is the regression it exists for.
+  expect(block.maxHeightTokenPx).toBeDefined();
+  expect(surfaceBox!.height).toBeLessThan(block.maxHeightTokenPx!);
+
+  // …and the same fact from inside: the list is not scrolling, because it is
+  // exactly as tall as what it holds rather than as tall as a box.
+  const scrolls = await page
+    .getByTestId('capsule-context-scroll')
+    .evaluate((el) => el.scrollHeight > el.clientHeight);
+  expect(scrolls).toBe(false);
 
   const rows = surface.locator('[data-context-row]');
   const rowCount = await rows.count();
   expect(rowCount).toBeGreaterThan(0);
   for (let i = 0; i < rowCount; i += 1) {
-    // The row band is a floor, not a fixed height: a sensed row carries a title
-    // and a line of reason, and growing for that is the design — the contract
-    // pins `rowHeightToken` as the band every row starts from.
+    // One band, not "at least one band". This used to be a `>=` with the comment
+    // "growing for that is the design", and that was wrong twice over: the
+    // pattern doc lists rows of unequal height as an anti-pattern ("so the list
+    // does not jitter between sense states"), and the row's two lines only
+    // overflowed the band because no leading was set — 48px against 44px, which
+    // the fixed surface height used to hide. Now that the height is a ceiling
+    // the difference would show up between sense states, so the band is asserted
+    // as a band.
     const box = await rows.nth(i).boundingBox();
     expect(box).not.toBeNull();
-    expect(box!.height).toBeGreaterThanOrEqual((block.rowHeightTokenPx ?? 0) - 1);
+    expect(Math.abs(box!.height - (block.rowHeightTokenPx ?? 0))).toBeLessThanOrEqual(1);
     await expectTouchTargetsWithin(rows.nth(i), opts);
   }
 
   // The lower Capsule is the anchor: same box, and the gap between the two is
   // the token rather than a measured guess (#1347 SC-41/SC-43).
   const shellAfter = await page.getByTestId('capsule-shell').boundingBox();
-  const surfaceBox = await surface.boundingBox();
   expect(shellAfter).toEqual(shellBefore);
 
   // The gap *is* the surface's own bottom margin — read from the element and
@@ -179,6 +207,95 @@ async function assertContextCapsule(
 }
 
 // ── Web experience ─────────────────────────────────────────────────────────
+
+/**
+ * The upper surface's own box in one fixture route, opened from `+` and closed
+ * again, so two states can be compared without a reload in between.
+ */
+async function contextCapsuleBoxInState(
+  page: import('@playwright/test').Page,
+  route: string,
+): Promise<{ width: number; height: number }> {
+  await page.goto(route);
+  await expect(page.getByTestId('capsule-capability-more')).toBeVisible();
+  await page.getByTestId('capsule-capability-more').click();
+
+  const surface = page.getByTestId('capsule-context-disclosure');
+  await expect(surface).toBeVisible();
+  await waitForSettledBox(surface);
+
+  const box = await surface.boundingBox();
+  expect(box).not.toBeNull();
+
+  await page.keyboard.press('Escape');
+  await expect(surface).toHaveCount(0);
+
+  return { width: box!.width, height: box!.height };
+}
+
+/**
+ * SC-44, asserted rather than assumed.
+ *
+ * "Work/no-work/context-only use the exact same upper Capsule shell, geometry,
+ * animation and dismissal behavior" used to be true *by construction*: the
+ * surface's height was a token, so no state could change it and no test needed
+ * to say so. Now the height is a ceiling, and the property rests on an
+ * invariant instead — the flat list renders every capability, so the states
+ * differ in row ORDER and never in row COUNT — which means nothing enforces it
+ * unless a test does.
+ *
+ * The App routes are the ones that can express the difference. On App a Session
+ * always senses Terminal Keys, so `/#/fixture/app` has one sensed row (two lines)
+ * and `?pane=claude.exe` adds a second; before the row-band fix those rows
+ * measured 48px against an ordinary row's 44, so the two states came out 4px
+ * apart. Web cannot vary its sense state at all — the Web fixture drives no
+ * pane command and never senses Terminal Keys — so this runs where it can.
+ */
+async function assertSameHeightAcrossSenseStates(
+  page: import('@playwright/test').Page,
+): Promise<void> {
+  const contextOnly = await contextCapsuleBoxInState(page, '/#/fixture/app');
+  const working = await contextCapsuleBoxInState(page, '/#/fixture/app?pane=claude.exe');
+
+  expect(working).toEqual(contextOnly);
+}
+
+/**
+ * Picking a row opens the detail, and the detail is where the Workspace is
+ * reached from.
+ *
+ * This is the assertion the interaction change exists for, and it is written
+ * against an ORDINARY row on purpose: `select()` used to route a sensed row to
+ * the Peek and an ordinary row to the Signal, so the ordinary row is the half
+ * that was wrong. `capsule-capability-open-workspace` is drawn only at Peek
+ * depth, so asserting it is visible is the same claim as "the workspace is one
+ * step from here" — and on the old code this row produced a Signal with no
+ * destination at all.
+ */
+async function assertRowOpensDetail(
+  page: import('@playwright/test').Page,
+  route: string,
+): Promise<void> {
+  await page.goto(route);
+  await expect(page.getByTestId('capsule-capability-more')).toBeVisible();
+  await page.getByTestId('capsule-capability-more').click();
+
+  const surface = page.getByTestId('capsule-context-disclosure');
+  await expect(surface).toBeVisible();
+
+  const ordinary = surface.locator('[data-context-row="ordinary"]').first();
+  await expect(ordinary).toBeVisible();
+  await ordinary.click();
+
+  const peek = page.getByTestId('capsule-capability-projection');
+  await expect(peek).toBeVisible();
+  await expect(peek).toHaveAttribute('data-depth', 'peek');
+
+  // Git and Claude Code have Workspace views, so one of them is always reachable
+  // here; Terminal Keys would not be, and has no business being the first
+  // ordinary row.
+  await expect(page.getByTestId('capsule-capability-open-workspace')).toBeVisible();
+}
 
 for (const row of viewports.filter((v) => v.experience === 'web')) {
   test.describe(`${row.id} ${row.width}×${row.height}`, () => {
@@ -217,6 +334,10 @@ for (const row of viewports.filter((v) => v.experience === 'web')) {
       await expect(page.getByTestId('terminal-capsule')).toBeVisible();
 
       await assertContextCapsule(page, 'web', row.id);
+    });
+
+    test('picking an ordinary capability opens its detail, and the Workspace from there', async ({ page }) => {
+      await assertRowOpensDetail(page, '/#/fixture');
     });
 
     test('terminal capsule controls hold the control token height', async ({ page }) => {
@@ -458,6 +579,14 @@ for (const row of viewports.filter((v) => v.experience === 'app')) {
       await expect(page.getByTestId('capsule-capability-more')).toBeVisible();
 
       await assertContextCapsule(page, 'app', row.id);
+    });
+
+    test('the Context Capsule is one height in every sense state (#1347 SC-44)', async ({ page }) => {
+      await assertSameHeightAcrossSenseStates(page);
+    });
+
+    test('picking an ordinary capability opens its detail, and the Workspace from there', async ({ page }) => {
+      await assertRowOpensDetail(page, '/#/fixture/app');
     });
 
     test('terminal capsule controls meet the App touch target', async ({ page }) => {

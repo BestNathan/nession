@@ -39,12 +39,7 @@ function setup(overrides: { session?: Session | null; experience?: 'web' | 'app'
       view.result.current.capabilities.disclosure?.onSelect(id);
     });
 
-  const chooseAtPeek = (id: CapabilityId) =>
-    act(() => {
-      view.result.current.capabilities.disclosure?.onSelectAtPeek?.(id);
-    });
-
-  return { ...view, initialProps, choose, chooseAtPeek, onToolChange, onSurfaceChange, onOpenWorkspace };
+  return { ...view, initialProps, choose, onToolChange, onSurfaceChange, onOpenWorkspace };
 }
 
 describe('capsule emergence', () => {
@@ -54,15 +49,20 @@ describe('capsule emergence', () => {
     expect(result.current.projection).toBeUndefined();
   });
 
-  it('emerges a Signal for a capability that has a Terminal depth', () => {
+  it('opens every chosen capability at Peek depth — the detail — and not at Signal', () => {
+    // `capability-emergence.md`: `+` is "the explicit entry for *peeking*", and a
+    // capability is "opened explicitly into a Peek". An ordinary row used to
+    // open the Signal depth instead, so picking Git showed a compact summary
+    // with no detail and — since the Workspace destination is drawn only at
+    // Peek — no way on to the Workspace either. Choosing is asking to look at
+    // something, so it lands on the detail.
     const { result, choose, onSurfaceChange } = setup();
 
     choose('git');
 
     expect(result.current.projection?.id).toBe('git');
-    expect(result.current.projection?.depth).toBe('signal');
-    // Choosing it must not steal the work surface — that is the whole point of
-    // a Signal existing.
+    expect(result.current.projection?.depth).toBe('peek');
+    // Still not a launcher: opening the detail must not steal the work surface.
     expect(onSurfaceChange).not.toHaveBeenCalled();
   });
 
@@ -74,26 +74,20 @@ describe('capsule emergence', () => {
     expect(result.current.projection?.title).toBe('Git');
   });
 
-  it('emerges a Peek directly when chosen at Peek depth (#1347 SC-20)', () => {
-    // The Context Disclosure's sensed rows select through `onSelectAtPeek`: the capability is
-    // already the subject of the surface the user is leaving, so skipping the
-    // Signal it would otherwise open at is the point, not a shortcut.
-    const { result, chooseAtPeek, onSurfaceChange } = setup();
-
-    chooseAtPeek('git');
-
-    expect(result.current.projection?.id).toBe('git');
-    expect(result.current.projection?.depth).toBe('peek');
-    // A Peek from the Work Overview still must not take the work surface.
-    expect(onSurfaceChange).not.toHaveBeenCalled();
-  });
-
-  it('opens the Signal to a Peek, one level at a time', () => {
+  it('keeps the Signal a step away, reached by stepping back out of the Peek', () => {
+    // Signal is not gone — it is what a dismissed Peek steps back to, and what
+    // Nession shows on its own when a capability earns presence. What changed is
+    // that choosing no longer *lands* there. This is the only path from a Peek
+    // to a Signal now, so the "one level at a time" step is asserted through it.
     const { result, choose } = setup();
 
     choose('git');
-    act(() => result.current.projection?.onDeeper?.());
+    expect(result.current.projection?.depth).toBe('peek');
 
+    act(() => result.current.projection?.onDismiss());
+    expect(result.current.projection?.depth).toBe('signal');
+
+    act(() => result.current.projection?.onDeeper?.());
     expect(result.current.projection?.depth).toBe('peek');
   });
 
@@ -103,16 +97,18 @@ describe('capsule emergence', () => {
     const { result, choose } = setup();
 
     choose('git');
-    act(() => result.current.projection?.onDeeper?.());
     act(() => result.current.projection?.onDismiss());
 
     expect(result.current.projection?.depth).toBe('signal');
   });
 
   it('closes the Signal to dormant', () => {
+    // Two dismissals now: the first steps the Peek back to its Signal, the
+    // second closes that.
     const { result, choose } = setup();
 
     choose('git');
+    act(() => result.current.projection?.onDismiss());
     act(() => result.current.projection?.onDismiss());
 
     expect(result.current.projection).toBeUndefined();
@@ -123,15 +119,15 @@ describe('capsule emergence', () => {
     // assert: a pane running `claude.exe` lights the *Work Ring* — that is the
     // ambient representation — and the observed-command path must stand down,
     // or one fact arrives three times (auto Signal, ring, disclosure).
-    const { result, chooseAtPeek, onSurfaceChange } = setup({
+    const { result, choose, onSurfaceChange } = setup({
       session: session('s1', 'claude.exe'),
     });
 
     expect(result.current.projection).toBeUndefined();
 
     // …and the user's own move still deepens it: choosing the sensed row in
-    // the Context Disclosure opens the Peek directly (SC-20).
-    chooseAtPeek('claude-code');
+    // the Context Disclosure opens the Peek (SC-20).
+    choose('claude-code');
 
     expect(result.current.projection?.id).toBe('claude-code');
     expect(result.current.projection?.depth).toBe('peek');
@@ -139,20 +135,23 @@ describe('capsule emergence', () => {
     expect(onSurfaceChange).not.toHaveBeenCalled();
   });
 
-  it('walks the ordinary Signal -> Peek protocol for Terminal Keys (SC-38)', () => {
-    // This test used to assert the opposite — the accessory had no deeper step
-    // because it *was* its own body. The 2026-10-03 review retired that family
-    // (SC-38): Terminal Keys has a Peek like any other capability, so the
-    // ordinary list opens its Signal and the title offers the step into it.
+  it('opens Terminal Keys at Peek like any other capability (SC-38)', () => {
+    // This test has asserted two different shapes. It first asserted the
+    // opposite — the accessory had no deeper step because it *was* its own
+    // body. The 2026-10-03 review retired that family (SC-38): Terminal Keys
+    // has a Peek like any other capability. It then asserted the ordinary
+    // Signal -> title -> Peek walk, which no longer exists either — choosing
+    // lands on the detail for every capability, so there is only one protocol
+    // to walk and one step to walk it in.
     const { result, choose } = setup();
+
     choose('terminal-keys');
 
     expect(result.current.projection?.id).toBe('terminal-keys');
-    expect(result.current.projection?.depth).toBe('signal');
-
-    act(() => result.current.projection?.onDeeper?.());
-
     expect(result.current.projection?.depth).toBe('peek');
+    // No Workspace view, so no destination is offered from here — the shape
+    // SC-38 kept, expressed by the capability having no view binding.
+    expect(result.current.projection?.onOpenWorkspace).toBeUndefined();
   });
 
   it('senses Terminal Keys by context on App, and only there (SC-37)', () => {
@@ -224,6 +223,9 @@ describe('capsule emergence', () => {
     const { result, choose } = setup();
 
     choose('git');
+    // Out of the Peek, then out of the Signal it steps back to — two dismissals
+    // now that choosing lands on the detail.
+    act(() => result.current.projection?.onDismiss());
     act(() => result.current.projection?.onDismiss());
     expect(result.current.projection).toBeUndefined();
 

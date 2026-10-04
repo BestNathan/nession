@@ -92,24 +92,38 @@ export function useCapsuleCapability(
   });
 
   /**
-   * Choosing a capability emerges it beside the capsule.
+   * Choosing a capability opens it at Peek depth — the detail.
    *
-   * **There is no path from here to the Workspace** (#1046). This used to fall
-   * back to `onToolChange` + `onSurfaceChange` for anything without a
+   * **Selecting an item is asking to look at it**, and `capability-emergence.md`
+   * says so in its own words: `+` is "the explicit entry for *peeking*", and a
+   * capability is "opened explicitly into a Peek". This used to open the Signal
+   * depth for an ordinary row while a sensed row went straight to Peek, which
+   * meant clicking Git showed a compact summary with no detail and — because
+   * the Workspace destination is drawn only at Peek — no way on to the
+   * Workspace either. The two callbacks that expressed that split are one now.
+   *
+   * Signal is untouched by this: it is still what Nession shows when a
+   * capability earns presence on its own, and it is still where a dismissed
+   * Peek steps back to (see `onDismiss`). What is gone is only the idea that
+   * *explicitly* choosing a capability should show less than choosing nothing.
+   *
+   * **There is still no path from here to the Workspace** (#1046). This used to
+   * fall back to `onToolChange` + `onSurfaceChange` for anything without a
    * projection, which made the entry a shortcut into the Workspace and is the
    * behaviour the requirement removes: selecting a capsule item must not change
    * surface. That fallback is gone rather than guarded, because the entry can
    * no longer offer a capability without a Terminal depth — `CAPSULE_ENTRY_IDS`
    * decides what reaches `choose` at all, so the branch it guarded is
-   * unreachable by construction rather than by care.
+   * unreachable by construction rather than by care. The Peek is where the way
+   * deeper lives, and the user takes it deliberately from there.
    */
   const choose = useCallback(
     (id: CapabilityId) => {
       setEmergence((current) => ({
         chosen: id,
-        opened: false,
+        opened: true,
         // Choosing it again is how a dismissal is undone — otherwise there
-        // would be no way back to a Signal the user closed.
+        // would be no way back to a projection the user closed.
         dismissed: current.dismissed.filter((candidate) => candidate !== id),
       }));
     },
@@ -117,23 +131,6 @@ export function useCapsuleCapability(
     // from it, and the entry can no longer offer a capability that would need
     // it. A dependency kept "just in case" is one that re-creates the callback
     // for reasons the callback does not have.
-    [],
-  );
-
-  /**
-   * Choose at Peek depth (#1347 SC-20): a sensed row in the Context Disclosure opens Peek.
-   *
-   * Same as `choose` but sets `opened: true` so the capability emerges at Peek
-   * depth instead of Signal. Used by the Context Disclosure's sensed rows (SC-20).
-   */
-  const chooseAtPeek = useCallback(
-    (id: CapabilityId) => {
-      setEmergence((current) => ({
-        chosen: id,
-        opened: true,
-        dismissed: current.dismissed.filter((candidate) => candidate !== id),
-      }));
-    },
     [],
   );
 
@@ -189,7 +186,6 @@ export function useCapsuleCapability(
             disclosure: {
               entries: resolution.entries,
               onSelect: choose,
-              onSelectAtPeek: chooseAtPeek,
               sensedContext: resolveSensedContext(
                 resolution.entries,
                 {

@@ -61,6 +61,10 @@
         "minHeightToken": {
           "$ref": "#/$defs/tokenRef"
         },
+        "maxHeightToken": {
+          "$ref": "#/$defs/tokenRef",
+          "description": "Ceiling for a surface that takes its content's natural height and clamps only here (pattern.context-capsule). Distinct from heightToken, which pins the box: a max-height surface is asserted to be AT MOST this and, when its content is shorter, strictly less — otherwise the assertion cannot tell a ceiling from a height and the field would be a rename rather than a change. Resolved value must be px-measurable."
+        },
         "overflow": {
           "$ref": "#/$defs/overflow"
         },

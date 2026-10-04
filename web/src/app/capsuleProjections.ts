@@ -146,11 +146,12 @@ export interface CapsuleProjectionBinding {
 /**
  * Capabilities that can say anything in the Terminal, in registration order.
  *
- * Only these get a Signal when chosen in the capability entry. Everything else
- * keeps the behaviour it had: choosing it opens its Workspace view. A capability
- * absent from this list is not broken — it simply has no shallower depth to
- * deepen into, which is exactly what `capability-emergence.md` means by a
- * Terminal-local capability stopping at the Terminal.
+ * Only these are offered in the capability entry, and choosing one of them opens
+ * its Peek. Everything else keeps the behaviour it had: choosing it opens its
+ * Workspace view. A capability absent from this list is not broken — it simply
+ * has no shallower depth to deepen into, which is exactly what
+ * `capability-emergence.md` means by a Terminal-local capability stopping at the
+ * Terminal.
  */
 const CAPSULE_PROJECTIONS: readonly CapsuleProjectionBinding[] = [
   claudeCodeProjection,

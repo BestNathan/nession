@@ -1,6 +1,6 @@
 {
   "id": "pattern.context-capsule",
-  "$description": "The upper Capsule of the stacked pair (#1347 SC-41–44): what `+` opens on the Terminal capsule. One flat list — the capabilities sensed right now first (work-sensed, then context-sensed), the ordinary catalog below them — in one bounded surface whose height is FIXED. It is contracted separately from `pattern.terminal-capsule` because every measurable thing about it differs in kind, not in degree: the shell does not resize with its content (the sense state changes rows, never geometry), its rows are not the experience's control band (a sensed row carries a title and a line of reason, so it is taller than any band on purpose — `rowHeightToken`, not `heightToken`), and it collapses nothing into a menu. What it shares with `popup-menu` is only the shape a reader might mistake it for; that pattern's own rationale runs the other way here — a portalled popup inherits no experience scope, while this surface is rendered inside the capsule's dock, which is where it gets the scope, the App exchange transform, and the right to be a sibling of the shell rather than a floating panel. Its trigger is not this pattern's: `+` belongs to `terminal-capsule`, and this block pins what that trigger opens — the surface's fixed height and radius, its rows' height, its horizontal padding, that it owns its own scroll, and, on App, that every row meets the touch floor. What it does NOT pin is the inter-Capsule gap: that is `experience.<x>.contextCapsule.marginBottom`, asserted against the token in the browser, because the claim is that the lower Capsule does not move rather than that a box is a size.",
+  "$description": "The upper Capsule of the stacked pair (#1347 SC-41–44): what `+` opens on the Terminal capsule. One flat list — the capabilities sensed right now first (work-sensed, then context-sensed), the ordinary catalog below them — in one bounded surface whose height is a CEILING. It is contracted separately from `pattern.terminal-capsule` because every measurable thing about it differs in kind, not in degree: the surface takes its content's height and clamps only at the ceiling (so a short list is short rather than reserving dead space), its rows are not the experience's control band (a sensed row carries a title and a line of reason, and `rowLineHeight` is what keeps those two lines inside the one `rowHeight` band every row shares — without it a sensed row stood 4px prouder than an ordinary one and the list's rhythm changed with the sense state), and it collapses nothing into a menu. What it shares with `popup-menu` is only the shape a reader might mistake it for; that pattern's own rationale runs the other way here — a portalled popup inherits no experience scope, while this surface is rendered inside the capsule's dock, which is where it gets the scope, the App exchange transform, and the right to be a sibling of the shell rather than a floating panel. Its trigger is not this pattern's: `+` belongs to `terminal-capsule`, and this block pins what that trigger opens — the surface's height ceiling and radius, its rows' band and leading, its horizontal padding, that it owns its own scroll, and, on App, that every row meets the touch floor. What it does NOT pin is the inter-Capsule gap: that is `experience.<x>.contextCapsule.marginBottom`, asserted against the token in the browser, because the claim is that the lower Capsule does not move rather than that a box is a size.",
   "extends": [
     "category.chrome"
   ],
@@ -9,7 +9,7 @@
     "justify": "start",
     "wrap": true,
     "radiusToken": "semantic.radius-capsule",
-    "heightToken": "experience.web.contextCapsule.height",
+    "maxHeightToken": "experience.web.contextCapsule.maxHeight",
     "rowHeightToken": "experience.web.contextCapsule.rowHeight",
     "padXToken": "experience.web.terminalCapsule.shellPadX",
     "overflow": "scroll",
@@ -19,7 +19,7 @@
     "justify": "start",
     "wrap": true,
     "radiusToken": "semantic.radius-capsule",
-    "heightToken": "experience.app.contextCapsule.height",
+    "maxHeightToken": "experience.app.contextCapsule.maxHeight",
     "rowHeightToken": "experience.app.contextCapsule.rowHeight",
     "padXToken": "experience.app.terminalCapsule.shellPadX",
     "overflow": "scroll",

@@ -430,13 +430,17 @@
       "$description": "The inter-Capsule gap: the deliberate space between the upper Context Capsule and the resting Conversation Capsule below it (#1347 SC-43). The same value as projectionMarginBottom so a list-to-Peek swap does not jump the gap, but a separate leaf because the two pairs may diverge — a Peek is read while typing, the list is a place you stop.",
       "value": "0.5rem"
     },
-    "height": {
-      "$description": "FIXED height of the upper Context Capsule, identical in every sense state — quiet, working, context-only (#1347 SC-44). Content beyond it scrolls inside the surface, and a short list leaves the surface this tall: the stability is the point, because the lower Capsule must not move as rows come and go. Equal to this experience's projectionMaxHeight, the region above this dock has already been proven to hold that much.",
+    "maxHeight": {
+      "$description": "Ceiling for the upper Context Capsule (#1347 SC-44). The surface takes its content's natural height and only clamps here, so a short list is short instead of reserving room for rows that do not exist; content beyond the ceiling scrolls inside it. A ceiling rather than a height because the flat list renders every capability, so quiet, working and context-only differ in row ORDER and never in row COUNT — the pair still does not resize as senses come and go, which is the stability a fixed height was protecting, but it now comes from the list's own invariant rather than from a box. Equal to this experience's projectionMaxHeight, so deepening the list into a Peek can reach the same ceiling, and the region above this dock has already been proven to hold that much.",
       "value": "18rem"
     },
     "rowHeight": {
       "$description": "One capability row in the Context Capsule: capability icon, title, and one line of reason for a sensed capability (#1347 SC-19/SC-42). 44px on both experiences — two lines of text need at least 40, and on App this is exactly the touch floor, so a row is a legal App target by construction.",
       "value": "2.75rem"
+    },
+    "rowLineHeight": {
+      "$description": "Leading inside one Context Capsule row, and the missing half of the decision above. Two lines — the title, and the sensed row's reason — have to fit the 44px band, and nothing else pinned this: both line classes set only a font-size, so they inherited the document's 1.5, which at the capsule's 1rem text is 24px a line. A sensed row therefore measured 48px and stood 4px prouder than an ordinary one, so the list's rhythm changed with the sense state — the anti-pattern context-capsule.md names, and invisible while the surface was a fixed 18rem tall. 20px a line puts the pair at the 40px the band was sized for (see rowHeight) and makes every row exactly one band.",
+      "value": "1.25rem"
     },
     "markerSize": {
       "$description": "The presence mark beside an ordinary row's title: a capability the session actually needs. The same 5px as the shell's status dot on purpose — both are 'a quiet mark beside text' rather than a badge — but a separate leaf, because that one answers service health while this answers capability presence, and the design system's rule is that an equal resolved value does not make two names interchangeable.",

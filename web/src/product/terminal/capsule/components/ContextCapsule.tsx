@@ -113,11 +113,11 @@ export function ContextCapsule({ disclosure, workContext, onDismiss, triggerRef 
   }, [onDismiss, sensedCount]);
 
   const select = (row: ContextRow) => {
-    // A sensed row deepens straight to its Peek (SC-20/SC-38); an ordinary row
-    // walks the depth its own binding declares. Either way the surface closes,
-    // because the Peek takes this same slot.
-    const choose = row.kind === 'ordinary' ? disclosure.onSelect : disclosure.onSelectAtPeek ?? disclosure.onSelect;
-    choose(row.capabilityId);
+    // Every row opens its capability at Peek depth — the detail (#1347 SC-20).
+    // Sensed and ordinary rows behave alike: picking something in this list is
+    // asking to look at it, and the Peek is where the way on to the Workspace
+    // lives. The surface closes because the Peek takes this same slot.
+    disclosure.onSelect(row.capabilityId);
     onDismiss();
   };
 
