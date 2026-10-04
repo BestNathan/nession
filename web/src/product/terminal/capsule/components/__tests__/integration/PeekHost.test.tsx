@@ -162,7 +162,7 @@ describe('capability projection frame', () => {
     expect(visual?.className).toContain('var(--control-visual-size)');
   });
 
-  it('typesets Nession-owned Peek chrome with canonical roles', () => {
+  it('typesets Nession-owned Peek chrome with canonical roles without leaking them into the body', () => {
     renderFrame(projection());
 
     expect(screen.getByTestId('capsule-capability-title').className).toContain(
@@ -172,6 +172,14 @@ describe('capability projection frame', () => {
       'terminal-capsule-projection-font-size',
     );
     expect(screen.getByTestId('capsule-capability-open-workspace').className).toContain(
+      'var(--typography-body-size)',
+    );
+
+    // The host owns title/actions, not the capability body's inherited type
+    // context. Putting a role on the root makes a new capability silently pick
+    // up Nession host typography even when its own controls have different
+    // workload semantics (Terminal Keys exposed this in #1446 visual review).
+    expect(screen.getByTestId('capsule-capability-projection').className).not.toContain(
       'var(--typography-body-size)',
     );
   });
