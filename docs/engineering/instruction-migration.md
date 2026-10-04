@@ -71,14 +71,14 @@ This is the section-level classification used for the Skill rewrite.
 | nession-development | Batch Development by Label; Quick Reference; Common Mistakes | concise batch/stop conditions in development entrypoint |
 | nession-cicd | Overview; Deployment Monitoring; Iron Laws | CI/CD entrypoint + root/development link for worktrees |
 | nession-cicd | Development Flow; release staging->main; merge strategy | CI/CD entrypoint; live workflow files remain executable truth |
-| nession-cicd | ArgoCD/GitOps; version bump; direct-to-main; main/staging movement | CI/CD entrypoint + `.github/AGENTS.md` + workflow owners |
+| nession-cicd | ArgoCD/GitOps; version bump; direct-to-main; main/staging movement | `nession-cicd` owns branch-route/version decisions; `.github/AGENTS.md` owns workflow-local exception/trust rules; workflow YAML owns executable triggers |
 | nession-cicd | Requirement Acceptance; issue auto-close | `nession-acceptance` + deterministic validator; CI/CD only routes it |
 | nession-cicd | Pipeline architecture; troubleshooting | CI/CD entrypoint uses failing boundary classification and live workflows |
 | nession-code-review | review modes; baseline; invariant; data path | concise review entrypoint |
 | nession-code-review | concurrency checklist; lifecycle/reconnect | review entrypoint + nearest runtime scoped owner |
 | nession-code-review | protocol review | `crates/nession-protocol/AGENTS.md` + `docs/architecture/protocol.md` |
 | nession-code-review | tests-as-proof; issue comparison; severity; evidence | concise review entrypoint |
-| nession-code-review | issue lifecycle; fix ordering; Nession-specific heuristics | owner-specific guidance + concise stop/output workflow |
+| nession-code-review | issue lifecycle; fix ordering; Nession-specific heuristics | review Skill links to canonical reopen-vs-new lifecycle in `nession-writing-requirements`; concise review stop/output workflow remains here |
 | nession-writing-requirements | classify; hard rules; automated audit | concise issue-authoring entrypoint + `scripts/issue-contract.mjs` |
 | nession-writing-requirements | executable acceptance | `nession-acceptance` + acceptance validator |
 | nession-writing-requirements | Requirement body/commands/conversation history | concise canonical templates/workflow |
