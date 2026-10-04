@@ -201,14 +201,16 @@ function ContextRowButton({
         {Icon ? <Icon className="size-[length:var(--icon-md)]" /> : null}
       </span>
       <span className="flex min-w-0 flex-1 flex-col">
-        {/* Only an `unavailable` capability is muted. An `available` one is
-            reachable and listed for exactly that reason (SC-35), so drawing
-            it in the disabled colour said the opposite of what the row is:
-            `available` and `relevant` now read alike, and the 5px mark is
-            what tells them apart. */}
-        <span className={cn(contextCapsuleTitleClass, row.state === 'unavailable' && 'text-muted-foreground')}>
-          {row.title}
-        </span>
+        {/* No muted state, because this list has none to draw: the entries come
+            from `disclosure.discoverable`, and `resolveCapabilityPresences` maps
+            `unavailable` to `hidden` (`product/capability/presence.ts`), which
+            `resolveCapabilityDisclosure` keeps out of that bucket. A capability
+            the registry calls unavailable is not listed here at all.
+
+            So every title renders at full strength, and the mark is what tells
+            a needed capability from a merely listed one — presence is drawn,
+            not coloured. */}
+        <span className={contextCapsuleTitleClass}>{row.title}</span>
         {row.reason === undefined ? null : (
           <span className={contextCapsuleReasonClass}>{row.reason}</span>
         )}
