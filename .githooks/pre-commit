@@ -12,8 +12,9 @@ NC='\033[0m'
 
 STAGED_RUST=$(git diff --cached --name-only --diff-filter=ACM | grep '\.rs$' || true)
 STAGED_TSX=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(ts|tsx)$' | grep '^web/' || true)
-STAGED_ALL=$(git diff --cached --name-only --diff-filter=ACM)
+STAGED_ALL=$(git diff --cached --name-only)
 STAGED_DESIGN=$(echo "$STAGED_ALL" | grep -E '^(design/|docs/design/|web/src/|web/eslint-plugin-nession/|scripts/check-design-tokens|\.claude/skills/nession-web-design/|justfile$)' || true)
+STAGED_INSTRUCTIONS=$(echo "$STAGED_ALL" | grep -E '(^|/)(AGENTS|CLAUDE)\.md$|^\.agents/|^\.claude/skills/|^\.githooks/pre-commit$|^\.github/workflows/quality\.yml$|^scripts/instruction-contract(\.test)?\.mjs$|^docs/engineering/instruction-(architecture|migration|scenarios)\.md$|^gates/checks/instruction-contract\.sh$|^gates/suites/(pre-commit|quality-web|quality)\.gates$' || true)
 
 if [ -z "$STAGED_ALL" ]; then
   exit 0
@@ -148,6 +149,17 @@ if [ -n "$STAGED_TSX" ]; then
     echo -e "${GREEN}✓ just web-test-unit${NC}"
   else
     echo -e "${RED}✗ just web-test-unit — fix failures above${NC}"
+    HAS_ERROR=1
+  fi
+fi
+
+# ── Repository instruction contract ────────────────────────────────────────
+if [ -n "$STAGED_INSTRUCTIONS" ]; then
+  echo -e "${YELLOW}→ instruction-contract${NC}"
+  if ./gates/run instruction-contract; then
+    echo -e "${GREEN}✓ instruction-contract${NC}"
+  else
+    echo -e "${RED}✗ instruction-contract — repair the canonical instruction owner/compatibility link${NC}"
     HAS_ERROR=1
   fi
 fi

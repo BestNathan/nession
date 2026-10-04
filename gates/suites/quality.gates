@@ -1,5 +1,6 @@
 # quality
 # Gate IDs only. Not wired into current hooks/workflows yet.
+instruction-contract
 rust-format
 rust-clippy
 rustc-wrapper
