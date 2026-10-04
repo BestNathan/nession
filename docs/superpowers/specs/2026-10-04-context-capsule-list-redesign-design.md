@@ -33,6 +33,20 @@
 - `CAPSULE_ENTRY_IDS`（`filter(b => b.entry !== 'signal')`）与 `CAPSULE_PROJECTION_IDS` 现在是**同一个列表**，那个 filter 排除不掉任何东西；
 - 该字段的注释描述的正是那条不可达的观测路径（"it still emerges by observation when Nession resolves it as relevant"）。
 
+**1b-bis. 两个深度画的是同一个位置、同一个容器，但两套内容 —— 这是「像两个弹窗」的来源。**
+
+`PeekHost` 是**一个**组件，Signal 与 Peek 用**同一套 class**（`capsuleProjectionClass` + dock/scroll/text）画在胶囊上方的**同一个槽位**。差异只有三处：
+
+1. **能力体按 `depth` 分叉**：`GitProjection.tsx:52` `return depth === 'signal' ? <GitSignalBody/> : <GitPeekBody/>`；`ClaudeCodeProjection.tsx:71` `if (depth === 'peek') return <ClaudeCodePeek/>`，否则另一套。
+2. **标题**：Signal 上是可点的（点了深化），Peek 上是 `disabled`。
+3. **`Open in Workspace →`**：只在 Peek 画。
+
+所以用户看到的是：**同一个位置先后换上两种内容形态** —— 「一个弹窗的感觉」是对的，但里面是两套东西。
+
+删掉 Signal 之后 `depth` 从 body 的入参里消失，两个能力的 `depth === 'signal'` 分支与 `GitSignalBody` 一并删除，标题只剩一种形态，Workspace 入口对有 view 的能力恒在。**一个位置、一个容器、唯一一种样式。**
+
+（顺带确认：`GitSignalBody` / `GitPeekBody` 内部**已经在用** `chromeSansRole('metadata'/'caption')` —— 也就是说能力体早就在设计语言里，只有 Context Capsule 的行没有。这印证了 owner 的观察确实指向那个列表。）
+
 **1c. `DisclosureDepth` 整个类型没有消费者。**
 
 `git grep` 全树只有它的定义与 `product/capability/index.ts` 的再导出。`'signal'` 从它里面删掉之后，这个类型本身是否还该存在，是同一个问题。
@@ -78,6 +92,8 @@ Signal 之所以能删得干净，是因为上面第 1 条：删它**不丢任�
 - `product/capability/emergence.ts`：`DisclosureDepth` 删 `'signal'`；由于它全树无消费者（见 1c），**连同类型一起删除**，`index.ts` 的再导出同步去掉。
 - **`CapsuleProjectionBinding.entry` 字段删除**（见 1b）：它三个实例全是 `'peek'`，`'signal'` 一旦删掉这个字段就恒为同一个值 —— 单值 union 正是本仓库说的「unused axis」。随之 `CAPSULE_ENTRY_IDS` 与 `CAPSULE_PROJECTION_IDS` 合并成**一个** `CAPSULE_PROJECTION_IDS`，`capsulePresence.ts` 的那句 `filter(b => b.entry !== 'signal')` 与它引用的那道 #1046 区分一并消失（已经没有能区分出来的成员）。三个 `contribution.tsx` 各删一行。
   - ⚠ 这是本改动里唯一一处**扩大范围**的决定：`entry` 是 #1046 引入的、文档写明「provisional by design, #826 Q6 才冻结」。它今天不含信息，但删掉意味着将来「只有 Signal 的能力」在类型上不再可能 —— 而那正是本轮要消灭的东西，所以是收敛而非能力损失。**若 owner 认为该字段应保留作为一种声明位，说一声，我改成保留 `entry: 'peek'` 单值。**
+- **能力体失去 `depth` 入参**（见 1b-bis）：`CapsuleProjectionBodyProps.depth` 删除；`GitProjection` 的 `GitSignalBody` 与 `depth === 'signal'` 分支删除；`ClaudeCodeProjection` 的 `if (depth === 'peek')` 分支取直。两个能力的 rest 分支因此从「两套」收敛成「一套」。
+- `docs/design/design-system/patterns/*` 与 `capability-emergence.md` 里描述「Signal 是 the smallest identifying state needed」的段落一并核。
 
 **行为结果**：点行 → 详情 → ✕ → 干净的空胶囊。全程没有用户没要过的中间态。
 
