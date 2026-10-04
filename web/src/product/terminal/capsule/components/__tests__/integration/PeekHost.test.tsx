@@ -152,6 +152,30 @@ describe('capability projection frame', () => {
     expect(onOpenWorkspace).toHaveBeenCalledWith('src/a.ts');
   });
 
+  it('keeps the close hit target separate from its drawn affordance (#1446 SC-08)', () => {
+    renderFrame(projection());
+
+    const dismiss = screen.getByTestId('capsule-capability-dismiss');
+    const visual = dismiss.querySelector('[data-testid="capsule-control-visual"]');
+    expect(dismiss.className).toContain('var(--control-md)');
+    expect(visual).not.toBeNull();
+    expect(visual?.className).toContain('var(--control-visual-size)');
+  });
+
+  it('typesets Nession-owned Peek chrome with canonical roles', () => {
+    renderFrame(projection());
+
+    expect(screen.getByTestId('capsule-capability-title').className).toContain(
+      'var(--typography-body-size)',
+    );
+    expect(screen.getByTestId('capsule-capability-title').className).not.toContain(
+      'terminal-capsule-projection-font-size',
+    );
+    expect(screen.getByTestId('capsule-capability-open-workspace').className).toContain(
+      'var(--typography-body-size)',
+    );
+  });
+
   it('keeps a capability with no Workspace destination dismissible', async () => {
     // Terminal Keys' shape: the accessory is the capability in full, so the
     // only way out is the one control it is guaranteed.
