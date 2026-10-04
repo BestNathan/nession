@@ -69,7 +69,7 @@ This is the section-level classification used for the Skill rewrite.
 | nession-development | Version Bumping; Development Cycle; PR Workflow | development entrypoint delegates release-specific policy to `nession-cicd` |
 | nession-development | Playwright Functional Verification | `nession-web-design` owns browser/visual workflow |
 | nession-development | Batch Development by Label; Quick Reference; Common Mistakes | concise batch/stop conditions in development entrypoint |
-| nession-cicd | Overview; Deployment Monitoring; Iron Laws | CI/CD entrypoint + root/development link for worktrees |
+| nession-cicd | Overview; Deployment Monitoring; Iron Laws | `nession-cicd` preserves no-local-Docker, artifact-retention, merge/branch policy, and routes end-to-end monitoring to `scripts/deploy-watch.sh`; root/development own worktree basics |
 | nession-cicd | Development Flow; release staging->main; merge strategy | CI/CD entrypoint; live workflow files remain executable truth |
 | nession-cicd | ArgoCD/GitOps; version bump; direct-to-main; main/staging movement | `nession-cicd` owns branch-route/version decisions; `.github/AGENTS.md` owns workflow-local exception/trust rules; workflow YAML owns executable triggers |
 | nession-cicd | Requirement Acceptance; issue auto-close | `nession-acceptance` + deterministic validator; CI/CD only routes it |
