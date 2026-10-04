@@ -14,7 +14,7 @@ function fixture() {
   fs.mkdirSync(path.join(root, '.agents'), { recursive: true });
   fs.mkdirSync(path.join(root, '.githooks'), { recursive: true });
   fs.writeFileSync(path.join(root, 'AGENTS.md'), '# Root\n\n[demo](.claude/skills/demo/SKILL.md)\n');
-  fs.writeFileSync(path.join(root, '.githooks', 'pre-commit'), '#!/usr/bin/env bash\nset -euo pipefail\nexit 0\n');
+  fs.writeFileSync(path.join(root, '.githooks', 'pre-commit'), '#!/usr/bin/env bash\nset -euo pipefail\nSTAGED_ALL=$(git diff --cached --name-only)\nSTAGED_INSTRUCTIONS="$STAGED_ALL"\n./gates/run instruction-contract\nexit 0\n');
   fs.symlinkSync('AGENTS.md', path.join(root, 'CLAUDE.md'));
   fs.symlinkSync('../.claude/skills', path.join(root, '.agents', 'skills'));
   fs.writeFileSync(path.join(root, '.claude', 'skills', 'demo', 'SKILL.md'), '---\nname: demo\ndescription: Demo workflow.\n---\n\n# Demo\n');
@@ -96,5 +96,30 @@ test('rejects malformed pre-commit router syntax', () => {
     fs.writeFileSync(path.join(root, '.githooks', 'pre-commit'), '#!/usr/bin/env bash\nif then\n');
     const errors = validateInstructionTree(root).errors;
     assert.ok(errors.some((x) => x.includes('.githooks/pre-commit: shell syntax invalid')));
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+
+test('rejects invalid YAML-like frontmatter', () => {
+  const root = fixture();
+  try {
+    fs.writeFileSync(
+      path.join(root, '.claude', 'skills', 'demo', 'SKILL.md'),
+      '---\nname: demo\ndescription: [unterminated\n---\n\n# Demo\n',
+    );
+    const errors = validateInstructionTree(root).errors;
+    assert.ok(errors.some((x) => x.includes('supported YAML string subset')));
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('rejects instruction router that ignores deletions and type changes', () => {
+  const root = fixture();
+  try {
+    fs.writeFileSync(
+      path.join(root, '.githooks', 'pre-commit'),
+      '#!/usr/bin/env bash\nSTAGED_ALL=$(git diff --cached --name-only --diff-filter=ACM)\nSTAGED_INSTRUCTIONS="$STAGED_ALL"\n./gates/run instruction-contract\n',
+    );
+    const errors = validateInstructionTree(root).errors;
+    assert.ok(errors.some((x) => x.includes('must include staged deletions, renames, and type changes')));
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
