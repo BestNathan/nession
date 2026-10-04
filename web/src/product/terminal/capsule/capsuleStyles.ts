@@ -359,12 +359,12 @@ export const capsuleInlineFieldRowClass =
   'flex items-center gap-[length:var(--terminal-capsule-popover-gap)]';
 
 /**
- * An emerged capability projection — the Signal and Peek frame (`#826`).
+ * An emerged capability projection — the Peek frame (`#826`).
  *
  * Its own token group rather than borrowed popover values: a projection is a
  * smaller, less permanent surface than a popover, and pointing at the popover's
  * geometry would have made the two move together for no reason. The typography
- * is a step below the capsule's own scale, because a Signal that arrived at the
+ * is a step below the capsule's own scale, because a Peek that arrived at the
  * composer's text size would read as a second composer.
  *
  * **The radius is part of that group now (#1110).** It was the one value here

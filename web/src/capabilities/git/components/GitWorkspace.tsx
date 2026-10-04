@@ -237,7 +237,7 @@ function GitHeader({
  * The header's second line.
  *
  * Names the work tree as well as the branch: the same repository checked out
- * twice is two different places to be, and the Signal already says which one
+ * twice is two different places to be, and the Peek already says which one
  * (`capability-emergence.md` lists worktree identity as part of the model).
  */
 function headerSummary(

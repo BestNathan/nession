@@ -84,12 +84,13 @@ describe('capsule capability presence', () => {
   });
 
   it('resolves a capability state independently of the entry list', () => {
-    // The projection reads lifecycle from `snapshots`, not from the entry list,
-    // and #1046 does not change that: it still emerges by observation when its
-    // state warrants it. The entry half of this assertion is gone because its
-    // subject is: after #1120 all three projections are listed, so there is no
-    // unlisted capability left to make the point through. What the capsule
-    // actually reads is the snapshot, which is where it belongs anyway.
+    // The projection reads lifecycle from `snapshots`, not from the entry list.
+    // It used to emerge by observation when its state warranted it; that is
+    // gone with the depth axis — nothing opens on its own any more, the user's
+    // choice does. The entry half of this assertion is gone because its subject
+    // is: after #1120 all three projections are listed, so there is no unlisted
+    // capability left to make the point through. What the capsule actually
+    // reads is the snapshot, which is where it belongs anyway.
     const facts = { sessionForegroundCommand: 'claude.exe' };
     const resolution = resolveCapsuleCapabilities(input({ facts }));
 
@@ -130,7 +131,9 @@ describe('capsule capability presence', () => {
     // Checked against the binding rather than for mere presence: "some icon"
     // is not the claim — the row draws the glyph the capability declared for
     // this surface, and a second lookup here would be free to disagree with it.
-    // Mutation: drop `const icon = projectionIconFor(...)` — must fail.
+    // Mutation: build one entry with another binding's glyph — the `entry.icon`
+    // comparison must fail. (Deleting the `projectionIconFor` lookup instead
+    // only breaks the type check, which is not what this assertion watches.)
     const resolution = resolveCapsuleCapabilities(input());
 
     expect(resolution.entries.length).toBeGreaterThan(0);

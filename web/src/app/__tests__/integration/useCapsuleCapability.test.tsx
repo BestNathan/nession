@@ -99,8 +99,11 @@ describe('capsule emergence', () => {
   it('does not emerge on its own for work the capsule already senses (SC-34)', () => {
     // The owner's 2026-10-03 decision, and a reversal of what this test used to
     // assert: a pane running `claude.exe` lights the *Work Ring* — that is the
-    // ambient representation — and the observed-command path must stand down,
-    // or one fact arrives three times (auto Signal, ring, disclosure).
+    // ambient representation — so the observed-command path had to stand down,
+    // or one fact would arrive three times: an auto Signal, the ring, the
+    // disclosure. The Signal depth and the auto path went with it (2026-10-04);
+    // the two expressions left are the ring and the sensed row leading the
+    // capsule, and nothing opens on its own — which is what this test pins.
     const { result, choose, onSurfaceChange } = setup({
       session: session('s1', 'claude.exe'),
     });

@@ -117,7 +117,7 @@ The affordance does not encode Agent connectivity, Session lifecycle, attachment
 Capabilities do not become surface-navigation entries, and surface actions do
 not become capabilities.
 
-A capability may be discovered through the Session capsule's `+` expansion and may expose a temporary Signal/Peek near the Terminal before deepening into Workspace. The surface affordance remains about **work versus contextual depth**, not about choosing tools. See [../../capability-emergence.md](../../capability-emergence.md).
+A capability may be discovered through the Session capsule's `+` expansion and may expose a temporary Peek near the Terminal before deepening into Workspace. The surface affordance remains about **work versus contextual depth**, not about choosing tools. See [../../capability-emergence.md](../../capability-emergence.md).
 
 See [workspace-navigation.md](workspace-navigation.md) and [terminal-capsule.md](terminal-capsule.md).
 

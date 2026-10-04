@@ -27,7 +27,7 @@ export function FixtureShell() {
   // The same stub `FixtureApp` installs, for the same reason (#838): a
   // capability has to be *reachable* from a fixture to be captured, and the
   // App route had this while the Web route did not — so the Web screen could
-  // show the capability entry but not a Signal or a Peek behind it, which is
+  // show the capability entry but not a Peek behind it, which is
   // why `#1046`'s second depth had no Web baseline at all (#1102).
   //
   // Installed for the route's lifetime and released on unmount. Nothing

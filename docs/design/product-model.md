@@ -83,10 +83,10 @@ This lifecycle is a product-state vocabulary, not a requirement for one specific
 - **relevant** — the current Workspace or Session gives the capability a reason to gain presence.
 - **active** — the capability is participating in the current work and may surface directly in the Session interaction layer.
 
-Lifecycle state is independent from **disclosure depth**. The same capability may be active while Nession shows only a compact Signal, or relevant while the user explicitly opens a Peek.
+Lifecycle state is independent from **disclosure depth**. The same capability may be active while nothing of it is shown, or relevant while the user explicitly opens a Peek.
 
 ```text
-Dormant -> Signal -> Peek -> Workspace
+Dormant -> Peek -> Workspace
 ```
 
 Terminal owns the lightweight current-work projections; Workspace owns the rich capability surface. Deepening must preserve Session / Workspace / location / resource context rather than reopening a generic feature homepage.

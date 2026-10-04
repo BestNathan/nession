@@ -151,9 +151,9 @@ export function classifyDiffLine(line: string): 'meta' | 'added' | 'removed' | '
 }
 
 /**
- * The work tree's name — what a Signal calls it.
+ * The work tree's name — what a Peek calls it.
  *
- * The basename of the root rather than the whole path: a Signal has room for an
+ * The basename of the root rather than the whole path: a Peek has room for an
  * identity, not an address, and the directory name is what the user calls the
  * checkout (`capsule`, not `/Users/…/worktrees/capsule`). Trailing separators
  * are dropped first so a root of `/repo/` still reads `repo`.

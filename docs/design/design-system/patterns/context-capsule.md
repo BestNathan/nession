@@ -98,9 +98,9 @@ What this pattern owns is the surface above it and the rows inside it.
   alike. Choosing is asking to look at it, so it lands at Peek where the way on
   to the Workspace lives; a capability that has no Workspace view simply has no
   destination beyond the Peek, which is `capability-emergence.md`'s "explicit
-  path into Workspace **when deeper inspection is useful**". Signal is not
-  something selection produces — it is what Nession shows on its own, and what a
-  dismissed Peek steps back to.
+  path into Workspace **when deeper inspection is useful**". A dismissed Peek
+  steps back to nothing: the Signal depth it used to return to was removed on
+  2026-10-04, so closing it returns the slot to dormant.
 - **Sensed rows carry a reason; ordinary rows do not, and the rhythm does not
   change.** A row without a reason keeps the same band so the list does not
   jitter between sense states.
