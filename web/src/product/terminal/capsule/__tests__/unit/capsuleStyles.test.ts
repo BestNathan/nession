@@ -101,8 +101,8 @@ describe('capsuleStyles', () => {
     // title and the reason were the same size, distinguished only by colour —
     // because both classes refed `terminalCapsule.fontSize` /
     // `captionFontSize`, and both of those resolve to `primitive.typography`.
-    // The design language has a ramp for exactly this job; `body`'s own note
-    // names "button labels, menu items, filters".
+    // The design language has a ramp for exactly this job; the `body` role's
+    // note on Web names "button labels, menu items, filters".
     for (const cls of [contextCapsuleTitleClass, contextCapsuleReasonClass]) {
       expect(cls).toContain('--typography-');
       expect(cls).not.toContain('--terminal-capsule-');
@@ -114,9 +114,11 @@ describe('capsuleStyles', () => {
   });
 
   it('keeps the two lines inside one row band without a capsule leading token', () => {
-    // 14 * 1.4 + 11.5 * 1.3 = 34.55px on App, 13 * 1.35 + 11 * 1.3 = 31.85px on
-    // Web, against a 44px band. The role leadings are what make the band hold,
-    // so a capsule-local leading would be a second answer to the same question.
+    // The pair already fits on the role sizes: 14 + 11.5 at the inherited 1.5
+    // is 38.25px on App (13 + 11 is 36px on Web), against a 44px band. The role
+    // leadings only tighten it, to 34.55px / 31.85px. So a capsule-local leading
+    // is not what holds the band — it would be a second answer to a question the
+    // roles already answer.
     expect(contextCapsuleTitleClass).not.toContain('--context-capsule-row-line-height');
     expect(contextCapsuleReasonClass).not.toContain('--context-capsule-row-line-height');
   });

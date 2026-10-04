@@ -70,19 +70,23 @@ What this pattern owns is the surface above it and the rows inside it.
   compares the surface's box across the App states that can differ).
 - **Every row is exactly one row band.** A sensed row carries a title and a line
   of reason and an ordinary row carries a title, and both are one band tall, so
-  the list's rhythm does not change with the sense state. Two lines only fit a
-  44px band if the leading says so, and the role leadings are what say it now —
-  with only a font-size set the pair measured 48px against it. The band is 44px
-  because that is the App touch floor, so a row is a legal App target by
-  construction as well as one band.
+  the list's rhythm does not change with the sense state. The pair fits the 44px
+  band on the role sizes alone — 14 + 11.5 at the inherited 1.5 is 38.25px on App
+  (Web 36px) — and the role leadings only tighten it, to 34.55px / 31.85px. A
+  pair set in the capsule's own font size did not fit: at 1rem a line is 24px at
+  the inherited 1.5, so 48px for the pair, which is what stood a sensed row 4px
+  prouder than an ordinary one. The band is 44px because that is the App touch
+  floor, so a row is a legal App target by construction as well as one band.
 - **The row's two lines are typeset in the design language's roles, not in the
   Capsule's font size.** The title takes `body` and the reason `caption`, read
   through `chromeSansRole`. The Capsule's own `fontSize` / `captionFontSize` both
   resolve to `primitive.typography`, so a row that named them rendered every line
   at the same 16px and told title from reason by colour alone — a list with no
   typographic hierarchy. `body` is the role the design language writes for
-  controls ("button labels, menu items, filters"), and its leading plus
-  `caption`'s put the pair at 34.55px on App and 31.85px on Web.
+  controls (the role's note on Web names "button labels, menu items, filters"),
+  and its size plus `caption`'s hold the pair inside the 44px band — 38.25px on
+  App, 36px on Web — with the two role leadings tightening it to 34.55px and
+  31.85px.
 - **The lower Capsule is the anchor.** Opening, closing and deepening change the
   upper surface only: the shell's box, clearance and occlusion are identical
   with the surface open and closed. The gap between them is a token.
@@ -166,9 +170,10 @@ draw it open and move with this pattern; they are the only ones that do.
 - A second step (`All capabilities`) or any secondary layer: the catalog is
   reachable in the list the user is already looking at.
 - A row taller than the row band — a sensed row carrying two lines is the case
-  that keeps trying to happen, and the role leadings are what hold it in the
-  band. A taller sensed row makes the list's rhythm change with the sense state,
-  and it is invisible while the surface is tall enough to absorb it.
+  that keeps trying to happen, and the role sizes are what hold it in the band
+  (the leadings only tighten the pair). A taller sensed row makes the list's
+  rhythm change with the sense state, and it is invisible while the surface is
+  tall enough to absorb it.
 - Rendering the surface outside the capsule's dock — it then inherits no
   experience scope, does not ride the App's exchange transform, and reads as a
   second object rather than the Capsule's upper half.

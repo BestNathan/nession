@@ -235,12 +235,15 @@ export const contextCapsuleScrollClass = 'min-h-0 flex-1 overflow-y-auto overscr
  *
  * `min-h` is a floor, so the band is only uniform if both lines fit inside it —
  * that is a rule about the pair, not about the box. It once needed a
- * capsule-local leading to hold: with only a font-size set, the two lines
- * inherited the document's 1.5 (24px a line at this experience's 1rem text, so
- * 48px for the pair) and a sensed row measured 4px taller than an ordinary one,
- * changing the list's rhythm with the sense state. The design language's roles
- * carry that leading now, so the roles themselves are what keep the pair in
- * the one band every row shares.
+ * capsule-local leading to hold: with only a font-size set, both lines inherited
+ * the document's 1.5, and at the capsule's own 1rem text the pair measured 48px
+ * against the 44px band, so a sensed row stood 4px prouder than an ordinary one
+ * and the list's rhythm changed with the sense state. The pair fits now because
+ * of the role *sizes*: 14 + 11.5 at the same inherited 1.5 is 38.25px (Web 36px),
+ * already inside the band, and the role leadings only tighten that to 34.55px /
+ * 31.85px. The leading is still what retires `rowLineHeight` — the roles supply
+ * one, so a capsule-local one would be a second answer to a question already
+ * answered — but the band does not depend on it.
  */
 export const contextCapsuleRowClass = [
   'flex w-full min-h-[length:var(--context-capsule-row-height)] items-center gap-[length:var(--terminal-capsule-control-gap)]',
@@ -281,12 +284,13 @@ export const contextCapsuleMarkerClass =
  * staging 2026-10-04: all four rows' initial cap height was 12px). The design
  * language keeps a ramp for exactly this job, and the row was using none of it.
  *
- * `body` is the role written for it — its own note names "button labels, menu
- * items, filters" — and the reason takes `caption`. The roles supply the
- * leading too, which is what retires `contextCapsule.rowLineHeight`: it
- * existed to substitute a leading for the one the pair had inherited, and the
- * role leadings land the pair at 14×1.4 + 11.5×1.3 = 34.55px on App and
- * 13×1.35 + 11×1.3 = 31.85px on Web, both inside the 44px band.
+ * `body` is the role written for it — the role's note on Web names "button
+ * labels, menu items, filters" — and the reason takes `caption`. The roles
+ * supply the leading too, which is what retires `contextCapsule.rowLineHeight`:
+ * the pair was already inside the band on the role sizes (14 + 11.5 at the
+ * inherited 1.5 is 38.25px on App, 36px on Web), so what a capsule-local leading
+ * would duplicate is the roles' own answer, not the fit — the role leadings only
+ * tighten the pair to 34.55px / 31.85px.
  */
 export const contextCapsuleTitleClass = cn('truncate text-foreground', chromeSansRole('body'));
 
