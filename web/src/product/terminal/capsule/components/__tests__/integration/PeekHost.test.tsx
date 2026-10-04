@@ -16,9 +16,7 @@ function projection(
   return {
     id: 'git',
     title: 'Git',
-    depth: 'signal',
     body: () => <p data-testid="body">body content</p>,
-    onDeeper: vi.fn(),
     onDismiss: vi.fn(),
     onOpenWorkspace: vi.fn(),
     ...overrides,
@@ -53,20 +51,14 @@ describe('capability projection frame', () => {
     expect(screen.getByTestId('capsule-capability-title')).toHaveTextContent('Git');
   });
 
-  it('carries the depth it was given as data', () => {
-    // Depth is decided before this mounts; the frame only reports which one it
-    // is showing, so a styling or test question can be asked of the DOM.
-    const { rerender } = renderFrame(projection());
-    expect(screen.getByTestId('capsule-capability-projection')).toHaveAttribute(
-      'data-depth',
-      'signal',
-    );
+  it('names the projection with a title that is not a control', () => {
+    // With one depth there is nothing behind the title to open — it used to be
+    // the Signal's way in — so it names the projection and takes no input.
+    renderFrame(projection());
 
-    rerender(frame(projection({ depth: 'peek' })));
-    expect(screen.getByTestId('capsule-capability-projection')).toHaveAttribute(
-      'data-depth',
-      'peek',
-    );
+    const title = screen.getByTestId('capsule-capability-title');
+    expect(title.tagName).toBe('H2');
+    expect(title).not.toHaveAttribute('role', 'button');
   });
 
   it('carries the containment boundary that keeps a body inside the host (#1347 SC-27)', () => {
@@ -75,45 +67,25 @@ describe('capability projection frame', () => {
     // host instead of the viewport, and a body's z-index stays inside the
     // host's stacking context. jsdom cannot prove the clipping; it can prove
     // the mechanism is on the element every body is drawn into.
-    renderFrame(projection({ depth: 'peek' }));
+    renderFrame(projection());
 
     expect(screen.getByTestId('capsule-capability-projection').className).toContain(
       'contain-paint',
     );
   });
 
-  it('opens a Signal deeper from its title', async () => {
-    const onDeeper = vi.fn();
-    renderFrame(projection({ onDeeper }));
-
-    await userEvent.click(screen.getByTestId('capsule-capability-title'));
-
-    expect(onDeeper).toHaveBeenCalledTimes(1);
-  });
-
-  it('offers no deeper step once it is already a Peek', async () => {
-    // Peek is as deep as the Terminal goes; going further is the Workspace, and
-    // that is a different affordance with a different consequence.
-    const onDeeper = vi.fn();
-    renderFrame(projection({ depth: 'peek', onDeeper }));
-
-    const title = screen.getByTestId('capsule-capability-title');
-    expect(title).toBeDisabled();
-    await userEvent.click(title);
-    expect(onDeeper).not.toHaveBeenCalled();
-  });
-
-  it('owns the Workspace destination: drawn at Peek, never at Signal (#1347 SC-21)', () => {
+  it('owns the Workspace destination (#1347 SC-21)', () => {
     // **The re-inversion.** `#1046` handed the action to the body; #1347's
     // "Peek header and Workspace destination are Nession-owned" takes the
     // presentation back, and re-review #2 settled that #1046 is superseded on
     // this point. The body drawing its own "Open in Workspace" is now the
-    // regression — and a Signal drawing one at all is the second: a Signal
-    // informs, the step to the action is the title's deepening.
-    const { rerender } = renderFrame(projection());
+    // regression. Whether the destination exists is the app layer's answer, so
+    // the frame draws it whenever the capability supplies one — and never for
+    // a capability, like Terminal Keys, that has no Workspace view.
+    const { rerender } = renderFrame(projection({ onOpenWorkspace: undefined }));
     expect(screen.queryByTestId('capsule-capability-open-workspace')).toBeNull();
 
-    rerender(frame(projection({ depth: 'peek' })));
+    rerender(frame(projection()));
     expect(screen.getByTestId('capsule-capability-open-workspace')).toBeInTheDocument();
   });
 
@@ -121,7 +93,7 @@ describe('capability projection frame', () => {
     // Presence is the app layer's answer (the Workspace view registry), so a
     // capability without a view — Terminal Keys — supplies no routing and the
     // host draws nothing.
-    renderFrame(projection({ depth: 'peek', onOpenWorkspace: undefined }));
+    renderFrame(projection({ onOpenWorkspace: undefined }));
 
     expect(screen.queryByTestId('capsule-capability-open-workspace')).toBeNull();
   });
@@ -132,7 +104,6 @@ describe('capability projection frame', () => {
     const onOpenWorkspace = vi.fn();
     renderFrame(
       projection({
-        depth: 'peek',
         onOpenWorkspace,
         body: (_focus, setFocus) => (
           <button type="button" data-testid="pick" onClick={() => setFocus('src/a.ts')}>
@@ -150,7 +121,7 @@ describe('capability projection frame', () => {
 
   it('the destination with no selection opens the capability landing page', async () => {
     const onOpenWorkspace = vi.fn();
-    renderFrame(projection({ depth: 'peek', onOpenWorkspace }));
+    renderFrame(projection({ onOpenWorkspace }));
 
     await userEvent.click(screen.getByTestId('capsule-capability-open-workspace'));
 
@@ -163,7 +134,6 @@ describe('capability projection frame', () => {
     const onOpenWorkspace = vi.fn();
     renderFrame(
       projection({
-        depth: 'peek',
         onOpenWorkspace,
         body: (_focus, _setFocus, actions) => (
           <button
@@ -182,26 +152,11 @@ describe('capability projection frame', () => {
     expect(onOpenWorkspace).toHaveBeenCalledWith('src/a.ts');
   });
 
-  it('makes the title inert rather than opening an empty Peek', async () => {
-    const onOpenWorkspace = vi.fn();
-    renderFrame(projection({ onDeeper: undefined, onOpenWorkspace }));
-
-    const title = screen.getByTestId('capsule-capability-title');
-    expect(title).toBeDisabled();
-    await userEvent.click(title);
-
-    // Nothing deeper happened — and no Workspace either, since that is a
-    // separate decision the user makes with a control that says so.
-    expect(onOpenWorkspace).not.toHaveBeenCalled();
-  });
-
-  it('keeps a capability with neither a Peek nor a Workspace dismissible', async () => {
+  it('keeps a capability with no Workspace destination dismissible', async () => {
     // Terminal Keys' shape: the accessory is the capability in full, so the
     // only way out is the one control it is guaranteed.
     const onDismiss = vi.fn();
-    renderFrame(
-      projection({ onDeeper: undefined, onOpenWorkspace: undefined, onDismiss }),
-    );
+    renderFrame(projection({ onOpenWorkspace: undefined, onDismiss }));
 
     await userEvent.click(screen.getByTestId('capsule-capability-dismiss'));
 
@@ -221,7 +176,6 @@ describe('capability projection frame', () => {
     const onOpenWorkspace = vi.fn();
     renderFrame(
       projection({
-        depth: 'peek',
         onOpenWorkspace,
         body: (_focus, setFocus, actions) => (
           <>
@@ -248,7 +202,6 @@ describe('capability projection frame', () => {
     const onOpenWorkspace = vi.fn();
     renderFrame(
       projection({
-        depth: 'peek',
         onOpenWorkspace,
         body: (_focus, _setFocus, actions) => (
           <button type="button" data-testid="deepen" onClick={() => actions.openWorkspace()}>
@@ -263,9 +216,9 @@ describe('capability projection frame', () => {
     expect(onOpenWorkspace).toHaveBeenCalledWith(undefined);
   });
 
-  it('dismisses from either depth', async () => {
+  it('dismisses the projection', async () => {
     const onDismiss = vi.fn();
-    renderFrame(projection({ depth: 'peek', onDismiss }));
+    renderFrame(projection({ onDismiss }));
 
     await userEvent.click(screen.getByTestId('capsule-capability-dismiss'));
 
@@ -287,7 +240,6 @@ describe('capability projection frame', () => {
     // accessible name.
     const user = userEvent.setup();
     const peek = projection({
-      depth: 'peek',
       body: (_focus, _setFocus, actions) => (
         <button
           type="button"
@@ -322,7 +274,6 @@ describe('capability projection frame', () => {
     // where they were.
     const user = userEvent.setup();
     const peek = projection({
-      depth: 'peek',
       body: (_focus, _setFocus, actions) => (
         <button
           type="button"
@@ -351,20 +302,17 @@ describe('capability projection frame', () => {
     const { terminalKeysProjection } = await import('@/product/terminal/terminalKeys');
 
     const gitPeek = projection({
-      depth: 'peek',
       body: () => <p data-testid="git-peek-body">peek</p>,
     });
     const keysPeek: CapsuleCapabilityProjection = {
       id: 'terminal-keys',
       title: 'Terminal Keys',
-      depth: 'signal',
       ownsInputFocus: true,
       onDismiss: vi.fn(),
       body: (_focus, setFocus, actions) =>
         terminalKeysProjection.body({
           agentId: 'a1',
           sessionId: 's1',
-          depth: 'signal',
           state: 'available',
           onFocusChange: setFocus,
           ...actions,

@@ -26,7 +26,6 @@ function projection(
   return {
     id: 'terminal-keys',
     title: 'Terminal Keys',
-    depth: 'signal',
     body: () => <p data-testid="projection-body">keys</p>,
     onDismiss: vi.fn(),
     ...overrides,

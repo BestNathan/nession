@@ -145,7 +145,6 @@ describe('Context Disclosure', () => {
     const projection: CapsuleCapabilityProjection = {
       id: 'claude-code',
       title: 'Claude Code',
-      depth: 'peek',
       body: () => <p data-testid="projection-body">peek</p>,
       onDismiss: vi.fn(),
     };
@@ -213,7 +212,6 @@ describe('Context Disclosure', () => {
     const projection: CapsuleCapabilityProjection = {
       id: 'claude-code',
       title: 'Claude Code',
-      depth: 'peek',
       body: () => <p data-testid="projection-body">peek</p>,
       onDismiss: vi.fn(),
     };

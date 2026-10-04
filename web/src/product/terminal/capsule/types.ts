@@ -101,21 +101,19 @@ export interface CapsuleCapabilityPresence {
  * A capability emerging beside the capsule (`docs/design/capability-emergence.md`).
  *
  * The capsule draws the frame and the capability supplies the body, so the
- * capability states what it is and Nession decides that it appears at all, at
- * which depth, and where. `depth` is an input rather than capsule state: the
- * decision was `resolveCapabilityProjection`'s, and a component free to change
- * it would be a second copy of that rule.
+ * capability states what it is and Nession decides that it appears at all and
+ * where. There is one of these per emergence and one form for it to take: the
+ * resolver decides *which* capability shows, and nothing else.
  */
 export interface CapsuleCapabilityProjection {
   id: CapabilityId;
   title: string;
-  depth: 'signal' | 'peek';
   /**
-   * The capability's own content for this depth.
+   * The capability's own content.
    *
    * A render prop rather than an element because the frame owns the selection
-   * the body produces: Peek lets the user pick a changed file, and that pick is
-   * what the frame's Workspace handoff carries.
+   * the body produces: the Peek lets the user pick a changed file, and that
+   * pick is what the frame's Workspace handoff carries.
    */
   body: (
     focus: string | undefined,
@@ -147,16 +145,6 @@ export interface CapsuleCapabilityProjection {
       disabled: boolean;
     },
   ) => ReactNode;
-  /**
-   * Signal → Peek. Absent for a capability with nothing to add at Peek.
-   *
-   * The second implementation settled this. Git has two Terminal depths and
-   * deepens by tapping its title; a capability whose Signal already says
-   * everything the Terminal can say has no Peek to open, and offering one would
-   * open an empty surface. The frame drops the step and reaches the Workspace
-   * from the Signal instead.
-   */
-  onDeeper?: () => void;
   onDismiss: () => void;
   /** Present when the capability has somewhere deeper to go. */
   onOpenWorkspace?: (resourceId?: string) => void;
@@ -165,8 +153,8 @@ export interface CapsuleCapabilityProjection {
    *
    * Read back from the capability's own binding, not derived here: the capsule
    * has no capability ids and must not grow any, so a projection that needs the
-   * keys (Terminal Keys) and one that is read while typing (Git's Signal and
-   * Peek) are told apart by the capability declaring which it is.
+   * keys (Terminal Keys) and one that is read while typing (Git's) are told
+   * apart by the capability declaring which it is.
    *
    * Absent means the composer keeps input focus — a capability that has not
    * asked for the keyboard never has it taken away.

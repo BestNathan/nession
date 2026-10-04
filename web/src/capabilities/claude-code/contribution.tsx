@@ -91,9 +91,8 @@ export const claudeCodeView: WorkspaceViewBinding = {
 /**
  * How Claude Code says something in the Terminal.
  *
- * **Both depths.** It is the capability whose state comes from observation, so
- * it is the one that emerges on its own — a pane running `claude.exe` gets the
- * Signal without anyone choosing it, which is Q1's second input made real.
+ * It is the capability whose state comes from observation: a pane running
+ * `claude.exe` reports `active`, which is Q1's second input made real.
  *
  * It **is** offered for selection, which it was not before `#1120`. The
  * argument for withholding it was that its richer surface is the Workspace
@@ -106,11 +105,10 @@ export const claudeCodeView: WorkspaceViewBinding = {
 export const claudeCodeProjection: CapsuleProjectionBinding = {
   id: CLAUDE_CODE_ID,
   entry: 'peek',
-  body: ({ agentId, sessionId, depth, state, openWorkspace, openDetail }) => (
+  body: ({ agentId, sessionId, state, openWorkspace, openDetail }) => (
     <ClaudeCodeProjection
       agentId={agentId}
       sessionId={sessionId}
-      depth={depth}
       state={state}
       onOpenWorkspace={openWorkspace}
       openDetail={openDetail}

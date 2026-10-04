@@ -40,43 +40,36 @@ function status(overrides: Partial<GitStatusResponse & { state: 'ok' }> = {}): G
   } as GitStatusResponse;
 }
 
-function renderProjection(depth: 'signal' | 'peek', onFocusChange = vi.fn()) {
+function renderProjection(onFocusChange = vi.fn()) {
   render(
     <GitProjection
       agentId="a1"
       sessionId="a1:work"
-      depth={depth}
       onFocusChange={onFocusChange}
     />,
   );
   return { onFocusChange };
 }
 
-describe('Git Signal (L1)', () => {
+/**
+ * One body, so one describe: there is no second form of this projection that
+ * could report a different repository for the same Session.
+ */
+describe('Git projection', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockedStatus.mockResolvedValue(status());
   });
 
   it('names the branch, the work tree, and how far it has drifted', async () => {
-    renderProjection('signal');
+    renderProjection();
 
     // `capability-emergence.md` names exactly these: branch, worktree identity,
     // change count, ahead/behind.
-    const body = await screen.findByTestId('git-signal-body');
+    const body = await screen.findByTestId('git-peek-body');
     expect(body).toHaveTextContent('feat/capsule');
     expect(body).toHaveTextContent('worktree: nession-capsule');
     expect(body).toHaveTextContent('2 ahead');
-  });
-
-  it('is not a toolbar — it states the current state and nothing else', async () => {
-    renderProjection('signal');
-    await screen.findByTestId('git-signal-body');
-
-    // A Signal is "the smallest identifying state needed". Anything pressable
-    // would make it a surface the user has to read as a set of actions.
-    expect(screen.queryAllByRole('button')).toHaveLength(0);
-    expect(screen.queryByTestId('git-peek-body')).toBeNull();
   });
 
   it('says so plainly when the tree is clean', async () => {
@@ -94,39 +87,32 @@ describe('Git Signal (L1)', () => {
       }),
     );
 
-    renderProjection('signal');
+    renderProjection();
 
-    expect(await screen.findByTestId('git-signal-body')).toHaveTextContent('Working tree clean');
+    expect(await screen.findByTestId('git-peek-body')).toHaveTextContent('Working tree clean');
   });
 
   it('takes no space when it has nothing to say', async () => {
-    // A Signal that cannot say anything is not worth the room it takes from the
-    // work surface. The readable copy for each failure lives in the Workspace,
-    // which is where someone can act on it.
+    // A projection that cannot say anything is not worth the room it takes from
+    // the work surface. The readable copy for each failure lives in the
+    // Workspace, which is where someone can act on it.
     mockedStatus.mockResolvedValue({ state: 'not_a_repository', message: 'not a git repository' });
 
-    renderProjection('signal');
+    renderProjection();
 
     const body = await screen.findByText(/not in a git repository/i);
     expect(body).toBeInTheDocument();
-    expect(screen.queryByTestId('git-signal-body')).toBeNull();
-  });
-});
-
-describe('Git Peek (L2)', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mockedStatus.mockResolvedValue(status());
+    expect(screen.queryByTestId('git-peek-body')).toBeNull();
   });
 
   it('splits staged from unstaged', async () => {
-    renderProjection('peek');
+    renderProjection();
 
     expect(await screen.findByTestId('git-peek-body')).toHaveTextContent('1 staged · 1 unstaged');
   });
 
   it('summarises changed files by name, not by full path', async () => {
-    renderProjection('peek');
+    renderProjection();
 
     const rows = await screen.findAllByTestId('git-peek-file');
     expect(rows.map((row) => row.textContent)).toEqual([
@@ -161,14 +147,14 @@ describe('Git Peek (L2)', () => {
       }),
     );
 
-    renderProjection('peek');
+    renderProjection();
 
     expect(await screen.findAllByTestId('git-peek-file')).toHaveLength(4);
     expect(screen.getByTestId('git-peek-more')).toHaveTextContent('and 3 more');
   });
 
   it('reports what the user picked, so the handoff can carry it', async () => {
-    const { onFocusChange } = renderProjection('peek');
+    const { onFocusChange } = renderProjection();
 
     await userEvent.click((await screen.findAllByTestId('git-peek-file'))[1]);
 
@@ -176,7 +162,7 @@ describe('Git Peek (L2)', () => {
   });
 
   it('never shows a diff', async () => {
-    renderProjection('peek');
+    renderProjection();
     await screen.findByTestId('git-peek-body');
 
     expect(screen.queryByTestId('git-diff-body')).toBeNull();

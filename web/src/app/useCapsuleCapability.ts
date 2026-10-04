@@ -1,13 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSessionCapabilityFacts } from '@/app/useSessionCapabilityFacts';
 import { collectContextSignals } from '@/app/contextSignals';
-import { collectWorkSignals } from '@/app/workSignals';
 import {
   resolveCapsuleCapabilities,
   type CapsuleCapabilityContribution,
   type CapsuleCapabilityInput,
 } from '@/app/capsulePresence';
-import { CAPSULE_PROJECTION_IDS, projectionBindingFor } from '@/app/capsuleProjections';
+import { projectionBindingFor } from '@/app/capsuleProjections';
 import { WORKSPACE_VIEW_BINDINGS } from '@/app/workspace/viewBindings';
 import {
   resolveCapabilityPresences,
@@ -28,14 +27,6 @@ export interface CapsuleCapability {
   projection: CapsuleCapabilityProjection | undefined;
 }
 
-interface EmergenceState {
-  chosen: CapabilityId | null;
-  opened: boolean;
-  dismissed: readonly CapabilityId[];
-}
-
-const DORMANT: EmergenceState = { chosen: null, opened: false, dismissed: [] };
-
 /**
  * Observe the session once, then resolve both of the capsule's contributions.
  *
@@ -45,7 +36,7 @@ const DORMANT: EmergenceState = { chosen: null, opened: false, dismissed: [] };
  *
  * ## Why the emergence state lives here
  *
- * Disclosure depth is Session-scoped (Q3): it follows the Session, and a
+ * The emerging capability is Session-scoped (Q3): it follows the Session, and a
  * Session change returns the Terminal to Dormant. Keeping it beside the
  * observations is what makes that reset one line instead of a subscription —
  * and it is why this is a hook and not an atom, since nothing outside the
@@ -57,124 +48,54 @@ export function useCapsuleCapability(
   const facts = useSessionCapabilityFacts(input.session);
   const sessionId = input.session?.session_id ?? null;
 
-  const [emergence, setEmergence] = useState<EmergenceState>(DORMANT);
+  // Which capability is showing, and nothing else. It used to be a record
+  // because depth was a second axis (`opened`) and the observed-command path
+  // needed a dismissal memory (`dismissed`); with one depth and one source,
+  // "which one" is the whole of the state.
+  const [chosen, setChosen] = useState<CapabilityId | null>(null);
   const sessionRef = useRef(sessionId);
 
   useEffect(() => {
     if (sessionRef.current !== sessionId) {
       sessionRef.current = sessionId;
-      // Q1's decay: a projection belongs to the Session that produced it, so a
-      // new Session starts Dormant rather than inheriting the old one's.
-      setEmergence(DORMANT);
+      // Q1's decay: a projection belongs to the Session that produced it.
+      setChosen(null);
     }
   }, [sessionId]);
 
   const resolution = resolveCapsuleCapabilities({ ...input, facts });
   const presences = resolveCapabilityPresences(resolution.snapshots, { surface: 'capsule' });
-  // Which capabilities the same facts sense as *working* (#1347 SC-34): their
-  // ambient representation is the Work Ring, so the observed-command path must
-  // not also materialize a Signal for them. One observation, one spontaneous
-  // representation — the user's choice still emerges whatever it names.
-  const working = collectWorkSignals(facts)
-    .filter((signal) => signal.status === 'working')
-    .map((signal) => signal.capabilityId);
-  const active = resolveCapabilityProjection({
-    snapshots: resolution.snapshots,
-    presences,
-    // Only a capability that can be drawn may emerge. One without a Terminal
-    // projection deepens straight to Workspace, and emerging it here would
-    // select a depth nothing renders — the capability would vanish silently.
-    projectable: CAPSULE_PROJECTION_IDS,
-    chosen: emergence.chosen,
-    opened: emergence.opened,
-    dismissed: emergence.dismissed,
-    working,
-  });
+  const active = resolveCapabilityProjection({ presences, chosen });
 
   /**
-   * Choosing a capability opens it at Peek depth — the detail.
-   *
-   * **Selecting an item is asking to look at it**, and `capability-emergence.md`
-   * says so in its own words: `+` is "the explicit entry for *peeking*", and a
-   * capability is "opened explicitly into a Peek". This used to open the Signal
-   * depth for an ordinary row while a sensed row went straight to Peek, which
-   * meant clicking Git showed a compact summary with no detail and — because
-   * the Workspace destination is drawn only at Peek — no way on to the
-   * Workspace either. The two callbacks that expressed that split are one now.
-   *
-   * Signal is untouched by this: it is still what Nession shows when a
-   * capability earns presence on its own, and it is still where a dismissed
-   * Peek steps back to (see `onDismiss`). What is gone is only the idea that
-   * *explicitly* choosing a capability should show less than choosing nothing.
+   * Choosing a capability shows it. **Selecting an item is asking to look at
+   * it**, and `capability-emergence.md` says so in its own words: `+` is "the
+   * explicit entry for *peeking*", and a capability is "opened explicitly into
+   * a Peek". With one depth there is one outcome, so the choice is the state —
+   * there is no second, shallower depth for an ordinary row to land on.
    *
    * **There is still no path from here to the Workspace** (#1046). This used to
    * fall back to `onToolChange` + `onSurfaceChange` for anything without a
    * projection, which made the entry a shortcut into the Workspace and is the
    * behaviour the requirement removes: selecting a capsule item must not change
    * surface. That fallback is gone rather than guarded, because the entry can
-   * no longer offer a capability without a Terminal depth — `CAPSULE_ENTRY_IDS`
-   * decides what reaches `choose` at all, so the branch it guarded is
-   * unreachable by construction rather than by care. The Peek is where the way
-   * deeper lives, and the user takes it deliberately from there.
+   * no longer offer a capability without a Terminal projection —
+   * `CAPSULE_ENTRY_IDS` decides what reaches `choose` at all, so the branch it
+   * guarded is unreachable by construction rather than by care. The Workspace
+   * destination is where the way deeper lives, and the user takes it
+   * deliberately from the projection.
    */
-  const choose = useCallback(
-    (id: CapabilityId) => {
-      setEmergence((current) => ({
-        chosen: id,
-        opened: true,
-        // Choosing it again is how a dismissal is undone — otherwise there
-        // would be no way back to a projection the user closed.
-        dismissed: current.dismissed.filter((candidate) => candidate !== id),
-      }));
-    },
-    // No `input`: the fallback into the Workspace was the only thing this read
-    // from it, and the entry can no longer offer a capability that would need
-    // it. A dependency kept "just in case" is one that re-creates the callback
-    // for reasons the callback does not have.
-    [],
-  );
+  const choose = useCallback((id: CapabilityId) => setChosen(id), []);
 
   /**
-   * Deepening acts on the projection that is on screen, so the id is bound in
-   * by the caller rather than read from `chosen`. A projection can also emerge
-   * from the observed-command path — a capability the Session is running right
-   * now — where `chosen` is null because the user never chose anything, and
-   * reading `chosen` there deepened nothing (#1165).
+   * Dismissal closes the projection. There is no level to step back to — the
+   * Signal that used to receive it is gone — and no `dismissed` list to
+   * record it in, because the only path that could re-emerge something was
+   * the observed-command path, which is also gone (#1165).
    */
-  const onDeeper = useCallback((id: CapabilityId) => {
-    setEmergence((current) => ({ ...current, chosen: id, opened: true }));
-  }, []);
+  const onDismiss = useCallback(() => setChosen(null), []);
 
-  /**
-   * Dismissal steps back one level, then out.
-   *
-   * Peek closes to the Signal it came from — closing a detail view should not
-   * also destroy the indication that made it worth opening — and closing the
-   * Signal returns to Dormant, recording the dismissal so the observed-command
-   * path does not immediately re-emerge what the user just closed.
-   *
-   * The id is the projection actually on screen, not `current.chosen`. The two
-   * differ exactly when the projection emerged from the observed-command path:
-   * `chosen` is null there, so recording it put nothing into `dismissed` and
-   * the next render re-emerged the same Signal — the ✕ fired and was undone in
-   * the same frame, which is indistinguishable from a dead button (#1165).
-   */
-  const onDismiss = useCallback((id: CapabilityId) => {
-    setEmergence((current) => {
-      if (current.opened) {
-        return { ...current, opened: false };
-      }
-      return {
-        chosen: current.chosen === id ? null : current.chosen,
-        opened: false,
-        dismissed: current.dismissed.includes(id)
-          ? current.dismissed
-          : [...current.dismissed, id],
-      };
-    });
-  }, []);
-
-  const binding = active ? projectionBindingFor(active.capabilityId) : undefined;
+  const binding = active ? projectionBindingFor(active) : undefined;
   const stateOf = (id: CapabilityId) =>
     resolution.snapshots.find((snapshot) => snapshot.id === id)?.state ?? 'available';
 
@@ -199,41 +120,29 @@ export function useCapsuleCapability(
     projection:
       active && binding
         ? {
-            id: active.capabilityId,
-            title: resolution.titleFor(active.capabilityId),
-            depth: active.depth,
-            // Absent when the capability declared it has no Peek: the frame
-            // reads that as an inert title rather than a step into nothing.
-            onDeeper: binding.entry === 'peek'
-              ? () => onDeeper(active.capabilityId)
-              : undefined,
+            id: active,
+            title: resolution.titleFor(active),
             // The capability's own answer to "does this take the keyboard while
-            // it is up", copied through untouched. The capsule reacts to the
-            // boolean; only the capability knows which projections need it.
+            // it is up", copied through untouched.
             ownsInputFocus: binding.ownsInputFocus,
-            onDismiss: () => onDismiss(active.capabilityId),
-            // The Workspace destination's presence is Nession's answer (#1347
-            // SC-21), read from the Workspace view registry rather than left
-            // for the body to decide: a capability with no Workspace view
-            // (Terminal Keys) gets no routing at all, and the host draws no
-            // destination action for it.
-            onOpenWorkspace: WORKSPACE_VIEW_BINDINGS.some(
-              (view) => view.id === active.capabilityId,
-            )
-              ? (resourceId) => input.onOpenWorkspace(active.capabilityId, resourceId)
+            onDismiss,
+            // The Workspace destination's presence is Nession's answer
+            // (#1347 SC-21), read from the Workspace view registry rather than
+            // left for the body to decide: a capability with no Workspace view
+            // (Terminal Keys) gets no routing at all.
+            onOpenWorkspace: WORKSPACE_VIEW_BINDINGS.some((view) => view.id === active)
+              ? (resourceId) => input.onOpenWorkspace(active, resourceId)
               : undefined,
             // The body reports what the user picked; the frame holds it and
-            // hands it to `onOpenWorkspace`, so the handoff carries the item
-            // that caused it without the body knowing where it is going.
+            // hands it to `onOpenWorkspace`.
             body: (_focus, setFocus, actions) =>
               binding.body({
                 ...actions,
                 agentId: input.agent?.agent_id,
                 sessionId: input.session?.session_id,
-                depth: active.depth,
                 // The state the registry resolved, read back rather than
                 // re-derived — one decision, one place.
-                state: stateOf(active.capabilityId),
+                state: stateOf(active),
                 onFocusChange: setFocus,
               }),
           }

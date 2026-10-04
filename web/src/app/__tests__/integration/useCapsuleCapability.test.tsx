@@ -39,7 +39,12 @@ function setup(overrides: { session?: Session | null; experience?: 'web' | 'app'
       view.result.current.capabilities.disclosure?.onSelect(id);
     });
 
-  return { ...view, initialProps, choose, onToolChange, onSurfaceChange, onOpenWorkspace };
+  const dismiss = () =>
+    act(() => {
+      view.result.current.projection?.onDismiss();
+    });
+
+  return { ...view, initialProps, choose, dismiss, onToolChange, onSurfaceChange, onOpenWorkspace };
 }
 
 describe('capsule emergence', () => {
@@ -49,21 +54,12 @@ describe('capsule emergence', () => {
     expect(result.current.projection).toBeUndefined();
   });
 
-  it('opens every chosen capability at Peek depth — the detail — and not at Signal', () => {
-    // `capability-emergence.md`: `+` is "the explicit entry for *peeking*", and a
-    // capability is "opened explicitly into a Peek". An ordinary row used to
-    // open the Signal depth instead, so picking Git showed a compact summary
-    // with no detail and — since the Workspace destination is drawn only at
-    // Peek — no way on to the Workspace either. Choosing is asking to look at
-    // something, so it lands on the detail.
-    const { result, choose, onSurfaceChange } = setup();
+  it('shows the capability the user chose', () => {
+    const { result, choose } = setup();
 
     choose('git');
 
     expect(result.current.projection?.id).toBe('git');
-    expect(result.current.projection?.depth).toBe('peek');
-    // Still not a launcher: opening the detail must not steal the work surface.
-    expect(onSurfaceChange).not.toHaveBeenCalled();
   });
 
   it('titles the projection from the capability, not from the view', () => {
@@ -74,43 +70,16 @@ describe('capsule emergence', () => {
     expect(result.current.projection?.title).toBe('Git');
   });
 
-  it('keeps the Signal a step away, reached by stepping back out of the Peek', () => {
-    // Signal is not gone — it is what a dismissed Peek steps back to, and what
-    // Nession shows on its own when a capability earns presence. What changed is
-    // that choosing no longer *lands* there. This is the only path from a Peek
-    // to a Signal now, so the "one level at a time" step is asserted through it.
-    const { result, choose } = setup();
+  it('dismissing closes the projection', () => {
+    // One dismissal, not two. Stepping Peek -> Signal -> Dormant was the walk
+    // a two-depth model produced, and the Signal it landed on was a state the
+    // user never asked for.
+    const { result, choose, dismiss } = setup();
 
     choose('git');
-    expect(result.current.projection?.depth).toBe('peek');
+    expect(result.current.projection?.id).toBe('git');
 
-    act(() => result.current.projection?.onDismiss());
-    expect(result.current.projection?.depth).toBe('signal');
-
-    act(() => result.current.projection?.onDeeper?.());
-    expect(result.current.projection?.depth).toBe('peek');
-  });
-
-  it('closes a Peek back to the Signal it came from', () => {
-    // Closing a detail view should not also destroy the indication that made it
-    // worth opening.
-    const { result, choose } = setup();
-
-    choose('git');
-    act(() => result.current.projection?.onDismiss());
-
-    expect(result.current.projection?.depth).toBe('signal');
-  });
-
-  it('closes the Signal to dormant', () => {
-    // Two dismissals now: the first steps the Peek back to its Signal, the
-    // second closes that.
-    const { result, choose } = setup();
-
-    choose('git');
-    act(() => result.current.projection?.onDismiss());
-    act(() => result.current.projection?.onDismiss());
-
+    dismiss();
     expect(result.current.projection).toBeUndefined();
   });
 
@@ -126,29 +95,26 @@ describe('capsule emergence', () => {
     expect(result.current.projection).toBeUndefined();
 
     // …and the user's own move still deepens it: choosing the sensed row in
-    // the Context Disclosure opens the Peek (SC-20).
+    // the Context Disclosure opens the projection (SC-20).
     choose('claude-code');
 
     expect(result.current.projection?.id).toBe('claude-code');
-    expect(result.current.projection?.depth).toBe('peek');
     // Deepening is not opening the surface: the work surface is not taken.
     expect(onSurfaceChange).not.toHaveBeenCalled();
   });
 
-  it('opens Terminal Keys at Peek like any other capability (SC-38)', () => {
-    // This test has asserted two different shapes. It first asserted the
-    // opposite — the accessory had no deeper step because it *was* its own
-    // body. The 2026-10-03 review retired that family (SC-38): Terminal Keys
-    // has a Peek like any other capability. It then asserted the ordinary
-    // Signal -> title -> Peek walk, which no longer exists either — choosing
-    // lands on the detail for every capability, so there is only one protocol
-    // to walk and one step to walk it in.
+  it('opens Terminal Keys like any other capability (SC-38)', () => {
+    // This test has asserted several shapes. It first asserted the opposite —
+    // the accessory had no deeper step because it *was* its own body. The
+    // 2026-10-03 review retired that family (SC-38): Terminal Keys opens like
+    // any other capability. It then walked the ordinary Signal -> title ->
+    // Peek steps, which are gone too — choosing is the whole protocol now, for
+    // every capability alike.
     const { result, choose } = setup();
 
     choose('terminal-keys');
 
     expect(result.current.projection?.id).toBe('terminal-keys');
-    expect(result.current.projection?.depth).toBe('peek');
     // No Workspace view, so no destination is offered from here — the shape
     // SC-38 kept, expressed by the capability having no view binding.
     expect(result.current.projection?.onOpenWorkspace).toBeUndefined();
@@ -169,9 +135,9 @@ describe('capsule emergence', () => {
 
   it('carries the capability’s own answer about the soft keyboard', () => {
     // #1034 §5. Terminal Keys and an IME want the same vertical space, so that
-    // projection claims input focus while it is up; Git's Signal and Peek are
-    // read *while* typing (`git commit`), so taking the keyboard from them would
-    // be the regression, not the fix.
+    // projection claims input focus while it is up; Git's projection is read
+    // *while* typing (`git commit`), so taking the keyboard from it would be
+    // the regression, not the fix.
     //
     // This asymmetry is the design, and the capsule has no capability ids — so
     // this flag is the entire mechanism by which the two are told apart, and it
@@ -217,35 +183,29 @@ describe('capsule emergence', () => {
     expect(result.current.projection?.id).toBe('git');
   });
 
-  it('keeps a dismissed Signal dismissed', () => {
-    // Without the dismissal being remembered, the next render would re-emerge
-    // what the user just closed and the dismissal would undo itself.
-    const { result, choose } = setup();
+  it('does not re-show what was dismissed', () => {
+    // #1165 recorded a ✕ that fired and was undone in the same frame. The
+    // observed-command path that caused it is gone, so the guard is the
+    // simpler one now: dismissing clears the choice and nothing puts it back.
+    // Mutation: leave `chosen` set in `onDismiss` — this must fail.
+    const { result, choose, dismiss } = setup();
 
     choose('git');
-    // Out of the Peek, then out of the Signal it steps back to — two dismissals
-    // now that choosing lands on the detail.
-    act(() => result.current.projection?.onDismiss());
-    act(() => result.current.projection?.onDismiss());
+    dismiss();
+
     expect(result.current.projection).toBeUndefined();
-
-    // And the entry is how it comes back — otherwise a closed Signal would be
-    // unreachable until the Session changed.
-    choose('git');
-    expect(result.current.projection?.id).toBe('git');
   });
 
   it('carries the focused item into the Workspace', () => {
     const { result, choose, onOpenWorkspace } = setup();
 
     choose('git');
-    act(() => result.current.projection?.onDeeper?.());
-    // The capability has somewhere deeper to go — a projection with no
-    // Workspace view would carry nothing, and this is where that would show.
+    // Git has a Workspace view, so the destination exists — a projection with
+    // no Workspace view would carry nothing, and this is where that would show.
     expect(result.current.projection?.onOpenWorkspace).toBeTypeOf('function');
     act(() => result.current.projection?.onOpenWorkspace?.('src/a.ts'));
 
-    // #826: entering from a Peek lands on the item, not on a landing page.
+    // #826: entering from a projection lands on the item, not on a landing page.
     expect(onOpenWorkspace).toHaveBeenCalledWith('git', 'src/a.ts');
   });
 

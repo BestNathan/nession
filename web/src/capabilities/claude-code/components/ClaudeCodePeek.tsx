@@ -19,13 +19,13 @@ import { chromeSansRole } from '@/shared/typography/chromeRoles';
 const RECENT_LIMIT = 3;
 
 /**
- * Claude Code at the second depth.
+ * Claude Code beside the capsule.
  *
- * The Signal says what is true in one line; this says what there is to *do*
- * about it, which is the difference `#1046` draws between a Signal and a Peek
- * and the reason the capability was Signal-only until the conversation existed.
- * Before it, the honest answer to "what is behind this?" was the config browser
- * — a list the Workspace already drew better. Now it is the work itself.
+ * The line under the state says what is true; this says what there is to *do*
+ * about it — the difference `#1046` drew between a Signal and a Peek, and the
+ * reason the capability was Signal-only until the conversation existed. Before
+ * it, the honest answer to "what is behind this?" was the config browser — a
+ * list the Workspace already drew better. Now it is the work itself.
  *
  * Three states, because the provider has three answers and they are not
  * interchangeable:

@@ -91,9 +91,9 @@ export const terminalKeysProjection: CapsuleProjectionBinding = {
   // when it appears and steps it out when the field is tapped back.
   //
   // The flag is deliberately *not* on Git's projection, and that asymmetry is
-  // the design: Signal and Peek are read while you go on typing (`git commit`),
-  // so taking the keyboard from them would be a regression, not a consistency
-  // fix. Nothing here names the capsule; nothing in the capsule names this.
+  // the design: a Peek is read while you go on typing (`git commit`), so taking
+  // the keyboard from it would be a regression, not a consistency fix. Nothing
+  // here names the capsule; nothing in the capsule names this.
   ownsInputFocus: true,
   // Nothing to add at Peek and no Workspace view to open: the key row is the
   // capability in full, which is the lower bound `capability-emergence.md`

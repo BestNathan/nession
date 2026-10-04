@@ -12,7 +12,7 @@ import {
  * How a capability supplies its Terminal projection body.
  *
  * The capability contributes **content**; the capsule draws the frame and
- * Nession decides whether anything appears at all and at which depth. That is
+ * Nession decides whether anything appears at all. That is
  * the split `workspace-navigation.md` draws — "Extensions contribute
  * capability. Nession decides whether, where, and how" — and it is why this is
  * a body renderer rather than a component free to place itself.
@@ -64,7 +64,7 @@ export interface CapsuleProjectionBinding {
    * A projection the user *taps* to drive the terminal — Terminal Keys — cannot
    * share the screen with an IME: the keyboard would cover the accessory it is
    * competing with, and every key the user wants is behind it. A projection that
-   * is meant to be read *while* typing — Git's Signal and Peek, for a
+   * is meant to be read *while* typing — Git's Peek, for a
    * `git commit` in progress — has the opposite requirement, and taking the
    * keyboard away from it would be the bug.
    *
@@ -81,11 +81,10 @@ export interface CapsuleProjectionBinding {
   body: (props: {
     agentId: string | undefined;
     sessionId: string | undefined;
-    depth: 'signal' | 'peek';
     /**
      * The lifecycle state Nession resolved for this capability.
      *
-     * The second implementation asked for it. Claude Code's Signal says
+     * The second implementation asked for it. Claude Code's body says
      * "running now" or "ran earlier", and that is the capability layer's
      * decision — a body re-deriving it from the same facts would be a second
      * copy of `resolveClaudeCodeState` free to disagree with the one the
@@ -149,7 +148,7 @@ export interface CapsuleProjectionBinding {
  * Only these are offered in the capability entry, and choosing one of them opens
  * its Peek. Everything else keeps the behaviour it had: choosing it opens its
  * Workspace view. A capability absent from this list is not broken — it simply
- * has no shallower depth to deepen into, which is exactly what
+ * has no Terminal projection of its own, which is exactly what
  * `capability-emergence.md` means by a Terminal-local capability stopping at the
  * Terminal.
  */

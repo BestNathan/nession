@@ -29,8 +29,6 @@ export {
 } from './discovery';
 export {
   resolveCapabilityProjection,
-  type CapabilityProjection,
-  type DisclosureDepth,
   type EmergenceInput,
 } from './emergence';
 export { MAX_OBSERVED_COMMANDS, observeSessionCommand } from './facts';
