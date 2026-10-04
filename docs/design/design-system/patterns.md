@@ -83,7 +83,11 @@ The ownership rule is **reuse before restyle**:
 - product chrome owns surface material, radius family, elevation, typography
   roles, standard row/action anatomy, focus treatment and experience geometry;
 - a capability owns its domain content and composition inside the host, not the
-  host chrome around it.
+  host chrome around it;
+- a feature-local component is appropriate when its semantics are genuinely
+  feature-specific and no canonical primitive/recipe already owns the role. If
+  a second independent consumer needs the same control, that is the signal to
+  promote it rather than copy it.
 
 This is deliberately not a universal Surface DSL. Each stable product region may
 own a small grammar when doing so removes implementation freedom that has already
