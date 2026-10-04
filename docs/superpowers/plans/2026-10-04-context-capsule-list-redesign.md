@@ -882,15 +882,43 @@ MSG
 - `patterns/terminal-capsule.md`：图与文字里 Signal 的痕迹。
 - `interaction/app.md`：`Dormant -> Signal -> Peek -> Workspace` 那条链。
 
-- [ ] **Step 2: 校验**
+- [ ] **Step 2: `web/src` 里的现在时 Signal 措辞（计划原本漏了这一步）**
 
-Run: `git grep -n "Signal" -- docs/design | grep -viE "work signal|workSignal|AbortSignal|signals" | head -20`
-Expected: 只应剩下描述 WorkSignal / context signal 的用法，不再有深度意义上的 Signal。
+代码质量复核发现：本计划的校验 grep 只扫 `docs/design`，而**十处 `web/src` 的注释仍在用现在时讲 Signal**。它们不是历史记录，是在描述一个不存在的机制 —— 与本次改动「把死词表删干净」的初衷相反。
 
-- [ ] **Step 3: Commit**
+逐条核（行号是 `34bf9f6f` 时点，会漂移，按内容找）：
+
+| 文件 | 现在写的是 |
+|---|---|
+| `app/__tests__/unit/capsulePresence.test.ts:93-94` | "*…it still emerges by observation when its state warrants it.*" —— **现在是假话**：commit A 之后不再有任何自动涌现 |
+| `capabilities/git/state.ts:154-156` | "what a Signal calls it … a Signal has room for an identity" |
+| `capabilities/git/contribution.tsx:49` | "push/pop, Signal/Peek" |
+| `capabilities/git/components/GitWorkspace.tsx:240` | "the Signal already says which one" |
+| `capabilities/git/components/GitWorktreesView.tsx:18` | "the Terminal Signal says it before that" |
+| `product/terminal/capsule/capsuleStyles.ts:343,348` | "the Signal and Peek frame"、"a Signal that arrived at the composer's text size" |
+| `product/terminal/capsule/components/CapsuleShell.tsx:28` | "a capability Signal or Peek" |
+| `app/fixture/fixtureGit.ts:86` | "a Signal names its basename" |
+| `app/fixture/FixtureApp.tsx:59` | "what lets a Signal draw real content offline" |
+| `app/__tests__/integration/TerminalCapsule.test.tsx:170,194` | "while Git's Signal is up"、"a Signal is not a reason to take the keyboard away" |
+
+**⛔ 不要动这两处** —— 它们是**过去时的实测记录**，正是本仓库要求保留的证据文体：
+`product/terminal/capsule/hooks/useCapsuleDockClearance.ts:16-18`（"Measured on the dock, a Signal added its own height…"）与 `app/__tests__/integration/useCapsuleDockClearance.test.ts:101-102`。改动方式是把它们标注成历史（例如 "before the Signal depth was removed (2026-10-04)"），而不是重写或删除测量值。
+
+- [ ] **Step 3: 校验（两个范围都要扫）**
 
 ```bash
-git add docs/
+git grep -n "Signal" -- docs/design
+git grep -n "Signal" -- web/src | grep -v __tests__/integration/useCapsuleDockClearance
+```
+
+Expected:
+- `docs/design` 只剩 WorkSignal / context signal 的用法；
+- `web/src` 只剩三类：① `useCapsuleDockClearance` 的过去时实测记录；② `collectWorkSignals` / `WorkSignal` / `contextSignals` 这些**仍然存在**的概念；③ `AbortSignal` 等无关用法。**不再有任何描述「投影的 Signal 深度」的现在时句子。**
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add docs/ web/src/
 git commit -F - <<'MSG'
 docs: converge the emergence ladder on one depth
 
