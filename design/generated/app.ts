@@ -141,7 +141,6 @@ export const contextCapsule = {
   marginBottom: "0.5rem",
   maxHeight: "16rem",
   rowHeight: "2.75rem",
-  rowLineHeight: "1.25rem",
   markerSize: 5,
 } as const;
 export const motion = {

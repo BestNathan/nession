@@ -392,10 +392,6 @@
       "$description": "One capability row in the Context Capsule: capability icon, title, and one line of reason for a sensed capability (#1347 SC-19/SC-42). 44px on both experiences — two lines of text need at least 40, and on App this is exactly the touch floor, so a row is a legal App target by construction.",
       "value": "2.75rem"
     },
-    "rowLineHeight": {
-      "$description": "Leading inside one Context Capsule row, and the missing half of the decision above. Two lines — the title, and the sensed row's reason — have to fit the 44px band, and nothing else pinned this: both line classes set only a font-size, so they inherited the document's 1.5, which at the capsule's 1rem text is 24px a line. A sensed row therefore measured 48px and stood 4px prouder than an ordinary one, so the list's rhythm changed with the sense state — the anti-pattern context-capsule.md names, and invisible while the surface was a fixed 16rem tall. 20px a line puts the pair at the 40px the band was sized for (see rowHeight) and makes every row exactly one band.",
-      "value": "1.25rem"
-    },
     "markerSize": {
       "$description": "The presence mark beside an ordinary row's title: a capability the session actually needs. The same 5px as the shell's status dot on purpose — both are 'a quiet mark beside text' rather than a badge — but a separate leaf, because that one answers service health while this answers capability presence, and the design system's rule is that an equal resolved value does not make two names interchangeable.",
       "value": "5px"

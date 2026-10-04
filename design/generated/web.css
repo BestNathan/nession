@@ -216,7 +216,6 @@
   --context-capsule-margin-bottom: 0.5rem;
   --context-capsule-max-height: 18rem;
   --context-capsule-row-height: 2.75rem;
-  --context-capsule-row-line-height: 1.25rem;
   --context-capsule-marker-size: 5px;
   --motion-terminal-capsule: 280ms cubic-bezier(0.22, 1, 0.36, 1);
   --motion-shell-duration: 180ms;
@@ -629,7 +628,6 @@
   --context-capsule-margin-bottom: 0.5rem;
   --context-capsule-max-height: 16rem;
   --context-capsule-row-height: 2.75rem;
-  --context-capsule-row-line-height: 1.25rem;
   --context-capsule-marker-size: 5px;
   --motion-terminal-capsule: 280ms cubic-bezier(0.22, 1, 0.36, 1);
   --conversation-bubble-max-width: 82%;
