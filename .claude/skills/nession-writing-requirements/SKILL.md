@@ -24,7 +24,29 @@ Use one or more area labels appropriate to the affected owner.
 
 Before creating a new issue, search for an existing issue that already owns the same problem.
 
-## 2. Requirement format
+## 2. Issue lifecycle and dedupe
+
+This Skill is the canonical owner of **reopen-vs-new issue decisions**, including findings produced by post-implementation review.
+
+Before creating anything:
+
+1. scan all open issues, not only one label;
+2. inspect relevant closed issues;
+3. compare the underlying invariant / Success Criterion, not only title keywords or symptoms.
+
+| Existing state | Action |
+|---|---|
+| Existing issue owns the **same invariant / SC** and it is still unmet | **reopen that issue** (if closed) and add a post-implementation investigation comment |
+| Existing open issue already owns the same invariant | comment/cross-reference there; do not duplicate |
+| Same symptom but a **different confirmed root cause** | create a new Bug and reference the old issue |
+| New independent behavior/design decision | create a new Requirement |
+| Follow-up is already tracked elsewhere | link that issue from the parent/review issue |
+
+When reopening, explain what the earlier implementation fixed, what invariant still remains false, and what evidence/Acceptance must change. Preserve the existing issue's Acceptance history instead of fragmenting one invariant across new issues.
+
+Do not create a new Bug merely because an old issue is closed; closure state is not proof that its invariant is satisfied.
+
+## 3. Requirement format
 
 Title:
 
@@ -68,7 +90,7 @@ Stages are `pre-merge`, `staging`, or `post-merge`.
 
 Results are `Pending`, `Pass`, `Fail`, or justified `N/A`.
 
-## 3. Good Success Criteria
+## 4. Good Success Criteria
 
 A criterion states an externally verifiable outcome, not an implementation todo.
 
@@ -88,7 +110,7 @@ Bad:
 
 Use `post-merge` only when the criterion genuinely cannot be proven before merge/deploy/observation.
 
-## 4. Bug format
+## 5. Bug format
 
 Title:
 
@@ -111,13 +133,13 @@ If root cause is not verified, use `## Investigation Status` instead of `## Root
 
 A Bug issue should distinguish verified facts from hypotheses.
 
-## 5. Product alignment
+## 6. Product alignment
 
 For user-facing Requirements, read `VISION.md`, `PRINCIPLE.md`, and relevant `docs/design/*` before finalizing.
 
 Do not use current implementation limitations as product requirements unless the constraint is intentional.
 
-## 6. Conversation history
+## 7. Conversation history
 
 When requirements evolve, preserve meaningful decisions in an issue comment rather than repeatedly bloating the canonical body.
 
@@ -137,7 +159,7 @@ Recommended comment:
 
 The issue body should remain the current canonical requirement, not a chronological transcript.
 
-## 7. Changes after creation
+## 8. Changes after creation
 
 When the user changes a requirement:
 
@@ -149,7 +171,7 @@ When the user changes a requirement:
 
 If criterion meaning changes materially, old evidence must not silently count as proof.
 
-## 8. Acceptance relationship
+## 9. Acceptance relationship
 
 This Skill defines criteria and report structure.
 
@@ -157,7 +179,7 @@ This Skill defines criteria and report structure.
 
 Do not duplicate validator semantics here beyond the public table vocabulary.
 
-## 9. Validate
+## 10. Validate
 
 Before considering an issue well-formed, run/use the canonical issue contract validator where applicable:
 
