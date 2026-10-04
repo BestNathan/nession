@@ -25,10 +25,12 @@ scope; this surface is rendered inside the capsule's dock, so it inherits the
 scope, rides the App's Conversation↔Capability exchange transform, and needs the
 opposite rule stated: **a generic menu's sizing is a violation here** (SC-42).
 
-**Its rows carry two lines on App.** Icon, title, and one line of *why* — the
-reason a work-sensed or context-sensed capability is here at all (SC-19). A
-two-line row is taller than one band, which no row pattern measures today, so
-the row height is this pattern's own token.
+**Its sensed rows may carry two lines, but every row remains one band.** Icon,
+title, and one line of *why* explain why a work-sensed or context-sensed
+capability is here at all (SC-19). The canonical chrome role sizes/leadings keep
+that pair inside the same row band as an ordinary one-line row, so sensing does
+not change the list rhythm. The row height is this pattern's own token because it
+is a repeated product relationship rather than a generic control band.
 
 **The lower Capsule must not move.** Opening it adds a sibling above the
 Conversation Capsule; the shell's box is identical open and closed, and the gap
