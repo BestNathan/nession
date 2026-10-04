@@ -93,10 +93,12 @@ describe('Context Disclosure', () => {
   });
 
   it('starts every row at the same column', async () => {
-    // jsdom has no layout, so this cannot measure the 6px the bug produced —
-    // the e2e `assertContextCapsule` does that. What this pins is the cause:
-    // the marker column renders on every row, so the icon and title columns
-    // begin at the same offset whether or not a dot is drawn.
+    // jsdom has no layout, so this cannot measure the 6px the bug produced.
+    // What it pins is the cause: the marker column renders on every row, so
+    // the icon and title columns begin at the same offset whether or not a
+    // dot is drawn. The pixel consequence is measured in the browser, not
+    // here — which is the general split for this surface, not a claim about
+    // any one spec.
     // Mutation: render the slot only for `row.kind === 'ordinary'` — must fail.
     const caps = disclosure();
     render(
