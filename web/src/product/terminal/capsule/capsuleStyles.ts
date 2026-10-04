@@ -370,10 +370,10 @@ export const capsuleHistoryItemClass =
   'flex w-full items-center justify-between gap-[length:var(--terminal-capsule-popover-gap)] rounded px-[length:var(--terminal-capsule-phys-key-pad-x)] py-[length:var(--terminal-capsule-phys-key-pad-x)] text-left text-[length:var(--terminal-capsule-font-size)] hover:bg-accent/40';
 
 export const capsulePhysKeyButtonClass =
-  'h-[length:var(--terminal-capsule-phys-key-height)] min-w-[5ch] shrink-0 whitespace-nowrap px-0 font-mono text-[length:var(--terminal-capsule-phys-key-font-size)]';
+  'h-[length:var(--terminal-capsule-phys-key-height)] min-w-[5ch] shrink-0 whitespace-nowrap px-0 font-mono text-[length:var(--terminal-capsule-phys-key-font-size)] leading-[length:var(--terminal-capsule-phys-key-font-size)]';
 
 export const capsuleArrowKeyAppButtonClass =
-  'h-[length:var(--terminal-capsule-phys-key-height)] w-[var(--terminal-capsule-phys-key-arrow-width)] min-w-0 shrink-0 px-0 font-mono text-[length:var(--terminal-capsule-phys-key-font-size)]';
+  'h-[length:var(--terminal-capsule-phys-key-height)] w-[var(--terminal-capsule-phys-key-arrow-width)] min-w-0 shrink-0 px-0 font-mono text-[length:var(--terminal-capsule-phys-key-font-size)] leading-[length:var(--terminal-capsule-phys-key-font-size)]';
 
 export const capsulePhysKeyIconClass = 'size-[length:var(--terminal-capsule-phys-key-icon-size)]';
 
@@ -426,8 +426,6 @@ export const capsuleProjectionDockClass = capsuleUpperDockClass;
  */
 export const capsuleProjectionScrollClass =
   'max-h-[length:var(--terminal-capsule-projection-max-height)] overflow-y-auto';
-
-export const capsuleProjectionTextClass = chromeSansRole('body');
 
 export const capsuleProjectionItemClass =
   'flex w-full items-center gap-[length:var(--terminal-capsule-projection-item-gap)] rounded px-[length:var(--terminal-capsule-projection-item-pad-x)] py-[length:var(--terminal-capsule-projection-item-pad-y)] text-left transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
