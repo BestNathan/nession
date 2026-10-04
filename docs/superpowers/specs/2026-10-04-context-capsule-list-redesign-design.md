@@ -78,6 +78,9 @@
 2. **排版用设计语言的角色**：标题 `body`，说明 `caption`。
 3. **图标列接上真实图标**，不是删掉。
 4. **删掉每行右边的 `›`**。
+5. **`CapsuleProjectionBinding.entry` 字段整个删掉**（不是保留成单值）。
+6. **深度词汇表只保留 `peek`** —— 包括 `#1347` 的 SC-34 / SC-36 / SC-38 措辞按此收敛。
+7. **收敛成「一个位置、一个容器、唯一一种样式」** —— 同一槽位不允许再出现两种内容形态。
 
 ## 设计
 
@@ -91,7 +94,7 @@ Signal 之所以能删得干净，是因为上面第 1 条：删它**不丢任�
 - `working` 的计算（`collectWorkSignals(...).filter(status==='working')`）失去唯一消费者（`working` 入参），一并删除。
 - `product/capability/emergence.ts`：`DisclosureDepth` 删 `'signal'`；由于它全树无消费者（见 1c），**连同类型一起删除**，`index.ts` 的再导出同步去掉。
 - **`CapsuleProjectionBinding.entry` 字段删除**（见 1b）：它三个实例全是 `'peek'`，`'signal'` 一旦删掉这个字段就恒为同一个值 —— 单值 union 正是本仓库说的「unused axis」。随之 `CAPSULE_ENTRY_IDS` 与 `CAPSULE_PROJECTION_IDS` 合并成**一个** `CAPSULE_PROJECTION_IDS`，`capsulePresence.ts` 的那句 `filter(b => b.entry !== 'signal')` 与它引用的那道 #1046 区分一并消失（已经没有能区分出来的成员）。三个 `contribution.tsx` 各删一行。
-  - ⚠ 这是本改动里唯一一处**扩大范围**的决定：`entry` 是 #1046 引入的、文档写明「provisional by design, #826 Q6 才冻结」。它今天不含信息，但删掉意味着将来「只有 Signal 的能力」在类型上不再可能 —— 而那正是本轮要消灭的东西，所以是收敛而非能力损失。**若 owner 认为该字段应保留作为一种声明位，说一声，我改成保留 `entry: 'peek'` 单值。**
+  - **owner 2026-10-04 拍板：删掉。** 这是本改动里唯一一处**扩大范围**的决定 —— `entry` 是 #1046 引入的、文档写明「provisional by design, #826 Q6 才冻结」。它今天不含信息，删掉意味着将来「只有 Signal 的能力」在类型上不再可能，而那正是本轮要消灭的东西，所以是收敛而非能力损失。
 - **能力体失去 `depth` 入参**（见 1b-bis）：`CapsuleProjectionBodyProps.depth` 删除；`GitProjection` 的 `GitSignalBody` 与 `depth === 'signal'` 分支删除；`ClaudeCodeProjection` 的 `if (depth === 'peek')` 分支取直。两个能力的 rest 分支因此从「两套」收敛成「一套」。
 - `docs/design/design-system/patterns/*` 与 `capability-emergence.md` 里描述「Signal 是 the smallest identifying state needed」的段落一并核。
 
@@ -139,7 +142,7 @@ Signal 之所以能删得干净，是因为上面第 1 条：删它**不丢任�
 | 删除 `rowLineHeight` 后有人以为行带不再受保护 | pattern doc 写明规则 + e2e 断言保留；spec 里点明「断言比 token 更能守住」 |
 | 图标引入把 `app` 层的东西塞进 `product` 层 | `iconFor` 由 `app/capsuleProjections.ts` 提供并注入，`product` 侧只接收 `LucideIcon` 值，不 import app 层 |
 | 视觉基线大面积移动 | 同批 `--update-snapshots=all` 重生成，按 Playwright 自己的 YIQ 度量逐张归属，只提交本次真被改动的 |
-| 删 `entry` 字段属于扩大范围 | 已在设计里点名并给出退路（保留单值 `entry: 'peek'`）；owner 未反对才执行 |
+| 删 `entry` 字段属于扩大范围 | 已单独点名，owner 2026-10-04 明确同意删除 |
 | 与其它会话并发 | 开 worktree 前已查 `gh pr list`，无 capsule 相关开放 PR |
 
 ## 验证
