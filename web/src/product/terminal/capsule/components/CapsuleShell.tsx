@@ -85,11 +85,9 @@ export function CapsuleShell({
       data-morph-id="capsule-shell"
       className={cn(
         geometry.shellClass,
-        // In the adjacent row the shell shares the dock's width with the
-        // action: `flex-1` (basis 0%) supersedes the derived `w-full` for a flex
-        // item, so the capsule yields the action's width rather than
-        // overflowing the group (#1204 §8).
-        adjacentAction && 'min-w-0 flex-1',
+        // In the adjacent layout the grid owns the width split; the shell fills
+        // column 1 and only needs min-width zero so its content may shrink.
+        adjacentAction && 'min-w-0',
       )}
     >
       <div
