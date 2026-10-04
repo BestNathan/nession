@@ -32,6 +32,33 @@ Evaluate only criteria whose declared stage matches the environment/boundary bei
 
 Do not mark a criterion Pass because implementation exists; execute/observe the criterion's actual proof.
 
+## Execute through the trusted workflow
+
+Acceptance execution is routed through `.github/workflows/acceptance.yml`.
+
+Manual execution uses **Actions -> Acceptance -> Run workflow** (`workflow_dispatch`) with:
+
+- `issue_number`;
+- explicit `stage` (`pre-merge`, `staging`, or `post-merge`);
+- exact `target_ref`;
+- optional `deployment`;
+- optional deterministic result or model provider.
+
+CI/CD callers invoke the same workflow through `workflow_call`. Never infer Acceptance stage from a branch name.
+
+### Trust boundary
+
+The workflow intentionally separates **verification** from **Issue mutation**:
+
+- the Acceptance harness/updater is checked out from trusted `main`;
+- target code is a separate read-only verification workspace;
+- the Acceptance Agent/execute job has read-only repository/Issue authority and must never edit the Issue, PR, repository, Success Criteria, IDs, wording, or stages;
+- when deterministic evidence is already available, supply it and skip the model;
+- the structured Acceptance Result is normalized/frozen before mutation;
+- **only the deterministic updater job has `issues: write`** and may project the frozen result into the Acceptance Report/check boxes.
+
+A Requirement-level `Pass` / `Pending` / `Fail` / `N/A` is acceptance data; it must not be conflated with workflow infrastructure success/failure.
+
 ## Evidence
 
 Evidence must be concrete enough for another reviewer/validator to understand what was proven.
