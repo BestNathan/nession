@@ -29,7 +29,6 @@
   --radius: 0.625rem;
   --radius-control: 0.625rem;
   --radius-surface: calc(var(--radius) * 1.6);
-  --radius-floating: calc(var(--radius) * 2);
   --radius-capsule: calc(var(--radius) * 2.2);
   --elevation-floating: 0 0 0 1px oklch(0 0 0 / 6%), 0 1px 2px oklch(0 0 0 / 6%), 0 8px 24px oklch(0 0 0 / 8%);
   --chart-1: oklch(0.2636 0.0063 258.359);
@@ -205,7 +204,6 @@
   --terminal-capsule-projection-margin-bottom: 0.5rem;
   --terminal-capsule-projection-pad: 0.75rem;
   --terminal-capsule-projection-gap: 0.5rem;
-  --terminal-capsule-projection-radius: 0.75rem;
   --terminal-capsule-projection-max-height: 18rem;
   --terminal-capsule-projection-font-size: 0.75rem;
   --terminal-capsule-projection-line-height: 1rem;
@@ -278,7 +276,6 @@
   --radius: 0.625rem;
   --radius-control: 0.625rem;
   --radius-surface: calc(var(--radius) * 1.6);
-  --radius-floating: calc(var(--radius) * 2);
   --radius-capsule: calc(var(--radius) * 2.2);
   --elevation-floating: 0 0 0 1px oklch(1 0 0 / 8%), 0 1px 2px oklch(0 0 0 / 30%), 0 8px 24px oklch(0 0 0 / 40%);
   --chart-1: oklch(0.93 0.006 265);
@@ -374,7 +371,6 @@
   --color-ring: var(--ring);
   --color-radius-control: var(--radius-control);
   --color-radius-surface: var(--radius-surface);
-  --color-radius-floating: var(--radius-floating);
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);
   --color-chart-3: var(--chart-3);
@@ -505,7 +501,6 @@
   --spacing-terminal-capsule-projection-margin-bottom: var(--terminal-capsule-projection-margin-bottom);
   --spacing-terminal-capsule-projection-pad: var(--terminal-capsule-projection-pad);
   --spacing-terminal-capsule-projection-gap: var(--terminal-capsule-projection-gap);
-  --spacing-terminal-capsule-projection-radius: var(--terminal-capsule-projection-radius);
   --spacing-terminal-capsule-projection-max-height: var(--terminal-capsule-projection-max-height);
   --spacing-terminal-capsule-projection-font-size: var(--terminal-capsule-projection-font-size);
   --spacing-terminal-capsule-projection-line-height: var(--terminal-capsule-projection-line-height);
@@ -617,7 +612,6 @@
   --terminal-capsule-projection-margin-bottom: 0.5rem;
   --terminal-capsule-projection-pad: 0.75rem;
   --terminal-capsule-projection-gap: 0.5rem;
-  --terminal-capsule-projection-radius: 0.75rem;
   --terminal-capsule-projection-max-height: 16rem;
   --terminal-capsule-projection-font-size: 0.75rem;
   --terminal-capsule-projection-line-height: 1rem;

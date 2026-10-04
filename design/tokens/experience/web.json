@@ -396,9 +396,6 @@
     "projectionGap": {
       "value": "0.5rem"
     },
-    "projectionRadius": {
-      "value": "0.75rem"
-    },
     "projectionMaxHeight": {
       "$description": "Ceiling for an emerged projection (#826 Q5). It is a small surface floating over the work, so it stops well short of the terminal and scrolls its own overflow rather than taking the viewport's.",
       "value": "18rem"

@@ -367,19 +367,24 @@ export const capsuleInlineFieldRowClass =
  * is a step below the capsule's own scale, because a Peek that arrived at the
  * composer's text size would read as a second composer.
  *
- * **The radius is part of that group now (#1110).** It was the one value here
- * still borrowed — `var(--radius-lg)`, which resolves to `var(--radius)`, a
- * generic shadcn-scale value that everything from a menu to a card also uses.
- * So the corner was the only part of the surface not owned by the surface, and
- * `terminalCapsule.projectionRadius` — declared in both experience token files
- * for exactly this frame — was read by nothing.
+ * **The radius is the capsule's** (owner decision, 2026-10-04). It has been
+ * three different values on the way here: `var(--radius-lg)`, the generic
+ * shadcn-scale corner a menu or a card also wears; then
+ * `terminalCapsule.projectionRadius`, a leaf declared in both experience files
+ * for exactly this frame; now `radius-capsule`, the same token the resting
+ * capsule below it resolves.
  *
- * This moves the frame from 10px to 12px. That is the point rather than a side
- * effect: the declaration and the rendering disagreed, and the declaration is
- * the one that was written down on purpose.
+ * That last step is the point. The Peek does not sit beside the capsule — it
+ * takes the capsule's slot, one gap above it, and a surface that replaces
+ * another in place reads as a *different family* when its corner does not
+ * match. 12px against 22px was visible; the 2px between this and the
+ * `radius-floating` tier the hierarchy had assigned the Peek was not. So the
+ * hierarchy changed rather than the value being nudged: `radius-floating` is
+ * deleted (its one documented consumer was this frame), and the capsule tier
+ * now covers the capsule and the surface that stands in for it.
  */
 export const capsuleProjectionClass =
-  'pointer-events-auto flex flex-col gap-[length:var(--terminal-capsule-projection-gap)] rounded-[var(--terminal-capsule-projection-radius)] border border-border/60 bg-background/95 p-[length:var(--terminal-capsule-projection-pad)] shadow-[var(--elevation-floating)] backdrop-blur';
+  'pointer-events-auto flex flex-col gap-[length:var(--terminal-capsule-projection-gap)] rounded-[var(--radius-capsule)] border border-border/60 bg-background/95 p-[length:var(--terminal-capsule-projection-pad)] shadow-[var(--elevation-floating)] backdrop-blur';
 
 /** Above the capsule, never over it: the resting capsule's box does not move. */
 export const capsuleProjectionDockClass =

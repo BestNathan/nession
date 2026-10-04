@@ -3,12 +3,23 @@
  * Static gate: App-owned surfaces must use semantic radius tokens, not generic
  * Tailwind `rounded-*` utilities.
  *
- * The 5-tier semantic radius hierarchy (#1110) is:
+ * The semantic radius hierarchy (#1110) is:
  * - radius-control (10px): interactive controls (buttons, inputs)
  * - radius-surface (16px): contained surfaces (panels, cards)
- * - radius-floating (20px): temporary elevated surfaces (Peek, popovers)
- * - radius-capsule (22px): TerminalCapsule shell
+ * - radius-capsule (22px): the capsule, and everything that stands in its slot
  * - radius.pill (9999px): true pill/chip geometry
+ *
+ * The capsule tier covers the resting Capsule, the Context Capsule that opens
+ * above it, the Peek that replaces the latter in place, and the child overlay a
+ * Peek opens. They share one corner because they share one position: a surface
+ * that takes another's slot reads as a different family when its corner does
+ * not match, and 12px beside 22px did.
+ *
+ * `radius-floating` (20px, "temporary elevated surfaces: Peek, popovers,
+ * inspectors") was removed on 2026-10-04. Its one documented consumer was the
+ * Peek, and the owner converged the Peek onto the capsule's corner rather than
+ * the other way — so the tier had no surface left to describe, and the 4-tier
+ * hierarchy above is the one to read.
  *
  * Generic `rounded-{sm|md|lg|xl|2xl}` utilities are unowned — they have no
  * semantic meaning and no product role. App-owned surfaces (not components/ui/)

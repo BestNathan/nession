@@ -89,10 +89,6 @@
         "$description": "Contained surfaces: panels, cards where justified. Larger than control to visually group content.",
         "value": "calc(var(--radius) * 1.6)"
       },
-      "radius-floating": {
-        "$description": "Temporary elevated surfaces: Peek, popovers, inspectors. Softer corners for transient overlays.",
-        "value": "calc(var(--radius) * 2)"
-      },
       "radius-capsule": {
         "value": "calc(var(--radius) * 2.2)"
       },
@@ -232,10 +228,6 @@
       "radius-surface": {
         "$description": "Contained surfaces: panels, cards where justified. Larger than control to visually group content.",
         "value": "calc(var(--radius) * 1.6)"
-      },
-      "radius-floating": {
-        "$description": "Temporary elevated surfaces: Peek, popovers, inspectors. Softer corners for transient overlays.",
-        "value": "calc(var(--radius) * 2)"
       },
       "radius-capsule": {
         "value": "calc(var(--radius) * 2.2)"

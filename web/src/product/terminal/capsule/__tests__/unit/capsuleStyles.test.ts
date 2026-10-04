@@ -14,20 +14,19 @@ import {
 } from '@/product/terminal/capsule/capsuleStyles';
 
 describe('capsuleStyles', () => {
-  it('rounds the projection with its own token, not a generic radius', () => {
-    // `#1110`. The projection borrowed `var(--radius-lg)` — which resolves to
-    // `var(--radius)`, the generic shadcn-scale value a menu or a card also
-    // uses — so the corner was the one part of the surface the surface did not
-    // own, and `terminalCapsule.projectionRadius` was read by nothing.
+  it('rounds the projection with the capsule radius, not one of its own', () => {
+    // The Peek sits in the capsule's slot, directly above it, and read as a
+    // different family while its corner did not match: 12px against the
+    // capsule's 22px. The design language assigns both to `radius-capsule`
+    // now — the `terminalCapsule.projectionRadius` leaf it used to name is
+    // deleted, and so is `radius-floating`, the tier that described the Peek
+    // and had no consumer left once this one moved.
     //
-    // **Asserted on the token name, not on a pixel value.** The two resolve to
-    // 10px and 12px today, so a `toContain('12px')`-shaped check would pass on
-    // the wrong one the moment the values converged — and a rendered-value
-    // assertion in the browser would pass on *both* if they ever agreed. The
-    // question is which token the class names, so that is what is asked.
-    expect(capsuleProjectionClass).toContain(
-      'rounded-[var(--terminal-capsule-projection-radius)]',
-    );
+    // **Asserted on the token name, not on a pixel value.** A rendered-value
+    // assertion passes on any two radii that happen to agree, and the question
+    // here is which token the class names, so that is what is asked.
+    expect(capsuleProjectionClass).toContain('rounded-[var(--radius-capsule)]');
+    expect(capsuleProjectionClass).not.toContain('--terminal-capsule-projection-radius');
     expect(capsuleProjectionClass).not.toContain('--radius-lg');
   });
 

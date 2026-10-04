@@ -128,7 +128,6 @@ export const terminalCapsule = {
   projectionMarginBottom: "0.5rem",
   projectionPad: "0.75rem",
   projectionGap: "0.5rem",
-  projectionRadius: "0.75rem",
   projectionMaxHeight: "16rem",
   projectionFontSize: "0.75rem",
   projectionLineHeight: "1rem",
