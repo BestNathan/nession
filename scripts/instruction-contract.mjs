@@ -38,16 +38,93 @@ function expectSymlink(errors, root, file, expectedTarget) {
   }
 }
 
+function parseStrictFrontmatterScalar(raw, file, key, errors) {
+  const value = raw.trim();
+  if (!value) {
+    errors.push(`${file}: frontmatter ${key} must be a non-empty string`);
+    return null;
+  }
+
+  if (value.startsWith('"')) {
+    if (!value.endsWith('"')) {
+      errors.push(`${file}: frontmatter ${key} has invalid quoted YAML scalar`);
+      return null;
+    }
+    try {
+      const parsed = JSON.parse(value);
+      if (typeof parsed !== 'string' || !parsed.trim()) throw new Error('not string');
+      return parsed;
+    } catch {
+      errors.push(`${file}: frontmatter ${key} has invalid quoted YAML scalar`);
+      return null;
+    }
+  }
+
+  if (value.startsWith("'")) {
+    if (!/^'(?:[^']|'')*'$/.test(value)) {
+      errors.push(`${file}: frontmatter ${key} has invalid quoted YAML scalar`);
+      return null;
+    }
+    return value.slice(1, -1).replace(/''/g, "'");
+  }
+
+  // Deliberately strict YAML subset: single-line plain string scalars only.
+  // Reject flow/block/tag/anchor forms and values YAML would type as
+  // mappings/comments/booleans/nulls/numbers. Nession Skill frontmatter
+  // intentionally needs only name + description strings.
+  const forbiddenStart = ['[', ']', '{', '}', '|', '>', '&', '*', '!', '?', '@', '`'];
+  if (
+    forbiddenStart.includes(value[0]) ||
+    value.includes(': ') ||
+    value.includes(' #') ||
+    /^(?:null|~|true|false|yes|no|on|off)$/i.test(value) ||
+    /^[-+]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:e[-+]?[0-9]+)?$/i.test(value)
+  ) {
+    errors.push(`${file}: frontmatter ${key} is outside the supported YAML string subset`);
+    return null;
+  }
+
+  return value;
+}
+
 function parseFrontmatter(text, file, errors) {
   const match = text.match(/^---\n([\s\S]*?)\n---(?:\n|$)/);
   if (!match) {
     errors.push(`${file}: missing YAML frontmatter`);
     return null;
   }
-  const name = match[1].match(/^name:\s*(.+?)\s*$/m)?.[1]?.trim();
-  const description = match[1].match(/^description:\s*(.+?)\s*$/m)?.[1]?.trim();
+
+  const fields = new Map();
+  for (const rawLine of match[1].split('\n')) {
+    const line = rawLine.trimEnd();
+    if (!line.trim()) continue;
+
+    const field = line.match(/^([A-Za-z][A-Za-z0-9_-]*):[ \t]+(.+)$/);
+    if (!field) {
+      errors.push(`${file}: frontmatter is not valid Nession YAML subset: ${line}`);
+      return null;
+    }
+
+    const key = field[1];
+    const rawValue = field[2];
+    if (fields.has(key)) {
+      errors.push(`${file}: duplicate frontmatter key ${key}`);
+      return null;
+    }
+    fields.set(key, parseStrictFrontmatterScalar(rawValue, file, key, errors));
+  }
+
+  const name = fields.get('name');
+  const description = fields.get('description');
   if (!name) errors.push(`${file}: missing frontmatter name`);
   if (!description) errors.push(`${file}: missing frontmatter description`);
+
+  for (const key of fields.keys()) {
+    if (key !== 'name' && key !== 'description') {
+      errors.push(`${file}: unsupported frontmatter key ${key}`);
+    }
+  }
+
   return { name, description };
 }
 
@@ -80,6 +157,23 @@ function validateBashSyntax(root, relativePath, errors) {
   if (result.status !== 0) {
     const detail = (result.stderr || result.stdout || '').trim().replace(/\s+/g, ' ');
     errors.push(`${relativePath}: shell syntax invalid${detail ? `: ${detail}` : ''}`);
+  }
+}
+
+function validatePreCommitInstructionRouter(root, errors) {
+  const relativePath = '.githooks/pre-commit';
+  const file = path.join(root, relativePath);
+  if (!fs.existsSync(file)) return;
+
+  const text = fs.readFileSync(file, 'utf8');
+  if (!text.includes('STAGED_ALL=$(git diff --cached --name-only)')) {
+    errors.push(`${relativePath}: STAGED_ALL must include staged deletions, renames, and type changes (no ACM-only diff filter)`);
+  }
+  if (!text.includes('STAGED_INSTRUCTIONS=')) {
+    errors.push(`${relativePath}: missing instruction-surface routing`);
+  }
+  if (!text.includes('./gates/run instruction-contract')) {
+    errors.push(`${relativePath}: instruction changes must invoke instruction-contract`);
   }
 }
 
@@ -116,6 +210,7 @@ export function validateInstructionTree(root = DEFAULT_ROOT) {
   }
 
   validateBashSyntax(root, '.githooks/pre-commit', errors);
+  validatePreCommitInstructionRouter(root, errors);
 
   const skillsRoot = path.join(root, '.claude', 'skills');
   if (!fs.existsSync(skillsRoot)) {
