@@ -122,10 +122,16 @@ Terminal running a shell
 Git becomes relevant
     -> resting capsule remains unchanged
     -> Git may be discovered/selected through `+`
-    -> compact Git Signal: branch / worktree / changes
-    -> tap for Git Peek
+    -> Git Peek: branch / worktree / changes
     -> Open Workspace for full Git
 ```
+
+Selecting through `+` lands on the Peek, not on a Signal: choosing a capability
+is asking to look at it, so the detail is what the explicit entry opens
+(`capability-emergence.md` — `+` is "the explicit entry for *peeking*"). A Signal
+is what Nession shows on its own when a capability earns presence without being
+asked, and what a dismissed Peek steps back to; it is not a step the user
+selects their way into.
 
 Signal/Peek is session-scoped and intentionally shallow. Rich state, history, management, and capability-specific workflows belong in Workspace.
 

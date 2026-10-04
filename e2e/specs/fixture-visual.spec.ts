@@ -98,10 +98,10 @@ test.describe('Web 1440×900', () => {
 
     await page.getByTestId('capsule-capability-more').click();
     await page.getByTestId('capsule-capability-picker-git').click();
-    // The title is the step from Signal to Peek, and it goes inert once there —
-    // so `git-peek-body` below is what says this is a Peek rather than a Signal
-    // whose title happened to be tapped.
-    await page.getByTestId('capsule-capability-title').click();
+    // The row is already the step to Peek — picking a capability opens its
+    // detail — so there is no title click here any more. `git-peek-body` is what
+    // says this is a Peek rather than a Signal.
+    await expect(page.getByTestId('capsule-capability-projection')).toHaveAttribute('data-depth', 'peek');
 
     await expect(page.getByTestId('git-peek-body')).toBeVisible();
     // The capability's own Workspace action, which the Host no longer draws
@@ -556,7 +556,13 @@ test.describe('App 390×844', () => {
     await gotoFixtureApp(page);
     await waitForFixtureTerminal(page);
 
+    // A Signal is reached by stepping back out of the Peek now — picking a row
+    // opens the detail, so there is no longer a selection that lands on Signal
+    // directly. This is also the only place the Signal -> Peek step is exercised
+    // in a real browser, so the walk is asserted rather than only photographed.
     await openCapsuleCapability(page, 'git');
+    await expect(page.getByTestId('capsule-capability-projection')).toHaveAttribute('data-depth', 'peek');
+    await page.getByTestId('capsule-capability-dismiss').click();
 
     await expect(page.getByTestId('capsule-capability-projection')).toBeVisible();
     await expect(page.getByTestId('git-signal-body')).toContainText('worktree: nession-capsule');
@@ -565,6 +571,12 @@ test.describe('App 390×844', () => {
       fullPage: true,
       ...FIXTURE_SCREENSHOT,
     });
+
+    // …and the title is still the step from Signal to Peek. It goes inert once
+    // there, so the depth attribute is what says the step happened.
+    await page.getByTestId('capsule-capability-title').click();
+    await expect(page.getByTestId('capsule-capability-projection')).toHaveAttribute('data-depth', 'peek');
+    await expect(page.getByTestId('git-peek-body')).toBeVisible();
   });
 
   // #1102: the Peek is the surface #1046 creates — the Signal's second depth —
@@ -577,10 +589,10 @@ test.describe('App 390×844', () => {
     await waitForFixtureTerminal(page);
 
     await openCapsuleCapability(page, 'git');
-    // The title is the step from Signal to Peek, and it goes inert once there —
-    // so `git-peek-body` below is what says this is a Peek rather than a Signal
-    // whose title happened to be tapped.
-    await page.getByTestId('capsule-capability-title').click();
+    // The row is already the step to Peek — picking a capability opens its
+    // detail — so there is no title click here any more. `git-peek-body` is what
+    // says this is a Peek rather than a Signal.
+    await expect(page.getByTestId('capsule-capability-projection')).toHaveAttribute('data-depth', 'peek');
 
     await expect(page.getByTestId('git-peek-body')).toBeVisible();
     // The capability's own Workspace action, which the Host no longer draws
@@ -1025,9 +1037,9 @@ test.describe('App 390×844', () => {
     await waitForFixtureTerminal(page);
 
     await openCapsuleCapability(page, 'claude-code');
-    // The title is the step from Signal to Peek, the same walk `app-git-peek`
-    // documents; `claude-code-peek-body` below is what says this is a Peek.
-    await page.getByTestId('capsule-capability-title').click();
+    // The step to Peek happens on the row itself now — the walk `app-git-peek`
+    // documents — and `claude-code-peek-body` below is what says this is a Peek.
+    await expect(page.getByTestId('capsule-capability-projection')).toHaveAttribute('data-depth', 'peek');
     await expect(page.getByTestId('claude-code-peek-body')).toBeVisible();
 
     await expect(page).toHaveScreenshot('app-claude-code-chat-dialect-peek.png', {

@@ -18,6 +18,7 @@ import {
   expectScrollable,
   expectSingleLine,
   expectTokenHeight,
+  expectTokenMaxHeight,
   expectTouchTarget,
   expectTouchTargetsWithin,
   expectVisibleWithin,
@@ -91,6 +92,20 @@ test.describe('assertion helpers detect deliberate violations', () => {
 
     await page.setContent(`<div id="root" style="height: ${expected + 12}px; box-sizing: border-box;"></div>`);
     await rejectsWith(expectTokenHeight(page.locator('#root'), capsule), 'height');
+  });
+
+  test('max-height: over the ceiling fails, at or under it passes (context-capsule)', async ({ page }) => {
+    const capsule = { pattern: 'pattern.context-capsule', experience: 'app' as const };
+    const ceiling = patternBlock(capsule.pattern, 'app').maxHeightTokenPx!;
+
+    await page.setContent(`<div id="root" style="height: ${ceiling - 40}px; box-sizing: border-box;"></div>`);
+    await expectTokenMaxHeight(page.locator('#root'), capsule); // under the ceiling — passes
+
+    await page.setContent(`<div id="root" style="height: ${ceiling}px; box-sizing: border-box;"></div>`);
+    await expectTokenMaxHeight(page.locator('#root'), capsule); // exactly at it — passes
+
+    await page.setContent(`<div id="root" style="height: ${ceiling + 12}px; box-sizing: border-box;"></div>`);
+    await rejectsWith(expectTokenMaxHeight(page.locator('#root'), capsule), 'max-height');
   });
 
   test('drawn affordance: a smaller circle inside the target passes, a filled one fails (terminal-capsule)', async ({ page }) => {

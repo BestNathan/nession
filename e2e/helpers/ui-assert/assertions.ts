@@ -157,6 +157,30 @@ export async function expectTokenHeight(locator: Locator, opts: AssertOptions): 
   }
 }
 
+/**
+ * Measured height must not exceed the contract's `maxHeightToken`.
+ *
+ * Note what this can and cannot see, because the whole reason the pattern also
+ * asserts "shorter than the ceiling" is here: a surface whose content is taller
+ * than its ceiling measures the ceiling whether the class is `max-h-` or `h-`,
+ * so this assertion alone cannot tell a ceiling from a height. It checks the
+ * direction that must never break — the surface must not grow past the token.
+ */
+export async function expectTokenMaxHeight(locator: Locator, opts: AssertOptions): Promise<void> {
+  const block = blockFor(opts);
+  if (block.maxHeightTokenPx === undefined) return; // pattern height not ceiled by a token
+  const { height } = await measure(locator);
+  if (height > block.maxHeightTokenPx + (opts.tolerance ?? 1)) {
+    violation(
+      opts,
+      'max-height',
+      `at most ${block.maxHeightToken} (${block.maxHeightTokenPx}px)`,
+      `${height.toFixed(1)}px`,
+      `measuredHeight: ${height.toFixed(1)}px`,
+    );
+  }
+}
+
 /** Computed horizontal padding must match the contract's padXToken (± tolerance). */
 export async function expectPaddingX(locator: Locator, opts: AssertOptions): Promise<void> {
   const block = blockFor(opts);

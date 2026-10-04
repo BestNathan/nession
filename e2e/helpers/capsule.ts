@@ -17,6 +17,14 @@ import { expect, type Page } from '@playwright/test';
  * not ask the DOM what shape it has before the surface has mounted — a
  * `count()` immediately after the click reads an empty tree, and the click that
  * follows then times out on a row that was always going to appear (#1441).
+ *
+ * What the row leads to is now the same either way: every row opens its
+ * capability's Peek, so a caller does not have to know which half it landed in
+ * to know where it ended up. That was not true before — a sensed row opened the
+ * Peek while an ordinary one opened a Signal, and the specs that followed this
+ * helper carried an extra title click to make up the difference. The two rows
+ * still differ (only a sensed one shows a reason line), but their destination
+ * does not, so callers can drop that click.
  */
 export async function openCapsuleCapability(page: Page, id: string): Promise<void> {
   await page.getByTestId('capsule-capability-more').click();

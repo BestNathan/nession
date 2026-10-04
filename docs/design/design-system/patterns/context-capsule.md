@@ -12,9 +12,14 @@ bounded scrollable surface.
 Three properties are measurable and none of them is owned anywhere else.
 
 **It is a Capsule, not a menu.** Its surface, radius, padding and elevation are
-the `terminal-capsule` family's, and its height is *fixed* — the same in every
-sense state, so swapping the list for a Peek inside the same slot does not move
-anything. The pattern it replaces, [`popup-menu.md`](popup-menu.md), exists to
+the `terminal-capsule` family's, and its height is a *ceiling* — the surface
+takes its content's height and clamps only when the list outgrows it. It was a
+fixed height until 2026-10-04, on the reasoning that a box which cannot resize
+cannot move anything; the owner retired that when a real deployment with three
+capabilities registered showed the rest of the box empty. What the fixed height
+was protecting still holds, and for a better reason: the flat list renders every
+capability, so the sense states differ in row *order* and never in row *count*.
+The pattern it replaces, [`popup-menu.md`](popup-menu.md), exists to
 pin a menu's rows and to explain why a *portalled* popup inherits no experience
 scope; this surface is rendered inside the capsule's dock, so it inherits the
 scope, rides the App's Conversation↔Capability exchange transform, and needs the
@@ -55,17 +60,35 @@ What this pattern owns is the surface above it and the rows inside it.
   resolver gives them (work-sensed, then context-sensed); every non-sensed
   capability follows in the same list. A capability appears **once** — a sensed
   id is not repeated in the catalog half.
-- **The height is fixed, and identical in every sense state.** Quiet, working
-  and context-only differ in rows and ordering, never in the shell's geometry.
-  Content beyond the surface scrolls inside it; the surface owns that scroll and
-  does not hand the gesture to the work behind it.
+- **The height is a ceiling, and the same ceiling in every sense state.** The
+  surface is as tall as its content and no taller than the ceiling; a list that
+  outgrows the ceiling scrolls inside it, and the surface owns that scroll rather
+  than handing the gesture to the work behind it. Quiet, working and context-only
+  still come out the same height — because the one flat list renders every
+  capability, so those states reorder rows and never add or drop one. That is an
+  invariant now rather than a property of a box, so it is asserted (the matrix
+  compares the surface's box across the App states that can differ).
+- **Every row is exactly one row band.** A sensed row carries a title and a line
+  of reason and an ordinary row carries a title, and both are one band tall, so
+  the list's rhythm does not change with the sense state. Two lines only fit a
+  44px band if the leading says so: `contextCapsule.rowLineHeight` is what keeps
+  them inside it, and without it the pair measured 48px against a 44px band.
+  The band is 44px because that is the App touch floor, so a row is a legal App
+  target by construction as well as one band.
 - **The lower Capsule is the anchor.** Opening, closing and deepening change the
   upper surface only: the shell's box, clearance and occlusion are identical
   with the surface open and closed. The gap between them is a token.
 - **A row is a control whose whole row is the target**, and on App it meets the
-  touch floor. The row's *height* is this pattern's token; the icon and title
-  are the capability's display identity and the reason is Nession's copy — an id
-  is never the row's text (SC-19).
+  touch floor. The row's *height* is this pattern's token — the same band for
+  every row; the icon and title are the capability's display identity and the
+  reason is Nession's copy — an id is never the row's text (SC-19).
+- **Selecting any row opens that capability's detail**, sensed or ordinary
+  alike. Choosing is asking to look at it, so it lands at Peek where the way on
+  to the Workspace lives; a capability that has no Workspace view simply has no
+  destination beyond the Peek, which is `capability-emergence.md`'s "explicit
+  path into Workspace **when deeper inspection is useful**". Signal is not
+  something selection produces — it is what Nession shows on its own, and what a
+  dismissed Peek steps back to.
 - **Sensed rows carry a reason; ordinary rows do not, and the rhythm does not
   change.** A row without a reason keeps the same band so the list does not
   jitter between sense states.
@@ -86,7 +109,9 @@ What this pattern owns is the surface above it and the rows inside it.
 - **context-only** — the context-sensed rows lead (App with a Session: Terminal
   Keys), with no Work Ring anywhere: context is not work (SC-37).
 - **deepened** — selecting a row puts that capability's Peek in the same slot,
-  at the same width, with the same gap to the shell below.
+  at the same width, with the same gap to the shell below. The surface's height
+  follows whatever is in the slot, so the list and the Peek may differ in height;
+  what does not change is the anchor below them.
 
 ## Not this pattern
 
@@ -102,12 +127,19 @@ What this pattern owns is the surface above it and the rows inside it.
 
 ## Contracts and visual baselines
 
-`design/contracts/patterns/context-capsule.json` pins, per experience: the fixed
-height, the row band, the semantic Capsule radius, the horizontal padding, the
+`design/contracts/patterns/context-capsule.json` pins, per experience: the height
+ceiling, the row band, the semantic Capsule radius, the horizontal padding, the
 scroll ownership, and — on App — the touch floor every row must meet. The
 inter-Capsule gap is asserted against its token rather than a literal, and the
 "the lower Capsule does not move" claim is asserted by measuring `capsule-shell`
 before and after, in `e2e/specs/ui-contract-matrix.spec.ts`.
+
+Two claims have no one-line assertion, so both are asserted in the matrix by
+name. **The height is a ceiling and not a height** takes two comparisons, because
+"at most the ceiling" passes on a fixed height too whenever the content is taller
+— so the surface is also required to come in *under* it on the canonical fixture,
+where three capabilities cannot fill it. And **the three sense states agree**
+compares the surface's box between the App states that can actually differ.
 
 The App baselines `app-capability-entry.png` and `app-work-context-disclosure.png`
 draw it open and move with this pattern; they are the only ones that do.
@@ -117,11 +149,18 @@ draw it open and move with this pattern; they are the only ones that do.
 - A generic menu or popover wearing Capsule colours — `w-60`, `bg-popover`,
   `ring-1`, shadow-md. This is the shape SC-42 fails, and it is what the
   disclosure shipped as before this pattern existed.
-- A height that resizes with its content, so the pair jumps as rows come and go.
+- A fixed height, so a short list reserves room for rows it does not have. This
+  was a rule here until 2026-10-04, when the ceiling replaced it: the concern
+  behind the old wording — a surface that resizes as rows come and go, dragging
+  the pair around — cannot happen on this surface, because the flat list gives
+  every state the same row count. The rule was guarding against a cause that does
+  not exist, at the cost of a box that was mostly empty.
 - A second step (`All capabilities`) or any secondary layer: the catalog is
   reachable in the list the user is already looking at.
-- Making sensed rows taller than ordinary ones, so the list's rhythm changes
-  with the sense state.
+- A row taller than the row band — a sensed row carrying two lines is the case
+  that keeps trying to happen, and it is what `rowLineHeight` is for. A taller
+  sensed row makes the list's rhythm change with the sense state, and it is
+  invisible while the surface is tall enough to absorb it.
 - Rendering the surface outside the capsule's dock — it then inherits no
   experience scope, does not ride the App's exchange transform, and reads as a
   second object rather than the Capsule's upper half.

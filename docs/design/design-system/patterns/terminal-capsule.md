@@ -140,7 +140,7 @@ SC-33 / SC-35 / SC-41–44). Its own pattern is
 this one.
 
 ```text
-              ┌─ Context Capsule (fixed height) ──┐
+              ┌─ Context Capsule (ceiling) ───────┐
               │ sensed first, catalog below       │
               │ — one list, one scroll            │
               └───────────────────────────────────┘
@@ -161,15 +161,16 @@ Conversation↔Capability exchange, and it could not be a sibling at all.
 The list is **one list**: what Nession currently senses, first (work-sensed, then
 context-sensed), each row carrying the capability's display identity and a
 reason line — never a raw capability id — and the ordinary catalog below them in
-the same scroll. There is no `All capabilities` step. A sensed row opens that
-capability directly at Peek, and the Peek takes this same upper slot, so
+the same scroll. There is no `All capabilities` step, and every row — sensed or
+ordinary — opens that capability at Peek, which takes this same upper slot, so
 selecting deepens the surface rather than stacking a third one.
 
 It is never a Dialog and never a menu: no backdrop, no centered modal geometry,
-no focus trap, no generic menu sizing. Its height is fixed and identical in
-every sense state — the pair does not resize as rows come and go — and overflow
-scrolls inside it. When the sense that opened the surface disappears, the
-surface dismisses itself; a Peek the user opened explicitly is theirs to close.
+no focus trap, no generic menu sizing. Its height is a ceiling that its content
+fills up to — the pair does not resize as senses come and go, because the one
+flat list gives every sense state the same rows — and overflow scrolls inside it.
+When the sense that opened the surface disappears, the surface dismisses itself;
+a Peek the user opened explicitly is theirs to close.
 
 ## Input modes
 
