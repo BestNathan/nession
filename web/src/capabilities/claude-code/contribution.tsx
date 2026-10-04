@@ -104,7 +104,6 @@ export const claudeCodeView: WorkspaceViewBinding = {
  */
 export const claudeCodeProjection: CapsuleProjectionBinding = {
   id: CLAUDE_CODE_ID,
-  entry: 'peek',
   body: ({ agentId, sessionId, state, openWorkspace, openDetail }) => (
     <ClaudeCodeProjection
       agentId={agentId}

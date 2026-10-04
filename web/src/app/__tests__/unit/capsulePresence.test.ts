@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { CapabilityId, CapabilitySnapshot, CapabilityState } from '@/product/capability';
 import type { Session } from '@/types';
-import { CAPSULE_PROJECTION_IDS, projectionBindingFor } from '../../capsuleProjections';
 import { resolveCapsuleCapabilities, type CapsuleCapabilityInput } from '../../capsulePresence';
 
 function snapshot(id: CapabilityId, state: CapabilityState): CapabilitySnapshot {
@@ -35,8 +34,8 @@ describe('capsule capability presence', () => {
   //
   // Capsule eligibility is a statement about the **Terminal**: the entry lists
   // what can be peeked at from where the user already is. Having a Workspace
-  // view is not enough, and neither is a Signal — the entry is not a shortcut
-  // into the Workspace, and it is not a list of everything that exists.
+  // view is not enough — the entry is not a shortcut into the Workspace, and it
+  // is not a list of everything that exists.
 
   it('lists a capability that contributes a Peek', () => {
     // Git is the reference: a changed-file summary is worth a Terminal depth,
@@ -45,7 +44,7 @@ describe('capsule capability presence', () => {
   });
 
   it('does not list a Workspace-only capability', () => {
-    // Files has a Workspace view and no Terminal depth. Selecting it from the
+    // Files has a Workspace view and no Terminal projection. Selecting it from the
     // capsule used to switch surface, which is what #1046 removes — and the
     // removal is at the source, so it is not offered at all rather than offered
     // and ignored.
@@ -55,22 +54,16 @@ describe('capsule capability presence', () => {
     expect(ids).not.toContain('env');
   });
 
-  it('lists Claude Code now that it contributes a real Peek, and still withholds a Signal', () => {
+  it('lists Claude Code now that it contributes a real Peek (#1120)', () => {
     // This asserted the opposite until #1120, and said how it would end: "It
     // returns to the entry when the plugin contributes a real Peek." The plugin
-    // now does, so the instance changed.
+    // now does, so the instance changed. The rule it used to be checked against
+    // — a `'signal'` binding earns no discovery — went with the depth axis:
+    // `CAPSULE_PROJECTION_IDS` is one list now, so there is no second answer
+    // left for a loop to compare it against.
     expect(entryIds({ facts: { sessionForegroundCommand: 'claude.exe' } })).toContain(
       'claude-code',
     );
-
-    // The **rule** is what outlives the instance: a binding that declares
-    // 'signal' is withheld, whatever any particular binding happens to declare
-    // today. Written as a loop over the projections rather than as one more
-    // hard-coded id, because after #1120 no binding declares 'signal' at all —
-    // so a test naming one would have nothing left to name.
-    for (const id of CAPSULE_PROJECTION_IDS) {
-      expect(entryIds().includes(id)).toBe(projectionBindingFor(id)?.entry !== 'signal');
-    }
   });
 
   it('keeps the built-in Terminal-local Peek listed', () => {

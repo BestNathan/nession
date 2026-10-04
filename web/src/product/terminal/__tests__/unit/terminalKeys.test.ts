@@ -11,9 +11,8 @@ import {
  * The capsule's integration test walks the same path through the composed hook
  * (`sensedContext` on App and not on Web, `ownsInputFocus` on the projection).
  * What is here is the branches that path cannot reach — no Session, no
- * experience — plus the two static properties that say which *family* the
- * capability belongs to, because those are the ones a future change would
- * reintroduce silently.
+ * experience — plus the projection's static properties, which the composed
+ * test reaches through the host and this one reads from the binding itself.
  */
 describe('resolveTerminalKeysState', () => {
   it('is unavailable with nothing to type into', () => {
@@ -59,11 +58,13 @@ describe('terminalKeysContext (SC-37)', () => {
 });
 
 describe('terminalKeysProjection (SC-38/39)', () => {
-  it('is a Peek — the accessory family is retired (SC-38)', () => {
-    // `'signal'` would withhold it from the entry (a Signal-only binding earns
-    // no explicit discovery, #1046); a third family would give one capability a
-    // selection path of its own, which is what the 2026-10-03 review retired.
-    expect(terminalKeysProjection.entry).toBe('peek');
+  it('is a Peek, and only a Peek — the accessory family stayed retired (SC-38)', () => {
+    // `entry` used to say which Terminal depth the binding claimed, and the
+    // accessory family was a third one (#1046, retired 2026-10-03). Both are
+    // gone: there is one depth, so a binding has nothing to declare but its
+    // body. Asserted as an absence on purpose — the axis was reintroduced once
+    // already, and the field is what would bring its branch back with it.
+    expect('entry' in terminalKeysProjection).toBe(false);
   });
 
   it('claims input focus while it is up (SC-39)', () => {

@@ -80,7 +80,7 @@ export function useCapsuleCapability(
    * behaviour the requirement removes: selecting a capsule item must not change
    * surface. That fallback is gone rather than guarded, because the entry can
    * no longer offer a capability without a Terminal projection —
-   * `CAPSULE_ENTRY_IDS` decides what reaches `choose` at all, so the branch it
+   * `CAPSULE_PROJECTION_IDS` decides what reaches `choose` at all, so the branch it
    * guarded is unreachable by construction rather than by care. The Workspace
    * destination is where the way deeper lives, and the user takes it
    * deliberately from the projection.

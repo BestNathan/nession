@@ -25,39 +25,6 @@ import {
 export interface CapsuleProjectionBinding {
   id: CapabilityId;
   /**
-   * What this binding contributes to the capsule, which is what decides whether
-   * the capability entry may offer it (#1046).
-   *
-   * Capsule eligibility is a statement about the **Terminal**, not about the
-   * capability having a view somewhere: the entry lists what can be reached
-   * from where the user already is. So the role is declared here, beside the
-   * body that does the reaching, and it is **required** — a new binding cannot
-   * arrive without saying which of the three it is. That is the property
-   * `supportsPeek?: boolean` did not have: absent meant "no" for a capability
-   * that had never considered the question, and "not yet" for one that had.
-   *
-   * - `'peek'` — it contributes a Terminal-local Peek. This is the only thing
-   *   that earns a capability explicit discovery: "availability in Workspace is
-   *   not enough". Terminal Keys is one of these: it has a Peek and no
-   *   Workspace view, which is a *shape* a Peek entry already expresses.
-   * - `'signal'` — a Terminal Signal and no Peek. It is **not** listed: it
-   *   still emerges by observation when Nession resolves it as relevant, but it
-   *   is not offered for explicit selection. Claude Code is the reference case,
-   *   and `#1046` is explicit that a Signal-only binding is insufficient for
-   *   explicit discovery; it returns to the entry when the plugin contributes a
-   *   Peek.
-   *
-   * There was a third, `'accessory'`, for Terminal Keys — a family of its own
-   * on the reasoning that a built-in with no Workspace view should not be
-   * confused with a capability. The 2026-10-03 review retired it (#1347
-   * SC-38): the accessory had its own selection path, its own state story and
-   * no way to be *sensed*, so one capability spoke a protocol of its own while
-   * the Context Disclosure was being built to speak one for all of them. The
-   * distinguishing property it carried — no Workspace destination — is already
-   * expressed by the capability simply having no Workspace view binding.
-   */
-  entry: 'peek' | 'signal';
-  /**
    * Whether this projection claims the soft keyboard while it is up (#1034).
    *
    * The keyboard is the contested resource, and it is contested asymmetrically.
@@ -163,26 +130,16 @@ export function projectionBindingFor(id: CapabilityId): CapsuleProjectionBinding
 }
 
 /**
- * Capabilities that have a Terminal depth, for the entry to mark.
+ * Every capability that can be drawn beside the capsule.
  *
- * The capability entry shows every reachable capability; this says which of them
- * will emerge beside the capsule rather than switching surface, so the
- * difference is discoverable before the tap rather than as a surprise.
+ * This was two lists. `#1046` split "can be drawn" from "is worth offering"
+ * so a Signal-only binding could emerge on its own without being offered for
+ * explicit selection — and with Signal gone, every binding declares a Peek,
+ * so the filter that expressed the difference excluded nothing. One list,
+ * because there is one answer.
  */
 export const CAPSULE_PROJECTION_IDS: readonly CapabilityId[] = CAPSULE_PROJECTIONS.map(
   (binding) => binding.id,
 );
-
-/**
- * Capabilities the entry may offer, which is **not** the list above.
- *
- * `CAPSULE_PROJECTION_IDS` answers "can be drawn beside the capsule"; this
- * answers "is worth offering". They differ by exactly the Signal-only
- * bindings, and that difference is the whole of `#1046`: a capability that can
- * emerge when it becomes relevant is not thereby one the entry should list.
- */
-export const CAPSULE_ENTRY_IDS: readonly CapabilityId[] = CAPSULE_PROJECTIONS.filter(
-  (binding) => binding.entry !== 'signal',
-).map((binding) => binding.id);
 
 export { CLAUDE_CODE_ID, GIT_ID, TERMINAL_KEYS_ID };

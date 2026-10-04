@@ -83,7 +83,6 @@ export const terminalKeysProjection: CapsuleProjectionBinding = {
   // since 2026-10-03 no longer a family of its own: the accessory variant is
   // retired (`SC-38`), so selecting it — from a sensed row or the ordinary list —
   // opens its Peek, the same single step every other capability takes.
-  entry: 'peek',
   // The keys are tapped, not typed into, and the soft keyboard is the one thing
   // that would make them unusable: it covers the row the user is reaching for,
   // and it takes the vertical space the key row needs. So this one projection
