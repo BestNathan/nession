@@ -39,6 +39,22 @@ These are repository policy, not GitHub UI defaults:
 - **Exception for `.github/workflows/*`:** workflow-definition changes are fast-tracked in a separate worktree based on `origin/main`, submitted as their own PR directly to `main`, and merged with `--merge`. Do not bury a workflow fix inside a feature PR waiting on staging.
 - The staging -> main release PR is also merged with `--merge`.
 
+### PR base routing
+
+Choose the target branch from the changed surface:
+
+| Change | PR base |
+|---|---|
+| anything under `crates/` or `web/src/` | `staging` — runtime/build-input changes require integration + staging validation |
+| `.github/workflows/*` | `main` — separate fast-track workflow PR |
+| docs-only changes | `main` |
+| repository chore/config/cleanup with no runtime build input | `main` |
+| `scripts/**` / `justfile` changes with no runtime build-input change | `main` |
+
+If a “chore”, script, or config change also changes runtime/build inputs under `crates/` or `web/src/`, the runtime rule wins and it goes through `staging`.
+
+Direct-to-main changes still use a worktree and `--merge`. They do not get a free pass around the relevant local/Gate checks.
+
 The long historical rationale is intentionally not carried in this entrypoint; this section preserves the operational invariants agents must follow.
 
 ## 3. Current workflow owners
