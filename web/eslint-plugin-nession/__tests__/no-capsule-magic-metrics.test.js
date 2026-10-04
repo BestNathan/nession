@@ -58,6 +58,31 @@ test('no-capsule-magic-metrics flags tailwind numeric classes in capsule path', 
 // protecting nothing. This asserts each concrete token the rule names still
 // exists in the generated CSS, so the next token rename fails loudly here
 // instead of silently disarming the capsule gate.
+test('upper Capsule hosts cannot invent their own visual chrome', () => {
+  ruleTester.run('upper-capsule-visual-owner', nessionPlugin.rules['no-capsule-magic-metrics'], {
+    valid: [
+      {
+        code: 'export function PeekHost() { return <div className="flex min-w-0" />; }',
+        filename: '/proj/web/src/product/terminal/capsule/components/PeekHost.tsx',
+      },
+    ],
+    invalid: [
+      {
+        code:
+          'export function PeekHost() { return <div className="rounded-lg bg-popover shadow-md text-[length:var(--terminal-capsule-projection-font-size)]" />; }',
+        filename: '/proj/web/src/product/terminal/capsule/components/PeekHost.tsx',
+        errors: [{ messageId: 'violation' }],
+      },
+      {
+        code:
+          'export function ContextCapsule() { return <div className="border border-border font-semibold" />; }',
+        filename: '/proj/web/src/product/terminal/capsule/components/ContextCapsule.tsx',
+        errors: [{ messageId: 'violation' }],
+      },
+    ],
+  });
+});
+
 test('every token the rule names still exists in the generated CSS', () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const ruleSource = readFileSync(join(here, '../rules/no-capsule-magic-metrics.js'), 'utf8');
