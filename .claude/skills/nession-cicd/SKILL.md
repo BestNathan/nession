@@ -27,7 +27,29 @@ Do not “fix CI” by weakening the domain invariant that CI exposed.
 
 Workflow changes still happen in a worktree from latest `main`; use `nession-development`.
 
-Do not build/push release Docker images manually as a substitute for CI. Local development builds are for diagnosis, not release publication.
+### Container-image Iron Laws
+
+**Never build Nession Docker images locally. No exceptions.**
+
+- do not run `docker build` for Nession images;
+- do not `docker push` Nession images to GHCR;
+- do not manually create multi-arch manifests;
+- do not manually patch Kubernetes/GitOps image tags to bypass CI;
+- if an image/release is broken, fix CI or roll back to an already-published artifact.
+
+CI is the single source of truth for Nession container images. Diagnose application code with the native local development commands owned by `nession-development`; do not use a local Docker build as an alternate image pipeline.
+
+### Artifact retention
+
+Release/rollback history is append-only unless a separate approved policy explicitly changes it.
+
+Do not add cleanup/pruning that removes:
+
+- hash-tagged staging images;
+- version-tagged production images;
+- GitHub Releases needed for historical release/rollback traceability.
+
+Rollback depends on previously published artifacts remaining available.
 
 ## Repository merge and branch policy
 
@@ -151,11 +173,21 @@ Do not manually mutate production desired state merely to make a rollout “look
 
 Keep one owner per layer.
 
-## 8. Monitoring a change
+## 8. Deployment monitoring
 
-After a merge/release, report the concrete workflow run, status, failing/passing job, and deployed revision when relevant.
+Use the repository's canonical end-to-end monitor instead of reconstructing partial `gh` / `kubectl` checks:
 
-Do not claim deployment success from “workflow green” if the user asked for runtime rollout proof.
+```bash
+# after merging to staging
+./scripts/deploy-watch.sh staging
+
+# after release/version promotion to production
+./scripts/deploy-watch.sh prod
+```
+
+`scripts/deploy-watch.sh` owns the combined view of the relevant GitHub Actions phases plus Kubernetes rollout/pod health, and exits non-zero on failure. Its prerequisites are `gh`, `kubectl`, and `jq`.
+
+After a merge/release, report the concrete workflow run, deployed revision, and runtime rollout result. Do not claim deployment success from “workflow green” when the requested boundary includes Kubernetes/application rollout proof.
 
 ## 9. Router design
 
