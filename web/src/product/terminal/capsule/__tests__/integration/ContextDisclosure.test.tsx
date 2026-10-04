@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { Bot, GitBranch } from 'lucide-react';
+import { Bot, GitBranch, Keyboard } from 'lucide-react';
 import { TerminalCapsule } from '@/product/terminal/capsule/TerminalCapsule';
 import type {
   CapsuleCapabilityDisclosure,
@@ -150,10 +150,11 @@ describe('Context Disclosure', () => {
     // registry calls `unavailable` out of it entirely. So no title has a
     // reason to be dimmed.
     //
-    // Every row, not just the available one: the defect this replaces muted
-    // the sensed half too (`!perceived` is false for a sensed row, since
-    // `perceived` is `ordinary && …`), and a conditional that mutes one state
-    // is the same defect whichever row it lands on.
+    // Every row, not just the available one: the removed condition only ever
+    // applied to ordinary rows — the base carried its own
+    // `row.kind === 'ordinary' &&`, and the `unavailable` form it became could
+    // not match at all — but a conditional that mutes one state is the same
+    // defect whichever half of the list it lands on.
     // Mutation: restore `!perceived && 'text-muted-foreground'`, or mute a
     // single half, e.g. `row.kind === 'ordinary' && 'text-muted-foreground'` —
     // must fail.
@@ -209,6 +210,7 @@ describe('Context Disclosure', () => {
         {
           capabilityId: 'terminal-keys',
           title: 'Terminal Keys',
+          icon: Keyboard,
           reason: 'Touch controls for Terminal',
         },
       ],

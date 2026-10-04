@@ -11,11 +11,11 @@ import { WORKSPACE_VIEW_BINDINGS } from '@/app/workspace/viewBindings';
 import {
   resolveCapabilityPresences,
   resolveCapabilityProjection,
-  type CapabilityDisclosureEntry,
   type CapabilityFacts,
   type CapabilityId,
 } from '@/product/capability';
 import type {
+  CapsuleCapabilityEntry,
   CapsuleCapabilityProjection,
   SensedCapabilityItem,
 } from '@/product/terminal/capsule/types';
@@ -158,11 +158,17 @@ export function useCapsuleCapability(
  *
  * The same shape as the work-sensed items the capsule builds from
  * `workContext`: a signal says *which* capability and *why*, and its display
- * identity comes from the disclosure entries — a sensed item with no entry is
- * dropped rather than shown as a raw id, exactly as the work half does.
+ * identity — title and glyph together — comes from the disclosure entries; a
+ * sensed item with no entry is dropped rather than shown as a raw id, exactly
+ * as the work half does.
+ *
+ * Typed as `CapsuleCapabilityEntry`, the entry that carries the glyph, rather
+ * than the icon-free `CapabilityDisclosureEntry` it extends: with the wider
+ * type this function resolved the title off the entry and left the icon
+ * behind, and nothing failed to compile.
  */
 function resolveSensedContext(
-  entries: readonly CapabilityDisclosureEntry[],
+  entries: readonly CapsuleCapabilityEntry[],
   context: { sessionId?: string; experience?: 'web' | 'app' },
 ): SensedCapabilityItem[] {
   const byId = new Map(entries.map((entry) => [entry.id, entry]));
@@ -173,6 +179,11 @@ function resolveSensedContext(
           {
             capabilityId: signal.capabilityId,
             title: entry.title,
+            // The glyph travels with the title. This was the seam: the sensed
+            // row drew an empty icon column while `sensedWorkItems` copied its
+            // entry's icon (measured on App, 2026-10-04). The field is required
+            // now, so dropping it is a compile error rather than a silent gap.
+            icon: entry.icon,
             reason: signal.summary,
           },
         ]

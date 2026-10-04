@@ -1,8 +1,21 @@
-import { act, renderHook } from '@testing-library/react';
+import { act, render, renderHook, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
+import { Keyboard } from 'lucide-react';
 import { useCapsuleCapability } from '@/app/useCapsuleCapability';
+import { TerminalCapsule } from '@/product/terminal/capsule/TerminalCapsule';
 import type { CapabilityId } from '@/product/capability';
 import type { Session } from '@/types';
+
+vi.mock('@/product/terminal/hooks/useCommandHistory', () => ({
+  useCommandHistory: () => ({
+    addEntry: vi.fn(),
+    history: [],
+    removeEntry: vi.fn(),
+    clearHistory: vi.fn(),
+    filterHistory: vi.fn().mockReturnValue([]),
+  }),
+}));
 
 function session(id: string, foregroundCommand: string | null = null): Session {
   return {
@@ -126,11 +139,42 @@ describe('capsule emergence', () => {
     // (a physical keyboard) must not sense it at all.
     const app = setup({ experience: 'app' });
     expect(app.result.current.capabilities.disclosure?.sensedContext).toEqual([
-      { capabilityId: 'terminal-keys', title: 'Terminal Keys', reason: 'Touch controls for Terminal' },
+      {
+        capabilityId: 'terminal-keys',
+        title: 'Terminal Keys',
+        icon: Keyboard,
+        reason: 'Touch controls for Terminal',
+      },
     ]);
 
     const web = setup({ experience: 'web' });
     expect(web.result.current.capabilities.disclosure?.sensedContext).toEqual([]);
+  });
+
+  it('draws the context-sensed row with its glyph, not an empty column (SC-37)', async () => {
+    // The seam this closes. `sensedWorkItems` copied the entry's icon;
+    // `resolveSensedContext` did not, and the capsule reserves a 16px icon
+    // column on every row — so on App, where the context sense actually fires
+    // (Web has a physical keyboard and never senses it), its row drew an empty
+    // slot where the other rows drew identity.
+    //
+    // The disclosure is the one the real hook resolved, not a hand-built
+    // fixture: the glyph has to arrive *through* `resolveSensedContext`, and a
+    // fixture carrying its own icon would pass with the seam still open.
+    // Mutation: drop `icon: entry.icon` from `resolveSensedContext` — must fail.
+    const app = setup({ experience: 'app' });
+    render(
+      <TerminalCapsule
+        experience="app"
+        sendText={vi.fn()}
+        capabilityDisclosure={app.result.current.capabilities.disclosure}
+      />,
+    );
+
+    await userEvent.click(screen.getByTestId('capsule-capability-more'));
+
+    const row = await screen.findByTestId('capsule-context-item-terminal-keys');
+    expect(row.querySelector('svg')).not.toBeNull();
   });
 
   it('carries the capability’s own answer about the soft keyboard', () => {

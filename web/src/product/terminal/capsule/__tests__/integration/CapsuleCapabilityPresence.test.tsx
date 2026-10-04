@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { Bot, Folder } from 'lucide-react';
 import { TerminalCapsule } from '@/product/terminal/capsule/TerminalCapsule';
 
 describe('capsule capability presence', () => {
@@ -23,7 +24,7 @@ describe('capsule capability presence', () => {
         experience="web"
         sendText={vi.fn()}
         capabilityDisclosure={{
-          entries: [{ id: 'claude-code', title: 'Claude Code', state: 'active' }],
+          entries: [{ id: 'claude-code', title: 'Claude Code', state: 'active', icon: Bot }],
           onSelect: vi.fn(),
         }}
       />,
@@ -51,8 +52,8 @@ describe('capsule capability disclosure', () => {
         sendText={vi.fn()}
         capabilityDisclosure={{
           entries: [
-            { id: 'claude-code', title: 'Claude Code', state: 'active' },
-            { id: 'env', title: 'Environment Files', state: 'available' },
+            { id: 'claude-code', title: 'Claude Code', state: 'active', icon: Bot },
+            { id: 'env', title: 'Environment Files', state: 'available', icon: Folder },
           ],
           onSelect,
         }}

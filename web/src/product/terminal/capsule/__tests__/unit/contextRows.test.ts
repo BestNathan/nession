@@ -1,14 +1,15 @@
 import { describe, expect, it } from 'vitest';
+import { GitBranch } from 'lucide-react';
 import { resolveContextRows, sensedWorkItems } from '../../contextRows';
 import type { CapsuleCapabilityEntry, SensedCapabilityItem } from '../../types';
 import type { ResolvedWorkContext } from '../../workAwareness';
 
 function entry(id: string, title = id): CapsuleCapabilityEntry {
-  return { id, title, state: 'available' };
+  return { id, title, state: 'available', icon: GitBranch };
 }
 
 function sensed(id: string, reason: string): SensedCapabilityItem {
-  return { capabilityId: id, title: id, reason };
+  return { capabilityId: id, title: id, icon: GitBranch, reason };
 }
 
 const ENTRIES: readonly CapsuleCapabilityEntry[] = [
@@ -92,7 +93,7 @@ describe('sensedWorkItems', () => {
       {
         capabilityId: 'claude-code',
         title: 'Claude Code',
-        icon: undefined,
+        icon: GitBranch,
         reason: 'Working in this Session',
       },
     ]);

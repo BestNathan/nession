@@ -12,7 +12,7 @@ import type {
 import type { DomainState } from '@/product/session/model/domainState';
 import type { FileOps } from '@/capabilities/files';
 import type { Agent, Session } from '@/types';
-import { CAPSULE_PROJECTION_IDS, iconFor } from '@/app/capsuleProjections';
+import { CAPSULE_PROJECTION_IDS, projectionIconFor } from '@/app/capsuleProjections';
 import { resolveWorkspaceCapabilities } from '@/app/workspace/capabilities';
 import type { Experience } from '@/app/workspace/workspaceContext';
 
@@ -110,17 +110,24 @@ export function resolveCapsuleCapabilities(
       return [];
     }
     const snapshot = snapshots.find((candidate) => candidate.id === presence.capabilityId);
-    return snapshot
+    // The glyph travels with the entry, resolved from the Terminal binding.
+    // It used to be left out here — `{ id, title, state }` — while the row
+    // held a 16px column open for it, so every row drew an empty icon column
+    // (measured on staging 2026-10-04).
+    //
+    // The filter above and this lookup read one registry — `CAPSULE_PROJECTION_IDS`
+    // *is* the binding list's ids — so they cannot disagree about which
+    // capabilities have a glyph. The guard is what makes the required field
+    // true rather than asserted; it is also the second half of the snapshot
+    // check, since a capability with no snapshot has no entry either.
+    const icon = projectionIconFor(presence.capabilityId);
+    return snapshot && icon
       ? [
           {
             id: snapshot.id,
             title: snapshot.title,
             state: snapshot.state,
-            // The glyph travels with the entry, resolved from the Terminal
-            // binding. It used to be left out here — `{ id, title, state }` —
-            // while the row held a 16px column open for it, so every row drew
-            // an empty icon column (measured on staging 2026-10-04).
-            icon: iconFor(snapshot.id),
+            icon,
           },
         ]
       : [];

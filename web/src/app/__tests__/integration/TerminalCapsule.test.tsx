@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { Bot } from 'lucide-react';
 import { TerminalCapsule } from '@/product/terminal/capsule/TerminalCapsule';
 import type { CapsuleCapabilityProjection } from '@/product/terminal/capsule/types';
 
@@ -57,7 +58,7 @@ describe('TerminalCapsule', () => {
         experience="app"
         sendText={vi.fn()}
         capabilityDisclosure={{
-          entries: [{ id: 'claude-code', title: 'Claude Code', state: 'active' }],
+          entries: [{ id: 'claude-code', title: 'Claude Code', state: 'active', icon: Bot }],
           onSelect: vi.fn(),
         }}
       />,

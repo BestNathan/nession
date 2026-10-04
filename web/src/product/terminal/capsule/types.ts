@@ -56,11 +56,16 @@ export {
  * The registry's entry plus the glyph the **app layer** resolved from the
  * capability's Terminal projection binding (`app/capsuleProjections`) — the
  * glyph cannot be looked up here, because which glyph speaks for a capability
- * is app-layer knowledge and product code does not reach into it. Absent is
- * legal: a capability with no projection has no glyph to contribute, and the
- * row keeps the slot empty so titles stay aligned.
+ * is app-layer knowledge and product code does not reach into it.
+ *
+ * Required, not optional: an entry only exists when the capability has a
+ * Terminal projection (`capsulePresence` filters on exactly that), and every
+ * binding declares a glyph — so "no glyph to contribute" is not a state this
+ * list can be in. While the field was optional, a producer that forgot it
+ * compiled anyway and its row drew the empty icon column the glyph exists to
+ * fill (measured on staging 2026-10-04).
  */
-export type CapsuleCapabilityEntry = CapabilityDisclosureEntry & { icon?: LucideIcon };
+export type CapsuleCapabilityEntry = CapabilityDisclosureEntry & { icon: LucideIcon };
 
 /**
  * One sensed capability, as the Context Capsule renders it (#1347 SC-19).
@@ -74,7 +79,14 @@ export type CapsuleCapabilityEntry = CapabilityDisclosureEntry & { icon?: Lucide
 export interface SensedCapabilityItem {
   capabilityId: CapabilityId;
   title: string;
-  icon?: LucideIcon;
+  /**
+   * Required for the same reason `CapsuleCapabilityEntry.icon` is: a sensed
+   * row is drawn by the same component as an ordinary one, with the same
+   * reserved glyph column, so an item that arrives without its glyph is an
+   * empty column — which is exactly what happened to the context-sensed half
+   * while this was optional.
+   */
+  icon: LucideIcon;
   reason: string;
 }
 

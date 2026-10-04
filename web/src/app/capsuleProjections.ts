@@ -28,12 +28,14 @@ export interface CapsuleProjectionBinding {
   /**
    * The capability's glyph in the Terminal.
    *
-   * Declared here rather than read from the capability's Workspace view
-   * binding, because this is *this* surface's chrome: the capsule lists a
-   * capability that has no Workspace view at all (Terminal Keys), and a row
-   * that cannot find an icon draws an empty column where the others draw
-   * identity. `chrome belongs to the surface` is the rule the Workspace
-   * registry already follows one layer over.
+   * This surface's own declaration, not a lookup performed against the
+   * capability's Workspace view binding: the capsule lists a capability that
+   * has no Workspace view at all (Terminal Keys), and a row that cannot find
+   * an icon draws an empty column where the others draw identity. What the
+   * value is, is the capability's to decide — one whose view declares the same
+   * glyph references it (`icon: gitView.icon`) rather than restating it, so
+   * there is one Git glyph in the tree; one with nothing to reference declares
+   * its own.
    */
   icon: LucideIcon;
   /**
@@ -142,13 +144,18 @@ export function projectionBindingFor(id: CapabilityId): CapsuleProjectionBinding
 }
 
 /**
- * The capability's Terminal glyph, or undefined for one with no projection.
+ * The capability's **Terminal projection** glyph, or undefined for one with no
+ * projection.
+ *
+ * Named for the registry it reads: `projectionIconFor('files')` is undefined
+ * because Files has a Workspace view and no Terminal projection — this is not
+ * "the capability's icon", which the Workspace view binding answers.
  *
  * Resolves through `projectionBindingFor` rather than repeating its lookup:
  * there is one rule for "which binding speaks for this id", and a second
  * `.find` here would be a copy free to disagree with it.
  */
-export function iconFor(id: CapabilityId): LucideIcon | undefined {
+export function projectionIconFor(id: CapabilityId): LucideIcon | undefined {
   return projectionBindingFor(id)?.icon;
 }
 

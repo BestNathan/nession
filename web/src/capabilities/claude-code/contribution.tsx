@@ -104,10 +104,10 @@ export const claudeCodeView: WorkspaceViewBinding = {
  */
 export const claudeCodeProjection: CapsuleProjectionBinding = {
   id: CLAUDE_CODE_ID,
-  // The Terminal row's own statement of the capability's glyph. Same value as
-  // `claudeCodeView.icon`, declared separately because it is this surface's
-  // chrome — see `CapsuleProjectionBinding.icon`.
-  icon: Bot,
+  // The Terminal row's glyph, referenced from the view's own icon rather than
+  // restated: one value, so the two surfaces cannot drift into two pictures of
+  // the same capability — see `CapsuleProjectionBinding.icon`.
+  icon: claudeCodeView.icon,
   body: ({ agentId, sessionId, state, openWorkspace, openDetail }) => (
     <ClaudeCodeProjection
       agentId={agentId}
@@ -154,8 +154,9 @@ export const claudeCodeWork: CapabilityWorkBinding = {
  * The matcher is the same one the presence state and the work signal use —
  * one definition of "Claude is running", so the ring, the chip and the
  * destination glyph can never disagree about the same pane. The glyph is the
- * view's own icon: one icon per capability, drawn in place of the circle's
- * Terminal icon (*replace inner glyph*, never a badge).
+ * view's own icon — the Terminal projection references the same symbol rather
+ * than declaring a second one — so there is one icon per capability, drawn in
+ * place of the circle's Terminal icon (*replace inner glyph*, never a badge).
  */
 export const claudeCodeConversation: CapabilityConversationBinding = {
   id: CLAUDE_CODE_ID,

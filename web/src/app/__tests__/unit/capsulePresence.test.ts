@@ -130,7 +130,7 @@ describe('capsule capability presence', () => {
     // Checked against the binding rather than for mere presence: "some icon"
     // is not the claim — the row draws the glyph the capability declared for
     // this surface, and a second lookup here would be free to disagree with it.
-    // Mutation: drop `icon: iconFor(snapshot.id)` — must fail.
+    // Mutation: drop `const icon = projectionIconFor(...)` — must fail.
     const resolution = resolveCapsuleCapabilities(input());
 
     expect(resolution.entries.length).toBeGreaterThan(0);
