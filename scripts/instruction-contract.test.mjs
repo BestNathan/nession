@@ -123,3 +123,31 @@ test('rejects instruction router that ignores deletions and type changes', () =>
     assert.ok(errors.some((x) => x.includes('must include staged deletions, renames, and type changes')));
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
+
+
+test('rejects an unregistered scoped instruction copy', () => {
+  const root = fixture();
+  try {
+    const extra = path.join(root, 'extra-owner');
+    fs.mkdirSync(extra);
+    fs.writeFileSync(path.join(extra, 'AGENTS.md'), '# Extra owner\n');
+    fs.writeFileSync(path.join(extra, 'CLAUDE.md'), '# stale editable copy\n');
+    const errors = validateInstructionTree(root).errors;
+    assert.ok(errors.some((x) => x.includes('extra-owner/CLAUDE.md: must be a symlink')));
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('rejects Skill names longer than Codex limit', () => {
+  const root = fixture();
+  try {
+    const longName = 'a'.repeat(65);
+    const dir = path.join(root, '.claude', 'skills', longName);
+    fs.mkdirSync(dir);
+    fs.writeFileSync(
+      path.join(dir, 'SKILL.md'),
+      `---\nname: ${longName}\ndescription: Long-name fixture.\n---\n\n# Long\n`,
+    );
+    const errors = validateInstructionTree(root).errors;
+    assert.ok(errors.some((x) => x.includes('Skill name exceeds Codex 64-character limit')));
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
