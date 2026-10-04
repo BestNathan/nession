@@ -120,4 +120,23 @@ describe('capsule capability presence', () => {
       expect(projectionBindingFor(entry.id)).toBeDefined();
     }
   });
+
+  it('gives every entry the capability icon', () => {
+    // The row held a 16px column open for a glyph that entries never carried:
+    // they were built as `{ id, title, state }` while `CapsuleCapabilityEntry`
+    // declared `icon?`, so every row on the deployed build drew an empty icon
+    // column (measured on staging 2026-10-04).
+    //
+    // Checked against the binding rather than for mere presence: "some icon"
+    // is not the claim — the row draws the glyph the capability declared for
+    // this surface, and a second lookup here would be free to disagree with it.
+    // Mutation: drop `icon: iconFor(snapshot.id)` — must fail.
+    const resolution = resolveCapsuleCapabilities(input());
+
+    expect(resolution.entries.length).toBeGreaterThan(0);
+    for (const entry of resolution.entries) {
+      expect(entry.icon).toBeDefined();
+      expect(entry.icon).toBe(projectionBindingFor(entry.id)?.icon);
+    }
+  });
 });

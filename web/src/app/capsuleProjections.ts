@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import type { LucideIcon } from 'lucide-react';
 import type { CapabilityId, CapabilityState } from '@/product/capability';
 import type { CapsuleDetail } from '@/product/terminal/capsule/types';
 import { CLAUDE_CODE_ID, claudeCodeProjection } from '@/capabilities/claude-code';
@@ -24,6 +25,17 @@ import {
  */
 export interface CapsuleProjectionBinding {
   id: CapabilityId;
+  /**
+   * The capability's glyph in the Terminal.
+   *
+   * Declared here rather than read from the capability's Workspace view
+   * binding, because this is *this* surface's chrome: the capsule lists a
+   * capability that has no Workspace view at all (Terminal Keys), and a row
+   * that cannot find an icon draws an empty column where the others draw
+   * identity. `chrome belongs to the surface` is the rule the Workspace
+   * registry already follows one layer over.
+   */
+  icon: LucideIcon;
   /**
    * Whether this projection claims the soft keyboard while it is up (#1034).
    *
@@ -127,6 +139,17 @@ const CAPSULE_PROJECTIONS: readonly CapsuleProjectionBinding[] = [
 
 export function projectionBindingFor(id: CapabilityId): CapsuleProjectionBinding | undefined {
   return CAPSULE_PROJECTIONS.find((binding) => binding.id === id);
+}
+
+/**
+ * The capability's Terminal glyph, or undefined for one with no projection.
+ *
+ * Resolves through `projectionBindingFor` rather than repeating its lookup:
+ * there is one rule for "which binding speaks for this id", and a second
+ * `.find` here would be a copy free to disagree with it.
+ */
+export function iconFor(id: CapabilityId): LucideIcon | undefined {
+  return projectionBindingFor(id)?.icon;
 }
 
 /**

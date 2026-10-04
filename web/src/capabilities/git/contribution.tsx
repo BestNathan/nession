@@ -66,6 +66,10 @@ export const gitView: WorkspaceViewBinding = {
  */
 export const gitProjection: CapsuleProjectionBinding = {
   id: GIT_ID,
+  // The same glyph the Workspace binding declares, restated here because this
+  // is a different surface's chrome: the Terminal row draws its own identity
+  // and must not reach into the Workspace registry for it.
+  icon: GitBranch,
   // A changed-file summary is what sits between "3 changed" and a full diff,
   // so Git has a Peek of its own.
   body: ({ agentId, sessionId, onFocusChange }) => (

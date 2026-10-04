@@ -104,6 +104,10 @@ export const claudeCodeView: WorkspaceViewBinding = {
  */
 export const claudeCodeProjection: CapsuleProjectionBinding = {
   id: CLAUDE_CODE_ID,
+  // The Terminal row's own statement of the capability's glyph. Same value as
+  // `claudeCodeView.icon`, declared separately because it is this surface's
+  // chrome — see `CapsuleProjectionBinding.icon`.
+  icon: Bot,
   body: ({ agentId, sessionId, state, openWorkspace, openDetail }) => (
     <ClaudeCodeProjection
       agentId={agentId}

@@ -122,4 +122,12 @@ describe('capsuleStyles', () => {
     expect(contextCapsuleTitleClass).not.toContain('--context-capsule-row-line-height');
     expect(contextCapsuleReasonClass).not.toContain('--context-capsule-row-line-height');
   });
+
+  it('truncates both row lines', () => {
+    // A long capability name must ellipsise, not wrap: the row is a `min-h`
+    // floor, so a wrapped title would grow it past its 44px band.
+    // Mutation: drop `truncate` from either class — must fail.
+    expect(contextCapsuleTitleClass).toMatch(/\btruncate\b/);
+    expect(contextCapsuleReasonClass).toMatch(/\btruncate\b/);
+  });
 });

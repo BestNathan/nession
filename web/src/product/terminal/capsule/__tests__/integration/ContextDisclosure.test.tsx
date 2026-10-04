@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { Bot, GitBranch } from 'lucide-react';
 import { TerminalCapsule } from '@/product/terminal/capsule/TerminalCapsule';
 import type {
   CapsuleCapabilityDisclosure,
@@ -26,9 +27,12 @@ vi.mock('@/product/terminal/hooks/useCommandHistory', () => ({
 
 function disclosure(overrides: Partial<CapsuleCapabilityDisclosure> = {}): CapsuleCapabilityDisclosure {
   return {
+    // The glyphs are part of an entry now (`capsulePresence` fills them from
+    // the capability's Terminal binding), so the fixture carries them too: a
+    // hand-built entry without one would be a state the product cannot reach.
     entries: [
-      { id: 'claude-code', title: 'Claude Code', state: 'active' },
-      { id: 'git', title: 'Git', state: 'available' },
+      { id: 'claude-code', title: 'Claude Code', state: 'active', icon: Bot },
+      { id: 'git', title: 'Git', state: 'available', icon: GitBranch },
     ],
     onSelect: vi.fn(),
     ...overrides,
@@ -86,6 +90,75 @@ describe('Context Disclosure', () => {
     // alike: `compareDocumentPosition` returns FOLLOWING when the second node
     // comes after the first.
     expect(sensed.compareDocumentPosition(ordinary) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('starts every row at the same column', async () => {
+    // jsdom has no layout, so this cannot measure the 6px the bug produced —
+    // the e2e `assertContextCapsule` does that. What this pins is the cause:
+    // the marker column renders on every row, so the icon and title columns
+    // begin at the same offset whether or not a dot is drawn.
+    // Mutation: render the slot only for `row.kind === 'ordinary'` — must fail.
+    const caps = disclosure();
+    render(
+      <TerminalCapsule experience="web" sendText={vi.fn()} capabilityDisclosure={caps} workContext={workContext()} />,
+    );
+
+    await userEvent.click(screen.getByTestId('capsule-capability-more'));
+    await screen.findByTestId('capsule-context-item-claude-code');
+
+    // The fixture's two rows are the two kinds the bug treated differently: a
+    // sensed row and an ordinary one.
+    const rows = [...document.querySelectorAll('[data-context-row]')];
+    const markers = screen.getAllByTestId('capsule-row-marker');
+    expect(rows).toHaveLength(2);
+    expect(markers).toHaveLength(rows.length);
+    // Not merely "one per row": each row *begins* with the column, which is
+    // what "the same column" has to mean for the icon and title after it.
+    for (const [index, row] of rows.entries()) {
+      expect(row.firstElementChild).toBe(markers[index]);
+    }
+  });
+
+  it('draws each capability its own glyph', async () => {
+    // Mutation: drop `<Icon />` from the icon slot — must fail.
+    const caps = disclosure();
+    render(
+      <TerminalCapsule experience="web" sendText={vi.fn()} capabilityDisclosure={caps} workContext={workContext()} />,
+    );
+
+    await userEvent.click(screen.getByTestId('capsule-capability-more'));
+
+    const [sensedGlyph, ordinaryGlyph] = [
+      await screen.findByTestId('capsule-context-item-claude-code'),
+      screen.getByTestId('capsule-capability-picker-git'),
+    ].map((row) => row.querySelector('svg'));
+    // Every row draws one — the column was reserved and filled by nothing.
+    expect(sensedGlyph).not.toBeNull();
+    expect(ordinaryGlyph).not.toBeNull();
+    // …and the rows are not all drawing the same one: `<Icon />` is each row's
+    // own entry's glyph, not a single stand-in for all of them.
+    expect(sensedGlyph?.innerHTML).not.toBe(ordinaryGlyph?.innerHTML);
+  });
+
+  it('does not grey out a capability that is merely available', async () => {
+    // SC-35: every non-sensed capability remains reachable; a muted title
+    // reads as disabled, which is the opposite of reachable.
+    // Mutation: restore `!perceived && 'text-muted-foreground'` — must fail.
+    const caps = disclosure();
+    render(
+      <TerminalCapsule experience="web" sendText={vi.fn()} capabilityDisclosure={caps} workContext={workContext()} />,
+    );
+
+    await userEvent.click(screen.getByTestId('capsule-capability-more'));
+
+    const available = await screen.findByTestId('capsule-capability-picker-git');
+    // The premise, read off the row itself: this is the `available` half, not
+    // a `relevant` row that would pass for the wrong reason.
+    expect(available).toHaveAttribute('data-capability-state', 'available');
+    // The title line specifically. "Nothing in the row is muted" would be the
+    // wrong question — the reason line is muted by design — and `getByText`
+    // is also what keeps "not muted" from being reached by drawing nothing.
+    expect(within(available).getByText('Git').className).not.toContain('text-muted-foreground');
   });
 
   it('senses a context capability without lighting the Work Ring (SC-37)', async () => {

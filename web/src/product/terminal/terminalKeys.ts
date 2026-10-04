@@ -21,6 +21,7 @@
  * Keys would change that host's hook count and crash on the next interaction.
  */
 import { createElement } from 'react';
+import { Keyboard } from 'lucide-react';
 import type { CapabilityState } from '@/product/capability';
 import type { CapabilityContextBinding } from '@/app/contextSignals';
 import type { CapsuleProjectionBinding } from '@/app/capsuleProjections';
@@ -79,6 +80,10 @@ export const terminalKeysContext: CapabilityContextBinding = {
 
 export const terminalKeysProjection: CapsuleProjectionBinding = {
   id: TERMINAL_KEYS_ID,
+  // The one capability here with no Workspace view to borrow a glyph from —
+  // which is exactly the case `CapsuleProjectionBinding.icon` exists for: the
+  // Terminal row draws identity for these keys or the column stays empty.
+  icon: Keyboard,
   // A Terminal-local capability with a Peek and no Workspace view (#1046), and
   // since 2026-10-03 no longer a family of its own: the accessory variant is
   // retired (`SC-38`), so selecting it — from a sensed row or the ordinary list —

@@ -54,11 +54,11 @@ export {
  * One capability row's display identity in the Context Capsule (#1347 SC-19).
  *
  * The registry's entry plus the glyph the **app layer** resolved from the
- * capability's own binding — the glyph cannot be looked up here, because the
- * only thing that knows it is `app/workspace/viewBindings`, and product code
- * does not reach into the app layer. Absent is legal: a capability with no view
- * binding has no glyph to contribute, and the row keeps the slot empty so
- * titles stay aligned.
+ * capability's Terminal projection binding (`app/capsuleProjections`) — the
+ * glyph cannot be looked up here, because which glyph speaks for a capability
+ * is app-layer knowledge and product code does not reach into it. Absent is
+ * legal: a capability with no projection has no glyph to contribute, and the
+ * row keeps the slot empty so titles stay aligned.
  */
 export type CapsuleCapabilityEntry = CapabilityDisclosureEntry & { icon?: LucideIcon };
 

@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, type RefObject } from 'react';
-import { ChevronRight } from 'lucide-react';
 import { cn } from '@/shared/lib/utils';
 import {
   contextCapsuleDockClass,
@@ -166,10 +165,10 @@ function ContextRowButton({
   onSelect: () => void;
 }) {
   const Icon = row.icon;
-  // Only a capability the session actually needs is marked; `available` is
-  // listed so it stays reachable, not to be pointed at. The marker slot is
-  // always present so titles stay aligned whether or not a dot is drawn.
-  const perceived = row.state === 'relevant' || row.state === 'active';
+  // Only a capability the session actually needs is marked, and only an
+  // ordinary row can be: a sensed row's presence is the reason line's job.
+  const perceived =
+    row.kind === 'ordinary' && (row.state === 'relevant' || row.state === 'active');
 
   return (
     <button
@@ -189,23 +188,35 @@ function ContextRowButton({
       onClick={onSelect}
       className={contextCapsuleRowClass}
     >
-      {row.kind === 'ordinary' ? (
-        <span aria-hidden className={contextCapsuleMarkerSlotClass}>
-          {perceived ? <span className={contextCapsuleMarkerClass} /> : null}
-        </span>
-      ) : null}
+      {/* The presence mark's column, on every row. It used to be rendered
+          only for ordinary rows, which pushed their titles 6px right of a
+          sensed row's (measured on staging: x=44 against x=50) — two
+          different left edges in one list. The column is always present so
+          the icon and title columns start at the same offset whether or not
+          a dot is drawn. */}
+      <span aria-hidden data-testid="capsule-row-marker" className={contextCapsuleMarkerSlotClass}>
+        {perceived ? <span className={contextCapsuleMarkerClass} /> : null}
+      </span>
       <span className={contextCapsuleIconSlotClass} aria-hidden>
         {Icon ? <Icon className="size-[length:var(--icon-md)]" /> : null}
       </span>
       <span className="flex min-w-0 flex-1 flex-col">
-        <span className={cn(contextCapsuleTitleClass, row.kind === 'ordinary' && !perceived && 'text-muted-foreground')}>
+        {/* Only an `unavailable` capability is muted. An `available` one is
+            reachable and listed for exactly that reason (SC-35), so drawing
+            it in the disabled colour said the opposite of what the row is:
+            `available` and `relevant` now read alike, and the 5px mark is
+            what tells them apart. */}
+        <span className={cn(contextCapsuleTitleClass, row.state === 'unavailable' && 'text-muted-foreground')}>
           {row.title}
         </span>
         {row.reason === undefined ? null : (
           <span className={contextCapsuleReasonClass}>{row.reason}</span>
         )}
       </span>
-      <ChevronRight className="size-[length:var(--icon-md)] shrink-0 text-muted-foreground" aria-hidden />
+      {/* No drill-in chevron. It is the strongest "this is a dropdown menu"
+          tell on a surface SC-42 says must not read as one, and it is not
+          even honest: picking a row deepens it in place rather than
+          navigating anywhere. */}
     </button>
   );
 }

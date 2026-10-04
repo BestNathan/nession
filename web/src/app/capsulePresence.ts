@@ -1,18 +1,18 @@
 import {
   resolveCapabilityDisclosure,
   resolveCapabilityPresences,
-  type CapabilityDisclosureEntry,
   type CapabilityFacts,
   type CapabilityId,
   type CapabilitySnapshot,
 } from '@/product/capability';
 import type {
   CapsuleCapabilityDisclosure,
+  CapsuleCapabilityEntry,
 } from '@/product/terminal/capsule/types';
 import type { DomainState } from '@/product/session/model/domainState';
 import type { FileOps } from '@/capabilities/files';
 import type { Agent, Session } from '@/types';
-import { CAPSULE_PROJECTION_IDS } from '@/app/capsuleProjections';
+import { CAPSULE_PROJECTION_IDS, iconFor } from '@/app/capsuleProjections';
 import { resolveWorkspaceCapabilities } from '@/app/workspace/capabilities';
 import type { Experience } from '@/app/workspace/workspaceContext';
 
@@ -67,8 +67,16 @@ export interface CapsuleCapabilityInput {
  * the capability's view.
  */
 export interface CapsuleCapabilityResolution {
-  /** Reachable capabilities, each carrying its state so `+` can mark it. */
-  entries: readonly CapabilityDisclosureEntry[];
+  /**
+   * Reachable capabilities, each carrying its state so `+` can mark it and its
+   * Terminal glyph so the row can draw identity.
+   *
+   * Typed as the capsule's own entry rather than the icon-free
+   * `CapabilityDisclosureEntry` it extends: this resolution is what fills the
+   * icon, so a type that discarded it would describe the data one step behind
+   * the code.
+   */
+  entries: readonly CapsuleCapabilityEntry[];
   /** The capability layer's answer for this Session, which the projection reads. */
   snapshots: readonly CapabilitySnapshot[];
   /** A capability's title, so the capsule never invents one. */
@@ -97,12 +105,25 @@ export function resolveCapsuleCapabilities(
   // Workspace view and no Terminal projection is present and not offered — that
   // is the whole of what this requirement changes, and it is why the filter is
   // here rather than the entry being taught to hide things.
-  const entries: CapabilityDisclosureEntry[] = disclosure.discoverable.flatMap((presence) => {
+  const entries: CapsuleCapabilityEntry[] = disclosure.discoverable.flatMap((presence) => {
     if (!CAPSULE_PROJECTION_IDS.includes(presence.capabilityId)) {
       return [];
     }
     const snapshot = snapshots.find((candidate) => candidate.id === presence.capabilityId);
-    return snapshot ? [{ id: snapshot.id, title: snapshot.title, state: snapshot.state }] : [];
+    return snapshot
+      ? [
+          {
+            id: snapshot.id,
+            title: snapshot.title,
+            state: snapshot.state,
+            // The glyph travels with the entry, resolved from the Terminal
+            // binding. It used to be left out here — `{ id, title, state }` —
+            // while the row held a 16px column open for it, so every row drew
+            // an empty icon column (measured on staging 2026-10-04).
+            icon: iconFor(snapshot.id),
+          },
+        ]
+      : [];
   });
 
   return {
