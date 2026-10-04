@@ -3,6 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_ROOT = path.resolve(HERE, '..');
@@ -50,13 +51,35 @@ function parseFrontmatter(text, file, errors) {
   return { name, description };
 }
 
-function validateLocalLinks(root, skillFile, text, errors) {
-  const dir = path.dirname(skillFile);
-  for (const match of text.matchAll(/\[[^\]]*\]\((\.\.?\/[^)#]+)(?:#[^)]+)?\)/g)) {
-    const resolved = path.resolve(dir, match[1]);
+function validateLocalLinks(root, sourceFile, text, errors) {
+  const dir = path.dirname(sourceFile);
+  for (const match of text.matchAll(/\[[^\]]*\]\(([^)]+)\)/g)) {
+    let target = match[1].trim();
+    if (!target || target.startsWith('#') || /^[a-z][a-z0-9+.-]*:/i.test(target) || target.startsWith('//')) continue;
+    if (target.startsWith('<') && target.endsWith('>')) target = target.slice(1, -1);
+    target = target.split('#', 1)[0].split('?', 1)[0].trim();
+    if (!target) continue;
+    const resolved = path.resolve(dir, target);
     if (!fs.existsSync(resolved)) {
-      errors.push(`${rel(root, skillFile)}: broken local link ${match[1]}`);
+      errors.push(`${rel(root, sourceFile)}: broken local link ${target}`);
     }
+  }
+}
+
+function validateBashSyntax(root, relativePath, errors) {
+  const file = path.join(root, relativePath);
+  if (!fs.existsSync(file)) {
+    errors.push(`${relativePath}: missing routed shell entrypoint`);
+    return;
+  }
+  const result = spawnSync('bash', ['-n', file], { encoding: 'utf8' });
+  if (result.error) {
+    errors.push(`${relativePath}: could not run bash syntax check: ${result.error.message}`);
+    return;
+  }
+  if (result.status !== 0) {
+    const detail = (result.stderr || result.stdout || '').trim().replace(/\s+/g, ' ');
+    errors.push(`${relativePath}: shell syntax invalid${detail ? `: ${detail}` : ''}`);
   }
 }
 
@@ -67,10 +90,12 @@ export function validateInstructionTree(root = DEFAULT_ROOT) {
   if (!fs.existsSync(rootAgents)) {
     errors.push('AGENTS.md: missing canonical root instructions');
   } else {
-    const count = lineCount(fs.readFileSync(rootAgents, 'utf8'));
+    const rootText = fs.readFileSync(rootAgents, 'utf8');
+    const count = lineCount(rootText);
     if (count > ROOT_MAX_LINES) {
       errors.push(`AGENTS.md: ${count} lines exceeds ${ROOT_MAX_LINES}-line always-on budget`);
     }
+    validateLocalLinks(root, rootAgents, rootText, errors);
   }
 
   expectSymlink(errors, root, 'CLAUDE.md', 'AGENTS.md');
@@ -84,9 +109,13 @@ export function validateInstructionTree(root = DEFAULT_ROOT) {
     }
     if (fs.lstatSync(agentsPath).isSymbolicLink()) {
       errors.push(`${scope}/AGENTS.md: must be canonical, not a symlink`);
+    } else {
+      validateLocalLinks(root, agentsPath, fs.readFileSync(agentsPath, 'utf8'), errors);
     }
     expectSymlink(errors, root, `${scope}/CLAUDE.md`, 'AGENTS.md');
   }
+
+  validateBashSyntax(root, '.githooks/pre-commit', errors);
 
   const skillsRoot = path.join(root, '.claude', 'skills');
   if (!fs.existsSync(skillsRoot)) {

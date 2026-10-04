@@ -29,6 +29,18 @@ Workflow changes still happen in a worktree from latest `main`; use `nession-dev
 
 Do not build/push release Docker images manually as a substitute for CI. Local development builds are for diagnosis, not release publication.
 
+## Repository merge and branch policy
+
+These are repository policy, not GitHub UI defaults:
+
+- **Every PR merge uses a merge commit**: `gh pr merge <N> --merge` (or `--auto --merge` when a required check is pending).
+- **Never merge with `--rebase` or `--squash`.** Branch-local history cleanup may happen before the PR is merged, but the repository merge itself preserves the branch tip and original commit ancestry.
+- Normal feature/fix delivery goes through the staging flow before release to `main`.
+- **Exception for `.github/workflows/*`:** workflow-definition changes are fast-tracked in a separate worktree based on `origin/main`, submitted as their own PR directly to `main`, and merged with `--merge`. Do not bury a workflow fix inside a feature PR waiting on staging.
+- The staging -> main release PR is also merged with `--merge`.
+
+The long historical rationale is intentionally not carried in this entrypoint; this section preserves the operational invariants agents must follow.
+
 ## 3. Current workflow owners
 
 Treat the files themselves as live truth:
@@ -77,7 +89,7 @@ Before promotion:
 1. identify the exact commit/PR being promoted;
 2. verify required quality/acceptance evidence;
 3. verify version policy if the release changes version;
-4. merge using the repository's current required merge strategy;
+4. merge with the repository policy above (`--merge`, never rebase/squash);
 5. observe the resulting workflow and deployment until the requested boundary is proven.
 
 Do not assume an old staging/main relationship; inspect current workflow triggers and branch state.

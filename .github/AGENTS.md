@@ -4,6 +4,12 @@ This scope owns `.github/` workflows/templates and GitHub execution routing.
 
 Load `nession-cicd` for release/deployment changes and `nession-gates` for Gate routing.
 
+## Workflow branch / merge policy
+
+Repository merge policy is owned by `nession-cicd`: PRs are merged with `--merge`, never squash/rebase.
+
+For this scope, `.github/workflows/*` is a deliberate delivery exception: make the workflow change in a separate worktree based on `origin/main`, open its own PR directly to `main`, and merge it with `--merge`. Do not make workflow activation depend on an unrelated feature's staging lifecycle.
+
 ## Workflows are routers
 
 A workflow may:

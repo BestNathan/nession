@@ -12,7 +12,9 @@ function fixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'nession-instruction-contract-'));
   fs.mkdirSync(path.join(root, '.claude', 'skills', 'demo'), { recursive: true });
   fs.mkdirSync(path.join(root, '.agents'), { recursive: true });
-  fs.writeFileSync(path.join(root, 'AGENTS.md'), '# Root\n');
+  fs.mkdirSync(path.join(root, '.githooks'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'AGENTS.md'), '# Root\n\n[demo](.claude/skills/demo/SKILL.md)\n');
+  fs.writeFileSync(path.join(root, '.githooks', 'pre-commit'), '#!/usr/bin/env bash\nset -euo pipefail\nexit 0\n');
   fs.symlinkSync('AGENTS.md', path.join(root, 'CLAUDE.md'));
   fs.symlinkSync('../.claude/skills', path.join(root, '.agents', 'skills'));
   fs.writeFileSync(path.join(root, '.claude', 'skills', 'demo', 'SKILL.md'), '---\nname: demo\ndescription: Demo workflow.\n---\n\n# Demo\n');
@@ -73,5 +75,26 @@ test('rejects duplicate names and broken relative links', () => {
     const errors = validateInstructionTree(root).errors;
     assert.ok(errors.some((x) => x.includes('duplicate Skill name')));
     assert.ok(errors.some((x) => x.includes('broken local link')));
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+
+test('rejects broken root and scoped instruction links', () => {
+  const root = fixture();
+  try {
+    fs.appendFileSync(path.join(root, 'AGENTS.md'), '\n[missing-root](docs/nope.md)\n');
+    fs.writeFileSync(path.join(root, 'web', 'AGENTS.md'), '# Scope\n\n[missing-scope](./nope.md)\n');
+    const errors = validateInstructionTree(root).errors;
+    assert.ok(errors.some((x) => x.includes('AGENTS.md: broken local link docs/nope.md')));
+    assert.ok(errors.some((x) => x.includes('web/AGENTS.md: broken local link ./nope.md')));
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('rejects malformed pre-commit router syntax', () => {
+  const root = fixture();
+  try {
+    fs.writeFileSync(path.join(root, '.githooks', 'pre-commit'), '#!/usr/bin/env bash\nif then\n');
+    const errors = validateInstructionTree(root).errors;
+    assert.ok(errors.some((x) => x.includes('.githooks/pre-commit: shell syntax invalid')));
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
