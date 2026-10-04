@@ -134,7 +134,6 @@ export interface ConversationSummary {
    * does not have.
    */
   bound: boolean;
-  hasConversation: boolean;
   /** What the provider offered, in its own order. The Peek lists these. */
   candidates: Candidate[];
   /** When the bound conversation last moved, for the Peek's recency line. */
@@ -148,7 +147,6 @@ type Candidate = ClaudeCodeConversationItem;
 const NO_CONVERSATION: ConversationSummary = {
   title: null,
   bound: false,
-  hasConversation: false,
   candidates: [],
   updatedAt: null,
 };
@@ -176,7 +174,7 @@ function summarize(response: ClaudeCodeConversationsResponse): ConversationSumma
     // is this Session's. Saying that much is all the body may do — there is no
     // `ambiguous` to render anymore, because the list *is* the answer (#1222),
     // and choosing one is what `#1005` forbids.
-    return { ...NO_CONVERSATION, hasConversation: candidates.length > 0, candidates };
+    return { ...NO_CONVERSATION, candidates };
   }
 
   // The binding names the item; the display metadata lives on the item itself.
@@ -188,7 +186,6 @@ function summarize(response: ClaudeCodeConversationsResponse): ConversationSumma
   return {
     title: title ? title : null,
     bound: true,
-    hasConversation: true,
     candidates,
     updatedAt: bound?.updated_at ?? null,
   };

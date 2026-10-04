@@ -65,7 +65,9 @@ export function useCapsuleCapability(
 
   const resolution = resolveCapsuleCapabilities({ ...input, facts });
   const presences = resolveCapabilityPresences(resolution.snapshots, { surface: 'capsule' });
-  const active = resolveCapabilityProjection({ presences, chosen });
+  // The capability the capsule is drawing, if any. Deliberately not named
+  // `active`: that word is a `CapabilityState`, and this is a display choice.
+  const shown = resolveCapabilityProjection({ presences, chosen });
 
   /**
    * Choosing a capability shows it. **Selecting an item is asking to look at
@@ -95,7 +97,7 @@ export function useCapsuleCapability(
    */
   const onDismiss = useCallback(() => setChosen(null), []);
 
-  const binding = active ? projectionBindingFor(active) : undefined;
+  const binding = shown ? projectionBindingFor(shown) : undefined;
   const stateOf = (id: CapabilityId) =>
     resolution.snapshots.find((snapshot) => snapshot.id === id)?.state ?? 'available';
 
@@ -118,10 +120,10 @@ export function useCapsuleCapability(
           }
         : {},
     projection:
-      active && binding
+      shown && binding
         ? {
-            id: active,
-            title: resolution.titleFor(active),
+            id: shown,
+            title: resolution.titleFor(shown),
             // The capability's own answer to "does this take the keyboard while
             // it is up", copied through untouched.
             ownsInputFocus: binding.ownsInputFocus,
@@ -130,8 +132,8 @@ export function useCapsuleCapability(
             // (#1347 SC-21), read from the Workspace view registry rather than
             // left for the body to decide: a capability with no Workspace view
             // (Terminal Keys) gets no routing at all.
-            onOpenWorkspace: WORKSPACE_VIEW_BINDINGS.some((view) => view.id === active)
-              ? (resourceId) => input.onOpenWorkspace(active, resourceId)
+            onOpenWorkspace: WORKSPACE_VIEW_BINDINGS.some((view) => view.id === shown)
+              ? (resourceId) => input.onOpenWorkspace(shown, resourceId)
               : undefined,
             // The body reports what the user picked; the frame holds it and
             // hands it to `onOpenWorkspace`.
@@ -142,7 +144,7 @@ export function useCapsuleCapability(
                 sessionId: input.session?.session_id,
                 // The state the registry resolved, read back rather than
                 // re-derived — one decision, one place.
-                state: stateOf(active),
+                state: stateOf(shown),
                 onFocusChange: setFocus,
               }),
           }

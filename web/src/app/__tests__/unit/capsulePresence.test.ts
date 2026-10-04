@@ -1,13 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { CapabilityId, CapabilitySnapshot, CapabilityState } from '@/product/capability';
+import type { CapabilityId } from '@/product/capability';
 import type { Session } from '@/types';
+import { projectionBindingFor } from '../../capsuleProjections';
 import { resolveCapsuleCapabilities, type CapsuleCapabilityInput } from '../../capsulePresence';
-
-function snapshot(id: CapabilityId, state: CapabilityState): CapabilitySnapshot {
-  return { id, title: id, scope: {}, state };
-}
-
-void snapshot;
 
 function input(overrides: Partial<CapsuleCapabilityInput> = {}): CapsuleCapabilityInput {
   return {
@@ -112,13 +107,17 @@ describe('capsule capability presence', () => {
     expect(resolution.titleFor('nobody-registered-this')).toBe('nobody-registered-this');
   });
 
-  it('exposes the resolved snapshots the projection reads', () => {
-    // The projection is resolved from the same answer as the discovery list, so
-    // a capability cannot be active for one and absent for the other.
-    const resolution = resolveCapsuleCapabilities(
-      input({ facts: { sessionForegroundCommand: 'claude.exe' } }),
-    );
+  it('offers only capabilities the capsule can actually draw', () => {
+    // The coherence both halves of the capsule depend on, checked across the
+    // two answers rather than inside either: everything the discovery list
+    // offers must resolve to a projection binding, or selecting it would land
+    // on nothing. Where the deleted `entry` loop compared the entry against the
+    // depth a binding declared, this compares it against the binding itself.
+    const resolution = resolveCapsuleCapabilities(input());
 
-    expect(resolution.snapshots.find((s) => s.id === 'claude-code')?.state).toBe('active');
+    expect(resolution.entries.length).toBeGreaterThan(0);
+    for (const entry of resolution.entries) {
+      expect(projectionBindingFor(entry.id)).toBeDefined();
+    }
   });
 });
