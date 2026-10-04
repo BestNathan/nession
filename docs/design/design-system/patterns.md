@@ -36,6 +36,7 @@ Patterns that display capabilities must respect that lifecycle and progressive d
 | [FileWorkspace](patterns/file-workspace.md) | capability view | Files-specific master/detail composition |
 | [AgentDetail](patterns/agent-detail.md) | detail | Infrastructure/location detail |
 | [TerminalCapsule](patterns/terminal-capsule.md) | interaction | Conversational/contextual interaction surface over the Terminal |
+| [ContextCapsule](patterns/context-capsule.md) | contextual interaction | Nession-owned upper Capsule list; deepens in-place into Peek |
 | [TerminalSurface](patterns/terminal-surface.md) | work surface | xterm well, focus, scroll, clearance, attachment lifecycle |
 | [PopupMenu](patterns/popup-menu.md) | primitive-backed surface | The list a control collapses into; contracted here because a popup is not a DOM descendant of its trigger (#1066) |
 
@@ -54,6 +55,49 @@ Every product pattern should document:
 7. **Web vs App** — shared meaning with experience-specific presentation.
 8. **Visual Contract** — dominance, hierarchy, density, surface treatment, state-driven emphasis, and anti-patterns.
 9. **Acceptance / executable contract** — measurable rules only after the relationship is stable enough to encode.
+
+## Visual grammar ownership
+
+Tokens are necessary but not sufficient for consistency. A feature can use only
+valid tokens and still assemble them into a surface that belongs to a different
+visual family. Product patterns therefore own a layer above generic primitives:
+
+```text
+Primitive / Semantic / Experience tokens
+        ↓
+Generic UI primitives
+        ↓
+Product visual grammar / recipes
+        ↓
+Feature / capability content
+```
+
+The ownership rule is **reuse before restyle**:
+
+- if an existing primitive or product recipe already expresses the role, reuse
+  it rather than restyling a local copy;
+- when a second independent consumer needs the same control, promote that
+  control to the shared owner instead of copying it;
+- an intentional visual difference must be an explicit semantic variant at the
+  canonical owner, not a consumer-local class fork;
+- product chrome owns surface material, radius family, elevation, typography
+  roles, standard row/action anatomy, focus treatment and experience geometry;
+- a capability owns its domain content and composition inside the host, not the
+  host chrome around it;
+- a feature-local component is appropriate when its semantics are genuinely
+  feature-specific and no canonical primitive/recipe already owns the role. If
+  a second independent consumer needs the same control, that is the signal to
+  promote it rather than copy it.
+
+This is deliberately not a universal Surface DSL. Each stable product region may
+own a small grammar when doing so removes implementation freedom that has already
+caused drift. Capsule is the first enforced family: Context and Peek occupy one
+upper slot and therefore consume one Nession-owned upper-surface recipe.
+
+For Agent-authored changes this boundary must be mechanically enforceable.
+Stable relationships should be asserted **between** analogous components
+(computed material, bounds, typography role, transition continuity), not only by
+checking that each component independently uses allowed tokens.
 
 ## Shared rules
 

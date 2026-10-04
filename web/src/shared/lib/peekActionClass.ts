@@ -1,3 +1,6 @@
+import { cn } from '@/shared/lib/utils';
+import { chromeSansRole } from '@/shared/typography/chromeRoles';
+
 /**
  * The appearance of a Peek's own action — "Open in Workspace", and whatever a
  * capability offers beside it (#1046).
@@ -21,5 +24,7 @@
  * One class rather than one per capability, so two Peeks that both offer the
  * action look the same and the third does not invent its own.
  */
-export const capsulePeekActionClass =
-  'rounded px-[length:var(--terminal-capsule-projection-item-pad-x)] font-medium text-foreground transition-colors hover:text-foreground/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
+export const capsulePeekActionClass = cn(
+  'rounded-[var(--radius-control)] px-[length:var(--terminal-capsule-projection-item-pad-x)] text-foreground transition-colors hover:text-foreground/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+  chromeSansRole('body'),
+);

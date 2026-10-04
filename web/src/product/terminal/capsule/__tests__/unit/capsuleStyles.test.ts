@@ -8,12 +8,42 @@ import {
   capsulePhysKeyRowClass,
   capsulePopoverPanelClass,
   capsuleProjectionClass,
+  capsuleUpperSurfaceClass,
+  capsuleUpperTitleClass,
   contextCapsuleReasonClass,
   contextCapsuleSurfaceClass,
   contextCapsuleTitleClass,
 } from '@/product/terminal/capsule/capsuleStyles';
+import { capsulePeekActionClass } from '@/shared/lib/peekActionClass';
 
 describe('capsuleStyles', () => {
+  it('routes Context and Peek through one upper Capsule visual grammar', () => {
+    // The two states replace each other in one slot. A token-valid Context and a
+    // token-valid Peek are still visually wrong if they choose different
+    // material/elevation families, so this is intentionally relational.
+    for (const cls of [contextCapsuleSurfaceClass, capsuleProjectionClass]) {
+      expect(cls).toContain('var(--radius-capsule)');
+      expect(cls).toContain('var(--terminal-capsule-surface)');
+      expect(cls).toContain('var(--elevation-floating)');
+      expect(cls).toContain('backdrop-blur-md');
+      expect(cls).not.toMatch(/\bborder(?:\s|$)/);
+    }
+    expect(capsuleProjectionClass).not.toContain('bg-background/95');
+    expect(capsuleProjectionClass).toContain(capsuleUpperSurfaceClass);
+    expect(contextCapsuleSurfaceClass).toContain(capsuleUpperSurfaceClass);
+  });
+
+  it('keeps upper host title and Peek actions on canonical chrome roles', () => {
+    expect(capsuleUpperTitleClass).toContain('var(--typography-body-size)');
+    expect(capsuleUpperTitleClass).toContain('var(--typography-body-weight)');
+    expect(capsuleUpperTitleClass).not.toContain('--terminal-capsule-projection-font-size');
+
+    expect(capsulePeekActionClass).toContain('var(--typography-body-size)');
+    expect(capsulePeekActionClass).toContain('var(--typography-body-weight)');
+    expect(capsulePeekActionClass).toContain('var(--radius-control)');
+    expect(capsulePeekActionClass).not.toMatch(/\bfont-medium\b/);
+  });
+
   it('rounds the projection with the capsule radius, not one of its own', () => {
     // The Peek sits in the capsule's slot, directly above it, and read as a
     // different family while its corner did not match: 12px against the

@@ -7,13 +7,16 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { capsulePeekActionClass } from '@/shared/lib/peekActionClass';
-import { cn } from '@/shared/lib/utils';
+import { CapsuleIconVisual } from '@/product/terminal/capsule/CapsuleIconVisual';
 import {
-  capsuleIconButtonClass,
+  capsuleDetailDialogClass,
   capsuleProjectionClass,
   capsuleProjectionDockClass,
   capsuleProjectionScrollClass,
   capsuleProjectionTextClass,
+  capsuleUpperCloseButtonClass,
+  capsuleUpperHeaderClass,
+  capsuleUpperTitleClass,
 } from '@/product/terminal/capsule/capsuleStyles';
 import type {
   CapsuleCapabilityProjection,
@@ -70,7 +73,7 @@ export function PeekHost({
     <div
       data-testid="capsule-capability-projection"
       data-capability={projection.id}
-      className={cn(
+      className={[
         capsuleProjectionClass,
         capsuleProjectionDockClass,
         capsuleProjectionTextClass,
@@ -84,15 +87,15 @@ export function PeekHost({
         // host" enforced rather than intended. The host's own overlay is
         // unaffected: the Dialog portals to the body, outside this subtree.
         'contain-paint',
-      )}
+      ].join(' ')}
     >
-      <div className="flex items-center justify-between gap-[length:var(--terminal-capsule-projection-item-gap)]">
+      <div className={capsuleUpperHeaderClass}>
         {/* The title names the projection. It is not a control: there is only
             one depth, so there is nothing behind it to open — it used to be the
             Signal's way in. */}
         <h2
           data-testid="capsule-capability-title"
-          className="min-w-0 flex-1 truncate text-left font-semibold text-foreground"
+          className={capsuleUpperTitleClass}
         >
           {title}
         </h2>
@@ -101,12 +104,11 @@ export function PeekHost({
           data-testid="capsule-capability-dismiss"
           aria-label={`Dismiss ${title}`}
           onClick={() => onDismiss()}
-          className={cn(
-            capsuleIconButtonClass,
-            'text-muted-foreground transition-colors hover:text-foreground',
-          )}
+          className={capsuleUpperCloseButtonClass}
         >
-          <X aria-hidden />
+          <CapsuleIconVisual>
+            <X />
+          </CapsuleIconVisual>
         </button>
       </div>
 
@@ -177,7 +179,7 @@ export function PeekHost({
             does not change the shape of the thing it came out of. */}
         <DialogContent
           data-testid="capsule-capability-detail"
-          className="flex max-h-[calc(100dvh-2rem)] flex-col overflow-hidden rounded-[var(--radius-capsule)] sm:max-w-lg"
+          className={capsuleDetailDialogClass}
         >
           <DialogHeader>
             <DialogTitle>{detail?.title ?? ''}</DialogTitle>

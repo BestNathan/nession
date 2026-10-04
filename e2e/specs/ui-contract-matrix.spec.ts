@@ -103,6 +103,29 @@ async function assertPopupMenu(
   await expect(menu).toHaveCount(0);
 }
 
+async function upperCapsuleVisualSignature(
+  surface: import('@playwright/test').Locator,
+): Promise<{
+  backgroundColor: string;
+  borderRadius: string;
+  borderTopWidth: string;
+  boxShadow: string;
+  backdropFilter: string;
+  marginBottom: string;
+}> {
+  return surface.evaluate((el) => {
+    const style = getComputedStyle(el);
+    return {
+      backgroundColor: style.backgroundColor,
+      borderRadius: style.borderRadius,
+      borderTopWidth: style.borderTopWidth,
+      boxShadow: style.boxShadow,
+      backdropFilter: style.backdropFilter,
+      marginBottom: style.marginBottom,
+    };
+  });
+}
+
 /**
  * Open the Context Capsule from `+` and hold it to `pattern.context-capsule`
  * (#1347 SC-41–44).
@@ -206,6 +229,14 @@ async function assertContextCapsule(
   const shellAfter = await page.getByTestId('capsule-shell').boundingBox();
   expect(shellAfter).toEqual(shellBefore);
 
+  // The upper slot is the shell's column, not the dock's whole width. On Web
+  // the second dock column belongs to the Workspace destination circle; a
+  // surface spanning it reads as a panel rather than the Conversation
+  // Capsule's upper half (#1446 SC-07). App has no adjacent action, so the same
+  // relational assertion naturally reduces to full-width alignment there.
+  expect(Math.abs(surfaceBox!.x - shellAfter!.x)).toBeLessThanOrEqual(1);
+  expect(Math.abs(surfaceBox!.width - shellAfter!.width)).toBeLessThanOrEqual(1);
+
   // The gap *is* the surface's own bottom margin — read from the element and
   // compared to the space actually measured. No literal: the claim is that the
   // distance between the pair is the token applied to the upper surface, not
@@ -302,6 +333,13 @@ async function assertRowOpensDetail(
 
   const surface = page.getByTestId('capsule-context-disclosure');
   await expect(surface).toBeVisible();
+  await waitForSettledBox(surface);
+
+  const contextBox = await surface.boundingBox();
+  const shellBefore = await page.getByTestId('capsule-shell').boundingBox();
+  expect(contextBox).not.toBeNull();
+  expect(shellBefore).not.toBeNull();
+  const contextVisual = await upperCapsuleVisualSignature(surface);
 
   const ordinary = surface.locator('[data-context-row="ordinary"]').first();
   await expect(ordinary).toBeVisible();
@@ -309,8 +347,16 @@ async function assertRowOpensDetail(
 
   const peek = page.getByTestId('capsule-capability-projection');
   await expect(peek).toBeVisible();
-  // The `data-depth` assertion that stood here went with the attribute it read:
-  // one depth meant one value, so it could no longer witness the step.
+  await waitForSettledBox(peek);
+
+  // Context -> Peek is a depth/content transition inside ONE upper product
+  // surface. Height/content may change; family geometry and material may not.
+  const peekBox = await peek.boundingBox();
+  expect(peekBox).not.toBeNull();
+  expect(Math.abs(peekBox!.x - contextBox!.x)).toBeLessThanOrEqual(1);
+  expect(Math.abs(peekBox!.width - contextBox!.width)).toBeLessThanOrEqual(1);
+  expect(await upperCapsuleVisualSignature(peek)).toEqual(contextVisual);
+  expect(await page.getByTestId('capsule-shell').boundingBox()).toEqual(shellBefore);
 
   // Git and Claude Code have Workspace views, so one of them is always reachable
   // here; Terminal Keys would not be, and has no business being the first

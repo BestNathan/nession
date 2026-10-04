@@ -85,11 +85,9 @@ export function CapsuleShell({
       data-morph-id="capsule-shell"
       className={cn(
         geometry.shellClass,
-        // In the adjacent row the shell shares the dock's width with the
-        // action: `flex-1` (basis 0%) supersedes the derived `w-full` for a flex
-        // item, so the capsule yields the action's width rather than
-        // overflowing the group (#1204 §8).
-        adjacentAction && 'min-w-0 flex-1',
+        // In the adjacent layout the grid owns the width split; the shell fills
+        // column 1 and only needs min-width zero so its content may shrink.
+        adjacentAction && 'min-w-0',
       )}
     >
       <div
@@ -119,17 +117,34 @@ export function CapsuleShell({
         isApp ? capsuleShellAppDockBottomClass : capsuleShellDockBottomClass,
       )}
     >
-      {projection}
       {adjacentAction ? (
-        /* `items-end` pins the action to the shell's bottom edge, so a composer
-           growing upward never lifts the action above the shell's top — the
-           shell-only occlusion measurement stays exact (#1204 §1). */
-        <div className="flex items-end gap-[length:var(--shell-space-2)]">
-          {shell}
-          {adjacentAction}
+        /*
+         * One two-column grid owns both rows. The shell and every upper-slot
+         * surface occupy column 1; the destination action owns column 2 only on
+         * the lower row. That is the relationship #1446 needs: Context → Peek
+         * may change content/height, but neither can suddenly widen across the
+         * destination circle and read like a different panel.
+         *
+         * `items-end` still pins the action to the shell's bottom edge, so a
+         * composer growing upward never lifts it above the shell's top and the
+         * shell-only occlusion measurement stays exact (#1204 §1).
+         */
+        <div className="grid grid-cols-[minmax(0,1fr)_auto] items-end gap-x-[length:var(--shell-space-2)]">
+          {projection ? (
+            <div className="col-start-1 row-start-1 min-w-0">{projection}</div>
+          ) : null}
+          <div className={cn('col-start-1 min-w-0', projection ? 'row-start-2' : 'row-start-1')}>
+            {shell}
+          </div>
+          <div className={cn('col-start-2', projection ? 'row-start-2' : 'row-start-1')}>
+            {adjacentAction}
+          </div>
         </div>
       ) : (
-        shell
+        <>
+          {projection}
+          {shell}
+        </>
       )}
       {measureMirror}
     </div>

@@ -275,6 +275,19 @@ so the split cannot converge back silently. Values live in
 
 - Floating-control elevation without decorative border stacks.
 - Capsule radius from semantic design tokens.
+- The dock has **one upper visual family**. Context and Peek replace each other
+  in the same upper slot and therefore use one Nession-owned surface recipe:
+  material, radius, elevation/blur, horizontal bounds and inter-Capsule gap do
+  not change when the content deepens.
+- On Web, that upper slot aligns with the Conversation Capsule shell itself. The
+  reciprocal Workspace destination circle is a separate dock column and does
+  not widen the upper Capsule.
+- Peek capabilities own the body they contribute, not the host chrome around
+  it. Header/title/dismiss/Workspace destination and standard host actions
+  remain Nession-owned.
+- Writing typography and chrome typography are different roles: the composer
+  may keep the input size required for writing/mobile input, while Context/Peek
+  host chrome consumes semantic typography roles rather than the composer font.
 - Avoid nested cards inside the capsule.
 - Motion communicates state changes; it does not celebrate routine actions.
 

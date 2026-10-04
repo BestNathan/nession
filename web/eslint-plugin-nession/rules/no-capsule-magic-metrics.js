@@ -5,6 +5,11 @@ const ALLOWLIST = new Set([
   'src/product/terminal/capsule/components/ComposerMeasureMirror.tsx',
 ]);
 
+const CHROME_HOST_SUFFIXES = [
+  'src/product/terminal/capsule/components/ContextCapsule.tsx',
+  'src/product/terminal/capsule/components/PeekHost.tsx',
+];
+
 const METRIC_PREFIX =
   '(?:h|w|size|gap|p|px|py|pt|pb|pl|pr|m|mx|my|mr|ml|mb|mt|min-h|min-w|max-h|max-w)';
 
@@ -41,7 +46,7 @@ const RULES = [
   },
 ];
 
-function reportClassViolations(context, node, classString) {
+function reportClassViolations(context, node, classString, enforceChromeOwner = false) {
   if (typeof classString !== 'string') {
     return;
   }
@@ -54,6 +59,34 @@ function reportClassViolations(context, node, classString) {
       });
     }
   }
+
+  if (!enforceChromeOwner) {
+    return;
+  }
+
+  const classes = classString.split(/\s+/).filter(Boolean);
+  const forbidden = classes.find((name) =>
+    name.startsWith('rounded') ||
+    name.startsWith('bg-') ||
+    name.startsWith('shadow-') ||
+    name === 'border' ||
+    name.startsWith('border-') ||
+    name.startsWith('text-[') ||
+    name === 'font-medium' ||
+    name === 'font-semibold' ||
+    name === 'font-bold'
+  );
+  if (forbidden) {
+    context.report({
+      node,
+      messageId: 'violation',
+      data: {
+        message:
+          'Context/Peek host chrome is Nession-owned. Put radius/material/elevation/typography in capsuleStyles and consume the canonical upper-Capsule recipe.',
+        ruleId: 'upper-capsule-visual-owner',
+      },
+    });
+  }
 }
 
 function isCapsuleFile(filename) {
@@ -63,6 +96,11 @@ function isCapsuleFile(filename) {
     !normalized.includes('/__tests__/') &&
     !/\.(test|spec)\.[jt]sx?$/.test(normalized)
   );
+}
+
+function isChromeHost(filename) {
+  const normalized = filename.replace(/\\/g, '/');
+  return CHROME_HOST_SUFFIXES.some((suffix) => normalized.endsWith(suffix));
 }
 
 function isAllowlisted(filename) {
@@ -95,13 +133,20 @@ export default function noCapsuleMagicMetrics() {
         return {};
       }
 
+      const enforceChromeOwner = isChromeHost(filename);
+
       return {
         Literal(node) {
-          reportClassViolations(context, node, node.value);
+          reportClassViolations(context, node, node.value, enforceChromeOwner);
         },
         TemplateLiteral(node) {
           for (const quasi of node.quasis) {
-            reportClassViolations(context, quasi, quasi.value.cooked ?? quasi.value.raw);
+            reportClassViolations(
+              context,
+              quasi,
+              quasi.value.cooked ?? quasi.value.raw,
+              enforceChromeOwner,
+            );
           }
         },
         JSXAttribute(node) {
