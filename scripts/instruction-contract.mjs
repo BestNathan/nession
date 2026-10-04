@@ -9,7 +9,8 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_ROOT = path.resolve(HERE, '..');
 const ROOT_MAX_LINES = 200;
 const SKILL_MAX_LINES = 320;
-const SCOPES = ['web', 'crates/nession-protocol', 'crates/nession-agent', 'scripts', '.github', 'design', 'docs'];
+const MAX_SKILL_NAME_LENGTH = 64;
+const REQUIRED_SCOPES = ['web', 'crates/nession-protocol', 'crates/nession-agent', 'scripts', '.github', 'design', 'docs'];
 
 function lineCount(text) {
   return text.replace(/\r\n?/g, '\n').split('\n').length;
@@ -17,6 +18,42 @@ function lineCount(text) {
 
 function rel(root, file) {
   return path.relative(root, file) || '.';
+}
+
+function discoverInstructionPaths(root) {
+  const git = spawnSync('git', ['-C', root, 'ls-files', '-z'], { encoding: 'utf8' });
+  if (!git.error && git.status === 0) {
+    return git.stdout
+      .split('\0')
+      .filter((file) => file && /(^|\/)(AGENTS|CLAUDE)\.md$/.test(file))
+      .sort();
+  }
+
+  const found = [];
+  const skippedNames = new Set(['.git', 'node_modules', 'target']);
+
+  function walk(dir, relativeDir = '') {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const relativePath = relativeDir ? path.posix.join(relativeDir, entry.name) : entry.name;
+      if (entry.isDirectory()) {
+        if (skippedNames.has(entry.name) || relativePath === '.claude/worktrees' || relativePath.startsWith('.claude/worktrees/')) continue;
+        walk(path.join(dir, entry.name), relativePath);
+        continue;
+      }
+      if (entry.name === 'AGENTS.md' || entry.name === 'CLAUDE.md') found.push(relativePath);
+    }
+  }
+
+  walk(root);
+  return found.sort();
+}
+
+function discoverInstructionScopes(instructionPaths) {
+  return [...new Set(
+    instructionPaths
+      .map((file) => path.posix.dirname(file))
+      .filter((dir) => dir !== '.'),
+  )].sort();
 }
 
 function expectSymlink(errors, root, file, expectedTarget) {
@@ -195,18 +232,39 @@ export function validateInstructionTree(root = DEFAULT_ROOT) {
   expectSymlink(errors, root, 'CLAUDE.md', 'AGENTS.md');
   expectSymlink(errors, root, '.agents/skills', '../.claude/skills');
 
-  for (const scope of SCOPES) {
-    const agentsPath = path.join(root, scope, 'AGENTS.md');
-    if (!fs.existsSync(agentsPath)) {
-      errors.push(`${scope}/AGENTS.md: missing scoped owner`);
+  const instructionPaths = discoverInstructionPaths(root);
+  const instructionPathSet = new Set(instructionPaths);
+  const discoveredScopes = discoverInstructionScopes(instructionPaths);
+
+  for (const scope of REQUIRED_SCOPES) {
+    if (!discoveredScopes.includes(scope)) {
+      errors.push(`${scope}/AGENTS.md: missing required scoped owner`);
+    }
+  }
+
+  for (const scope of discoveredScopes) {
+    const agentsRelative = `${scope}/AGENTS.md`;
+    const claudeRelative = `${scope}/CLAUDE.md`;
+    const hasAgents = instructionPathSet.has(agentsRelative);
+    const hasClaude = instructionPathSet.has(claudeRelative);
+
+    if (!hasAgents) {
+      errors.push(`${scope}: scoped CLAUDE.md exists without canonical AGENTS.md`);
       continue;
     }
+
+    const agentsPath = path.join(root, agentsRelative);
     if (fs.lstatSync(agentsPath).isSymbolicLink()) {
-      errors.push(`${scope}/AGENTS.md: must be canonical, not a symlink`);
+      errors.push(`${agentsRelative}: must be canonical, not a symlink`);
     } else {
       validateLocalLinks(root, agentsPath, fs.readFileSync(agentsPath, 'utf8'), errors);
     }
-    expectSymlink(errors, root, `${scope}/CLAUDE.md`, 'AGENTS.md');
+
+    if (!hasClaude) {
+      errors.push(`${claudeRelative}: missing compatibility symlink`);
+    } else {
+      expectSymlink(errors, root, claudeRelative, 'AGENTS.md');
+    }
   }
 
   validateBashSyntax(root, '.githooks/pre-commit', errors);
@@ -241,6 +299,9 @@ export function validateInstructionTree(root = DEFAULT_ROOT) {
         } else {
           names.set(meta.name, rel(root, skillFile));
         }
+        if (meta.name.length > MAX_SKILL_NAME_LENGTH) {
+          errors.push(`${rel(root, skillFile)}: Skill name exceeds Codex ${MAX_SKILL_NAME_LENGTH}-character limit`);
+        }
         if (meta.name !== entry.name) {
           errors.push(`${rel(root, skillFile)}: frontmatter name must match directory name ${entry.name}`);
         }
@@ -249,13 +310,13 @@ export function validateInstructionTree(root = DEFAULT_ROOT) {
     }
   }
 
-  return { ok: errors.length === 0, errors, rootMaxLines: ROOT_MAX_LINES, skillMaxLines: SKILL_MAX_LINES, scopes: [...SCOPES] };
+  return { ok: errors.length === 0, errors, rootMaxLines: ROOT_MAX_LINES, skillMaxLines: SKILL_MAX_LINES, maxSkillNameLength: MAX_SKILL_NAME_LENGTH, scopes: discoveredScopes };
 }
 
 function main() {
   const result = validateInstructionTree();
   if (result.ok) {
-    console.log(`instruction-contract: PASS (root<=${ROOT_MAX_LINES}, skills<=${SKILL_MAX_LINES}, ${SCOPES.length} scoped owners)`);
+    console.log(`instruction-contract: PASS (root<=${ROOT_MAX_LINES}, skills<=${SKILL_MAX_LINES}, name<=${MAX_SKILL_NAME_LENGTH}, dynamic scoped owners)`);
     return;
   }
   console.error('instruction-contract: FAIL');
