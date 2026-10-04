@@ -112,6 +112,14 @@ test('an emerged capability does not reflow the terminal (#826)', async ({ page 
   expect(emerged.occlusion).not.toBe('0px');
 
   // Dismissal returns to the same numbers, which is what "continuity" means.
+  //
+  // Twice, because dismissal steps back one level at a time: picking a
+  // capability opens its Peek, closing that steps back to the Signal it came
+  // from, and only closing the Signal returns to dormant. The geometry is
+  // asserted at the end because that is the claim — the terminal is where it
+  // was once nothing is floating over it.
+  await page.getByTestId('capsule-capability-dismiss').click();
+  await expect(page.getByTestId('capsule-capability-projection')).toHaveAttribute('data-depth', 'signal');
   await page.getByTestId('capsule-capability-dismiss').click();
   await expect(page.getByTestId('capsule-capability-projection')).toHaveCount(0);
   expect(await geometry()).toEqual(dormant);
