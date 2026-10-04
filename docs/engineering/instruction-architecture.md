@@ -84,8 +84,7 @@ Checklist:
 3. add canonical `<scope>/AGENTS.md`;
 4. add sibling `<scope>/CLAUDE.md -> AGENTS.md`;
 5. link detailed rationale instead of copying a handbook;
-6. add the scope to `scripts/instruction-contract.mjs`;
-7. run `./gates/run instruction-contract`.
+6. run `./gates/run instruction-contract`; the validator discovers tracked scoped instruction files automatically.
 
 Do not create a scope merely to distribute line count.
 
@@ -122,8 +121,8 @@ The instruction contract enforces:
 - root `AGENTS.md`: <= 200 lines;
 - main `SKILL.md` entrypoints: <= 320 lines;
 - canonical/symlink relationships;
-- unique Skill names and required descriptions;
-- scoped compatibility links.
+- valid/unique Skill names and required descriptions, including the Codex 64-character name bound;
+- dynamically discovered scoped instruction compatibility pairs, while preserving required existing owners.
 
 Budgets are regression guardrails, not targets to fill.
 
