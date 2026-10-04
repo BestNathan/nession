@@ -204,8 +204,7 @@ The semantic radius vocabulary is five tiers, from tightest to softest:
 |---|---:|---|
 | `radius-control` | 10px | Interactive controls: buttons, inputs, search fields. The base radius from primitive. |
 | `radius-surface` | 16px | Contained surfaces: panels, cards where justified. Larger than control to visually group content. |
-| `radius-floating` | 20px | Temporary elevated surfaces: Peek, popovers, inspectors. Softer corners for transient overlays. |
-| `radius-capsule` | 22px | TerminalCapsule shell. |
+| `radius-capsule` | 22px | The capsule and everything that stands in its slot: the resting Capsule, the Context Capsule above it, the Peek that replaces the latter, and the child overlay a Peek opens. One corner because it is one position — a surface that takes another's place reads as a different family when its corner does not match. |
 | `radius.pill` | 9999px | True pill/chip geometry. |
 
 **Ownership**: radius tokens live at the Semantic layer (`design/tokens/semantic.json`),

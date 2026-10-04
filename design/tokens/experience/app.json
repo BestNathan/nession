@@ -350,9 +350,6 @@
     "projectionGap": {
       "value": "0.5rem"
     },
-    "projectionRadius": {
-      "value": "0.75rem"
-    },
     "projectionMaxHeight": {
       "$description": "Ceiling for an emerged projection (#826 Q5). Lower than Web's: the App capsule sits closer to the bottom edge and its projection has less room above it for the same content.",
       "value": "16rem"

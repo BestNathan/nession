@@ -168,9 +168,16 @@ export function PeekHost({
 
             The content still scrolls itself rather than the Terminal: the
             dialog is portalled and bounded, so nothing behind it moves. */}
+        {/* The radius is overridden here rather than in `components/ui/dialog`:
+            that file is the shared primitive, and its generic default is right
+            for a dialog in general — teaching it the capsule would be the
+            primitive learning product semantics. This surface is the capsule's
+            own, and it wears the capsule's corner: the same one the Peek behind
+            it and the resting Capsule below it wear, so opening a child overlay
+            does not change the shape of the thing it came out of. */}
         <DialogContent
           data-testid="capsule-capability-detail"
-          className="flex max-h-[calc(100dvh-2rem)] flex-col overflow-hidden sm:max-w-lg"
+          className="flex max-h-[calc(100dvh-2rem)] flex-col overflow-hidden rounded-[var(--radius-capsule)] sm:max-w-lg"
         >
           <DialogHeader>
             <DialogTitle>{detail?.title ?? ''}</DialogTitle>
