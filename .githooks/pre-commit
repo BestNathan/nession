@@ -12,7 +12,7 @@ NC='\033[0m'
 
 STAGED_RUST=$(git diff --cached --name-only --diff-filter=ACM | grep '\.rs$' || true)
 STAGED_TSX=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(ts|tsx)$' | grep '^web/' || true)
-STAGED_ALL=$(git diff --cached --name-only --diff-filter=ACM)
+STAGED_ALL=$(git diff --cached --name-only)
 STAGED_DESIGN=$(echo "$STAGED_ALL" | grep -E '^(design/|docs/design/|web/src/|web/eslint-plugin-nession/|scripts/check-design-tokens|\.claude/skills/nession-web-design/|justfile$)' || true)
 STAGED_INSTRUCTIONS=$(echo "$STAGED_ALL" | grep -E '(^|/)(AGENTS|CLAUDE)\.md$|^\.agents/|^\.claude/skills/|^\.githooks/pre-commit$|^\.github/workflows/quality\.yml$|^scripts/instruction-contract(\.test)?\.mjs$|^docs/engineering/instruction-(architecture|migration|scenarios)\.md$|^gates/checks/instruction-contract\.sh$|^gates/suites/(pre-commit|quality-web|quality)\.gates$' || true)
 
