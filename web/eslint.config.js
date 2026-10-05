@@ -22,7 +22,6 @@ export default tseslint.config(
     rules: {
       ...reactHooks.configs.recommended.rules,
       'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
-      'nession/no-primitive-tokens': 'error',
       'nession/no-cross-experience-token': 'error',
       'nession/no-capsule-magic-metrics': 'error',
       'nession/no-sf-overlay-vars': 'error',
@@ -30,7 +29,7 @@ export default tseslint.config(
       'nession/no-ui-product-imports': 'error', // components/ui stays generic (see the rule's header)
       'nession/no-deep-capability-imports': 'error', // a capability is reached through its index (#801)
       'nession/no-capability-portals': 'error', // a Peek body stays inside the host (#1347 SC-27)
-      'nession/visual-vocabulary': 'error', // all product visual vars resolve through --nession-* (#1451)
+      'nession/visual-vocabulary': 'error', // canonical vars + color/type/radius/elevation vocabulary (#1451)
 
       // ── Code quality limits ──────────────────────────────────────────
       complexity:    ['error', 20],
