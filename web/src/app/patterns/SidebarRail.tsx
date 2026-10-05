@@ -78,7 +78,7 @@ export function SidebarRail({
       // nav shrink-wrapped its content, the flex-1 spacer collapsed to zero,
       // and the status dot sat directly under the summaries instead of pinned
       // to the bottom edge where the expanded footer carries it.
-      className="flex h-full w-[length:var(--shell-rail-width)] shrink-0 flex-col items-center gap-1 py-[var(--shell-space-2)]"
+      className="flex h-full w-[length:var(--nession-shell-rail-width)] shrink-0 flex-col items-center gap-1 py-[var(--nession-shell-space-2)]"
     >
       <button
         type="button"
@@ -86,9 +86,9 @@ export function SidebarRail({
         aria-label="Expand sidebar"
         title="Expand sidebar"
         onClick={() => onExpand()}
-        className={cn(shellIconButtonClass, 'rounded-[var(--radius-control)] hover:bg-accent hover:text-accent-foreground')}
+        className={cn(shellIconButtonClass, 'rounded-[var(--nession-radius-control)] hover:bg-accent hover:text-accent-foreground')}
       >
-        <PanelLeftOpen className="size-[length:var(--icon-md)]" aria-hidden />
+        <PanelLeftOpen className="size-[length:var(--nession-icon-md)]" aria-hidden />
       </button>
 
       {/* Static summaries. `role="img"` + aria-label so the pair announces as
@@ -99,9 +99,9 @@ export function SidebarRail({
         role="img"
         aria-label={agentsLabel}
         title={agentsLabel}
-        className="mt-[var(--shell-space-2)] flex flex-col items-center gap-[var(--shell-space-1)] py-[var(--shell-space-1)] text-muted-foreground"
+        className="mt-[var(--nession-shell-space-2)] flex flex-col items-center gap-[var(--nession-shell-space-1)] py-[var(--nession-shell-space-1)] text-muted-foreground"
       >
-        <Server className="size-[length:var(--icon-md)]" aria-hidden />
+        <Server className="size-[length:var(--nession-icon-md)]" aria-hidden />
         <span aria-hidden className={cn(chromeSansRole('secondary'), 'tabular-nums')}>
           {agentCount}
         </span>
@@ -111,9 +111,9 @@ export function SidebarRail({
         role="img"
         aria-label={sessionsLabel}
         title={sessionsTitle}
-        className="flex flex-col items-center gap-[var(--shell-space-1)] py-[var(--shell-space-1)] text-muted-foreground"
+        className="flex flex-col items-center gap-[var(--nession-shell-space-1)] py-[var(--nession-shell-space-1)] text-muted-foreground"
       >
-        <ListTree className="size-[length:var(--icon-md)]" aria-hidden />
+        <ListTree className="size-[length:var(--nession-icon-md)]" aria-hidden />
         <span aria-hidden className={cn(chromeSansRole('secondary'), 'tabular-nums')}>
           {sessionCount}
         </span>
@@ -127,9 +127,9 @@ export function SidebarRail({
         role="img"
         aria-label={`Server ${connectionStatus}`}
         className={cn(
-          'size-[length:var(--shell-status-dot-size)] rounded-full',
+          'size-[length:var(--nession-shell-status-dot-size)] rounded-full',
           shellMotionClass,
-          healthy ? 'bg-[var(--action)]' : 'bg-destructive',
+          healthy ? 'bg-[var(--nession-action)]' : 'bg-destructive',
         )}
       />
     </nav>
