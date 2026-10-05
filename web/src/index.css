@@ -198,7 +198,7 @@ html {
 }
 
 [data-terminal-capsule-host][data-terminal-scrollback-mode='local-buffer'] {
-  --nession-local-terminal-content-bottom-inset: var(--terminal-capsule-occlusion, 0px);
+  --nession-local-terminal-content-bottom-inset: var(--nession-local-terminal-capsule-occlusion, 0px);
 }
 
 [data-terminal-capsule-host][data-terminal-scrollback-mode='local-buffer']::after {
