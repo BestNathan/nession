@@ -1,0 +1,115 @@
+name: Temporary Capsule Baseline Refresh
+
+on:
+  push:
+    branches:
+      - fix/capsule-peek-body-typography
+
+permissions:
+  contents: write
+
+concurrency:
+  group: tmp-capsule-baseline-refresh
+  cancel-in-progress: true
+
+env:
+  RUSTC_WRAPPER: ""
+
+jobs:
+  refresh:
+    # The workflow deletes itself in the successful baseline commit. If the file
+    # is absent at HEAD, do nothing on any queued/superseded run.
+    if: ${{ github.repository == 'BestNathan/nession' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/capsule-peek-body-typography
+          fetch-depth: 0
+
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache-workspaces: "."
+          cache-all-crates: "true"
+      - uses: extractions/setup-just@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: e2e/package-lock.json
+
+      - run: sudo apt-get update && sudo apt-get install -y tmux
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ hashFiles('e2e/package-lock.json') }}
+
+      - run: |
+          cd e2e
+          npm ci
+          npx playwright install chromium --with-deps
+
+      - run: cd web && npm ci && npm run build
+      - run: cargo build -p nession-server -p nession-agent
+
+      - name: Regenerate canonical visual baselines on CI Linux
+        env:
+          CI: true
+        run: |
+          cd e2e
+          npx playwright test fixture-visual --update-snapshots=all
+
+      - name: Verify only reviewed Capsule baselines moved
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t changed < <(git diff --name-only -- e2e/specs/__snapshots__/fixture-visual.spec.ts)
+          printf 'Changed visual baselines:\n%s\n' "${changed[*]:-<none>}"
+
+          expected=(
+            "e2e/specs/__snapshots__/fixture-visual.spec.ts/web-git-peek-linux.png"
+            "e2e/specs/__snapshots__/fixture-visual.spec.ts/app-git-peek-linux.png"
+            "e2e/specs/__snapshots__/fixture-visual.spec.ts/app-terminal-keys-linux.png"
+            "e2e/specs/__snapshots__/fixture-visual.spec.ts/app-claude-code-chat-dialect-peek-linux.png"
+          )
+
+          if [ "${#changed[@]}" -ne "${#expected[@]}" ]; then
+            echo "::error::Expected exactly 4 reviewed baseline changes, got ${#changed[@]}"
+            exit 1
+          fi
+
+          for want in "${expected[@]}"; do
+            found=false
+            for got in "${changed[@]}"; do
+              if [ "$got" = "$want" ]; then found=true; break; fi
+            done
+            if [ "$found" != true ]; then
+              echo "::error::Missing reviewed baseline: $want"
+              exit 1
+            fi
+          done
+
+          for got in "${changed[@]}"; do
+            allowed=false
+            for want in "${expected[@]}"; do
+              if [ "$got" = "$want" ]; then allowed=true; break; fi
+            done
+            if [ "$allowed" != true ]; then
+              echo "::error::Unreviewed visual drift: $got"
+              exit 1
+            fi
+          done
+
+      - name: Commit reviewed baselines and remove temporary workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rm .github/workflows/tmp-capsule-baseline.yml
+          git add             e2e/specs/__snapshots__/fixture-visual.spec.ts/web-git-peek-linux.png             e2e/specs/__snapshots__/fixture-visual.spec.ts/app-git-peek-linux.png             e2e/specs/__snapshots__/fixture-visual.spec.ts/app-terminal-keys-linux.png             e2e/specs/__snapshots__/fixture-visual.spec.ts/app-claude-code-chat-dialect-peek-linux.png
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "test(e2e): accept reviewed Capsule visual baselines (#1446)"
+          git push origin HEAD:fix/capsule-peek-body-typography
