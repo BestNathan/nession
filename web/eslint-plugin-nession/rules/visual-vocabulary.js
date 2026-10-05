@@ -155,7 +155,7 @@ function normalizedPath(filename) {
   return String(filename ?? '').replace(/\\/g, '/');
 }
 
-function isForeignAdapter(filename) {
+export function isForeignAdapter(filename) {
   const path = normalizedPath(filename);
   return (
     path.includes('/src/components/ui/') ||
