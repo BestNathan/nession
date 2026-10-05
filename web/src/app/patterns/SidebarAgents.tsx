@@ -80,7 +80,7 @@ export function SidebarAgents({
     <section
       data-testid="sidebar-agents"
       aria-label="Agents"
-      className="flex shrink-0 flex-col px-[var(--shell-space-2)]"
+      className="flex shrink-0 flex-col px-[var(--nession-shell-space-2)]"
     >
       {showSectionHead ? <SidebarSectionHead label="Agents" action={action} /> : null}
       <ul className="flex flex-col">
@@ -94,7 +94,7 @@ export function SidebarAgents({
               data-agent-active={active ? 'true' : undefined}
               title={`${agentDisplayName(agent)} — ${online ? 'online' : agent.status}`}
               className={cn(
-                'flex w-full items-center gap-[var(--shell-space-2)] rounded-[var(--shell-session-row-radius)] px-[var(--shell-space-2)] py-[var(--shell-node-row-pad-y)]',
+                'flex w-full items-center gap-[var(--nession-shell-space-2)] rounded-[var(--shell-session-row-radius)] px-[var(--nession-shell-space-2)] py-[var(--shell-node-row-pad-y)]',
                 chromeSansRole('secondary'),
                 active ? 'text-foreground' : 'text-[color:var(--text-secondary)]',
               )}
