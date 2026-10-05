@@ -53,12 +53,12 @@ export function ChatCodeBlock({ value, language }: ChatCodeBlockProps) {
   return (
     <div
       data-testid="chat-code-block"
-      className="my-2 min-w-0 overflow-hidden rounded-[var(--radius-surface)] border border-[var(--conversation-code-border)]"
+      className="my-2 min-w-0 overflow-hidden rounded-[var(--nession-radius-surface)] border border-[var(--nession-conversation-code-border)]"
     >
-      <div className="flex items-center justify-between gap-2 bg-[var(--conversation-code-surface)] px-2 py-1">
+      <div className="flex items-center justify-between gap-2 bg-[var(--nession-conversation-code-surface)] px-2 py-1">
         <span
           data-testid="code-block-language"
-          className="font-mono text-[length:var(--typography-code-size)] text-[var(--conversation-code-foreground)]"
+          className="font-mono text-[length:var(--nession-typography-code-size)] text-[var(--nession-conversation-code-foreground)]"
         >
           {language ?? ''}
         </span>
@@ -67,14 +67,14 @@ export function ChatCodeBlock({ value, language }: ChatCodeBlockProps) {
           size="xs"
           type="button"
           aria-label={language ? `Copy ${language} code` : 'Copy code'}
-          className="text-[var(--conversation-code-foreground)]"
+          className="text-[var(--nession-conversation-code-foreground)]"
           onClick={copy}
         >
           <Copy aria-hidden />
           Copy
         </Button>
       </div>
-      <pre className="overflow-x-auto p-3 text-[length:var(--typography-code-size)] leading-relaxed">
+      <pre className="overflow-x-auto p-3 text-[length:var(--nession-typography-code-size)] leading-relaxed">
         <code
           className={language === undefined ? undefined : `language-${language}`}
           dangerouslySetInnerHTML={{ __html: highlighted }}
