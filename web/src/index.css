@@ -99,7 +99,7 @@ html {
   margin: 0 0 1.25rem;
   border: 1px solid var(--nession-border);
   border-left: 3px solid var(--nession-primary);
-  border-radius: var(--nession-radius-md);
+  border-radius: var(--radius-md);
   border-collapse: collapse;
   overflow: hidden;
   background: var(--nession-muted);
