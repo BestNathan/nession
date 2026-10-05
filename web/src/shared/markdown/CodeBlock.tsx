@@ -67,15 +67,15 @@ export function CodeBlock({
       // `overflow-hidden` so the header's surface and the body's share one
       // rounded outline; the scrolling lives on the `<pre>` below, never here,
       // or the header would scroll away with the code.
-      className="my-2 min-w-0 overflow-hidden rounded-[var(--radius-surface)] border border-[var(--conversation-code-border)]"
+      className="my-2 min-w-0 overflow-hidden rounded-[var(--nession-radius-surface)] border border-[var(--nession-conversation-code-border)]"
     >
-      <div className="flex items-center justify-between gap-2 bg-[var(--conversation-code-surface)] px-2 py-1">
+      <div className="flex items-center justify-between gap-2 bg-[var(--nession-conversation-code-surface)] px-2 py-1">
         {/* Absent when the fence declared no language, rather than a placeholder
             like "text": a label that is always there and sometimes wrong is
             worse than one that is sometimes absent. */}
         <span
           data-testid="code-block-language"
-          className="font-mono text-[length:var(--typography-code-size)] text-[var(--conversation-code-foreground)]"
+          className="font-mono text-[length:var(--nession-typography-code-size)] text-[var(--nession-conversation-code-foreground)]"
         >
           {language ?? ''}
         </span>
@@ -86,7 +86,7 @@ export function CodeBlock({
           // The button carries no text, so its name is the only thing a screen
           // reader has. It is not decoration and must not be `aria-hidden`.
           aria-label={language ? `Copy ${language} code` : 'Copy code'}
-          className="text-[var(--conversation-code-foreground)]"
+          className="text-[var(--nession-conversation-code-foreground)]"
           onClick={copy}
         >
           <Copy aria-hidden />
@@ -95,7 +95,7 @@ export function CodeBlock({
       </div>
       {/* `overflow-x-auto` and no wrapping: a wrapped code line is a line whose
           indentation lies, which matters more here than fitting the column. */}
-      <pre className="overflow-x-auto p-3 text-[length:var(--typography-code-size)] leading-relaxed">
+      <pre className="overflow-x-auto p-3 text-[length:var(--nession-typography-code-size)] leading-relaxed">
         {children}
       </pre>
     </div>
