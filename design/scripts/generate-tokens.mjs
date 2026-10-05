@@ -360,6 +360,22 @@ export function generateLintMetadata(tokens) {
   meta.cssVariables = [
     ...new Set(allLeaves.map(({ path }) => nessionCssVar(toKebab(path)))),
   ].sort();
+
+  const cssVariableOwners = {};
+  for (const { path, owner } of allLeaves) {
+    if (!owner) continue;
+    const variable = nessionCssVar(toKebab(path));
+    const existing = cssVariableOwners[variable];
+    if (existing && existing !== owner) {
+      throw new Error(
+        `conflicting CSS variable owners for ${variable}: ${existing} vs ${owner}`,
+      );
+    }
+    cssVariableOwners[variable] = owner;
+  }
+  meta.cssVariableOwners = Object.fromEntries(
+    Object.entries(cssVariableOwners).sort(([a], [b]) => a.localeCompare(b)),
+  );
   meta.legacyCssVariables = [
     ...new Set(allLeaves.map(({ path }) => `--${toKebab(path)}`)),
   ].sort();
