@@ -299,7 +299,8 @@ function logicalControlToken(token) {
  * `experience.web.control.md`.
  */
 function logicalControlTokenFromVar(name) {
-  const [head, ...rest] = name.replace(/^control-/, '').split('-');
+  const normalized = String(name).replace(/^nession-/, '');
+  const [head, ...rest] = normalized.replace(/^control-/, '').split('-');
   return `control.${head}${rest
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join('')}`;
@@ -333,7 +334,7 @@ function checkCapsuleSemanticBridge(root) {
   const bridgePath = join(root, 'web/src/product/terminal/capsule/capsuleStyles.ts');
   const source = readFileSync(bridgePath, 'utf8');
   const bridge = extractExportedString(source, 'capsuleIconButtonClass');
-  const actualMatch = bridge?.match(/var\(--control-([A-Za-z0-9_-]+)\)/);
+  const actualMatch = bridge?.match(/var\(--nession-control-([A-Za-z0-9_-]+)\)/);
   const actual = actualMatch ? `control.${actualMatch[1]}` : 'missing control token';
   violations.push(...checkSemanticTokenIdentity({
     pattern: 'pattern.terminal-capsule',
@@ -361,7 +362,7 @@ function checkCapsuleSemanticBridge(root) {
     readFileSync(join(root, 'design/tokens/experience/app.json'), 'utf8'),
   );
   const visualBridge = extractExportedString(source, 'capsuleIconVisualClass');
-  const visualMatch = visualBridge?.match(/var\(--(control-[A-Za-z0-9_-]+)\)/);
+  const visualMatch = visualBridge?.match(/var\(--(nession-control-[A-Za-z0-9_-]+)\)/);
   violations.push(...checkDrawnAffordanceBand({
     pattern: 'pattern.terminal-capsule',
     expectedToken: logicalControlToken(capsuleContract.app?.visualSizeToken) ?? 'missing visualSizeToken',
