@@ -21,7 +21,7 @@ import { ChevronRightIcon, CheckIcon } from "lucide-react"
  * `usePopupPortalContainer`. A menu opened inside the App experience reads the
  * App's 44px; the same menu opened from the Web shell reads 28px.
  */
-const menuItemBandClass = "min-h-[length:var(--control-sm)]"
+const menuItemBandClass = "min-h-[length:var(--nession-control-sm)]"
 
 function DropdownMenu({ ...props }: MenuPrimitive.Root.Props) {
   return <MenuPrimitive.Root data-slot="dropdown-menu" {...props} />
