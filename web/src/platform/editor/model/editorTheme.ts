@@ -42,18 +42,18 @@ export const EDITOR_THEME: Extension = githubLight;
 export const EDITOR_METRICS: Extension = EditorView.theme({
   '&': {
     height: '100%',
-    fontSize: 'var(--workspace-editor-font-size)',
+    fontSize: 'var(--nession-workspace-editor-font-size)',
     fontFamily: 'var(--font-mono, ui-monospace, monospace)',
   },
   '.cm-scroller': {
     fontFamily: 'var(--font-mono, ui-monospace, monospace)',
-    lineHeight: 'var(--workspace-editor-line-height)',
+    lineHeight: 'var(--nession-workspace-editor-line-height)',
   },
-  '.cm-content': { padding: 'var(--workspace-editor-pad-y) 0' },
+  '.cm-content': { padding: 'var(--nession-workspace-editor-pad-y) 0' },
   '.cm-gutters': { border: 'none', backgroundColor: 'transparent' },
   '.cm-lineNumbers .cm-gutterElement': {
-    minWidth: 'var(--workspace-editor-gutter-width)',
-    padding: '0 var(--workspace-editor-gutter-pad-end) 0 0',
+    minWidth: 'var(--nession-workspace-editor-gutter-width)',
+    padding: '0 var(--nession-workspace-editor-gutter-pad-end) 0 0',
     textAlign: 'right',
     opacity: '0.65',
   },
