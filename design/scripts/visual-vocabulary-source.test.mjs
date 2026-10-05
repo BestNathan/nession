@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   scanCssSource,
+  scanVisualUtilitySource,
   scanVisualVocabularySuppression,
 } from './visual-vocabulary-source.mjs';
 
@@ -42,6 +43,33 @@ test('CSS source gate rejects legacy and unowned custom properties', () => {
     ['foreign-definition', 'legacy-reference', 'foreign-reference'],
   );
   assert.match(violations[1].repair, /--nession-background/);
+});
+
+test('fast source gate rejects unowned visual utilities but not local composition', () => {
+  const source = `
+export const layout = 'flex items-center overflow-auto';
+export const good = 'bg-background rounded-[var(--nession-radius-control)]';
+export const bad = 'text-sm font-semibold rounded-lg shadow-md bg-white';
+`;
+  const violations = scanVisualUtilitySource(source, 'web/src/product/probe.ts', {
+    cssVariables: ['--nession-background', '--nession-radius-control'],
+    legacyCssVariables: [],
+    tailwindThemeBridges: {
+      color: { background: '--nession-background' },
+      spacing: {},
+    },
+  });
+
+  assert.deepEqual(
+    violations.map((v) => [v.actual, v.kind]),
+    [
+      ['text-sm', 'utility-typography'],
+      ['font-semibold', 'utility-typography'],
+      ['rounded-lg', 'utility-radius'],
+      ['shadow-md', 'utility-elevation'],
+      ['bg-white', 'utility-color'],
+    ],
+  );
 });
 
 test('visual vocabulary rule cannot be disabled in a consumer', () => {
