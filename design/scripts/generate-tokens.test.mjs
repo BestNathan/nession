@@ -65,6 +65,7 @@ const fixture = {
       // boundary needs the metrics as JS, and the fixture is what proves it
       // does not silently emit `undefined` when they are absent.
       terminal: {
+        $owner: 'pattern.terminal-surface',
         fontSize: { value: '12.5px' },
         lineHeight: { value: 1.62 },
         padX: { value: '18px' },
@@ -75,6 +76,7 @@ const fixture = {
       touchTarget: { min: { value: 44 } },
       control: { md: { value: '44px' } },
       terminal: {
+        $owner: 'pattern.terminal-surface',
         fontSize: { value: '11.5px' },
         lineHeight: { value: 1.7 },
         padX: { value: '14px' },
@@ -169,6 +171,10 @@ test('generateLintMetadata exposes the generated visual vocabulary', () => {
   assert.equal(meta.tailwindThemeBridges.color.background, '--nession-background');
   assert.equal(meta.tailwindThemeBridges.color['agent-online'], '--nession-agent-online');
   assert.equal(meta.tailwindThemeBridges.spacing['control-sm'], '--nession-control-sm');
+  assert.equal(
+    meta.cssVariableOwners['--nession-terminal-font-size'],
+    'pattern.terminal-surface',
+  );
 });
 
 test('generateAppTs exports numeric touchTarget.min === 44', () => {
