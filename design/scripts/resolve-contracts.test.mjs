@@ -82,6 +82,22 @@ test('terminal-capsule: chrome + control merge; app sheet overflow wins', () => 
 // height token alone cannot express it — control.sm and control.md are 44px
 // there, so a control that grew its painting back to the band would be
 // pixel-identical to one that kept the smaller circle.
+test('CSS-valued contract tokens use the canonical --nession-* namespace', () => {
+  const merged = mergeContracts(REAL, TOKENS);
+  for (const id of [
+    'pattern.context-capsule',
+    'pattern.terminal-capsule',
+    'pattern.workspace-navigation',
+  ]) {
+    for (const experience of ['web', 'app']) {
+      const css = merged[id][experience].radiusTokenCss;
+      assert.ok(css, `${id}.${experience}.radiusTokenCss is missing`);
+      assert.match(css, /var\(--nession-/);
+      assert.doesNotMatch(css, /var\(--(?!nession-)/);
+    }
+  }
+});
+
 test('terminal-capsule: the drawn affordance resolves below the App hit target', () => {
   const merged = mergeContracts(REAL, TOKENS)['pattern.terminal-capsule'];
   assert.equal(merged.web.visualSizeToken, 'experience.web.control.visualSize');
