@@ -80,7 +80,7 @@ export function JsonCompactValue({ value, depth = 0, inline = false }: JsonCompa
       );
     }
     return (
-      <div className={cn('min-w-0 space-y-0.5 pl-[var(--shell-space-2)] border-l border-border/40', jsonTreeMonoClass())}>
+      <div className={cn('min-w-0 space-y-0.5 pl-[var(--nession-shell-space-2)] border-l border-border/40', jsonTreeMonoClass())}>
         {shownKeys.map((key) => (
           <div key={key} className="min-w-0">
             <span className={jsonSyntax.key}>{JSON.stringify(key)}</span>
