@@ -56,16 +56,16 @@ export function AppHome({ onCreate, onBrowse, createDisabled }: AppHomeProps) {
   return (
     <div
       data-testid="app-home"
-      className="flex min-h-0 flex-1 flex-col items-center justify-center gap-[var(--shell-space-4)] px-[var(--shell-space-4)] text-center"
+      className="flex min-h-0 flex-1 flex-col items-center justify-center gap-[var(--nession-shell-space-4)] px-[var(--nession-shell-space-4)] text-center"
     >
-      <div className="flex flex-col gap-[var(--shell-space-1)]">
+      <div className="flex flex-col gap-[var(--nession-shell-space-1)]">
         <h1 className={titleAppClass}>
           {APP_START_SESSION_COPY.heading}
         </h1>
         <p className={secondaryAppClass}>{APP_START_SESSION_COPY.supporting}</p>
       </div>
 
-      <div className="flex flex-col items-center gap-[var(--shell-space-2)]">
+      <div className="flex flex-col items-center gap-[var(--nession-shell-space-2)]">
         <Button
           type="button"
           onClick={() => onCreate()}
