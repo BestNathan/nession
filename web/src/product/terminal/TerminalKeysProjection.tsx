@@ -41,7 +41,7 @@ export function TerminalKeysProjection({
   return (
     <div
       data-testid="terminal-keys-body"
-      className="flex flex-col gap-[length:var(--terminal-capsule-projection-item-gap)]"
+      className="flex flex-col gap-[length:var(--nession-terminal-capsule-projection-item-gap)]"
     >
       {isChaining ? (
         <CapsuleChainBar buffer={chainBuffer} onCancel={cancelChain} onSend={sendChain} />
