@@ -214,13 +214,23 @@ function cssVarFromRef(ref) {
   return null;
 }
 
+function namespaceTokenValue(value) {
+  return String(value).replace(
+    /var\(--(?!nession-)([A-Za-z0-9-]+)/g,
+    'var(--nession-$1',
+  );
+}
+
 function cssValue(node, tokens, theme = 'light') {
   if ('value' in node) {
-    return String(node.value);
+    // Token-source expressions are part of the Nession graph too. A semantic
+    // leaf such as `calc(var(--radius) * 1.6)` must not smuggle the legacy
+    // spelling back into the canonical generated API.
+    return namespaceTokenValue(node.value);
   }
   const asVar = cssVarFromRef(node.ref);
   if (asVar) return asVar;
-  return String(resolveRef(node, tokens, new Set(), theme).value);
+  return namespaceTokenValue(resolveRef(node, tokens, new Set(), theme).value);
 }
 
 function emitCustomProps(leaves, tokens, theme) {
