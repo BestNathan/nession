@@ -6,7 +6,10 @@ import assert from 'node:assert/strict';
 import { RuleTester } from 'eslint';
 import tseslint from 'typescript-eslint';
 import nessionPlugin from '../index.js';
-import { findVisualVariableViolations } from '../rules/visual-vocabulary.js';
+import {
+  findVisualUtilityViolations,
+  findVisualVariableViolations,
+} from '../rules/visual-vocabulary.js';
 
 const metadataPath = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -24,6 +27,37 @@ test('generated metadata makes the --nession-* namespace machine-readable', () =
   assert.equal(
     lintMetadata.tailwindThemeBridges.color.background,
     '--nession-background',
+  );
+});
+
+test('visual utility classifier separates local composition from visual vocabulary', () => {
+  for (const allowed of [
+    'flex items-center justify-between overflow-auto relative',
+    'bg-background text-muted-foreground border-border',
+    'rounded-[var(--nession-radius-control)]',
+    'shadow-[var(--nession-elevation-floating)]',
+  ]) {
+    assert.deepEqual(
+      findVisualUtilityViolations(allowed, lintMetadata),
+      [],
+      `expected canonical/local composition to remain legal: ${allowed}`,
+    );
+  }
+
+  const violations = findVisualUtilityViolations(
+    'text-sm font-semibold rounded-lg bg-white shadow-md text-[13px]',
+    lintMetadata,
+  );
+  assert.deepEqual(
+    violations.map((v) => [v.token, v.kind]),
+    [
+      ['text-sm', 'typography'],
+      ['font-semibold', 'typography'],
+      ['rounded-lg', 'radius'],
+      ['bg-white', 'color'],
+      ['shadow-md', 'elevation'],
+      ['text-[13px]', 'typography'],
+    ],
   );
 });
 
