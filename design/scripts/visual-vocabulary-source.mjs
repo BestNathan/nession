@@ -1,6 +1,7 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, extname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { findVisualUtilityViolations } from '../../web/eslint-plugin-nession/rules/visual-vocabulary.js';
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(SCRIPT_DIR, '..', '..');
@@ -91,6 +92,41 @@ export function scanCssSource(source, file = '<fixture>', metadata = METADATA) {
   return violations;
 }
 
+function stringLiterals(source) {
+  const values = [];
+  const patterns = [
+    /'([^'\\]*(?:\\.[^'\\]*)*)'/g,
+    /"([^"\\]*(?:\\.[^"\\]*)*)"/g,
+    /`([^`\\]*(?:\\.[^`\\]*)*)`/g,
+  ];
+  for (const pattern of patterns) {
+    for (const match of source.matchAll(pattern)) {
+      values.push({ value: match[1], index: match.index ?? 0 });
+    }
+  }
+  return values;
+}
+
+export function scanVisualUtilitySource(
+  source,
+  file = '<fixture>',
+  metadata = METADATA,
+) {
+  const violations = [];
+  for (const literal of stringLiterals(source)) {
+    for (const hit of findVisualUtilityViolations(literal.value, metadata)) {
+      violations.push({
+        file,
+        line: lineNumber(source, literal.index),
+        kind: `utility-${hit.kind}`,
+        actual: hit.token,
+        repair: hit.repair,
+      });
+    }
+  }
+  return violations;
+}
+
 export function scanVisualVocabularySuppression(source, file = '<fixture>') {
   const violations = [];
   for (const match of source.matchAll(/eslint-disable(?:-next-line|-line)?[^\n]*nession\/visual-vocabulary/g)) {
@@ -104,6 +140,13 @@ export function scanVisualVocabularySuppression(source, file = '<fixture>') {
     });
   }
   return violations;
+}
+
+function isTestSource(relativePath) {
+  return (
+    relativePath.includes('/__tests__/') ||
+    /\.(?:test|spec)\.[^.]+$/.test(relativePath)
+  );
 }
 
 function walk(dir) {
@@ -124,7 +167,12 @@ export function scanRepository(root = ROOT) {
     const rel = relative(root, path).replaceAll('\\', '/');
     const source = readFileSync(path, 'utf8');
     if (ext === '.css') violations.push(...scanCssSource(source, rel));
-    if (ext !== '.css') violations.push(...scanVisualVocabularySuppression(source, rel));
+    if (ext !== '.css') {
+      violations.push(...scanVisualVocabularySuppression(source, rel));
+      if (!isTestSource(rel)) {
+        violations.push(...scanVisualUtilitySource(source, rel));
+      }
+    }
   }
   return violations;
 }
