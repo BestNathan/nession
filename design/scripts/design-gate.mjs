@@ -22,8 +22,8 @@ const FAST_COMMANDS = [
     id: 'visual-vocabulary-source',
     command: 'node design/scripts/visual-vocabulary-source.mjs',
     owner: 'design/tokens/* + design/generated/lint-metadata.json + web/src/**/*.css',
-    expected: 'Nession visual custom properties use --nession-* and consumers cannot locally suppress the visual vocabulary gate',
-    repair: 'migrate the consumer to --nession-* or encode an explicit framework/renderer adapter boundary',
+    expected: 'Nession visual variables and hard visual utilities resolve through the canonical vocabulary, and consumers cannot locally suppress the gate',
+    repair: 'migrate the consumer to --nession-* / a generated semantic utility / canonical recipe, or encode an explicit adapter boundary',
   },
   {
     id: 'contract-generated-integrity',
@@ -60,13 +60,6 @@ const FAST_COMMANDS = [
     expected: 'capsule presentation stays on generated design vocabulary',
     repair: 'route the value through capsuleStyles and design/tokens rather than adding a local metric',
   },
-  {
-    id: 'radius-ownership',
-    command: 'node scripts/check-radius-ownership.mjs',
-    owner: 'design/tokens/semantic.json + web/src/**/*.{tsx,ts}',
-    expected: 'App-owned surfaces use semantic radius tokens, not generic rounded-* utilities',
-    repair: 'replace rounded-{sm|md|lg|xl|2xl} with rounded-[var(--radius-<role>)] where <role> is control/surface/floating',
-  },
 ];
 
 const FULL_COMMANDS = [
@@ -74,7 +67,7 @@ const FULL_COMMANDS = [
     id: 'web-design-eslint',
     command: 'cd web && npx eslint src --report-unused-disable-directives --max-warnings 0',
     owner: 'web/eslint.config.js + web/eslint-plugin-nession/',
-    expected: 'shipping Web source satisfies primitive/cross-experience/magic-metric design rules',
+    expected: 'shipping Web source satisfies visual-vocabulary, cross-experience, product-grammar and architecture rules',
     repair: 'fix the canonical owner or consumer; do not use eslint-disable as a design escape hatch',
   },
   {
