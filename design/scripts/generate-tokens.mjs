@@ -214,7 +214,7 @@ function cssVarFromRef(ref) {
   return null;
 }
 
-function namespaceTokenValue(value) {
+export function namespaceTokenValue(value) {
   return String(value).replace(
     /var\(--(?!nession-)([A-Za-z0-9-]+)/g,
     'var(--nession-$1',
