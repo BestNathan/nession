@@ -165,6 +165,19 @@ export function isForeignAdapter(filename) {
   );
 }
 
+function isCapabilitySource(filename) {
+  return normalizedPath(filename).includes('/src/capabilities/');
+}
+
+function capabilityCannotOwnVariable(name, metadata) {
+  const cssVariable = `--${name}`;
+  const owner = metadata.cssVariableOwners?.[cssVariable] ?? null;
+  return (
+    owner === 'pattern.terminal-capsule' ||
+    name === 'nession-radius-capsule'
+  );
+}
+
 function variableSets(metadata) {
   const canonical = new Set(
     (metadata.cssVariables ?? []).map((name) => String(name).replace(/^--/, '')),
@@ -185,7 +198,18 @@ export function findVisualVariableViolations(value, metadata, filename = '') {
   for (const match of value.matchAll(/var\(--([A-Za-z0-9_-]+)/g)) {
     const name = match[1];
 
-    if (canonical.has(name) || name.startsWith('nession-local-')) {
+    if (canonical.has(name)) {
+      if (isCapabilitySource(filename) && capabilityCannotOwnVariable(name, metadata)) {
+        violations.push({
+          name,
+          kind: 'ownership',
+          repair:
+            'capability body content must consume the host slot/shared primitive; Capsule host geometry stays with the Nession product pattern',
+        });
+      }
+      continue;
+    }
+    if (name.startsWith('nession-local-')) {
       continue;
     }
 
@@ -242,6 +266,16 @@ export default function visualVocabularyRule(metadata) {
           'owner: design/tokens/* + canonical visual grammar',
           'repair: {{repair}}',
         ].join('\n'),
+        ownershipViolation: [
+          'DESIGN_SYSTEM_VIOLATION',
+          '',
+          'rule: nession/visual-vocabulary',
+          'actual: {{actual}}',
+          'kind: ownership',
+          'expected: capability contributes body/content; Nession product pattern owns host chrome',
+          'owner: {{owner}}',
+          'repair: {{repair}}',
+        ].join('\n'),
       },
     },
 
@@ -287,6 +321,30 @@ export default function visualVocabularyRule(metadata) {
               data: violation,
             });
           }
+        },
+        ImportDeclaration(node) {
+          if (!isCapabilitySource(filename) || typeof node.source?.value !== 'string') {
+            return;
+          }
+          const source = node.source.value;
+          const forbiddenOwner =
+            source === '@/product/terminal/capsule/capsuleStyles'
+              ? 'pattern.terminal-capsule'
+              : source === '@/product/workspace/patterns/workspaceNavigationStyles'
+                ? 'pattern.workspace-navigation'
+                : null;
+          if (!forbiddenOwner) return;
+
+          context.report({
+            node: node.source,
+            messageId: 'ownershipViolation',
+            data: {
+              actual: source,
+              owner: forbiddenOwner,
+              repair:
+                'consume the host-provided slot/shared primitive instead of importing product host chrome into a capability',
+            },
+          });
         },
       };
     },
