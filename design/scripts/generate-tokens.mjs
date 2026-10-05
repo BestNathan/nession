@@ -365,7 +365,10 @@ export function generateLintMetadata(tokens) {
     const name = toKebab(path);
     if (shouldBridgeThemeSize(name)) spacing[name] = nessionCssVar(name);
   }
-  meta.tailwindThemeBridges = { color, spacing };
+  meta.tailwindThemeBridges = {
+    color: Object.fromEntries(Object.entries(color).sort(([a], [b]) => a.localeCompare(b))),
+    spacing: Object.fromEntries(Object.entries(spacing).sort(([a], [b]) => a.localeCompare(b))),
+  };
   return meta;
 }
 
