@@ -5,6 +5,15 @@ import { WORKSPACE_VIEW_BINDINGS } from '@/app/workspace/viewBindings';
 import type { WorkspacePresentationItem } from '@/app/workspace/presentation';
 import { capsuleOuterGeometry } from '@/product/terminal/capsule/capsuleStyles';
 import type { CapsuleExperience } from '@/product/terminal/capsule/types';
+import {
+  workspaceCapabilityEntryClass,
+  workspaceCapabilityIndicatorClass,
+  workspaceCapabilityIndicatorStateClass,
+  workspaceCapabilityLabelBaseClass,
+  workspaceCapabilityLabelSizeClass,
+  workspaceCapabilityScrollClass,
+  workspaceCapabilityStateClass,
+} from '@/product/workspace/patterns/workspaceNavigationStyles';
 
 const workspaceViewBindings = new Map(
   WORKSPACE_VIEW_BINDINGS.map((view) => [view.id, view]),
@@ -117,7 +126,7 @@ export function CapabilityCapsule({
     >
       <div
         ref={scrollRef}
-        className="flex items-center gap-[length:var(--terminal-capsule-control-gap)] overflow-x-auto"
+        className={workspaceCapabilityScrollClass}
         data-testid="workspace-capability-scroll"
       >
         {items.map((item) => {
@@ -146,7 +155,7 @@ export function CapabilityCapsule({
               presence={item.presence.level}
               isActive={isActive}
               isUnavailable={isUnavailable}
-              icon={<Icon className="size-[length:var(--icon-md)]" aria-hidden />}
+              icon={<Icon className="size-[length:var(--nession-icon-md)]" aria-hidden />}
               onSelect={() => onSelect(item.snapshot.id)}
             />
           );
@@ -236,8 +245,8 @@ const CapabilityEntry = forwardRef<HTMLButtonElement, CapabilityEntryProps>(
         data-capability-active={isActive ? 'true' : undefined}
         onClick={onSelect}
         style={{
-          width: 'var(--terminal-capsule-capability-slot-width)',
-          minHeight: 'var(--terminal-capsule-capability-entry-height)',
+          width: 'var(--nession-terminal-capsule-capability-slot-width)',
+          minHeight: 'var(--nession-terminal-capsule-capability-entry-height)',
         }}
         className={cn(
           // The entry is one control band tall and centres icon-over-label in
@@ -246,12 +255,11 @@ const CapabilityEntry = forwardRef<HTMLButtonElement, CapabilityEntryProps>(
           // 2026-10-03 — the labeled form had grown to 82px). A floor rather
           // than a cap: a two-line label grows the entry by its line box
           // instead of clipping.
-          'relative flex shrink-0 flex-col items-center justify-center gap-[length:var(--terminal-capsule-control-gap)] rounded-[var(--radius-control)] px-1 transition-colors duration-[var(--motion-shell-duration)] ease-[var(--motion-shell-ease)]',
-          isUnavailable
-            ? 'cursor-default text-disabled-foreground'
-            : isActive
-              ? 'text-foreground'
-              : 'text-muted-foreground hover:text-foreground',
+          workspaceCapabilityEntryClass,
+          workspaceCapabilityStateClass({
+            active: isActive,
+            unavailable: isUnavailable,
+          }),
         )}
       >
         {/* The glyph is drawn bare — the painted circle `CapsuleIconVisual`
@@ -264,10 +272,8 @@ const CapabilityEntry = forwardRef<HTMLButtonElement, CapabilityEntryProps>(
           ref={labelRef}
           data-testid={`${testId}-label`}
           className={cn(
-            'line-clamp-2 text-center leading-tight',
-            wrapped
-              ? 'text-[length:var(--terminal-capsule-capability-label-wrapped-font-size)]'
-              : 'text-[length:var(--terminal-capsule-capability-label-font-size)]',
+            workspaceCapabilityLabelBaseClass,
+            workspaceCapabilityLabelSizeClass(wrapped),
           )}
         >
           {title}
@@ -278,8 +284,8 @@ const CapabilityEntry = forwardRef<HTMLButtonElement, CapabilityEntryProps>(
         <span
           aria-hidden
           className={cn(
-            'absolute bottom-0.5 size-1 rounded-full',
-            isActive ? 'bg-foreground' : 'bg-transparent',
+            workspaceCapabilityIndicatorClass,
+            workspaceCapabilityIndicatorStateClass(isActive),
           )}
         />
       </button>
