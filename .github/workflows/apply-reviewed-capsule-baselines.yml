@@ -1,0 +1,49 @@
+name: Apply reviewed Capsule baselines
+
+on:
+  push:
+    branches:
+      - fix/capsule-peek-body-typography
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/capsule-peek-body-typography
+
+      - name: Download reviewed visual artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api repos/${GITHUB_REPOSITORY}/actions/artifacts/11307851585/zip > /tmp/capsule-baselines.zip
+          mkdir -p /tmp/capsule-baselines
+          unzip -q /tmp/capsule-baselines.zip -d /tmp/capsule-baselines
+
+      - name: Apply only reviewed Peek baselines
+        run: |
+          set -euo pipefail
+          SNAP=e2e/specs/__snapshots__/fixture-visual.spec.ts
+          ART=/tmp/capsule-baselines/test-results
+
+          cp "$ART/fixture-visual-Web-1440×900-Git-Peek-on-the-Terminal/web-git-peek-actual.png"              "$SNAP/web-git-peek-linux.png"
+          cp "$ART/fixture-visual-App-390×844-Git-Peek-on-the-Terminal/app-git-peek-actual.png"              "$SNAP/app-git-peek-linux.png"
+          cp "$ART/fixture-visual-App-390×844-Terminal-Keys-Peek/app-terminal-keys-actual.png"              "$SNAP/app-terminal-keys-linux.png"
+          cp "$ART/fixture-visual-App-390×844-6f6d1-rsation-Chat-dialect-corpus/app-claude-code-chat-dialect-peek-actual.png"              "$SNAP/app-claude-code-chat-dialect-peek-linux.png"
+
+          git add             "$SNAP/web-git-peek-linux.png"             "$SNAP/app-git-peek-linux.png"             "$SNAP/app-terminal-keys-linux.png"             "$SNAP/app-claude-code-chat-dialect-peek-linux.png"
+
+      - name: Remove one-shot workflow and commit
+        run: |
+          set -euo pipefail
+          git rm .github/workflows/apply-reviewed-capsule-baselines.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "test(capsule): accept reviewed Peek visual baselines (#1446)"
+          git push origin HEAD:fix/capsule-peek-body-typography
