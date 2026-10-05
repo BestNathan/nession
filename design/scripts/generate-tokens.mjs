@@ -329,61 +329,43 @@ export function generateLintMetadata(tokens) {
     };
   }
 
-  const cssVariables = {};
-  const legacyCssVariables = new Set();
-  const colorBridges = {};
-  const spacingBridges = {};
-
-  const addVariables = (leaves, layer, mode = null) => {
-    for (const { path, owner } of leaves) {
-      const name = toKebab(path);
-      const cssVar = nessionCssVar(name);
-      const current = cssVariables[cssVar] ?? {
-        layer,
-        public: true,
-        modes: [],
-        owner: owner ?? null,
-      };
-      if (mode && !current.modes.includes(mode)) current.modes.push(mode);
-      if (!current.owner && owner) current.owner = owner;
-      cssVariables[cssVar] = current;
-      legacyCssVariables.add(`--${name}`);
-    }
-  };
-
   const lightSemantic = flattenLeaves(tokens.semantic?.themes?.light ?? {});
   const darkSemantic = flattenLeaves(tokens.semantic?.themes?.dark ?? {});
   const domainLeaves = flattenLeaves(tokens.domain ?? {});
   const webLeaves = flattenLeaves(tokens.experience?.web ?? {});
   const appLeaves = flattenLeaves(tokens.experience?.app ?? {});
+  const allLeaves = [
+    ...lightSemantic,
+    ...darkSemantic,
+    ...domainLeaves,
+    ...webLeaves,
+    ...appLeaves,
+  ];
 
-  addVariables(lightSemantic, 'semantic', 'light');
-  addVariables(darkSemantic, 'semantic', 'dark');
-  addVariables(domainLeaves, 'domain');
-  addVariables(webLeaves, 'experience', 'web');
-  addVariables(appLeaves, 'experience', 'app');
+  meta.experienceAppVars = appOnlyVars(tokens);
+  meta.cssVariables = [
+    ...new Set(allLeaves.map(({ path }) => nessionCssVar(toKebab(path)))),
+  ].sort();
+  meta.legacyCssVariables = [
+    ...new Set(allLeaves.map(({ path }) => `--${toKebab(path)}`)),
+  ].sort();
 
+  const color = {};
+  const spacing = {};
   for (const { path } of lightSemantic) {
     const name = toKebab(path);
-    if (!NON_COLOR_SEMANTIC.has(name)) colorBridges[name] = nessionCssVar(name);
-    if (shouldBridgeThemeSize(name)) spacingBridges[name] = nessionCssVar(name);
+    if (!NON_COLOR_SEMANTIC.has(name)) color[name] = nessionCssVar(name);
+    if (shouldBridgeThemeSize(name)) spacing[name] = nessionCssVar(name);
   }
   for (const { path } of domainLeaves) {
     const name = toKebab(path);
-    colorBridges[name] = nessionCssVar(name);
+    color[name] = nessionCssVar(name);
   }
   for (const { path } of webLeaves) {
     const name = toKebab(path);
-    if (shouldBridgeThemeSize(name)) spacingBridges[name] = nessionCssVar(name);
+    if (shouldBridgeThemeSize(name)) spacing[name] = nessionCssVar(name);
   }
-
-  meta.experienceAppVars = appOnlyVars(tokens);
-  meta.cssVariables = cssVariables;
-  meta.legacyCssVariables = [...legacyCssVariables].sort();
-  meta.tailwindThemeBridges = {
-    color: colorBridges,
-    spacing: spacingBridges,
-  };
+  meta.tailwindThemeBridges = { color, spacing };
   return meta;
 }
 
