@@ -60,7 +60,7 @@ jobs:
           CI: true
         run: |
           cd e2e
-          npx playwright test fixture-visual --update-snapshots=all
+          npx playwright test fixture-visual --grep 'Git Peek on the Terminal|Terminal Keys Peek|Claude Code Peek conversation, Chat dialect corpus' --update-snapshots=all
 
       - name: Verify only reviewed Capsule baselines moved
         shell: bash
