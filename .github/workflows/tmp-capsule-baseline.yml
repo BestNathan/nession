@@ -66,6 +66,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # The Claude Peek case continues into the conversation overlay and
+          # therefore has a second screenshot in the same test. Normal E2E did
+          # not reject that baseline; it is not part of #1446, so keep HEAD's
+          # canonical image rather than absorbing unrelated sub-tolerance drift.
+          git checkout -- e2e/specs/__snapshots__/fixture-visual.spec.ts/app-claude-code-chat-dialect-linux.png
+
           mapfile -t changed < <(git diff --name-only -- e2e/specs/__snapshots__/fixture-visual.spec.ts)
           printf 'Changed visual baselines:\n%s\n' "${changed[*]:-<none>}"
 
