@@ -203,7 +203,7 @@ function FileList({
                 aria-current={state.selectedFile?.path === file.path ? 'true' : undefined}
                 onClick={() => onFileClick(scope, file)}
                 className={cn(
-                  'flex w-full items-center gap-2 rounded-[var(--radius-control)] px-2 py-1.5 text-left transition-colors',
+                  'flex w-full items-center gap-2 rounded-[var(--nession-radius-control)] px-2 py-1.5 text-left transition-colors',
                   chromeSansRole('secondary'),
                   'hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                   state.selectedFile?.path === file.path && 'bg-accent text-accent-foreground',
