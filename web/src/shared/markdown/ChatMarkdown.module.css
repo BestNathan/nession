@@ -28,9 +28,9 @@
 .markdown {
   min-width: 0;
   overflow-wrap: anywhere;
-  font-size: var(--typography-body-size);
-  font-weight: var(--typography-body-weight);
-  line-height: var(--typography-body-line-height);
+  font-size: var(--nession-typography-body-size);
+  font-weight: var(--nession-typography-body-weight);
+  line-height: var(--nession-typography-body-line-height);
   color: var(--color-text-primary);
 }
 
@@ -41,23 +41,23 @@
 /* Markdown headings render one level down (h1→h2 …), so the top pair is the
  * title role and the next pair the primary role. */
 .markdown :where(h1, h2) {
-  font-size: var(--typography-title-size);
-  font-weight: var(--typography-title-weight);
-  line-height: var(--typography-title-line-height);
+  font-size: var(--nession-typography-title-size);
+  font-weight: var(--nession-typography-title-weight);
+  line-height: var(--nession-typography-title-line-height);
   margin: 32px 0 16px;
 }
 
 .markdown :where(h3, h4) {
-  font-size: var(--typography-primary-size);
-  font-weight: var(--typography-primary-weight);
-  line-height: var(--typography-primary-line-height);
+  font-size: var(--nession-typography-primary-size);
+  font-weight: var(--nession-typography-primary-weight);
+  line-height: var(--nession-typography-primary-line-height);
   margin: 32px 0 16px;
 }
 
 .markdown :where(h5, h6) {
-  font-size: var(--typography-body-size);
-  font-weight: var(--typography-title-weight);
-  line-height: var(--typography-body-line-height);
+  font-size: var(--nession-typography-body-size);
+  font-weight: var(--nession-typography-title-weight);
+  line-height: var(--nession-typography-body-line-height);
   margin: 16px 0;
 }
 
@@ -220,9 +220,9 @@
   padding: 10px 16px;
   border-bottom: 0.5px solid var(--color-border-strong);
   border-top: none;
-  font-size: var(--typography-metadata-size);
-  font-weight: var(--typography-title-weight);
-  line-height: var(--typography-metadata-line-height);
+  font-size: var(--nession-typography-metadata-size);
+  font-weight: var(--nession-typography-title-weight);
+  line-height: var(--nession-typography-metadata-line-height);
   max-width: 320px;
   max-width: min(30vw, 320px);
   min-width: 100px;
@@ -231,8 +231,8 @@
 .tableScroll td {
   padding: 10px 16px;
   border-bottom: 0.5px solid var(--color-border-subtle);
-  font-size: var(--typography-body-size);
-  line-height: var(--typography-body-line-height);
+  font-size: var(--nession-typography-body-size);
+  line-height: var(--nession-typography-body-line-height);
   max-width: 320px;
   max-width: min(30vw, 320px);
   min-width: 100px;
