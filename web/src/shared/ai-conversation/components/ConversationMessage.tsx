@@ -148,7 +148,7 @@ export const AssistantMessage = memo(function AssistantMessage({
       <div
         data-testid="conversation-assistant-body"
         data-streaming={streaming ? 'true' : undefined}
-        className="min-w-0 text-sm text-[var(--conversation-assistant-foreground)]"
+        className="min-w-0 text-sm text-[var(--nession-conversation-assistant-foreground)]"
         style={{ maxWidth: 'var(--conversation-reading-column-max)' }}
       >
         <ChatMarkdown text={contentOf(item)} streaming={streaming} />
