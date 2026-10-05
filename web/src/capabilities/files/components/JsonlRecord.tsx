@@ -23,7 +23,7 @@ export function JsonlRecord({
   return (
     <section
       data-jsonl-line={record.lineNumber}
-      className="border-b border-border/50 py-[var(--shell-space-2)] px-[var(--workspace-editor-head-pad-x)] min-w-0"
+      className="border-b border-border/50 py-[var(--nession-shell-space-2)] px-[var(--nession-workspace-editor-head-pad-x)] min-w-0"
       aria-labelledby={lineLabelId}
     >
       <div className="flex items-center gap-2 mb-1">
@@ -37,7 +37,7 @@ export function JsonlRecord({
           <button
             type="button"
             className={cn(
-              'ml-auto inline-flex items-center gap-1 text-[length:var(--workspace-editor-action-font-size)] text-muted-foreground hover:text-foreground',
+              'ml-auto inline-flex items-center gap-1 text-[length:var(--nession-workspace-editor-action-font-size)] text-muted-foreground hover:text-foreground',
             )}
             aria-expanded={expanded}
             onClick={() => onToggleExpanded()}
@@ -50,10 +50,10 @@ export function JsonlRecord({
       {record.kind === 'invalid' ? (
         <div role="alert" className={cn('min-w-0', chromeSansRole('secondary'), jsonPreviewSurfaceClass('border-destructive/30 bg-destructive/5'))}>
           <p className={cn('text-destructive', chromeSansRole('secondary'))}>Invalid JSON</p>
-          <p className="text-muted-foreground font-mono text-[length:var(--workspace-editor-font-size)] mt-1">
+          <p className="text-muted-foreground font-mono text-[length:var(--nession-workspace-editor-font-size)] mt-1">
             {record.message}
           </p>
-          <pre className="mt-2 font-mono text-[length:var(--workspace-editor-font-size)] whitespace-pre-wrap break-all text-foreground/80">
+          <pre className="mt-2 font-mono text-[length:var(--nession-workspace-editor-font-size)] whitespace-pre-wrap break-all text-foreground/80">
             {record.raw}
           </pre>
         </div>
