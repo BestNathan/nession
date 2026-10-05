@@ -3,6 +3,7 @@ import { dirname, extname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   findVisualUtilityViolations,
+  findVisualVariableViolations,
   isForeignAdapter,
 } from '../../web/eslint-plugin-nession/rules/visual-vocabulary.js';
 
@@ -117,14 +118,26 @@ export function scanVisualUtilitySource(
 ) {
   const violations = [];
   for (const literal of stringLiterals(source)) {
-    for (const hit of findVisualUtilityViolations(literal.value, metadata)) {
+    for (const hit of findVisualVariableViolations(literal.value, metadata, file)) {
       violations.push({
         file,
         line: lineNumber(source, literal.index),
-        kind: `utility-${hit.kind}`,
-        actual: hit.token,
+        kind: `variable-${hit.kind}`,
+        actual: `var(--${hit.name})`,
         repair: hit.repair,
       });
+    }
+
+    if (!isForeignAdapter(file)) {
+      for (const hit of findVisualUtilityViolations(literal.value, metadata)) {
+        violations.push({
+          file,
+          line: lineNumber(source, literal.index),
+          kind: `utility-${hit.kind}`,
+          actual: hit.token,
+          repair: hit.repair,
+        });
+      }
     }
   }
   return violations;
@@ -172,7 +185,7 @@ export function scanRepository(root = ROOT) {
     if (ext === '.css') violations.push(...scanCssSource(source, rel));
     if (ext !== '.css') {
       violations.push(...scanVisualVocabularySuppression(source, rel));
-      if (!isTestSource(rel) && !isForeignAdapter(rel)) {
+      if (!isTestSource(rel)) {
         violations.push(...scanVisualUtilitySource(source, rel));
       }
     }
