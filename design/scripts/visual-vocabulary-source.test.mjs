@@ -72,6 +72,24 @@ export const bad = 'text-sm font-semibold rounded-lg shadow-md bg-white';
   );
 });
 
+test('fast source gate rejects legacy custom properties in TS/TSX strings', () => {
+  const violations = scanVisualUtilitySource(
+    "export const cls = 'bg-[var(--background)]';",
+    'web/src/product/probe.ts',
+    {
+      cssVariables: ['--nession-background'],
+      legacyCssVariables: ['--background'],
+      tailwindThemeBridges: { color: { background: '--nession-background' }, spacing: {} },
+    },
+  );
+
+  assert.deepEqual(
+    violations.map((v) => [v.actual, v.kind]),
+    [['var(--background)', 'variable-legacy']],
+  );
+  assert.match(violations[0].repair, /--nession-background/);
+});
+
 test('visual vocabulary rule cannot be disabled in a consumer', () => {
   const violations = scanVisualVocabularySuppression(
     '// eslint-disable-next-line nession/visual-vocabulary\nconst x = 1;',
