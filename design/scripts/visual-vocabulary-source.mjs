@@ -1,7 +1,10 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, extname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { findVisualUtilityViolations } from '../../web/eslint-plugin-nession/rules/visual-vocabulary.js';
+import {
+  findVisualUtilityViolations,
+  isForeignAdapter,
+} from '../../web/eslint-plugin-nession/rules/visual-vocabulary.js';
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(SCRIPT_DIR, '..', '..');
@@ -169,7 +172,7 @@ export function scanRepository(root = ROOT) {
     if (ext === '.css') violations.push(...scanCssSource(source, rel));
     if (ext !== '.css') {
       violations.push(...scanVisualVocabularySuppression(source, rel));
-      if (!isTestSource(rel)) {
+      if (!isTestSource(rel) && !isForeignAdapter(rel)) {
         violations.push(...scanVisualUtilitySource(source, rel));
       }
     }
