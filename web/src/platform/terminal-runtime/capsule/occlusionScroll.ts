@@ -6,8 +6,8 @@ export type ScrollMode = 'following' | 'history';
 
 /** Read published occlusion height from the capsule host (inline style wins). */
 export function readOcclusionPx(host: HTMLElement): number {
-  const inline = host.style.getPropertyValue('--terminal-capsule-occlusion');
-  const raw = inline || getComputedStyle(host).getPropertyValue('--terminal-capsule-occlusion');
+  const inline = host.style.getPropertyValue('--nession-local-terminal-capsule-occlusion');
+  const raw = inline || getComputedStyle(host).getPropertyValue('--nession-local-terminal-capsule-occlusion');
   return Number.parseFloat(raw) || 0;
 }
 
@@ -142,7 +142,7 @@ export class CapsuleOcclusionScroll {
     this.touchStartListener = null;
     this.touchMoveListener = null;
     this.touchLastY = null;
-    this.host.style.removeProperty('--terminal-content-bottom-inset');
+    this.host.style.removeProperty('--nession-local-terminal-content-bottom-inset');
     delete this.host.dataset.terminalScrollMode;
   }
 
@@ -213,9 +213,9 @@ export class CapsuleOcclusionScroll {
     this.currentMode = mode;
     this.wasFollowing = mode === 'following';
     const inset = mode === 'following'
-      ? 'var(--terminal-capsule-occlusion, 0px)'
+      ? 'var(--nession-local-terminal-capsule-occlusion, 0px)'
       : '0px';
-    this.host.style.setProperty('--terminal-content-bottom-inset', inset);
+    this.host.style.setProperty('--nession-local-terminal-content-bottom-inset', inset);
     this.host.dataset.terminalScrollMode = mode;
   }
 
