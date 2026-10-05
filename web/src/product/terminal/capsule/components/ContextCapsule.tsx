@@ -198,7 +198,7 @@ function ContextRowButton({
         {perceived ? <span className={contextCapsuleMarkerClass} /> : null}
       </span>
       <span className={contextCapsuleIconSlotClass} aria-hidden>
-        {Icon ? <Icon className="size-[length:var(--icon-md)]" /> : null}
+        {Icon ? <Icon className="size-[length:var(--nession-icon-md)]" /> : null}
       </span>
       <span className="flex min-w-0 flex-1 flex-col">
         {/* No muted state, because this list has none to draw: the entries come
