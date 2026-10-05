@@ -44,7 +44,7 @@ export function ReasoningActivity({ item }: { item: AIReasoningItem }) {
       <summary
         className={cn(
           'flex cursor-pointer items-center gap-2 py-1',
-          'text-[var(--conversation-tool-foreground)]',
+          'text-[var(--nession-conversation-tool-foreground)]',
           chromeSansRole('metadata'),
         )}
       >
@@ -68,8 +68,8 @@ export function ReasoningActivity({ item }: { item: AIReasoningItem }) {
       <div
         data-testid="conversation-reasoning-body"
         className={cn(
-          'rounded-[var(--radius-surface)] bg-[var(--conversation-tool-surface)] px-3 py-2',
-          'text-[var(--conversation-tool-foreground)]',
+          'rounded-[var(--nession-radius-surface)] bg-[var(--nession-conversation-tool-surface)] px-3 py-2',
+          'text-[var(--nession-conversation-tool-foreground)]',
         )}
       >
         {/* The same Markdown path as every other body — a second one for a
