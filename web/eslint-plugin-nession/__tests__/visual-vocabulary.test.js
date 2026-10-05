@@ -7,6 +7,7 @@ import { RuleTester } from 'eslint';
 import tseslint from 'typescript-eslint';
 import nessionPlugin from '../index.js';
 import {
+  findInlineStyleVisualViolations,
   findVisualUtilityViolations,
   findVisualVariableViolations,
 } from '../rules/visual-vocabulary.js';
@@ -59,6 +60,29 @@ test('visual utility classifier separates local composition from visual vocabula
       ['text-[13px]', 'typography'],
     ],
   );
+});
+
+test('visual vocabulary owns raw inline visual colors too', () => {
+  const node = {
+    type: 'ObjectExpression',
+    properties: [
+      {
+        type: 'Property',
+        key: { type: 'Identifier', name: 'backgroundColor' },
+        value: { type: 'Literal', value: '#fff' },
+      },
+      {
+        type: 'Property',
+        key: { type: 'Identifier', name: 'width' },
+        value: { type: 'Literal', value: '10px' },
+      },
+    ],
+  };
+
+  const violations = findInlineStyleVisualViolations(node);
+  assert.equal(violations.length, 1);
+  assert.equal(violations[0].kind, 'color');
+  assert.equal(violations[0].token, '#fff');
 });
 
 test('findVisualVariableViolations accepts generated and local Nession variables', () => {
@@ -139,6 +163,12 @@ test('visual-vocabulary reports non-canonical production variables', () => {
         filename: PRODUCT,
         errors: [{ messageId: 'violation' }],
       },
+      {
+        code: 'export function Probe() { return <div style={{ color: "#fff" }} />; }',
+        filename: PRODUCT,
+        errors: [{ messageId: 'utilityViolation' }],
+      },
+
     ],
   });
 });
