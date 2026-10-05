@@ -44,7 +44,12 @@ export function findCrossExperienceVars(value, metadata) {
   const found = [];
   for (const match of value.matchAll(/var\(--([a-zA-Z0-9-]+)/g)) {
     const name = match[1];
-    if (appOnly.has(name) && !found.includes(name)) {
+    // #1451 namespaces the canonical CSS API. During migration the generated
+    // compatibility adapter still exposes the old spelling, so this semantic
+    // rule must understand both forms or the namespace change would silently
+    // switch off the cross-experience protection again.
+    const canonical = name.startsWith('nession-') ? name : `nession-${name}`;
+    if (appOnly.has(canonical) && !found.includes(name)) {
       found.push(name);
     }
   }
