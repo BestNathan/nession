@@ -36,6 +36,65 @@ because only one platform consumes it. `experience.web.workspace.treeWidth` is
 a *file-workspace* decision that happens to be expressed on Web; calling it
 "Experience" would be true of its housing and false of its owner.
 
+## CSS vocabulary API and visual invariants (#1451)
+
+The token graph above is the source model. CSS is its generated public API, and
+that API has one Nession-owned namespace:
+
+```text
+--nession-*
+```
+
+Examples:
+
+```css
+--nession-background
+--nession-radius-control
+--nession-typography-body-size
+--nession-terminal-capsule-shell-pad-x
+```
+
+The logical token ID and the CSS spelling are deliberately different concerns:
+
+```text
+semantic.background
+        ↓ generate
+--nession-background
+```
+
+Framework-facing names are adapters, not alternate product vocabulary.
+Tailwind/shadcn bridges such as `--color-background` or
+`--spacing-control-md` may exist only in the canonical generated adapter and
+must resolve back to `--nession-*`. Product/feature code must not define a
+second theme namespace.
+
+The repository-wide invariant stack is:
+
+```text
+V5  Canonical visual baseline
+V4  Relational rendered contract
+V3  Product visual grammar / recipe
+V2  Shared primitive
+V1  Semantic visual vocabulary
+V0  --nession-* namespace
+```
+
+A feature can own composition without owning a second visual language. Local
+`flex`, `grid`, positioning, overflow, and content-specific layout are not
+automatically token concerns. Color, material, typography, radius, elevation,
+focus, motion, standard control geometry, and shared action/row anatomy are.
+
+The generated `design/generated/lint-metadata.json` is the machine-readable
+vocabulary used by lint/gates. Do not copy token names into a second hand-kept
+registry. If lint cannot prove a visual variable came from the generator, the
+correct repair is to route the value through the canonical owner.
+
+Renderer/framework foreign variables are permitted only behind explicit adapter
+boundaries (for example CodeMirror, xterm, or normalized upstream UI
+primitives). A Nession-owned token used through its pre-#1451 unprefixed spelling
+is still a violation in production source; generated aliases exist only as a
+temporary migration bridge.
+
 ### When a value's owner is narrower than Experience
 
 A value whose meaning belongs to one pattern or composition says so, in the
