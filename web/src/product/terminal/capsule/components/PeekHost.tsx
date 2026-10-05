@@ -13,7 +13,6 @@ import {
   capsuleProjectionClass,
   capsuleProjectionDockClass,
   capsuleProjectionScrollClass,
-  capsuleProjectionTextClass,
   capsuleUpperCloseButtonClass,
   capsuleUpperHeaderClass,
   capsuleUpperTitleClass,
@@ -76,7 +75,6 @@ export function PeekHost({
       className={[
         capsuleProjectionClass,
         capsuleProjectionDockClass,
-        capsuleProjectionTextClass,
         capsuleProjectionScrollClass,
         // The containment boundary (#1347 SC-27): paint containment clips the
         // body to this box and makes it the containing block and stacking

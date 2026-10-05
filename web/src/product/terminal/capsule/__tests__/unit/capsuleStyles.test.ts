@@ -83,6 +83,9 @@ describe('capsuleStyles', () => {
     expect(capsulePhysKeyButtonClass).toContain(
       'text-[length:var(--terminal-capsule-phys-key-font-size)]',
     );
+    expect(capsulePhysKeyButtonClass).toContain(
+      'leading-[length:var(--terminal-capsule-phys-key-font-size)]',
+    );
     expect(capsulePhysKeyIconClass).toContain(
       'var(--terminal-capsule-phys-key-icon-size)',
     );
