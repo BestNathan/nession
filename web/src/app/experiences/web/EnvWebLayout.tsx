@@ -67,7 +67,7 @@ export function EnvWebLayout({ ctx }: { ctx: WorkspaceContext }) {
     <div data-testid="env-workspace" className="h-full min-h-0 overflow-hidden">
       <div
         data-testid="env-web-layout"
-        className="grid h-full min-h-0 grid-cols-[var(--workspace-tree-width)_minmax(0,1fr)] overflow-hidden"
+        className="grid h-full min-h-0 grid-cols-[var(--nession-workspace-tree-width)_minmax(0,1fr)] overflow-hidden"
       >
         <div className="bg-workspace-navigation min-h-0 overflow-hidden">
           <EnvironmentNavigator
