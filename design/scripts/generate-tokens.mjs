@@ -8,6 +8,20 @@ const DESIGN_DIR = join(SCRIPT_DIR, '..');
 const TOKENS_DIR = join(DESIGN_DIR, 'tokens');
 const GENERATED_DIR = join(DESIGN_DIR, 'generated');
 
+export const NESSION_CSS_NAMESPACE = 'nession';
+
+function nessionVarName(name) {
+  return `${NESSION_CSS_NAMESPACE}-${name}`;
+}
+
+export function nessionCssVar(name) {
+  return `--${nessionVarName(name)}`;
+}
+
+function nessionVarRef(name) {
+  return `var(${nessionCssVar(name)})`;
+}
+
 // Semantic names that carry something other than a colour, so they must not be
 // bridged into Tailwind's colour namespace. `elevation-floating` is a shadow:
 // every floating surface takes it (visual-language.md, "several floating
@@ -104,7 +118,10 @@ export function appOnlyVars(tokens) {
   const app = flattenLeaves(tokens.experience?.app ?? {});
   const web = flattenLeaves(tokens.experience?.web ?? {});
   const webNames = new Set(web.map(({ path }) => toKebab(path)));
-  return app.map(({ path }) => toKebab(path)).filter((name) => !webNames.has(name));
+  return app
+    .map(({ path }) => toKebab(path))
+    .filter((name) => !webNames.has(name))
+    .map((name) => nessionVarName(name));
 }
 
 function isLeaf(node) {
@@ -122,16 +139,434 @@ function getPath(obj, path) {
   return current;
 }
 
-function flattenLeaves(obj, prefix = []) {
+function flattenLeaves(obj, prefix = [], inheritedOwner = null) {
   const leaves = [];
   if (isLeaf(obj)) {
-    if (prefix.length > 0) leaves.push({ path: prefix, node: obj });
+    if (prefix.length > 0) {
+      leaves.push({
+        path: prefix,
+        node: obj,
+        owner: obj.$owner ?? inheritedOwner ?? null,
+      });
+    }
     return leaves;
   }
   if (!obj || typeof obj !== 'object') return leaves;
+  const owner = obj.$owner ?? inheritedOwner;
   for (const [key, value] of Object.entries(obj)) {
+    if (key.startsWith('
+
+function toKebab(parts) {
+  return parts
+    .map((part) => String(part).replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase())
+    .join('-');
+}
+
+export function resolveRef(node, tokens, seen = new Set(), theme = 'light') {
+  if (node == null || typeof node !== 'object') {
+    throw new Error('invalid token node');
+  }
+  if ('value' in node) {
+    return { value: node.value };
+  }
+  if (!('ref' in node) || typeof node.ref !== 'string') {
+    throw new Error('token node missing ref/value');
+  }
+  const ref = node.ref;
+  if (seen.has(ref)) {
+    throw new Error(`circular ref: ${ref}`);
+  }
+  seen.add(ref);
+
+  // `{theme}` lets a Domain leaf name a theme-scoped Primitive directly
+  // (`primitive.{theme}.location.local`) instead of routing through a
+  // pass-through Semantic alias whose CSS variable name would collide with
+  // the Domain leaf's own name.
+  let target = getPath(tokens, ref.replace('{theme}', theme));
+  if (
+    target === undefined &&
+    ref.startsWith('semantic.') &&
+    !ref.startsWith('semantic.themes.')
+  ) {
+    const name = ref.slice('semantic.'.length);
+    target = getPath(tokens, `semantic.themes.${theme}.${name}`);
+  }
+  if (target === undefined || (target && typeof target === 'object' && !isLeaf(target))) {
+    throw new Error(`missing ref: ${ref}`);
+  }
+  return resolveRef(target, tokens, seen, theme);
+}
+
+function cssVarFromRef(ref) {
+  if (ref.startsWith('semantic.themes.')) {
+    return nessionVarRef(ref.split('.').slice(3).join('-'));
+  }
+  if (ref.startsWith('semantic.')) {
+    return nessionVarRef(ref.slice('semantic.'.length).replace(/\./g, '-'));
+  }
+  if (ref.startsWith('domain.')) {
+    return nessionVarRef(toKebab(ref.slice('domain.'.length).split('.')));
+  }
+  return null;
+}
+
+function cssValue(node, tokens, theme = 'light') {
+  if ('value' in node) {
+    return String(node.value);
+  }
+  const asVar = cssVarFromRef(node.ref);
+  if (asVar) return asVar;
+  return String(resolveRef(node, tokens, new Set(), theme).value);
+}
+
+function emitCustomProps(leaves, tokens, theme) {
+  return leaves.map(({ path, node }) => {
+    const name = toKebab(path);
+    return `  ${nessionCssVar(name)}: ${cssValue(node, tokens, theme)};`;
+  });
+}
+
+/**
+ * Transitional compatibility adapter for pre-#1451 consumers.
+ *
+ * New Nession-owned source must consume --nession-* directly (or a generated
+ * Tailwind semantic utility). These aliases exist only so namespace migration
+ * can land without a flag day; the visual-vocabulary gate owns their removal.
+ */
+function emitLegacyAliases(leaves) {
+  return leaves.map(({ path }) => {
+    const name = toKebab(path);
+    return `  --${name}: ${nessionVarRef(name)};`;
+  });
+}
+
+function shouldBridgeThemeSize(name) {
+  return THEME_SIZE_PREFIXES.some(
+    (prefix) => name === prefix || name.startsWith(prefix),
+  );
+}
+
+function emitAppExperienceRemap(tokens) {
+  const app = tokens.experience?.app ?? {};
+  const appLeaves = flattenLeaves(app);
+  if (appLeaves.length === 0) {
+    return [];
+  }
+  const lines = emitCustomProps(appLeaves, tokens, 'light');
+  const aliases = emitLegacyAliases(appLeaves);
+  return ['', '[data-experience="app"] {', ...lines, ...aliases, '}', ''];
+}
+
+export function generateWebCss(tokens) {
+  const light = tokens.semantic?.themes?.light ?? {};
+  const dark = tokens.semantic?.themes?.dark ?? {};
+  const domain = tokens.domain ?? {};
+  const web = tokens.experience?.web ?? {};
+
+  const lightSemantic = flattenLeaves(light);
+  const darkSemantic = flattenLeaves(dark);
+  const domainLeaves = flattenLeaves(domain);
+  const webLeaves = flattenLeaves(web);
+
+  const rootLeaves = [...lightSemantic, ...domainLeaves, ...webLeaves];
+  const root = [
+    ...emitCustomProps(rootLeaves, tokens, 'light'),
+    ...emitLegacyAliases(rootLeaves),
+  ];
+  const darkBlock = [
+    ...emitCustomProps(darkSemantic, tokens, 'dark'),
+    ...emitCustomProps(domainLeaves, tokens, 'dark'),
+  ];
+
+  const themeBridges = [];
+  for (const { path } of lightSemantic) {
+    const name = toKebab(path);
+    if (NON_COLOR_SEMANTIC.has(name)) continue;
+    themeBridges.push(`  --color-${name}: ${nessionVarRef(name)};`);
+  }
+  for (const { path } of domainLeaves) {
+    const name = toKebab(path);
+    themeBridges.push(`  --color-${name}: ${nessionVarRef(name)};`);
+  }
+  for (const { path } of webLeaves) {
+    const name = toKebab(path);
+    if (shouldBridgeThemeSize(name)) {
+      themeBridges.push(`  --spacing-${name}: ${nessionVarRef(name)};`);
+    }
+  }
+  for (const { path } of lightSemantic) {
+    const name = toKebab(path);
+    if (shouldBridgeThemeSize(name)) {
+      themeBridges.push(`  --spacing-${name}: ${nessionVarRef(name)};`);
+    }
+  }
+
+  return [
+    '/* generated — do not edit */',
+    '',
+    ':root {',
+    ...root,
+    '}',
+    '',
+    '.dark {',
+    ...darkBlock,
+    '}',
+    '',
+    '@theme inline {',
+    ...themeBridges,
+    '}',
+    ...emitAppExperienceRemap(tokens),
+  ].join('\n');
+}
+
+export function generateLintMetadata(tokens) {
+  const meta = {};
+  for (const [id, suggestions] of Object.entries(LINT_PRIMITIVES)) {
+    meta[id] = {
+      layer: 'primitive',
+      allowedInComponent: false,
+      suggestions: [...suggestions],
+    };
+  }
+
+  const cssVariables = {};
+  const legacyCssVariables = new Set();
+  const colorBridges = {};
+  const spacingBridges = {};
+
+  const addVariables = (leaves, layer, mode = null) => {
+    for (const { path, owner } of leaves) {
+      const name = toKebab(path);
+      const cssVar = nessionCssVar(name);
+      const current = cssVariables[cssVar] ?? {
+        layer,
+        public: true,
+        modes: [],
+        owner: owner ?? null,
+      };
+      if (mode && !current.modes.includes(mode)) current.modes.push(mode);
+      if (!current.owner && owner) current.owner = owner;
+      cssVariables[cssVar] = current;
+      legacyCssVariables.add(`--${name}`);
+    }
+  };
+
+  const lightSemantic = flattenLeaves(tokens.semantic?.themes?.light ?? {});
+  const darkSemantic = flattenLeaves(tokens.semantic?.themes?.dark ?? {});
+  const domainLeaves = flattenLeaves(tokens.domain ?? {});
+  const webLeaves = flattenLeaves(tokens.experience?.web ?? {});
+  const appLeaves = flattenLeaves(tokens.experience?.app ?? {});
+
+  addVariables(lightSemantic, 'semantic', 'light');
+  addVariables(darkSemantic, 'semantic', 'dark');
+  addVariables(domainLeaves, 'domain');
+  addVariables(webLeaves, 'experience', 'web');
+  addVariables(appLeaves, 'experience', 'app');
+
+  for (const { path } of lightSemantic) {
+    const name = toKebab(path);
+    if (!NON_COLOR_SEMANTIC.has(name)) colorBridges[name] = nessionCssVar(name);
+    if (shouldBridgeThemeSize(name)) spacingBridges[name] = nessionCssVar(name);
+  }
+  for (const { path } of domainLeaves) {
+    const name = toKebab(path);
+    colorBridges[name] = nessionCssVar(name);
+  }
+  for (const { path } of webLeaves) {
+    const name = toKebab(path);
+    if (shouldBridgeThemeSize(name)) spacingBridges[name] = nessionCssVar(name);
+  }
+
+  meta.experienceAppVars = appOnlyVars(tokens);
+  meta.cssVariables = cssVariables;
+  meta.legacyCssVariables = [...legacyCssVariables].sort();
+  meta.tailwindThemeBridges = {
+    color: colorBridges,
+    spacing: spacingBridges,
+  };
+  return meta;
+}
+
+function parseExperienceValue(value) {
+  if (typeof value === 'number') return value;
+  if (typeof value === 'string') {
+    const match = /^(\d+(?:\.\d+)?)px$/.exec(value);
+    if (match) return Number(match[1]);
+  }
+  return value;
+}
+
+function unwrapExperience(node, tokens) {
+  if (isLeaf(node)) {
+    const raw = 'value' in node ? node.value : resolveRef(node, tokens).value;
+    return parseExperienceValue(raw);
+  }
+  if (!node || typeof node !== 'object') return node;
+  const out = {};
+  for (const [key, value] of Object.entries(node)) {
     if (key.startsWith('$')) continue;
-    leaves.push(...flattenLeaves(value, [...prefix, key]));
+    out[key] = unwrapExperience(value, tokens);
+  }
+  return out;
+}
+
+function jsLiteral(value, indent = 0) {
+  if (typeof value === 'number') return String(value);
+  if (typeof value === 'string') return JSON.stringify(value);
+  if (value && typeof value === 'object') {
+    const inner = '  '.repeat(indent + 1);
+    const close = '  '.repeat(indent);
+    const entries = Object.entries(value).map(
+      ([key, child]) => `${inner}${key}: ${jsLiteral(child, indent + 1)}`,
+    );
+    return `{\n${entries.join(',\n')},\n${close}}`;
+  }
+  return JSON.stringify(value);
+}
+
+export function generateAppTs(tokens) {
+  const app = unwrapExperience(tokens.experience?.app ?? {}, tokens);
+  const lines = ['// generated — do not edit', ''];
+  for (const [key, value] of Object.entries(app)) {
+    lines.push(`export const ${key} = ${jsLiteral(value)} as const;`);
+  }
+  lines.push('');
+  return lines.join('\n');
+}
+
+/** Experiences the terminal boundary is rendered in, in emission order. */
+export const TERMINAL_METRIC_EXPERIENCES = ['web', 'app'];
+
+/**
+ * The xterm boundary, emitted as TS rather than CSS because xterm takes a JS
+ * object. Two things cross that boundary: the ANSI theme, and the surface's own
+ * font metrics — xterm's `fontSize` / `lineHeight` are constructor options, so
+ * the Experience values in `experience.{web,app}.terminal` cannot reach the
+ * rendered terminal as custom properties. Keeping both in one artifact is what
+ * makes `design/generated/terminal.ts` the answer to "what does the terminal
+ * read, and from where". No `import type { ITheme }` here: `design/` has no
+ * node_modules, so the type must be applied by the consumer, which is where it
+ * type-checks.
+ */
+export function generateTerminalTs(tokens) {
+  const terminal = tokens.primitive?.terminal ?? {};
+  const read = (key) => {
+    const node = terminal[key];
+    if (node === undefined) {
+      throw new Error(`missing ref: primitive.terminal.${key}`);
+    }
+    return resolveRef(node, tokens).value;
+  };
+
+  const lines = ['// generated — do not edit', ''];
+  lines.push(
+    `export const TERMINAL_MINIMUM_CONTRAST_RATIO = ${JSON.stringify(read('minimum-contrast-ratio'))};`,
+    '',
+    'export const TERMINAL_THEME = {',
+  );
+  for (const [slot, key] of TERMINAL_THEME_SLOTS) {
+    lines.push(`  ${slot}: ${JSON.stringify(read(key))},`);
+  }
+  lines.push('};', '');
+
+  lines.push('export const TERMINAL_METRICS = {');
+  for (const experience of TERMINAL_METRIC_EXPERIENCES) {
+    const node = tokens.experience?.[experience]?.terminal;
+    if (node === undefined) {
+      throw new Error(`missing ref: experience.${experience}.terminal`);
+    }
+    lines.push(`  ${experience}: ${jsLiteral(unwrapExperience(node, tokens), 1)},`);
+  }
+  lines.push('} as const;', '');
+  return lines.join('\n');
+}
+
+function readJson(relativePath) {
+  const path = join(TOKENS_DIR, relativePath);
+  try {
+    return JSON.parse(readFileSync(path, 'utf8'));
+  } catch (err) {
+    throw new Error(
+      `failed to read ${path}: ${err.message}\n  Fix: add the token JSON under design/tokens/`,
+    );
+  }
+}
+
+export function loadTokens() {
+  return {
+    primitive: readJson('primitive.json'),
+    semantic: readJson('semantic.json'),
+    domain: readJson('domain.json'),
+    experience: {
+      web: readJson('experience/web.json'),
+      app: readJson('experience/app.json'),
+    },
+  };
+}
+
+function artifactsFrom(tokens) {
+  return {
+    'web.css': generateWebCss(tokens),
+    'lint-metadata.json': `${JSON.stringify(generateLintMetadata(tokens), null, 2)}\n`,
+    'app.ts': generateAppTs(tokens),
+    'terminal.ts': generateTerminalTs(tokens),
+  };
+}
+
+function writeArtifacts(dir, files) {
+  mkdirSync(dir, { recursive: true });
+  for (const [name, content] of Object.entries(files)) {
+    writeFileSync(join(dir, name), content);
+  }
+}
+
+function checkArtifacts(files) {
+  const temp = mkdtempSync(join(tmpdir(), 'nession-tokens-'));
+  writeArtifacts(temp, files);
+  let failed = false;
+  for (const name of Object.keys(files)) {
+    const expectedPath = join(temp, name);
+    const actualPath = join(GENERATED_DIR, name);
+    const expected = readFileSync(expectedPath, 'utf8');
+    let actual;
+    try {
+      actual = readFileSync(actualPath, 'utf8');
+    } catch {
+      console.error(`✗ ${join('design/generated', name)} is missing`);
+      console.error('  Fix: node design/scripts/generate-tokens.mjs');
+      failed = true;
+      continue;
+    }
+    if (actual !== expected) {
+      console.error(`✗ ${join('design/generated', name)} is out of date`);
+      console.error('  Fix: node design/scripts/generate-tokens.mjs');
+      failed = true;
+    }
+  }
+  if (failed) process.exit(1);
+}
+
+function runningAsCli() {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  return import.meta.url === pathToFileURL(resolve(entry)).href;
+}
+
+function main() {
+  const tokens = loadTokens();
+  const files = artifactsFrom(tokens);
+  if (process.argv.includes('--check')) {
+    checkArtifacts(files);
+    return;
+  }
+  writeArtifacts(GENERATED_DIR, files);
+}
+
+if (runningAsCli()) {
+  main();
+}
+)) continue;
+    leaves.push(...flattenLeaves(value, [...prefix, key], owner));
   }
   return leaves;
 }
