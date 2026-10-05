@@ -62,7 +62,7 @@ export const ToolActivity = memo(function ToolActivity({ item }: { item: AIToolI
       // A tool is not a participant, so it takes the activity surface rather
       // than either speaker's. Full width on purpose (#1120): a bubble here
       // would put the work *in* the conversation instead of beside it.
-      className="group min-w-0 rounded-[var(--radius-surface)] bg-[var(--conversation-tool-surface)] px-3 py-2 text-[var(--conversation-tool-foreground)]"
+      className="group min-w-0 rounded-[var(--nession-radius-surface)] bg-[var(--nession-conversation-tool-surface)] px-3 py-2 text-[var(--nession-conversation-tool-foreground)]"
     >
       <summary className={cn('flex cursor-pointer items-center gap-2', chromeSansRole('metadata'))}>
         {/* Turns as the disclosure opens. Decorative: `<details>` announces its
@@ -139,7 +139,7 @@ function ToolBody({ label, payload }: { label: string; payload: AIToolPayload })
           already says the body continues, and a fade would need measurement to
           appear only when it means something. */}
       <pre
-        className="mt-1 overflow-auto rounded border border-[var(--conversation-code-border)] p-2 font-mono text-[length:var(--typography-code-size)] whitespace-pre-wrap"
+        className="mt-1 overflow-auto rounded border border-[var(--nession-conversation-code-border)] p-2 font-mono text-[length:var(--nession-typography-code-size)] whitespace-pre-wrap"
         style={{ maxHeight: 'var(--conversation-group-max-height)' }}
       >
         {payload.text}
@@ -192,7 +192,7 @@ export function UnknownActivity() {
     <p
       data-testid="conversation-unknown"
       className={cn(
-        'flex items-center gap-2 text-[var(--conversation-tool-foreground)]',
+        'flex items-center gap-2 text-[var(--nession-conversation-tool-foreground)]',
         chromeSansRole('metadata'),
       )}
     >
