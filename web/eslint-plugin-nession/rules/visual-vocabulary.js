@@ -26,6 +26,17 @@ const TRACKING_RE = /^tracking-(?:tighter|tight|normal|wide|wider|widest|\[[^\]]
 const GENERIC_RADIUS_RE = /^rounded(?:-[trblsexy]{1,2})?(?:-(?:sm|md|lg|xl|[2-9]xl))?$/;
 const RADIUS_LITERAL_RE = /^rounded(?:-[trblsexy]{1,2})?-\[(?:-?\d+(?:\.\d+)?)(?:px|rem|em)?\]$/;
 const ELEVATION_RE = /^shadow(?:-(?:sm|md|lg|xl|2xl|inner))?$/;
+const INLINE_COLOR_RE =
+  /^(?:#[0-9a-fA-F]{3,8}|(?:rgb|rgba|hsl|hsla|oklch|oklab)\([^)]+\))$/i;
+const STYLE_COLOR_PROPS = new Set([
+  'color',
+  'background',
+  'backgroundColor',
+  'borderColor',
+  'outlineColor',
+  'fill',
+  'stroke',
+]);
 
 function baseClassToken(token) {
   const parts = String(token).split(':');
@@ -74,6 +85,28 @@ function repairFor(kind) {
     default:
       return 'use the generated Nession visual vocabulary';
   }
+}
+
+export function findInlineStyleVisualViolations(node) {
+  if (!node || node.type !== 'ObjectExpression') return [];
+  const violations = [];
+
+  for (const prop of node.properties) {
+    if (prop.type !== 'Property' || prop.key?.type !== 'Identifier') continue;
+    if (!STYLE_COLOR_PROPS.has(prop.key.name)) continue;
+    if (prop.value?.type !== 'Literal' || typeof prop.value.value !== 'string') continue;
+
+    const value = prop.value.value.trim();
+    if (!INLINE_COLOR_RE.test(value)) continue;
+    violations.push({
+      node: prop.value,
+      token: value,
+      kind: 'color',
+      repair: repairFor('color'),
+    });
+  }
+
+  return violations;
 }
 
 export function findVisualUtilityViolations(value, metadata) {
@@ -241,6 +274,18 @@ export default function visualVocabularyRule(metadata) {
         TemplateLiteral(node) {
           for (const quasi of node.quasis) {
             check(quasi, quasi.value.cooked ?? quasi.value.raw);
+          }
+        },
+        JSXAttribute(node) {
+          if (node.name.name !== 'style' || node.value?.type !== 'JSXExpressionContainer') {
+            return;
+          }
+          for (const violation of findInlineStyleVisualViolations(node.value.expression)) {
+            context.report({
+              node: violation.node,
+              messageId: 'utilityViolation',
+              data: violation,
+            });
           }
         },
       };
