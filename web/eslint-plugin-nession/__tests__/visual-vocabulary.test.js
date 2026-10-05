@@ -20,6 +20,7 @@ const lintMetadata = JSON.parse(readFileSync(metadataPath, 'utf8'));
 
 const PRODUCT = '/proj/web/src/product/session/components/Probe.tsx';
 const EDITOR_ADAPTER = '/proj/web/src/platform/editor/model/editorTheme.ts';
+const CAPABILITY = '/proj/web/src/capabilities/probe/components/Probe.tsx';
 
 test('generated metadata makes the --nession-* namespace machine-readable', () => {
   assert.ok(lintMetadata.cssVariables.includes('--nession-background'));
@@ -28,6 +29,10 @@ test('generated metadata makes the --nession-* namespace machine-readable', () =
   assert.equal(
     lintMetadata.tailwindThemeBridges.color.background,
     '--nession-background',
+  );
+  assert.equal(
+    lintMetadata.cssVariableOwners['--nession-terminal-capsule-shell-pad-x'],
+    'pattern.terminal-capsule',
   );
 });
 
@@ -115,6 +120,25 @@ test('findVisualVariableViolations rejects legacy, unknown and foreign vocabular
   );
 });
 
+test('a legal token still fails when a capability consumes host-owned chrome', () => {
+  const violations = findVisualVariableViolations(
+    'px-[length:var(--nession-terminal-capsule-shell-pad-x)]',
+    lintMetadata,
+    CAPABILITY,
+  );
+  assert.equal(violations.length, 1);
+  assert.equal(violations[0].kind, 'ownership');
+
+  assert.deepEqual(
+    findVisualVariableViolations(
+      'px-[length:var(--nession-terminal-capsule-shell-pad-x)]',
+      lintMetadata,
+      '/proj/web/src/product/terminal/capsule/capsuleStyles.ts',
+    ),
+    [],
+  );
+});
+
 test('approved renderer adapters may consume foreign variables but not legacy Nession aliases', () => {
   assert.deepEqual(
     findVisualVariableViolations('var(--cm-editor-background)', lintMetadata, EDITOR_ADAPTER),
@@ -167,6 +191,11 @@ test('visual-vocabulary reports non-canonical production variables', () => {
         code: 'export function Probe() { return <div style={{ color: "#fff" }} />; }',
         filename: PRODUCT,
         errors: [{ messageId: 'utilityViolation' }],
+      },
+      {
+        code: 'import { capsuleUpperSurfaceClass } from "@/product/terminal/capsule/capsuleStyles"; export const Probe = () => null;',
+        filename: CAPABILITY,
+        errors: [{ messageId: 'ownershipViolation' }],
       },
 
     ],
