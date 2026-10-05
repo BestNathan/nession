@@ -19,6 +19,13 @@ const FAST_COMMANDS = [
     repair: 'change the canonical token source, then run `just tokens-gen`',
   },
   {
+    id: 'visual-vocabulary-source',
+    command: 'node design/scripts/visual-vocabulary-source.mjs',
+    owner: 'design/tokens/* + design/generated/lint-metadata.json + web/src/**/*.css',
+    expected: 'Nession visual custom properties use --nession-* and consumers cannot locally suppress the visual vocabulary gate',
+    repair: 'migrate the consumer to --nession-* or encode an explicit framework/renderer adapter boundary',
+  },
+  {
     id: 'contract-generated-integrity',
     command: 'node design/scripts/resolve-contracts.mjs --check',
     owner: 'design/contracts/* + design/scripts/resolve-contracts.mjs',
