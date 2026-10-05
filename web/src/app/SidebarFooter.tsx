@@ -77,13 +77,13 @@ export function SidebarFooter({
   }`;
 
   return (
-    <div className="flex w-full min-w-0 items-center gap-[var(--shell-foot-gap)]">
+    <div className="flex w-full min-w-0 items-center gap-[var(--nession-shell-foot-gap)]">
       <span
         data-testid="sidebar-foot-dot"
         aria-hidden="true"
         className={cn(
-          'size-[length:var(--shell-status-dot-size)] shrink-0 rounded-full',
-          healthy ? 'bg-[var(--action)]' : 'bg-destructive',
+          'size-[length:var(--nession-shell-status-dot-size)] shrink-0 rounded-full',
+          healthy ? 'bg-[var(--nession-action)]' : 'bg-destructive',
         )}
       />
       <span className={cn('min-w-0 flex-1 truncate text-muted-foreground', chromeSansRole('caption'))}>
