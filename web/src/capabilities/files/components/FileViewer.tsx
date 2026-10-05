@@ -77,8 +77,8 @@ function FileViewerToolbar({
   const showEditToggle = isText && !forceReadOnly && (!hasPreviewRawToggle || viewMode === 'raw');
 
   return (
-    <div className="flex flex-shrink-0 items-center justify-between gap-[var(--shell-space-2)] border-b border-border/60 px-[var(--workspace-editor-head-pad-x)] py-[var(--shell-space-1)]">
-      <div className={cn('flex min-w-0 items-center gap-[var(--shell-space-2)] text-muted-foreground', chromeMonoRole('code'))}>
+    <div className="flex flex-shrink-0 items-center justify-between gap-[var(--nession-shell-space-2)] border-b border-border/60 px-[var(--nession-workspace-editor-head-pad-x)] py-[var(--nession-shell-space-1)]">
+      <div className={cn('flex min-w-0 items-center gap-[var(--nession-shell-space-2)] text-muted-foreground', chromeMonoRole('code'))}>
         {/* The path, not the basename. The mockup's head reads
             `web/src/platform/terminal-runtime/ThemeManager.ts` — with a tree beside
             it, a bare filename does not say which of several `index.css` is
@@ -98,7 +98,7 @@ function FileViewerToolbar({
           </Button>
         )}
         {hasPreviewRawToggle && (
-          <div className="flex items-center rounded-[var(--radius-control)] bg-muted/60 p-0.5" role="group" aria-label="View mode">
+          <div className="flex items-center rounded-[var(--nession-radius-control)] bg-muted/60 p-0.5" role="group" aria-label="View mode">
             <Button
               variant={viewMode === 'preview' ? 'secondary' : 'ghost'}
               size="sm"
