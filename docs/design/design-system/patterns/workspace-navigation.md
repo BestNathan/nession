@@ -170,7 +170,7 @@ Two consequences, replacing the old pair:
 
 - The bottom clearance the capsule needs is **every depth's** clearance. A pushed
   detail's scrollers reserve the same trailing padding the root's do — the workspace
-  publishes one measured inset (`--workspace-content-bottom-inset`, from the bar's own
+  publishes one measured inset (`--nession-workspace-content-bottom-inset`, from the bar's own
   geometry) and every Workspace scroller spends it, so the last line of a file, the
   last turn of a transcript and the last search hit can all be scrolled above the
   capsule.
@@ -214,7 +214,7 @@ destination circles, unlike Web's reciprocal pair, and that difference is
 experience presentation, not a divergence in the Capsule's identity.
 
 What the two states **share** is the outer geometry: the floating surface and
-elevation, the semantic capsule radius (`--radius-capsule`), the App dock's
+elevation, the semantic capsule radius (`--nession-radius-capsule`), the App dock's
 bottom and safe-area-aware placement, the shell's inner padding rhythm — and,
 after the owner correction of 2026-10-03, the band itself. The labeled entries
 take `capabilityEntryHeight`, the same 44px row the composer uses, so both
@@ -270,6 +270,54 @@ Files may use master/detail on Web and push navigation on App. That composition 
 Claude Code may use state/history/configuration views. Git may use repository status and change navigation. Agent/location detail may use an information surface.
 
 WorkspaceNavigation coordinates access; it does not force these capabilities into the same content layout.
+
+## Visual grammar ownership (#1451)
+
+Workspace navigation is the second product family, after Capsule, to make the
+repository-wide visual invariant stack executable.
+
+Its ownership chain is:
+
+```text
+--nession-* vocabulary
+        ↓
+shared primitives / Capsule geometry
+        ↓
+workspaceNavigationStyles
+        ↓
+CapabilityCapsule composition
+        ↓
+capability identity + state
+```
+
+Nession owns the Workspace navigation surface, entry geometry, radius,
+typography treatment, disabled/active affordance, indicator and motion. A
+capability contributes identity/state and its Workspace body; it does not
+redefine the global switcher's chrome.
+
+Selection is explicitly a **state change inside one visual grammar**, not a new
+recipe. The browser matrix measures one entry before and after it becomes active
+and requires width, height, radius, padding and label typography to remain
+identical. State may change semantic color/presence only.
+
+The canonical recipe owner is:
+
+```text
+web/src/product/workspace/patterns/workspaceNavigationStyles.ts
+```
+
+Consumers must not reproduce its radius/type/motion decisions inline. New visual
+behavior belongs there as an explicit semantic variant when it represents a real
+Workspace-navigation distinction.
+
+All direct custom-property consumption uses the repository namespace:
+
+```text
+--nession-*
+```
+
+Framework utilities such as `text-foreground` remain legal only because the
+generated theme bridge resolves them back to that vocabulary.
 
 ## Visual contract
 
