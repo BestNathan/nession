@@ -450,7 +450,7 @@ function ModeToggle({ mode, onChange }: { mode: AttachMode; onChange: (m: Attach
           type="button"
           onClick={() => onChange(m.value)}
           className={cn(
-            'flex flex-col items-start rounded-[var(--radius-surface)] border px-3 py-2 text-left transition-colors',
+            'flex flex-col items-start rounded-[var(--nession-radius-surface)] border px-3 py-2 text-left transition-colors',
             mode === m.value ? 'border-primary bg-primary/10' : 'border-input hover:bg-accent/50',
           )}
         >
@@ -481,7 +481,7 @@ function RendererToggle({
           onClick={() => onChange('webgl')}
           disabled={!webglSupported}
           className={cn(
-            'flex flex-col items-start rounded-[var(--radius-surface)] border px-3 py-2 text-left transition-colors',
+            'flex flex-col items-start rounded-[var(--nession-radius-surface)] border px-3 py-2 text-left transition-colors',
             renderer === 'webgl' ? 'border-primary bg-primary/10' : 'border-input hover:bg-accent/50',
             !webglSupported && 'opacity-50 cursor-not-allowed',
           )}
@@ -495,7 +495,7 @@ function RendererToggle({
           type="button"
           onClick={() => onChange('canvas')}
           className={cn(
-            'flex flex-col items-start rounded-[var(--radius-surface)] border px-3 py-2 text-left transition-colors',
+            'flex flex-col items-start rounded-[var(--nession-radius-surface)] border px-3 py-2 text-left transition-colors',
             renderer === 'canvas' ? 'border-primary bg-primary/10' : 'border-input hover:bg-accent/50',
           )}
         >
@@ -632,7 +632,7 @@ function AddressRow({ label, badge, sublabel, selected, onSelect, reachable, isC
       type="button"
       onClick={onSelect}
       className={cn(
-        'flex w-full items-center gap-2 rounded-[var(--radius-surface)] border px-3 py-2 text-left transition-colors',
+        'flex w-full items-center gap-2 rounded-[var(--nession-radius-surface)] border px-3 py-2 text-left transition-colors',
         selected ? 'border-primary bg-primary/10' : 'border-input hover:bg-accent/50',
       )}
     >
