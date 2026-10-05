@@ -93,8 +93,13 @@ function escapeRegex(value) {
 
 function sourceConsumesName(content, name) {
   const escaped = escapeRegex(name);
-  const cssVar = new RegExp(`--${escaped}(?![A-Za-z0-9_-])`);
-  if (cssVar.test(content)) return true;
+  const canonicalCssVar = new RegExp(`--nession-${escaped}(?![A-Za-z0-9_-])`);
+  if (canonicalCssVar.test(content)) return true;
+  // Transitional evidence only: #1451 removes legacy consumption before
+  // acceptance, but keeping it visible here makes the migration inventory
+  // truthful instead of turning still-unmigrated consumers into false zeroes.
+  const legacyCssVar = new RegExp(`--${escaped}(?![A-Za-z0-9_-])`);
+  if (legacyCssVar.test(content)) return true;
   const utility = new RegExp(`(?:^|[^A-Za-z0-9_-])(?:bg|text|border|ring|outline|fill|stroke|shadow|h|w|min-h|min-w|max-h|max-w|size|p|px|py|pt|pr|pb|pl|m|mx|my|mt|mr|mb|ml|gap|gap-x|gap-y|space-x|space-y|rounded|leading)-${escaped}(?![A-Za-z0-9_-])`, 'm');
   return utility.test(content);
 }
