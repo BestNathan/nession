@@ -154,7 +154,11 @@ function flattenLeaves(obj, prefix = [], inheritedOwner = null) {
   if (!obj || typeof obj !== 'object') return leaves;
   const owner = obj.$owner ?? inheritedOwner;
   for (const [key, value] of Object.entries(obj)) {
-    if (key.startsWith('
+    if (key.startsWith('$')) continue;
+    leaves.push(...flattenLeaves(value, [...prefix, key], owner));
+  }
+  return leaves;
+}
 
 function toKebab(parts) {
   return parts
