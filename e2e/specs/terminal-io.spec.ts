@@ -792,6 +792,47 @@ test.describe('Terminal I/O', () => {
     }).toPass({ timeout: 15_000 });
   });
 
+  test('a restored session still takes input after the reload (#1429)', async ({ page }, testInfo) => {
+    // #1429's reported flow: create, use, leave (reload), restore, type.
+    //
+    // It is a **regression test for the reported behavior, not for a
+    // reproduced defect**: the identity work the issue produced — the browser
+    // binding its stable id on the P2P socket (#1454), the Server presenting it
+    // to the Agent on the relay — changed *who the Agent thinks is typing*, and
+    // this flow was expected to pass on both sides of that change. The audit
+    // that established that is on the issue; this case is here because the
+    // report is what a user sees, and "the restored terminal shows output but
+    // takes no input" is the shape worth failing on if it ever comes back.
+    //
+    // P2P, and only P2P, because it is the transport where the Web decides its
+    // own control role and can therefore withhold input locally; on relay the
+    // client sends and the Agent authorizes, with no client-side gate to get
+    // wrong.
+    test.skip(!process.env.CI, 'local only — runs in CI workflow only');
+    const SESSION_NAME = `e2e-restore-input-${testInfo.retry}`;
+    await createSession(page, SESSION_NAME);
+    await attachToSession(page, SESSION_NAME, 'P2P');
+    await waitForInteractiveShell(page);
+
+    // Typing works before the reload, so what the assertion below measures is
+    // the restore rather than a session that never carried input at all.
+    await submitTerminalCommand(page, 'echo BEFORE-RESTORE-MARKER');
+    await expect
+      .poll(async () => readTerminalBuffer(page), { timeout: 15_000 })
+      .toContain('BEFORE-RESTORE-MARKER');
+
+    // A genuinely fresh client: the document reloads and the attach is rebuilt
+    // from the persisted profile (#1186), so waiting for the shell is waiting
+    // for the restore — there is no second confirmation to click.
+    await page.reload();
+    await waitForInteractiveShell(page);
+
+    await submitTerminalCommand(page, 'echo AFTER-RESTORE-MARKER');
+    await expect
+      .poll(async () => readTerminalBuffer(page), { timeout: 15_000 })
+      .toContain('AFTER-RESTORE-MARKER');
+  });
+
   test('reading history does not get dragged to the bottom, and returning does (#321)', async ({ page }, testInfo) => {
     // #321's remaining two criteria, and they are only reachable at all under
     // the default transport: `shouldScrollLocally()` is dead code under Plain

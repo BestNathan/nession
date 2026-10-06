@@ -549,6 +549,7 @@ where
                 session_id,
                 session_name,
                 client_id,
+                browser_client_id,
                 env_snapshots,
                 cols,
                 rows,
@@ -561,6 +562,11 @@ where
                     RelayRequest {
                         agent_ws_urls: &agent_ws_urls,
                         session_name: &session_name,
+                        // The browser's own id wherever it has one: the Agent's
+                        // control bookkeeping names clients, and the client is
+                        // the only party that can recognise its own name
+                        // (#1429).
+                        client_id: browser_client_id.as_deref().unwrap_or(&client_id),
                         env_snapshots: &env_snapshots,
                         cols,
                         rows,
@@ -733,6 +739,12 @@ struct RelayRequest<'a> {
     agent_ws_urls: &'a [String],
     /// Short session name, as the agent knows it.
     session_name: &'a str,
+    /// The identity this relay presents to the Agent (#1429): the browser's
+    /// stable client id when it sent one, and the Server's per-attach id
+    /// otherwise. It is written as `client.auth` on the relay's own connection
+    /// before the attach, so every id the Agent publishes for this session is
+    /// one the browser can recognise — see `relay_bidirectional_via_channel`.
+    client_id: &'a str,
     /// Resolved env snapshots to inject via the attach.
     env_snapshots: &'a [EnvSnapshot],
     /// Terminal columns for the initial tmux resize.
@@ -748,6 +760,73 @@ struct RelayRequest<'a> {
     /// client needs the session's history is a fact about *that client's*
     /// terminal, which only the client has — so the Server does not read it.
     needs_bootstrap: Option<bool>,
+}
+
+/// Read from the agent until the reply carrying `request_id` arrives, sending
+/// every other frame on to the client.
+///
+/// The frames in between are the Agent talking to the **client** — a scrollback
+/// prefill, an initial `terminal.resize` — and they must ride the same terminal
+/// lane they would have without the relay in the path. This used to read
+/// exactly **one** frame and treat whatever came back as the answer, which held
+/// only while the Agent stayed silent between a request and its reply; under
+/// control mode it does not, and a relayed attach silently lost its bootstrap
+/// (measured in the #321 S3 e2e run). A frame that cannot be read at all is
+/// forwarded rather than guessed at: an unknown wire is ignored everywhere else
+/// in this tree, and here "ignored" and "dropped on the floor" would be the same
+/// thing.
+///
+/// Generic over the read half so a test can drive it without a socket, the same
+/// shape [`forward_client_to_agent`] has. The caller owns the deadline.
+async fn await_agent_reply<RS>(
+    agent_read: &mut RS,
+    sender: &crate::server::outbound::WsMessageSender,
+    request_id: &str,
+    waiting_for: &str,
+) -> Result<serde_json::Value, String>
+where
+    RS: futures_util::Stream<
+            Item = Result<
+                tokio_tungstenite::tungstenite::Message,
+                tokio_tungstenite::tungstenite::Error,
+            >,
+        > + Unpin,
+{
+    use futures_util::StreamExt;
+
+    loop {
+        let Some(frame) = agent_read.next().await else {
+            return Err(format!(
+                "Agent closed the connection before answering {waiting_for}"
+            ));
+        };
+        let msg = match frame {
+            Ok(msg) => msg,
+            Err(e) => {
+                return Err(format!(
+                    "Agent connection error while waiting for {waiting_for}: {e}"
+                ));
+            }
+        };
+        let parsed = msg
+            .to_text()
+            .ok()
+            .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok());
+        if let Some(value) = parsed {
+            if value.get("id").and_then(|v| v.as_str()) == Some(request_id) {
+                return Ok(value);
+            }
+        }
+        match sender.send_terminal(msg).await {
+            Ok(()) => {}
+            Err(crate::server::outbound::OutboundError::Stalled) => {
+                return Err(format!(
+                    "Client stalled while the agent was answering {waiting_for}"
+                ));
+            }
+            Err(e) => return Err(format!("Failed to forward agent message: {e}")),
+        }
+    }
 }
 
 /// Relay mode using the connection's queued outbound path for client writes.
@@ -775,6 +854,7 @@ where
     let RelayRequest {
         agent_ws_urls,
         session_name,
+        client_id,
         env_snapshots,
         cols,
         rows,
@@ -828,6 +908,60 @@ where
     };
 
     let (mut agent_write, mut agent_read) = agent_ws.split();
+
+    // ── Step 0: Bind this relay's identity on the Agent connection (#1429) ──
+    //
+    // The Agent roles and authorizes attach, control changes and input by the
+    // connection's `client_id`, and everything it publishes about control names
+    // that id back to the client (`agent.terminal.control.changed`, the acquire
+    // reply). The browser decides its own role by comparing those names against
+    // its stable id — so a relay that presents no identity leaves the Agent
+    // naming every relayed browser, and the Server itself, `unknown-client`, and
+    // every one of those comparisons false.
+    //
+    // Sent, and waited for, *before* the attach on the same socket: the Agent
+    // serves `client.auth` inline after draining everything read before it, so
+    // ordering on this one socket is what makes the attach that follows be
+    // served by this identity rather than by whatever the connection was. The
+    // wait is what turns a refusal into a failed relay instead of a session
+    // that quietly belongs to nobody.
+    //
+    // The token is left empty on purpose: the Agent ignores it (it shares one
+    // payload type with the Server), and this socket's credential was the
+    // Agent's own connection token, presented at the upgrade.
+    let auth_id = uuid::Uuid::new_v4().to_string();
+    let auth_msg = serde_json::json!({
+        "msg_type": "client.auth",
+        "id": auth_id.clone(),
+        "timestamp": std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+        "payload": { "auth_token": "", "client_id": client_id },
+    });
+    agent_write
+        .send(tokio_tungstenite::tungstenite::Message::Text(
+            auth_msg.to_string(),
+        ))
+        .await?;
+    let auth_response = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        await_agent_reply(&mut agent_read, &sender, &auth_id, "the client auth"),
+    )
+    .await;
+    match auth_response {
+        Ok(Ok(_)) => {}
+        Ok(Err(reason)) => {
+            error!("{reason}");
+            return Err(anyhow::anyhow!("{reason}"));
+        }
+        Err(_) => {
+            error!("Timeout waiting for the agent's client.auth response (10s)");
+            return Err(anyhow::anyhow!(
+                "Timeout waiting for agent to bind the relay's identity for session '{session_name}'",
+            ));
+        }
+    }
 
     // ── Step 1: Send agent.attach to the agent ──
     // The Agent answers this one, so the wire carries the Agent's prefix even
@@ -900,40 +1034,10 @@ where
     //
     // A frame that is not ours is the agent talking to the **client**; it rides
     // the same terminal lane it would have without the relay in the path.
-    let attach_response = tokio::time::timeout(std::time::Duration::from_secs(10), async {
-        loop {
-            let Some(frame) = agent_read.next().await else {
-                return Err("Agent closed connection before accepting attach".to_string());
-            };
-            let msg = match frame {
-                Ok(msg) => msg,
-                Err(e) => return Err(format!("Agent connection error during attach: {e}")),
-            };
-            let parsed = msg
-                .to_text()
-                .ok()
-                .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok());
-            match parsed {
-                Some(value)
-                    if value.get("id").and_then(|v| v.as_str()) == Some(attach_id.as_str()) =>
-                {
-                    return Ok(value);
-                }
-                // Not the reply — including a frame that could not be read at
-                // all, which is forwarded rather than guessed at. An unknown
-                // wire is ignored everywhere else in this tree; here "ignored"
-                // and "dropped on the floor" are the same thing, so it goes on.
-                _ => {}
-            }
-            match sender.send_terminal(msg).await {
-                Ok(()) => {}
-                Err(crate::server::outbound::OutboundError::Stalled) => {
-                    return Err("Client stalled while the agent was still attaching".to_string());
-                }
-                Err(e) => return Err(format!("Failed to forward agent message: {e}")),
-            }
-        }
-    })
+    let attach_response = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        await_agent_reply(&mut agent_read, &sender, &attach_id, "the attach"),
+    )
     .await;
     let attach_response = match attach_response {
         Ok(Ok(parsed)) => parsed,
