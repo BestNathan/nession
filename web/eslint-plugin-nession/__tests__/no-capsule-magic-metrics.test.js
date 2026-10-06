@@ -20,7 +20,7 @@ test('no-capsule-magic-metrics flags tailwind numeric classes in capsule path', 
   ruleTester.run('no-capsule-magic-metrics', nessionPlugin.rules['no-capsule-magic-metrics'], {
     valid: [
       {
-        code: 'export function Ok() { return <div className="text-[length:var(--terminal-capsule-font-size)]" />; }',
+        code: 'export function Ok() { return <div className="text-[length:var(--nession-terminal-capsule-font-size)]" />; }',
         filename: '/proj/web/src/product/terminal/capsule/Ok.tsx',
       },
       {
@@ -44,7 +44,7 @@ test('no-capsule-magic-metrics flags tailwind numeric classes in capsule path', 
         // #801 Phase 6-style token rename, at which point the pattern pointed at
         // a name nothing emits any more — a branch that could never fire, with
         // nothing to notice. Exercised here so it cannot go quiet again.
-        code: 'export function Probe() { return <div className="text-[length:var(--terminal-capsule-line-height)]" />; }',
+        code: 'export function Probe() { return <div className="text-[length:var(--nession-terminal-capsule-line-height)]" />; }',
         filename: '/proj/web/src/product/terminal/capsule/Probe.tsx',
         errors: [{ messageId: 'violation' }],
       },
@@ -69,7 +69,7 @@ test('upper Capsule hosts cannot invent their own visual chrome', () => {
     invalid: [
       {
         code:
-          'export function PeekHost() { return <div className="rounded-lg bg-popover shadow-md text-[length:var(--terminal-capsule-projection-font-size)]" />; }',
+          'export function PeekHost() { return <div className="rounded-lg bg-popover shadow-md text-[length:var(--nession-terminal-capsule-projection-font-size)]" />; }',
         filename: '/proj/web/src/product/terminal/capsule/components/PeekHost.tsx',
         errors: [{ messageId: 'violation' }],
       },
