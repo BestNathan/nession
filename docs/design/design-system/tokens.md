@@ -92,8 +92,10 @@ correct repair is to route the value through the canonical owner.
 Renderer/framework foreign variables are permitted only behind explicit adapter
 boundaries (for example CodeMirror, xterm, or normalized upstream UI
 primitives). A Nession-owned token used through its pre-#1451 unprefixed spelling
-is still a violation in production source; generated aliases exist only as a
-temporary migration bridge.
+is still a violation in production source. The runtime compatibility aliases
+were removed once the source gate reached zero legacy consumers; the old
+spellings remain only in generated lint metadata so diagnostics can name the
+canonical `--nession-*` repair.
 
 ### When a value's owner is narrower than Experience
 
