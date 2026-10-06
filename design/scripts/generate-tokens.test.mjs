@@ -130,8 +130,11 @@ test('generateWebCss makes --nession-* the canonical CSS API and bridges framewo
     css,
     /@theme inline\s*\{[^}]*--color-success:\s*var\(--nession-success\);/s,
   );
-  // Pre-#1451 spelling is a compatibility adapter, not a second source.
-  assert.match(css, /--background:\s*var\(--nession-background\);/);
+  assert.doesNotMatch(
+    css,
+    /(^|\n)\s*--background:/,
+    'pre-#1451 spellings remain lint diagnostics only, not runtime CSS APIs',
+  );
 });
 
 test('generateWebCss emits namespaced domain vocabulary', () => {
