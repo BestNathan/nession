@@ -114,11 +114,10 @@ export function CapabilityCapsule({
       data-shell-shape={geometry.shape}
       className={cn(
         // The Capability Form wears the Conversation Form's geometry, from the
-        // same derivation `CapsuleShell` uses (#1347 SC-29/SC-30): on App the
-        // 44px control band the composer's own row takes, the labeled entries
-        // inside it (`capabilityEntryHeight`), and the shared surface, radius
-        // family, padding and clipping. The owner's 2026-10-03 correction, after
-        // the labeled form first shipped at 82px.
+        // same derivation `CapsuleShell` uses (#1347 SC-29/SC-30): the
+        // canonical control.md band, shared surface/radius family, padding and
+        // clipping. Content is contained inside that band; it never owns outer
+        // Capsule height (#1455).
         //
         // The bound is what makes the INNER row scroll instead of the capsule
         // overhanging the tool bar (SC-06); which bound depends on the bar, and
@@ -181,20 +180,16 @@ interface CapabilityEntryProps {
 }
 
 /**
- * One capability, as icon-over-label in a fixed-width slot.
+ * One capability in a fixed-width, fixed-height slot.
  *
- * The slot is what bounds the row (the owner's follow-up to Capsule V2): a
- * long label wraps inside its slot instead of widening it, and a wrapped label
- * drops to the smaller type — measured by its own line count, not guessed from
- * the string, so the rule stays true if a title changes. Both sizes are
- * capsule tokens, so Web and App cannot drift apart.
+ * Geometry belongs to WorkspaceNavigation, not the capability. Web uses a
+ * horizontal icon+label composition inside the denser 32px band; App keeps the
+ * icon-over-label composition inside its 44px touch band. Long labels truncate
+ * rather than growing either entry or outer Capsule, while aria-label/title keep
+ * the complete capability name available.
  *
- * The entry is one control band tall (`capabilityEntryHeight`): icon over
- * label, centred, so the Capability Form's row is the Conversation form's row.
- * The glyph is drawn bare rather than inside `CapsuleIconVisual`'s painted
- * circle — that split (#1034) is the icon *button*'s, and a labeled entry is a
- * tab, not a button: its affordance is the pair, and the band goes to ink and
- * the name rather than to a ring.
+ * The glyph stays bare rather than using CapsuleIconVisual: a labeled entry is
+ * one affordance, not an icon button plus a second label.
  */
 const CapabilityEntry = forwardRef<HTMLButtonElement, CapabilityEntryProps>(
   function CapabilityEntry(
