@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="316" viewBox="0 0 1180 316" role="img" aria-labelledby="title desc">
+  <title id="title">Nession Repository Telemetry</title>
+  <desc id="desc">Current repository health and rolling seven-day and thirty-day engineering efficiency for Nession.</desc>
+  <style>
+    text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+    .heading { font-size: 18px; font-weight: 650; fill: #1f2328; }
+    .group { font-size: 11px; font-weight: 700; letter-spacing: .8px; fill: #1f2328; }
+    .meta, .subtitle, .label, .secondary { fill: #656d76; }
+    .meta, .subtitle, .label { font-size: 11px; }
+    .label { font-weight: 600; }
+    .primary { font-size: 18px; font-weight: 700; }
+    .secondary { font-size: 10px; }
+  </style>
+  <rect width="1180" height="316" rx="14" fill="#ffffff" stroke="#d0d7de"/>
+  <text x="16" y="28" class="heading">Repository Telemetry</text>
+  <text x="1164" y="28" text-anchor="end" class="meta">main · updated 2026-10-06T23:54:25.044Z</text>
+
+  <text x="16" y="55" class="group">REPOSITORY METRICS</text>
+  <text x="1164" y="55" text-anchor="end" class="subtitle">current structure &amp; health</text>
+  <g><rect x="16" y="82" width="221.6" height="72" rx="10" fill="#f6f8fa" stroke="#d0d7de"/><text x="29" y="102" class="label">Source</text><text x="29" y="127" class="primary" fill="#1f2328">218,670 LOC</text><text x="29" y="145" class="secondary">1,135 tracked files</text></g><g><rect x="247.6" y="82" width="221.6" height="72" rx="10" fill="#f6f8fa" stroke="#d0d7de"/><text x="260.6" y="102" class="label">Tests</text><text x="260.6" y="127" class="primary" fill="#0969da">4,289 total</text><text x="260.6" y="145" class="secondary">U 2,600 · I 1,528 · E2E 161</text></g><g><rect x="479.2" y="82" width="221.6" height="72" rx="10" fill="#f6f8fa" stroke="#d0d7de"/><text x="492.2" y="102" class="label">Coverage</text><text x="492.2" y="127" class="primary" fill="#0969da">Rust 88%</text><text x="492.2" y="145" class="secondary">Web 86%</text></g><g><rect x="710.8" y="82" width="221.6" height="72" rx="10" fill="#f6f8fa" stroke="#d0d7de"/><text x="723.8" y="102" class="label">Test Health</text><text x="723.8" y="127" class="primary" fill="#0969da">U 100% · I 100%</text><text x="723.8" y="145" class="secondary">E2E 100%</text></g><g><rect x="942.4" y="82" width="221.6" height="72" rx="10" fill="#f6f8fa" stroke="#d0d7de"/><text x="955.4" y="102" class="label">Protocols</text><text x="955.4" y="127" class="primary" fill="#0969da">74 units</text><text x="955.4" y="145" class="secondary">server 30 · agent 44 · other 0</text></g>
+
+  <line x1="16" y1="177" x2="1164" y2="177" stroke="#d0d7de"/>
+
+  <text x="16" y="200" class="group">ENGINEERING EFFICIENCY</text>
+  <text x="1164" y="200" text-anchor="end" class="subtitle">rolling 7d / 30d · throughput &amp; repository flow</text>
+  <g><rect x="16" y="226" width="221.6" height="72" rx="10" fill="#f6f8fa" stroke="#d0d7de"/><text x="29" y="246" class="label">Code Churn · 7d</text><text x="29" y="271" class="primary" fill="#1f2328"><tspan fill="#1a7f37">+36,569</tspan><tspan fill="#656d76"> / </tspan><tspan fill="#cf222e">−8,595</tspan></text><text x="29" y="289" class="secondary">30d +181,827 / −64,614</text></g><g><rect x="247.6" y="226" width="221.6" height="72" rx="10" fill="#f6f8fa" stroke="#d0d7de"/><text x="260.6" y="246" class="label">Commits</text><text x="260.6" y="271" class="primary" fill="#0969da">3,486</text><text x="260.6" y="289" class="secondary">+366 7d · +1,653 30d</text></g><g><rect x="479.2" y="226" width="221.6" height="72" rx="10" fill="#f6f8fa" stroke="#d0d7de"/><text x="492.2" y="246" class="label">Issues</text><text x="492.2" y="271" class="primary" fill="#0969da">18 open</text><text x="492.2" y="289" class="secondary">7d +32/−45 · 30d +195/−215</text></g><g><rect x="710.8" y="226" width="221.6" height="72" rx="10" fill="#f6f8fa" stroke="#d0d7de"/><text x="723.8" y="246" class="label">Pull Requests</text><text x="723.8" y="271" class="primary" fill="#0969da">0 open</text><text x="723.8" y="289" class="secondary">7d +149/142m · 30d +624/577m</text></g><g><rect x="942.4" y="226" width="221.6" height="72" rx="10" fill="#f6f8fa" stroke="#d0d7de"/><text x="955.4" y="246" class="label">Workflow Activity</text><text x="955.4" y="271" class="primary" fill="#0969da">5,050</text><text x="955.4" y="289" class="secondary">+1,493 7d · +3,651 30d</text></g>
+</svg>
