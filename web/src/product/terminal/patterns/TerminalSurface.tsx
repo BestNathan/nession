@@ -14,8 +14,6 @@ import { Button } from '@/components/ui/button';
 import type { ResolvedWorkContext } from '@/product/terminal/capsule/workAwareness';
 import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
-import { cn } from '@/shared/lib/utils';
-import { chromeSansRole } from '@/shared/typography/chromeRoles';
 
 export interface TerminalSurfaceProps {
   /** xterm mount tree (TerminalPane). */
