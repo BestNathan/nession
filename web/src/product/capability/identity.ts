@@ -22,9 +22,9 @@ function capabilityTitleSegmenter(): GraphemeSegmenter {
     return cachedSegmenter;
   }
 
-  const Segmenter = (
-    Intl as unknown as { Segmenter?: GraphemeSegmenterConstructor }
-  ).Segmenter;
+  const Segmenter = Reflect.get(Intl, 'Segmenter') as
+    | GraphemeSegmenterConstructor
+    | undefined;
 
   if (!Segmenter) {
     throw new Error(
