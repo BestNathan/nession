@@ -1,5 +1,4 @@
 import { useEffect } from 'react';
-import { useLocation } from 'react-router-dom';
 import { FixtureTerminal } from '@/app/fixture/FixtureTerminal';
 import type { TerminalChrome } from '@/app/ShellMain';
 import {
@@ -26,7 +25,12 @@ import { fixturePaneCommand } from './fixturePaneCommand';
  * can reach (docs/design/migration.md).
  */
 export function FixtureShell() {
-  const search = useLocation().search;
+  // FixtureShell is also mounted directly by component tests without a Router.
+  // Canonical browser routes use HashRouter (`/#/fixture?pane=...`), so read
+  // only the hash query here instead of coupling this deterministic fixture to
+  // router context.
+  const queryIndex = window.location.hash.indexOf('?');
+  const search = queryIndex >= 0 ? window.location.hash.slice(queryIndex) : '';
 
   // The same stub `FixtureApp` installs, for the same reason (#838): a
   // capability has to be *reachable* from a fixture to be captured, and the
