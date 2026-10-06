@@ -35,7 +35,7 @@
 }
 
 .markdown strong {
-  font-weight: 600;
+  font-weight: var(--nession-typography-title-weight);
 }
 
 /* Markdown headings render one level down (h1→h2 …), so the top pair is the
@@ -81,14 +81,14 @@
 .markdown a {
   color: var(--color-text-link);
   font-weight: 500;
-  transition: box-shadow var(--transition-duration) var(--transition-ease);
+  transition: box-shadow var(--nession-motion-shell-duration) var(--nession-motion-shell-ease);
   position: relative;
   text-decoration: none;
   /* Transparent hit-area padding. */
-  border-left: 3px solid rgb(255 255 255 / 0);
-  border-right: 3px solid rgb(255 255 255 / 0);
-  border-top: 2px solid rgb(255 255 255 / 0);
-  border-bottom: 2px solid rgb(255 255 255 / 0);
+  border-left: 3px solid transparent;
+  border-right: 3px solid transparent;
+  border-top: 2px solid transparent;
+  border-bottom: 2px solid transparent;
   margin-left: -3px;
   margin-right: -3px;
 }
@@ -168,12 +168,13 @@
   display: inline-flex;
   align-items: center;
   box-sizing: border-box;
-  font: var(--typography-code-base);
   font-family: var(--font-family-mono);
   font-size: 0.875em !important;
+  font-weight: var(--nession-typography-code-weight);
+  line-height: var(--nession-typography-code-line-height);
   background-color: var(--color-surface-code-inline);
   border: 0.5px solid var(--color-border-subtle);
-  border-radius: var(--radius-sm);
+  border-radius: var(--nession-radius-control);
   padding: 0 5px;
 }
 
@@ -248,7 +249,7 @@
 }
 
 .tableScroll table code {
-  font-size: 11px;
+  font-size: var(--nession-typography-caption-size);
 }
 
 .markdown > *:first-child,
