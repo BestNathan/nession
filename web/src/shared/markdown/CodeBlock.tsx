@@ -10,6 +10,7 @@ import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { copyToClipboard } from '@/shared/lib/clipboard';
 import type { HastElement } from './hast';
+import { markdownCodeBlockPreClass } from './markdownVisualGrammar';
 
 /**
  * A fenced code block, as a readable surface rather than a wall of text.
@@ -95,7 +96,7 @@ export function CodeBlock({
       </div>
       {/* `overflow-x-auto` and no wrapping: a wrapped code line is a line whose
           indentation lies, which matters more here than fitting the column. */}
-      <pre className="overflow-x-auto p-3 text-[length:var(--nession-typography-code-size)] leading-[var(--nession-typography-code-line-height)]">
+      <pre className={markdownCodeBlockPreClass}>
         {children}
       </pre>
     </div>
