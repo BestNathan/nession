@@ -38,8 +38,8 @@ const STATUS: Record<
   AIToolStatus,
   { icon: typeof Check; label: string; className: string }
 > = {
-  success: { icon: Check, label: 'succeeded', className: 'text-[var(--conversation-tool-success)]' },
-  error: { icon: X, label: 'failed', className: 'text-[var(--conversation-tool-error)]' },
+  success: { icon: Check, label: 'succeeded', className: 'text-[var(--nession-conversation-tool-success)]' },
+  error: { icon: X, label: 'failed', className: 'text-[var(--nession-conversation-tool-error)]' },
   running: { icon: Loader, label: 'still running', className: '' },
   // Deliberately not "running": the provider could not tell whether a result
   // exists, and saying the call is still going would be a claim it never made.
