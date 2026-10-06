@@ -96,7 +96,7 @@ describe('ToolActivity', () => {
     )
 
     const body = screen.getByText('x'.repeat(5000))
-    expect(body.style.maxHeight).toContain('--conversation-group-max-height')
+    expect(body.style.maxHeight).toContain('--nession-conversation-group-max-height')
   })
 })
 
