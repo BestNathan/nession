@@ -14,26 +14,18 @@ This pattern previously required that direct chrome be **bounded to the contextu
 
 **#1347 (Capsule V2) supersedes both.** The Workspace capsule now carries the capability list — every capability that has a Workspace view — as one bounded, internally-scrolling horizontal row, and the `+`/menu disclosure is gone from Workspace. The contract's `overflow` moved from `menu` to `scroll` in the same change; the design-source test that pinned it moved with it.
 
-### Membership does not vary with the work (2026-10-02, owner decision)
+### Membership follows lifecycle visibility (#1455)
 
-This is a **second and separate reversal** — not part of #1347's — and it is recorded on its own because it replaces a rule this document carried for longer than Capsule V2 has existed.
+Capability registration does not buy permanent navigation chrome.
 
-An `unavailable` capability (presence `hidden`) used to be **dropped**. The old rule was *"unavailable capabilities render no dead slot"*, and the anti-pattern list called a disabled entry chrome *"advertising something that cannot be opened"*. It now **keeps its slot, drawn inert** on `disabled-foreground` — the role the design system defines for a control the user cannot act with, held to the 3:1 that keeps it from disappearing rather than to AA.
+The Workspace Capsule contains capabilities that:
 
-What changed the answer: Capsule V2 put the whole capability list in one row, so dropping a capability now means the row's **membership** changes as the work changes — an entry that vanishes and reappears is how a reader loses track of what the Workspace holds. The row now says "this exists, and you cannot use it here" rather than staying silent.
+1. contribute a Workspace view; and
+2. currently have visible lifecycle presence.
 
-**What it costs, plainly.** The retired rule was not empty: a Session with no files now shows a permanently inert Files entry. The mitigation is that it is inert and legible as such — not a live control that fails, not a silent absence — and it still carries `data-capability-state="unavailable"` for anything that needs to reason about it.
+An `unavailable` capability resolves to hidden presence and **does not reserve a disabled slot**. If that capability was already open when it becomes unavailable, its explanatory content may remain stable until the user chooses another capability, but the navigation row does not advertise dead chrome.
 
-What the supersession keeps, and what carries the old rules' weight instead:
-
-| Old rule | What holds it now |
-|---|---|
-| Direct chrome is bounded | The **capsule** is bounded: it must stay inside the tool bar while its content scrolls. The bound is on the row's width, not on the entry count. |
-| Registration never implies permanent navigation | A capability with no Workspace view contributes **no slot**. Visibility follows the view binding, not the registry. |
-| Unavailable capabilities render no dead slot | **Reversed on 2026-10-02 — see the section above.** The capability keeps its slot and is drawn inert. What survives from the old rule is its reason: the entry is *not* a live control that fails, and it is not silent either. |
-| Not a second application shell | Unchanged — the capsule is a bottom-zone control, not a sidebar and not a band above the capability. |
-
-The tradeoff, stated plainly: a Workspace with many capabilities now shows many icons in one row, and that row scrolls. The earlier design preferred a small visible set. That preference is **no longer a rule of this pattern** — the anti-patterns below were narrowed to match, and what remains forbidden is a row that *grows the shell* rather than a row that holds many entries.
+The capsule itself remains bounded. Adding more eligible capabilities increases only the row's horizontal scroll extent; it never widens the shell, creates a second row, or changes the Capsule's outer height.
 
 ## Purpose
 
@@ -43,7 +35,7 @@ Navigation should be generated from Workspace context and capability state rathe
 
 Must not:
 
-- render a slot for a capability that has no Workspace view — there is nothing to open and nothing to explain. (An `unavailable` capability *does* keep a slot and is drawn inert — see the membership note above; the difference is that it has a view to be unavailable *in*.)
+- render a slot for a capability that has no Workspace view or whose lifecycle presence is hidden/unavailable — dead navigation chrome advertises something the user cannot open;
 - let the row grow the shell: the capsule's width is bounded and its content scrolls, so registering another capability never widens the chrome and never wraps the row onto a second line;
 - force Files master/detail chrome onto unrelated capabilities;
 - allow an extension to define global Workspace navigation independently of Nession;
@@ -63,12 +55,12 @@ Navigation consequences:
 
 | State | Navigation behavior |
 |-------|---------------------|
-| `unavailable` | **Its slot, drawn inert and disabled.** Resolves to `hidden` presence; the surface renders it on `disabled-foreground` rather than dropping it — see the membership note above. Reached some other way it still lands on the capability's own not-available state. |
-| `available` | Its slot, carrying `available` |
-| `relevant` | The same slot, carrying `relevant` — state is data on the entry, not a promotion into or out of the row |
-| `active` | Selected state (dot) and scrolled into view; may also have Session-level presence |
+| `unavailable` | No Workspace navigation slot; already-open explanatory content may remain stable. |
+| `available` | A quiet entry surface carrying `available`. |
+| `relevant` | The same entry geometry carrying `relevant`; relevance does not invent another selected treatment. |
+| `active` | The same entry becomes selected through its Nession-owned entry surface and is scrolled into view. No dot/badge/underline. |
 
-For every state that has a slot, state is published on the entry (`data-capability-state`, `data-capability-presence`), so a capability's condition stays legible without the row changing size or membership as the work changes — `unavailable` included, since it keeps its slot drawn inert rather than being removed (see the membership note above). A capability does not become primary navigation merely because it is active. Current work remains primary.
+For every visible state, state is published on the entry (`data-capability-state`, `data-capability-presence`). Selection is navigation identity, not a work signal: active/inactive/hover may change semantic foreground/background only, while geometry and typography remain invariant. A capability does not become primary navigation merely because it is active. Current work remains primary.
 
 ## Presentation model
 
@@ -92,6 +84,7 @@ Conceptually, a capability contributes semantic data:
 interface WorkspaceCapability {
   id: string
   title: string
+  shortTitle?: string
   state: (context: CapabilityContext) => CapabilityState
 }
 ```
@@ -100,6 +93,13 @@ The exact API is implementation-specific. What a capability contributes is its
 semantic identity and state — a summary, an action list, or a self-declared view
 descriptor is not part of the contract, because each of those is a placement
 decision wearing a semantic name.
+
+`title` is the full human-readable identity. Compact navigation surfaces resolve
+`shortTitle ?? title`. If the full title exceeds **8 user-visible grapheme
+clusters**, the capability must declare an explicit `shortTitle` no longer than
+8 graphemes. Nession does not manufacture an abbreviation by slicing the full
+name. Context Capsule, Peek, Workspace headings and accessibility continue to use
+the full title where the surface has room for it.
 
 Important boundary:
 
@@ -182,17 +182,19 @@ Two consequences, replacing the old pair:
 ### Web: the capability capsule
 
 Capability navigation on Web is a **capsule** of fixed-width labeled slots in the
-bottom Capsule Zone, with a dot marking the open one. It carries every capability
-that has a Workspace view **and visible lifecycle presence**; `unavailable` is
-hidden and reserves no disabled slot (#1455).
+bottom Capsule Zone. The open capability is identified by the selected **entry
+surface itself** — there is no detached dot, badge or underline (#1458). It carries
+every capability that has a Workspace view **and visible lifecycle presence**;
+`unavailable` is hidden and reserves no disabled slot (#1455).
 
 The capsule's width is bounded and the row scrolls internally, so the shell does
 not grow when an extension registers. The entry itself is exactly the canonical
 `control.md` band. Because Web has the denser 32px band, icon + label are laid
-out horizontally and the label is constrained to one line inside its slot. A
-long capability name truncates visually while its complete name remains the
-button's accessible name/title. Content adapts to the band; the outer Capsule
-does not grow.
+out horizontally and the label is constrained to one line inside its slot. The
+visual label uses the capability-owned compact identity (`shortTitle ?? title`);
+the complete `title` remains the button's accessible name/title. Truncation is a
+defensive viewport guard, not the naming strategy. Content adapts to the band;
+the outer Capsule does not grow.
 
 The glyph is drawn bare (`icon-md`): the painted circle belongs to icon buttons,
 while a labeled capability entry's affordance is its icon-plus-name pair.
@@ -231,10 +233,11 @@ labeled build let entries carry their own vertical mass and the form grew to
 
 What they **do not** share is content — a composer on one, the labeled
 capability slots on the other. App keeps icon-over-label composition inside the
-44px band, but a long label is still a containment problem rather than permission
-to resize the Capsule. Labels stay single-line/truncated with their full
-accessible name retained. A relational long-label fixture protects that rule
-instead of relying on today's capability names being short.
+44px band and consumes the same capability-owned compact identity as Web. The
+visual compact title is capped by contract at 8 grapheme clusters; the full title
+remains accessible. Truncation remains only a defensive containment fallback and
+never grants permission to resize the Capsule. A relational long-label fixture
+protects that final guard.
 
 Two questions the previous revision left open, now settled by the same decision:
 
@@ -331,18 +334,21 @@ generated theme bridge resolves them back to that vocabulary.
 - Whitespace and hierarchy are preferred over card/tab proliferation.
 - Per-capability branding must not fragment Nession's visual language.
 - Active/relevant state may affect presence, but routine availability should remain quiet.
+- Active selection is a restrained semantic entry surface; it is not a dot, badge, underline, work signal or plugin-branded accent.
+- Compact capability labels are capability-owned semantic identities, not host-generated truncations.
 
 ## Anti-patterns
 
 - A capability strip that **grows the shell** — widening with the registry, or wrapping
   onto a second line. The failure is the growing row, not the number of entries in a
   bounded, scrolling one.
-- A slot for a capability that has no Workspace view — nothing to open, nothing to explain.
-  (An inert entry for an `unavailable` capability is *not* this: it has a view, it says so,
-  and it is why this anti-pattern was narrowed on 2026-10-02.)
+- A slot for a capability that has no Workspace view.
 - A disabled permanent entry for an unavailable capability. `unavailable` is
   hidden presence; explanatory content may remain open, but dead navigation
   chrome must not advertise it.
+- A detached selected dot/badge/underline that makes navigation identity look like
+  notification, pagination or work state.
+- Automatically slicing a long capability title to invent a compact identity.
 - One extension = one global tab.
 - A Workspace home page that is mostly a grid of feature launch cards.
 - A full-height secondary sidebar that exists only to list capabilities.
