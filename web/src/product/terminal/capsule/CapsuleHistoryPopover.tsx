@@ -14,7 +14,9 @@ import { CapsuleIconVisual } from '@/product/terminal/capsule/CapsuleIconVisual'
 import {
   capsuleCaptionTextClass,
   capsuleEmptyStatePadClass,
+  capsuleHistoryCommandClass,
   capsuleHistoryItemClass,
+  capsuleHistoryTitleClass,
   capsuleIconButtonClass,
   capsulePopoverHeaderClass,
   capsulePopoverPanelClass,
@@ -85,7 +87,7 @@ export function CapsuleHistoryPopover({
         className={capsulePopoverPanelClass}
       >
         <PopoverHeader className={capsulePopoverHeaderClass}>
-          <PopoverTitle>History</PopoverTitle>
+          <PopoverTitle className={capsuleHistoryTitleClass}>History</PopoverTitle>
           <Input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
@@ -112,7 +114,7 @@ export function CapsuleHistoryPopover({
                   setQuery('');
                 }}
               >
-                <span className="truncate font-mono">{entry.command}</span>
+                <span className={capsuleHistoryCommandClass}>{entry.command}</span>
                 <span className={cn(capsuleCaptionTextClass, 'shrink-0 text-muted-foreground')}>
                   {relativeTime(entry.timestamp)}
                 </span>
