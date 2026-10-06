@@ -344,7 +344,7 @@ export const capsuleComposerRowGapYClass = 'gap-y-[length:var(--nession-terminal
 export const capsuleShellContentGapClass = 'gap-[length:var(--nession-terminal-capsule-shell-content-gap)]';
 
 export const capsulePopoverPanelClass =
-  'z-[length:var(--nession-terminal-capsule-popover-zindex)] max-h-[length:var(--nession-terminal-capsule-popover-max-height)] w-[length:var(--nession-terminal-capsule-popover-width)] max-w-[calc(100vw-var(--nession-terminal-capsule-popover-viewport-inset))] overflow-hidden border-border bg-popover p-0 text-popover-foreground shadow-md';
+  'z-[length:var(--nession-terminal-capsule-popover-zindex)] max-h-[length:var(--nession-terminal-capsule-popover-max-height)] w-[length:var(--nession-terminal-capsule-popover-width)] max-w-[calc(100vw-var(--nession-terminal-capsule-popover-viewport-inset))] overflow-hidden border-border bg-popover p-0 text-popover-foreground shadow-[var(--nession-elevation-floating)]';
 
 export const capsulePopoverHeaderClass =
   'gap-[length:var(--nession-terminal-capsule-popover-gap)] border-b border-border/60 p-[length:var(--nession-terminal-capsule-popover-pad)]';
@@ -367,7 +367,7 @@ export const capsuleEmptyStatePadClass =
   'px-[length:var(--nession-terminal-capsule-phys-key-pad-x)] py-[length:var(--nession-terminal-capsule-dialog-gap)] text-[length:var(--nession-terminal-capsule-font-size)]';
 
 export const capsuleHistoryItemClass =
-  'flex w-full items-center justify-between gap-[length:var(--nession-terminal-capsule-popover-gap)] rounded px-[length:var(--nession-terminal-capsule-phys-key-pad-x)] py-[length:var(--nession-terminal-capsule-phys-key-pad-x)] text-left text-[length:var(--nession-terminal-capsule-font-size)] hover:bg-accent/40';
+  'flex w-full items-center justify-between gap-[length:var(--nession-terminal-capsule-popover-gap)] rounded-[var(--nession-radius-control)] px-[length:var(--nession-terminal-capsule-phys-key-pad-x)] py-[length:var(--nession-terminal-capsule-phys-key-pad-x)] text-left text-[length:var(--nession-terminal-capsule-font-size)] hover:bg-accent/40';
 
 export const capsulePhysKeyButtonClass =
   'h-[length:var(--nession-terminal-capsule-phys-key-height)] min-w-[5ch] shrink-0 whitespace-nowrap px-0 font-mono text-[length:var(--nession-terminal-capsule-phys-key-font-size)] leading-[length:var(--nession-terminal-capsule-phys-key-font-size)]';
