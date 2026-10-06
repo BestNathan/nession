@@ -1,15 +1,7 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { renderHook, waitFor } from '@testing-library/react';
+import { describe, it, expect } from 'vitest';
+import { renderHook } from '@testing-library/react';
 import { useAddressPlan } from '@/shared/hooks/useAddressPlan';
-import { orderAddressesByLatency } from '@/shared/lib/addressSelection';
 import type { AttachInfo, ProbedAddress } from '@/types';
-
-// Mock the latency ordering so the hook test is deterministic. The real
-// implementation tests ALL addresses from the browser and never filters on
-// server-side status; the mock returns every url in input order.
-vi.mock( '@/shared/lib/addressSelection', () => ({
-  orderAddressesByLatency: vi.fn(async (addrs: ProbedAddress[]) => addrs.map((a) => a.url)),
-}));
 
 function attach(overrides: Partial<AttachInfo>): AttachInfo {
   return {
@@ -24,103 +16,95 @@ function probed(url: string, status: ProbedAddress['status'] = 'reachable'): Pro
   return { url, network_type: 'lan', priority: 10, status };
 }
 
-beforeEach(() => {
-  vi.clearAllMocks();
-});
-
-afterEach(() => {
-  vi.restoreAllMocks();
-});
-
-describe('useAddressPlan', () => {
-  it('uses the manual override as a single-entry plan without latency testing', async () => {
-    const info = attach({
-      addresses: [probed('ws://a/ws'), probed('ws://b/ws')],
-    });
+describe('useAddressPlan (#1430)', () => {
+  it('uses the manual override as a single-entry plan', () => {
+    const info = attach({ addresses: [probed('ws://a/ws'), probed('ws://b/ws')] });
     const { result } = renderHook(() =>
       useAddressPlan(info, { orderedUrls: null, manualUrl: 'ws://b/ws' }),
     );
-    await waitFor(() => expect(result.current.ready).toBe(true));
-    expect(result.current.urls).toEqual(['ws://b/ws']);
+    expect(result.current).toEqual(['ws://b/ws']);
   });
 
-  it('uses pre-resolved orderedUrls verbatim (no re-testing)', async () => {
+  it('uses pre-resolved orderedUrls verbatim', () => {
     const info = attach({ addresses: [probed('ws://a/ws'), probed('ws://b/ws')] });
     const { result } = renderHook(() =>
       useAddressPlan(info, { orderedUrls: ['ws://b/ws', 'ws://a/ws'], manualUrl: null }),
     );
-    await waitFor(() => expect(result.current.ready).toBe(true));
-    expect(result.current.urls).toEqual(['ws://b/ws', 'ws://a/ws']);
+    expect(result.current).toEqual(['ws://b/ws', 'ws://a/ws']);
   });
 
   // Regression (issue #51): an EMPTY orderedUrls (probe cache not yet populated
   // / expired / transiently failed) must NOT resolve to a zero-URL plan. That
   // left activeUrl null → P2P never started and relay fallback never fired
-  // (dead state: badge says P2P, nothing connects). Empty must fall through to
-  // browser-testing attachInfo.addresses instead.
-  it('does not treat an empty orderedUrls as a resolved plan — falls back to candidates', async () => {
+  // (dead state: badge says P2P, nothing connects). Empty falls through to the
+  // advertisement's own order.
+  it('does not treat an empty orderedUrls as a resolved plan — falls back to candidates', () => {
     const info = attach({ addresses: [probed('ws://a/ws'), probed('ws://b/ws')] });
     const { result } = renderHook(() =>
       useAddressPlan(info, { orderedUrls: [], manualUrl: null }),
     );
-    await waitFor(() => expect(result.current.ready).toBe(true));
-    expect(result.current.urls).toEqual(['ws://a/ws', 'ws://b/ws']);
+    expect(result.current).toEqual(['ws://a/ws', 'ws://b/ws']);
   });
 
-  it('empty orderedUrls with no candidates falls back to legacy agent_address', async () => {
+  it('empty orderedUrls with no candidates falls back to legacy agent_address', () => {
     const info = attach({ agent_address: 'ws://legacy/ws', addresses: [] });
     const { result } = renderHook(() =>
       useAddressPlan(info, { orderedUrls: [], manualUrl: null }),
     );
-    await waitFor(() => expect(result.current.ready).toBe(true));
-    expect(result.current.urls).toEqual(['ws://legacy/ws']);
+    expect(result.current).toEqual(['ws://legacy/ws']);
   });
 
-  it('falls back to the legacy agent_address when no address list is present', async () => {
+  it('falls back to the legacy agent_address when no address list is present', () => {
     const info = attach({ agent_address: 'ws://legacy/ws', addresses: [] });
     const { result } = renderHook(() =>
       useAddressPlan(info, { orderedUrls: null, manualUrl: null }),
     );
-    await waitFor(() => expect(result.current.ready).toBe(true));
-    expect(result.current.urls).toEqual(['ws://legacy/ws']);
+    expect(result.current).toEqual(['ws://legacy/ws']);
   });
 
-  it('auto-orders the candidate list by latency when not pre-resolved', async () => {
+  /**
+   * The point of #1430: with no pre-resolved order the plan IS the
+   * advertisement's own order — synchronously, with no probe in the path.
+   * That order is the agent's priority sort, so the first entry is the right
+   * first attempt; the browser's measurement refines the *next* attach.
+   */
+  it('orders by the advertisement, synchronously, with no probe in the path', () => {
     const info = attach({
       addresses: [probed('ws://a/ws'), probed('ws://dead/ws', 'unreachable')],
     });
     const { result } = renderHook(() =>
       useAddressPlan(info, { orderedUrls: null, manualUrl: null }),
     );
-    await waitFor(() => expect(result.current.ready).toBe(true));
-    // Browser tests all addresses; server 'unreachable' is NOT a filter.
-    expect(result.current.urls).toEqual(['ws://a/ws', 'ws://dead/ws']);
+    // Server-side 'unreachable' is still not a filter — the browser is the
+    // authority — and nothing here waits to measure either address.
+    expect(result.current).toEqual(['ws://a/ws', 'ws://dead/ws']);
   });
 
-  /**
-   * The probe must present the reply's credential (#1091): the agent refuses an
-   * uncredentialed upgrade since #1013, so a bare probe measures nothing and
-   * reports every candidate unreachable.
-   */
-  it('probes the candidates with the attach reply credential', async () => {
-    const info = attach({ addresses: [probed('ws://a/ws')], connection_token: 'tok' });
+  it('carries every candidate into the plan, whatever the server thinks of it', () => {
+    const info = attach({
+      addresses: [probed('ws://lan/ws'), probed('ws://vpn/ws'), probed('ws://public/ws')],
+    });
     const { result } = renderHook(() =>
       useAddressPlan(info, { orderedUrls: null, manualUrl: null }),
     );
-    await waitFor(() => expect(result.current.ready).toBe(true));
-
-    expect(orderAddressesByLatency).toHaveBeenCalledWith(
-      [probed('ws://a/ws')],
-      { credential: 'tok' },
-    );
+    expect(result.current).toHaveLength(3);
   });
 
-  it('is immediately ready with no urls for relay attaches', async () => {
+  it('is immediately ready with no urls for relay attaches', () => {
     const info = attach({ mode: 'relay' });
     const { result } = renderHook(() =>
       useAddressPlan(info, { orderedUrls: null, manualUrl: null }),
     );
-    await waitFor(() => expect(result.current.ready).toBe(true));
-    expect(result.current.urls).toEqual([]);
+    expect(result.current).toEqual([]);
+  });
+
+  it('resolves the same plan across re-renders (no effect, no churn)', () => {
+    const info = attach({ addresses: [probed('ws://a/ws')] });
+    const { result, rerender } = renderHook(() =>
+      useAddressPlan(info, { orderedUrls: null, manualUrl: null }),
+    );
+    const first = result.current;
+    rerender();
+    expect(result.current).toBe(first);
   });
 });

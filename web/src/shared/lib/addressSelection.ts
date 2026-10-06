@@ -120,18 +120,3 @@ export function orderByLatency(results: AddressLatency[]): string[] {
   reachable.sort((a, b) => (a.latencyMs ?? Infinity) - (b.latencyMs ?? Infinity));
   return [...reachable.map((r) => r.url), ...failed.map((r) => r.url)];
 }
-
-/**
- * Convenience: browser-test a candidate list and return the best-first URL
- * order. Tests all addresses (never filters on server-side status).
- */
-export async function orderAddressesByLatency(
-  addresses: ProbedAddress[],
-  options: ProbeOptions = {},
-): Promise<string[]> {
-  if (addresses.length === 0) {
-    return [];
-  }
-  const results = await testAddresses(addresses, options);
-  return orderByLatency(results);
-}

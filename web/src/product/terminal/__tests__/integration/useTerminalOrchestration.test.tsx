@@ -59,7 +59,6 @@ const { deps } = vi.hoisted(() => ({
 
 vi.mock('@/product/terminal/hooks/useP2PAttachTransport', () => ({
   useP2PAttachTransport: () => ({
-    waitingForAddressPlan: false,
     agentTerminalApi: deps.api,
     connectionState: deps.connectionState,
     runtime: deps.runtime,

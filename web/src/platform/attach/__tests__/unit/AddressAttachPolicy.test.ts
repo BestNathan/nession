@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { AddressAttachPolicy } from '@/platform/attach/AddressAttachPolicy';
 import type { AttachInfo } from '@/types';
-import type { AddressPlan } from '@/shared/hooks/useAddressPlan';
 
 function makeAttachInfo(): AttachInfo {
   return {
@@ -16,8 +15,9 @@ function makeAttachInfo(): AttachInfo {
   };
 }
 
-function makePlan(urls: string[]): AddressPlan {
-  return { ready: true, urls };
+/** The plan is the ordered URL list (#1430) — no readiness state exists. */
+function makePlan(urls: string[]): string[] {
+  return urls;
 }
 
 describe('AddressAttachPolicy', () => {
@@ -27,7 +27,7 @@ describe('AddressAttachPolicy', () => {
       orderedUrls: ['ws://a/ws', 'ws://b/ws'],
       manualOverride: null,
       forcedRelay: false,
-      addressPlan: makePlan(['ws://a/ws', 'ws://b/ws']),
+      addressUrls: makePlan(['ws://a/ws', 'ws://b/ws']),
       addressIndex: 0,
     });
     expect(policy.activeUrl).toBe('ws://a/ws');
@@ -39,7 +39,7 @@ describe('AddressAttachPolicy', () => {
       orderedUrls: null,
       manualOverride: null,
       forcedRelay: true,
-      addressPlan: makePlan(['ws://a/ws']),
+      addressUrls: makePlan(['ws://a/ws']),
       addressIndex: 0,
     });
     expect(policy.activeUrl).toBeNull();
@@ -51,7 +51,7 @@ describe('AddressAttachPolicy', () => {
       orderedUrls: ['ws://a/ws', 'ws://b/ws'],
       manualOverride: null,
       forcedRelay: false,
-      addressPlan: makePlan(['ws://a/ws', 'ws://b/ws']),
+      addressUrls: makePlan(['ws://a/ws', 'ws://b/ws']),
       addressIndex: 0,
     });
     expect(policy.onCandidateDisconnected()).toEqual({ type: 'next-candidate' });
@@ -64,7 +64,7 @@ describe('AddressAttachPolicy', () => {
       orderedUrls: ['ws://dead/ws'],
       manualOverride: null,
       forcedRelay: false,
-      addressPlan: makePlan(['ws://dead/ws']),
+      addressUrls: makePlan(['ws://dead/ws']),
       addressIndex: 0,
     });
     expect(policy.onCandidateDisconnected()).toEqual({ type: 'force-relay' });
@@ -76,7 +76,7 @@ describe('AddressAttachPolicy', () => {
       orderedUrls: ['ws://a/ws', 'ws://b/ws'],
       manualOverride: null,
       forcedRelay: false,
-      addressPlan: makePlan(['ws://a/ws', 'ws://b/ws']),
+      addressUrls: makePlan(['ws://a/ws', 'ws://b/ws']),
       addressIndex: 0,
     });
     expect(policy.maxReconnectAttempts()).toBe(2);
@@ -88,7 +88,7 @@ describe('AddressAttachPolicy', () => {
       orderedUrls: ['ws://a/ws', 'ws://b/ws'],
       manualOverride: 'ws://manual/ws',
       forcedRelay: false,
-      addressPlan: makePlan(['ws://a/ws', 'ws://b/ws']),
+      addressUrls: makePlan(['ws://a/ws', 'ws://b/ws']),
       addressIndex: 0,
     });
     expect(policy.isP2P).toBe(true);
@@ -102,12 +102,12 @@ describe('AddressAttachPolicy', () => {
       orderedUrls: ['ws://a/ws', 'ws://b/ws'],
       manualOverride: null,
       forcedRelay: false,
-      addressPlan: makePlan(['ws://a/ws', 'ws://b/ws']),
+      addressUrls: makePlan(['ws://a/ws', 'ws://b/ws']),
       addressIndex: 0,
     });
     policy.onCandidateDisconnected();
     expect(policy.activeUrl).toBe('ws://b/ws');
-    policy.update({ addressPlan: makePlan(['ws://c/ws', 'ws://d/ws']) });
+    policy.update({ addressUrls: makePlan(['ws://c/ws', 'ws://d/ws']) });
     expect(policy.activeUrl).toBe('ws://c/ws');
   });
 
@@ -118,7 +118,7 @@ describe('AddressAttachPolicy', () => {
       orderedUrls: null,
       manualOverride: null,
       forcedRelay: false,
-      addressPlan: makePlan([attachInfo.agent_address ?? 'ws://a/ws']),
+      addressUrls: makePlan([attachInfo.agent_address ?? 'ws://a/ws']),
       addressIndex: 0,
     });
     expect(policy.maxReconnectAttempts()).toBe(2);
