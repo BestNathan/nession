@@ -19,6 +19,7 @@ const VISUAL_COLOR_PREFIXES = new Set([
   'caret','divide','from','to','via',
 ]);
 const TYPOGRAPHY_SCALE_RE = /^text-(?:xs|sm|base|lg|xl|[2-9]xl)$/;
+const PROSE_SCALE_RE = /^prose-(?:sm|base|lg|xl|2xl)$/;
 const TYPOGRAPHY_LITERAL_RE = /^text-\[(?:-?\d+(?:\.\d+)?)(?:px|rem|em)?\]$/;
 const FONT_WEIGHT_RE = /^font-(?:thin|extralight|light|normal|medium|semibold|bold|extrabold|black)$/;
 const LEADING_RE = /^leading-(?:none|tight|snug|normal|relaxed|loose|\[[^\]]+\])$/;
@@ -122,7 +123,7 @@ export function findVisualUtilityViolations(value, metadata) {
       continue;
     }
 
-    if (TYPOGRAPHY_SCALE_RE.test(token) || TYPOGRAPHY_LITERAL_RE.test(token) ||
+    if (TYPOGRAPHY_SCALE_RE.test(token) || PROSE_SCALE_RE.test(token) || TYPOGRAPHY_LITERAL_RE.test(token) ||
         FONT_WEIGHT_RE.test(token) || LEADING_RE.test(token) || TRACKING_RE.test(token)) {
       violations.push({ token: raw, kind: 'typography', repair: repairFor('typography') });
       continue;
