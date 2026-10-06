@@ -85,10 +85,6 @@
       "lineHeight": {
         "value": "1.35"
       }
-    },
-    "labelTracking": {
-      "$description": "Letter spacing for uppercase quiet chrome labels. Centralized so section labels do not invent tracking per feature (#1451).",
-      "value": "0.025em"
     }
   },
   "control": {
@@ -434,5 +430,9 @@
       "$description": "The viewer's own controls (Edit / Save / View / Raw / close). The body role, like every other App control — the shared `Button size=\"sm\"` default (`text-xs`) is a desktop density that the App inherited, and it left the file detail's actions as the smallest text on the screen they act on.",
       "ref": "experience.app.typography.body.size"
     }
+  },
+  "typographyLabelTracking": {
+    "$description": "Letter spacing for uppercase quiet chrome labels. Centralized so section labels do not invent tracking per feature (#1451).",
+    "value": "0.025em"
   }
 }
