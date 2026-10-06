@@ -178,7 +178,7 @@ export function WorkspaceShell({
   // still remain as explanatory content without advertising dead chrome.
   //
   // The row renders **registration order**, and the open capability is only
-  // *marked* (selected state + dot), never moved. The owner's follow-up settled
+  // *marked* by its entry surface, never moved. The owner's follow-up settled
   // this: activation is not placement, so the entry under the thumb stays where
   // it was and a row does not reshuffle itself as the work changes. The
   // presentation model still decides *membership* (which capabilities hold

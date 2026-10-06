@@ -32,3 +32,10 @@ export {
   type EmergenceInput,
 } from './emergence';
 export { MAX_OBSERVED_COMMANDS, observeSessionCommand } from './facts';
+
+export {
+  CAPABILITY_COMPACT_TITLE_MAX_GRAPHEMES,
+  countCapabilityTitleGraphemes,
+  resolveCapabilityCompactTitle,
+  validateCapabilityIdentity,
+} from './identity';

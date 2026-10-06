@@ -54,12 +54,18 @@ export interface CapabilityContext extends CapabilityScope {
 
 export interface CapabilitySnapshot {
   id: CapabilityId;
+  /** Full human-readable capability identity. */
   title: string;
+  /** Capability-owned compact identity for constrained navigation surfaces. */
+  shortTitle?: string;
   scope: CapabilityScope;
   state: CapabilityState;
 }
 
-export type CapabilitySnapshotData = Omit<CapabilitySnapshot, 'id' | 'title'>;
+export type CapabilitySnapshotData = Omit<
+  CapabilitySnapshot,
+  'id' | 'title' | 'shortTitle'
+>;
 
 /**
  * A provider describes capability semantics and state. It does not own global
@@ -67,6 +73,14 @@ export type CapabilitySnapshotData = Omit<CapabilitySnapshot, 'id' | 'title'>;
  */
 export interface CapabilityDefinition {
   id: CapabilityId;
+  /** Full human-readable capability identity. */
   title: string;
+  /**
+   * Capability-owned compact identity.
+   *
+   * Required by the registry when `title` exceeds the compact-name limit.
+   * Nession never manufactures an abbreviation from the full title.
+   */
+  shortTitle?: string;
   resolve(context: CapabilityContext): CapabilitySnapshotData;
 }

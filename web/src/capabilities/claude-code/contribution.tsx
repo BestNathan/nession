@@ -27,6 +27,7 @@ import { ClaudeCodeProjection } from './components/ClaudeCodeProjection';
 
 export const CLAUDE_CODE_ID = 'claude-code';
 export const CLAUDE_CODE_TITLE = 'Claude Code';
+export const CLAUDE_CODE_SHORT_TITLE = 'Claude';
 
 /**
  * Commands that mean "Claude Code is running here".

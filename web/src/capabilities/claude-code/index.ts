@@ -10,6 +10,7 @@ export type {
 export {
   CLAUDE_CODE_ID,
   CLAUDE_CODE_TITLE,
+  CLAUDE_CODE_SHORT_TITLE,
   claudeCodeConversation,
   claudeCodeProjection,
   claudeCodeView,

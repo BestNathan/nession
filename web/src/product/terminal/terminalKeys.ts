@@ -29,6 +29,7 @@ import { TerminalKeysProjection } from '@/product/terminal/TerminalKeysProjectio
 
 export const TERMINAL_KEYS_ID = 'terminal-keys';
 export const TERMINAL_KEYS_TITLE = 'Terminal Keys';
+export const TERMINAL_KEYS_SHORT_TITLE = 'Keys';
 
 /**
  * Reachable wherever there is a terminal to type into, and *sensed* where there
