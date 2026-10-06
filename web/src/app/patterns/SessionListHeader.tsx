@@ -88,7 +88,7 @@ export function SessionListHeader({
   };
 
   return (
-    <div className="flex shrink-0 flex-col gap-[var(--shell-space-2)] px-[var(--shell-space-2)] pb-[var(--shell-space-2)] max-lg:gap-[var(--shell-space-3)]">
+    <div className="flex shrink-0 flex-col gap-[var(--nession-shell-space-2)] px-[var(--nession-shell-space-2)] pb-[var(--nession-shell-space-2)] max-lg:gap-[var(--nession-shell-space-3)]">
       <SidebarSectionHead label="Sessions" />
       <SearchBar
         searchQuery={searchQuery}

@@ -129,7 +129,7 @@ export function CapsuleShell({
          * composer growing upward never lifts it above the shell's top and the
          * shell-only occlusion measurement stays exact (#1204 §1).
          */
-        <div className="grid grid-cols-[minmax(0,1fr)_auto] items-end gap-x-[length:var(--shell-space-2)]">
+        <div className="grid grid-cols-[minmax(0,1fr)_auto] items-end gap-x-[length:var(--nession-shell-space-2)]">
           {projection ? (
             <div className="col-start-1 row-start-1 min-w-0">{projection}</div>
           ) : null}

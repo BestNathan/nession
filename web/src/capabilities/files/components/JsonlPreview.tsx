@@ -70,7 +70,7 @@ export function JsonlPreview({ content }: JsonlPreviewProps) {
 
   if (records.length === 0) {
     return (
-      <div className={cn('p-[var(--workspace-editor-pad-y)] px-[var(--workspace-editor-head-pad-x)] text-muted-foreground', chromeSansRole('secondary'))}>
+      <div className={cn('p-[var(--nession-workspace-editor-pad-y)] px-[var(--nession-workspace-editor-head-pad-x)] text-muted-foreground', chromeSansRole('secondary'))}>
         No JSONL records in this file.
       </div>
     );

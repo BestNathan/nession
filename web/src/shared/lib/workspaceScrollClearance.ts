@@ -37,7 +37,7 @@
  * with the surface that owns it swapped in, so the two halves of SC-12 read as
  * one mechanism.
  */
-export const WORKSPACE_CONTENT_BOTTOM_INSET = '--workspace-content-bottom-inset';
+export const WORKSPACE_CONTENT_BOTTOM_INSET = '--nession-local-workspace-content-bottom-inset';
 
 /**
  * The opt-in for a scroll container that can reach the pane bottom: trailing
@@ -47,4 +47,5 @@ export const WORKSPACE_CONTENT_BOTTOM_INSET = '--workspace-content-bottom-inset'
  * (no capabilities, or nothing to navigate), the shell publishes `0px`, and the
  * container goes back to full height without reserving anything permanently.
  */
-export const workspaceScrollClearanceClass = `pb-[var(${WORKSPACE_CONTENT_BOTTOM_INSET},0px)]`;
+export const workspaceScrollClearanceClass =
+  'pb-[var(--nession-local-workspace-content-bottom-inset,0px)]';

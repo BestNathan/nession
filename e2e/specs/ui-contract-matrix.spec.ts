@@ -364,6 +364,47 @@ async function assertRowOpensDetail(
   await expect(page.getByTestId('capsule-capability-open-workspace')).toBeVisible();
 }
 
+async function assertWorkspaceEntryStateKeepsVisualGrammar(
+  page: import('@playwright/test').Page,
+): Promise<void> {
+  const signatureForFiles = async (route: string, expectedPressed: 'true' | 'false') => {
+    await page.goto(route);
+    const target = page.getByTestId('workspace-tool-files');
+    await expect(target).toBeVisible();
+    await expect(target).toHaveAttribute('aria-pressed', expectedPressed);
+    await waitForSettledBox(target);
+
+    return target.evaluate((node) => {
+      const rect = node.getBoundingClientRect();
+      const style = getComputedStyle(node);
+      const label = node.querySelector('[data-testid$="-label"]');
+      const labelStyle = label instanceof HTMLElement ? getComputedStyle(label) : null;
+      return {
+        width: rect.width,
+        height: rect.height,
+        borderRadius: style.borderRadius,
+        paddingLeft: style.paddingLeft,
+        paddingRight: style.paddingRight,
+        fontSize: labelStyle?.fontSize ?? null,
+        fontWeight: labelStyle?.fontWeight ?? null,
+        lineHeight: labelStyle?.lineHeight ?? null,
+      };
+    });
+  };
+
+  // FixtureWorkspace derives the active capability from the URL and deliberately
+  // supplies a no-op onToolChange. Compare the SAME Files entry across two
+  // canonical routes instead of pretending the fixture owns interactive routing:
+  // default => Files active; ?capability=git => Files inactive.
+  const active = await signatureForFiles('/#/fixture/workspace', 'true');
+  const inactive = await signatureForFiles('/#/fixture/workspace?capability=git', 'false');
+
+  // Selection is state, not a new component recipe. Color/presence may change;
+  // geometry and typography may not. This is the Workspace family's relational
+  // invariant, analogous to Context -> Peek for Capsule but across control state.
+  expect(inactive).toEqual(active);
+}
+
 for (const row of viewports.filter((v) => v.experience === 'web')) {
   test.describe(`${row.id} ${row.width}×${row.height}`, () => {
     test.use({ viewport: { width: row.width, height: row.height } });
@@ -394,6 +435,10 @@ for (const row of viewports.filter((v) => v.experience === 'web')) {
       await expectVisibleWithin(capsule, bar, optsFor(PATTERN_WORKSPACE_NAV, 'web', row.id));
 
       // The capsule is a scrollable container showing all capabilities.
+    });
+
+    test('workspace capability state does not fork its visual grammar (#1451)', async ({ page }) => {
+      await assertWorkspaceEntryStateKeepsVisualGrammar(page);
     });
 
     test('the Context Capsule is a stacked Capsule, not a menu (#1347 SC-41–44)', async ({ page }) => {

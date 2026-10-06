@@ -114,7 +114,7 @@ function GitPeekBody({
                 title={row.path}
                 onClick={() => onFocusChange?.(row.path)}
                 className={cn(
-                  'flex w-full items-center gap-1.5 rounded px-1 py-0.5 text-left text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                  'flex w-full items-center gap-1.5 rounded-[var(--nession-radius-control)] px-1 py-0.5 text-left text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                   chromeSansRole('caption'),
                 )}
               >

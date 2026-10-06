@@ -204,7 +204,7 @@ describe('SessionItem', () => {
       />,
     );
     const row = screen.getByTestId('session-item-row');
-    expect(row.className).toMatch(/shell-space|var\(--shell-space/);
+    expect(row.className).toMatch(/shell-space|var\(--nession-shell-space/);
   });
 });
 
@@ -369,11 +369,11 @@ describe('SessionItem row actions overflow', () => {
   it('sizes the trigger from the experience control band, not a literal', () => {
     renderRow({ onKill: vi.fn() });
     const trigger = screen.getByTestId(`session-actions-${session.session_id}`);
-    // `--control-md` is the row's own band: 32px under the Web shell, 44px
+    // `--nession-control-md` is the row's own band: 32px under the Web shell, 44px
     // inside the App, whose value is `experience.app.touchTarget.min`. A
     // literal here would be right in one experience and a sub-floor tap target
     // in the other — which is what `size-8` on the inline icons is.
-    expect(trigger.className).toMatch(/var\(--control-md\)/);
+    expect(trigger.className).toMatch(/var\(--nession-control-md\)/);
     expect(trigger.className).not.toMatch(/(^|\s)size-\d/);
   });
 

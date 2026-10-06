@@ -4,4 +4,4 @@
  * plus the same vertical inset as `capsuleShellInnerPadClass` / dock `py-*`.
  */
 export const surfaceDestinationActionBandClass =
-  'size-[length:calc(var(--control-md)+2*var(--terminal-capsule-shell-pad-y))]';
+  'size-[length:calc(var(--nession-control-md)+2*var(--nession-terminal-capsule-shell-pad-y))]';

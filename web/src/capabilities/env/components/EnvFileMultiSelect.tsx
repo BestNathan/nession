@@ -64,7 +64,7 @@ export function EnvFileMultiSelect({
           disabled={disabled}
         />
       </div>
-      <ScrollArea className="h-40 rounded-[var(--radius-surface)] border">
+      <ScrollArea className="h-40 rounded-[var(--nession-radius-surface)] border">
         {filtered.length === 0 ? (
           <p className={cn('py-6 text-center text-muted-foreground', chromeSansRole('metadata'))}>
             {files.length === 0 ? emptyLabel : 'No files match your search'}
@@ -86,7 +86,7 @@ export function EnvFileMultiSelect({
                 >
                   <span
                     className={cn(
-                      'w-4 h-4 rounded border flex items-center justify-center flex-shrink-0',
+                      'w-4 h-4 rounded-[var(--nession-radius-control)] border flex items-center justify-center flex-shrink-0',
                       isSelected ? 'bg-primary border-primary' : 'border-muted-foreground/40',
                     )}
                   >

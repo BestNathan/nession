@@ -37,7 +37,7 @@ describe('SurfaceDestinationAction (#1204)', () => {
     render(<SurfaceDestinationAction destination="workspace" onOpen={vi.fn()} />);
 
     const action = screen.getByTestId('surface-action-open-workspace');
-    expect(action.className).toMatch(/calc\(var\(--control-md\)\+2\*var\(--terminal-capsule-shell-pad-y\)\)/);
+    expect(action.className).toMatch(/calc\(var\(--nession-control-md\)\+2\*var\(--nession-terminal-capsule-shell-pad-y\)\)/);
   });
 
   it('restores pointer hit-testing inside a pointer-events-none dock region', () => {

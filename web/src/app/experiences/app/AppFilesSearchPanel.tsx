@@ -5,8 +5,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 import type { FileEntry } from '@/capabilities/files';
 import type { AppFilesSearchStatus } from './useAppFilesSearch';
 import { cn } from '@/shared/lib/utils';
-import { bodyAppClass, metadataAppClass, primaryAppClass, secondaryAppClass } from '@/app/experiences/app/appTypography';
-import { chromeMonoRole } from '@/shared/typography/chromeRoles';
+import { bodyAppClass, primaryAppClass, secondaryAppClass } from '@/app/experiences/app/appTypography';
+import { chromeLabelRole, chromeMonoRole } from '@/shared/typography/chromeRoles';
 
 export interface AppFilesSearchPanelProps {
   query: string;
@@ -29,9 +29,9 @@ export function AppFilesSearchPanel({
 }: AppFilesSearchPanelProps) {
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="files-app-search">
-      <div className="relative shrink-0 px-[var(--shell-space-3)] pb-[var(--shell-space-2)]">
+      <div className="relative shrink-0 px-[var(--nession-shell-space-3)] pb-[var(--nession-shell-space-2)]">
         <Search
-          className="pointer-events-none absolute left-[calc(var(--shell-space-3)+0.75rem)] top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+          className="pointer-events-none absolute left-[calc(var(--nession-shell-space-3)+0.75rem)] top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
           aria-hidden
         />
         <Input
@@ -47,14 +47,14 @@ export function AppFilesSearchPanel({
           capsule clearance: the search depth is a Workspace depth like any
           other, and its last hit must be able to scroll above the capsule
           (owner decision 2026-10-03). */}
-      <div className="min-h-0 flex-1 overflow-y-auto px-[var(--shell-space-3)] pb-[max(var(--shell-space-3),var(--workspace-content-bottom-inset,0px))]">
-        <p className={cn('pb-[var(--shell-space-2)] uppercase tracking-wide text-muted-foreground', metadataAppClass)}>
+      <div className="min-h-0 flex-1 overflow-y-auto px-[var(--nession-shell-space-3)] pb-[max(var(--nession-shell-space-3),var(--nession-local-workspace-content-bottom-inset,0px))]">
+        <p className={cn('pb-[var(--nession-shell-space-2)] text-muted-foreground', chromeLabelRole())}>
           Files
         </p>
         {status === 'loading' ? (
           <div className="flex flex-col gap-2">
             {Array.from({ length: 5 }, (_, i) => (
-              <Skeleton key={i} className="h-14 w-full rounded-[var(--shell-session-row-radius)]" />
+              <Skeleton key={i} className="h-14 w-full rounded-[var(--nession-shell-session-row-radius)]" />
             ))}
           </div>
         ) : null}
@@ -79,7 +79,7 @@ export function AppFilesSearchPanel({
                   type="button"
                   data-testid={`files-search-result-${entry.path}`}
                   onClick={() => onSelectFile(entry)}
-                  className="flex w-full min-h-[52px] flex-col justify-center rounded-[var(--shell-session-row-radius)] px-[var(--shell-space-2)] py-[var(--shell-space-2)] text-left hover:bg-muted/60"
+                  className="flex w-full min-h-[52px] flex-col justify-center rounded-[var(--nession-shell-session-row-radius)] px-[var(--nession-shell-space-2)] py-[var(--nession-shell-space-2)] text-left hover:bg-muted/60"
                 >
                   <span className={cn('truncate text-foreground', primaryAppClass)}>
                     {entry.name}

@@ -65,6 +65,7 @@ const fixture = {
       // boundary needs the metrics as JS, and the fixture is what proves it
       // does not silently emit `undefined` when they are absent.
       terminal: {
+        $owner: 'pattern.terminal-surface',
         fontSize: { value: '12.5px' },
         lineHeight: { value: 1.62 },
         padX: { value: '18px' },
@@ -75,6 +76,7 @@ const fixture = {
       touchTarget: { min: { value: 44 } },
       control: { md: { value: '44px' } },
       terminal: {
+        $owner: 'pattern.terminal-surface',
         fontSize: { value: '11.5px' },
         lineHeight: { value: 1.7 },
         padX: { value: '14px' },
@@ -120,30 +122,38 @@ test('resolveRef throws when the ref path is missing', () => {
   );
 });
 
-test('generateWebCss emits light and dark semantic background and @theme success bridge', () => {
+test('generateWebCss makes --nession-* the canonical CSS API and bridges frameworks to it', () => {
   const css = generateWebCss(fixture);
-  assert.match(css, /:root\s*\{[^}]*--background:\s*oklch\(0\.985 0 0\)/s);
-  assert.match(css, /\.dark\s*\{[^}]*--background:\s*oklch\(0\.145 0 0\)/s);
-  assert.match(css, /@theme inline\s*\{[^}]*--color-success:\s*var\(--success\);/s);
+  assert.match(css, /:root\s*\{[^}]*--nession-background:\s*oklch\(0\.985 0 0\)/s);
+  assert.match(css, /\.dark\s*\{[^}]*--nession-background:\s*oklch\(0\.145 0 0\)/s);
+  assert.match(
+    css,
+    /@theme inline\s*\{[^}]*--color-success:\s*var\(--nession-success\);/s,
+  );
+  assert.doesNotMatch(
+    css,
+    /(^|\n)\s*--background:/,
+    'pre-#1451 spellings remain lint diagnostics only, not runtime CSS APIs',
+  );
 });
 
-test('generateWebCss emits domain --agent-online and --agent-connecting', () => {
+test('generateWebCss emits namespaced domain vocabulary', () => {
   const css = generateWebCss(fixture);
-  assert.match(css, /--agent-online\b/);
-  assert.match(css, /--agent-connecting\b/);
+  assert.match(css, /--nession-agent-online\b/);
+  assert.match(css, /--nession-agent-connecting\b/);
 });
 
 test('generateWebCss scopes App density vars under [data-experience=app] only', () => {
   const css = generateWebCss(fixture);
   assert.doesNotMatch(css, /control-app-/);
   const rootBlock = css.match(/:root\s*\{([^}]*)\}/s)?.[1] ?? '';
-  assert.doesNotMatch(rootBlock, /--touch-target-min:/);
-  assert.match(css, /\[data-experience="app"\][\s\S]*--touch-target-min:\s*44/);
+  assert.doesNotMatch(rootBlock, /--nession-touch-target-min:/);
+  assert.match(css, /\[data-experience="app"\][\s\S]*--nession-touch-target-min:\s*44/);
 });
 
 test('generateWebCss emits [data-experience=app] control remap', () => {
   const css = generateWebCss(fixture);
-  assert.match(css, /\[data-experience="app"\]\s*\{[^}]*--control-md:\s*44px/s);
+  assert.match(css, /\[data-experience="app"\]\s*\{[^}]*--nession-control-md:\s*44px/s);
 });
 
 test('generateLintMetadata marks green-500 as a primitive forbidden in components', () => {
@@ -153,6 +163,21 @@ test('generateLintMetadata marks green-500 as a primitive forbidden in component
   assert.ok(meta['green-500'].suggestions.includes('agent-online'));
   assert.ok(meta['green-500'].suggestions.includes('muted-foreground'));
   assert.ok(!meta['green-500'].suggestions.includes('success'));
+});
+
+test('generateLintMetadata exposes the generated visual vocabulary', () => {
+  const meta = generateLintMetadata(fixture);
+  assert.ok(meta.cssVariables.includes('--nession-background'));
+  assert.ok(meta.cssVariables.includes('--nession-agent-online'));
+  assert.ok(meta.legacyCssVariables.includes('--background'));
+  assert.ok(meta.experienceAppVars.includes('nession-touch-target-min'));
+  assert.equal(meta.tailwindThemeBridges.color.background, '--nession-background');
+  assert.equal(meta.tailwindThemeBridges.color['agent-online'], '--nession-agent-online');
+  assert.equal(meta.tailwindThemeBridges.spacing['control-sm'], '--nession-control-sm');
+  assert.equal(
+    meta.cssVariableOwners['--nession-terminal-font-size'],
+    'pattern.terminal-surface',
+  );
 });
 
 test('generateAppTs exports numeric touchTarget.min === 44', () => {
@@ -180,13 +205,13 @@ test('production web.css uses one composer body size on web and app', () => {
     join(dirname(fileURLToPath(import.meta.url)), '../generated/web.css'),
     'utf8',
   );
-  const rootMatch = generatedCss.match(/:root \{[\s\S]*?--terminal-capsule-font-size: ([^;]+);/);
+  const rootMatch = generatedCss.match(/:root \{[\s\S]*?--nession-terminal-capsule-font-size: ([^;]+);/);
   const appBlock = generatedCss.match(/\[data-experience="app"\] \{([\s\S]*?)\n\}/);
   assert.equal(rootMatch?.[1]?.trim(), '1rem');
-  assert.match(appBlock?.[1] ?? '', /--terminal-capsule-font-size: 1rem/);
-  assert.match(appBlock?.[1] ?? '', /--terminal-capsule-quick-key-font-size: 1rem/);
-  assert.match(appBlock?.[1] ?? '', /--terminal-capsule-phys-key-font-size: 1rem/);
-  assert.match(appBlock?.[1] ?? '', /--terminal-capsule-caption-font-size: 1rem/);
+  assert.match(appBlock?.[1] ?? '', /--nession-terminal-capsule-font-size: 1rem/);
+  assert.match(appBlock?.[1] ?? '', /--nession-terminal-capsule-quick-key-font-size: 1rem/);
+  assert.match(appBlock?.[1] ?? '', /--nession-terminal-capsule-phys-key-font-size: 1rem/);
+  assert.match(appBlock?.[1] ?? '', /--nession-terminal-capsule-caption-font-size: 1rem/);
 });
 
 test('generateTerminalTs fills every xterm ITheme colour slot', () => {
@@ -232,7 +257,7 @@ test('production terminal background equals the light chrome ground', () => {
   const css = readFileSync(join(dir, '../generated/web.css'), 'utf8');
   const background = terminalTs.match(/\bbackground: "(#[0-9a-fA-F]{6})"/)?.[1];
   assert.equal(background?.toLowerCase(), '#ffffff');
-  assert.match(css, /:root \{[\s\S]*?--background: oklch\(1 0 0\);/);
+  assert.match(css, /:root \{[\s\S]*?--nession-background: oklch\(1 0 0\);/);
 });
 
 test('production terminal.ts carries no Catppuccin Mocha leftover', () => {
@@ -278,7 +303,7 @@ function readGeneratedWebCss() {
 /** The custom property's value inside a named block of the generated CSS. */
 function cssValueIn(css, block, name) {
   const body = css.match(new RegExp(`${block} \\{([\\s\\S]*?)\\n\\}`))?.[1] ?? '';
-  return body.match(new RegExp(`--${name}: ([^;]+);`))?.[1]?.trim() ?? null;
+  return body.match(new RegExp(`--nession-${name}: ([^;]+);`))?.[1]?.trim() ?? null;
 }
 
 test('the App states its own typography role sizes rather than aliasing Web\'s', () => {
@@ -349,7 +374,7 @@ test('generated CSS carries the App scale under the App experience only', () => 
   for (const role of APP_ROLES) {
     assert.ok(
       cssValueIn(css, APP_BLOCK, `typography-${role}-size`),
-      `--typography-${role}-size is not emitted under [data-experience="app"]`,
+      `--nession-typography-${role}-size is not emitted under [data-experience="app"]`,
     );
   }
   // Three shared tokens the App remaps: the Web value stays at :root and the
@@ -363,8 +388,8 @@ test('generated CSS carries the App scale under the App experience only', () => 
   for (const name of remapped) {
     const root = cssValueIn(css, ':root', name);
     const app = cssValueIn(css, APP_BLOCK, name);
-    assert.ok(root, `--${name} is missing at :root`);
-    assert.ok(app, `--${name} is missing under [data-experience="app"]`);
+    assert.ok(root, `--nession-${name} is missing at :root`);
+    assert.ok(app, `--nession-${name} is missing under [data-experience="app"]`);
     assert.notEqual(app, root, `--${name} has the same value in both experiences`);
   }
 });

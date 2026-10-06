@@ -25,6 +25,6 @@ import { chromeSansRole } from '@/shared/typography/chromeRoles';
  * action look the same and the third does not invent its own.
  */
 export const capsulePeekActionClass = cn(
-  'rounded-[var(--radius-control)] px-[length:var(--terminal-capsule-projection-item-pad-x)] text-foreground transition-colors hover:text-foreground/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+  'rounded-[var(--nession-radius-control)] px-[length:var(--nession-terminal-capsule-projection-item-pad-x)] text-foreground transition-colors hover:text-foreground/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
   chromeSansRole('body'),
 );

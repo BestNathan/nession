@@ -12,7 +12,7 @@ const LONG_PRESS_MS = 400;
 export function FileListErrorPanel({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
     <div
-      className="flex flex-col gap-[var(--shell-space-3)] p-[var(--shell-space-4)]"
+      className="flex flex-col gap-[var(--nession-shell-space-3)] p-[var(--nession-shell-space-4)]"
       data-testid="files-app-list"
     >
       <div>
@@ -30,9 +30,9 @@ export function FileListErrorPanel({ message, onRetry }: { message: string; onRe
 
 export function FileListLoadingSkeleton() {
   return (
-    <div className="flex flex-col gap-2 px-[var(--shell-space-3)] py-[var(--shell-space-2)]">
+    <div className="flex flex-col gap-2 px-[var(--nession-shell-space-3)] py-[var(--nession-shell-space-2)]">
       {Array.from({ length: 6 }, (_, i) => (
-        <Skeleton key={i} className="h-12 w-full rounded-[var(--shell-session-row-radius)]" />
+        <Skeleton key={i} className="h-12 w-full rounded-[var(--nession-shell-session-row-radius)]" />
       ))}
     </div>
   );
@@ -111,14 +111,14 @@ function FileListRow({
         onFileClick(entry);
       }}
       className={cn(
-        'flex w-full min-h-[52px] items-center gap-[var(--shell-space-3)] rounded-[var(--shell-session-row-radius)] px-[var(--shell-space-3)] py-[var(--shell-space-2)] text-left transition-colors hover:bg-muted/60',
+        'flex w-full min-h-[52px] items-center gap-[var(--nession-shell-space-3)] rounded-[var(--nession-shell-session-row-radius)] px-[var(--nession-shell-space-3)] py-[var(--nession-shell-space-2)] text-left transition-colors hover:bg-muted/60',
         selectionMode && selected && 'bg-muted/80',
       )}
     >
       {selectionMode ? (
         <span
           className={cn(
-            'flex size-5 shrink-0 items-center justify-center rounded-[var(--radius-control)] border border-border',
+            'flex size-5 shrink-0 items-center justify-center rounded-[var(--nession-radius-control)] border border-border',
             selected && 'border-primary bg-primary text-primary-foreground',
           )}
           aria-hidden
@@ -159,7 +159,7 @@ export function FileListEntryRows({
 }: FileListEntryRowsProps) {
   if (entries.length === 0) {
     return (
-      <p className={cn('px-[var(--shell-space-3)] py-[var(--shell-space-4)] text-muted-foreground', chromeSansRole('secondary'))}>
+      <p className={cn('px-[var(--nession-shell-space-3)] py-[var(--nession-shell-space-4)] text-muted-foreground', chromeSansRole('secondary'))}>
         This folder is empty.
       </p>
     );

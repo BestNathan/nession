@@ -188,20 +188,20 @@ describe('WorkspaceRegion app layer composition', () => {
 
     const column = screen.getByTestId('sidebar-column');
     expect(column).not.toHaveAttribute('data-collapsed');
-    expect(column.className).toContain('--shell-sidebar-width');
+    expect(column.className).toContain('--nession-shell-sidebar-width');
 
     await user.click(screen.getByTestId('sidebar-collapse'));
 
     expect(column).toHaveAttribute('data-collapsed', 'true');
-    expect(column.className).toContain('--shell-rail-width');
-    expect(column.className).not.toContain('--shell-sidebar-width');
+    expect(column.className).toContain('--nession-shell-rail-width');
+    expect(column.className).not.toContain('--nession-shell-sidebar-width');
     // The work surface stays mounted — collapse is geometry, not a remount.
     expect(screen.getByTestId('terminal')).toBeInTheDocument();
 
     await user.click(screen.getByTestId('sidebar-rail-expand'));
 
     expect(column).not.toHaveAttribute('data-collapsed');
-    expect(column.className).toContain('--shell-sidebar-width');
+    expect(column.className).toContain('--nession-shell-sidebar-width');
     // Selection and navigation state survive the round trip (#1196 §6).
     expect(screen.getByTestId(`session-item-${sess.session_id}`)).toBeInTheDocument();
   });

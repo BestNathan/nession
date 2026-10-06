@@ -66,7 +66,7 @@ export type AppSessionsSurfaceProps = Omit<
  * silently rather than failing.
  */
 const sessionsListFloorAppClass =
-  'min-h-[length:var(--shell-sessions-list-min-height)]';
+  'min-h-[length:var(--nession-shell-sessions-list-min-height)]';
 
 const STATUS_FILTERS: { key: StatusFilter; label: string }[] = [
   { key: 'all', label: 'All' },
@@ -157,7 +157,7 @@ function AgentsDisclosure({
             className={cn(
               shellRowControlMinClass,
               shellMotionClass,
-              'flex w-full items-center gap-[var(--shell-space-1)] rounded-[var(--shell-session-row-radius)] px-[var(--shell-space-2)] text-left text-muted-foreground hover:text-foreground',
+              'flex w-full items-center gap-[var(--nession-shell-space-1)] rounded-[var(--nession-shell-session-row-radius)] px-[var(--nession-shell-space-2)] text-left text-muted-foreground hover:text-foreground',
               bodyAppClass,
             )}
           />
@@ -260,7 +260,7 @@ function SessionsActiveFilter({
       className={cn(
         shellRowControlMinClass,
         shellMotionClass,
-        'flex w-fit items-center gap-[var(--shell-space-1)] rounded-full bg-muted px-[var(--shell-space-2)] text-muted-foreground',
+        'flex w-fit items-center gap-[var(--nession-shell-space-1)] rounded-full bg-muted px-[var(--nession-shell-space-2)] text-muted-foreground',
         bodyAppClass,
       )}
     >
@@ -411,7 +411,7 @@ function SessionsListRegion({
                   <h2
                     data-testid="session-group-label"
                     className={cn(
-                      'px-[var(--shell-space-2)] pt-[var(--shell-space-3)] pb-[var(--shell-space-1)] text-muted-foreground',
+                      'px-[var(--nession-shell-space-2)] pt-[var(--nession-shell-space-3)] pb-[var(--nession-shell-space-1)] text-muted-foreground',
                       secondaryAppClass,
                     )}
                   >
@@ -472,9 +472,9 @@ function SessionsEmptyState({
   return (
     <div
       data-testid="app-sessions-empty"
-      className="flex h-full flex-col items-center justify-center gap-[var(--shell-space-2)] px-[var(--shell-space-4)] text-center"
+      className="flex h-full flex-col items-center justify-center gap-[var(--nession-shell-space-2)] px-[var(--nession-shell-space-4)] text-center"
     >
-      <div className="flex flex-col gap-[var(--shell-space-1)]">
+      <div className="flex flex-col gap-[var(--nession-shell-space-1)]">
         <h2 className={titleAppClass}>
           {APP_START_SESSION_COPY.heading}
         </h2>
@@ -522,7 +522,7 @@ function SessionsSearchMiss({
   return (
     <div
       data-testid="app-sessions-search-miss"
-      className="flex h-full flex-col items-center justify-center gap-[var(--shell-space-2)] px-[var(--shell-space-4)] text-center text-muted-foreground"
+      className="flex h-full flex-col items-center justify-center gap-[var(--nession-shell-space-2)] px-[var(--nession-shell-space-4)] text-center text-muted-foreground"
     >
       <SearchX aria-hidden className="size-8" />
       <p className={secondaryAppClass}>No sessions match "{searchQuery}"</p>
@@ -636,7 +636,7 @@ function SessionsChrome({
       data-testid="app-sessions-chrome"
       className="flex min-h-0 shrink flex-col overflow-y-auto"
     >
-      <div className="flex flex-col gap-[var(--shell-space-2)] px-[var(--shell-space-2)] pb-[var(--shell-space-2)] max-lg:gap-[var(--shell-space-3)]">
+      <div className="flex flex-col gap-[var(--nession-shell-space-2)] px-[var(--nession-shell-space-2)] pb-[var(--nession-shell-space-2)] max-lg:gap-[var(--nession-shell-space-3)]">
         <SearchBar
           searchQuery={searchQuery}
           setSearchQuery={setSearchQuery}
@@ -830,7 +830,7 @@ export function AppSessionsSurface({
       {connectionStatus === 'connected' ? null : (
         <div
           data-testid="app-sessions-problem"
-          className="flex shrink-0 items-center gap-[var(--shell-space-2)] border-t px-[var(--shell-space-3)] py-[var(--shell-foot-pad-y)] pb-[max(var(--shell-foot-pad-y),env(safe-area-inset-bottom))]"
+          className="flex shrink-0 items-center gap-[var(--nession-shell-space-2)] border-t px-[var(--nession-shell-space-3)] py-[var(--nession-shell-foot-pad-y)] pb-[max(var(--nession-shell-foot-pad-y),env(safe-area-inset-bottom))]"
         >
           <div className="min-w-0 flex-1">
             <SidebarFooter

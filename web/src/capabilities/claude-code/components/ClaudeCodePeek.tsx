@@ -83,7 +83,7 @@ export function ClaudeCodePeek({
                   // host's footer and into the capability that made the row.
                   onClick={() => onOpenWorkspace?.(candidate.id)}
                   className={cn(
-                    'w-full truncate rounded text-left text-muted-foreground',
+                    'w-full truncate rounded-[var(--nession-radius-control)] text-left text-muted-foreground',
                     chromeSansRole('caption'),
                     'transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                   )}

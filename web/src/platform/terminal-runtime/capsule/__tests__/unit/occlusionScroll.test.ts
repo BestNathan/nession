@@ -74,13 +74,13 @@ describe('occlusionScroll helpers', () => {
     expect(occlusion.mode()).toBe('following');
     occlusion.enterHistory();
     expect(occlusion.mode()).toBe('history');
-    expect(styleValues.get('--terminal-content-bottom-inset')).toBe('0px');
+    expect(styleValues.get('--nession-local-terminal-content-bottom-inset')).toBe('0px');
     expect(host.dataset.terminalScrollMode).toBe('history');
 
     occlusion.scrollToMarginBottom();
     expect(occlusion.mode()).toBe('following');
-    expect(styleValues.get('--terminal-content-bottom-inset'))
-      .toBe('var(--terminal-capsule-occlusion, 0px)');
+    expect(styleValues.get('--nession-local-terminal-content-bottom-inset'))
+      .toBe('var(--nession-local-terminal-capsule-occlusion, 0px)');
     expect(host.dataset.terminalScrollMode).toBe('following');
   });
 

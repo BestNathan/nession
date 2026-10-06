@@ -33,7 +33,7 @@ test('the app-only token list is derived from the token source, not hand-listed'
   assert.ok(Array.isArray(vars) && vars.length > 0, 'experienceAppVars is empty or missing');
 
   // Present in experience/app.json only — emitted solely under [data-experience="app"].
-  for (const appOnly of ['touch-target-min', 'terminal-capsule-shell-inset']) {
+  for (const appOnly of ['nession-touch-target-min', 'nession-terminal-capsule-shell-inset']) {
     assert.ok(vars.includes(appOnly), `expected ${appOnly} in experienceAppVars`);
   }
   // `touch-target-compact` used to pin this list too, and retired with the
@@ -44,23 +44,33 @@ test('the app-only token list is derived from the token source, not hand-listed'
 
   // Present in BOTH experiences (app overrides it). Emitted at :root, so it
   // resolves on Web too — flagging it would be a false positive.
-  for (const shared of ['control-md', 'control-sm', 'icon-md']) {
+  for (const shared of ['nession-control-md', 'nession-control-sm', 'nession-icon-md']) {
     assert.ok(!vars.includes(shared), `${shared} is shared and must not be listed as app-only`);
   }
 });
 
-test('findCrossExperienceVars matches the var() form and ignores shared tokens', () => {
+test('findCrossExperienceVars understands canonical and transitional var() forms', () => {
+  assert.deepEqual(
+    findCrossExperienceVars(
+      'inset-x-[length:var(--nession-terminal-capsule-shell-inset)]',
+      lintMetadata,
+    ),
+    ['nession-terminal-capsule-shell-inset'],
+  );
   assert.deepEqual(
     findCrossExperienceVars('inset-x-[length:var(--terminal-capsule-shell-inset)]', lintMetadata),
     ['terminal-capsule-shell-inset'],
   );
   assert.deepEqual(
-    findCrossExperienceVars('bottom-[max(var(--terminal-capsule-shell-inset),var(--terminal-capsule-shell-safe-area))]', lintMetadata),
-    ['terminal-capsule-shell-inset', 'terminal-capsule-shell-safe-area'],
+    findCrossExperienceVars(
+      'bottom-[max(var(--nession-terminal-capsule-shell-inset),var(--nession-terminal-capsule-shell-safe-area))]',
+      lintMetadata,
+    ),
+    ['nession-terminal-capsule-shell-inset', 'nession-terminal-capsule-shell-safe-area'],
   );
   // Shared and web-only tokens resolve in both experiences.
-  assert.deepEqual(findCrossExperienceVars('h-[length:var(--control-md)]', lintMetadata), []);
-  assert.deepEqual(findCrossExperienceVars('var(--terminal-capsule-shell-margin-x)', lintMetadata), []);
+  assert.deepEqual(findCrossExperienceVars('h-[length:var(--nession-control-md)]', lintMetadata), []);
+  assert.deepEqual(findCrossExperienceVars('var(--nession-terminal-capsule-shell-margin-x)', lintMetadata), []);
   assert.deepEqual(findCrossExperienceVars(undefined, lintMetadata), []);
 });
 
@@ -85,16 +95,16 @@ test('no-cross-experience-token fails an App-only token outside an App-scoped bi
   ruleTester.run('no-cross-experience-token', nessionPlugin.rules['no-cross-experience-token'], {
     valid: [
       {
-        code: 'export const capsuleShellAppOuterClass = "inset-x-[length:var(--terminal-capsule-shell-inset)]";',
+        code: 'export const capsuleShellAppOuterClass = "inset-x-[length:var(--nession-terminal-capsule-shell-inset)]";',
         filename: CAPSULE,
       },
       {
-        code: 'export const capsuleShellWebOuterClass = "inset-x-[length:var(--terminal-capsule-shell-margin-x)]";',
+        code: 'export const capsuleShellWebOuterClass = "inset-x-[length:var(--nession-terminal-capsule-shell-margin-x)]";',
         filename: CAPSULE,
       },
       {
         // A shared token is legal in either experience.
-        code: 'export const capsuleControlRowClass = "h-[length:var(--control-md)]";',
+        code: 'export const capsuleControlRowClass = "h-[length:var(--nession-control-md)]";',
         filename: CAPSULE,
       },
     ],
@@ -102,14 +112,14 @@ test('no-cross-experience-token fails an App-only token outside an App-scoped bi
       {
         // The shape the rename corrected: App-only token, binding name silent
         // about the experience it belongs to.
-        code: 'export const capsuleQuickKeyRowClass = "gap-[length:var(--terminal-capsule-quick-key-gap)]";',
+        code: 'export const capsuleQuickKeyRowClass = "gap-[length:var(--nession-terminal-capsule-quick-key-gap)]";',
         filename: CAPSULE,
         errors: [{ messageId: 'violation' }],
       },
       {
         // No named binding at all — the author has not said which experience
         // this class belongs to, so the rule cannot clear it.
-        code: 'export function Probe() { return <div className="inset-x-[length:var(--terminal-capsule-shell-inset)]" />; }',
+        code: 'export function Probe() { return <div className="inset-x-[length:var(--nession-terminal-capsule-shell-inset)]" />; }',
         filename: CAPSULE,
         errors: [{ messageId: 'violation' }],
       },
@@ -128,14 +138,14 @@ test('the violation names the token, the binding, and the owner', () => {
       reported.push(descriptor);
     },
   };
-  rule.create(context).Literal({ type: 'Literal', value: 'var(--touch-target-min)' });
+  rule.create(context).Literal({ type: 'Literal', value: 'var(--nession-touch-target-min)' });
 
   assert.equal(reported.length, 1);
   const message = rule.meta.messages.violation.replace(
     /\{\{(\w+)\}\}/g,
     (_, key) => reported[0].data[key],
   );
-  assert.match(message, /var\(--touch-target-min\)/);
+  assert.match(message, /var\(--nession-touch-target-min\)/);
   assert.match(message, /no named binding/);
   assert.match(message, /owner: {2}design\/tokens\/experience\/app\.json/);
   assert.match(message, /repair:/);

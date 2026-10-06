@@ -14,9 +14,9 @@ export const jsonSyntax = {
 
 export function jsonPreviewSurfaceClass(className?: string) {
   return cn(
-    'min-w-0 rounded-[var(--radius-surface)] border border-[var(--conversation-code-border)]',
-    'bg-[var(--conversation-code-surface)]/50',
-    'px-[var(--shell-space-2)] py-[var(--shell-space-1)]',
+    'min-w-0 rounded-[var(--nession-radius-surface)] border border-[var(--nession-conversation-code-border)]',
+    'bg-[var(--nession-conversation-code-surface)]/50',
+    'px-[var(--nession-shell-space-2)] py-[var(--nession-shell-space-1)]',
     className,
   );
 }
@@ -25,7 +25,7 @@ export function jsonPreviewSurfaceClass(className?: string) {
 export function jsonlRecordBodyClass(expanded: boolean, className?: string) {
   return cn(
     jsonPreviewSurfaceClass(),
-    !expanded && 'max-h-[calc(var(--workspace-editor-line-height)*9em)] overflow-hidden',
+    !expanded && 'max-h-[calc(var(--nession-workspace-editor-line-height)*9em)] overflow-hidden',
     className,
   );
 }

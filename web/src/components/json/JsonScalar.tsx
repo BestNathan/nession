@@ -38,7 +38,7 @@ export function JsonScalar({ value, allowExpand = false, maxChars }: JsonScalarP
       {showExpandControl ? (
         <button
           type="button"
-          className="ml-1 text-[length:var(--workspace-editor-action-font-size)] text-muted-foreground hover:text-foreground"
+          className="ml-1 text-[length:var(--nession-workspace-editor-action-font-size)] text-muted-foreground hover:text-foreground"
           onClick={() => setExpanded((prev) => !prev)}
           aria-expanded={expanded}
         >

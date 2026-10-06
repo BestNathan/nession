@@ -9,7 +9,7 @@ import type {
   ClaudeCodeReadResponse,
 } from '../types';
 import { cn } from '@/shared/lib/utils';
-import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
+import { chromeLabelRole, chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
 import { workspaceScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
 import type { WorkspaceContext } from '@/app/workspace/workspaceContext';
 import { ConversationView, useAIConversation } from '@/shared/ai-conversation';
@@ -191,7 +191,7 @@ function FileList({
     <div className="space-y-4 p-3" data-testid={active ? 'claude-code-file-list' : undefined}>
       {state.categories.map((category) => (
         <section key={category.name}>
-          <h2 className={cn('mb-1 px-2 uppercase tracking-wide text-muted-foreground', chromeSansRole('metadata'))}>
+          <h2 className={cn('mb-1 px-2 text-muted-foreground', chromeLabelRole())}>
             {category.name}
           </h2>
           <div className="space-y-0.5">
@@ -203,7 +203,7 @@ function FileList({
                 aria-current={state.selectedFile?.path === file.path ? 'true' : undefined}
                 onClick={() => onFileClick(scope, file)}
                 className={cn(
-                  'flex w-full items-center gap-2 rounded-[var(--radius-control)] px-2 py-1.5 text-left transition-colors',
+                  'flex w-full items-center gap-2 rounded-[var(--nession-radius-control)] px-2 py-1.5 text-left transition-colors',
                   chromeSansRole('secondary'),
                   'hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                   state.selectedFile?.path === file.path && 'bg-accent text-accent-foreground',

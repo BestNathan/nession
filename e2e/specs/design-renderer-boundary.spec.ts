@@ -76,10 +76,10 @@ test.describe('third-party renderer boundary (CodeMirror)', () => {
       const rootStyle = getComputedStyle(document.documentElement);
       const scrollerStyle = getComputedStyle(scroller);
       return {
-        tokenFontSize: rootStyle.getPropertyValue('--workspace-editor-font-size').trim(),
-        tokenLineHeight: rootStyle.getPropertyValue('--workspace-editor-line-height').trim(),
-        tokenGutterWidth: rootStyle.getPropertyValue('--workspace-editor-gutter-width').trim(),
-        tokenPadY: rootStyle.getPropertyValue('--workspace-editor-pad-y').trim(),
+        tokenFontSize: rootStyle.getPropertyValue('--nession-workspace-editor-font-size').trim(),
+        tokenLineHeight: rootStyle.getPropertyValue('--nession-workspace-editor-line-height').trim(),
+        tokenGutterWidth: rootStyle.getPropertyValue('--nession-workspace-editor-gutter-width').trim(),
+        tokenPadY: rootStyle.getPropertyValue('--nession-workspace-editor-pad-y').trim(),
         renderedFontSize: Number.parseFloat(scrollerStyle.fontSize),
         renderedLineHeight: Number.parseFloat(scrollerStyle.lineHeight),
         renderedPadTop: Number.parseFloat(getComputedStyle(content).paddingTop),
@@ -100,10 +100,10 @@ test.describe('third-party renderer boundary (CodeMirror)', () => {
     const m = metrics as EditorMetrics;
 
     for (const [name, value] of Object.entries({
-      '--workspace-editor-font-size': m.tokenFontSize,
-      '--workspace-editor-line-height': m.tokenLineHeight,
-      '--workspace-editor-gutter-width': m.tokenGutterWidth,
-      '--workspace-editor-pad-y': m.tokenPadY,
+      '--nession-workspace-editor-font-size': m.tokenFontSize,
+      '--nession-workspace-editor-line-height': m.tokenLineHeight,
+      '--nession-workspace-editor-gutter-width': m.tokenGutterWidth,
+      '--nession-workspace-editor-pad-y': m.tokenPadY,
     })) {
       expect(value, `${name} resolved to "${value}"`).not.toBe('');
     }

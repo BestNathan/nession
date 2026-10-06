@@ -63,7 +63,7 @@ function CapsuleCapabilityMore({ workContext }: { workContext?: ResolvedWorkCont
       )}
     >
       <CapsuleIconVisual>
-        <Plus className="size-[length:var(--icon-md)]" />
+        <Plus className="size-[length:var(--nession-icon-md)]" />
       </CapsuleIconVisual>
       <WorkRing working={isWorking} />
     </button>
@@ -119,7 +119,7 @@ export function CapsuleInputTrailingActions({
           onOpenChange={onHistoryOpenChange}
           disabled={disabled}
           onSelect={onSelectHistory}
-          triggerClassName="rounded-[var(--radius-control)]"
+          triggerClassName="rounded-[var(--nession-radius-control)]"
         />
       ) : null}
       <CapsuleInputActionButtons

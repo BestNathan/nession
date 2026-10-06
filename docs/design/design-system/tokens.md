@@ -36,6 +36,74 @@ because only one platform consumes it. `experience.web.workspace.treeWidth` is
 a *file-workspace* decision that happens to be expressed on Web; calling it
 "Experience" would be true of its housing and false of its owner.
 
+## CSS vocabulary API and visual invariants (#1451)
+
+The token graph above is the source model. CSS is its generated public API, and
+that API has one Nession-owned namespace:
+
+```text
+--nession-*
+```
+
+Examples:
+
+```css
+--nession-background
+--nession-radius-control
+--nession-typography-body-size
+--nession-terminal-capsule-shell-pad-x
+```
+
+The logical token ID and the CSS spelling are deliberately different concerns:
+
+```text
+semantic.background
+        ↓ generate
+--nession-background
+```
+
+Framework-facing names are adapters, not alternate product vocabulary.
+Tailwind/shadcn bridges such as `--color-background` or
+`--spacing-control-md` may exist only in the canonical generated adapter and
+must resolve back to `--nession-*`. Product/feature code must not define a
+second theme namespace.
+
+The repository-wide invariant stack is:
+
+```text
+V5  Canonical visual baseline
+V4  Relational rendered contract
+V3  Product visual grammar / recipe
+V2  Shared primitive
+V1  Semantic visual vocabulary
+V0  --nession-* namespace
+```
+
+A feature can own composition without owning a second visual language. Local
+`flex`, `grid`, positioning, overflow, and content-specific layout are not
+automatically token concerns. Color, material, typography, radius, elevation,
+focus, motion, standard control geometry, and shared action/row anatomy are.
+
+The generated `design/generated/lint-metadata.json` is the machine-readable
+vocabulary used by lint/gates. Do not copy token names into a second hand-kept
+registry. If lint cannot prove a visual variable came from the generator, the
+correct repair is to route the value through the canonical owner.
+
+Renderer/framework foreign variables are permitted only behind explicit adapter
+boundaries (for example CodeMirror, xterm, normalized upstream UI primitives,
+or the canonical Markdown renderer grammar). An adapter is not a consumer
+allowlist: the adapter may preserve vocabulary owned by the upstream renderer
+(for example `@tailwindcss/typography`'s `prose-sm` rhythm), while feature and
+product consumers must consume the Nession-owned adapter/recipe instead of
+repeating that vocabulary. Nession custom properties inside the adapter still
+use `--nession-*`; legacy Nession spellings are never exempt.
+
+A Nession-owned token used through its pre-#1451 unprefixed spelling is still a
+violation in production source. The runtime compatibility aliases were removed
+once the source gate reached zero legacy consumers; the old spellings remain
+only in generated lint metadata so diagnostics can name the canonical
+`--nession-*` repair.
+
 ### When a value's owner is narrower than Experience
 
 A value whose meaning belongs to one pattern or composition says so, in the
@@ -53,12 +121,14 @@ family is genuinely mixed, on the individual leaf. **An absent `$owner` means
 generic platform vocabulary**, not "unknown" — that is the default, and most of
 `control` / `icon` / `focus` / `motion` is exactly that.
 
-The annotation is deliberately inert: it changes no generated artifact, adds no
-token layer, and no consumer reads it. Its job is to make ownership *legible and
-checkable* — the inventory reports it as evidence, and `$owner` must name a real
-`patterns/*.md` doc, so a typo fails rather than reading as a decision. Using a
-pattern that has no doc yet is the signal to write the doc, not to skip the
-annotation.
+`$owner` adds no token layer and changes no rendered value, but it is no longer
+inert metadata: the generator emits it into
+`design/generated/lint-metadata.json.cssVariableOwners`, where
+`nession/visual-vocabulary` can prove that a token is legal **and** that the
+consumer is allowed to own that decision. The inventory also reports it as
+evidence. `$owner` must name a real `patterns/*.md` doc, so a typo fails
+rather than reading as a decision. Using a pattern that has no doc yet is the
+signal to write the doc, not to skip the annotation.
 
 Do not add a pass-through `PatternToken` layer to express this. The value stays
 where it is; only its ownership is recorded.
@@ -211,9 +281,11 @@ The semantic radius vocabulary is five tiers, from tightest to softest:
 not Experience. Radius is not platform-specific — if the App later needs different
 values, remap at the Experience layer. The current values are shared.
 
-**Migration rule**: App-owned surfaces (not `components/ui/`) must use semantic
-radius tokens, not generic `rounded-{sm|md|lg|xl|2xl}` utilities. The design
-gate (`scripts/check-radius-ownership.mjs`) catches unowned radius literals.
+**Migration rule**: Nession-owned product/capability surfaces must use semantic
+radius tokens or a canonical product recipe, not generic
+`rounded-{sm|md|lg|xl|2xl}` utilities. Radius is enforced by the repository-wide
+`nession/visual-vocabulary` rule and the fast source gate; the old standalone
+radius-only gate is no longer the primary owner of this invariant.
 
 **Exemptions**:
 - `components/ui/*` — shadcn primitives are upstream, not Nession-owned

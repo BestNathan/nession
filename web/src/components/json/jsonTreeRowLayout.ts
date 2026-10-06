@@ -10,7 +10,7 @@ export const jsonKvRowGridClass = cn(
 export const jsonKvValueCellClass = 'min-w-0 min-h-0 break-words';
 
 /** Indent for properties under a root `{` / `[` (#1199). */
-export const jsonTreeRootBodyIndentClass = 'pl-[var(--shell-space-2)]';
+export const jsonTreeRootBodyIndentClass = 'pl-[var(--nession-shell-space-2)]';
 
 /** Nested object/array body — border guides depth. */
 export const jsonTreeNestedBodyIndentClass = 'pl-4 border-l border-border/30 ml-1.5';

@@ -29,7 +29,7 @@ export function FilesWebLayout({ ctx }: { ctx: WorkspaceContext }) {
           shift is the separator, as in the shell (visual-language.md P7). */}
       <div
         data-testid="files-web-layout"
-        className="grid h-full min-h-0 grid-cols-[var(--workspace-tree-width)_minmax(0,1fr)] overflow-hidden"
+        className="grid h-full min-h-0 grid-cols-[var(--nession-workspace-tree-width)_minmax(0,1fr)] overflow-hidden"
       >
         <div className="bg-workspace-navigation min-h-0 overflow-hidden">
           <FileBrowser

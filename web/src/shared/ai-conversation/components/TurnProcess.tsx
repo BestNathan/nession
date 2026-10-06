@@ -51,12 +51,12 @@ export function TurnProcess({
       onClick={() => onToggle()}
       className={cn(
         'flex w-full items-center gap-2 text-left',
-        'text-[var(--conversation-tool-foreground)]',
-        'transition-colors duration-[var(--motion-shell-duration)] ease-[var(--motion-shell-ease)]',
+        'text-[var(--nession-conversation-tool-foreground)]',
+        'transition-colors duration-[var(--nession-motion-shell-duration)] ease-[var(--nession-motion-shell-ease)]',
         'hover:text-foreground',
         chromeSansRole('metadata'),
       )}
-      style={{ height: 'var(--conversation-fold-control-height)' }}
+      style={{ height: 'var(--nession-conversation-fold-control-height)' }}
     >
       <ChevronRight
         aria-hidden

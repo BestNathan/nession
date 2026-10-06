@@ -28,36 +28,38 @@
 .markdown {
   min-width: 0;
   overflow-wrap: anywhere;
-  font-size: var(--typography-body-size);
-  font-weight: var(--typography-body-weight);
-  line-height: var(--typography-body-line-height);
+  font-size: var(--nession-typography-body-size);
+  font-weight: var(--nession-typography-body-weight);
+  line-height: var(--nession-typography-body-line-height);
   color: var(--color-text-primary);
 }
 
 .markdown strong {
+  /* Renderer baseline: DSH-derived strong emphasis is 600. This file is the
+   * Markdown adapter boundary; consumers cannot restate this value. */
   font-weight: 600;
 }
 
 /* Markdown headings render one level down (h1→h2 …), so the top pair is the
  * title role and the next pair the primary role. */
 .markdown :where(h1, h2) {
-  font-size: var(--typography-title-size);
-  font-weight: var(--typography-title-weight);
-  line-height: var(--typography-title-line-height);
+  font-size: var(--nession-typography-title-size);
+  font-weight: var(--nession-typography-title-weight);
+  line-height: var(--nession-typography-title-line-height);
   margin: 32px 0 16px;
 }
 
 .markdown :where(h3, h4) {
-  font-size: var(--typography-primary-size);
-  font-weight: var(--typography-primary-weight);
-  line-height: var(--typography-primary-line-height);
+  font-size: var(--nession-typography-primary-size);
+  font-weight: var(--nession-typography-primary-weight);
+  line-height: var(--nession-typography-primary-line-height);
   margin: 32px 0 16px;
 }
 
 .markdown :where(h5, h6) {
-  font-size: var(--typography-body-size);
-  font-weight: var(--typography-title-weight);
-  line-height: var(--typography-body-line-height);
+  font-size: var(--nession-typography-body-size);
+  font-weight: var(--nession-typography-title-weight);
+  line-height: var(--nession-typography-body-line-height);
   margin: 16px 0;
 }
 
@@ -81,14 +83,14 @@
 .markdown a {
   color: var(--color-text-link);
   font-weight: 500;
-  transition: box-shadow var(--transition-duration) var(--transition-ease);
+  transition: box-shadow var(--nession-motion-shell-duration) var(--nession-motion-shell-ease);
   position: relative;
   text-decoration: none;
   /* Transparent hit-area padding. */
-  border-left: 3px solid rgb(255 255 255 / 0);
-  border-right: 3px solid rgb(255 255 255 / 0);
-  border-top: 2px solid rgb(255 255 255 / 0);
-  border-bottom: 2px solid rgb(255 255 255 / 0);
+  border-left: 3px solid transparent;
+  border-right: 3px solid transparent;
+  border-top: 2px solid transparent;
+  border-bottom: 2px solid transparent;
   margin-left: -3px;
   margin-right: -3px;
 }
@@ -168,12 +170,11 @@
   display: inline-flex;
   align-items: center;
   box-sizing: border-box;
-  font: var(--typography-code-base);
   font-family: var(--font-family-mono);
   font-size: 0.875em !important;
   background-color: var(--color-surface-code-inline);
   border: 0.5px solid var(--color-border-subtle);
-  border-radius: var(--radius-sm);
+  border-radius: var(--nession-radius-control);
   padding: 0 5px;
 }
 
@@ -220,9 +221,9 @@
   padding: 10px 16px;
   border-bottom: 0.5px solid var(--color-border-strong);
   border-top: none;
-  font-size: var(--typography-metadata-size);
-  font-weight: var(--typography-title-weight);
-  line-height: var(--typography-metadata-line-height);
+  font-size: var(--nession-typography-metadata-size);
+  font-weight: var(--nession-typography-title-weight);
+  line-height: var(--nession-typography-metadata-line-height);
   max-width: 320px;
   max-width: min(30vw, 320px);
   min-width: 100px;
@@ -231,8 +232,8 @@
 .tableScroll td {
   padding: 10px 16px;
   border-bottom: 0.5px solid var(--color-border-subtle);
-  font-size: var(--typography-body-size);
-  line-height: var(--typography-body-line-height);
+  font-size: var(--nession-typography-body-size);
+  line-height: var(--nession-typography-body-line-height);
   max-width: 320px;
   max-width: min(30vw, 320px);
   min-width: 100px;
@@ -248,6 +249,7 @@
 }
 
 .tableScroll table code {
+  /* Preserve the renderer baseline across Web/App density. */
   font-size: 11px;
 }
 

@@ -104,7 +104,7 @@ function ListRefreshError({ message, onReload }: { message: string; onReload?: (
       data-testid="conversation-list-error"
       role="alert"
       className={cn(
-        'mb-2 flex flex-wrap items-center gap-2 rounded-[var(--radius-surface)] p-2 text-destructive',
+        'mb-2 flex flex-wrap items-center gap-2 rounded-[var(--nession-radius-surface)] p-2 text-destructive',
         chromeSansRole('metadata'),
       )}
     >

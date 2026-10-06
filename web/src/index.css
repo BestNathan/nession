@@ -9,27 +9,27 @@
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
+  --radius-sm: calc(var(--nession-radius) - 4px);
+  --radius-md: calc(var(--nession-radius) - 2px);
+  --radius-lg: var(--nession-radius);
+  --radius-xl: calc(var(--nession-radius) + 4px);
   --font-sans: 'Inter Variable', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono Variable', ui-monospace, SFMono-Regular, Menlo, monospace;
   --font-heading: var(--font-sans);
-  --radius-2xl: calc(var(--radius) * 1.8);
-  --radius-3xl: calc(var(--radius) * 2.2);
-  --radius-4xl: calc(var(--radius) * 2.6);
+  --radius-2xl: calc(var(--nession-radius) * 1.8);
+  --radius-3xl: calc(var(--nession-radius) * 2.2);
+  --radius-4xl: calc(var(--nession-radius) * 2.6);
 }
 
 @layer base {
   * {
-    border-color: var(--border);
+    border-color: var(--nession-border);
   }
 }
 
 body {
-  background-color: var(--background);
-  color: var(--foreground);
+  background-color: var(--nession-background);
+  color: var(--nession-foreground);
 }
 
 html, body, #root {
@@ -97,12 +97,12 @@ html {
   display: table;
   width: 100%;
   margin: 0 0 1.25rem;
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--primary);
+  border: 1px solid var(--nession-border);
+  border-left: 3px solid var(--nession-primary);
   border-radius: var(--radius-md);
   border-collapse: collapse;
   overflow: hidden;
-  background: var(--muted);
+  background: var(--nession-muted);
   font-size: 0.75rem;
   line-height: 1.5;
 }
@@ -116,13 +116,13 @@ html {
   font-weight: 600;
   letter-spacing: 0.09em;
   text-transform: uppercase;
-  color: var(--muted-foreground);
-  background: var(--muted);
-  border-bottom: 1px solid var(--border);
+  color: var(--nession-muted-foreground);
+  background: var(--nession-muted);
+  border-bottom: 1px solid var(--nession-border);
 }
 
 .markdown-preview table.nession-frontmatter tr + tr > * {
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--nession-border);
 }
 
 /* Keys hug their content so values get the remaining width. */
@@ -137,7 +137,7 @@ html {
   font-family: var(--font-mono, ui-monospace, monospace);
   font-weight: 600;
   font-size: 0.6875rem;
-  color: var(--muted-foreground);
+  color: var(--nession-muted-foreground);
 }
 
 .markdown-preview table.nession-frontmatter td {
@@ -147,7 +147,7 @@ html {
   background: none;
   font-family: var(--font-mono, ui-monospace, monospace);
   font-size: 0.6875rem;
-  color: var(--foreground);
+  color: var(--nession-foreground);
   overflow-wrap: anywhere;
 }
 
@@ -160,8 +160,8 @@ html {
      design/generated/web.css — do not restate them here, or the token source
      stops being the single authority. */
   color-scheme: light;
-  background-color: var(--background);
-  color: var(--foreground);
+  background-color: var(--nession-background);
+  color: var(--nession-foreground);
 }
 
 /* Terminal capsule — occlusion band. Same colour as the terminal itself (the
@@ -178,7 +178,7 @@ html {
   position: relative;
   flex: 1 1 0%;
   min-height: 0;
-  background: var(--terminal-background);
+  background: var(--nession-terminal-background);
   isolation: isolate;
 }
 
@@ -198,7 +198,7 @@ html {
 }
 
 [data-terminal-capsule-host][data-terminal-scrollback-mode='local-buffer'] {
-  --terminal-content-bottom-inset: var(--terminal-capsule-occlusion, 0px);
+  --nession-local-terminal-content-bottom-inset: var(--nession-local-terminal-capsule-occlusion, 0px);
 }
 
 [data-terminal-capsule-host][data-terminal-scrollback-mode='local-buffer']::after {
@@ -207,15 +207,15 @@ html {
   position: absolute;
   inset-inline: 0;
   bottom: 0;
-  height: var(--terminal-content-bottom-inset, 0px);
+  height: var(--nession-local-terminal-content-bottom-inset, 0px);
   z-index: 5;
-  background: var(--terminal-background);
+  background: var(--nession-terminal-background);
 }
 
 /* Capsule composer typography — token vars only; beats global touch textarea bump. */
 .shell [data-testid='terminal-capsule'] [data-testid='capsule-ghost-input'] {
-  font-size: var(--terminal-capsule-font-size);
-  line-height: var(--terminal-capsule-text-line-height);
+  font-size: var(--nession-terminal-capsule-font-size);
+  line-height: var(--nession-terminal-capsule-text-line-height);
 }
 
 /* Capsule add-command dialog sits above composer popovers (z-index 100). */
@@ -233,7 +233,7 @@ html {
 
 @media (prefers-reduced-motion: reduce) {
   .shell {
-    --motion-shell-duration: 0ms;
+    --nession-motion-shell-duration: 0ms;
   }
 
   /*

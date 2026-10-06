@@ -14,7 +14,7 @@ export function AppFilesSelectionTopBar({
 }) {
   return (
     <div
-      className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-[var(--shell-space-3)] py-[var(--shell-space-2)]"
+      className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-[var(--nession-shell-space-3)] py-[var(--nession-shell-space-2)]"
       data-testid="files-app-selection-top"
     >
       <Button
@@ -49,8 +49,8 @@ export function AppFilesSelectionBottomBar({
   return (
     <div
       className={cn(
-        'flex shrink-0 items-center justify-around gap-2 border-t border-border bg-background px-[var(--shell-space-2)] py-[var(--shell-space-2)]',
-        'pb-[max(var(--shell-space-2),env(safe-area-inset-bottom))]',
+        'flex shrink-0 items-center justify-around gap-2 border-t border-border bg-background px-[var(--nession-shell-space-2)] py-[var(--nession-shell-space-2)]',
+        'pb-[max(var(--nession-shell-space-2),env(safe-area-inset-bottom))]',
       )}
       data-testid="files-app-selection-bottom"
     >

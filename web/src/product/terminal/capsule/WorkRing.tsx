@@ -62,7 +62,7 @@ export function WorkRing({ working, className }: WorkRingProps) {
         strokeLinecap="round"
         // Rotate so the gap is at the bottom-right (like a progress indicator).
         transform="rotate(-90 12 12)"
-        className="text-[color:var(--terminal-capsule-surface)]"
+        className="text-[color:var(--nession-terminal-capsule-surface)]"
       />
     </svg>
   );
