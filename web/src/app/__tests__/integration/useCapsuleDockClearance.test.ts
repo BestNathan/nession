@@ -88,14 +88,14 @@ describe('useCapsuleDockClearance', () => {
     host.addEventListener('terminal-capsule-occlusion', listener);
     renderHook(() => useCapsuleDockClearance({ current: shell }));
 
-    expect(host.style.getPropertyValue('--nession-terminal-capsule-occlusion')).toBe('60px');
+    expect(host.style.getPropertyValue('--nession-local-terminal-capsule-occlusion')).toBe('60px');
     expect(observe).toHaveBeenCalledWith(shell);
     expect(observe).toHaveBeenCalledWith(host);
     expect(listener).toHaveBeenCalled();
   });
 
   it('does not grow for a projection floating above the shell (#826)', () => {
-    // The occlusion is not advisory: `--nession-terminal-content-bottom-inset` derives
+    // The occlusion is not advisory: `--nession-local-terminal-content-bottom-inset` derives
     // from it and `TerminalViewport` spends it as padding-bottom inside a
     // `box-border` element xterm is mounted in. Measuring the dock made an
     // emerged Signal add its own height, so the terminal re-fit — rows changed
@@ -103,11 +103,11 @@ describe('useCapsuleDockClearance', () => {
     // surface reflowing the work surface.
     const without = capsuleDom({ withProjection: false });
     renderHook(() => useCapsuleDockClearance({ current: without.shell }));
-    const dormant = without.host.style.getPropertyValue('--nession-terminal-capsule-occlusion');
+    const dormant = without.host.style.getPropertyValue('--nession-local-terminal-capsule-occlusion');
 
     const withProjection = capsuleDom({ withProjection: true });
     renderHook(() => useCapsuleDockClearance({ current: withProjection.shell }));
-    const emerged = withProjection.host.style.getPropertyValue('--nession-terminal-capsule-occlusion');
+    const emerged = withProjection.host.style.getPropertyValue('--nession-local-terminal-capsule-occlusion');
 
     expect(dormant).toBe('60px');
     // The dock's top moved 120px up; the clearance must not have noticed.
