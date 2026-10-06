@@ -85,14 +85,20 @@ describe('WorkspaceShell contextual capability presentation', () => {
     expect(env).toHaveAttribute('aria-pressed', 'true');
   });
 
-  it('keeps every capability label available to sighted and assistive readers', () => {
+  it('uses compact visual labels while preserving full accessible capability names', () => {
     const ctx = workspaceContext();
     render(<WorkspaceShell ctx={ctx} activeCapabilityId="files" />);
 
     expect(screen.getByTestId('workspace-tool-files-label')).toHaveTextContent('Files');
-    expect(screen.getByTestId('workspace-tool-claude-code-label')).toHaveTextContent(
-      'Claude Code',
-    );
+
+    const claude = screen.getByTestId('workspace-tool-claude-code');
+    expect(screen.getByTestId('workspace-tool-claude-code-label')).toHaveTextContent('Claude');
+    expect(claude).toHaveAttribute('aria-label', 'Claude Code');
+    expect(claude).toHaveAttribute('title', 'Claude Code');
+
+    const env = screen.getByTestId('workspace-tool-env');
+    expect(screen.getByTestId('workspace-tool-env-label')).toHaveTextContent('Env');
+    expect(env).toHaveAttribute('aria-label', 'Environment');
   });
 
   it('arrives with the capsule exchange while a swipe carries the layer in', () => {
