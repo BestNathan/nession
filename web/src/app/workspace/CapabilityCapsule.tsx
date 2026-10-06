@@ -1,6 +1,9 @@
 import { forwardRef, useEffect, useRef, type ReactNode } from 'react';
 import { cn } from '@/shared/lib/utils';
-import type { CapabilityId } from '@/product/capability';
+import {
+  resolveCapabilityCompactTitle,
+  type CapabilityId,
+} from '@/product/capability';
 import { WORKSPACE_VIEW_BINDINGS } from '@/app/workspace/viewBindings';
 import type { WorkspacePresentationItem } from '@/app/workspace/presentation';
 import { capsuleOuterGeometry } from '@/product/terminal/capsule/capsuleStyles';
@@ -8,8 +11,6 @@ import type { CapsuleExperience } from '@/product/terminal/capsule/types';
 import {
   workspaceCapabilityEntryClass,
   workspaceCapabilityEntryLayoutClass,
-  workspaceCapabilityIndicatorClass,
-  workspaceCapabilityIndicatorStateClass,
   workspaceCapabilityLabelAlignmentClass,
   workspaceCapabilityLabelBaseClass,
   workspaceCapabilityLabelSizeClass,
@@ -152,6 +153,7 @@ export function CapabilityCapsule({
               ref={isActive ? activeItemRef : undefined}
               id={`workspace-capability-${item.snapshot.id}`}
               title={item.snapshot.title}
+              compactTitle={resolveCapabilityCompactTitle(item.snapshot)}
               testId={`workspace-tool-${item.snapshot.id}`}
               state={item.snapshot.state}
               presence={item.presence.level}
@@ -170,6 +172,7 @@ export function CapabilityCapsule({
 interface CapabilityEntryProps {
   id: string;
   title: string;
+  compactTitle: string;
   testId: string;
   state: string;
   presence: string;
@@ -184,16 +187,27 @@ interface CapabilityEntryProps {
  *
  * Geometry belongs to WorkspaceNavigation, not the capability. Web uses a
  * horizontal icon+label composition inside the denser 32px band; App keeps the
- * icon-over-label composition inside its 44px touch band. Long labels truncate
- * rather than growing either entry or outer Capsule, while aria-label/title keep
- * the complete capability name available.
+ * icon-over-label composition inside its 44px touch band. The capability owns a
+ * compact title for this constrained surface; aria-label/title keep the complete
+ * capability name available. Truncation remains only a defensive viewport guard.
  *
  * The glyph stays bare rather than using CapsuleIconVisual: a labeled entry is
  * one affordance, not an icon button plus a second label.
  */
 const CapabilityEntry = forwardRef<HTMLButtonElement, CapabilityEntryProps>(
   function CapabilityEntry(
-    { id, title, testId, state, presence, isActive, experience, icon, onSelect },
+    {
+      id,
+      title,
+      compactTitle,
+      testId,
+      state,
+      presence,
+      isActive,
+      experience,
+      icon,
+      onSelect,
+    },
     ref,
   ) {
     return (
@@ -224,15 +238,8 @@ const CapabilityEntry = forwardRef<HTMLButtonElement, CapabilityEntryProps>(
             workspaceCapabilityLabelAlignmentClass(experience),
           )}
         >
-          {title}
+          {compactTitle}
         </span>
-        <span
-          aria-hidden
-          className={cn(
-            workspaceCapabilityIndicatorClass,
-            workspaceCapabilityIndicatorStateClass(isActive),
-          )}
-        />
       </button>
     );
   },
