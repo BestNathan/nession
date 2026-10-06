@@ -21,7 +21,7 @@
 
 import { MessageSquare } from 'lucide-react'
 import { cn } from '@/shared/lib/utils'
-import { chromeSansRole } from '@/shared/typography/chromeRoles'
+import { chromeLabelRole, chromeSansRole } from '@/shared/typography/chromeRoles'
 import type { AIConversationSummary } from '../model/conversation'
 import { BUCKET_LABELS, bucketRows, undatedRows, type ConversationRowContent } from '../model/listing'
 
@@ -102,8 +102,8 @@ export function ConversationList({
         <section key={bucket}>
           <h3
             className={cn(
-              'px-2 pb-1 uppercase tracking-wide text-muted-foreground',
-              chromeSansRole('metadata'),
+              'px-2 pb-1 text-muted-foreground',
+              chromeLabelRole(),
             )}
             data-testid="conversation-bucket"
           >
