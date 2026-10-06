@@ -36,7 +36,7 @@ export const typography = {
     weight: 475,
     lineHeight: "1.35",
   },
- } as const;
+} as const;
 export const typographyLabelTracking = "0.025em" as const;
 export const control = {
   sm: 44,
