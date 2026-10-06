@@ -9,14 +9,12 @@ import type { AttachInfo } from '@/types';
 
 vi.mock('@/product/terminal/hooks/useSessionRuntime', () => ({
   useSessionRuntime: vi.fn(() => ({
-    addressPlan: { ready: true, urls: ['ws://a/ws'] },
+    addressUrls: ['ws://a/ws'],
     activeUrl: 'ws://a/ws',
     agentTerminalApi: null,
     connectionState: 'disconnected' as const,
-    waitingForAddressPlan: false,
     fileOps: null,
     runtime: null,
-    transportKey: null,
     snapshot: null,
   })),
 }));
@@ -69,6 +67,5 @@ describe('useP2PAttachTransport', () => {
     );
 
     expect(result.current.activeUrl).toBe('ws://a/ws');
-    expect(result.current.waitingForAddressPlan).toBe(false);
   });
 });

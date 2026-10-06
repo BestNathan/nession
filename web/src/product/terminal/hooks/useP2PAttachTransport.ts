@@ -1,6 +1,5 @@
 import { useSessionRuntime } from '@/product/terminal/hooks/useSessionRuntime';
 import type { AttachInfo } from '@/types';
-import type { AddressPlan } from '@/shared/hooks/useAddressPlan';
 import type { TerminalAgentApi } from '@/product/terminal';
 import type { RelayServerTransport } from '@/platform/attach/relayServerConnection';
 
@@ -16,13 +15,11 @@ interface UseP2PAttachTransportOptions {
 }
 
 interface UseP2PAttachTransportResult {
-  addressPlan: AddressPlan;
   activeUrl: string | null;
   /** Live agent terminal capability of the current P2P transport (null in relay). */
   agentTerminalApi: TerminalAgentApi | null;
   /** Agent-transport connection state, gated 'disconnected' outside the P2P transport. */
   connectionState: import('@/platform/socket/types').ConnectionState;
-  waitingForAddressPlan: boolean;
   fileOps: import('@/capabilities/files').FileOps | null;
   runtime: import('@/platform/session-runtime/SessionRuntime').SessionRuntime | null;
   snapshot: import('@/platform/session-runtime/SessionRuntime').SessionRuntimeSnapshot | null;
@@ -36,8 +33,8 @@ export function useP2PAttachTransport({
   hasSessionOutput,
 }: UseP2PAttachTransportOptions): UseP2PAttachTransportResult {
   const {
-    addressPlan, activeUrl, agentTerminalApi, connectionState,
-    waitingForAddressPlan, fileOps, runtime, snapshot,
+    activeUrl, agentTerminalApi, connectionState,
+    fileOps, runtime, snapshot,
   } = useSessionRuntime({
     configOwner: true,
     serverConnection,
@@ -45,11 +42,9 @@ export function useP2PAttachTransport({
   });
 
   return {
-    addressPlan,
     activeUrl,
     agentTerminalApi,
     connectionState,
-    waitingForAddressPlan,
     fileOps,
     runtime,
     snapshot,

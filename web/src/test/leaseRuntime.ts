@@ -24,7 +24,7 @@ export function leaseRuntimeAtPhase(sessionId: string, phase: 'attached' | 'fail
     orderedUrls: null,
     manualOverride: null,
     forcedRelay: true,
-    addressPlan: { urls: [], ready: true },
+    addressUrls: [],
     routeIntentEpoch: 0,
     // Never called: the inert context (no attachInfo, relay intent, no server
     // connection) keeps the runtime from building any transport or agent API.

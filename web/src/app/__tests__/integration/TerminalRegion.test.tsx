@@ -22,7 +22,6 @@ const { wsListeners, surfaceProps } = vi.hoisted(() => ({
 
 vi.mock('@/product/terminal/hooks/useP2PAttachTransport', () => ({
   useP2PAttachTransport: () => ({
-    waitingForAddressPlan: false,
     agentTerminalApi: null,
     connectionState: 'connected' as const,
     activeUrl: null,

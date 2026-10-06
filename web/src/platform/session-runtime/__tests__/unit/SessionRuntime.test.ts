@@ -13,6 +13,7 @@ import type { AttachInfo } from '@/types';
 const OriginalWebSocket = globalThis.WebSocket;
 
 interface MockWs {
+  url: string;
   readyState: number;
   onopen: ((ev: Event) => void) | null;
   onmessage: ((ev: MessageEvent) => void) | null;
@@ -137,7 +138,7 @@ function makeConfig(overrides: Partial<ConstructorParameters<typeof SessionRunti
     orderedUrls: ['ws://a/ws', 'ws://b/ws'],
     manualOverride: null,
     forcedRelay: false,
-    addressPlan: { ready: true, urls: ['ws://a/ws', 'ws://b/ws'] },
+    addressUrls: ['ws://a/ws', 'ws://b/ws'],
     routeIntentEpoch: 0,
     createFilesApi,
     createTerminalAgentApi,
@@ -250,6 +251,7 @@ describe('SessionRuntime', () => {
     vi.stubGlobal('WebSocket', class {
       static CONNECTING = 0;
       static OPEN = 1;
+      url: string;
       readyState = 0;
       binaryType = 'arraybuffer';
       onopen: ((ev: Event) => void) | null = null;
@@ -259,7 +261,8 @@ describe('SessionRuntime', () => {
       send = vi.fn();
       close = vi.fn();
 
-      constructor() {
+      constructor(url: string) {
+        this.url = url;
         wsInstances.push(this);
       }
     });
@@ -280,8 +283,15 @@ describe('SessionRuntime', () => {
     rt.dispose();
   });
 
-  it('creates P2P connection and file capability when address plan is ready', () => {
+  it('dials the plan\'s first candidate at construction — no gate, no probe wait (#1430)', () => {
+    // The issue's scenario, at the runtime's level: candidate A answers in
+    // 30 ms and candidate B would time out at 3 s, but the runtime can see
+    // neither measurement — the plan is the advertisement's own order and the
+    // first entry is dialled synchronously, with no readiness signal to wait
+    // for and no second socket.
     const rt = new SessionRuntime(makeConfig());
+    expect(wsInstances).toHaveLength(1);
+    expect(lastWs().url).toBe('ws://a/ws?token=tok');
     expect(rt.activeUrl).toBe('ws://a/ws');
     expect(rt.getAgentTerminalApi()).not.toBeNull();
     expect(rt.getFilesApi()).not.toBeNull();
@@ -304,11 +314,12 @@ describe('SessionRuntime', () => {
     rt.dispose();
   });
 
-  it('reports waitingForAddressPlan when plan is not ready', () => {
-    const rt = new SessionRuntime(makeConfig({
-      addressPlan: { ready: false, urls: [] },
-    }));
-    expect(rt.waitingForAddressPlan).toBe(true);
+  it('builds no agent API when the plan carries no addresses (#1430)', () => {
+    // An empty plan is a resolved answer now: there is no "not ready" state
+    // left to wait in, so it means the advertisement named no candidate and
+    // there is no legacy address either — nothing to dial.
+    const rt = new SessionRuntime(makeConfig({ addressUrls: [] }));
+    expect(rt.activeUrl).toBeNull();
     expect(rt.getAgentTerminalApi()).toBeNull();
     rt.dispose();
   });
@@ -419,9 +430,14 @@ describe('SessionRuntime', () => {
     // any extra render source above the terminal used to fall into.
     rt.updateContext({ forcedRelay: false });
     rt.updateContext({});
+    // The plan arrives as a fresh array whenever the memo recomputes
+    // (`attachInfo` is itself rebuilt per attach reply), so the same contents
+    // in a new array must also be a no-op: no republish, no second socket.
+    rt.updateContext({ addressUrls: ['ws://a/ws', 'ws://b/ws'] });
 
     expect(rt.getSnapshot()).toBe(published);
     expect(changes).not.toHaveBeenCalled();
+    expect(wsInstances).toHaveLength(1);
 
     unsubscribe();
     rt.dispose();
@@ -642,6 +658,16 @@ describe('SessionRuntime', () => {
       expect(rt.getSnapshot().forcedRelay).toBe(true);
       expect(rt.attachState.phase).toBe('attached');
       expect(serverConnection.beginRelay).toHaveBeenCalledTimes(1);
+
+      // And a re-allocated plan of equal contents — what a recomputed memo
+      // sends — is the same statement: it is compared by content, so it must
+      // not clear the fallback either (#1430), or every re-render would retry
+      // P2P and flap back into the relay it just left.
+      const socketsBefore = wsInstances.length;
+      rt.updateContext({ addressUrls: ['ws://a/ws', 'ws://b/ws'] });
+      expect(rt.getSnapshot().forcedRelay).toBe(true);
+      expect(rt.activeUrl).toBeNull();
+      expect(wsInstances).toHaveLength(socketsBefore);
       rt.dispose();
     });
 
@@ -670,7 +696,7 @@ describe('SessionRuntime', () => {
 
       rt.updateContext({
         orderedUrls: ['ws://c/ws'],
-        addressPlan: { urls: ['ws://c/ws'], ready: true },
+        addressUrls: ['ws://c/ws'],
       });
       expect(rt.getSnapshot().forcedRelay).toBe(false);
       expect(rt.activeUrl).toBe('ws://c/ws');

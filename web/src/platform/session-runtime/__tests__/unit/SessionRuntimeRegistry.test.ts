@@ -20,7 +20,7 @@ function makeConfig(sessionId: string): SessionRuntimeConfig {
     orderedUrls: ['ws://agent/ws'],
     manualOverride: null,
     forcedRelay: false,
-    addressPlan: { ready: true, urls: ['ws://agent/ws'] },
+    addressUrls: ['ws://agent/ws'],
     routeIntentEpoch: 0,
     createFilesApi,
     createTerminalAgentApi,

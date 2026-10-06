@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { measureLatency, orderAddressesByLatency } from '@/shared/lib/addressSelection';
+import { measureLatency, orderByLatency, testAddresses } from '@/shared/lib/addressSelection';
 import type { ProbedAddress } from '@/types';
 
 // ---------------------------------------------------------------------------
@@ -65,6 +65,18 @@ function setupMock() {
 
 function probed(url: string, status: ProbedAddress['status'], priority = 10): ProbedAddress {
   return { url, network_type: 'lan', priority, status };
+}
+
+/**
+ * The production composition (`useAgentProbe`): measure every candidate, then
+ * order. Since #1430 the *plan* no longer waits on this — the measurement
+ * refines the next attach — so it is a helper, not a plan factory.
+ */
+function orderCandidates(
+  addresses: ProbedAddress[],
+  options?: { credential?: string },
+): Promise<string[]> {
+  return testAddresses(addresses, options).then(orderByLatency);
 }
 
 beforeEach(() => {
@@ -136,7 +148,7 @@ describe('measureLatency', () => {
     behavior['ws://b/ws'] = { openDelayMs: 1 };
     const addrs = [probed('ws://a/ws', 'reachable'), probed('ws://b/ws', 'reachable')];
 
-    const p = orderAddressesByLatency(addrs, { credential: 'tok' });
+    const p = orderCandidates(addrs, { credential: 'tok' });
     await vi.advanceTimersByTimeAsync(10);
     const urls = await p;
 
@@ -146,7 +158,7 @@ describe('measureLatency', () => {
   });
 });
 
-describe('orderAddressesByLatency', () => {
+describe('testAddresses + orderByLatency', () => {
   it('keeps a browser-reachable address even if server marked it unreachable', async () => {
     // The server's probe is a different vantage point; the browser is the
     // authority. An address the server called unreachable but the browser CAN
@@ -157,7 +169,7 @@ describe('orderAddressesByLatency', () => {
     ];
     behavior['ws://server-dead-browser-ok/ws'] = { openDelayMs: 1 };
     behavior['ws://live/ws'] = { openDelayMs: 20 };
-    const p = orderAddressesByLatency(addrs);
+    const p = orderCandidates(addrs);
     await vi.advanceTimersByTimeAsync(50);
     const urls = await p;
     // Both reachable from the browser; the faster one (server-"dead") wins.
@@ -171,7 +183,7 @@ describe('orderAddressesByLatency', () => {
     ];
     behavior['ws://slow/ws'] = { openDelayMs: 50 };
     behavior['ws://fast/ws'] = { openDelayMs: 5 };
-    const p = orderAddressesByLatency(addrs);
+    const p = orderCandidates(addrs);
     await vi.advanceTimersByTimeAsync(100);
     const urls = await p;
     expect(urls[0]).toBe('ws://fast/ws');
@@ -185,7 +197,7 @@ describe('orderAddressesByLatency', () => {
     ];
     behavior['ws://ok/ws'] = { openDelayMs: 5 };
     behavior['ws://flaky/ws'] = { fail: true };
-    const p = orderAddressesByLatency(addrs);
+    const p = orderCandidates(addrs);
     await vi.advanceTimersByTimeAsync(4_000);
     const urls = await p;
     expect(urls[0]).toBe('ws://ok/ws');
@@ -199,7 +211,7 @@ describe('orderAddressesByLatency', () => {
     const addrs = [probed('ws://x/ws', 'reachable'), probed('ws://y/ws', 'reachable')];
     behavior['ws://x/ws'] = { fail: true };
     behavior['ws://y/ws'] = { fail: true };
-    const p = orderAddressesByLatency(addrs);
+    const p = orderCandidates(addrs);
     await vi.advanceTimersByTimeAsync(10);
     const urls = await p;
     expect(urls).toHaveLength(2);
@@ -208,7 +220,7 @@ describe('orderAddressesByLatency', () => {
   });
 
   it('returns empty only for an empty candidate list', async () => {
-    const urls = await orderAddressesByLatency([]);
+    const urls = await orderCandidates([]);
     expect(urls).toEqual([]);
   });
 });

@@ -42,8 +42,27 @@ export function useSessionData() {
     }
   }, []);
 
+  /**
+   * Insert a Session the client already knows the identity of, before any list
+   * carries it (#1430). The create ACK is the one caller today: its id is
+   * authoritative, and `sessionFromCreateAck` mirrors the row the server has
+   * already committed, so the insert is not a guess — it is the same row one
+   * projection earlier.
+   *
+   * Idempotent by id: if the list already carries it (the broadcast raced
+   * ahead), the existing row wins and nothing is overwritten.
+   */
+  const insertSession = useCallback((session: Session) => {
+    setSessions((prev) =>
+      prev.some((existing) => existing.session_id === session.session_id)
+        ? prev
+        : [session, ...prev],
+    );
+  }, []);
+
   return {
     sessions, setSessions,
+    insertSession,
     loadingSessions,
     sessionsLoaded,
     staleAgents,
