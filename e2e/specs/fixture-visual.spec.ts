@@ -347,7 +347,7 @@ test.describe('Web 1440×900', () => {
 
     const railWidth = await page.evaluate(() =>
       parseFloat(
-        getComputedStyle(document.documentElement).getPropertyValue('--shell-rail-width'),
+        getComputedStyle(document.documentElement).getPropertyValue('--nession-shell-rail-width'),
       ),
     );
     const column = page.getByTestId('sidebar-column');
