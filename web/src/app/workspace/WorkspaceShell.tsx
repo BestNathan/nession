@@ -195,7 +195,7 @@ export function WorkspaceShell({
   // able to switch capabilities is not leaving.
   //
   // The dock's clearance follows from this: the pushed depth's scrollers must
-  // clear it exactly as the root's do (`--workspace-content-bottom-inset`,
+  // clear it exactly as the root's do (`--nession-local-workspace-content-bottom-inset`,
   // published from this bar's own geometry — see `useWorkspaceCapsuleClearance`).
   const showDock = hasNavigation;
   // `#1204`: the surface-leave action never becomes a dock entry, and it stays
@@ -255,7 +255,7 @@ export function WorkspaceShell({
             // capsule does (the App dock placement); on Web it keeps the shared
             // zone's own bottom offset.
             ctx.experience === 'app' ? capsuleZoneAppClass : capsuleZoneClass,
-            'gap-[length:var(--shell-space-2)]',
+            'gap-[length:var(--nession-shell-space-2)]',
           )}
         >
           {showSurfaceAction ? <SurfaceNavigation>{surfaceAction}</SurfaceNavigation> : null}
