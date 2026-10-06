@@ -2,7 +2,11 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } fro
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { loadTokens, resolveRef } from './generate-tokens.mjs';
+import {
+  loadTokens,
+  namespaceTokenValue,
+  resolveRef,
+} from './generate-tokens.mjs';
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const DESIGN_DIR = join(SCRIPT_DIR, '..');
@@ -156,7 +160,9 @@ function cssForTokenId(index, tokens, id) {
     return { known: true, css: null };
   }
   if (typeof value === 'number') return { known: true, css: String(value) };
-  if (typeof value === 'string' && value.trim() !== '') return { known: true, css: value };
+  if (typeof value === 'string' && value.trim() !== '') {
+    return { known: true, css: namespaceTokenValue(value) };
+  }
   return { known: true, css: null };
 }
 

@@ -157,22 +157,22 @@ describe('capability projection frame', () => {
 
     const dismiss = screen.getByTestId('capsule-capability-dismiss');
     const visual = dismiss.querySelector('[data-testid="capsule-control-visual"]');
-    expect(dismiss.className).toContain('var(--control-md)');
+    expect(dismiss.className).toContain('var(--nession-control-md)');
     expect(visual).not.toBeNull();
-    expect(visual?.className).toContain('var(--control-visual-size)');
+    expect(visual?.className).toContain('var(--nession-control-visual-size)');
   });
 
   it('typesets Nession-owned Peek chrome with canonical roles without leaking them into the body', () => {
     renderFrame(projection());
 
     expect(screen.getByTestId('capsule-capability-title').className).toContain(
-      'var(--typography-body-size)',
+      'var(--nession-typography-body-size)',
     );
     expect(screen.getByTestId('capsule-capability-title').className).not.toContain(
       'terminal-capsule-projection-font-size',
     );
     expect(screen.getByTestId('capsule-capability-open-workspace').className).toContain(
-      'var(--typography-body-size)',
+      'var(--nession-typography-body-size)',
     );
 
     // The host owns title/actions, not the capability body's inherited type
@@ -180,7 +180,7 @@ describe('capability projection frame', () => {
     // up Nession host typography even when its own controls have different
     // workload semantics (Terminal Keys exposed this in #1446 visual review).
     expect(screen.getByTestId('capsule-capability-projection').className).not.toContain(
-      'var(--typography-body-size)',
+      'var(--nession-typography-body-size)',
     );
   });
 

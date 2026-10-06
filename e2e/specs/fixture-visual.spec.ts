@@ -347,7 +347,7 @@ test.describe('Web 1440×900', () => {
 
     const railWidth = await page.evaluate(() =>
       parseFloat(
-        getComputedStyle(document.documentElement).getPropertyValue('--shell-rail-width'),
+        getComputedStyle(document.documentElement).getPropertyValue('--nession-shell-rail-width'),
       ),
     );
     const column = page.getByTestId('sidebar-column');
@@ -404,18 +404,18 @@ test.describe('Web 1440×900', () => {
     await expect(sessionsSummary).toHaveAttribute('aria-label', '6 sessions');
 
     // The rail fills the column's full height: the status dot sits one
-    // --shell-space-2 off the bottom edge, mirroring where the expanded footer
+    // --nession-shell-space-2 off the bottom edge, mirroring where the expanded footer
     // carries the same status — not directly under the summaries, which is
     // where a shrink-wrapped nav left it.
     expect(await glyphCenterOffset('sidebar-rail-expand')).toBeLessThanOrEqual(0.5);
     // A custom property's computed value keeps the author's unit, so
-    // getPropertyValue('--shell-space-2') reads "0.5rem" and parseFloat makes
+    // getPropertyValue('--nession-shell-space-2') reads "0.5rem" and parseFloat makes
     // it 0.5, not 8 (--shell-rail-width above is px-valued, which is why the
     // same trick works there). Measure it through a probe element instead.
     const shellSpace2 = await page.evaluate(() => {
       const probe = document.createElement('div');
       probe.style.cssText =
-        'position:absolute;visibility:hidden;height:var(--shell-space-2)';
+        'position:absolute;visibility:hidden;height:var(--nession-shell-space-2)';
       document.body.appendChild(probe);
       const px = probe.getBoundingClientRect().height;
       probe.remove();

@@ -21,7 +21,7 @@
 
 import { MessageSquare } from 'lucide-react'
 import { cn } from '@/shared/lib/utils'
-import { chromeSansRole } from '@/shared/typography/chromeRoles'
+import { chromeLabelRole, chromeSansRole } from '@/shared/typography/chromeRoles'
 import type { AIConversationSummary } from '../model/conversation'
 import { BUCKET_LABELS, bucketRows, undatedRows, type ConversationRowContent } from '../model/listing'
 
@@ -41,7 +41,7 @@ function CandidateRow({
         aria-current={open ? 'true' : undefined}
         onClick={() => onSelect(row.id)}
         className={cn(
-          'flex w-full items-start gap-2 rounded-[var(--radius-control)] px-2 py-1.5 text-left transition-colors',
+          'flex w-full items-start gap-2 rounded-[var(--nession-radius-control)] px-2 py-1.5 text-left transition-colors',
           'hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
           open && 'bg-accent text-accent-foreground',
         )}
@@ -102,8 +102,8 @@ export function ConversationList({
         <section key={bucket}>
           <h3
             className={cn(
-              'px-2 pb-1 uppercase tracking-wide text-muted-foreground',
-              chromeSansRole('metadata'),
+              'px-2 pb-1 text-muted-foreground',
+              chromeLabelRole(),
             )}
             data-testid="conversation-bucket"
           >

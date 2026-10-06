@@ -7,6 +7,7 @@ import { cn } from '@/shared/lib/utils';
 import { CodeBlock } from './CodeBlock';
 import type { HastElement } from './hast';
 import { getRehypePlugins, getRemarkPlugins, getRemarkRehypeOptions } from './previewPlugins';
+import { markdownMessageRootClass } from './markdownVisualGrammar';
 
 /**
  * Markdown, rendered — the primitive, without a surface around it.
@@ -48,7 +49,7 @@ export function Markdown({
     // width, which for a document containing a code fence is the longest
     // unwrapped line — so without this the block below forces the whole column
     // to that width instead of letting the fence scroll inside itself.
-    <div className={cn('prose prose-sm max-w-none min-w-0', PROSE, className)}>
+    <div className={cn(markdownMessageRootClass, className)}>
       <ReactMarkdown
         remarkPlugins={getRemarkPlugins()}
         rehypePlugins={getRehypePlugins()}
@@ -60,43 +61,6 @@ export function Markdown({
     </div>
   );
 }
-
-/**
- * Nession's Markdown treatment, as class modifiers on the `prose` wrapper.
- *
- * Two of these are corrections rather than taste, and both were visible the
- * first time this rendered:
- *
- * - **`prose-pre:*: zeroed.** `CodeBlock` replaces `pre` entirely and draws its
- *   own surface, so the typography plugin's `pre` treatment is a *second*
- *   surface underneath it — measured, a `oklch(0.278 0.033 256.848)` padding
- *   band around the highlight theme's `rgb(34, 39, 46)` code. Two darks that
- *   are not the same dark, and the outer one is a raw palette value this app
- *   never chose.
- * - **Inline code's backticks removed.** `@tailwindcss/typography` decorates
- *   `code` with literal `::before`/`::after` backticks. In prose that is a
- *   convention; in a chat message containing a filename it is noise, and the
- *   surrounding tokens already say "this is code".
- *
- * The rest names existing vocabulary rather than inventing it: links take the
- * action role, and headings are sized so a message cannot out-shout the page
- * that contains it — the same reason the component levels them down.
- */
-const PROSE = [
-  'prose-pre:bg-transparent prose-pre:p-0 prose-pre:m-0',
-  'prose-code:before:content-none prose-code:after:content-none',
-  'prose-code:bg-muted/60 prose-code:px-1 prose-code:py-0.5 prose-code:rounded',
-  'prose-code:text-xs prose-code:font-normal prose-code:text-foreground/80',
-  'prose-a:text-action prose-a:no-underline hover:prose-a:underline',
-  'prose-headings:font-semibold prose-headings:tracking-tight',
-  'prose-h2:text-base prose-h3:text-sm prose-h4:text-sm',
-  'prose-hr:border-border',
-  'prose-li:marker:text-muted-foreground prose-li:my-0.5',
-  'prose-table:border prose-table:border-border',
-  'prose-th:border prose-th:border-border prose-th:px-2 prose-th:py-1 prose-th:text-left',
-  'prose-td:border prose-td:border-border prose-td:px-2 prose-td:py-1',
-  'prose-blockquote:border-l-2 prose-blockquote:border-border prose-blockquote:not-italic',
-].join(' ');
 
 const markdownComponents: Components = {
   pre: ({ node, children }) => (

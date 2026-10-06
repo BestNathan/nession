@@ -40,7 +40,7 @@ export const capsuleZoneClass = cn(
   'inset-x-0',
   // Bottom position uses shell-space token for consistency with capsule margins.
   // The zone floats above the content; content can scroll underneath (SC-11).
-  'bottom-[var(--shell-space-3)]',
+  'bottom-[var(--nession-shell-space-3)]',
   // Horizontal padding uses the capsule's own shell padding token for alignment.
   capsuleShellInnerPadClass,
 );
@@ -57,6 +57,6 @@ export const capsuleZoneClass = cn(
  */
 export const capsuleZoneAppClass = cn(
   capsuleZoneBaseClass,
-  'inset-x-[length:var(--terminal-capsule-shell-inset)]',
+  'inset-x-[length:var(--nession-terminal-capsule-shell-inset)]',
   capsuleShellAppDockBottomClass,
 );

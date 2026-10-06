@@ -124,7 +124,7 @@ function ChangedFileRow({
         data-path={file.path}
         onClick={() => onSelect()}
         className={cn(
-          'w-full rounded px-2 py-1 text-left hover:bg-accent',
+          'w-full rounded-[var(--nession-radius-control)] px-2 py-1 text-left hover:bg-accent',
           chromeSansRole('metadata'),
           selected && 'bg-accent',
         )}

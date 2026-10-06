@@ -24,7 +24,7 @@ export function AppFilesBreadcrumb({
 }: AppFilesBreadcrumbProps) {
   return (
     <div
-      className="flex shrink-0 items-center gap-1 px-[var(--shell-space-3)] pb-[var(--shell-space-1)]"
+      className="flex shrink-0 items-center gap-1 px-[var(--nession-shell-space-3)] pb-[var(--nession-shell-space-1)]"
       data-testid="files-app-breadcrumb"
     >
       <nav

@@ -19,6 +19,13 @@ const FAST_COMMANDS = [
     repair: 'change the canonical token source, then run `just tokens-gen`',
   },
   {
+    id: 'visual-vocabulary-source',
+    command: 'node design/scripts/visual-vocabulary-source.mjs',
+    owner: 'design/tokens/* + design/generated/lint-metadata.json + web/src/**/*.css',
+    expected: 'Nession visual variables and hard visual utilities resolve through the canonical vocabulary, and consumers cannot locally suppress the gate',
+    repair: 'migrate the consumer to --nession-* / a generated semantic utility / canonical recipe, or encode an explicit adapter boundary',
+  },
+  {
     id: 'contract-generated-integrity',
     command: 'node design/scripts/resolve-contracts.mjs --check',
     owner: 'design/contracts/* + design/scripts/resolve-contracts.mjs',
@@ -53,13 +60,6 @@ const FAST_COMMANDS = [
     expected: 'capsule presentation stays on generated design vocabulary',
     repair: 'route the value through capsuleStyles and design/tokens rather than adding a local metric',
   },
-  {
-    id: 'radius-ownership',
-    command: 'node scripts/check-radius-ownership.mjs',
-    owner: 'design/tokens/semantic.json + web/src/**/*.{tsx,ts}',
-    expected: 'App-owned surfaces use semantic radius tokens, not generic rounded-* utilities',
-    repair: 'replace rounded-{sm|md|lg|xl|2xl} with rounded-[var(--radius-<role>)] where <role> is control/surface/floating',
-  },
 ];
 
 const FULL_COMMANDS = [
@@ -67,7 +67,7 @@ const FULL_COMMANDS = [
     id: 'web-design-eslint',
     command: 'cd web && npx eslint src --report-unused-disable-directives --max-warnings 0',
     owner: 'web/eslint.config.js + web/eslint-plugin-nession/',
-    expected: 'shipping Web source satisfies primitive/cross-experience/magic-metric design rules',
+    expected: 'shipping Web source satisfies visual-vocabulary, cross-experience, product-grammar and architecture rules',
     repair: 'fix the canonical owner or consumer; do not use eslint-disable as a design escape hatch',
   },
   {
@@ -299,7 +299,8 @@ function logicalControlToken(token) {
  * `experience.web.control.md`.
  */
 function logicalControlTokenFromVar(name) {
-  const [head, ...rest] = name.replace(/^control-/, '').split('-');
+  const normalized = String(name).replace(/^nession-/, '');
+  const [head, ...rest] = normalized.replace(/^control-/, '').split('-');
   return `control.${head}${rest
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join('')}`;
@@ -333,7 +334,7 @@ function checkCapsuleSemanticBridge(root) {
   const bridgePath = join(root, 'web/src/product/terminal/capsule/capsuleStyles.ts');
   const source = readFileSync(bridgePath, 'utf8');
   const bridge = extractExportedString(source, 'capsuleIconButtonClass');
-  const actualMatch = bridge?.match(/var\(--control-([A-Za-z0-9_-]+)\)/);
+  const actualMatch = bridge?.match(/var\(--nession-control-([A-Za-z0-9_-]+)\)/);
   const actual = actualMatch ? `control.${actualMatch[1]}` : 'missing control token';
   violations.push(...checkSemanticTokenIdentity({
     pattern: 'pattern.terminal-capsule',
@@ -361,7 +362,7 @@ function checkCapsuleSemanticBridge(root) {
     readFileSync(join(root, 'design/tokens/experience/app.json'), 'utf8'),
   );
   const visualBridge = extractExportedString(source, 'capsuleIconVisualClass');
-  const visualMatch = visualBridge?.match(/var\(--(control-[A-Za-z0-9_-]+)\)/);
+  const visualMatch = visualBridge?.match(/var\(--(nession-control-[A-Za-z0-9_-]+)\)/);
   violations.push(...checkDrawnAffordanceBand({
     pattern: 'pattern.terminal-capsule',
     expectedToken: logicalControlToken(capsuleContract.app?.visualSizeToken) ?? 'missing visualSizeToken',

@@ -29,6 +29,30 @@ describe('CapsuleHistoryPopover', () => {
     expect(onOpenChange.mock.calls[0]?.[0]).toBe(true);
   });
 
+  it('uses chrome roles for title, search, command, and timestamp', () => {
+    render(
+      <CapsuleHistoryPopover
+        open
+        onOpenChange={vi.fn()}
+        onSelect={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('History').className).toContain(
+      'var(--nession-typography-body-size)',
+    );
+    expect(screen.getByTestId('capsule-history-search').className).toContain(
+      'var(--nession-typography-body-size)',
+    );
+    const item = screen.getByTestId('capsule-history-item');
+    expect(item.querySelector('.font-mono')?.className).toContain(
+      'var(--nession-typography-code-size)',
+    );
+    expect(item.lastElementChild?.className).toContain(
+      'var(--nession-typography-caption-size)',
+    );
+  });
+
   it('opens popover and selects a history row', async () => {
     const onSelect = vi.fn();
     const onOpenChange = vi.fn();

@@ -33,11 +33,21 @@ describe('SurfaceDestinationAction (#1204)', () => {
     expect(screen.queryByRole('tablist')).not.toBeInTheDocument();
   });
 
+  it('consumes the Capsule-family floating material while keeping circle geometry', () => {
+    render(<SurfaceDestinationAction destination="workspace" onOpen={vi.fn()} />);
+
+    const action = screen.getByTestId('surface-action-open-workspace');
+    expect(action.className).toContain('var(--nession-terminal-capsule-surface)');
+    expect(action.className).toContain('var(--nession-elevation-floating)');
+    expect(action.className).toContain('backdrop-blur-md');
+    expect(action.className).toContain('rounded-full');
+  });
+
   it('matches the capsule/dock chrome band, not the bare control target (#1204)', () => {
     render(<SurfaceDestinationAction destination="workspace" onOpen={vi.fn()} />);
 
     const action = screen.getByTestId('surface-action-open-workspace');
-    expect(action.className).toMatch(/calc\(var\(--control-md\)\+2\*var\(--terminal-capsule-shell-pad-y\)\)/);
+    expect(action.className).toMatch(/calc\(var\(--nession-control-md\)\+2\*var\(--nession-terminal-capsule-shell-pad-y\)\)/);
   });
 
   it('restores pointer hit-testing inside a pointer-events-none dock region', () => {

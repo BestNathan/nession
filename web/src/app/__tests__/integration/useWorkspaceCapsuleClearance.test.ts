@@ -122,9 +122,11 @@ describe('useWorkspaceCapsuleClearance', () => {
     // The hook publishes it and every capability scroller's class consumes it;
     // these are two files apart, and a rename on one side would silently zero
     // the clearance on the other. The literal is the contract.
-    expect(WORKSPACE_CONTENT_BOTTOM_INSET).toBe('--workspace-content-bottom-inset');
-    expect(workspaceScrollClearanceClass).toContain(
-      `pb-[var(--workspace-content-bottom-inset,0px)]`,
+    expect(WORKSPACE_CONTENT_BOTTOM_INSET).toBe(
+      '--nession-local-workspace-content-bottom-inset',
+    );
+    expect(workspaceScrollClearanceClass).toBe(
+      'pb-[var(--nession-local-workspace-content-bottom-inset,0px)]',
     );
   });
 });

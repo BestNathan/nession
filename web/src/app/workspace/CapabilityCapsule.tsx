@@ -1,10 +1,21 @@
-import { forwardRef, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { forwardRef, useEffect, useRef, type ReactNode } from 'react';
 import { cn } from '@/shared/lib/utils';
 import type { CapabilityId } from '@/product/capability';
 import { WORKSPACE_VIEW_BINDINGS } from '@/app/workspace/viewBindings';
 import type { WorkspacePresentationItem } from '@/app/workspace/presentation';
 import { capsuleOuterGeometry } from '@/product/terminal/capsule/capsuleStyles';
 import type { CapsuleExperience } from '@/product/terminal/capsule/types';
+import {
+  workspaceCapabilityEntryClass,
+  workspaceCapabilityEntryLayoutClass,
+  workspaceCapabilityIndicatorClass,
+  workspaceCapabilityIndicatorStateClass,
+  workspaceCapabilityLabelAlignmentClass,
+  workspaceCapabilityLabelBaseClass,
+  workspaceCapabilityLabelSizeClass,
+  workspaceCapabilityScrollClass,
+  workspaceCapabilityStateClass,
+} from '@/product/workspace/patterns/workspaceNavigationStyles';
 
 const workspaceViewBindings = new Map(
   WORKSPACE_VIEW_BINDINGS.map((view) => [view.id, view]),
@@ -103,11 +114,10 @@ export function CapabilityCapsule({
       data-shell-shape={geometry.shape}
       className={cn(
         // The Capability Form wears the Conversation Form's geometry, from the
-        // same derivation `CapsuleShell` uses (#1347 SC-29/SC-30): on App the
-        // 44px control band the composer's own row takes, the labeled entries
-        // inside it (`capabilityEntryHeight`), and the shared surface, radius
-        // family, padding and clipping. The owner's 2026-10-03 correction, after
-        // the labeled form first shipped at 82px.
+        // same derivation `CapsuleShell` uses (#1347 SC-29/SC-30): the
+        // canonical control.md band, shared surface/radius family, padding and
+        // clipping. Content is contained inside that band; it never owns outer
+        // Capsule height (#1455).
         //
         // The bound is what makes the INNER row scroll instead of the capsule
         // overhanging the tool bar (SC-06); which bound depends on the bar, and
@@ -117,7 +127,7 @@ export function CapabilityCapsule({
     >
       <div
         ref={scrollRef}
-        className="flex items-center gap-[length:var(--terminal-capsule-control-gap)] overflow-x-auto"
+        className={workspaceCapabilityScrollClass}
         data-testid="workspace-capability-scroll"
       >
         {items.map((item) => {
@@ -128,12 +138,13 @@ export function CapabilityCapsule({
 
           const Icon = binding.icon;
           const isActive = item.snapshot.id === activeCapabilityId;
-          // `unavailable` is the one state the reader cannot act from. It keeps
-          // its slot — membership must not change under them as the work
-          // changes — and is drawn inert instead: `disabled-foreground` is the
-          // role the design system defines for a control that cannot be used,
-          // held to the 3:1 that keeps it from disappearing rather than to AA.
-          const isUnavailable = item.snapshot.state === 'unavailable';
+          // Hidden/unavailable capabilities must not occupy Workspace chrome.
+          // Keep this guard at the rendering boundary as well as in the
+          // presentation model so a future caller cannot accidentally turn a
+          // hidden capability into a disabled advertisement.
+          if (item.snapshot.state === 'unavailable') {
+            return null;
+          }
 
           return (
             <CapabilityEntry
@@ -145,8 +156,8 @@ export function CapabilityCapsule({
               state={item.snapshot.state}
               presence={item.presence.level}
               isActive={isActive}
-              isUnavailable={isUnavailable}
-              icon={<Icon className="size-[length:var(--icon-md)]" aria-hidden />}
+              experience={experience}
+              icon={<Icon className="size-[length:var(--nession-icon-md)]" aria-hidden />}
               onSelect={() => onSelect(item.snapshot.id)}
             />
           );
@@ -163,70 +174,33 @@ interface CapabilityEntryProps {
   state: string;
   presence: string;
   isActive: boolean;
-  isUnavailable: boolean;
+  experience: CapsuleExperience;
   icon: ReactNode;
   onSelect: () => void;
 }
 
 /**
- * One capability, as icon-over-label in a fixed-width slot.
+ * One capability in a fixed-width, fixed-height slot.
  *
- * The slot is what bounds the row (the owner's follow-up to Capsule V2): a
- * long label wraps inside its slot instead of widening it, and a wrapped label
- * drops to the smaller type — measured by its own line count, not guessed from
- * the string, so the rule stays true if a title changes. Both sizes are
- * capsule tokens, so Web and App cannot drift apart.
+ * Geometry belongs to WorkspaceNavigation, not the capability. Web uses a
+ * horizontal icon+label composition inside the denser 32px band; App keeps the
+ * icon-over-label composition inside its 44px touch band. Long labels truncate
+ * rather than growing either entry or outer Capsule, while aria-label/title keep
+ * the complete capability name available.
  *
- * The entry is one control band tall (`capabilityEntryHeight`): icon over
- * label, centred, so the Capability Form's row is the Conversation form's row.
- * The glyph is drawn bare rather than inside `CapsuleIconVisual`'s painted
- * circle — that split (#1034) is the icon *button*'s, and a labeled entry is a
- * tab, not a button: its affordance is the pair, and the band goes to ink and
- * the name rather than to a ring.
+ * The glyph stays bare rather than using CapsuleIconVisual: a labeled entry is
+ * one affordance, not an icon button plus a second label.
  */
 const CapabilityEntry = forwardRef<HTMLButtonElement, CapabilityEntryProps>(
   function CapabilityEntry(
-    { id, title, testId, state, presence, isActive, isUnavailable, icon, onSelect },
+    { id, title, testId, state, presence, isActive, experience, icon, onSelect },
     ref,
   ) {
-    const labelRef = useRef<HTMLSpanElement>(null);
-    const [wrapped, setWrapped] = useState(false);
-
-    /**
-     * The font pick is by rendered line count: measure at the one-line size and
-     * keep the smaller size once the label takes more than one line box. Never
-     * evaluated back upward — the smaller size may fit on one line again, and
-     * flipping back would oscillate the row.
-     *
-     * The count comes from a Range over the text, not from the span's own
-     * client rects: `line-clamp` makes the span a `-webkit-box`, whose client
-     * rects collapse to the single box — the range still reports one rect per
-     * rendered line (the same measurement the e2e contract helper uses).
-     */
-    useLayoutEffect(() => {
-      const el = labelRef.current;
-      if (!el || wrapped) {
-        return;
-      }
-      const range = document.createRange();
-      // jsdom has no layout and no `Range.getClientRects` (the same reason the
-      // scroll-into-view above is feature-checked); the browser path is the
-      // one that measures, and browser verification is what proves it.
-      if (typeof range.getClientRects !== 'function') {
-        return;
-      }
-      range.selectNodeContents(el);
-      if (range.getClientRects().length > 1) {
-        setWrapped(true);
-      }
-    }, [wrapped, title]);
-
     return (
       <button
         ref={ref}
         id={id}
         type="button"
-        disabled={isUnavailable}
         aria-pressed={isActive}
         aria-label={title}
         title={title}
@@ -235,51 +209,28 @@ const CapabilityEntry = forwardRef<HTMLButtonElement, CapabilityEntryProps>(
         data-capability-presence={presence}
         data-capability-active={isActive ? 'true' : undefined}
         onClick={onSelect}
-        style={{
-          width: 'var(--terminal-capsule-capability-slot-width)',
-          minHeight: 'var(--terminal-capsule-capability-entry-height)',
-        }}
         className={cn(
-          // The entry is one control band tall and centres icon-over-label in
-          // it: `capabilityEntryHeight` is the Conversation form's own row, so
-          // the two Capsule states sit at the same height (owner correction,
-          // 2026-10-03 — the labeled form had grown to 82px). A floor rather
-          // than a cap: a two-line label grows the entry by its line box
-          // instead of clipping.
-          'relative flex shrink-0 flex-col items-center justify-center gap-[length:var(--terminal-capsule-control-gap)] rounded-[var(--radius-control)] px-1 transition-colors duration-[var(--motion-shell-duration)] ease-[var(--motion-shell-ease)]',
-          isUnavailable
-            ? 'cursor-default text-disabled-foreground'
-            : isActive
-              ? 'text-foreground'
-              : 'text-muted-foreground hover:text-foreground',
+          workspaceCapabilityEntryClass,
+          workspaceCapabilityEntryLayoutClass(experience),
+          workspaceCapabilityStateClass({ active: isActive }),
         )}
       >
-        {/* The glyph is drawn bare — the painted circle `CapsuleIconVisual`
-            belongs to icon *buttons*, and a labeled entry's affordance is the
-            icon-plus-name pair itself. Bare also spends the band on ink rather
-            than on chrome: 20px of glyph (icon-md) where the circle version
-            showed 16px inside 36px of ring. */}
         {icon}
         <span
-          ref={labelRef}
           data-testid={`${testId}-label`}
           className={cn(
-            'line-clamp-2 text-center leading-tight',
-            wrapped
-              ? 'text-[length:var(--terminal-capsule-capability-label-wrapped-font-size)]'
-              : 'text-[length:var(--terminal-capsule-capability-label-font-size)]',
+            workspaceCapabilityLabelBaseClass,
+            workspaceCapabilityLabelSizeClass,
+            workspaceCapabilityLabelAlignmentClass(experience),
           )}
         >
           {title}
         </span>
-        {/* Active capability marked with dot indicator — same visual language
-            as the previous dock, but now inside a capsule shape. The dot is
-            always rendered so the row's geometry does not shift between states. */}
         <span
           aria-hidden
           className={cn(
-            'absolute bottom-0.5 size-1 rounded-full',
-            isActive ? 'bg-foreground' : 'bg-transparent',
+            workspaceCapabilityIndicatorClass,
+            workspaceCapabilityIndicatorStateClass(isActive),
           )}
         />
       </button>

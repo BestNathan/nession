@@ -37,6 +37,7 @@ export const typography = {
     lineHeight: "1.35",
   },
 } as const;
+export const typographyLabelTracking = "0.025em" as const;
 export const control = {
   sm: 44,
   md: 44,

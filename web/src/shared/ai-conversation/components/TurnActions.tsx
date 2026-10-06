@@ -111,9 +111,9 @@ export function TurnActions({
         'pointer-fine:opacity-0',
         'pointer-fine:hover:opacity-100',
         'pointer-fine:focus-within:opacity-100',
-        'transition-opacity duration-[var(--motion-shell-duration)] ease-[var(--motion-shell-ease)]',
+        'transition-opacity duration-[var(--nession-motion-shell-duration)] ease-[var(--nession-motion-shell-ease)]',
       )}
-      style={{ height: 'var(--conversation-fold-control-height)' }}
+      style={{ height: 'var(--nession-conversation-fold-control-height)' }}
     >
       {settled ? (
         <Button

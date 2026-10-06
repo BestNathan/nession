@@ -87,6 +87,10 @@
       }
     }
   },
+  "typographyLabelTracking": {
+    "$description": "Letter spacing for uppercase quiet chrome labels. Centralized so section labels do not invent tracking per feature (#1451).",
+    "value": "0.025em"
+  },
   "control": {
     "$description": "sm == md on purpose: app has a touch-target floor (touchTarget.min, 44px), so no control *hit target* may sit below it. Web keeps a real 28/32/36 scale because a pointer has no minimum hit area. Do not 'restore' a smaller app sm — that reintroduces sub-44px tap targets. `visualSize` is the one legitimate sub-44px dimension in this group and the only exception to the floor: it is not a hit target, it is the affordance painted *inside* one (#1034), so it must stay strictly below `md`.",
     "sm": {

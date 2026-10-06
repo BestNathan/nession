@@ -8,7 +8,7 @@ export type AppToolScrollProps = HTMLAttributes<HTMLDivElement>;
  * App tool scroll container: full-height scroll area whose bottom padding
  * clears BOTH the home indicator and the floating tool bar.
  *
- * The toolbar's share used to be a constant — `var(--shell-space-3) + 2.75rem`,
+ * The toolbar's share used to be a constant — `var(--nession-shell-space-3) + 2.75rem`,
  * the bar's offset plus a pill's height — which was an approximation of the
  * zone rather than a measurement of it (#1347 SC-12). It now spends
  * {@link workspaceScrollClearanceClass}, the same measured occlusion the Web

@@ -71,7 +71,7 @@ describe('a turn’s actions', () => {
     // It reserves its own height rather than appearing on hover: a row that
     // appeared would move the answer under the reader's pointer.
     expect(actions[0]?.getAttribute('style')).toContain(
-      'var(--conversation-fold-control-height)',
+      'var(--nession-conversation-fold-control-height)',
     )
   })
 

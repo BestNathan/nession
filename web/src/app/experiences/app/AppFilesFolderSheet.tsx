@@ -71,7 +71,7 @@ export function AppFilesFolderSheet({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         showCloseButton
-        className="fixed top-auto bottom-0 left-0 max-h-[min(70dvh,24rem)] w-full max-w-none translate-x-0 translate-y-0 rounded-b-none rounded-t-xl border-b-0 data-open:slide-in-from-bottom-4 data-closed:slide-out-to-bottom-4"
+        className="fixed top-auto bottom-0 left-0 max-h-[min(70dvh,24rem)] w-full max-w-none translate-x-0 translate-y-0 rounded-b-none rounded-t-[var(--nession-radius-surface)] border-b-0 data-open:slide-in-from-bottom-4 data-closed:slide-out-to-bottom-4"
         data-testid="files-app-folder-sheet"
       >
         <DialogHeader>

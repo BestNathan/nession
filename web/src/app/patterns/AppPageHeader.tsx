@@ -51,7 +51,7 @@ export function AppPageHeader({ backLabel, onBack, title, technical }: AppPageHe
   return (
     <header
       data-testid="app-page-header"
-      className="flex shrink-0 items-center gap-1 px-[var(--shell-space-2)] pt-[max(var(--shell-space-1),env(safe-area-inset-top))]"
+      className="flex shrink-0 items-center gap-1 px-[var(--nession-shell-space-2)] pt-[max(var(--nession-shell-space-1),env(safe-area-inset-top))]"
     >
       <AppBackButton label={backLabel} testid="app-page-back" onClick={onBack} />
       {/* The page's name. `visual-language.md`'s role vocabulary names "current

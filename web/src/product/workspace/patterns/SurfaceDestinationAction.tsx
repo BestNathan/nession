@@ -1,7 +1,10 @@
 import type { ReactNode } from 'react';
 import { LayoutPanelTop, SquareTerminal } from 'lucide-react';
 
-import { surfaceDestinationActionBandClass } from '@/product/workspace/patterns/surfaceDestinationStyles';
+import {
+  surfaceDestinationActionBandClass,
+  surfaceDestinationActionClass,
+} from '@/product/workspace/patterns/surfaceDestinationStyles';
 import { cn } from '@/shared/lib/utils';
 
 export type Surface = 'terminal' | 'workspace';
@@ -72,7 +75,7 @@ export function SurfaceDestinationAction({
       data-morph-id="surface-action"
       onClick={() => onOpen()}
       className={cn(
-        'pointer-events-auto relative flex shrink-0 items-center justify-center rounded-full bg-[color:var(--terminal-capsule-surface)] text-muted-foreground shadow-[var(--elevation-floating)] backdrop-blur-md transition-colors duration-[var(--motion-shell-duration)] ease-[var(--motion-shell-ease)] hover:text-foreground focus-visible:text-foreground motion-reduce:transition-none',
+        surfaceDestinationActionClass,
         surfaceDestinationActionBandClass,
       )}
     >
@@ -84,12 +87,12 @@ export function SurfaceDestinationAction({
         <span
           aria-hidden
           data-testid="surface-action-glyph"
-          className="flex items-center justify-center [&_svg]:size-[length:var(--icon-md)]"
+          className="flex items-center justify-center [&_svg]:size-[length:var(--nession-icon-md)]"
         >
           {glyph}
         </span>
       ) : (
-        <Icon className="size-[length:var(--icon-md)]" aria-hidden />
+        <Icon className="size-[length:var(--nession-icon-md)]" aria-hidden />
       )}
     </button>
   );

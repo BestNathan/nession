@@ -66,7 +66,7 @@ const sessions: Session[] = [
  * `[data-experience="app"]` (`nession/no-cross-experience-token`).
  */
 const AppSessionsListFloorClass =
-  'min-h-[length:var(--shell-sessions-list-min-height)]';
+  'min-h-[length:var(--nession-shell-sessions-list-min-height)]';
 
 /**
  * A local time `minutes` from today's midnight — negative for earlier days.
@@ -415,8 +415,8 @@ describe('App Sessions surface (#1050 stage 1)', () => {
     // into the header as an icon (it was a labelled `+ New Session` row), and
     // it is sized by the icon-button token, which is where the 44px floor the
     // App contract measures actually comes from.
-    const AppBodyRoleClass = 'text-[length:var(--typography-body-size)]';
-    const AppIconButtonSizeClass = 'size-[length:var(--shell-icon-button-size)]';
+    const AppBodyRoleClass = 'text-[length:var(--nession-typography-body-size)]';
+    const AppIconButtonSizeClass = 'size-[length:var(--nession-shell-icon-button-size)]';
     render(<AppSessionsSurface {...props()} />);
 
     // Both resting controls are icons now — creation in the header, the filter
@@ -437,11 +437,11 @@ describe('App Sessions surface (#1050 stage 1)', () => {
     // because a literal px would be the local type decision #1073 forbids.
     //
     // `AppTitleRoleClass` is named, and named for the experience, because
-    // `--typography-title-size` is emitted only under `[data-experience="app"]`
+    // `--nession-typography-title-size` is emitted only under `[data-experience="app"]`
     // — an unnamed literal here is what `nession/no-cross-experience-token`
     // reports, and it is right to: the same string outside the App resolves to
     // nothing and the declaration is dropped silently.
-    const AppTitleRoleClass = 'text-[length:var(--typography-title-size)]';
+    const AppTitleRoleClass = 'text-[length:var(--nession-typography-title-size)]';
     render(<AppSessionsSurface {...props()} />);
 
     expect(screen.getByRole('heading', { name: 'Sessions' }).className).toContain(
@@ -491,7 +491,7 @@ describe('App Sessions surface (#1050 stage 1)', () => {
   });
 
   it('sizes the chips and the sort row by the same control role', async () => {
-    const AppBodyRoleClass = 'text-[length:var(--typography-body-size)]';
+    const AppBodyRoleClass = 'text-[length:var(--nession-typography-body-size)]';
     render(<AppSessionsSurface {...props()} />);
 
     await userEvent.click(screen.getByTestId('session-list-filters'));

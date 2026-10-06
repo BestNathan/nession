@@ -65,8 +65,8 @@ export function WebLayout(props: WebLayoutProps) {
           className={cn(
             'flex min-h-0 shrink-0',
             sidebarCollapsed
-              ? 'w-[length:var(--shell-rail-width)]'
-              : 'w-[min(var(--shell-sidebar-width),90vw)]',
+              ? 'w-[length:var(--nession-shell-rail-width)]'
+              : 'w-[min(var(--nession-shell-sidebar-width),90vw)]',
           )}
         >
           <Sidebar

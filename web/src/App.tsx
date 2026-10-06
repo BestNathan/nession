@@ -11,6 +11,8 @@ import { FixtureApp } from './app/fixture/FixtureApp';
 import { FixtureShell } from './app/fixture/FixtureShell';
 import { FixtureWorkspace } from './app/fixture/FixtureWorkspace';
 import { Shell } from './app/Shell';
+import { cn } from '@/shared/lib/utils';
+import { chromeSansRole } from '@/shared/typography/chromeRoles';
 
 // Module-stable (static element, immutable) — safe to create once at module
 // scope and reuse in both routers without a useMemo dependency.
@@ -21,7 +23,7 @@ const fixtureAppRoute = { path: '/fixture/app', element: <FixtureApp /> };
 function ReconnectingShell() {
   return (
     <div className="h-[100dvh] flex flex-col items-center justify-center bg-background gap-3">
-      <p className="text-sm text-muted-foreground">Reconnecting…</p>
+      <p className={cn('text-muted-foreground', chromeSansRole('secondary'))}>Reconnecting…</p>
     </div>
   );
 }

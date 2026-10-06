@@ -38,7 +38,7 @@ describe('AgentContext', () => {
     // with it.
     expect(screen.getByText('Agent offline').className).toMatch(/text-agent-offline/);
     expect(screen.getByText('devbox-01').className).toMatch(/text-foreground/);
-    expect(chip.className).toContain('var(--typography-metadata-size)');
+    expect(chip.className).toContain('var(--nession-typography-metadata-size)');
   });
 
   it('reports a healthy node as quiet identity and opens on click', async () => {

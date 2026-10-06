@@ -1,15 +1,23 @@
 import { describe, expect, it } from 'vitest';
 import {
+  capsuleCaptionTextClass,
+  capsuleEmptyStatePadClass,
+  capsuleFloatingMaterialClass,
+  capsuleHistoryCommandClass,
+  capsuleHistoryTitleClass,
   capsuleIconButtonClass,
   capsuleIconVisualClass,
   capsulePhysKeyButtonClass,
   capsulePhysKeyGridGapClass,
   capsulePhysKeyIconClass,
   capsulePhysKeyRowClass,
+  capsulePopoverItemClass,
   capsulePopoverPanelClass,
+  capsulePopoverSearchClass,
   capsuleProjectionClass,
   capsuleUpperSurfaceClass,
   capsuleUpperTitleClass,
+  capsuleWorkRingClass,
   contextCapsuleReasonClass,
   contextCapsuleSurfaceClass,
   contextCapsuleTitleClass,
@@ -22,9 +30,9 @@ describe('capsuleStyles', () => {
     // token-valid Peek are still visually wrong if they choose different
     // material/elevation families, so this is intentionally relational.
     for (const cls of [contextCapsuleSurfaceClass, capsuleProjectionClass]) {
-      expect(cls).toContain('var(--radius-capsule)');
-      expect(cls).toContain('var(--terminal-capsule-surface)');
-      expect(cls).toContain('var(--elevation-floating)');
+      expect(cls).toContain('var(--nession-radius-capsule)');
+      expect(cls).toContain('var(--nession-terminal-capsule-surface)');
+      expect(cls).toContain('var(--nession-elevation-floating)');
       expect(cls).toContain('backdrop-blur-md');
       expect(cls).not.toMatch(/\bborder(?:\s|$)/);
     }
@@ -34,14 +42,46 @@ describe('capsuleStyles', () => {
   });
 
   it('keeps upper host title and Peek actions on canonical chrome roles', () => {
-    expect(capsuleUpperTitleClass).toContain('var(--typography-body-size)');
-    expect(capsuleUpperTitleClass).toContain('var(--typography-body-weight)');
+    expect(capsuleUpperTitleClass).toContain('var(--nession-typography-body-size)');
+    expect(capsuleUpperTitleClass).toContain('var(--nession-typography-body-weight)');
     expect(capsuleUpperTitleClass).not.toContain('--terminal-capsule-projection-font-size');
 
-    expect(capsulePeekActionClass).toContain('var(--typography-body-size)');
-    expect(capsulePeekActionClass).toContain('var(--typography-body-weight)');
-    expect(capsulePeekActionClass).toContain('var(--radius-control)');
+    expect(capsulePeekActionClass).toContain('var(--nession-typography-body-size)');
+    expect(capsulePeekActionClass).toContain('var(--nession-typography-body-weight)');
+    expect(capsulePeekActionClass).toContain('var(--nession-radius-control)');
     expect(capsulePeekActionClass).not.toMatch(/\bfont-medium\b/);
+  });
+
+  it('keeps working state perceptible without inventing a second material', () => {
+    expect(capsuleWorkRingClass).toContain('text-muted-foreground');
+    expect(capsuleWorkRingClass).not.toContain('terminal-capsule-surface');
+    expect(capsuleWorkRingClass).not.toMatch(/animate-|spin|pulse/);
+  });
+
+  it('keeps Capsule history/popover chrome off the composer writing scale', () => {
+    for (const cls of [
+      capsulePopoverItemClass,
+      capsulePopoverSearchClass,
+      capsuleEmptyStatePadClass,
+      capsuleHistoryTitleClass,
+      capsuleCaptionTextClass,
+      capsuleHistoryCommandClass,
+    ]) {
+      expect(cls).toContain('--nession-typography-');
+      expect(cls).not.toContain('--nession-terminal-capsule-font-size');
+      expect(cls).not.toContain('--nession-terminal-capsule-caption-font-size');
+    }
+    expect(capsuleHistoryCommandClass).toContain('var(--nession-typography-code-size)');
+    expect(capsuleHistoryCommandClass).toContain('font-mono');
+    expect(capsuleCaptionTextClass).toContain('var(--nession-typography-caption-size)');
+  });
+
+  it('exposes one Capsule-family floating material recipe', () => {
+    expect(capsuleFloatingMaterialClass).toContain(
+      'var(--nession-terminal-capsule-surface)',
+    );
+    expect(capsuleFloatingMaterialClass).toContain('var(--nession-elevation-floating)');
+    expect(capsuleFloatingMaterialClass).toContain('backdrop-blur-md');
   });
 
   it('rounds the projection with the capsule radius, not one of its own', () => {
@@ -55,21 +95,21 @@ describe('capsuleStyles', () => {
     // **Asserted on the token name, not on a pixel value.** A rendered-value
     // assertion passes on any two radii that happen to agree, and the question
     // here is which token the class names, so that is what is asked.
-    expect(capsuleProjectionClass).toContain('rounded-[var(--radius-capsule)]');
+    expect(capsuleProjectionClass).toContain('rounded-[var(--nession-radius-capsule)]');
     expect(capsuleProjectionClass).not.toContain('--terminal-capsule-projection-radius');
     expect(capsuleProjectionClass).not.toContain('--radius-lg');
   });
 
   it('caps the token-sized popover to the viewport inset', () => {
-    expect(capsulePopoverPanelClass).toContain('w-[length:var(--terminal-capsule-popover-width)]');
+    expect(capsulePopoverPanelClass).toContain('w-[length:var(--nession-terminal-capsule-popover-width)]');
     expect(capsulePopoverPanelClass).toContain(
-      'max-w-[calc(100vw-var(--terminal-capsule-popover-viewport-inset))]',
+      'max-w-[calc(100vw-var(--nession-terminal-capsule-popover-viewport-inset))]',
     );
-    expect(capsulePopoverPanelClass).toContain('var(--terminal-capsule-popover-zindex)');
+    expect(capsulePopoverPanelClass).toContain('var(--nession-terminal-capsule-popover-zindex)');
   });
 
   it('provides the shared physical-key grid gap token', () => {
-    expect(capsulePhysKeyGridGapClass).toContain('var(--terminal-capsule-phys-key-grid-gap)');
+    expect(capsulePhysKeyGridGapClass).toContain('var(--nession-terminal-capsule-phys-key-grid-gap)');
   });
 
   it('keeps physical-key labels on a five-character touch target', () => {
@@ -81,13 +121,13 @@ describe('capsuleStyles', () => {
     expect(capsulePhysKeyRowClass).toContain('flex-row');
     expect(capsulePhysKeyRowClass).toContain('items-center');
     expect(capsulePhysKeyButtonClass).toContain(
-      'text-[length:var(--terminal-capsule-phys-key-font-size)]',
+      'text-[length:var(--nession-terminal-capsule-phys-key-font-size)]',
     );
     expect(capsulePhysKeyButtonClass).toContain(
-      'leading-[length:var(--terminal-capsule-phys-key-font-size)]',
+      'leading-[length:var(--nession-terminal-capsule-phys-key-font-size)]',
     );
     expect(capsulePhysKeyIconClass).toContain(
-      'var(--terminal-capsule-phys-key-icon-size)',
+      'var(--nession-terminal-capsule-phys-key-icon-size)',
     );
   });
 
@@ -96,8 +136,8 @@ describe('capsuleStyles', () => {
   // names* is the only thing that can tell a 44px control apart from a 36px
   // circle — asserting the px would pass either way.
   it('keeps the hit target on control.md and the drawn affordance on control.visualSize', () => {
-    expect(capsuleIconButtonClass).toContain('var(--control-md)');
-    expect(capsuleIconVisualClass).toContain('var(--control-visual-size)');
+    expect(capsuleIconButtonClass).toContain('var(--nession-control-md)');
+    expect(capsuleIconVisualClass).toContain('var(--nession-control-visual-size)');
     expect(capsuleIconButtonClass).not.toContain('control-sm');
     expect(capsuleIconVisualClass).not.toContain('control-sm');
   });
@@ -106,9 +146,9 @@ describe('capsuleStyles', () => {
     // The split is only real if each class owns one axis: a size on the visual
     // would be a second hit area, and a background on the control would fill the
     // 44px box on hover/touch and paint over the smaller circle.
-    expect(capsuleIconVisualClass).toContain('size-[length:var(--control-visual-size)]');
+    expect(capsuleIconVisualClass).toContain('size-[length:var(--nession-control-visual-size)]');
     expect(capsuleIconVisualClass).toContain('rounded-full');
-    expect(capsuleIconVisualClass).not.toContain('var(--control-md)');
+    expect(capsuleIconVisualClass).not.toContain('var(--nession-control-md)');
     expect(capsuleIconButtonClass).not.toMatch(/\bbg-/);
     expect(capsuleIconButtonClass).not.toMatch(/hover:bg-/);
   });
@@ -123,7 +163,7 @@ describe('capsuleStyles', () => {
     // short list is *shorter* than the ceiling, and all three sense states agree)
     // is in `e2e/specs/ui-contract-matrix.spec.ts`, where it can be measured.
     expect(contextCapsuleSurfaceClass).toContain(
-      'max-h-[length:var(--context-capsule-max-height)]',
+      'max-h-[length:var(--nession-context-capsule-max-height)]',
     );
     expect(contextCapsuleSurfaceClass).not.toContain('--context-capsule-height');
   });
@@ -136,13 +176,13 @@ describe('capsuleStyles', () => {
     // The design language has a ramp for exactly this job; the `body` role's
     // note on Web names "button labels, menu items, filters".
     for (const cls of [contextCapsuleTitleClass, contextCapsuleReasonClass]) {
-      expect(cls).toContain('--typography-');
+      expect(cls).toContain('--nession-typography-');
       expect(cls).not.toContain('--terminal-capsule-');
     }
-    expect(contextCapsuleTitleClass).toContain('var(--typography-body-size)');
-    expect(contextCapsuleTitleClass).toContain('var(--typography-body-weight)');
-    expect(contextCapsuleReasonClass).toContain('var(--typography-caption-size)');
-    expect(contextCapsuleReasonClass).toContain('var(--typography-caption-weight)');
+    expect(contextCapsuleTitleClass).toContain('var(--nession-typography-body-size)');
+    expect(contextCapsuleTitleClass).toContain('var(--nession-typography-body-weight)');
+    expect(contextCapsuleReasonClass).toContain('var(--nession-typography-caption-size)');
+    expect(contextCapsuleReasonClass).toContain('var(--nession-typography-caption-weight)');
   });
 
   it('keeps the two lines inside one row band without a capsule leading token', () => {

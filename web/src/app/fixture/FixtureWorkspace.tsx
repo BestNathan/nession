@@ -33,6 +33,7 @@ export function FixtureWorkspace() {
   const search = useLocation().search;
   const facts = fixtureCapabilityFacts(search);
   const capability = openedCapability(search);
+  const fileOps = new URLSearchParams(search).get('files') === 'unavailable' ? null : fixtureOps;
   const gitReady = useFixtureSurface(capability === 'git', search, installGitSurface);
   const conversationReady = useFixtureSurface(
     capability === 'claude-code',
@@ -65,7 +66,7 @@ export function FixtureWorkspace() {
     agent: selectedAgent,
     agents: FIXTURE_AGENTS,
     domain,
-    fileOps: fixtureOps,
+    fileOps,
     experience: 'web',
     facts,
     onToolChange: () => {},

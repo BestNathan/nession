@@ -107,7 +107,7 @@ function BranchRow({ branch }: { branch: GitBranch }) {
       data-branch={branch.name}
       data-current={branch.current ? 'true' : undefined}
       className={cn(
-        'flex flex-col gap-0.5 rounded-[var(--radius-surface)] px-2 py-1.5',
+        'flex flex-col gap-0.5 rounded-[var(--nession-radius-surface)] px-2 py-1.5',
         branch.current && 'bg-accent text-accent-foreground',
       )}
     >

@@ -74,9 +74,9 @@ describe('SessionListHeader', () => {
     const { container } = render(<SessionListHeader {...baseProps} />);
     const root = container.firstElementChild;
     expect(root).not.toBeNull();
-    expect(root!.className).toMatch(/shell-space|var\(--shell-space/);
+    expect(root!.className).toMatch(/shell-space|var\(--nession-shell-space/);
     expect(screen.getByTestId('create-session').className).toMatch(
-      /duration-\[var\(--motion-shell-duration\)\]/,
+      /duration-\[var\(--nession-motion-shell-duration\)\]/,
     );
   });
 });

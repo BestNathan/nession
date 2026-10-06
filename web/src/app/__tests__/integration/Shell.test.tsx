@@ -255,9 +255,9 @@ describe('Shell', () => {
     // that has one and the padding stays on the design system's scale where it
     // does not.
     expect(footer.className).toMatch(
-      /pb-\[max\(var\(--shell-foot-pad-y\),env\(safe-area-inset-bottom\)\)\]/,
+      /pb-\[max\(var\(--nession-shell-foot-pad-y\),env\(safe-area-inset-bottom\)\)\]/,
     );
-    expect(footer.className).toMatch(/shell-space|var\(--shell-space/);
+    expect(footer.className).toMatch(/shell-space|var\(--nession-shell-space/);
   });
 
   it('lists sessions in the sidebar column, without an Agent card grid', () => {

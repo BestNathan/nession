@@ -64,7 +64,7 @@ function TranscriptList({
               data-testid="transcript-open"
             >
               <div className="flex items-center gap-2">
-                <span className={cn('truncate font-medium', chromeSansRole('secondary'))}>
+                <span className={cn('truncate', chromeSansRole('secondary'))}>
                   {labelOf(transcript)}
                 </span>
                 {transcript.kind === 'sidechain' ? (

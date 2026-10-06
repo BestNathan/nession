@@ -16,7 +16,7 @@ function snapshot(id: string, state: CapabilitySnapshot['state']): CapabilitySna
 }
 
 describe('buildWorkspacePresentationModel', () => {
-  it('keeps unavailable capabilities out of direct and discoverable presence, carried as inert entries', () => {
+  it('keeps unavailable capabilities out of Workspace navigation presence', () => {
     const snapshots = [
       snapshot('files', 'unavailable'),
       snapshot('session', 'available'),
@@ -32,9 +32,7 @@ describe('buildWorkspacePresentationModel', () => {
     expect(model.direct.map((item) => item.snapshot.id)).toEqual(['session']);
     expect(model.discoverable.map((item) => item.snapshot.id)).toEqual([]);
     expect(model.opened?.snapshot.id).toBe('session');
-    // Carried, not dropped: a surface renders these inert rather than letting
-    // the row's membership change under the reader.
-    expect(model.unavailable.map((item) => item.snapshot.id)).toEqual(['files']);
+    expect('unavailable' in model).toBe(false);
   });
 
   it('keeps the opened capability direct, bounded by the cap, and in registration order', () => {
@@ -80,9 +78,9 @@ describe('buildWorkspacePresentationModel', () => {
     expect(model.opened?.presence.level).toBe('hidden');
     expect(model.direct).toEqual([]);
     expect(model.discoverable.map((item) => item.snapshot.id)).toEqual(['session']);
-    // It is explanatory context *and* an inert entry — the surface shows which
-    // capability the reader is stuck on without letting it rank as chrome.
-    expect(model.unavailable.map((item) => item.snapshot.id)).toEqual(['files']);
+    // The opened item survives only as explanatory content; hidden presence
+    // never receives a navigation bucket or disabled advertising slot.
+    expect('unavailable' in model).toBe(false);
   });
 
   it('ranks a stronger presence ahead of registration order for the slot cap', () => {

@@ -73,7 +73,7 @@ function resolveCapsuleItems(
   presentation: WorkspacePresentationModel,
 ): WorkspacePresentationItem[] {
   const itemById = new Map(
-    [...presentation.direct, ...presentation.discoverable, ...presentation.unavailable]
+    [...presentation.direct, ...presentation.discoverable]
       .filter(bindingFor)
       .map((item) => [item.snapshot.id, item]),
   );
@@ -172,8 +172,10 @@ export function WorkspaceShell({
     resolution.snapshots.find((snapshot) => snapshot.id === activeCapabilityId)?.title ??
     activeCapabilityId;
 
-  // Capsule V2 (#1347): Workspace capsule shows ALL capabilities (scrollable) —
-  // the reciprocal of Terminal, which shows only the active capability.
+  // Capsule V2 (#1347): Workspace capsule shows every capability that has
+  // earned visible Workspace presence. `unavailable` resolves to hidden and
+  // therefore owns no navigation slot (#1455); the opened unavailable view may
+  // still remain as explanatory content without advertising dead chrome.
   //
   // The row renders **registration order**, and the open capability is only
   // *marked* (selected state + dot), never moved. The owner's follow-up settled
@@ -195,7 +197,7 @@ export function WorkspaceShell({
   // able to switch capabilities is not leaving.
   //
   // The dock's clearance follows from this: the pushed depth's scrollers must
-  // clear it exactly as the root's do (`--workspace-content-bottom-inset`,
+  // clear it exactly as the root's do (`--nession-local-workspace-content-bottom-inset`,
   // published from this bar's own geometry — see `useWorkspaceCapsuleClearance`).
   const showDock = hasNavigation;
   // `#1204`: the surface-leave action never becomes a dock entry, and it stays
@@ -255,7 +257,7 @@ export function WorkspaceShell({
             // capsule does (the App dock placement); on Web it keeps the shared
             // zone's own bottom offset.
             ctx.experience === 'app' ? capsuleZoneAppClass : capsuleZoneClass,
-            'gap-[length:var(--shell-space-2)]',
+            'gap-[length:var(--nession-shell-space-2)]',
           )}
         >
           {showSurfaceAction ? <SurfaceNavigation>{surfaceAction}</SurfaceNavigation> : null}

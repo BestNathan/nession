@@ -71,7 +71,7 @@
         "maxHeightTokenPx": 288,
         "padXTokenPx": 12,
         "rowHeightTokenPx": 44,
-        "radiusTokenCss": "calc(var(--radius) * 2.2)"
+        "radiusTokenCss": "calc(var(--nession-radius) * 2.2)"
       },
       "app": {
         "overflow": "scroll",
@@ -88,7 +88,7 @@
         "touchTargetTokenPx": 44,
         "padXTokenPx": 10,
         "rowHeightTokenPx": 44,
-        "radiusTokenCss": "calc(var(--radius) * 2.2)"
+        "radiusTokenCss": "calc(var(--nession-radius) * 2.2)"
       }
     },
     "pattern.popup-menu": {
@@ -183,7 +183,7 @@
         "maxWidthTokenPx": 672,
         "padXTokenPx": 12,
         "visualSizeTokenPx": 32,
-        "radiusTokenCss": "calc(var(--radius) * 2.2)",
+        "radiusTokenCss": "calc(var(--nession-radius) * 2.2)",
         "pillRadiusTokenCss": "9999px"
       },
       "app": {
@@ -201,7 +201,7 @@
         "touchTargetTokenPx": 44,
         "padXTokenPx": 10,
         "visualSizeTokenPx": 36,
-        "radiusTokenCss": "calc(var(--radius) * 2.2)",
+        "radiusTokenCss": "calc(var(--nession-radius) * 2.2)",
         "pillRadiusTokenCss": "9999px"
       }
     },
@@ -222,7 +222,7 @@
         "padXToken": "experience.web.terminalCapsule.shellPadX",
         "minHeightTokenPx": 32,
         "padXTokenPx": 12,
-        "radiusTokenCss": "calc(var(--radius) * 2.2)",
+        "radiusTokenCss": "calc(var(--nession-radius) * 2.2)",
         "pillRadiusTokenCss": "9999px"
       },
       "app": {
@@ -237,7 +237,7 @@
         "minHeightTokenPx": 44,
         "touchTargetTokenPx": 44,
         "padXTokenPx": 10,
-        "radiusTokenCss": "calc(var(--radius) * 2.2)"
+        "radiusTokenCss": "calc(var(--nession-radius) * 2.2)"
       }
     }
   }

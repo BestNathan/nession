@@ -120,7 +120,7 @@ describe('FilesAppLayout', () => {
     await user.click(await screen.findByText('docs'));
     const name = (await screen.findByText('visual-language.md')).closest('span');
     expect(name?.className).toContain(
-      'var(--typography-primary-size)',
+      'var(--nession-typography-primary-size)',
     );
     expect(name?.className).not.toMatch(/(^|\s)text-sm(\s|$)/);
   });

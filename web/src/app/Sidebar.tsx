@@ -86,9 +86,9 @@ function CollapseControl({ onCollapse }: { onCollapse: () => void }) {
       aria-label="Collapse sidebar"
       title="Collapse sidebar"
       onClick={onCollapse}
-      className={cn(shellIconButtonClass, 'rounded-[var(--radius-control)] hover:bg-accent hover:text-accent-foreground')}
+      className={cn(shellIconButtonClass, 'rounded-[var(--nession-radius-control)] hover:bg-accent hover:text-accent-foreground')}
     >
-      <PanelLeftClose className="size-[length:var(--icon-md)]" aria-hidden />
+      <PanelLeftClose className="size-[length:var(--nession-icon-md)]" aria-hidden />
     </button>
   );
 }
@@ -198,7 +198,7 @@ export function Sidebar({
       </div>
       <div
         data-testid="sidebar-footer"
-        className="flex shrink-0 items-center gap-[var(--shell-foot-gap)] border-t px-[var(--shell-space-3)] py-[var(--shell-foot-pad-y)] pb-[max(var(--shell-foot-pad-y),env(safe-area-inset-bottom))]"
+        className="flex shrink-0 items-center gap-[var(--nession-shell-foot-gap)] border-t px-[var(--nession-shell-space-3)] py-[var(--nession-shell-foot-pad-y)] pb-[max(var(--nession-shell-foot-pad-y),env(safe-area-inset-bottom))]"
       >
         {/* Service status only — the collapse control moved to the Agents
             section head (#1196 §1). */}

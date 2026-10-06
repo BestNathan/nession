@@ -10,7 +10,7 @@ import { AppPageHeader } from '@/app/patterns/AppPageHeader';
  * in name because `--typography-title-size` is emitted only under
  * `[data-experience="app"]` (`nession/no-cross-experience-token`).
  */
-const AppTitleRoleClass = 'text-[length:var(--typography-title-size)]';
+const AppTitleRoleClass = 'text-[length:var(--nession-typography-title-size)]';
 
 describe('AppPageHeader', () => {
   it('renders one back affordance and the page title', () => {

@@ -121,7 +121,7 @@ export function FileList({
       {atRoot && workspaceContextLine ? (
         <p
           className={cn(
-            'px-[var(--shell-space-3)] pt-[var(--shell-space-1)] text-muted-foreground',
+            'px-[var(--nession-shell-space-3)] pt-[var(--nession-shell-space-1)] text-muted-foreground',
             chromeSansRole('secondary'),
           )}
           data-testid="files-app-root-context"
