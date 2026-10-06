@@ -9,7 +9,7 @@ import type {
   ClaudeCodeReadResponse,
 } from '../types';
 import { cn } from '@/shared/lib/utils';
-import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
+import { chromeLabelRole, chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
 import { workspaceScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
 import type { WorkspaceContext } from '@/app/workspace/workspaceContext';
 import { ConversationView, useAIConversation } from '@/shared/ai-conversation';
@@ -191,7 +191,7 @@ function FileList({
     <div className="space-y-4 p-3" data-testid={active ? 'claude-code-file-list' : undefined}>
       {state.categories.map((category) => (
         <section key={category.name}>
-          <h2 className={cn('mb-1 px-2 uppercase tracking-wide text-muted-foreground', chromeSansRole('metadata'))}>
+          <h2 className={cn('mb-1 px-2 text-muted-foreground', chromeLabelRole())}>
             {category.name}
           </h2>
           <div className="space-y-0.5">
