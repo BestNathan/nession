@@ -1,6 +1,6 @@
 import { FileText } from 'lucide-react';
 import { cn } from '@/shared/lib/utils';
-import { chromeSansRole } from '@/shared/typography/chromeRoles';
+import { chromeLabelRole, chromeSansRole } from '@/shared/typography/chromeRoles';
 import { isSelectable, type GitRow } from '../state';
 
 const GROUPS = ['Conflicts', 'Modified', 'Untracked'] as const;
@@ -45,7 +45,7 @@ export function GitChangeList({
         }
         return (
           <section key={title} data-testid={`git-group-${title.toLowerCase()}`}>
-            <h2 className={cn('mb-1 px-2 uppercase tracking-wide text-muted-foreground', chromeSansRole('metadata'))}>
+            <h2 className={cn('mb-1 px-2 text-muted-foreground', chromeLabelRole())}>
               {title} ({group.length})
             </h2>
             <div className="space-y-0.5">
