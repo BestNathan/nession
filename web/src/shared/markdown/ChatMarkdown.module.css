@@ -35,7 +35,9 @@
 }
 
 .markdown strong {
-  font-weight: var(--nession-typography-title-weight);
+  /* Renderer baseline: DSH-derived strong emphasis is 600. This file is the
+   * Markdown adapter boundary; consumers cannot restate this value. */
+  font-weight: 600;
 }
 
 /* Markdown headings render one level down (h1→h2 …), so the top pair is the
@@ -170,8 +172,6 @@
   box-sizing: border-box;
   font-family: var(--font-family-mono);
   font-size: 0.875em !important;
-  font-weight: var(--nession-typography-code-weight);
-  line-height: var(--nession-typography-code-line-height);
   background-color: var(--color-surface-code-inline);
   border: 0.5px solid var(--color-border-subtle);
   border-radius: var(--nession-radius-control);
@@ -249,7 +249,8 @@
 }
 
 .tableScroll table code {
-  font-size: var(--nession-typography-caption-size);
+  /* Preserve the renderer baseline across Web/App density. */
+  font-size: 11px;
 }
 
 .markdown > *:first-child,
