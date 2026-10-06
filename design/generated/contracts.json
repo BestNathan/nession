@@ -213,7 +213,7 @@
       ],
       "web": {
         "overflow": "scroll",
-        "wrap": true,
+        "wrap": false,
         "alignY": "middle",
         "justify": "start",
         "radiusToken": "semantic.radius-capsule",
@@ -227,7 +227,7 @@
       },
       "app": {
         "overflow": "scroll",
-        "wrap": true,
+        "wrap": false,
         "alignY": "middle",
         "touchTargetToken": "experience.app.touchTarget.min",
         "justify": "start",
