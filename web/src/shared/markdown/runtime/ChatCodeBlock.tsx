@@ -13,6 +13,7 @@ import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { copyToClipboard } from '@/shared/lib/clipboard';
 import hljs from 'highlight.js';
+import { markdownCodeBlockPreClass } from '../markdownVisualGrammar';
 
 interface ChatCodeBlockProps {
   value: string;
@@ -74,7 +75,7 @@ export function ChatCodeBlock({ value, language }: ChatCodeBlockProps) {
           Copy
         </Button>
       </div>
-      <pre className="overflow-x-auto p-3 text-[length:var(--nession-typography-code-size)] leading-[var(--nession-typography-code-line-height)]">
+      <pre className={markdownCodeBlockPreClass}>
         <code
           className={language === undefined ? undefined : `language-${language}`}
           dangerouslySetInnerHTML={{ __html: highlighted }}
