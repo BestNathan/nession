@@ -123,4 +123,30 @@ describe('useSessionData', () => {
     expect(toast.error).toHaveBeenCalledWith('network down');
     await waitFor(() => { expect(result.current.loadingSessions).toBe(false); });
   });
+
+  // ── insertSession (#1430) ────────────────────────────────────────────
+
+  it('inserts a Session the client already holds the identity of', () => {
+    const { result } = renderHook(() => useSessionData());
+
+    act(() => { result.current.insertSession(makeSession({ session_id: 'a1:acked' })); });
+
+    expect(result.current.sessions.map((s) => s.session_id)).toEqual(['a1:acked']);
+  });
+
+  /** The broadcast may race the ACK: if the list already carries the id, the
+   *  server's own row wins and the insert is a no-op rather than a duplicate. */
+  it('does not duplicate or overwrite a row the list already carries', async () => {
+    sessionsApiMock.fetchSessions.mockResolvedValue({
+      sessions: [makeSession({ session_id: 'a1:acked', status: 'active', window_count: 3 })],
+    });
+    const { result } = renderHook(() => useSessionData());
+    await act(async () => { await result.current.fetchSessions(); });
+
+    act(() => { result.current.insertSession(makeSession({ session_id: 'a1:acked' })); });
+
+    expect(result.current.sessions).toHaveLength(1);
+    expect(result.current.sessions[0].status).toBe('active');
+    expect(result.current.sessions[0].window_count).toBe(3);
+  });
 });

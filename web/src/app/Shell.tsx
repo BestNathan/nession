@@ -19,12 +19,14 @@ export function Shell({ connectionStatus }: ShellProps) {
 
   // Creating and selecting are two hooks' jobs, so they are composed here
   // rather than one reaching into the other's state (#1082): the dashboard
-  // refreshes its lists, the shell state waits for the new Session to appear
-  // and then selects it down the ordinary path.
+  // refreshes its lists, and the shell state makes the created Session current
+  // from the dialog's own id — `#1430` removed the wait for that refresh, so
+  // the two now run beside each other rather than in sequence. The refresh
+  // stays: it is what reconciles the row with the server's own.
   const handleSessionCreated = useCallback(
     (sessionId?: string) => {
       data.handleSessionCreated();
-      state.awaitSession(sessionId);
+      state.selectCreatedSession(sessionId);
     },
     [data, state],
   );
