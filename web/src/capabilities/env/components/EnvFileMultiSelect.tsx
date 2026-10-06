@@ -86,7 +86,7 @@ export function EnvFileMultiSelect({
                 >
                   <span
                     className={cn(
-                      'w-4 h-4 rounded border flex items-center justify-center flex-shrink-0',
+                      'w-4 h-4 rounded-[var(--nession-radius-control)] border flex items-center justify-center flex-shrink-0',
                       isSelected ? 'bg-primary border-primary' : 'border-muted-foreground/40',
                     )}
                   >
