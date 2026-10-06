@@ -54,3 +54,12 @@ export function chromeSansRole(role: ChromeTypographyRole): string {
 export function chromeMonoRole(role: ChromeTypographyRole): string {
   return cn(roleMetricClasses(role), 'font-mono');
 }
+
+
+/** Uppercase quiet label: canonical metadata metrics plus owned tracking. */
+export function chromeLabelRole(): string {
+  return cn(
+    chromeSansRole('metadata'),
+    'uppercase tracking-[var(--nession-typography-label-tracking)]',
+  );
+}
