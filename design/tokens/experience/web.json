@@ -85,10 +85,6 @@
       "lineHeight": {
         "value": "1.35"
       }
-    },
-    "labelTracking": {
-      "$description": "Letter spacing for uppercase quiet chrome labels. Centralized so section labels do not invent tracking per feature (#1451).",
-      "value": "0.025em"
     }
   },
   "control": {
@@ -568,5 +564,9 @@
       "$description": "Header horizontal inset. The mockup's 18px, which is wider than the shell's `space-4` — the header is inside the code surface, so it aligns to the code's own measure rather than to the pane's chrome padding.",
       "value": "18px"
     }
+  },
+  "typographyLabelTracking": {
+    "$description": "Letter spacing for uppercase quiet chrome labels. Centralized so section labels do not invent tracking per feature (#1451).",
+    "value": "0.025em"
   }
 }
