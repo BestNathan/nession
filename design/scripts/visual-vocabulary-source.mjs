@@ -96,6 +96,75 @@ export function scanCssSource(source, file = '<fixture>', metadata = METADATA) {
   return violations;
 }
 
+function maskComments(source) {
+  let out = '';
+  let state = 'code';
+  let quote = '';
+  let escaped = false;
+
+  for (let i = 0; i < source.length; i += 1) {
+    const ch = source[i];
+    const next = source[i + 1];
+
+    if (state === 'line-comment') {
+      if (ch === '\n') {
+        out += '\n';
+        state = 'code';
+      } else {
+        out += ' ';
+      }
+      continue;
+    }
+
+    if (state === 'block-comment') {
+      if (ch === '*' && next === '/') {
+        out += '  ';
+        i += 1;
+        state = 'code';
+      } else {
+        out += ch === '\n' ? '\n' : ' ';
+      }
+      continue;
+    }
+
+    if (state === 'string') {
+      out += ch;
+      if (escaped) {
+        escaped = false;
+      } else if (ch === '\\') {
+        escaped = true;
+      } else if (ch === quote) {
+        state = 'code';
+        quote = '';
+      }
+      continue;
+    }
+
+    if (ch === '/' && next === '/') {
+      out += '  ';
+      i += 1;
+      state = 'line-comment';
+      continue;
+    }
+    if (ch === '/' && next === '*') {
+      out += '  ';
+      i += 1;
+      state = 'block-comment';
+      continue;
+    }
+    if (ch === "'" || ch === '"' || ch === '`') {
+      state = 'string';
+      quote = ch;
+      out += ch;
+      continue;
+    }
+
+    out += ch;
+  }
+
+  return out;
+}
+
 function stringLiterals(source) {
   const values = [];
   const patterns = [
@@ -117,7 +186,8 @@ export function scanVisualUtilitySource(
   metadata = METADATA,
 ) {
   const violations = [];
-  for (const literal of stringLiterals(source)) {
+  const codeOnly = maskComments(source);
+  for (const literal of stringLiterals(codeOnly)) {
     for (const hit of findVisualVariableViolations(literal.value, metadata, file)) {
       violations.push({
         file,
