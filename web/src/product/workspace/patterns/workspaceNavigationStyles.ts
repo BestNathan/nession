@@ -38,7 +38,9 @@ export function workspaceCapabilityStateClass({
 }: {
   active: boolean;
 }): string {
-  return active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground';
+  return active
+    ? 'bg-accent text-accent-foreground'
+    : 'bg-transparent text-muted-foreground hover:bg-muted hover:text-foreground';
 }
 
 export const workspaceCapabilityLabelBaseClass = cn(
@@ -56,9 +58,3 @@ export function workspaceCapabilityLabelAlignmentClass(
   return experience === 'web' ? 'text-left' : 'text-center';
 }
 
-export const workspaceCapabilityIndicatorClass =
-  'absolute bottom-0.5 size-1 rounded-full';
-
-export function workspaceCapabilityIndicatorStateClass(active: boolean): string {
-  return active ? 'bg-foreground' : 'bg-transparent';
-}
