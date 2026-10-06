@@ -73,7 +73,7 @@ function resolveCapsuleItems(
   presentation: WorkspacePresentationModel,
 ): WorkspacePresentationItem[] {
   const itemById = new Map(
-    [...presentation.direct, ...presentation.discoverable, ...presentation.unavailable]
+    [...presentation.direct, ...presentation.discoverable]
       .filter(bindingFor)
       .map((item) => [item.snapshot.id, item]),
   );
@@ -172,8 +172,10 @@ export function WorkspaceShell({
     resolution.snapshots.find((snapshot) => snapshot.id === activeCapabilityId)?.title ??
     activeCapabilityId;
 
-  // Capsule V2 (#1347): Workspace capsule shows ALL capabilities (scrollable) —
-  // the reciprocal of Terminal, which shows only the active capability.
+  // Capsule V2 (#1347): Workspace capsule shows every capability that has
+  // earned visible Workspace presence. `unavailable` resolves to hidden and
+  // therefore owns no navigation slot (#1455); the opened unavailable view may
+  // still remain as explanatory content without advertising dead chrome.
   //
   // The row renders **registration order**, and the open capability is only
   // *marked* (selected state + dot), never moved. The owner's follow-up settled
