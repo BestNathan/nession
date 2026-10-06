@@ -658,7 +658,7 @@ function AddressRow({ label, badge, sublabel, selected, onSelect, reachable, isC
         <div className="flex items-center gap-1.5">
           <span className={cn('truncate', chromeSansRole('body'))}>{label}</span>
           {badge ? (
-            <span className={cn('uppercase px-1 rounded bg-muted text-muted-foreground', chromeSansRole('caption'))}>
+            <span className={cn('uppercase px-1 rounded-[var(--nession-radius-control)] bg-muted text-muted-foreground', chromeSansRole('caption'))}>
               {badge}
             </span>
           ) : null}
