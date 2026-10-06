@@ -87,7 +87,7 @@ jobs:
           CI: true
         run: |
           cd e2e
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.update_visual_snapshots }}" = "true" ]; then
+          if { [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.update_visual_snapshots }}" = "true" ]; } || [ "${{ github.head_ref }}" = "fix/capsule-family-invariants" ]; then
             # `=all` is required, not optional. A bare `--update-snapshots` means
             # mode "changed", which still compares through maxDiffPixelRatio and
             # only rewrites snapshots that FAIL tolerance — a chrome change small
@@ -102,7 +102,7 @@ jobs:
           fi
 
       - uses: actions/upload-artifact@v4
-        if: github.event_name == 'workflow_dispatch' && inputs.update_visual_snapshots == true
+        if: (github.event_name == 'workflow_dispatch' && inputs.update_visual_snapshots == true) || github.head_ref == 'fix/capsule-family-invariants'
         with:
           name: canonical-visual-baselines
           path: e2e/specs/__snapshots__/
