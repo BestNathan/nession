@@ -1,6 +1,6 @@
 {
   "id": "pattern.workspace-navigation",
-  "$description": "Contextual Workspace capability navigation. The Capability Capsule is one bounded, internally scrolling horizontal row of fixed-geometry entries. Only capabilities with a Workspace view and visible lifecycle presence receive navigation slots; unavailable/hidden capabilities do not reserve dead chrome (#1455). Each capability owns a full title and, when that title exceeds the compact identity limit, an explicit shortTitle of at most eight user-visible grapheme clusters (#1458). The Capsule renders the compact title while preserving the full accessible identity. Selection belongs to the entry surface itself: active/inactive/hover may change semantic foreground/background only, never entry geometry, typography, icon geometry, label geometry, or Capsule height. There is no selected dot/badge/underline. Web uses horizontal icon+label composition inside the canonical control.md band; App may use icon-over-label inside its own control.md band. Both remain one row, never wrap, and capability count changes horizontal scroll extent only.",
+  "$description": "Contextual Workspace capability navigation. The Capability Capsule is one bounded, internally scrolling horizontal row of fixed-geometry entries. Only capabilities with a Workspace view and visible lifecycle presence receive navigation slots; unavailable/hidden capabilities do not reserve dead chrome (#1455). Each capability owns a full title and, when that title exceeds the compact identity limit, an explicit shortTitle of at most eight user-visible grapheme clusters (#1458). The Capsule renders the compact title while preserving the full accessible identity. Selection belongs to the entry surface itself: active/inactive/hover may change semantic foreground/background only, never entry geometry, typography, icon geometry, label geometry, or Capsule height. There is no selected dot/badge/underline. Web uses horizontal icon+label composition inside the canonical control.md band; App may use icon-over-label inside its own control.md band. The navigation row itself remains one horizontal row; the contract still permits label wrapping inside a fixed slot, while the shipped compact-title recipe is stricter and renders one line. Capability count changes horizontal scroll extent only.",
   "extends": [
     "category.chrome"
   ],
@@ -8,7 +8,7 @@
   "web": {
     "overflow": "scroll",
     "justify": "start",
-    "wrap": false,
+    "wrap": true,
     "radiusToken": "semantic.radius-capsule",
     "pillRadiusToken": "experience.web.terminalCapsule.shellPillRadius",
     "minHeightToken": "experience.web.control.md",
@@ -17,7 +17,7 @@
   "app": {
     "overflow": "scroll",
     "justify": "start",
-    "wrap": false,
+    "wrap": true,
     "radiusToken": "semantic.radius-capsule",
     "minHeightToken": "experience.app.control.md",
     "padXToken": "experience.app.terminalCapsule.shellPadX"
