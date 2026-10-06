@@ -181,15 +181,21 @@ Two consequences, replacing the old pair:
 
 ### Web: the capability capsule
 
-Capability navigation on Web is a **capsule** of labeled slots — icon over name, one
-fixed-width slot each, a long name wrapping inside its slot at the smaller label
-size (owner follow-up, 2026-10-03) — in the bottom
-Capsule Zone, with a dot marking the open one. It carries every capability that has a
-Workspace view and is not `unavailable` (#1347). The capsule's width is bounded and the
-row scrolls internally, so the shell does not grow when an extension registers. The
-glyph is drawn bare (`icon-md`): the painted 36px circle is the icon *button*'s
-affordance, and a labeled entry is a tab whose affordance is the icon-plus-name pair;
-the entry's own band is `capabilityEntryHeight` (40px on Web).
+Capability navigation on Web is a **capsule** of fixed-width labeled slots in the
+bottom Capsule Zone, with a dot marking the open one. It carries every capability
+that has a Workspace view **and visible lifecycle presence**; `unavailable` is
+hidden and reserves no disabled slot (#1455).
+
+The capsule's width is bounded and the row scrolls internally, so the shell does
+not grow when an extension registers. The entry itself is exactly the canonical
+`control.md` band. Because Web has the denser 32px band, icon + label are laid
+out horizontally and the label is constrained to one line inside its slot. A
+long capability name truncates visually while its complete name remains the
+button's accessible name/title. Content adapts to the band; the outer Capsule
+does not grow.
+
+The glyph is drawn bare (`icon-md`): the painted circle belongs to icon buttons,
+while a labeled capability entry's affordance is its icon-plus-name pair.
 
 **No shell band above the capability area.** `workspace.md` is explicit that a
 capability's own layout belongs to the capability — Files' master/detail *"belongs
@@ -217,19 +223,18 @@ What the two states **share** is the outer geometry: the floating surface and
 elevation, the semantic capsule radius (`--nession-radius-capsule`), the App dock's
 bottom and safe-area-aware placement, the shell's inner padding rhythm — and,
 after the owner correction of 2026-10-03, the band itself. The labeled entries
-take `capabilityEntryHeight`, the same 44px row the composer uses, so both
-states measure **56px** on App; the shape claim, the semantic radius, the
-placement and the height are all compared relationally (SC-30). The correction
-is a correction: the first labeled build let the entries carry their own
-vertical mass and the form grew to 82px, which read as a different object
-sitting in the same slot ("太高了").
+take `control.md` directly, the same 44px row the composer uses, so both states
+measure **56px** on App; the shape claim, semantic radius, placement and height
+are compared relationally (SC-30). The correction is a correction: the first
+labeled build let entries carry their own vertical mass and the form grew to
+82px, which read as a different object sitting in the same slot ("太高了").
 
 What they **do not** share is content — a composer on one, the labeled
-capability slots on the other. A label that genuinely needs two lines may
-still grow its entry by its own line box rather than clip, but no shipped
-capability does that (measured 2026-10-03: every title is one line at the
-labeled sizes), so the band holds in practice and the relational assertion
-holds with it.
+capability slots on the other. App keeps icon-over-label composition inside the
+44px band, but a long label is still a containment problem rather than permission
+to resize the Capsule. Labels stay single-line/truncated with their full
+accessible name retained. A relational long-label fixture protects that rule
+instead of relying on today's capability names being short.
 
 Two questions the previous revision left open, now settled by the same decision:
 
@@ -335,9 +340,9 @@ generated theme bridge resolves them back to that vocabulary.
 - A slot for a capability that has no Workspace view — nothing to open, nothing to explain.
   (An inert entry for an `unavailable` capability is *not* this: it has a view, it says so,
   and it is why this anti-pattern was narrowed on 2026-10-02.)
-- A disabled entry drawn as a live one — an inert control must read as inert. Its
-  treatment is `disabled-foreground` and `disabled`, never a normal entry that silently
-  does nothing when pressed.
+- A disabled permanent entry for an unavailable capability. `unavailable` is
+  hidden presence; explanatory content may remain open, but dead navigation
+  chrome must not advertise it.
 - One extension = one global tab.
 - A Workspace home page that is mostly a grid of feature launch cards.
 - A full-height secondary sidebar that exists only to list capabilities.
@@ -359,14 +364,16 @@ Existing components should migrate incrementally. Do not remove reliable capabil
 
 ## Acceptance for future implementation work
 
-- [ ] A capability with no Workspace view contributes no slot; an `unavailable` one keeps its slot, drawn inert and disabled.
+- [ ] A capability with no Workspace view contributes no slot; an `unavailable` capability also contributes no navigation slot, even if its already-open content remains as explanatory context.
 - [ ] Capability state and presence are legible from the entry without changing the row's membership.
 - [ ] Workspace root communicates context, not a global feature catalog.
 - [ ] Extensions cannot independently fragment the global navigation model.
 - [ ] Web/App may present the same capability differently while preserving semantic state.
 - [ ] The App entries meet the chrome touch floor (`experience.app.touchTarget.min`, 44px) — the pattern declares no compact override since the 2026-10-03 Capsule-family decision — enforced by the viewport matrix.
-- [ ] The App Capability Form and Conversation Form share one outer geometry — radius, shape claim, dock placement **and the 56px band** (`capabilityEntryHeight` = the composer's `control-md` row) — asserted relationally rather than each alone (#1347 SC-30).
+- [ ] The App Capability Form and Conversation Form share one outer geometry — radius, shape claim, dock placement **and the 56px band** (both consume the same `control.md` row) — asserted relationally rather than each alone (#1347 SC-30 / #1455).
 - [ ] The capability capsule's row owns its horizontal drags: panning it never pages the shell, and only the shell's own edge bands remain a navigation start over it.
 - [ ] The capsule is present at every Workspace depth, pushed detail included, and each depth's scrollers can bring their last line above it (owner decision 2026-10-03, superseding `#1051`'s dock rule).
 - [ ] Files-specific layout remains local to Files.
 - [ ] The capsule stays inside the tool bar at every viewport, and its row scrolls internally.
+- [ ] Web flat Conversation Form and Web Capability Form have the same outer height; capability identity/state, long labels, and capability count cannot change the Capability Form's outer height or vertical anchor.
+- [ ] Long capability names adapt inside the fixed band and retain their complete accessible name.
