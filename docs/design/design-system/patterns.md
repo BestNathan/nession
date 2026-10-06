@@ -91,8 +91,10 @@ The ownership rule is **reuse before restyle**:
 
 This is deliberately not a universal Surface DSL. Each stable product region may
 own a small grammar when doing so removes implementation freedom that has already
-caused drift. Capsule is the first enforced family: Context and Peek occupy one
-upper slot and therefore consume one Nession-owned upper-surface recipe.
+caused drift. Capsule is the reference family: Context and Peek occupy one upper
+slot and therefore consume one Nession-owned upper-surface recipe. Workspace
+navigation is the second enforced family: inactive/active capability state may
+change semantic emphasis, but geometry and typography remain one recipe.
 
 For Agent-authored changes this boundary must be mechanically enforceable.
 Stable relationships should be asserted **between** analogous components
