@@ -112,12 +112,14 @@ family is genuinely mixed, on the individual leaf. **An absent `$owner` means
 generic platform vocabulary**, not "unknown" — that is the default, and most of
 `control` / `icon` / `focus` / `motion` is exactly that.
 
-The annotation is deliberately inert: it changes no generated artifact, adds no
-token layer, and no consumer reads it. Its job is to make ownership *legible and
-checkable* — the inventory reports it as evidence, and `$owner` must name a real
-`patterns/*.md` doc, so a typo fails rather than reading as a decision. Using a
-pattern that has no doc yet is the signal to write the doc, not to skip the
-annotation.
+`$owner` adds no token layer and changes no rendered value, but it is no longer
+inert metadata: the generator emits it into
+`design/generated/lint-metadata.json.cssVariableOwners`, where
+`nession/visual-vocabulary` can prove that a token is legal **and** that the
+consumer is allowed to own that decision. The inventory also reports it as
+evidence. `$owner` must name a real `patterns/*.md` doc, so a typo fails
+rather than reading as a decision. Using a pattern that has no doc yet is the
+signal to write the doc, not to skip the annotation.
 
 Do not add a pass-through `PatternToken` layer to express this. The value stays
 where it is; only its ownership is recorded.
@@ -270,9 +272,11 @@ The semantic radius vocabulary is five tiers, from tightest to softest:
 not Experience. Radius is not platform-specific — if the App later needs different
 values, remap at the Experience layer. The current values are shared.
 
-**Migration rule**: App-owned surfaces (not `components/ui/`) must use semantic
-radius tokens, not generic `rounded-{sm|md|lg|xl|2xl}` utilities. The design
-gate (`scripts/check-radius-ownership.mjs`) catches unowned radius literals.
+**Migration rule**: Nession-owned product/capability surfaces must use semantic
+radius tokens or a canonical product recipe, not generic
+`rounded-{sm|md|lg|xl|2xl}` utilities. Radius is enforced by the repository-wide
+`nession/visual-vocabulary` rule and the fast source gate; the old standalone
+radius-only gate is no longer the primary owner of this invariant.
 
 **Exemptions**:
 - `components/ui/*` — shadcn primitives are upstream, not Nession-owned
