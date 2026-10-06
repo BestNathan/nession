@@ -14,6 +14,8 @@ import { Button } from '@/components/ui/button';
 import type { ResolvedWorkContext } from '@/product/terminal/capsule/workAwareness';
 import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
+import { cn } from '@/shared/lib/utils';
+import { chromeSansRole } from '@/shared/typography/chromeRoles';
 
 export interface TerminalSurfaceProps {
   /** xterm mount tree (TerminalPane). */
@@ -209,7 +211,7 @@ export function TerminalSurface({
       ) : null}
       {terminalControl?.role === 'observer' ? (
         <div
-          className="flex shrink-0 items-center justify-between gap-3 border-t border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground"
+          className={cn('flex shrink-0 items-center justify-between gap-3 border-t border-border bg-muted/40 px-3 py-2 text-muted-foreground', chromeSansRole('body'))}
           data-testid="terminal-observer-bar"
         >
           <span>View only — another client is controlling this session.</span>
