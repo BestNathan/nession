@@ -158,7 +158,7 @@ function Row({ entry }: { entry: Entry }) {
   const head = (
     <div className="flex min-w-0 items-center gap-2">
       <IconOf entry={entry} />
-      <span className={cn('shrink-0 font-medium', chromeSansRole('secondary'))}>
+      <span className={cn('shrink-0', chromeSansRole('secondary'))}>
         {labelOf(entry)}
       </span>
       {summary ? (
