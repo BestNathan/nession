@@ -25,10 +25,10 @@ describe('CodeMirror design-system boundary', () => {
     // insufficient: CodeMirror injects later styles and may win the cascade.
     // These assertions inspect the renderer-owned stylesheet produced by
     // EditorView.theme, proving the canonical tokens crossed that boundary.
-    expect(injectedCss).toContain('var(--workspace-editor-font-size)');
-    expect(injectedCss).toContain('var(--workspace-editor-line-height)');
-    expect(injectedCss).toContain('var(--workspace-editor-pad-y)');
-    expect(injectedCss).toContain('var(--workspace-editor-gutter-width)');
-    expect(injectedCss).toContain('var(--workspace-editor-gutter-pad-end)');
+    expect(injectedCss).toContain('var(--nession-workspace-editor-font-size)');
+    expect(injectedCss).toContain('var(--nession-workspace-editor-line-height)');
+    expect(injectedCss).toContain('var(--nession-workspace-editor-pad-y)');
+    expect(injectedCss).toContain('var(--nession-workspace-editor-gutter-width)');
+    expect(injectedCss).toContain('var(--nession-workspace-editor-gutter-pad-end)');
   });
 });
