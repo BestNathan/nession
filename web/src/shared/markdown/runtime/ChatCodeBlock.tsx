@@ -74,7 +74,7 @@ export function ChatCodeBlock({ value, language }: ChatCodeBlockProps) {
           Copy
         </Button>
       </div>
-      <pre className="overflow-x-auto p-3 text-[length:var(--nession-typography-code-size)] leading-relaxed">
+      <pre className="overflow-x-auto p-3 text-[length:var(--nession-typography-code-size)] leading-[var(--nession-typography-code-line-height)]">
         <code
           className={language === undefined ? undefined : `language-${language}`}
           dangerouslySetInnerHTML={{ __html: highlighted }}
