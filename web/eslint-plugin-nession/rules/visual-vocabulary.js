@@ -3,9 +3,9 @@
  *
  * Nession-owned CSS custom properties have one public spelling: --nession-*.
  * The legal list is generated from design/tokens, so this rule never owns a
- * second hand-written token registry. During migration the generated CSS keeps
- * old aliases alive for rendering compatibility; production source is not
- * allowed to consume those aliases.
+ * second hand-written token registry. Pre-#1451 spellings live only in lint
+ * metadata so diagnostics can offer a repair; runtime CSS exposes no legacy
+ * aliases once the production-source migration reached zero consumers.
  */
 
 const RAW_COLOR_RE = /\[(?:#[0-9a-fA-F]{3,8}|(?:rgb|hsl|oklch|oklab)\([^\]]+)\]/i;
