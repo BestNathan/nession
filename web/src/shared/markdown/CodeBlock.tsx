@@ -95,7 +95,7 @@ export function CodeBlock({
       </div>
       {/* `overflow-x-auto` and no wrapping: a wrapped code line is a line whose
           indentation lies, which matters more here than fitting the column. */}
-      <pre className="overflow-x-auto p-3 text-[length:var(--nession-typography-code-size)] leading-relaxed">
+      <pre className="overflow-x-auto p-3 text-[length:var(--nession-typography-code-size)] leading-[var(--nession-typography-code-line-height)]">
         {children}
       </pre>
     </div>
