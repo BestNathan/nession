@@ -1,7 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import noPrimitiveTokens from './rules/no-primitive-tokens.js';
 import noCrossExperienceToken from './rules/no-cross-experience-token.js';
 import noCapsuleMagicMetrics from './rules/no-capsule-magic-metrics.js';
 import noSfOverlayVars from './rules/no-sf-overlay-vars.js';
@@ -23,7 +22,6 @@ const plugin = {
     version: '1.0.0',
   },
   rules: {
-    'no-primitive-tokens': noPrimitiveTokens(lintMetadata),
     'no-cross-experience-token': noCrossExperienceToken(lintMetadata),
     'no-capsule-magic-metrics': noCapsuleMagicMetrics(),
     'no-sf-overlay-vars': noSfOverlayVars(),
