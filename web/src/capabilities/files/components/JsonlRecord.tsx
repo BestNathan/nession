@@ -4,7 +4,7 @@ import { cn } from '@/shared/lib/utils';
 import { JsonTree } from '@/components/json/JsonTree';
 import { jsonlRecordBodyClass, jsonPreviewSurfaceClass } from '@/components/json/jsonTreeSyntax';
 import type { JsonlRecord as JsonlRecordModel } from '../model/jsonParse';
-import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
+import { chromeMonoLabelRole, chromeSansRole } from '@/shared/typography/chromeRoles';
 
 interface JsonlRecordProps {
   record: JsonlRecordModel;
@@ -29,7 +29,7 @@ export function JsonlRecord({
       <div className="flex items-center gap-2 mb-1">
         <span
           id={lineLabelId}
-          className={cn('uppercase tracking-wide text-muted-foreground font-mono', chromeMonoRole('caption'))}
+          className={cn('text-muted-foreground', chromeMonoLabelRole('caption'))}
         >
           {lineLabel}
         </span>
