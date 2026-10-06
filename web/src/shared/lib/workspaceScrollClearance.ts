@@ -47,4 +47,5 @@ export const WORKSPACE_CONTENT_BOTTOM_INSET = '--nession-local-workspace-content
  * (no capabilities, or nothing to navigate), the shell publishes `0px`, and the
  * container goes back to full height without reserving anything permanently.
  */
-export const workspaceScrollClearanceClass = `pb-[var(${WORKSPACE_CONTENT_BOTTOM_INSET},0px)]`;
+export const workspaceScrollClearanceClass =
+  'pb-[var(--nession-local-workspace-content-bottom-inset,0px)]';
