@@ -115,6 +115,7 @@
   --nession-typography-code-size: 12.5px;
   --nession-typography-code-weight: var(--nession-typography-role-code-weight);
   --nession-typography-code-line-height: 1.35;
+  --nession-typography-label-tracking: 0.025em;
   --nession-control-sm: 28px;
   --nession-control-md: 32px;
   --nession-control-lg: 36px;
@@ -359,6 +360,7 @@
   --typography-code-size: var(--nession-typography-code-size);
   --typography-code-weight: var(--nession-typography-code-weight);
   --typography-code-line-height: var(--nession-typography-code-line-height);
+  --typography-label-tracking: var(--nession-typography-label-tracking);
   --control-sm: var(--nession-control-sm);
   --control-md: var(--nession-control-md);
   --control-lg: var(--nession-control-lg);
@@ -780,6 +782,7 @@
   --nession-typography-code-size: 13px;
   --nession-typography-code-weight: var(--nession-typography-role-code-weight);
   --nession-typography-code-line-height: 1.35;
+  --nession-typography-label-tracking: 0.025em;
   --nession-control-sm: 44px;
   --nession-control-md: 44px;
   --nession-control-lg: 52px;
@@ -895,6 +898,7 @@
   --typography-code-size: var(--nession-typography-code-size);
   --typography-code-weight: var(--nession-typography-code-weight);
   --typography-code-line-height: var(--nession-typography-code-line-height);
+  --typography-label-tracking: var(--nession-typography-label-tracking);
   --control-sm: var(--nession-control-sm);
   --control-md: var(--nession-control-md);
   --control-lg: var(--nession-control-lg);
