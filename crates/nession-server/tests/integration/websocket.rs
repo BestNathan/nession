@@ -2440,6 +2440,18 @@ struct MockAgentEndpoint {
     frames: tokio::sync::mpsc::UnboundedReceiver<serde_json::Value>,
 }
 
+/// The wires this mock answers, as the real Agent does on a relay connection:
+/// the identity handshake (#1429) and the attach. Everything else it records
+/// and ignores — a `server.*` unit forwarded by the browser is the Server's,
+/// and answering it here would put a reply on the client's socket that the
+/// Server never wrote.
+fn is_relay_request(value: &serde_json::Value) -> bool {
+    matches!(
+        value.get("msg_type").and_then(serde_json::Value::as_str),
+        Some("client.auth") | Some("agent.attach")
+    )
+}
+
 async fn start_mock_agent_endpoint() -> anyhow::Result<MockAgentEndpoint> {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let addr = listener.local_addr()?;
@@ -2465,14 +2477,19 @@ async fn start_mock_agent_endpoint() -> anyhow::Result<MockAgentEndpoint> {
                     let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&text) else {
                         continue;
                     };
-                    // The relay waits for this answer before it forwards
-                    // anything at all, so it is the one frame that has to be
-                    // replied to rather than just recorded.
-                    if parsed.get("msg_type").and_then(serde_json::Value::as_str)
-                        == Some("agent.attach")
-                    {
+                    // Every request the Server makes is answered rather than
+                    // only recorded: the relay waits for its answers before it
+                    // forwards anything at all, and since #1429 it opens with
+                    // `client.auth` before the attach. Echoing the request's own
+                    // wire name back is what the real Agent does for
+                    // `agent.attach`, and the relay pairs replies by `id`, not
+                    // by name.
+                    if is_relay_request(&parsed) {
                         let answer = serde_json::json!({
-                            "msg_type": "agent.attach",
+                            "msg_type": parsed
+                                .get("msg_type")
+                                .cloned()
+                                .unwrap_or(serde_json::Value::Null),
                             "id": parsed.get("id").cloned().unwrap_or(serde_json::Value::Null),
                             "timestamp": current_timestamp(),
                             "payload": parsed
@@ -2531,20 +2548,28 @@ async fn start_streaming_mock_agent_endpoint(
                 };
                 let (mut sink, mut stream) = ws.split();
 
-                // Wait for the attach and answer it; nothing else is expected
-                // from the Server on this connection.
-                while let Some(Ok(message)) = stream.next().await {
+                // Answer what the Server asks and stop at the attach: since
+                // #1429 it opens with `client.auth`, which has to be answered
+                // before it will send one.
+                let mut attached = false;
+                while !attached {
+                    let Some(Ok(message)) = stream.next().await else {
+                        return;
+                    };
                     let tokio_tungstenite::tungstenite::Message::Text(text) = message else {
                         continue;
                     };
                     let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&text) else {
                         continue;
                     };
-                    if parsed.get("msg_type").and_then(serde_json::Value::as_str)
-                        == Some("agent.attach")
-                    {
+                    let wire = parsed.get("msg_type").and_then(serde_json::Value::as_str);
+                    attached = wire == Some("agent.attach");
+                    if is_relay_request(&parsed) {
                         let answer = serde_json::json!({
-                            "msg_type": "agent.attach",
+                            "msg_type": parsed
+                                .get("msg_type")
+                                .cloned()
+                                .unwrap_or(serde_json::Value::Null),
                             "id": parsed.get("id").cloned().unwrap_or(serde_json::Value::Null),
                             "timestamp": current_timestamp(),
                             "payload": parsed
@@ -2561,10 +2586,9 @@ async fn start_streaming_mock_agent_endpoint(
                         {
                             return;
                         }
-                        if tx.send(parsed).is_err() {
-                            return;
-                        }
-                        break;
+                    }
+                    if attached && tx.send(parsed).is_err() {
+                        return;
                     }
                 }
 
@@ -2786,8 +2810,38 @@ async fn start_bootstrapping_mock_agent_endpoint() -> anyhow::Result<MockAgentEn
                     if parsed.get("msg_type").and_then(serde_json::Value::as_str)
                         != Some("agent.attach")
                     {
-                        if tx.send(parsed).is_err() {
+                        if tx.send(parsed.clone()).is_err() {
                             return;
+                        }
+                        // A request that is not the attach still has to be
+                        // answered: since #1429 the relay opens with
+                        // `client.auth` and waits for its answer before it
+                        // will send one.
+                        if is_relay_request(&parsed) {
+                            let answer = serde_json::json!({
+                                "msg_type": parsed
+                                    .get("msg_type")
+                                    .cloned()
+                                    .unwrap_or(serde_json::Value::Null),
+                                "id": parsed
+                                    .get("id")
+                                    .cloned()
+                                    .unwrap_or(serde_json::Value::Null),
+                                "timestamp": current_timestamp(),
+                                "payload": parsed
+                                    .get("payload")
+                                    .cloned()
+                                    .unwrap_or(serde_json::Value::Null),
+                            });
+                            if sink
+                                .send(tokio_tungstenite::tungstenite::Message::Text(
+                                    answer.to_string(),
+                                ))
+                                .await
+                                .is_err()
+                            {
+                                return;
+                            }
                         }
                         continue;
                     }

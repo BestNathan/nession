@@ -643,3 +643,193 @@ async fn relay_carries_the_input_ack_to_the_browser() {
     agent_handle.shutdown().await.ok();
     server_handle.abort();
 }
+
+/// The identity the Agent knows for a relayed browser is the browser's own
+/// (#1429).
+///
+/// A relay is a dedicated connection to the Agent per browser-session, so the
+/// immediate result of an unauthenticated one is not "no identity" — it is
+/// `unknown-client`, **the same string for every browser and for the Server
+/// itself**. The Web decides its control role by comparing the ids the Agent
+/// publishes (`agent.terminal.control.changed`, the acquire reply) against its
+/// own stable id, so a relay that never names the browser makes every such
+/// comparison false, no matter which browser is behind it.
+///
+/// The assertion is the browser's own: the controller id the Agent publishes
+/// for this session is the id this browser authenticated with. It is read off
+/// the acquire reply rather than the notification because the reply is one
+/// frame with one id to pair against — `send_and_recv` is the harness that
+/// already does that pairing.
+///
+/// The mutation is dropping the identity from the relay's `client.auth` (or
+/// sending no `client.auth` at all): the id becomes `unknown-client` and the
+/// comparison the browser makes becomes false.
+#[tokio::test]
+async fn relay_binds_the_browser_identity_to_the_agent_connection() {
+    const BROWSER_ID: &str = "browser-relay-identity-1429";
+    let session_name = unique_session_name("relay-identity");
+
+    SessionManager::new().kill_session(&session_name).await.ok();
+
+    let (server_addr, server_handle, _db_dir) = start_server("test-token").await.unwrap();
+    let (agent_addr, agent_handle, agent_credentials, agent_mutations) =
+        start_agent("relay-identity-agent").await.unwrap();
+
+    let tmux = SessionManager::new();
+    tmux.create_session(&session_name, 80, 24, "/tmp", &[])
+        .await
+        .expect("create tmux session");
+
+    let client_handle = register_agent(
+        server_addr,
+        "relay-identity-agent",
+        "test-token",
+        agent_addr.port(),
+        Arc::clone(&agent_credentials),
+        Arc::clone(&agent_mutations),
+    )
+    .await
+    .unwrap();
+
+    let heartbeat = HeartbeatLoop::new(client_handle.clone(), SessionManager::new(), 1);
+    let heartbeat_shutdown = heartbeat.shutdown_handle();
+    tokio::spawn(async move {
+        let _ = heartbeat.run().await;
+    });
+
+    let watcher = SessionWatcher::new(client_handle.clone(), SessionManager::new(), 1);
+    let watcher_shutdown = watcher.shutdown_handle();
+    tokio::spawn(async move {
+        let _ = watcher.run().await;
+    });
+
+    tokio::time::sleep(Duration::from_millis(2000)).await;
+
+    let url = format!("ws://{server_addr}");
+    let (ws, _) = connect_async(&url).await.expect("client connect");
+    let (mut sink, mut stream) = ws.split();
+
+    // The browser's handshake carries its stable identity — the same field the
+    // Web sends from `getOrCreateClientId`. It is what the relay must present
+    // to the Agent, so that the Agent's ids are ids the browser can recognise.
+    let auth_req = msg(
+        "server.auth",
+        "auth-1",
+        serde_json::json!({
+            "auth_token": "test-token",
+            "client_id": BROWSER_ID,
+        }),
+    );
+    let auth_resp = send_and_recv(&mut sink, &mut stream, &auth_req)
+        .await
+        .unwrap();
+    assert_eq!(
+        auth_resp["payload"]["status"], "success",
+        "auth failed: {auth_resp}"
+    );
+
+    let session_id = format!("relay-identity-agent:{session_name}");
+    let attach_req = msg(
+        "server.session.attach",
+        "attach-1",
+        serde_json::json!({ "session_id": session_id, "preferred_mode": "relay" }),
+    );
+    let attach_resp = send_and_recv(&mut sink, &mut stream, &attach_req)
+        .await
+        .unwrap();
+    assert_eq!(
+        attach_resp["payload"]["status"], "success",
+        "attach failed: {attach_resp}"
+    );
+
+    let begin_req = msg(
+        "server.session.relay.begin",
+        "begin-1",
+        serde_json::json!({ "session_id": session_id }),
+    );
+    sink.send(WsMessage::Text(begin_req.to_string()))
+        .await
+        .expect("send begin");
+
+    // Acquire is forwarded verbatim like any other browser frame, and the
+    // Agent's reply states the controller it now has.
+    let acquire = msg(
+        "agent.terminal.control.acquire",
+        "acquire-1",
+        serde_json::json!({ "session_name": session_name }),
+    );
+    let acquired = send_and_recv(&mut sink, &mut stream, &acquire)
+        .await
+        .expect("the acquire must be answered through the relay");
+
+    assert_eq!(
+        acquired["payload"]["controller_client_id"].as_str(),
+        Some(BROWSER_ID),
+        "the Agent must know this browser by its own id, not by a shared \
+         placeholder: {acquired}"
+    );
+    assert_eq!(
+        acquired["payload"]["role"].as_str(),
+        Some("controller"),
+        "and the client that holds it is told so: {acquired}"
+    );
+
+    // A second browser on the same session, which presents no id of its own —
+    // the shape an older client has. It must still be *somebody*: the Server's
+    // per-attach id stands in, so two relays never collapse into one identity
+    // and the Agent never sees the shared placeholder.
+    let (ws_b, _) = connect_async(&url).await.expect("second client connect");
+    let (mut sink_b, mut stream_b) = ws_b.split();
+    let auth_b = msg(
+        "server.auth",
+        "auth-2",
+        serde_json::json!({ "auth_token": "test-token" }),
+    );
+    send_and_recv(&mut sink_b, &mut stream_b, &auth_b)
+        .await
+        .unwrap();
+    let attach_b = msg(
+        "server.session.attach",
+        "attach-2",
+        serde_json::json!({ "session_id": session_id, "preferred_mode": "relay" }),
+    );
+    send_and_recv(&mut sink_b, &mut stream_b, &attach_b)
+        .await
+        .unwrap();
+    let begin_b = msg(
+        "server.session.relay.begin",
+        "begin-2",
+        serde_json::json!({ "session_id": session_id }),
+    );
+    sink_b
+        .send(WsMessage::Text(begin_b.to_string()))
+        .await
+        .expect("send begin for the second browser");
+
+    let acquire_b = msg(
+        "agent.terminal.control.acquire",
+        "acquire-2",
+        serde_json::json!({ "session_name": session_name }),
+    );
+    let acquired_b = send_and_recv(&mut sink_b, &mut stream_b, &acquire_b)
+        .await
+        .expect("the second acquire must be answered too");
+    let id_b = acquired_b["payload"]["controller_client_id"].as_str();
+    assert_ne!(
+        id_b,
+        Some("unknown-client"),
+        "a client that presented no id still gets one of its own: {acquired_b}"
+    );
+    assert_ne!(
+        id_b,
+        Some(BROWSER_ID),
+        "and it is not the other browser's: {acquired_b}"
+    );
+
+    heartbeat_shutdown.shutdown().await.ok();
+    watcher_shutdown.shutdown().await.ok();
+    tmux.kill_session(&session_name).await.ok();
+    client_handle.shutdown().await.ok();
+    agent_handle.shutdown().await.ok();
+    server_handle.abort();
+}
