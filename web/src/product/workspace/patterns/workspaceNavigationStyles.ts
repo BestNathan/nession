@@ -26,8 +26,12 @@ export function workspaceCapabilityStateClass({
   active: boolean;
   unavailable: boolean;
 }): string {
-  if (unavailable) return 'cursor-default text-disabled-foreground';
-  if (active) return 'text-foreground';
+  if (unavailable) {
+    return 'cursor-default text-disabled-foreground';
+  }
+  if (active) {
+    return 'text-foreground';
+  }
   return 'text-muted-foreground hover:text-foreground';
 }
 
