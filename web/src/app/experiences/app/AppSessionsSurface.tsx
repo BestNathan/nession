@@ -66,7 +66,7 @@ export type AppSessionsSurfaceProps = Omit<
  * silently rather than failing.
  */
 const sessionsListFloorAppClass =
-  'min-h-[length:var(--shell-sessions-list-min-height)]';
+  'min-h-[length:var(--nession-shell-sessions-list-min-height)]';
 
 const STATUS_FILTERS: { key: StatusFilter; label: string }[] = [
   { key: 'all', label: 'All' },
