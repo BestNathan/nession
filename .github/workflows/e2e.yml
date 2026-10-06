@@ -7,10 +7,6 @@ name: E2E Tests
 env:
   RUSTC_WRAPPER: ""
 
-# Temporary #1455 CI-only baseline refresh. Removed after the generated PNGs
-# are committed back to the PR branch.
-permissions:
-  contents: write
 
 on:
   workflow_dispatch:
@@ -39,8 +35,6 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.head_ref || github.ref_name }}
 
       # ── Rust toolchain ────────────────────────────────────────────────
       - uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -93,7 +87,7 @@ jobs:
           CI: true
         run: |
           cd e2e
-          if { [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.update_visual_snapshots }}" = "true" ]; } || [ "${{ github.head_ref }}" = "fix/capsule-family-invariants" ]; then
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.update_visual_snapshots }}" = "true" ]; then
             # `=all` is required, not optional. A bare `--update-snapshots` means
             # mode "changed", which still compares through maxDiffPixelRatio and
             # only rewrites snapshots that FAIL tolerance — a chrome change small
@@ -108,24 +102,11 @@ jobs:
           fi
 
       - uses: actions/upload-artifact@v4
-        if: (github.event_name == 'workflow_dispatch' && inputs.update_visual_snapshots == true) || github.head_ref == 'fix/capsule-family-invariants'
+        if: github.event_name == 'workflow_dispatch' && inputs.update_visual_snapshots == true
         with:
           name: canonical-visual-baselines
           path: e2e/specs/__snapshots__/
           retention-days: 7
-
-      - name: Commit regenerated visual baselines
-        if: github.head_ref == 'fix/capsule-family-invariants'
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add e2e/specs/__snapshots__/
-          if git diff --cached --quiet; then
-            echo "Canonical visual baselines already current."
-            exit 0
-          fi
-          git commit -m "test(e2e): refresh Capsule visual baselines (#1455)"
-          git push origin "HEAD:${{ github.head_ref }}"
 
       # ── Report ────────────────────────────────────────────────────────
       - uses: actions/upload-artifact@v4
