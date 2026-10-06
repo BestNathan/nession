@@ -34,7 +34,7 @@ export const terminalViewportBoxClass = 'h-full w-full box-border bg-terminal-ba
 
 /** The Experience inset, as a class: `px` plus top only — see the note above. */
 export const terminalViewportInsetClass =
-  'px-[length:var(--terminal-pad-x)] pt-[length:var(--terminal-pad-y)]';
+  'px-[length:var(--nession-terminal-pad-x)] pt-[length:var(--nession-terminal-pad-y)]';
 
 /**
  * Pure DOM mount point for xterm.
