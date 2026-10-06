@@ -37,7 +37,7 @@
  * with the surface that owns it swapped in, so the two halves of SC-12 read as
  * one mechanism.
  */
-export const WORKSPACE_CONTENT_BOTTOM_INSET = '--workspace-content-bottom-inset';
+export const WORKSPACE_CONTENT_BOTTOM_INSET = '--nession-local-workspace-content-bottom-inset';
 
 /**
  * The opt-in for a scroll container that can reach the pane bottom: trailing
