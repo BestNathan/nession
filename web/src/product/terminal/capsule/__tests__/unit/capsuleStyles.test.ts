@@ -1,15 +1,23 @@
 import { describe, expect, it } from 'vitest';
 import {
+  capsuleCaptionTextClass,
+  capsuleEmptyStatePadClass,
+  capsuleFloatingMaterialClass,
+  capsuleHistoryCommandClass,
+  capsuleHistoryTitleClass,
   capsuleIconButtonClass,
   capsuleIconVisualClass,
   capsulePhysKeyButtonClass,
   capsulePhysKeyGridGapClass,
   capsulePhysKeyIconClass,
   capsulePhysKeyRowClass,
+  capsulePopoverItemClass,
   capsulePopoverPanelClass,
+  capsulePopoverSearchClass,
   capsuleProjectionClass,
   capsuleUpperSurfaceClass,
   capsuleUpperTitleClass,
+  capsuleWorkRingClass,
   contextCapsuleReasonClass,
   contextCapsuleSurfaceClass,
   contextCapsuleTitleClass,
@@ -42,6 +50,38 @@ describe('capsuleStyles', () => {
     expect(capsulePeekActionClass).toContain('var(--nession-typography-body-weight)');
     expect(capsulePeekActionClass).toContain('var(--nession-radius-control)');
     expect(capsulePeekActionClass).not.toMatch(/\bfont-medium\b/);
+  });
+
+  it('keeps working state perceptible without inventing a second material', () => {
+    expect(capsuleWorkRingClass).toContain('text-muted-foreground');
+    expect(capsuleWorkRingClass).not.toContain('terminal-capsule-surface');
+    expect(capsuleWorkRingClass).not.toMatch(/animate-|spin|pulse/);
+  });
+
+  it('keeps Capsule history/popover chrome off the composer writing scale', () => {
+    for (const cls of [
+      capsulePopoverItemClass,
+      capsulePopoverSearchClass,
+      capsuleEmptyStatePadClass,
+      capsuleHistoryTitleClass,
+      capsuleCaptionTextClass,
+      capsuleHistoryCommandClass,
+    ]) {
+      expect(cls).toContain('--nession-typography-');
+      expect(cls).not.toContain('--nession-terminal-capsule-font-size');
+      expect(cls).not.toContain('--nession-terminal-capsule-caption-font-size');
+    }
+    expect(capsuleHistoryCommandClass).toContain('var(--nession-typography-code-size)');
+    expect(capsuleHistoryCommandClass).toContain('font-mono');
+    expect(capsuleCaptionTextClass).toContain('var(--nession-typography-caption-size)');
+  });
+
+  it('exposes one Capsule-family floating material recipe', () => {
+    expect(capsuleFloatingMaterialClass).toContain(
+      'var(--nession-terminal-capsule-surface)',
+    );
+    expect(capsuleFloatingMaterialClass).toContain('var(--nession-elevation-floating)');
+    expect(capsuleFloatingMaterialClass).toContain('backdrop-blur-md');
   });
 
   it('rounds the projection with the capsule radius, not one of its own', () => {

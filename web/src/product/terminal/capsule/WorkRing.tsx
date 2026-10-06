@@ -6,7 +6,7 @@
  *
  * **Design:**
  * - 270° arc (3/4 circle) — enough to be visible, not enough to be busy
- * - Uses capsule surface color for consistency
+ * - Uses the Capsule's quiet semantic state treatment, distinct from its surface
  * - Static (no animation) — motion is reserved for state transitions, not idle
  * - Positioned absolutely around the `+` button
  *
@@ -15,6 +15,7 @@
  * - SC-17: Work Ring is not a spinner, counter, or persistent animation
  */
 import { cn } from '@/shared/lib/utils';
+import { capsuleWorkRingClass } from '@/product/terminal/capsule/capsuleStyles';
 
 interface WorkRingProps {
   /** Whether to show the work ring (working state). */
@@ -25,9 +26,9 @@ interface WorkRingProps {
 /**
  * Work Ring component — partial ring around the `+` button.
  *
- * Renders a 270° arc using SVG. The ring is static (no animation) and uses the
- * capsule surface color for visual consistency. It appears when working and
- * disappears when quiet.
+ * Renders a 270° arc using SVG. The ring is static (no animation) and uses a
+ * quiet semantic foreground owned by the Capsule grammar, so it remains visible
+ * against the Capsule surface without competing with the primary action.
  */
 export function WorkRing({ working, className }: WorkRingProps) {
   if (!working) {
@@ -62,7 +63,7 @@ export function WorkRing({ working, className }: WorkRingProps) {
         strokeLinecap="round"
         // Rotate so the gap is at the bottom-right (like a progress indicator).
         transform="rotate(-90 12 12)"
-        className="text-[color:var(--nession-terminal-capsule-surface)]"
+        className={capsuleWorkRingClass}
       />
     </svg>
   );

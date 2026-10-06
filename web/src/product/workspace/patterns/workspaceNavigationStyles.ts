@@ -1,17 +1,18 @@
+import { cn } from '@/shared/lib/utils';
+import type { CapsuleExperience } from '@/product/terminal/capsule/types';
+
 /**
- * Workspace capability navigation visual grammar (#1451).
+ * Workspace capability navigation visual grammar (#1451 / #1455).
  *
  * Workspace owns the navigation row and entry chrome; capabilities contribute
- * identity/state only. Keep material/geometry/typography decisions here so a
- * capability cannot restyle the global Workspace switcher from its feature
- * slice.
+ * identity/state only. Geometry is intentionally relational with the resting
+ * Conversation Capsule: one control.md band inside the same shell padding.
  */
-
 export const workspaceCapabilityScrollClass =
-  'flex items-center gap-[length:var(--nession-terminal-capsule-control-gap)] overflow-x-auto';
+  'flex min-w-0 items-center gap-[length:var(--nession-terminal-capsule-control-gap)] overflow-x-auto';
 
 export const workspaceCapabilityEntryClass = [
-  'relative flex shrink-0 flex-col items-center justify-center',
+  'relative flex h-[length:var(--nession-control-md)] w-[length:var(--nession-terminal-capsule-capability-slot-width)] shrink-0 items-center justify-center overflow-hidden',
   'gap-[length:var(--nession-terminal-capsule-control-gap)]',
   'rounded-[var(--nession-radius-control)] px-1',
   'transition-colors',
@@ -19,32 +20,40 @@ export const workspaceCapabilityEntryClass = [
   'ease-[var(--nession-motion-shell-ease)]',
 ].join(' ');
 
-export function workspaceCapabilityStateClass({
-  active,
-  unavailable,
-}: {
-  active: boolean;
-  unavailable: boolean;
-}): string {
-  if (unavailable) {
-    return 'cursor-default text-disabled-foreground';
-  }
-  if (active) {
-    return 'text-foreground';
-  }
-  return 'text-muted-foreground hover:text-foreground';
+/**
+ * Intentional Experience variant inside one fixed outer band.
+ *
+ * Web has only 32px of control mass, so icon + label are horizontal. App has
+ * the 44px touch band and can preserve the icon-over-label composition. Neither
+ * variant may grow the entry or outer Capsule.
+ */
+export function workspaceCapabilityEntryLayoutClass(
+  experience: CapsuleExperience,
+): string {
+  return experience === 'web' ? 'flex-row' : 'flex-col';
 }
 
-export const workspaceCapabilityLabelBaseClass = [
-  'line-clamp-2 text-center font-sans',
+export function workspaceCapabilityStateClass({
+  active,
+}: {
+  active: boolean;
+}): string {
+  return active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground';
+}
+
+export const workspaceCapabilityLabelBaseClass = cn(
+  'min-w-0 max-w-full truncate whitespace-nowrap font-sans',
   'font-[number:var(--nession-typography-caption-weight)]',
   'leading-[var(--nession-typography-caption-line-height)]',
-].join(' ');
+);
 
-export function workspaceCapabilityLabelSizeClass(wrapped: boolean): string {
-  return wrapped
-    ? 'text-[length:var(--nession-terminal-capsule-capability-label-wrapped-font-size)]'
-    : 'text-[length:var(--nession-terminal-capsule-capability-label-font-size)]';
+export const workspaceCapabilityLabelSizeClass =
+  'text-[length:var(--nession-terminal-capsule-capability-label-font-size)]';
+
+export function workspaceCapabilityLabelAlignmentClass(
+  experience: CapsuleExperience,
+): string {
+  return experience === 'web' ? 'text-left' : 'text-center';
 }
 
 export const workspaceCapabilityIndicatorClass =

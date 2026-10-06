@@ -37,13 +37,13 @@ function workspaceContext(overrides: Partial<WorkspaceContext> = {}): WorkspaceC
 }
 
 describe('WorkspaceShell contextual capability presentation', () => {
-  it('renders all capabilities in the scrollable capsule', () => {
+  it('renders all lifecycle-eligible capabilities in the scrollable capsule', () => {
     const ctx = workspaceContext();
     render(<WorkspaceShell ctx={ctx} activeCapabilityId="files" />);
 
     expect(screen.getByTestId('mock-files-web')).toBeInTheDocument();
-    // Capsule V2 (#1347): Workspace capsule shows ALL capabilities (scrollable).
-    // This is the reciprocal of Terminal, which shows only the active capability.
+    // Capsule V2 (#1347): the Workspace Capsule is scrollable, but only
+    // lifecycle-eligible capabilities earn a slot (#1455).
     expect(screen.getByTestId('workspace-tool-files')).toBeInTheDocument();
     expect(screen.getByTestId('workspace-tool-session')).toBeInTheDocument();
     expect(screen.getByTestId('workspace-tool-agent')).toBeInTheDocument();
@@ -85,7 +85,7 @@ describe('WorkspaceShell contextual capability presentation', () => {
     expect(env).toHaveAttribute('aria-pressed', 'true');
   });
 
-  it('labels every entry under its icon', () => {
+  it('keeps every capability label available to sighted and assistive readers', () => {
     const ctx = workspaceContext();
     render(<WorkspaceShell ctx={ctx} activeCapabilityId="files" />);
 
@@ -119,19 +119,13 @@ describe('WorkspaceShell contextual capability presentation', () => {
   // They are accessed through Work Overview in Terminal form. Removed tests that
   // validated the disclosure menu behavior.
 
-  it('keeps an unavailable capability in the row, greyed rather than dropped', () => {
+  it('does not reserve a navigation slot for an unavailable capability', () => {
     const ctx = workspaceContext({ fileOps: null });
 
     render(<WorkspaceShell ctx={ctx} activeCapabilityId="session" />);
 
-    // Membership must not change under the reader as the work changes, so the
-    // entry stays and is drawn inert instead. `disabled-foreground` is the role
-    // the design system defines for a control the user cannot act with — held
-    // to the 3:1 that keeps it from disappearing, not to AA.
-    const files = screen.getByTestId('workspace-tool-files');
-    expect(files).toHaveAttribute('data-capability-state', 'unavailable');
-    expect(files).toBeDisabled();
-    expect(files.className).toContain('text-disabled-foreground');
+    expect(screen.queryByTestId('workspace-tool-files')).not.toBeInTheDocument();
+    expect(screen.getByTestId('workspace-tool-session')).toBeInTheDocument();
   });
 
   it('keeps an unavailable opened capability stable instead of switching arbitrarily', () => {
@@ -143,12 +137,9 @@ describe('WorkspaceShell contextual capability presentation', () => {
     expect(screen.getByTestId('workspace-capability-unavailable')).toHaveTextContent(
       'Files is not available here',
     );
-    // The row still carries it, inert — the view refused to switch, and the
-    // reader can see which capability they are sitting on and why.
-    expect(screen.getByTestId('workspace-tool-files')).toHaveAttribute(
-      'data-capability-state',
-      'unavailable',
-    );
+    // The explanatory view remains stable, but unavailable state does not buy
+    // permanent chrome.
+    expect(screen.queryByTestId('workspace-tool-files')).not.toBeInTheDocument();
   });
 
   // Capsule V2 (#1347): Claude Code discoverability through disclosure menu removed.

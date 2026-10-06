@@ -405,11 +405,114 @@ async function assertWorkspaceEntryStateKeepsVisualGrammar(
   expect(inactive).toEqual(active);
 }
 
+
+async function capsuleOuterBox(
+  locator: import('@playwright/test').Locator,
+): Promise<{ height: number; bottom: number }> {
+  await expect(locator).toBeVisible();
+  await waitForSettledBox(locator);
+  return locator.evaluate((node) => {
+    const rect = node.getBoundingClientRect();
+    return {
+      height: rect.height,
+      bottom: window.innerHeight - rect.bottom,
+    };
+  });
+}
+
+async function assertWebCapsuleOuterGeometry(
+  page: import('@playwright/test').Page,
+): Promise<void> {
+  await page.goto('/#/fixture');
+  const conversation = await capsuleOuterBox(page.getByTestId('capsule-shell'));
+
+  await page.goto('/#/fixture/workspace');
+  const capability = page.getByTestId('workspace-capability-capsule');
+  const active = await capsuleOuterBox(capability);
+
+  // The reciprocal long control is one Web Capsule family. Switching surface
+  // changes content/role, not vertical mass.
+  expect(Math.abs(active.height - conversation.height)).toBeLessThanOrEqual(1);
+
+  await page.goto('/#/fixture/workspace?capability=git');
+  const inactive = await capsuleOuterBox(page.getByTestId('workspace-capability-capsule'));
+  expect(Math.abs(inactive.height - active.height)).toBeLessThanOrEqual(1);
+  expect(Math.abs(inactive.bottom - active.bottom)).toBeLessThanOrEqual(1);
+
+  // Deliberately force a label far beyond the slot. This probes the rendered
+  // containment rule rather than relying on today's shipped names to stay short.
+  await page.getByTestId('workspace-tool-env-label').evaluate((node) => {
+    node.textContent =
+      'Environment Configuration and Runtime Diagnostics with a Deliberately Long Name';
+  });
+  const longLabel = await capsuleOuterBox(page.getByTestId('workspace-capability-capsule'));
+  expect(Math.abs(longLabel.height - active.height)).toBeLessThanOrEqual(1);
+  expect(Math.abs(longLabel.bottom - active.bottom)).toBeLessThanOrEqual(1);
+}
+
+async function assertDestinationSharesCapsuleMaterial(
+  page: import('@playwright/test').Page,
+  route: string,
+  capsuleTestId: string,
+  actionTestId: string,
+): Promise<void> {
+  await page.goto(route);
+  const capsule = page.getByTestId(capsuleTestId);
+  const action = page.getByTestId(actionTestId);
+  await expect(capsule).toBeVisible();
+  await expect(action).toBeVisible();
+
+  const signature = async (locator: import('@playwright/test').Locator) =>
+    locator.evaluate((node) => {
+      const rect = node.getBoundingClientRect();
+      const style = getComputedStyle(node);
+      return {
+        background: style.backgroundColor,
+        shadow: style.boxShadow,
+        backdrop: style.backdropFilter,
+        height: rect.height,
+        y: rect.y,
+      };
+    });
+
+  const capsuleVisual = await signature(capsule);
+  const actionVisual = await signature(action);
+
+  expect(actionVisual.background).toBe(capsuleVisual.background);
+  expect(actionVisual.shadow).toBe(capsuleVisual.shadow);
+  expect(actionVisual.backdrop).toBe(capsuleVisual.backdrop);
+  expect(Math.abs(actionVisual.height - capsuleVisual.height)).toBeLessThanOrEqual(1);
+  expect(Math.abs(actionVisual.y - capsuleVisual.y)).toBeLessThanOrEqual(1);
+}
+
+async function assertWorkRingPerceptible(
+  page: import('@playwright/test').Page,
+  route: string,
+): Promise<void> {
+  await page.goto(route);
+  const ring = page.getByTestId('work-ring');
+  await expect(ring).toBeVisible();
+
+  const signal = await ring.locator('circle').evaluate((node) => {
+    const style = getComputedStyle(node);
+    return {
+      color: style.color,
+      animationName: style.animationName,
+    };
+  });
+  const surface = await page.getByTestId('capsule-shell').evaluate((node) => {
+    return getComputedStyle(node).backgroundColor;
+  });
+
+  expect(signal.color).not.toBe(surface);
+  expect(signal.animationName).toBe('none');
+}
+
 for (const row of viewports.filter((v) => v.experience === 'web')) {
   test.describe(`${row.id} ${row.width}×${row.height}`, () => {
     test.use({ viewport: { width: row.width, height: row.height } });
 
-    test('session rows stay clipped; workspace capsule shows all capabilities', async ({ page }) => {
+    test('session rows stay clipped; workspace capsule shows lifecycle-eligible capabilities', async ({ page }) => {
       await page.goto('/#/fixture');
       await assertSessionRowsClipped(page, 'web', row.id);
 
@@ -417,8 +520,8 @@ for (const row of viewports.filter((v) => v.experience === 'web')) {
       const bar = page.getByTestId('workspace-tool-bar');
       await expect(bar).toBeVisible();
 
-      // Capsule V2 (#1347): Workspace capsule shows ALL capabilities (scrollable).
-      // All capabilities with workspace view bindings are directly visible.
+      // Capsule V2 (#1347 / #1455): the row is scrollable, but hidden /
+      // unavailable capabilities do not reserve dead chrome.
       const nav = page.getByRole('navigation', { name: 'Workspace capabilities' });
       const allCaps = nav.locator('button[data-testid^="workspace-tool-"]');
       expect(await allCaps.count()).toBeGreaterThan(0);
@@ -434,7 +537,34 @@ for (const row of viewports.filter((v) => v.experience === 'web')) {
       await expectSingleLine(capsule, optsFor(PATTERN_WORKSPACE_NAV, 'web', row.id));
       await expectVisibleWithin(capsule, bar, optsFor(PATTERN_WORKSPACE_NAV, 'web', row.id));
 
-      // The capsule is a scrollable container showing all capabilities.
+      // An unavailable capability is explanatory content only, never a
+      // disabled navigation advertisement.
+      await page.goto('/#/fixture/workspace?files=unavailable');
+      await expect(page.getByTestId('workspace-capability-unavailable')).toBeVisible();
+      await expect(page.getByTestId('workspace-tool-files')).toHaveCount(0);
+    });
+
+    test('Workspace Capsule keeps one outer height and anchor across state/label changes (#1455)', async ({ page }) => {
+      await assertWebCapsuleOuterGeometry(page);
+    });
+
+    test('destination actions share Capsule material without sharing its radius (#1455)', async ({ page }) => {
+      await assertDestinationSharesCapsuleMaterial(
+        page,
+        '/#/fixture',
+        'capsule-shell',
+        'surface-action-open-workspace',
+      );
+      await assertDestinationSharesCapsuleMaterial(
+        page,
+        '/#/fixture/workspace',
+        'workspace-capability-capsule',
+        'surface-action-open-terminal',
+      );
+    });
+
+    test('working state ring is quiet but perceptible (#1455)', async ({ page }) => {
+      await assertWorkRingPerceptible(page, '/#/fixture?pane=claude.exe');
     });
 
     test('workspace capability state does not fork its visual grammar (#1451)', async ({ page }) => {
@@ -539,7 +669,7 @@ for (const row of viewports.filter((v) => v.experience === 'app')) {
   test.describe(`${row.id} ${row.width}×${row.height}`, () => {
     test.use({ viewport: { width: row.width, height: row.height } });
 
-    test('workspace capsule shows all capabilities in the App bar', async ({ page }) => {
+    test('workspace capsule shows lifecycle-eligible capabilities in the App bar', async ({ page }) => {
       await page.goto('/#/fixture/app');
       await page.getByTestId('app-header-workspace').first().click();
       await expect(page.getByTestId('files-app-layout')).toBeVisible();
@@ -547,7 +677,7 @@ for (const row of viewports.filter((v) => v.experience === 'app')) {
       const bar = page.getByTestId('workspace-tool-bar');
       await expect(bar).toBeVisible();
 
-      // Capsule V2 (#1347): Workspace capsule shows ALL capabilities (scrollable).
+      // Capsule V2 (#1347 / #1455): eligible capability slots scroll inside one fixed band.
       const nav = page.getByRole('navigation', { name: 'Workspace capabilities' });
       const allCaps = nav.locator('button[data-testid^="workspace-tool-"]');
       expect(await allCaps.count()).toBeGreaterThan(0);
@@ -583,9 +713,9 @@ for (const row of viewports.filter((v) => v.experience === 'app')) {
       // Height IS compared, and that is a correction (owner, 2026-10-03): the
       // first labeled build let the entries carry their own vertical mass, the
       // form grew to 82px over the composer's 56, and it read as a different
-      // object in the same slot. The entries now take `capabilityEntryHeight`
-      // — the composer's own 44px row — so the two states must land on the
-      // same band, and this assertion is what keeps them there.
+      // object in the same slot. The entries now take the canonical
+      // `control.md` band directly, so content cannot reinterpret that height
+      // as a floor and grow the Capsule.
       // The shape attribute sits on each state's own outer object — the
       // Conversation dock (`terminal-capsule`) and the capability nav.
       //
@@ -647,6 +777,24 @@ for (const row of viewports.filter((v) => v.experience === 'app')) {
       expect(Math.abs(capability.bottom - conversation.bottom)).toBeLessThanOrEqual(1);
       expect(Math.abs(capability.insetLeft - conversation.insetLeft)).toBeLessThanOrEqual(1);
       expect(Math.abs(capability.insetRight - conversation.insetRight)).toBeLessThanOrEqual(1);
+
+      // Long labels are containment problems, not outer-geometry variants.
+      await page.getByTestId('workspace-tool-env-label').evaluate((node) => {
+        node.textContent =
+          'Environment Configuration and Runtime Diagnostics with a Deliberately Long Name';
+      });
+      const longLabelCapability = await geometryOf(
+        'workspace-capability-capsule',
+        'workspace-capability-capsule',
+      );
+      expect(Math.abs(longLabelCapability.height - capability.height)).toBeLessThanOrEqual(1);
+      expect(Math.abs(longLabelCapability.bottom - capability.bottom)).toBeLessThanOrEqual(1);
+      expect(Math.abs(longLabelCapability.insetLeft - capability.insetLeft)).toBeLessThanOrEqual(1);
+      expect(Math.abs(longLabelCapability.insetRight - capability.insetRight)).toBeLessThanOrEqual(1);
+    });
+
+    test('App working state ring is quiet but perceptible (#1455)', async ({ page }) => {
+      await assertWorkRingPerceptible(page, '/#/fixture/app?pane=claude.exe');
     });
 
     test('session rows meet the App touch target and stay clipped', async ({ page }) => {

@@ -22,7 +22,7 @@
  * name is the author's own statement of it.
  */
 import { cn } from '@/shared/lib/utils';
-import { chromeSansRole } from '@/shared/typography/chromeRoles';
+import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
 import type { CapsuleExperience, ComposerLayout } from '@/product/terminal/capsule/types';
 
 /** Shared by textarea + ghost overlay so glyphs stay locked. */
@@ -99,10 +99,18 @@ export const capsuleControlRowClass =
  *  "several floating surfaces ... must read as one group", terminal-capsule.md
  *  § Surface treatment). Every Nession-owned floating surface uses this token;
  *  a surface that needs its own shadow is evidence it should not be floating. */
-export const capsuleFloatingSurfaceClass =
-  'bg-[color:var(--nession-terminal-capsule-surface)] text-foreground shadow-[var(--nession-elevation-floating)] backdrop-blur-md';
+export const capsuleFloatingMaterialClass =
+  'bg-[color:var(--nession-terminal-capsule-surface)] shadow-[var(--nession-elevation-floating)] backdrop-blur-md';
+
+export const capsuleFloatingSurfaceClass = cn(
+  capsuleFloatingMaterialClass,
+  'text-foreground',
+);
 
 export const capsuleShellSurfaceClass = capsuleFloatingSurfaceClass;
+
+/** Quiet but perceivable ambient working state around the + affordance. */
+export const capsuleWorkRingClass = 'text-muted-foreground';
 
 /**
  * Canonical visual grammar for the dock's one upper Capsule slot (#1446).
@@ -355,19 +363,32 @@ export const capsulePopoverScrollClass =
 export const capsulePopoverBodyClass =
   'flex max-h-[length:var(--nession-terminal-capsule-popover-body-max-height)] flex-col overflow-hidden';
 
-export const capsulePopoverItemClass =
-  'flex h-[length:var(--nession-control-md)] w-full items-center gap-[length:var(--nession-terminal-capsule-popover-gap)] px-[length:var(--nession-terminal-capsule-popover-item-pad-x)] text-left text-[length:var(--nession-terminal-capsule-font-size)] transition-colors hover:bg-accent/40 disabled:opacity-50';
+export const capsulePopoverItemClass = cn(
+  'flex h-[length:var(--nession-control-md)] w-full items-center gap-[length:var(--nession-terminal-capsule-popover-gap)] px-[length:var(--nession-terminal-capsule-popover-item-pad-x)] text-left transition-colors hover:bg-accent/40 disabled:opacity-50',
+  chromeSansRole('body'),
+);
 
-export const capsuleCaptionTextClass = 'text-[length:var(--nession-terminal-capsule-caption-font-size)]';
+export const capsuleCaptionTextClass = chromeSansRole('caption');
 
-export const capsulePopoverSearchClass =
-  'h-[length:var(--nession-control-md)] text-[length:var(--nession-terminal-capsule-font-size)]';
+export const capsulePopoverSearchClass = cn(
+  'h-[length:var(--nession-control-md)]',
+  chromeSansRole('body'),
+);
 
-export const capsuleEmptyStatePadClass =
-  'px-[length:var(--nession-terminal-capsule-phys-key-pad-x)] py-[length:var(--nession-terminal-capsule-dialog-gap)] text-[length:var(--nession-terminal-capsule-font-size)]';
+export const capsuleEmptyStatePadClass = cn(
+  'px-[length:var(--nession-terminal-capsule-phys-key-pad-x)] py-[length:var(--nession-terminal-capsule-dialog-gap)]',
+  chromeSansRole('body'),
+);
 
 export const capsuleHistoryItemClass =
-  'flex w-full items-center justify-between gap-[length:var(--nession-terminal-capsule-popover-gap)] rounded-[var(--nession-radius-control)] px-[length:var(--nession-terminal-capsule-phys-key-pad-x)] py-[length:var(--nession-terminal-capsule-phys-key-pad-x)] text-left text-[length:var(--nession-terminal-capsule-font-size)] hover:bg-accent/40';
+  'flex w-full items-center justify-between gap-[length:var(--nession-terminal-capsule-popover-gap)] rounded-[var(--nession-radius-control)] px-[length:var(--nession-terminal-capsule-phys-key-pad-x)] py-[length:var(--nession-terminal-capsule-phys-key-pad-x)] text-left hover:bg-accent/40';
+
+export const capsuleHistoryTitleClass = chromeSansRole('body');
+
+export const capsuleHistoryCommandClass = cn(
+  'min-w-0 truncate',
+  chromeMonoRole('code'),
+);
 
 export const capsulePhysKeyButtonClass =
   'h-[length:var(--nession-terminal-capsule-phys-key-height)] min-w-[5ch] shrink-0 whitespace-nowrap px-0 font-mono text-[length:var(--nession-terminal-capsule-phys-key-font-size)] leading-[length:var(--nession-terminal-capsule-phys-key-font-size)]';
