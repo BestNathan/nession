@@ -120,10 +120,10 @@ export const UserMessage = memo(function UserMessage({ item }: { item: AIMessage
         // width, so the bubble keeps its proportion when the surface narrows —
         // and App states a wider fraction without this component changing.
         className={cn(
-          'min-w-0 rounded-[var(--radius-surface)] px-3 py-2',
-          'bg-[var(--conversation-user-surface)] text-[var(--conversation-user-foreground)]',
+          'min-w-0 rounded-[var(--nession-radius-surface)] px-3 py-2',
+          'bg-[var(--nession-conversation-user-surface)] text-[var(--nession-conversation-user-foreground)]',
         )}
-        style={{ maxWidth: 'var(--conversation-bubble-max-width)' }}
+        style={{ maxWidth: 'var(--nession-conversation-bubble-max-width)' }}
       >
         <ChatMarkdown text={contentOf(item)} streaming={false} />
       </div>
