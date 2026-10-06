@@ -1,7 +1,10 @@
 import type { ReactNode } from 'react';
 import { LayoutPanelTop, SquareTerminal } from 'lucide-react';
 
-import { surfaceDestinationActionBandClass } from '@/product/workspace/patterns/surfaceDestinationStyles';
+import {
+  surfaceDestinationActionBandClass,
+  surfaceDestinationActionClass,
+} from '@/product/workspace/patterns/surfaceDestinationStyles';
 import { cn } from '@/shared/lib/utils';
 
 export type Surface = 'terminal' | 'workspace';
@@ -72,7 +75,7 @@ export function SurfaceDestinationAction({
       data-morph-id="surface-action"
       onClick={() => onOpen()}
       className={cn(
-        'pointer-events-auto relative flex shrink-0 items-center justify-center rounded-full bg-[color:var(--nession-terminal-capsule-surface)] text-muted-foreground shadow-[var(--nession-elevation-floating)] backdrop-blur-md transition-colors duration-[var(--nession-motion-shell-duration)] ease-[var(--nession-motion-shell-ease)] hover:text-foreground focus-visible:text-foreground motion-reduce:transition-none',
+        surfaceDestinationActionClass,
         surfaceDestinationActionBandClass,
       )}
     >
