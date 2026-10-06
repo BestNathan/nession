@@ -5,7 +5,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import type { FileEntry } from '@/capabilities/files';
 import type { AppFilesSearchStatus } from './useAppFilesSearch';
 import { cn } from '@/shared/lib/utils';
-import { bodyAppClass, metadataAppClass, primaryAppClass, secondaryAppClass } from '@/app/experiences/app/appTypography';
+import { bodyAppClass, primaryAppClass, secondaryAppClass } from '@/app/experiences/app/appTypography';
 import { chromeLabelRole, chromeMonoRole } from '@/shared/typography/chromeRoles';
 
 export interface AppFilesSearchPanelProps {
