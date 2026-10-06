@@ -367,16 +367,14 @@ async function assertRowOpensDetail(
 async function assertWorkspaceEntryStateKeepsVisualGrammar(
   page: import('@playwright/test').Page,
 ): Promise<void> {
-  await page.goto('/#/fixture/workspace');
+  const signatureForFiles = async (route: string, expectedPressed: 'true' | 'false') => {
+    await page.goto(route);
+    const target = page.getByTestId('workspace-tool-files');
+    await expect(target).toBeVisible();
+    await expect(target).toHaveAttribute('aria-pressed', expectedPressed);
+    await waitForSettledBox(target);
 
-  const nav = page.getByRole('navigation', { name: 'Workspace capabilities' });
-  const target = nav.locator(
-    'button[data-testid^="workspace-tool-"][aria-pressed="false"]:not(:disabled)',
-  ).first();
-  await expect(target).toBeVisible();
-
-  const signature = async () =>
-    target.evaluate((node) => {
+    return target.evaluate((node) => {
       const rect = node.getBoundingClientRect();
       const style = getComputedStyle(node);
       const label = node.querySelector('[data-testid$="-label"]');
@@ -392,16 +390,19 @@ async function assertWorkspaceEntryStateKeepsVisualGrammar(
         lineHeight: labelStyle?.lineHeight ?? null,
       };
     });
+  };
 
-  const before = await signature();
-  await target.click();
-  await expect(target).toHaveAttribute('aria-pressed', 'true');
-  const after = await signature();
+  // FixtureWorkspace derives the active capability from the URL and deliberately
+  // supplies a no-op onToolChange. Compare the SAME Files entry across two
+  // canonical routes instead of pretending the fixture owns interactive routing:
+  // default => Files active; ?capability=git => Files inactive.
+  const active = await signatureForFiles('/#/fixture/workspace', 'true');
+  const inactive = await signatureForFiles('/#/fixture/workspace?capability=git', 'false');
 
   // Selection is state, not a new component recipe. Color/presence may change;
   // geometry and typography may not. This is the Workspace family's relational
   // invariant, analogous to Context -> Peek for Capsule but across control state.
-  expect(after).toEqual(before);
+  expect(inactive).toEqual(active);
 }
 
 for (const row of viewports.filter((v) => v.experience === 'web')) {
