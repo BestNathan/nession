@@ -42,14 +42,14 @@ describe('ConversationMessage', () => {
     const { rerender } = render(<UserMessage item={user('hi')} />)
     const userBody = screen.getByTestId('conversation-user-body')
     // The bubble's cap is a token, not a literal, so App can state its own.
-    expect(userBody.style.maxWidth).toContain('--conversation-bubble-max-width')
+    expect(userBody.style.maxWidth).toContain('--nession-conversation-bubble-max-width')
 
     rerender(<AssistantMessage item={assistant('hello')} label="Claude" />)
     const assistantBody = screen.getByTestId('conversation-assistant-body')
     // `#1167`: the assistant's Markdown *is* the content, so a second surface
     // around it would be chrome that says nothing.
     expect(assistantBody.className).not.toContain('conversation-user-surface')
-    expect(assistantBody.style.maxWidth).toContain('--conversation-reading-column-max')
+    expect(assistantBody.style.maxWidth).toContain('--nession-conversation-reading-column-max')
   })
 
   it('stretches the assistant and not the user, which is a correctness difference', () => {
