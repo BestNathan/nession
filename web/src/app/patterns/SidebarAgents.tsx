@@ -94,9 +94,9 @@ export function SidebarAgents({
               data-agent-active={active ? 'true' : undefined}
               title={`${agentDisplayName(agent)} — ${online ? 'online' : agent.status}`}
               className={cn(
-                'flex w-full items-center gap-[var(--nession-shell-space-2)] rounded-[var(--shell-session-row-radius)] px-[var(--nession-shell-space-2)] py-[var(--shell-node-row-pad-y)]',
+                'flex w-full items-center gap-[var(--nession-shell-space-2)] rounded-[var(--nession-shell-session-row-radius)] px-[var(--nession-shell-space-2)] py-[var(--nession-shell-node-row-pad-y)]',
                 chromeSansRole('secondary'),
-                active ? 'text-foreground' : 'text-[color:var(--text-secondary)]',
+                active ? 'text-foreground' : 'text-[color:var(--nession-text-secondary)]',
               )}
             >
                 {/* The active-node marker. It is a *shape* today, not a colour:
@@ -106,7 +106,7 @@ export function SidebarAgents({
                 <span
                   aria-hidden
                   className={cn(
-                    'size-[length:var(--shell-status-dot-size)] shrink-0 rounded-full',
+                    'size-[length:var(--nession-shell-status-dot-size)] shrink-0 rounded-full',
                     active ? 'bg-foreground' : 'bg-border',
                   )}
                 />
