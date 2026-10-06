@@ -428,7 +428,7 @@ export const capsuleProjectionScrollClass =
   'max-h-[length:var(--nession-terminal-capsule-projection-max-height)] overflow-y-auto';
 
 export const capsuleProjectionItemClass =
-  'flex w-full items-center gap-[length:var(--nession-terminal-capsule-projection-item-gap)] rounded px-[length:var(--nession-terminal-capsule-projection-item-pad-x)] py-[length:var(--nession-terminal-capsule-projection-item-pad-y)] text-left transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
+  'flex w-full items-center gap-[length:var(--nession-terminal-capsule-projection-item-gap)] rounded-[var(--nession-radius-control)] px-[length:var(--nession-terminal-capsule-projection-item-pad-x)] py-[length:var(--nession-terminal-capsule-projection-item-pad-y)] text-left transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
 
 /** The change letter's column, fixed so the filenames beside it share an edge. */
 export const capsuleProjectionMarkClass =
