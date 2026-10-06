@@ -10,6 +10,10 @@ import type { ConnectionOptions } from '@/platform/terminal-runtime/types';
 import type { TerminalInputSeed, TerminalTransport } from '@/platform/terminal-runtime/transport/TerminalTransport';
 import type { AttachInfo } from '@/types';
 
+vi.mock('@/platform/socket/clientId', () => ({
+  getOrCreateClientId: () => 'unit-client',
+}));
+
 const OriginalWebSocket = globalThis.WebSocket;
 
 interface MockWs {
@@ -26,11 +30,53 @@ function lastWs(): MockWs {
   return wsInstances[wsInstances.length - 1];
 }
 
-/** Drive the latest mock ws to the open state (surfaces 'connected' via onopen). */
-function openWs(): void {
+/**
+ * Drain a `client.auth` round trip's microtask chain — reply → router →
+ * handshake → connection state → listener → attach. A loop rather than a timer
+ * because some of this file's callers run on fake timers, and a loop rather
+ * than `flushMicrotasks`' two hops because the chain is longer than the one
+ * `requestRelayAttach` was measured for.
+ */
+async function drainHandshake(): Promise<void> {
+  for (let i = 0; i < 8; i += 1) {
+    await Promise.resolve();
+  }
+}
+
+/**
+ * Drive the latest mock ws to the open state and answer its `client.auth`
+ * handshake — what the Agent does before any frame can be served by an
+ * identity (#1429). Async because the handshake is a round trip: the
+ * connection reaches 'connected' a microtask after the reply. Pass
+ * `answerAuth: false` to leave the connection mid-handshake.
+ */
+async function openWs({ answerAuth = true }: { answerAuth?: boolean } = {}): Promise<void> {
   const ws = lastWs();
   ws.readyState = 1;
   ws.onopen?.(new Event('open'));
+  if (answerAuth) {
+    answerPending('client.auth', 'ok', {
+      status: 'success',
+      message: 'ok',
+      client_id: 'unit-client',
+    });
+  }
+  await drainHandshake();
+}
+
+/** Every frame the runtime sent, in send order, across all tracked sockets. */
+function sentFrames(): { msg_type?: string; id?: string; payload?: unknown }[] {
+  const frames: { msg_type?: string; id?: string; payload?: unknown }[] = [];
+  for (const ws of wsInstances) {
+    for (const call of ws.send.mock.calls) {
+      try {
+        frames.push(JSON.parse(String(call[0])));
+      } catch {
+        // non-JSON (binary) frame — ignore
+      }
+    }
+  }
+  return frames;
 }
 
 /** Count client.attach messages sent on any tracked ws. */
@@ -280,6 +326,48 @@ describe('SessionRuntime', () => {
     // construction fact rather than an effect noticing the runtime.
     expect(rt.attachState.phase).toBe('connecting');
     expect(rt.getSnapshot().phase).toBe('connecting');
+    rt.dispose();
+  });
+
+  it('binds the browser identity on the P2P socket before anything depends on it (#1429)', async () => {
+    // The Agent roles and authorizes every attach/control/input by the
+    // connection's `client_id`, which only `client.auth` sets — without it the
+    // connection is `unknown-client`, a different principal from the browser's
+    // own id, and the two sides disagree about who controls the session.
+    const rt = new SessionRuntime(makeConfig());
+    rt.setTransportReady(true);
+    await openWs();
+
+    const frames = sentFrames();
+    const authIndex = frames.findIndex((f) => f.msg_type === 'client.auth');
+    expect(authIndex).toBeGreaterThanOrEqual(0);
+    expect(frames[authIndex].payload).toMatchObject({ client_id: 'unit-client' });
+    // The attach's meaning depends on that identity, so the Agent must read it
+    // after the auth: order on this one socket is what guarantees it.
+    const attachIndex = frames.findIndex((f) => f.msg_type === 'agent.attach');
+    expect(attachIndex).toBeGreaterThan(authIndex);
+    rt.dispose();
+  });
+
+  it('holds the attach until the identity handshake is answered (#1429)', async () => {
+    // The gate is the point: an identity sent *at some point* would still race
+    // the attach, and the Agent would serve it as `unknown-client`.
+    const rt = new SessionRuntime(makeConfig());
+    rt.setTransportReady(true);
+    await openWs({ answerAuth: false });
+
+    expect(rt.connectionState).toBe('connecting');
+    expect(countClientAttach()).toBe(0);
+
+    answerPending('client.auth', 'ok', {
+      status: 'success',
+      message: 'ok',
+      client_id: 'unit-client',
+    });
+    await drainHandshake();
+
+    expect(rt.connectionState).toBe('connected');
+    expect(countClientAttach()).toBe(1);
     rt.dispose();
   });
 
@@ -756,7 +844,7 @@ describe('SessionRuntime', () => {
       }));
       empty.setTransportReady(true);
       empty.attachController.dispatch({ type: 'SESSION_SELECTED' });
-      openWs();
+      await openWs();
       await flushMicrotasks();
       expect(clientAttachBootstrapFlags()).toEqual([true]);
       empty.dispose();
@@ -767,7 +855,7 @@ describe('SessionRuntime', () => {
       }));
       holding.setTransportReady(true);
       holding.attachController.dispatch({ type: 'SESSION_SELECTED' });
-      openWs();
+      await openWs();
       await flushMicrotasks();
       // `false`, not absent: this client *has* an opinion, and its opinion is
       // that re-sending the history would duplicate what is already on screen.
@@ -782,7 +870,7 @@ describe('SessionRuntime', () => {
       const rt = new SessionRuntime(makeConfig());
       rt.setTransportReady(true);
       rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
-      openWs();
+      await openWs();
       await flushMicrotasks();
       expect(clientAttachBootstrapFlags()).toEqual([true]);
       rt.dispose();
@@ -809,7 +897,7 @@ describe('SessionRuntime', () => {
       }));
       rt.setTransportReady(true);
       rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
-      openWs();
+      await openWs();
       await flushMicrotasks();
       // Attached, holding output, nothing lost yet: no history requested.
       expect(clientAttachBootstrapFlags()).toEqual([false]);
@@ -836,7 +924,7 @@ describe('SessionRuntime', () => {
       }));
       rt.setTransportReady(true);
       rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
-      openWs();
+      await openWs();
       await flushMicrotasks();
       answerAttach();
       await flushMicrotasks();
@@ -848,7 +936,7 @@ describe('SessionRuntime', () => {
       rt.noteStreamTruncated();
 
       rt.updateContext({ routeIntentEpoch: 1 });
-      openWs();
+      await openWs();
       await flushMicrotasks();
 
       // The hole is still there, and this attach is where the repair is asked
@@ -864,7 +952,7 @@ describe('SessionRuntime', () => {
       expect(rt.attachState.phase).toBe('attached');
 
       rt.updateContext({ routeIntentEpoch: 2 });
-      openWs();
+      await openWs();
       await flushMicrotasks();
 
       expect(clientAttachBootstrapFlags()).toEqual([false, true, false]);
@@ -876,7 +964,7 @@ describe('SessionRuntime', () => {
       const rt = new SessionRuntime(makeConfig());
       rt.setTransportReady(true);
       rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
-      openWs();
+      await openWs();
       expect(rt.attachState.phase).toBe('connecting');
       expect(countClientAttach()).toBe(1);
 
@@ -905,7 +993,7 @@ describe('SessionRuntime', () => {
       const rt = new SessionRuntime(makeConfig({ manualOverride: 'ws://a/ws' }));
       rt.setTransportReady(true);
       rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
-      openWs();
+      await openWs();
       expect(countClientAttach()).toBe(1);
 
       for (let i = 0; i < P2P_MAX_RECONNECT; i += 1) {
@@ -926,7 +1014,7 @@ describe('SessionRuntime', () => {
       const rt = new SessionRuntime(makeConfig());
       rt.setTransportReady(true);
       rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
-      openWs();
+      await openWs();
       expect(countClientAttach()).toBe(1);
 
       rt.updateContext({ sessionName: 's1' });
@@ -988,7 +1076,7 @@ describe('SessionRuntime', () => {
       const rt = new SessionRuntime(makeConfig());
       rt.setTransportReady(true);
       rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
-      openWs();
+      await openWs();
       await flushMicrotasks();
       answerAttach();
       await flushMicrotasks();
@@ -1020,7 +1108,7 @@ describe('SessionRuntime', () => {
       const rt = new SessionRuntime(makeConfig());
       rt.setTransportReady(true);
       rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
-      openWs();
+      await openWs();
       await flushMicrotasks();
       answerAttach();
       await flushMicrotasks();
@@ -1047,7 +1135,7 @@ describe('SessionRuntime', () => {
       const rt = new SessionRuntime(makeConfig());
       rt.setTransportReady(true);
       rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
-      openWs();
+      await openWs();
       await flushMicrotasks();
       answerAttach();
       await flushMicrotasks();
@@ -1068,7 +1156,7 @@ describe('SessionRuntime', () => {
       const rt = new SessionRuntime(makeConfig());
       rt.setTransportReady(true);
       rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
-      openWs();
+      await openWs();
       await flushMicrotasks();
       answerAttach();
       await flushMicrotasks();
@@ -1106,7 +1194,7 @@ describe('SessionRuntime', () => {
       }));
       rt.setTransportReady(true);
       rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
-      openWs();
+      await openWs();
       await flushMicrotasks();
       answerAttach();
       await flushMicrotasks();
@@ -1126,7 +1214,7 @@ describe('SessionRuntime', () => {
       // not empty, it is *incomplete*, and only tmux's snapshot can repair it —
       // the stream resume comes back with zero events, because the agent
       // records only while someone is attached.
-      openWs();
+      await openWs();
       await flushMicrotasks();
 
       const flags = clientAttachBootstrapFlags();
@@ -1163,7 +1251,7 @@ describe('SessionRuntime', () => {
       });
       rt.buildTransport();
       // Construction selected the session; connecting starts the first attach.
-      openWs();
+      await openWs();
       await flushMicrotasks();
       expect(countClientAttach()).toBe(1);
       expect(rt.attachState.phase).toBe('connecting');
@@ -1190,7 +1278,7 @@ describe('SessionRuntime', () => {
       expect(outcomes.some((r) => r.retryAttach || r.forceRelay)).toBe(false);
 
       // The new generation's own attach proceeds untouched by the wreckage.
-      openWs();
+      await openWs();
       await flushMicrotasks();
       expect(countClientAttach()).toBe(2);
       answerPending('agent.attach', 'ok', { stream_epoch: 1, stream_cursor: 2 });
@@ -1204,7 +1292,7 @@ describe('SessionRuntime', () => {
       const unresponsive = vi.spyOn(WebSocketService.prototype, 'reportUnresponsive');
       const rt = new SessionRuntime(makeConfig());
       rt.setTransportReady(true);
-      openWs();
+      await openWs();
       await flushMicrotasks();
       answerAttach();
       await flushMicrotasks();
@@ -1304,7 +1392,7 @@ describe('SessionRuntime', () => {
       rt.setTransportReady(true);
       rt.buildTransport();
       rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
-      openWs();
+      await openWs();
       await flushMicrotasks();
 
       answerPending('agent.attach', 'ok', {
@@ -1343,7 +1431,7 @@ describe('SessionRuntime', () => {
       rt.setTransportReady(true);
       rt.buildTransport();
       rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
-      openWs();
+      await openWs();
       await flushMicrotasks();
       answerPending('agent.attach', 'ok', { stream_epoch: 7, stream_cursor: 42 });
       await flushMicrotasks();

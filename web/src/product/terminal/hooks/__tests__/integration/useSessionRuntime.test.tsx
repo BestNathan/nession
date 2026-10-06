@@ -74,6 +74,37 @@ function lastWs(): MockWs {
   return instances[instances.length - 1];
 }
 
+/**
+ * Open the latest mock socket and answer its `client.auth` handshake — the
+ * identity the Agent binds before it will serve an attach, and a readiness
+ * gate on the client (#1429). Anything that expects the connection to come up
+ * goes through here, exactly as it would against the real Agent; a socket
+ * that never bound an identity is not one the Agent would attach.
+ */
+function openSocketWithAuth(): void {
+  const ws = lastWs();
+  ws._readyState = WS.OPEN;
+  ws.onopen?.(new Event('open'));
+  const authCall = ws.send.mock.calls.find((call: unknown[]) => {
+    const raw = String(call[0]);
+    try {
+      return JSON.parse(raw).msg_type === 'client.auth';
+    } catch {
+      return false;
+    }
+  })?.[0] as string | undefined;
+  if (authCall === undefined) {
+    throw new Error(
+      'no client.auth frame was sent on open — the P2P socket must bind the browser identity (#1429)',
+    );
+  }
+  const parsed = JSON.parse(authCall) as { id: string };
+  ws.onmessage?.({ data: JSON.stringify({
+    msg_type: 'ok', id: parsed.id, timestamp: 0,
+    payload: { status: 'success', message: 'ok' },
+  }) } as MessageEvent);
+}
+
 /** Count client.attach frames sent on any tracked socket. */
 function countAttachFrames(): number {
   let count = 0;
@@ -211,9 +242,7 @@ describe('useSessionRuntime integration', () => {
     expect(result.current.connectionState).toBe('connecting');
 
     act(() => {
-      const ws = lastWs();
-      ws._readyState = WS.OPEN;
-      ws.onopen?.(new Event('open'));
+      openSocketWithAuth();
     });
 
     await waitFor(() => {
@@ -324,9 +353,7 @@ describe('useSessionRuntime integration', () => {
       current!.setTransportReady(true);
     });
     act(() => {
-      const ws = lastWs();
-      ws._readyState = WS.OPEN;
-      ws.onopen?.(new Event('open'));
+      openSocketWithAuth();
     });
     await waitFor(() => {
       expect(countAttachFrames()).toBe(1);
@@ -660,9 +687,7 @@ describe('useSessionRuntime integration', () => {
       result.current.runtime!.setTransportReady(true);
     });
     act(() => {
-      const ws = lastWs();
-      ws._readyState = WS.OPEN;
-      ws.onopen?.(new Event('open'));
+      openSocketWithAuth();
     });
     await waitFor(() => {
       expect(result.current.connectionState).toBe('connected');

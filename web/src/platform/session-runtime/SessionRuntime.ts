@@ -1,7 +1,9 @@
 import type { AttachInfo } from '@/types';
 import type { RelayServerTransport } from '@/platform/attach/relayServerConnection';
 import { buildAgentWsUrl, WebSocketService } from '@/platform/socket';
-import type { ConnectionState } from '@/platform/socket/types';
+import type { ConnectionState, HandshakeSurface } from '@/platform/socket/types';
+import { getOrCreateClientId } from '@/platform/socket/clientId';
+import { WIRE as CLIENT_AUTH_WIRE, type AuthResponsePayload } from '@/generated/protocol/core/client-auth/v1';
 import { AddressAttachPolicy } from '@/platform/attach/AddressAttachPolicy';
 import { AttachStateMachine, type AttachPhase, type AttachTransitionResult } from '@/platform/attach/AttachStateMachine';
 import { SessionAttachController } from '@/platform/attach/SessionAttachController';
@@ -170,6 +172,44 @@ const P2P_PROBE_INTERVAL_MS = 15_000;
  * against never answers at all, so the deadline does not need to be tight.
  */
 const P2P_PROBE_TIMEOUT_MS = 5_000;
+
+/**
+ * The identity handshake this socket presents before anything else is served
+ * (#1429).
+ *
+ * The Agent roles and authorizes every attach, control change and input by the
+ * connection's `client_id`, and `client.auth` is the only thing that sets it:
+ * an unauthenticated connection is `unknown-client`, a principal that is *not*
+ * the browser's stable id. The two sides then disagree about who controls the
+ * session — the Web compares the control reply against its own id while the
+ * Agent compares the caller's — so input is either withheld locally as an
+ * observer or refused agent-side. The Server connection has always sent this
+ * (`useAppConnection`); this socket did not.
+ *
+ * Run as the service's handshake, so it is a readiness gate (no frame can be
+ * requested before it succeeds) and it repeats on every physical socket, which
+ * is what a reconnect needs. The Agent serves it inline after draining the
+ * lanes it was read behind, so the frames that follow are served by the
+ * identity it establishes.
+ *
+ * `auth_token` belongs to the Server's half of this handshake and is ignored by
+ * the Agent, which shares the one payload type on purpose — and this socket has
+ * no Server token to present anyway: its credential was the per-attach one,
+ * already proven at the upgrade (#1013). Putting that credential in this field
+ * is exactly the conflation the type documents against.
+ */
+function p2pClientAuthHandshake(surface: HandshakeSurface): Promise<void> {
+  return surface
+    .request<AuthResponsePayload>(CLIENT_AUTH_WIRE, {
+      auth_token: '',
+      client_id: getOrCreateClientId(),
+    })
+    .then((res) => {
+      if (res.status !== 'success') {
+        throw new Error(res.message || 'P2P client authentication failed');
+      }
+    });
+}
 
 export class SessionRuntime {
   readonly sessionId: string;
@@ -1084,6 +1124,9 @@ export class SessionRuntime {
       // or force relay; keeping those open would stall the recovery they
       // already have (#1263).
       persistentReconnect: this.addressPolicy.isManualRoute,
+      // Bind the browser's stable identity before any frame this socket
+      // depends on is served (#1429) — see `p2pClientAuthHandshake`.
+      handshake: p2pClientAuthHandshake,
     });
     this.agentWs = ws;
     this.filesApi = files;
