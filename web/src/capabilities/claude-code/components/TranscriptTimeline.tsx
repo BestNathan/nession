@@ -206,7 +206,7 @@ function Row({ entry }: { entry: Entry }) {
                 // min-content, so the token wraps and the box stays in its
                 // pane. Not `break-all`, which would also fix the sizing but
                 // breaks ordinary prose mid-word; this body is often reasoning.
-                'mt-2 max-h-64 overflow-auto whitespace-pre-wrap wrap-anywhere rounded border border-border/50 bg-muted/40 p-2',
+                'mt-2 max-h-64 overflow-auto whitespace-pre-wrap wrap-anywhere rounded-[var(--nession-radius-surface)] border border-border/50 bg-muted/40 p-2',
                 chromeMonoRole('metadata'),
               )}
               data-testid="transcript-detail"
