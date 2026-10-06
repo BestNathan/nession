@@ -18,13 +18,14 @@ import type { AttachInfo } from '@/types';
 import { SessionRuntime } from '@/platform/session-runtime/SessionRuntime';
 import { sessionRuntimeRegistry } from '@/platform/session-runtime/SessionRuntimeRegistry';
 
+// #1430: the plan is the ordered URL list itself — no readiness state exists
+// to gate on, so the mock is the list.
 const addressPlanState = vi.hoisted(() => ({
   urls: ['ws://shared-agent/ws'] as string[],
-  ready: true,
 }));
 
 vi.mock('@/shared/hooks/useAddressPlan', () => ({
-  useAddressPlan: () => addressPlanState,
+  useAddressPlan: () => addressPlanState.urls,
 }));
 
 const OriginalWebSocket = globalThis.WebSocket;
@@ -179,7 +180,6 @@ function expectRegistryEmpty(): void {
 describe('useSessionRuntime integration', () => {
   beforeEach(() => {
     addressPlanState.urls = ['ws://shared-agent/ws'];
-    addressPlanState.ready = true;
     setupMockWebSocket();
   });
 
@@ -256,9 +256,8 @@ describe('useSessionRuntime integration', () => {
     expect(result.current.runtime).not.toBe(runtimeA);
   });
 
-  it('publishes fileOps after async address plan becomes ready', async () => {
+  it('publishes fileOps once the plan carries an address (#1430)', async () => {
     addressPlanState.urls = [];
-    addressPlanState.ready = false;
 
     const store = makeStore('agent:a', 'token-a');
     const { result, rerender } = renderHook(
@@ -273,7 +272,6 @@ describe('useSessionRuntime integration', () => {
 
     act(() => {
       addressPlanState.urls = ['ws://shared-agent/ws'];
-      addressPlanState.ready = true;
     });
     rerender();
 

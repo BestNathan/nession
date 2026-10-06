@@ -70,7 +70,7 @@ describe('resolveDeepLinkAttachChoice', () => {
     expect(choice.mode).toBe('auto');
   });
 
-  it('browser-probes addresses when probe cache is empty', async () => {
+  it('orders a cold cache by the advertisement, with no probe in the path (#1430)', async () => {
     const attachInfo = {
       mode: 'p2p' as const,
       session_id: session.session_id,
@@ -84,8 +84,12 @@ describe('resolveDeepLinkAttachChoice', () => {
 
     const choice = await resolveDeepLinkAttachChoice(session, new Map());
 
+    // The advertisement is the agent's own priority sort, so it IS the order.
+    // Measuring the candidates used to gate the attach here; it now belongs to
+    // `useAgentProbe`, and the next attach picks up its result (#1430).
     expect(choice.orderedUrls).toEqual(['ws://fast/ws', 'ws://slow/ws']);
-    expect(choice.latencies).toHaveLength(2);
+    expect(testAddresses).not.toHaveBeenCalled();
+    expect(choice.latencies).toEqual([]);
   });
 });
 
@@ -167,7 +171,7 @@ describe('resolveTargetChoice', () => {
     expect(choice.relayUrl).toBe('ws://relay/ws');
   });
 
-  it('live-tests candidate addresses when the probe cache is cold', async () => {
+  it('orders a cold cache by the advertisement, without a live test (#1430)', async () => {
     sessionsApiMock.requestAttach.mockResolvedValue({
       mode: 'p2p', session_id: 'agent-1:dev', connection_token: 'tok',
       addresses: [
@@ -178,13 +182,10 @@ describe('resolveTargetChoice', () => {
 
     const choice = await resolveTargetChoice(p2pSession, p2pChoice, new Map());
 
-    // With the reply's credential, not bare: the agent refuses an uncredentialed
-    // upgrade since #1013, so a probe without it measures nothing (#1091).
-    expect(testAddresses).toHaveBeenCalledWith(
-      expect.anything(),
-      { credential: 'tok' },
-    );
-    expect(choice.orderedUrls[0]).toBe('ws://fast/ws');
+    // #1430: no probe gates the attach, and the priority order is what the
+    // first attempt uses. (The probe still runs, owned by `useAgentProbe`.)
+    expect(testAddresses).not.toHaveBeenCalled();
+    expect(choice.orderedUrls).toEqual(['ws://fast/ws', 'ws://slow/ws']);
   });
 
   it('reuses the probe cache without live-testing addresses when warm', async () => {

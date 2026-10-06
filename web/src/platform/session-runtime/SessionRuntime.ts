@@ -1,5 +1,4 @@
 import type { AttachInfo } from '@/types';
-import type { AddressPlan } from '@/shared/hooks/useAddressPlan';
 import type { RelayServerTransport } from '@/platform/attach/relayServerConnection';
 import { buildAgentWsUrl, WebSocketService } from '@/platform/socket';
 import type { ConnectionState } from '@/platform/socket/types';
@@ -41,7 +40,8 @@ export interface SessionRuntimeConfig {
    * snapshot.
    */
   forcedRelay: boolean;
-  addressPlan: AddressPlan;
+  /** Ordered candidate URLs, best-first (#1430: resolved synchronously). */
+  addressUrls: string[];
   /** User-initiated route identity (manual switch); resets candidate index when changed. */
   routeIntentEpoch: number;
   /**
@@ -107,7 +107,6 @@ export interface RuntimeMirrorSnapshot {
 export interface SessionRuntimeSnapshot extends RuntimeMirrorSnapshot {
   sessionId: string;
   activeUrl: string | null;
-  waitingForAddressPlan: boolean;
   /**
    * The EFFECTIVE relay mode: static intent OR the runtime's own fallback
    * (#1309 SC-02). This is the only place the fallback is published — React
@@ -147,7 +146,6 @@ function isSameSnapshot(a: SessionRuntimeSnapshot, b: SessionRuntimeSnapshot): b
     && a.connectionState === b.connectionState
     && a.agentTerminalApi === b.agentTerminalApi
     && a.activeUrl === b.activeUrl
-    && a.waitingForAddressPlan === b.waitingForAddressPlan
     && a.forcedRelay === b.forcedRelay
     && a.transportReady === b.transportReady
     && a.lastResize?.cols === b.lastResize?.cols
@@ -271,7 +269,7 @@ export class SessionRuntime {
       orderedUrls: config.orderedUrls,
       manualOverride: config.manualOverride,
       forcedRelay: config.forcedRelay,
-      addressPlan: config.addressPlan,
+      addressUrls: config.addressUrls,
       addressIndex: 0,
     });
     // transportReady and lastResize are NOT config: they are facts about the
@@ -380,10 +378,6 @@ export class SessionRuntime {
     return this.addressPolicy.activeUrl;
   }
 
-  get waitingForAddressPlan(): boolean {
-    return this.addressPolicy.isP2P && !this.config.addressPlan.ready;
-  }
-
   /** Bumps on internal candidate rotation; distinct from routeIntentEpoch. */
   get currentTransportGeneration(): number {
     return this.transportGeneration;
@@ -469,8 +463,8 @@ export class SessionRuntime {
       next.routeIntentEpoch !== undefined
       && next.routeIntentEpoch !== this.routeIntentEpoch;
     const planUrlsChanged =
-      next.addressPlan !== undefined
-      && next.addressPlan.urls.join('|') !== this.config.addressPlan.urls.join('|');
+      next.addressUrls !== undefined
+      && next.addressUrls.join('|') !== this.config.addressUrls.join('|');
     this.config = { ...this.config, ...next };
     if (next.routeIntentEpoch !== undefined) {
       this.routeIntentEpoch = next.routeIntentEpoch;
@@ -488,7 +482,7 @@ export class SessionRuntime {
       orderedUrls: this.config.orderedUrls,
       manualOverride: this.config.manualOverride,
       forcedRelay: this.effectiveForcedRelay,
-      addressPlan: this.config.addressPlan,
+      addressUrls: this.config.addressUrls,
       addressIndex: this.addressPolicy.currentIndex,
     });
 
@@ -724,7 +718,6 @@ export class SessionRuntime {
       ...this.getMirrorSnapshot(),
       sessionId: this.sessionId,
       activeUrl: this.activeUrl,
-      waitingForAddressPlan: this.waitingForAddressPlan,
       forcedRelay: this.effectiveForcedRelay,
       transportReady: this.transportReady,
       lastResize: this.lastResize,

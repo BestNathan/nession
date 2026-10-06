@@ -1,5 +1,4 @@
 import type { AttachInfo } from '@/types';
-import type { AddressPlan } from '@/shared/hooks/useAddressPlan';
 
 export type AddressPolicyAction =
   | { type: 'none' }
@@ -12,7 +11,8 @@ export interface AddressAttachPolicyConfig {
   orderedUrls: string[] | null;
   manualOverride: string | null;
   forcedRelay: boolean;
-  addressPlan: AddressPlan;
+  /** Ordered candidate URLs, best-first — `useAddressPlan`'s value (#1430). */
+  addressUrls: string[];
   addressIndex: number;
 }
 
@@ -24,19 +24,19 @@ export class AddressAttachPolicy {
   private planUrlsKey = '';
 
   constructor(private config: AddressAttachPolicyConfig) {
-    this.planUrlsKey = config.addressPlan.urls.join(',');
+    this.planUrlsKey = config.addressUrls.join(',');
   }
 
   get activeUrl(): string | null {
-    const { attachInfo, forcedRelay, manualOverride, addressPlan } = this.config;
+    const { attachInfo, forcedRelay, manualOverride, addressUrls } = this.config;
     const isP2P = attachInfo?.mode === 'p2p' && !forcedRelay;
-    if (!isP2P || !addressPlan.ready) {
+    if (!isP2P) {
       return null;
     }
     if (manualOverride) {
       return manualOverride;
     }
-    return addressPlan.urls[this.addressIndex] ?? null;
+    return addressUrls[this.addressIndex] ?? null;
   }
 
   get currentIndex(): number {
@@ -62,7 +62,7 @@ export class AddressAttachPolicy {
   update(config: Partial<AddressAttachPolicyConfig>): AddressPolicyAction {
     const prevKey = this.planUrlsKey;
     this.config = { ...this.config, ...config };
-    const nextKey = this.config.addressPlan.urls.join(',');
+    const nextKey = this.config.addressUrls.join(',');
     if (nextKey !== prevKey) {
       this.planUrlsKey = nextKey;
       this.addressIndex = 0;
@@ -76,14 +76,14 @@ export class AddressAttachPolicy {
   }
 
   onCandidateDisconnected(): AddressPolicyAction {
-    const { attachInfo, manualOverride, addressPlan } = this.config;
+    const { attachInfo, manualOverride, addressUrls } = this.config;
     if (!attachInfo) {
       return { type: 'none' };
     }
     if (manualOverride) {
       return { type: 'transport-exhausted', manualRoute: true };
     }
-    if (this.addressIndex + 1 < addressPlan.urls.length) {
+    if (this.addressIndex + 1 < addressUrls.length) {
       this.addressIndex += 1;
       return { type: 'next-candidate' };
     }
@@ -91,14 +91,14 @@ export class AddressAttachPolicy {
   }
 
   maxReconnectAttempts(): number {
-    const { attachInfo, manualOverride, orderedUrls, addressPlan } = this.config;
+    const { attachInfo, manualOverride, orderedUrls, addressUrls } = this.config;
     if (manualOverride) {
       return 2;
     }
-    const hasMoreCandidates = this.addressIndex + 1 < addressPlan.urls.length;
+    const hasMoreCandidates = this.addressIndex + 1 < addressUrls.length;
     const singleLegacyFallback =
-      addressPlan.urls.length === 1
-      && addressPlan.urls[0] === attachInfo?.agent_address
+      addressUrls.length === 1
+      && addressUrls[0] === attachInfo?.agent_address
       && (orderedUrls === null || orderedUrls.length === 0);
     if (hasMoreCandidates || singleLegacyFallback) {
       return 2;

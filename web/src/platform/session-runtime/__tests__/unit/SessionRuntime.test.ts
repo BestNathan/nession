@@ -137,7 +137,7 @@ function makeConfig(overrides: Partial<ConstructorParameters<typeof SessionRunti
     orderedUrls: ['ws://a/ws', 'ws://b/ws'],
     manualOverride: null,
     forcedRelay: false,
-    addressPlan: { ready: true, urls: ['ws://a/ws', 'ws://b/ws'] },
+    addressUrls: ['ws://a/ws', 'ws://b/ws'],
     routeIntentEpoch: 0,
     createFilesApi,
     createTerminalAgentApi,
@@ -304,11 +304,12 @@ describe('SessionRuntime', () => {
     rt.dispose();
   });
 
-  it('reports waitingForAddressPlan when plan is not ready', () => {
-    const rt = new SessionRuntime(makeConfig({
-      addressPlan: { ready: false, urls: [] },
-    }));
-    expect(rt.waitingForAddressPlan).toBe(true);
+  it('builds no agent API when the plan carries no addresses (#1430)', () => {
+    // An empty plan is a resolved answer now: there is no "not ready" state
+    // left to wait in, so it means the advertisement named no candidate and
+    // there is no legacy address either — nothing to dial.
+    const rt = new SessionRuntime(makeConfig({ addressUrls: [] }));
+    expect(rt.activeUrl).toBeNull();
     expect(rt.getAgentTerminalApi()).toBeNull();
     rt.dispose();
   });
@@ -670,7 +671,7 @@ describe('SessionRuntime', () => {
 
       rt.updateContext({
         orderedUrls: ['ws://c/ws'],
-        addressPlan: { urls: ['ws://c/ws'], ready: true },
+        addressUrls: ['ws://c/ws'],
       });
       expect(rt.getSnapshot().forcedRelay).toBe(false);
       expect(rt.activeUrl).toBe('ws://c/ws');

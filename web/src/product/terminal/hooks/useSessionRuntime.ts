@@ -45,8 +45,8 @@ export interface UseSessionRuntimeResult {
   connectionState: ConnectionState;
   fileOps: FileOps | null;
   activeUrl: string | null;
-  waitingForAddressPlan: boolean;
-  addressPlan: ReturnType<typeof useAddressPlan>;
+
+  addressUrls: string[];
 }
 
 const EMPTY_RUNTIME_SNAPSHOT: SessionRuntimeSnapshot = {
@@ -56,7 +56,7 @@ const EMPTY_RUNTIME_SNAPSHOT: SessionRuntimeSnapshot = {
   connectionState: 'disconnected',
   agentTerminalApi: null,
   activeUrl: null,
-  waitingForAddressPlan: false,
+
   forcedRelay: false,
   transportReady: false,
   lastResize: null,
@@ -255,8 +255,7 @@ export function useSessionRuntime(options: UseSessionRuntimeOptions): UseSession
   // routes the transport's report here through its config.
   const setInputDrop = useSetAtom(inputDropAtomFamily(sessionId));
 
-  const addressPlan = useAddressPlan(attachInfo, { orderedUrls, manualUrl: manualOverride });
-  const addressPlanReady = addressPlan.ready;
+  const addressUrls = useAddressPlan(attachInfo, { orderedUrls, manualUrl: manualOverride });
 
   // Relay has two sources with two owners (#1309 SC-02): the static intent
   // (the attach choice was not P2P) is a config fact this hook computes, and
@@ -280,9 +279,9 @@ export function useSessionRuntime(options: UseSessionRuntimeOptions): UseSession
       // Static intent only — the runtime's own fallback lives inside the
       // runtime and must never be overwritten by a config sync.
       forcedRelay: !p2pIntent,
-      addressPlan: p2pIntent
-        ? { urls: addressPlan.urls, ready: addressPlanReady }
-        : { urls: [], ready: true },
+      // No P2P intent means no P2P addresses to rotate: the empty plan is the
+      // answer, not a pending one (#1430).
+      addressUrls: p2pIntent ? addressUrls : [],
       routeIntentEpoch,
       // Retained even while P2P is active: the runtime needs the relay-capable
       // server WS handle in hand when a fallback happens with the Terminal
@@ -305,8 +304,7 @@ export function useSessionRuntime(options: UseSessionRuntimeOptions): UseSession
     orderedUrls,
     manualOverride,
     p2pIntent,
-    addressPlanReady,
-    addressPlan.urls,
+    addressUrls,
     options.serverConnection,
     options.hasSessionOutput,
     routeIntentEpoch,
@@ -345,7 +343,6 @@ export function useSessionRuntime(options: UseSessionRuntimeOptions): UseSession
     connectionState,
     fileOps,
     activeUrl: runtime?.sessionId === sessionId && inP2PTransport ? runtime.activeUrl ?? null : null,
-    waitingForAddressPlan: inP2PTransport ? (runtime?.waitingForAddressPlan ?? !addressPlanReady) : false,
-    addressPlan,
+    addressUrls,
   };
 }

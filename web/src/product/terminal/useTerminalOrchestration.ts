@@ -136,7 +136,7 @@ export function useTerminalOrchestration({
     () => controllerRef.current?.hasSessionOutput ?? false,
     [],
   );
-  const { waitingForAddressPlan, agentTerminalApi, connectionState, runtime, snapshot, fileOps } = useP2PAttachTransport({
+  const { agentTerminalApi, connectionState, runtime, snapshot, fileOps } = useP2PAttachTransport({
     attachInfo,
     sessionName,
     orderedUrls,
@@ -205,7 +205,9 @@ export function useTerminalOrchestration({
     terminalState !== 'failed' && manualOverride !== null && connectionState !== 'connected';
   const inputDisabled = banner !== 'none' || isSwitching || observerReadOnly;
   const modeGateOk = !(effectiveMode === 'p2p' && !agentTerminalApi);
-  const viewportReady = modeGateOk && !waitingForAddressPlan;
+  // #1430: the address plan resolves synchronously, so there is no
+  // "waiting for the plan" state left to gate the viewport on.
+  const viewportReady = modeGateOk;
 
   useEffect(() => {
     if (!controller) { return; }
@@ -224,7 +226,6 @@ export function useTerminalOrchestration({
     sessionId,
     controller,
     isSwitching,
-    waitingForAddressPlan,
     viewportReady,
     inputDisabled,
     terminalState,

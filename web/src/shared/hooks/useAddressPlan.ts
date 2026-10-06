@@ -1,50 +1,11 @@
-import { useEffect, useRef, useState, useMemo } from 'react';
-import type { AttachInfo, ProbedAddress } from '@/types';
-import { orderAddressesByLatency } from '@/shared/lib/addressSelection';
-
-/** In-flight probe dedupe — shares one browser latency test across hook instances. */
-const inflightProbes = new Map<string, Promise<string[]>>();
-
-function probeAddresses(
-  asyncKey: string,
-  candidates: ProbedAddress[],
-  agentAddress: string | null,
-  credential: string | undefined,
-): Promise<string[]> {
-  let inflight = inflightProbes.get(asyncKey);
-  if (!inflight) {
-    // The credential is deliberately NOT part of `asyncKey`. The server mints a
-    // fresh one per attach-info request, so joining it would make every request
-    // a distinct key — defeating this module-global dedupe and re-opening the
-    // empty-`orderedUrls` dead state that `useAddressPlan.test.ts` pins as
-    // regression #51. Two callers sharing one probe is correct: the result
-    // carries bare URLs, so a credential that was valid when the dial started
-    // measures the same thing for both.
-    inflight = orderAddressesByLatency(candidates, { credential }).then((urls) => {
-      inflightProbes.delete(asyncKey);
-      return urls.length > 0 ? urls : agentAddress ? [agentAddress] : [];
-    }).catch((err) => {
-      inflightProbes.delete(asyncKey);
-      throw err;
-    });
-    inflightProbes.set(asyncKey, inflight);
-  }
-  return inflight;
-}
-
-/** Outcome of resolving which P2P endpoint(s) to try for an attach. */
-export interface AddressPlan {
-  /** Ordered candidate URLs to attempt, best-first. */
-  urls: string[];
-  /** True once selection has finished (or was pre-resolved / skipped). */
-  ready: boolean;
-}
+import { useMemo } from 'react';
+import type { AttachInfo } from '@/types';
 
 interface AddressPlanInput {
   /**
-   * Browser-tested URLs resolved upstream (in the attach dialog). When
-   * provided, they are used as-is with NO re-testing — the browser already
-   * measured them. `null` means "resolve here" (legacy / programmatic paths).
+   * Browser-tested URLs resolved upstream (in the attach dialog, or a saved
+   * profile's cached order). When provided, they are used as-is with NO
+   * re-testing — the browser already measured them.
    */
   orderedUrls: string[] | null;
   /** Manual single-address override (skips ordering, single-entry plan). */
@@ -52,105 +13,54 @@ interface AddressPlanInput {
 }
 
 /**
- * Resolve the ordered list of P2P URLs to attempt for a session attach.
+ * The ordered list of P2P URLs to attempt for a session attach, best-first.
  *
- * Priority:
- * 1. Manual override → single-entry plan.
- * 2. Pre-resolved `orderedUrls` from the dialog's browser test → used verbatim.
- * 3. Fallback (no pre-resolved list): browser-test `attachInfo.addresses` here,
- *    or use the legacy single `agent_address`.
+ * Every path resolves **synchronously** (#1430): the manual override, the
+ * pre-resolved order, the advertisement's own priority order, and the legacy
+ * single address. There is deliberately no "not ready" state and nothing here
+ * consults a browser probe — waiting for `testAddresses` to settle *every*
+ * candidate (3s per candidate, in parallel) made the slowest, often
+ * unreachable, VPN/LAN sibling part of the create → attach critical path.
  *
- * Rotation through the plan on failure is the caller's concern.
+ * The measurement still happens — `useAgentProbe` owns it from the attach
+ * reply's credential and caches the result — so the next attach starts from a
+ * measured order. Nothing waits for it.
  *
- * IMPORTANT: Deterministic resolution paths (manual URL, pre-resolved URLs,
- * legacy agent_address, non-P2P mode) are computed SYNCHRONOUSLY via
- * useMemo so there is never a stale render with the previous session's
- * agent address. Only the async browser-test path uses useState+useEffect.
+ * Deterministic by construction: computed in a `useMemo` rather than resolved
+ * in an effect, so there is never a stale render carrying the previous
+ * session's address. Rotation through the plan on failure is the caller's
+ * concern (`AddressAttachPolicy`).
  */
 export function useAddressPlan(
   attachInfo: AttachInfo | null,
   { orderedUrls, manualUrl }: AddressPlanInput,
-): AddressPlan {
-  // ── Deterministic resolution (synchronous — no stale state) ──────────
-
-  const syncPlan = useMemo<AddressPlan>(() => {
+): string[] {
+  return useMemo(() => {
     if (!attachInfo || attachInfo.mode !== 'p2p') {
-      return { urls: [], ready: true };
+      return [];
     }
 
     // 1. Manual selection: use exactly that address, no rotation.
     if (manualUrl) {
-      return { urls: [manualUrl], ready: true };
+      return [manualUrl];
     }
 
-    // 2. Pre-resolved order from the attach dialog's browser test. An EMPTY
-    //    array is NOT a valid pre-resolved plan — it means the dialog had no
-    //    cached probe yet. Fall through to path 3.
+    // 2. The measured order, when one is already in hand. An EMPTY array is
+    //    not an order — it means this attach has no measurement yet.
     if (orderedUrls && orderedUrls.length > 0) {
-      return { urls: orderedUrls, ready: true };
+      return orderedUrls;
     }
 
-    // 3. No candidates at all — fall back to legacy agent_address.
-    const candidates: ProbedAddress[] = attachInfo.addresses ?? [];
-    if (candidates.length === 0) {
-      return { urls: attachInfo.agent_address ? [attachInfo.agent_address] : [], ready: true };
+    // 3. The advertisement's own order. The agent priority-sorts its address
+    //    list (`crates/nession-common/src/address.rs`: de-duplicate, stable
+    //    sort by priority), so the first entry is the right first attempt and
+    //    rotation walks the rest.
+    const candidates = attachInfo.addresses ?? [];
+    if (candidates.length > 0) {
+      return candidates.map((candidate) => candidate.url);
     }
 
-    // 4. Candidates exist but no pre-resolved order — async browser test needed.
-    return { urls: [], ready: false };
+    // 4. No candidates at all — the legacy single address.
+    return attachInfo.agent_address ? [attachInfo.agent_address] : [];
   }, [attachInfo, orderedUrls, manualUrl]);
-
-  // ── Async browser-test fallback ─────────────────────────────────────
-
-  const [asyncUrls, setAsyncUrls] = useState<string[]>([]);
-
-  const candidates: ProbedAddress[] = attachInfo?.addresses ?? [];
-  const agentAddress = attachInfo?.agent_address ?? null;
-  const credential = attachInfo?.connection_token;
-  // Stable key for the async effect — only changes when candidates actually differ.
-  const asyncKey = `${candidates.map((a) => a.url).join(',')}|${agentAddress ?? ''}`;
-
-  const inputsRef = useRef({ candidates, agentAddress, credential });
-  inputsRef.current = { candidates, agentAddress, credential };
-
-  const activeKeyRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    if (syncPlan.ready) {
-      // Sync plan resolved — clear any stale async result.
-      setAsyncUrls([]);
-      return;
-    }
-
-    // syncPlan is not ready → browser-test the candidates.
-    const inputs = inputsRef.current;
-    activeKeyRef.current = asyncKey;
-
-    let cancelled = false;
-    void probeAddresses(
-      asyncKey,
-      inputs.candidates,
-      inputs.agentAddress,
-      inputs.credential,
-    ).then((finalUrls) => {
-      if (cancelled || activeKeyRef.current !== asyncKey) {
-        return;
-      }
-      setAsyncUrls(finalUrls);
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [asyncKey, syncPlan.ready]);
-
-  // ── Return ──────────────────────────────────────────────────────────
-
-  if (syncPlan.ready) {
-    return syncPlan;
-  }
-
-  return asyncUrls.length > 0
-    ? { urls: asyncUrls, ready: true }
-    : { urls: [], ready: false };
 }
