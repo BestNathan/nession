@@ -372,6 +372,9 @@ async function assertWorkspaceEntryStateKeepsVisualGrammar(
     const target = page.getByTestId('workspace-tool-files');
     await expect(target).toBeVisible();
     await expect(target).toHaveAttribute('aria-pressed', expectedPressed);
+    // The label is the only direct span. A second anonymous span here would
+    // reintroduce the detached selected dot #1458 removes.
+    await expect(target.locator(':scope > span')).toHaveCount(1);
     await waitForSettledBox(target);
 
     return target.evaluate((node) => {
@@ -380,14 +383,20 @@ async function assertWorkspaceEntryStateKeepsVisualGrammar(
       const label = node.querySelector('[data-testid$="-label"]');
       const labelStyle = label instanceof HTMLElement ? getComputedStyle(label) : null;
       return {
-        width: rect.width,
-        height: rect.height,
-        borderRadius: style.borderRadius,
-        paddingLeft: style.paddingLeft,
-        paddingRight: style.paddingRight,
-        fontSize: labelStyle?.fontSize ?? null,
-        fontWeight: labelStyle?.fontWeight ?? null,
-        lineHeight: labelStyle?.lineHeight ?? null,
+        geometry: {
+          width: rect.width,
+          height: rect.height,
+          borderRadius: style.borderRadius,
+          paddingLeft: style.paddingLeft,
+          paddingRight: style.paddingRight,
+          fontSize: labelStyle?.fontSize ?? null,
+          fontWeight: labelStyle?.fontWeight ?? null,
+          lineHeight: labelStyle?.lineHeight ?? null,
+        },
+        visual: {
+          background: style.backgroundColor,
+          foreground: style.color,
+        },
       };
     });
   };
@@ -399,10 +408,12 @@ async function assertWorkspaceEntryStateKeepsVisualGrammar(
   const active = await signatureForFiles('/#/fixture/workspace', 'true');
   const inactive = await signatureForFiles('/#/fixture/workspace?capability=git', 'false');
 
-  // Selection is state, not a new component recipe. Color/presence may change;
-  // geometry and typography may not. This is the Workspace family's relational
-  // invariant, analogous to Context -> Peek for Capsule but across control state.
-  expect(inactive).toEqual(active);
+  // Selection is state, not a new component recipe. Geometry and typography
+  // remain identical; only the Nession-owned semantic entry surface/foreground
+  // acknowledge selection.
+  expect(inactive.geometry).toEqual(active.geometry);
+  expect(active.visual.background).not.toBe(inactive.visual.background);
+  expect(active.visual.foreground).not.toBe(inactive.visual.foreground);
 }
 
 
@@ -439,8 +450,9 @@ async function assertWebCapsuleOuterGeometry(
   expect(Math.abs(inactive.height - active.height)).toBeLessThanOrEqual(1);
   expect(Math.abs(inactive.bottom - active.bottom)).toBeLessThanOrEqual(1);
 
-  // Deliberately force a label far beyond the slot. This probes the rendered
-  // containment rule rather than relying on today's shipped names to stay short.
+  // Deliberately force a label far beyond the slot. Normal capability identity
+  // is bounded by shortTitle now; this keeps truncation as the final defensive
+  // geometry guard rather than the naming strategy.
   await page.getByTestId('workspace-tool-env-label').evaluate((node) => {
     node.textContent =
       'Environment Configuration and Runtime Diagnostics with a Deliberately Long Name';
@@ -536,6 +548,14 @@ for (const row of viewports.filter((v) => v.experience === 'web')) {
       await expect(capsule).toBeVisible();
       await expectSingleLine(capsule, optsFor(PATTERN_WORKSPACE_NAV, 'web', row.id));
       await expectVisibleWithin(capsule, bar, optsFor(PATTERN_WORKSPACE_NAV, 'web', row.id));
+
+      // Compact navigation identity is capability-owned. The visual label uses
+      // shortTitle while the control's accessible/title identity stays full.
+      const env = page.getByTestId('workspace-tool-env');
+      await expect(page.getByTestId('workspace-tool-env-label')).toHaveText('Env');
+      await expect(env).toHaveAttribute('aria-label', 'Environment');
+      await expect(env).toHaveAttribute('title', 'Environment');
+      await expect(page.getByTestId('workspace-tool-claude-code-label')).toHaveText('Claude');
 
       // An unavailable capability is explanatory content only, never a
       // disabled navigation advertisement.
@@ -700,6 +720,12 @@ for (const row of viewports.filter((v) => v.experience === 'app')) {
       await expectTouchTarget(capsule, optsFor(PATTERN_WORKSPACE_NAV, 'app', row.id));
       await expectSingleLine(capsule, optsFor(PATTERN_WORKSPACE_NAV, 'app', row.id));
       await expectVisibleWithin(capsule, bar, optsFor(PATTERN_WORKSPACE_NAV, 'app', row.id));
+
+      const env = page.getByTestId('workspace-tool-env');
+      await expect(page.getByTestId('workspace-tool-env-label')).toHaveText('Env');
+      await expect(env).toHaveAttribute('aria-label', 'Environment');
+      await expect(env).toHaveAttribute('title', 'Environment');
+      await expect(env.locator(':scope > span')).toHaveCount(1);
     });
 
     test('the two App Capsule states are one family (#1347 SC-30)', async ({ page }) => {
