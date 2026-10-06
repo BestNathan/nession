@@ -240,20 +240,6 @@ function emitCustomProps(leaves, tokens, theme) {
   });
 }
 
-/**
- * Transitional compatibility adapter for pre-#1451 consumers.
- *
- * New Nession-owned source must consume --nession-* directly (or a generated
- * Tailwind semantic utility). These aliases exist only so namespace migration
- * can land without a flag day; the visual-vocabulary gate owns their removal.
- */
-function emitLegacyAliases(leaves) {
-  return leaves.map(({ path }) => {
-    const name = toKebab(path);
-    return `  --${name}: ${nessionVarRef(name)};`;
-  });
-}
-
 function shouldBridgeThemeSize(name) {
   return THEME_SIZE_PREFIXES.some(
     (prefix) => name === prefix || name.startsWith(prefix),
@@ -267,8 +253,7 @@ function emitAppExperienceRemap(tokens) {
     return [];
   }
   const lines = emitCustomProps(appLeaves, tokens, 'light');
-  const aliases = emitLegacyAliases(appLeaves);
-  return ['', '[data-experience="app"] {', ...lines, ...aliases, '}', ''];
+  return ['', '[data-experience="app"] {', ...lines, '}', ''];
 }
 
 export function generateWebCss(tokens) {
@@ -283,10 +268,7 @@ export function generateWebCss(tokens) {
   const webLeaves = flattenLeaves(web);
 
   const rootLeaves = [...lightSemantic, ...domainLeaves, ...webLeaves];
-  const root = [
-    ...emitCustomProps(rootLeaves, tokens, 'light'),
-    ...emitLegacyAliases(rootLeaves),
-  ];
+  const root = emitCustomProps(rootLeaves, tokens, 'light');
   const darkBlock = [
     ...emitCustomProps(darkSemantic, tokens, 'dark'),
     ...emitCustomProps(domainLeaves, tokens, 'dark'),
