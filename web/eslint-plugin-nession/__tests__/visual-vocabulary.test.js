@@ -20,6 +20,7 @@ const lintMetadata = JSON.parse(readFileSync(metadataPath, 'utf8'));
 
 const PRODUCT = '/proj/web/src/product/session/components/Probe.tsx';
 const EDITOR_ADAPTER = '/proj/web/src/platform/editor/model/editorTheme.ts';
+const MARKDOWN_ADAPTER = '/proj/web/src/shared/markdown/markdownVisualGrammar.ts';
 const CAPABILITY = '/proj/web/src/capabilities/probe/components/Probe.tsx';
 
 test('generated metadata makes the --nession-* namespace machine-readable', () => {
@@ -139,7 +140,7 @@ test('a legal token still fails when a capability consumes host-owned chrome', (
   );
 });
 
-test('approved renderer adapters may consume foreign variables but not legacy Nession aliases', () => {
+test('approved renderer adapters may preserve renderer vocabulary but not legacy Nession aliases', () => {
   assert.deepEqual(
     findVisualVariableViolations('var(--cm-editor-background)', lintMetadata, EDITOR_ADAPTER),
     [],
@@ -148,6 +149,19 @@ test('approved renderer adapters may consume foreign variables but not legacy Ne
     findVisualVariableViolations('var(--background)', lintMetadata, EDITOR_ADAPTER)[0]?.kind,
     'legacy',
   );
+
+  // @tailwindcss/typography is an upstream renderer vocabulary. It is legal
+  // only at the canonical Markdown grammar owner; feature consumers still
+  // fail the utility classifier for these same classes.
+  assert.deepEqual(
+    findVisualVariableViolations('var(--nession-radius-surface)', lintMetadata, MARKDOWN_ADAPTER),
+    [],
+  );
+  assert.equal(
+    findVisualVariableViolations('var(--radius-surface)', lintMetadata, MARKDOWN_ADAPTER)[0]?.kind,
+    'legacy',
+  );
+  assert.ok(findVisualUtilityViolations('prose-sm text-xs leading-relaxed', lintMetadata).length > 0);
 });
 
 const ruleTester = new RuleTester({
@@ -170,6 +184,10 @@ test('visual-vocabulary reports non-canonical production variables', () => {
         code: 'export const x = "color: var(--cm-editor-background)";',
         filename: EDITOR_ADAPTER,
       },
+      {
+        code: 'export const x = "prose prose-sm text-xs leading-relaxed rounded shadow-sm";',
+        filename: MARKDOWN_ADAPTER,
+      },
     ],
     invalid: [
       {
@@ -185,6 +203,20 @@ test('visual-vocabulary reports non-canonical production variables', () => {
       {
         code: 'export const x = "color: var(--foreign-theme)";',
         filename: PRODUCT,
+        errors: [{ messageId: 'violation' }],
+      },
+      {
+        code: 'export const x = "prose-sm text-xs leading-relaxed";',
+        filename: PRODUCT,
+        errors: [
+          { messageId: 'utilityViolation' },
+          { messageId: 'utilityViolation' },
+          { messageId: 'utilityViolation' },
+        ],
+      },
+      {
+        code: 'export const x = "var(--radius-surface)";',
+        filename: MARKDOWN_ADAPTER,
         errors: [{ messageId: 'violation' }],
       },
       {
