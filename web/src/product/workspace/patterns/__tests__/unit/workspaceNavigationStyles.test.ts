@@ -2,8 +2,6 @@ import { describe, expect, it } from 'vitest';
 import {
   workspaceCapabilityEntryClass,
   workspaceCapabilityEntryLayoutClass,
-  workspaceCapabilityIndicatorClass,
-  workspaceCapabilityIndicatorStateClass,
   workspaceCapabilityLabelAlignmentClass,
   workspaceCapabilityLabelBaseClass,
   workspaceCapabilityLabelSizeClass,
@@ -11,12 +9,11 @@ import {
   workspaceCapabilityStateClass,
 } from '@/product/workspace/patterns/workspaceNavigationStyles';
 
-describe('Workspace navigation visual grammar (#1451 / #1455)', () => {
+describe('Workspace navigation visual grammar (#1451 / #1455 / #1458)', () => {
   it('keeps Workspace chrome on canonical Nession vocabulary', () => {
     const classes = [
       workspaceCapabilityScrollClass,
       workspaceCapabilityEntryClass,
-      workspaceCapabilityIndicatorClass,
       workspaceCapabilityLabelBaseClass,
       workspaceCapabilityLabelSizeClass,
     ].join(' ');
@@ -48,13 +45,16 @@ describe('Workspace navigation visual grammar (#1451 / #1455)', () => {
   });
 
   it('state changes emphasis without creating a second geometry recipe', () => {
-    expect(workspaceCapabilityStateClass({ active: true })).toBe('text-foreground');
+    expect(workspaceCapabilityStateClass({ active: true })).toBe(
+      'bg-accent text-accent-foreground',
+    );
     expect(workspaceCapabilityStateClass({ active: false })).toBe(
-      'text-muted-foreground hover:text-foreground',
+      'bg-transparent text-muted-foreground hover:bg-muted hover:text-foreground',
     );
 
-    for (const active of [true, false]) {
-      expect(workspaceCapabilityIndicatorStateClass(active)).toMatch(/^bg-/);
-    }
+    // Selected state belongs to the entry surface itself. There is no detached
+    // indicator recipe that can be confused with work/pagination/status.
+    expect(workspaceCapabilityStateClass({ active: true })).not.toContain('font-');
+    expect(workspaceCapabilityStateClass({ active: false })).not.toContain('font-');
   });
 });
