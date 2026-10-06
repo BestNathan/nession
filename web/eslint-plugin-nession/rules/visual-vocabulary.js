@@ -162,7 +162,8 @@ export function isForeignAdapter(filename) {
     path.includes('/src/components/ui/') ||
     path.includes('/src/platform/editor/') ||
     path.includes('/src/platform/terminal-runtime/') ||
-    path.endsWith('/src/product/terminal/components/TerminalViewport.tsx')
+    path.endsWith('/src/product/terminal/components/TerminalViewport.tsx') ||
+    path.endsWith('/src/shared/markdown/markdownVisualGrammar.ts')
   );
 }
 
