@@ -56,10 +56,20 @@ export function chromeMonoRole(role: ChromeTypographyRole): string {
 }
 
 
-/** Uppercase quiet label: canonical metadata metrics plus owned tracking. */
-export function chromeLabelRole(): string {
+export type ChromeLabelRole = Extract<ChromeTypographyRole, 'metadata' | 'caption'>;
+
+/** Uppercase quiet label: canonical chrome metrics plus owned tracking. */
+export function chromeLabelRole(role: ChromeLabelRole = 'metadata'): string {
   return cn(
-    chromeSansRole('metadata'),
+    chromeSansRole(role),
+    'uppercase tracking-[var(--nession-typography-label-tracking)]',
+  );
+}
+
+/** Technical uppercase label with the same owned tracking treatment. */
+export function chromeMonoLabelRole(role: ChromeLabelRole = 'metadata'): string {
+  return cn(
+    chromeMonoRole(role),
     'uppercase tracking-[var(--nession-typography-label-tracking)]',
   );
 }
