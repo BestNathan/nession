@@ -85,7 +85,7 @@ function FileViewerToolbar({
             open. */}
         <span className="truncate">{path || filename}</span>
         {forceReadOnly && (
-          <span className={cn('inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-muted-foreground', chromeSansRole('caption'))}>
+          <span className={cn('inline-flex items-center gap-1 rounded-[var(--nession-radius-control)] bg-muted px-1.5 py-0.5 text-muted-foreground', chromeSansRole('caption'))}>
             <Lock className="h-2.5 w-2.5" /> Read-only
           </span>
         )}
@@ -236,7 +236,7 @@ function FileViewerContent({
           <span>This file looks like Markdown</span>
           <button
             onClick={onSuggestionPreview}
-            className={cn('ml-auto rounded bg-primary px-2 py-0.5 text-primary-foreground hover:bg-primary/80', chromeSansRole('metadata'))}
+            className={cn('ml-auto rounded-[var(--nession-radius-control)] bg-primary px-2 py-0.5 text-primary-foreground hover:bg-primary/80', chromeSansRole('metadata'))}
           >
             Preview
           </button>
