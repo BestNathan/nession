@@ -280,7 +280,7 @@ export function SessionItem({
           className={cn(
             'truncate',
             chromeSansRole('primary'),
-            selected ? 'text-foreground' : 'text-[color:var(--text-secondary)]',
+            selected ? 'text-foreground' : 'text-[color:var(--nession-text-secondary)]',
           )}
         >
           {session.session_name}
