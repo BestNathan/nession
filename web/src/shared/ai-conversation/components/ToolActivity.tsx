@@ -31,7 +31,7 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/shared/lib/utils'
 import { copyToClipboard } from '@/shared/lib/clipboard'
-import { chromeSansRole } from '@/shared/typography/chromeRoles'
+import { chromeLabelRole, chromeSansRole } from '@/shared/typography/chromeRoles'
 import type { AIToolItem, AIToolPayload, AIToolStatus } from '../model/conversation'
 
 const STATUS: Record<
@@ -120,7 +120,7 @@ function ToolBody({ label, payload }: { label: string; payload: AIToolPayload })
   return (
     <section>
       <div className="flex items-center gap-2">
-        <h4 className={cn('uppercase tracking-wide', chromeSansRole('caption'))}>{label}</h4>
+        <h4 className={chromeLabelRole('caption')}>{label}</h4>
         {payload.truncated ? (
           // Said explicitly, because a cut body is indistinguishable from a
           // short one — and the reader deciding whether they have the whole
@@ -139,8 +139,8 @@ function ToolBody({ label, payload }: { label: string; payload: AIToolPayload })
           already says the body continues, and a fade would need measurement to
           appear only when it means something. */}
       <pre
-        className="mt-1 overflow-auto rounded border border-[var(--nession-conversation-code-border)] p-2 font-mono text-[length:var(--nession-typography-code-size)] whitespace-pre-wrap"
-        style={{ maxHeight: 'var(--conversation-group-max-height)' }}
+        className="mt-1 overflow-auto rounded-[var(--nession-radius-surface)] border border-[var(--nession-conversation-code-border)] p-2 font-mono text-[length:var(--nession-typography-code-size)] whitespace-pre-wrap"
+        style={{ maxHeight: 'var(--nession-conversation-group-max-height)' }}
       >
         {payload.text}
       </pre>
