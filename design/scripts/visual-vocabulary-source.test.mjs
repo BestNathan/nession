@@ -72,6 +72,22 @@ export const bad = 'text-sm font-semibold rounded-lg shadow-md bg-white';
   );
 });
 
+test('fast source gate ignores visual vocabulary mentioned only in comments', () => {
+  const source = `
+// historical text-sm and var(--control-) are documentation, not code
+/* rounded-lg shadow-xl */
+export const cls = 'flex items-center';
+`;
+  assert.deepEqual(
+    scanVisualUtilitySource(source, 'web/src/product/probe.ts', {
+      cssVariables: [],
+      legacyCssVariables: [],
+      tailwindThemeBridges: { color: {}, spacing: {} },
+    }),
+    [],
+  );
+});
+
 test('fast source gate rejects legacy custom properties in TS/TSX strings', () => {
   const violations = scanVisualUtilitySource(
     "export const cls = 'bg-[var(--background)]';",
