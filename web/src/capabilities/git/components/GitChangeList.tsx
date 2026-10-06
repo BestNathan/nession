@@ -103,7 +103,7 @@ function GitRowItem({
       aria-current={selected ? 'true' : undefined}
       onClick={() => onSelect(row.path)}
       className={cn(
-        'flex w-full items-center gap-2 rounded-[var(--radius-control)] px-2 py-1.5 text-left transition-colors',
+        'flex w-full items-center gap-2 rounded-[var(--nession-radius-control)] px-2 py-1.5 text-left transition-colors',
         chromeSansRole('secondary'),
         'hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
         selected && 'bg-accent text-accent-foreground',
