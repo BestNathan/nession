@@ -90,12 +90,19 @@ registry. If lint cannot prove a visual variable came from the generator, the
 correct repair is to route the value through the canonical owner.
 
 Renderer/framework foreign variables are permitted only behind explicit adapter
-boundaries (for example CodeMirror, xterm, or normalized upstream UI
-primitives). A Nession-owned token used through its pre-#1451 unprefixed spelling
-is still a violation in production source. The runtime compatibility aliases
-were removed once the source gate reached zero legacy consumers; the old
-spellings remain only in generated lint metadata so diagnostics can name the
-canonical `--nession-*` repair.
+boundaries (for example CodeMirror, xterm, normalized upstream UI primitives,
+or the canonical Markdown renderer grammar). An adapter is not a consumer
+allowlist: the adapter may preserve vocabulary owned by the upstream renderer
+(for example `@tailwindcss/typography`'s `prose-sm` rhythm), while feature and
+product consumers must consume the Nession-owned adapter/recipe instead of
+repeating that vocabulary. Nession custom properties inside the adapter still
+use `--nession-*`; legacy Nession spellings are never exempt.
+
+A Nession-owned token used through its pre-#1451 unprefixed spelling is still a
+violation in production source. The runtime compatibility aliases were removed
+once the source gate reached zero legacy consumers; the old spellings remain
+only in generated lint metadata so diagnostics can name the canonical
+`--nession-*` repair.
 
 ### When a value's owner is narrower than Experience
 
