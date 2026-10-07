@@ -82,6 +82,7 @@ Skills are task-local workflows. Load only what the task needs.
 | Gate design/use/failure repair | [nession-gates](.claude/skills/nession-gates/SKILL.md) |
 | code/architecture/runtime review | [nession-code-review](.claude/skills/nession-code-review/SKILL.md) |
 | CI, staging, release, deployment | [nession-cicd](.claude/skills/nession-cicd/SKILL.md) |
+| Agent workflow telemetry, persistence, aggregation | [nession-agent-workflow-metrics](.claude/skills/nession-agent-workflow-metrics/SKILL.md) |
 | requirement/bug issue authoring | [nession-writing-requirements](.claude/skills/nession-writing-requirements/SKILL.md) |
 | stage-specific acceptance | [nession-acceptance](.claude/skills/nession-acceptance/SKILL.md) |
 | Web UI/design-system work | [nession-web-design](.claude/skills/nession-web-design/SKILL.md) |

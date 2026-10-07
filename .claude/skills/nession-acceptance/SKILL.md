@@ -7,7 +7,7 @@ description: Use when executing, reviewing, or integrating stage-specific Accept
 
 Acceptance is the executable phase that proves Requirement Success Criteria. It does not replace the deterministic Requirement Acceptance Gate.
 
-Issue structure belongs to `nession-writing-requirements`; Gate semantics belong to `nession-gates`.
+Issue structure belongs to `nession-writing-requirements`; Gate semantics belong to `nession-gates`; Agent execution telemetry belongs to `nession-agent-workflow-metrics`.
 
 ## Lifecycle
 
@@ -90,6 +90,6 @@ Do not use Pending/N/A to bypass a reachable required proof.
 
 ## Verification
 
-When acceptance tooling changes, run its self-tests and Gate suite.
+When acceptance tooling changes, run its self-tests and Gate suite. Any model-backed Acceptance invocation must also emit the canonical Agent Workflow Telemetry artifact; deterministic/no-criteria Acceptance does not invent an Agent run.
 
 When a criterion depends on deployment/runtime state, prove the exact revision/environment requested rather than an adjacent successful run.

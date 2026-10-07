@@ -6,6 +6,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { buildAgentWorkflowTelemetry, writeAgentWorkflowTelemetry } from './agent-workflow-telemetry.mjs';
 
 function promptFor(context) {
   return [
@@ -93,13 +94,54 @@ async function runCursor(context, workspace) {
     tools: ['read', 'grep', 'glob', 'ls'],
     local: { cwd: workspace, settingSources: [], store },
   });
+  const startedAt = new Date();
   try {
     const run = await agent.send(promptFor(context));
-    const result = await run.wait();
-    if (result.status !== 'finished') {
-      throw new Error('Cursor Acceptance Agent finished with status ' + result.status + ': ' + (result.error?.message || 'unknown error'));
+    let turns = 0;
+    const toolCalls = [];
+    for await (const event of run.stream()) {
+      if (event.type === 'usage') turns += 1;
+      if (event.type === 'tool_call' && event.status === 'running') toolCalls.push(event.name);
     }
-    return parseJsonText(result.result);
+    const result = await run.wait();
+    let billed = null;
+    try { billed = await agent.getUsage(); } catch {}
+    const usage = {
+      input: Number(result.usage?.inputTokens ?? 0),
+      output: Number(result.usage?.outputTokens ?? 0),
+      cache_read: Number(result.usage?.cacheReadTokens ?? 0),
+      cache_write: Number(result.usage?.cacheWriteTokens ?? 0),
+      reasoning: result.usage?.reasoningTokens == null ? null : Number(result.usage.reasoningTokens),
+      total: Number(result.usage?.totalTokens ?? 0),
+    };
+    const meta = {
+      provider: 'cursor',
+      model: { id: selection.id, fast: requestedCursorModel().fast, params: selection.params ?? [] },
+      run_id: result.id ?? run.id ?? null,
+      request_id: result.requestId ?? run.requestId ?? null,
+      status: result.status,
+      turns,
+      model_requests: turns,
+      tool_calls: toolCalls,
+      tools_observed: true,
+      tokens: usage,
+      cost: {
+        raw_usd: billed?.cost?.rawCostCents == null ? null : Number(billed.cost.rawCostCents) / 100,
+        charged_usd: billed?.cost?.chargedCents == null ? null : Number(billed.cost.chargedCents) / 100,
+        estimated_usd: null,
+      },
+      timing: {
+        started_at: startedAt.toISOString(),
+        finished_at: new Date().toISOString(),
+        agent_duration_ms: result.durationMs ?? run.durationMs ?? (Date.now() - startedAt.getTime()),
+      },
+    };
+    if (result.status !== 'finished') {
+      const error = new Error('Cursor Acceptance Agent finished with status ' + result.status + ': ' + (result.error?.message || 'unknown error'));
+      error.agentMeta = meta;
+      throw error;
+    }
+    return { result: parseJsonText(result.result), meta };
   } finally {
     if (typeof agent[Symbol.asyncDispose] === 'function') await agent[Symbol.asyncDispose]();
     else agent.close?.();
@@ -119,12 +161,40 @@ function parseClaudeEnvelope(stdout) {
   throw new Error('Claude Code stdout did not contain parseable JSON');
 }
 
+function claudeUsage(envelope) {
+  const usage = envelope?.usage ?? {};
+  const models = envelope?.modelUsage && typeof envelope.modelUsage === 'object' ? Object.values(envelope.modelUsage) : [];
+  const sum = (keys) => models.reduce((total, model) => {
+    for (const key of keys) {
+      const value = Number(model?.[key]);
+      if (Number.isFinite(value)) return total + value;
+    }
+    return total;
+  }, 0);
+  const first = (...values) => {
+    for (const value of values) {
+      const number = Number(value);
+      if (Number.isFinite(number)) return number;
+    }
+    return 0;
+  };
+  return {
+    input: first(usage.input_tokens, usage.inputTokens, sum(['inputTokens', 'input_tokens'])),
+    output: first(usage.output_tokens, usage.outputTokens, sum(['outputTokens', 'output_tokens'])),
+    cache_read: first(usage.cache_read_input_tokens, usage.cacheReadInputTokens, sum(['cacheReadInputTokens', 'cache_read_input_tokens'])),
+    cache_write: first(usage.cache_creation_input_tokens, usage.cacheCreationInputTokens, sum(['cacheCreationInputTokens', 'cache_creation_input_tokens'])),
+    reasoning: null,
+    total: null,
+  };
+}
+
 function runDeepSeek(context, workspace) {
   if (!process.env.ANTHROPIC_BASE_URL) throw new Error('ANTHROPIC_BASE_URL is required from the deepseek GitHub Environment');
   if (!process.env.ANTHROPIC_AUTH_TOKEN && !process.env.ANTHROPIC_API_KEY) {
     throw new Error('ANTHROPIC_AUTH_TOKEN or ANTHROPIC_API_KEY is required from the deepseek GitHub Environment');
   }
   const model = process.env.ACCEPTANCE_CLAUDE_MODEL || 'claude-sonnet-5';
+  const startedAt = new Date();
   const proc = spawnSync('claude', [
     '-p', promptFor(context),
     '--output-format', 'json',
@@ -145,17 +215,88 @@ function runDeepSeek(context, workspace) {
   });
   if (proc.error) throw proc.error;
   const envelope = parseClaudeEnvelope(proc.stdout);
+  const meta = {
+    provider: 'deepseek',
+    model: {
+      id: process.env.ANTHROPIC_MODEL || 'gateway-default',
+      request_model: model,
+      backend_mapping: 'claude-sonnet* -> deepseek-flash',
+    },
+    run_id: envelope.session_id ?? envelope.sessionId ?? null,
+    request_id: null,
+    status: proc.status === 0 ? 'finished' : 'error',
+    turns: envelope.num_turns ?? envelope.numTurns ?? null,
+    model_requests: null,
+    tool_calls: null,
+    tools_observed: false,
+    tokens: claudeUsage(envelope),
+    cost: {
+      raw_usd: null,
+      charged_usd: null,
+      estimated_usd: null,
+    },
+    timing: {
+      started_at: startedAt.toISOString(),
+      finished_at: new Date().toISOString(),
+      agent_duration_ms: envelope.duration_ms ?? envelope.durationMs ?? (Date.now() - startedAt.getTime()),
+    },
+  };
   if (proc.status !== 0) {
-    throw new Error('Claude Code exited ' + proc.status + ': ' + [proc.stderr?.trim(), envelope.result].filter(Boolean).join('\n'));
+    const error = new Error('Claude Code exited ' + proc.status + ': ' + [proc.stderr?.trim(), envelope.result].filter(Boolean).join('\n'));
+    error.agentMeta = meta;
+    throw error;
   }
-  return parseJsonText(envelope.result);
+  return { result: parseJsonText(envelope.result), meta };
 }
 
 export async function runAcceptanceAgent(context, provider, workspace) {
-  if (!context.criteria?.length) return { criteria: [] };
+  if (!context.criteria?.length) return { result: { criteria: [] }, meta: null };
   if (provider === 'cursor') return runCursor(context, workspace);
   if (provider === 'deepseek') return runDeepSeek(context, workspace);
   throw new Error('unsupported Acceptance Agent provider: ' + provider);
+}
+
+function telemetryInput(context, providerMeta, result, status = 'completed') {
+  const counts = { Pass: 0, Pending: 0, Fail: 0, 'N/A': 0 };
+  for (const criterion of result?.criteria ?? []) {
+    if (Object.hasOwn(counts, criterion.result)) counts[criterion.result] += 1;
+  }
+  return {
+    workflow_id: 'requirement-acceptance',
+    github_workflow: process.env.GITHUB_WORKFLOW || 'Acceptance',
+    job: 'execute',
+    task: {
+      id: 'issue-' + context.issue.number + '-' + context.stage,
+      type: 'acceptance',
+      issue: context.issue.number,
+      stage: context.stage,
+      target_ref: context.target_ref,
+      deployment: context.deployment || null,
+    },
+    agent: {
+      provider: providerMeta.provider,
+      model: providerMeta.model,
+      run_id: providerMeta.run_id,
+      request_id: providerMeta.request_id,
+      status: providerMeta.status,
+    },
+    execution: {
+      turns: providerMeta.turns,
+      model_requests: providerMeta.model_requests,
+      tool_calls: providerMeta.tool_calls,
+      tools_observed: providerMeta.tools_observed,
+    },
+    tokens: providerMeta.tokens,
+    cost: providerMeta.cost,
+    timing: providerMeta.timing,
+    result: {
+      status,
+      pass: counts.Pass,
+      pending: counts.Pending,
+      fail: counts.Fail,
+      na: counts['N/A'],
+    },
+  };
 }
 
 function selfTest() {
@@ -178,18 +319,52 @@ function selfTest() {
     params: [{ id: 'fast', value: 'true' }],
   });
   assert.throws(() => selectCursorModel([], { id: 'composer-2.5', fast: true }), /no fallback/i);
-  console.log('acceptance-agent self-test: 6 cases passed');
+  assert.equal(claudeUsage({ usage: { input_tokens: 2, output_tokens: 1 } }).input, 2);
+  console.log('acceptance-agent self-test: 7 cases passed');
 }
 
 async function main() {
   if (process.argv[2] === 'self-test') return selfTest();
-  const [contextFile, provider, workspace, outFile] = process.argv.slice(2);
+  const [contextFile, provider, workspace, outFile, telemetryFile] = process.argv.slice(2);
   if (!contextFile || !provider || !workspace || !outFile) {
-    throw new Error('usage: node scripts/acceptance-agent.mjs CONTEXT PROVIDER WORKSPACE OUT');
+    throw new Error('usage: node scripts/acceptance-agent.mjs CONTEXT PROVIDER WORKSPACE OUT [TELEMETRY_OUT]');
   }
   const context = JSON.parse(fs.readFileSync(contextFile, 'utf8'));
-  const result = await runAcceptanceAgent(context, provider, workspace);
-  fs.writeFileSync(outFile, JSON.stringify(result, null, 2) + '\n');
+  try {
+    const { result, meta } = await runAcceptanceAgent(context, provider, workspace);
+    fs.writeFileSync(outFile, JSON.stringify(result, null, 2) + '\n');
+    if (telemetryFile && meta) {
+      writeAgentWorkflowTelemetry(telemetryFile, buildAgentWorkflowTelemetry(telemetryInput(context, meta, result)));
+    }
+  } catch (error) {
+    if (telemetryFile) {
+      const fallbackMeta = error?.agentMeta ?? {
+        provider,
+        model: provider === 'cursor'
+          ? requestedCursorModel()
+          : { id: process.env.ANTHROPIC_MODEL || 'gateway-default', request_model: process.env.ACCEPTANCE_CLAUDE_MODEL || 'claude-sonnet-5' },
+        run_id: null,
+        request_id: null,
+        status: 'error',
+        turns: null,
+        model_requests: null,
+        tool_calls: null,
+        tools_observed: false,
+        tokens: {},
+        cost: {},
+        timing: {
+          started_at: new Date().toISOString(),
+          finished_at: new Date().toISOString(),
+          agent_duration_ms: null,
+        },
+      };
+      writeAgentWorkflowTelemetry(
+        telemetryFile,
+        buildAgentWorkflowTelemetry(telemetryInput(context, fallbackMeta, { criteria: [] }, 'agent-error')),
+      );
+    }
+    throw error;
+  }
 }
 
 try {

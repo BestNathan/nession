@@ -12,6 +12,7 @@ protocol-codegen-drift
 rust-coverage
 repo-health-selftest
 repo-metrics-selftest
+agent-workflow-telemetry
 issue-contract-selftest
 issue-audit-agent-selftest
 issue-audit-cursor-selftest

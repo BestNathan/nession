@@ -7,7 +7,7 @@ description: Use when changing or troubleshooting Nession GitHub Actions, stagin
 
 This Skill owns **CI, staging, release, and deployment execution**. Workflows are routers; domain rules remain with their scripts/Gates/scoped owners.
 
-Read `.github/AGENTS.md` before editing workflows and `nession-gates` when changing Gate routing.
+Read `.github/AGENTS.md` before editing workflows and `nession-gates` when changing Gate routing. If a workflow invokes an AI/Agent runtime, also load `nession-agent-workflow-metrics`; canonical execution telemetry is mandatory for Agent workflows.
 
 ## 1. First classify the problem
 
@@ -18,6 +18,7 @@ Identify the failing boundary before editing:
 - build/package;
 - staging deployment;
 - requirement acceptance;
+- Agent workflow telemetry/persistence;
 - release/version promotion;
 - GitOps/ArgoCD rollout.
 
@@ -89,6 +90,8 @@ Treat the files themselves as live truth:
 - `.github/workflows/e2e.yml`
 - `.github/workflows/requirement-acceptance.yml`
 - `.github/workflows/acceptance.yml`
+- `.github/workflows/repo-metrics.yml`
+- `.github/workflows/metrics-ingest.yml`
 - `.github/workflows/deploy.yml`
 
 When this Skill and workflow YAML disagree, inspect history/intent and repair the stale prose; do not copy the YAML's rule lists into this Skill.
