@@ -1,0 +1,238 @@
+{
+  "schema_version": 1,
+  "kind": "agent_metrics_aggregate",
+  "generated_at": "2026-10-07T04:21:05.000Z",
+  "windows": {
+    "7d": {
+      "runs": {
+        "total": 0,
+        "by_workflow": {},
+        "by_provider": {},
+        "by_result": {}
+      },
+      "turns": {
+        "observed_runs": 0,
+        "total": null,
+        "avg": null,
+        "p50": null,
+        "p95": null
+      },
+      "model_requests": {
+        "observed_runs": 0,
+        "total": null,
+        "avg": null,
+        "p50": null,
+        "p95": null
+      },
+      "tools": {
+        "observed_runs": 0,
+        "total": null,
+        "avg": null,
+        "p50": null,
+        "p95": null,
+        "by_name": {}
+      },
+      "tokens": {
+        "input": {
+          "observed_runs": 0,
+          "total": null
+        },
+        "output": {
+          "observed_runs": 0,
+          "total": null
+        },
+        "cache_read": {
+          "observed_runs": 0,
+          "total": null
+        },
+        "cache_write": {
+          "observed_runs": 0,
+          "total": null
+        },
+        "reasoning": {
+          "observed_runs": 0,
+          "total": null
+        },
+        "total": {
+          "observed_runs": 0,
+          "total": null
+        }
+      },
+      "duration_ms": {
+        "observed_runs": 0,
+        "total": null,
+        "avg": null,
+        "p50": null,
+        "p95": null
+      },
+      "cost_usd": {
+        "raw": {
+          "observed_runs": 0,
+          "total": null
+        },
+        "charged": {
+          "observed_runs": 0,
+          "total": null
+        },
+        "estimated": {
+          "observed_runs": 0,
+          "total": null
+        }
+      }
+    },
+    "30d": {
+      "runs": {
+        "total": 0,
+        "by_workflow": {},
+        "by_provider": {},
+        "by_result": {}
+      },
+      "turns": {
+        "observed_runs": 0,
+        "total": null,
+        "avg": null,
+        "p50": null,
+        "p95": null
+      },
+      "model_requests": {
+        "observed_runs": 0,
+        "total": null,
+        "avg": null,
+        "p50": null,
+        "p95": null
+      },
+      "tools": {
+        "observed_runs": 0,
+        "total": null,
+        "avg": null,
+        "p50": null,
+        "p95": null,
+        "by_name": {}
+      },
+      "tokens": {
+        "input": {
+          "observed_runs": 0,
+          "total": null
+        },
+        "output": {
+          "observed_runs": 0,
+          "total": null
+        },
+        "cache_read": {
+          "observed_runs": 0,
+          "total": null
+        },
+        "cache_write": {
+          "observed_runs": 0,
+          "total": null
+        },
+        "reasoning": {
+          "observed_runs": 0,
+          "total": null
+        },
+        "total": {
+          "observed_runs": 0,
+          "total": null
+        }
+      },
+      "duration_ms": {
+        "observed_runs": 0,
+        "total": null,
+        "avg": null,
+        "p50": null,
+        "p95": null
+      },
+      "cost_usd": {
+        "raw": {
+          "observed_runs": 0,
+          "total": null
+        },
+        "charged": {
+          "observed_runs": 0,
+          "total": null
+        },
+        "estimated": {
+          "observed_runs": 0,
+          "total": null
+        }
+      }
+    },
+    "all_time": {
+      "runs": {
+        "total": 0,
+        "by_workflow": {},
+        "by_provider": {},
+        "by_result": {}
+      },
+      "turns": {
+        "observed_runs": 0,
+        "total": null,
+        "avg": null,
+        "p50": null,
+        "p95": null
+      },
+      "model_requests": {
+        "observed_runs": 0,
+        "total": null,
+        "avg": null,
+        "p50": null,
+        "p95": null
+      },
+      "tools": {
+        "observed_runs": 0,
+        "total": null,
+        "avg": null,
+        "p50": null,
+        "p95": null,
+        "by_name": {}
+      },
+      "tokens": {
+        "input": {
+          "observed_runs": 0,
+          "total": null
+        },
+        "output": {
+          "observed_runs": 0,
+          "total": null
+        },
+        "cache_read": {
+          "observed_runs": 0,
+          "total": null
+        },
+        "cache_write": {
+          "observed_runs": 0,
+          "total": null
+        },
+        "reasoning": {
+          "observed_runs": 0,
+          "total": null
+        },
+        "total": {
+          "observed_runs": 0,
+          "total": null
+        }
+      },
+      "duration_ms": {
+        "observed_runs": 0,
+        "total": null,
+        "avg": null,
+        "p50": null,
+        "p95": null
+      },
+      "cost_usd": {
+        "raw": {
+          "observed_runs": 0,
+          "total": null
+        },
+        "charged": {
+          "observed_runs": 0,
+          "total": null
+        },
+        "estimated": {
+          "observed_runs": 0,
+          "total": null
+        }
+      }
+    }
+  }
+}
