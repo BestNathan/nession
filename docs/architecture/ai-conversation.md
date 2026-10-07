@@ -66,6 +66,11 @@ Three properties matter more than the field lists:
 - **Absent means the provider did not say.** Do not infer `status`, `activity`
   or an outcome you were not told; `unknown` is a real state and is drawn as
   one.
+- **Skipped completeness is a lower bound, not an invented exact union.** A
+  provider reports `skipped` per page and pages may overlap, so the runtime
+  keeps the maximum count observed across the loaded window and surfaces it as
+  “At least N records not shown”. Exact union cardinality would require stable
+  identities for skipped records, which the canonical contract does not have.
 
 ## Onboarding a new provider
 
