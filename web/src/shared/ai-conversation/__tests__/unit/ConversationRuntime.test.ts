@@ -877,7 +877,7 @@ describe('ConversationRuntime — round 6 contract boundaries', () => {
       refresh: {
         kind: 'push',
         sourceKey: (context, conversationId) => `${context}:${conversationId}`,
-        subscribe: (context, _conversationId, _onChange) => {
+        subscribe: (context) => {
           subscriptions.push(context)
           return () => unsubscribed.push(context)
         },
