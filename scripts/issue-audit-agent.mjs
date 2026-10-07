@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { auditIssue } from './issue-contract.mjs';
+import { buildAgentWorkflowTelemetry, writeAgentWorkflowTelemetry } from './agent-workflow-telemetry.mjs';
 
 function envNumber(name) {
   const raw = process.env[name];
@@ -149,8 +150,53 @@ function appendSummary(record) {
 
 function writeRecord(outDir, record) {
   fs.mkdirSync(outDir, { recursive: true });
-  const file = path.join(outDir, `issue-${record.issue.number}-usage.json`);
-  fs.writeFileSync(file, `${JSON.stringify(record, null, 2)}\n`);
+  const file = path.join(outDir, 'issue-' + record.issue.number + '-usage.json');
+  fs.writeFileSync(file, JSON.stringify(record, null, 2) + '\n');
+  if (record.agent?.invoked) {
+    const agent = record.agent;
+    writeAgentWorkflowTelemetry(
+      path.join(outDir, 'agent-telemetry.json'),
+      buildAgentWorkflowTelemetry({
+        workflow_id: 'issue-audit',
+        github_workflow: process.env.GITHUB_WORKFLOW || 'Issue Audit Agent',
+        job: 'agent',
+        task: {
+          id: 'issue-' + record.issue.number,
+          type: 'issue-audit',
+          issue: record.issue.number,
+        },
+        agent: {
+          provider: agent.provider || 'deepseek',
+          model: {
+            id: agent.model ?? null,
+            request_model: agent.claude_request_model ?? null,
+            backend_mapping: agent.backend_mapping ?? null,
+          },
+          run_id: agent.session_id ?? null,
+          request_id: null,
+          status: record.result === 'agent-error' ? 'error' : 'finished',
+        },
+        execution: {
+          turns: agent.num_turns ?? null,
+          model_requests: null,
+          tool_calls: null,
+          tools_observed: false,
+        },
+        tokens: agent.usage ?? {},
+        cost: {
+          raw_usd: agent.reported_cost_usd ?? null,
+          charged_usd: null,
+          estimated_usd: agent.estimated_cost_usd ?? null,
+        },
+        timing: {
+          started_at: agent.started_at ?? new Date().toISOString(),
+          finished_at: agent.finished_at ?? new Date().toISOString(),
+          agent_duration_ms: agent.duration_ms ?? null,
+        },
+        result: { status: record.result },
+      }),
+    );
+  }
   appendSummary(record);
   return file;
 }
@@ -249,6 +295,7 @@ function main() {
   }
 
   let claude;
+  const agentStartedAt = new Date();
   try {
     claude = runAgent(issue);
   } catch (error) {
@@ -271,7 +318,9 @@ function main() {
         backend_mapping: 'claude-sonnet* -> deepseek-flash',
         session_id: failed?.session_id ?? failed?.sessionId ?? null,
         num_turns: failed?.num_turns ?? failed?.numTurns ?? null,
-        duration_ms: failed?.duration_ms ?? failed?.durationMs ?? null,
+        started_at: agentStartedAt.toISOString(),
+        finished_at: new Date().toISOString(),
+        duration_ms: failed?.duration_ms ?? failed?.durationMs ?? (Date.now() - agentStartedAt.getTime()),
         usage,
         reported_cost_usd: failed?.total_cost_usd != null && Number.isFinite(Number(failed.total_cost_usd)) ? Number(failed.total_cost_usd) : null,
         reported_cost_basis: 'Claude list-equivalent from the request model; not the DeepSeek bill',
@@ -302,7 +351,9 @@ function main() {
       backend_mapping: 'claude-sonnet* -> deepseek-flash',
       session_id: claude.session_id ?? claude.sessionId ?? null,
       num_turns: claude.num_turns ?? claude.numTurns ?? null,
-      duration_ms: claude.duration_ms ?? claude.durationMs ?? null,
+      started_at: agentStartedAt.toISOString(),
+      finished_at: new Date().toISOString(),
+      duration_ms: claude.duration_ms ?? claude.durationMs ?? (Date.now() - agentStartedAt.getTime()),
       usage,
       reported_cost_usd: claude.total_cost_usd != null && Number.isFinite(Number(claude.total_cost_usd)) ? Number(claude.total_cost_usd) : null,
       reported_cost_basis: 'Claude list-equivalent from the request model; not the DeepSeek bill',
