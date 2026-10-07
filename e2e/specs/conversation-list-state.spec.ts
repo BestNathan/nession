@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { gotoFixtureApp } from '../helpers/fixtureVisual';
 
 // Local runs are forbidden: the webServer stack compiles and runs
 // nession-server/agent (which operate tmux). CI-only, like every spec here.
@@ -52,4 +53,33 @@ test('a failed list refresh keeps its rows and says it failed', async ({ page })
   // above it already rules out.
   await expect(rows).toHaveCount(3);
   await expect(rows.first()).toBeVisible();
+});
+
+
+test.describe('App push composition', () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+
+  test('a failed list refresh keeps the same warning and stale rows', async ({ page }) => {
+    await gotoFixtureApp(page, '?conversation=list-stale');
+    await page.getByTestId('app-header-workspace').first().click();
+    await page.getByTestId('workspace-tool-claude-code').click();
+
+    const retry = page
+      .getByTestId('conversation-unavailable')
+      .getByRole('button', { name: 'Retry' });
+    await expect(retry).toBeVisible();
+    await retry.click();
+
+    // Push starts on the open thread. Enter the list through the same control a
+    // reader uses; the warning must not be a Web/master-detail-only semantic.
+    await page.getByTestId('conversation-show-list').click();
+
+    const notice = page.getByTestId('conversation-list-error');
+    await expect(notice).toBeVisible();
+    await expect(notice).toContainText('could not be listed');
+
+    const rows = page.getByTestId('conversation-candidate-title');
+    await expect(rows).toHaveCount(3);
+    await expect(rows.first()).toBeVisible();
+  });
 });

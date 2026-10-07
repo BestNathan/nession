@@ -55,6 +55,7 @@ export {
   emptyPositions,
   hasOlder,
   itemsOf,
+  skippedOf,
   withNewest,
   withOlderPage,
 } from './runtime/pagination'

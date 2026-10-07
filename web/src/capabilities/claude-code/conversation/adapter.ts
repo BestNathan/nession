@@ -12,9 +12,9 @@
  * - The two units' request shapes and the routing field the contract does not
  *   carry — `agent_id` finds the target, it is not part of what the target is
  *   asked.
- * - The page sizes. The provider clamps them to its own ceiling; asking for the
- *   ceiling rather than the default is what makes the list the whole directory
- *   in the common case.
+ * - The page sizes. The provider clamps them to its own ceiling; the adapter
+ *   asks for that ceiling and exposes the provider cursor, while the shared
+ *   runtime continues until the directory is complete.
  * - The poll interval. Whether a provider polls, is pushed to, or waits to be
  *   asked is a fact about the provider's transport, and Claude Code has no push
  *   channel for conversations — `#1005` scope 5 allows polling for v1, and the
@@ -60,10 +60,7 @@ export interface ClaudeCodeConversationApi {
   claudeCodeMessages(request: ClaudeCodeMessagesRequest): Promise<ClaudeCodeMessagesResponse>
 }
 
-/**
- * Ask for the provider's own ceiling rather than its smaller default, so the
- * list the reader chooses from is the whole directory in the common case.
- */
+/** Ask for the provider's own ceiling; the runtime follows the returned cursor. */
 const LIST_LIMIT = 200
 
 /** One page of a timeline. The provider clamps this to its ceiling. */
@@ -98,13 +95,18 @@ export function createClaudeCodeAdapter(
     // selection made in one is not a selection in the other.
     contextKey: (context) => `${context.agentId}:${context.sessionId}`,
 
-    async list(context): Promise<AIConversationListResult> {
+    async list(context, cursor): Promise<AIConversationListResult> {
       const response = await api.claudeCodeConversations({
         agent_id: context.agentId,
         session_id: context.sessionId,
         limit: LIST_LIMIT,
+        ...(cursor !== undefined ? { cursor } : {}),
       })
       const bound = response.binding ?? null
+      const nextCursor = response.has_more ? (response.next_cursor ?? null) : null
+      if (response.state === 'ready' && response.has_more && nextCursor === null) {
+        throw new Error('Claude conversation list said more pages exist without a cursor')
+      }
       return {
         state: response.state,
         conversations: (response.items ?? []).map((item) =>
@@ -119,6 +121,7 @@ export function createClaudeCodeAdapter(
           ),
         ),
         bindingId: bound?.conversation_id ?? null,
+        nextCursor,
         error: response.error ?? null,
       }
     },

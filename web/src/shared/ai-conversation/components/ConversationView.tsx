@@ -68,11 +68,11 @@ function ConversationHeader({
           ) : snapshot.activity === 'inactive' ? (
             <span data-testid="conversation-state">Finished</span>
           ) : null}
-          {snapshot.partialTail ? (
+          {snapshot.state === 'ready' && snapshot.partialTail ? (
             <span data-testid="conversation-partial">· still being written</span>
           ) : null}
-          {snapshot.skipped > 0 ? (
-            <span data-testid="conversation-skipped">· {snapshot.skipped} records not shown</span>
+          {snapshot.state === 'ready' && snapshot.skipped > 0 ? (
+            <span data-testid="conversation-skipped">· At least {snapshot.skipped} records not shown</span>
           ) : null}
         </p>
       </div>
@@ -98,6 +98,16 @@ function ConversationHeader({
  * to choose from, and taking it away because a refresh missed would punish them
  * for the network.
  */
+function listRefreshMessage(snapshot: AIConversationSnapshot): string | null {
+  if (snapshot.listError) {
+    return snapshot.listError
+  }
+  if (snapshot.conversations.length > 0 && snapshot.listState === 'unavailable') {
+    return 'Conversations cannot be refreshed right now'
+  }
+  return null
+}
+
 function ListRefreshError({ message, onReload }: { message: string; onReload?: () => void }) {
   return (
     <div
@@ -291,8 +301,8 @@ export function ConversationView({
                 * nowhere, so a reader looking at a list that had just failed
                 * to refresh could not tell it from one that had refreshed and
                 * not moved. */}
-            {snapshot.listError ? (
-              <ListRefreshError message={snapshot.listError} onReload={onReload} />
+            {listRefreshMessage(snapshot) ? (
+              <ListRefreshError message={listRefreshMessage(snapshot) ?? ''} onReload={onReload} />
             ) : null}
             {list}
           </>
@@ -359,11 +369,16 @@ function PushLayout({
           {listBlocked ? (
             <ListStateGuard snapshot={snapshot} onReload={onReload} />
           ) : (
-            <ConversationList
-              conversations={snapshot.conversations}
-              openId={snapshot.openId}
-              onSelect={choose}
-            />
+            <>
+              {listRefreshMessage(snapshot) ? (
+                <ListRefreshError message={listRefreshMessage(snapshot) ?? ''} onReload={onReload} />
+              ) : null}
+              <ConversationList
+                conversations={snapshot.conversations}
+                openId={snapshot.openId}
+                onSelect={choose}
+              />
+            </>
           )}
         </div>
       ) : (

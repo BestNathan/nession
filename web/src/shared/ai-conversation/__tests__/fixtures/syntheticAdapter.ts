@@ -55,8 +55,12 @@ export interface SyntheticAdapterOptions {
    * is what lets a test tell one context's answer from another's.
    */
   bindingFor?: (context: string) => string | null
-  /** Items per page, for the pagination tests. */
+  /** Items per transcript page, for the pagination tests. */
   pageSize?: number
+  /** Conversations per list page. Omitted means the directory fits in one page. */
+  listPageSize?: number
+  /** Let a cursor page restate this many items already held, to exercise overlap. */
+  olderOverlap?: number
   refresh?: AIRefreshPolicy<string>
   /** Force the list's answer, whatever the data says. */
   listState?: AIConversationListResult['state']
@@ -68,6 +72,8 @@ export interface SyntheticAdapterOptions {
   partialTail?: boolean
   /** Records the adapter could not model, so the surface can say so. */
   skipped?: number
+  /** Per-page skipped count when a test needs newest and older pages to differ. */
+  skippedFor?: (cursor?: string) => number
   /** Context key this adapter reports. Defaults to the context string itself. */
   key?: string
 }
@@ -110,6 +116,9 @@ export class SyntheticAdapter implements AIConversationAdapter<string> {
    * a provider that never answered the list could not open one.
    */
   failList = false
+
+  /** Force the list state from here on, after an initially readable directory. */
+  forcedListState: AIConversationListResult['state'] | null = null
 
   /**
    * Force the state every read answers with from here on.
@@ -192,15 +201,37 @@ export class SyntheticAdapter implements AIConversationAdapter<string> {
     }
   }
 
-  async list(context: string): Promise<AIConversationListResult> {
-    this.calls.push({ kind: 'list', context })
-    await this.waitFor('list', undefined)
+  setActivity(conversationId: string, activity: AIConversationActivity): void {
+    const conversation = this.options.conversations.find((c) => c.id === conversationId)
+    if (conversation) {
+      conversation.activity = activity
+    }
+  }
+
+  async list(context: string, cursor?: string): Promise<AIConversationListResult> {
+    this.calls.push({ kind: 'list', context, cursor })
+    await this.waitFor('list', cursor)
     if (this.failList) {
       throw new Error('the list could not be read')
     }
+
+    const state = this.forcedListState ?? this.options.listState ?? 'ready'
+    if (state !== 'ready') {
+      return {
+        state,
+        conversations: [],
+        bindingId: null,
+        nextCursor: null,
+        ...(state === 'error' ? { error: 'the list could not be read' } : {}),
+      }
+    }
+
+    const size = this.options.listPageSize ?? this.options.conversations.length
+    const start = cursor === undefined ? 0 : Number(cursor)
+    const end = Math.min(this.options.conversations.length, start + size)
     return {
-      state: this.options.listState ?? 'ready',
-      conversations: this.options.conversations.map((c) => ({
+      state,
+      conversations: this.options.conversations.slice(start, end).map((c) => ({
         id: c.id,
         title: c.title ?? null,
         preview: c.preview ?? null,
@@ -209,6 +240,7 @@ export class SyntheticAdapter implements AIConversationAdapter<string> {
       bindingId: this.options.bindingFor
         ? this.options.bindingFor(context)
         : (this.options.bindingId ?? null),
+      nextCursor: end < this.options.conversations.length ? String(end) : null,
     }
   }
 
@@ -254,7 +286,7 @@ export class SyntheticAdapter implements AIConversationAdapter<string> {
       items: page.items,
       nextCursor: page.nextCursor,
       partialTail: this.options.partialTail ?? false,
-      skipped: this.options.skipped ?? 0,
+      skipped: this.options.skippedFor?.(cursor) ?? this.options.skipped ?? 0,
     }
   }
 
@@ -270,8 +302,12 @@ export class SyntheticAdapter implements AIConversationAdapter<string> {
     cursor?: string,
   ): { items: AIConversationItem[]; nextCursor: string | null } {
     const size = this.options.pageSize ?? conversation.items.length
-    const end = cursor === undefined ? conversation.items.length : Number(cursor)
-    const start = Math.max(0, end - size)
+    const requestedEnd = cursor === undefined ? conversation.items.length : Number(cursor)
+    const end =
+      cursor === undefined
+        ? requestedEnd
+        : Math.min(conversation.items.length, requestedEnd + (this.options.olderOverlap ?? 0))
+    const start = Math.max(0, requestedEnd - size)
     const items = conversation.items.slice(start, end)
     return { items, nextCursor: start > 0 ? String(start) : null }
   }

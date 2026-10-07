@@ -78,6 +78,14 @@ export interface AIConversationListResult {
    * list rather than guessing.
    */
   bindingId: string | null
+  /**
+   * Pass back to `list` to continue the directory. `null` means complete.
+   *
+   * List pagination is part of the canonical contract rather than a provider
+   * ceiling: a provider whose API caps one response must not silently make the
+   * rest of the directory unreachable (#1363 round 6).
+   */
+  nextCursor: string | null
   error?: string | null
 }
 
@@ -140,6 +148,16 @@ export type AIRefreshPolicy<Context = AIConversationContext> =
        * subscribe globally and re-read indiscriminately — a filter wearing an
        * adapter's name, which is the shape #1363 SC-06 exists to rule out.
        */
+      /**
+       * Stable identity of the concrete refresh source.
+       *
+       * `contextKey` identifies the conversation *space*; it deliberately may
+       * stay equal while a token, client, lease, socket, or other source handle
+       * changes. A push subscription captures that handle, so the runtime needs
+       * one provider-owned key that changes exactly when the subscription must
+       * be re-established. Object identity is explicitly not that key.
+       */
+      sourceKey: (context: Context, conversationId: string) => string
       subscribe: (
         context: Context,
         conversationId: string,
@@ -178,7 +196,14 @@ export interface AIConversationAdapter<Context = AIConversationContext> {
    */
   contextKey(context: Context): string
 
-  list(context: Context): Promise<AIConversationListResult>
+  /**
+   * Read one page of the conversation directory.
+   *
+   * Without a cursor this is the first page; with one it continues from a
+   * previous `nextCursor`. The shared runtime walks the cursor to completion,
+   * so surfaces never inherit a provider's per-request item ceiling.
+   */
+  list(context: Context, cursor?: string): Promise<AIConversationListResult>
 
   /**
    * Read one page of a conversation.

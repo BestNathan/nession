@@ -66,6 +66,11 @@ Three properties matter more than the field lists:
 - **Absent means the provider did not say.** Do not infer `status`, `activity`
   or an outcome you were not told; `unknown` is a real state and is drawn as
   one.
+- **Skipped completeness is a lower bound, not an invented exact union.** A
+  provider reports `skipped` per page and pages may overlap, so the runtime
+  keeps the maximum count observed across the loaded window and surfaces it as
+  “At least N records not shown”. Exact union cardinality would require stable
+  identities for skipped records, which the canonical contract does not have.
 
 ## Onboarding a new provider
 
@@ -98,24 +103,35 @@ export const myProviderConversationAdapter: AIConversationAdapter<MyContext> = {
   id: 'my-provider',
   identity: { label: 'My Provider' },
   contextKey: (context) => `${context.a}:${context.b}`,
-  async list(context) { /* → AIConversationListResult */ },
+  async list(context, cursor) { /* → AIConversationListResult + nextCursor */ },
   async read(context, conversationId, cursor) { /* → AIConversationPage */ },
   refresh: { kind: 'poll', intervalMs: 3000 },
 }
 ```
 
-Four decisions, all yours: how to list, how to read a page, what makes two
-contexts the same conversation space, and how you learn that something changed
-(`poll`, `push`, or `manual`).
+Four decisions, all yours: how to list one directory page, how to read one
+timeline page, what makes two contexts the same conversation space, and how you
+learn that something changed (`poll`, `push`, or `manual`). The runtime owns
+walking both cursors and merging their windows; a surface never needs a
+provider-specific "load page 2" branch.
 
-Two obligations:
+Four obligations:
 
+- **`nextCursor` is the provider's continuation token, or `null`.** Never
+  collapse a provider ceiling into "the whole directory". The runtime follows
+  this token until the listing is complete, so 201 conversations are as
+  reachable as 20.
 - **`bindingId` is an exact id** the provider named, or `null`. Never a guess
   from a timestamp or a list of one — a reader who sees a conversation open
   must be seeing one the provider said was *theirs*.
 - **`contextKey` is equal exactly when two contexts mean the same conversation
   space.** It is how the runtime tags a selection and discards a stale
   response, and it is the one thing only you can answer.
+- **A push policy also supplies `sourceKey(context, conversationId)`.** It is
+  equal exactly while the concrete subscription can be reused. A token, lease,
+  client, socket or stream handle may change while `contextKey` stays equal;
+  this stable source identity tells the runtime to unsubscribe and re-arm
+  without treating a fresh object on every React render as a new source.
 
 Export the adapter as a module-level constant: the hook treats it as the
 provider's identity, so building a new one per render would be asserting that
@@ -152,7 +168,8 @@ User and assistant message rendering · tool rows and their grouping · the
 process summary line · disclosure behaviour and focus handling · bounded group
 scrolling and edge fades · tail-follow, prepend anchors and jump-to-bottom ·
 loading, empty, unavailable, not-found, failure and partial-tail states ·
-Markdown (through the shared `ChatMarkdown`).
+list and transcript pagination · stale-list preservation · loaded-window
+unsupported-record reporting · Markdown (through the shared `ChatMarkdown`).
 
 If one of these does not fit your provider, that is a conversation about the
 **shared** model or the shared component — not a reason to fork one.

@@ -50,6 +50,7 @@ import {
   emptyPositions,
   hasOlder,
   itemsOf,
+  skippedOf,
   withNewest,
   withOlderPage,
   type ConversationPositions,
@@ -117,7 +118,7 @@ export interface AIConversationSnapshot {
   hasMore: boolean
   /** The transcript ended mid-record — normal for one being appended to. */
   partialTail: boolean
-  /** Records the adapter could not model, so the surface can say so. */
+  /** Safe lower bound for records omitted somewhere in the loaded window. */
   skipped: number
   /**
    * Whether the *list* is being read.
@@ -173,7 +174,6 @@ interface ThreadState {
   conversation: AIConversationSummary | null
   activity: AIConversationActivity | null
   partialTail: boolean
-  skipped: number
   loading: boolean
   loadingOlder: boolean
   olderError: string | null
@@ -193,7 +193,6 @@ const EMPTY_THREAD: ThreadState = {
   conversation: null,
   activity: null,
   partialTail: false,
-  skipped: 0,
   loading: true,
   loadingOlder: false,
   olderError: null,
@@ -332,7 +331,11 @@ export class ConversationRuntime<Context> {
    * notices — the subscription knows what it was for, and an event from one that
    * no longer matches is not evidence about what is open now.
    */
-  private refreshArmedFor: { key: string; conversationId: string } | null = null
+  private refreshArmedFor: {
+    key: string
+    conversationId: string
+    sourceKey: string | null
+  } | null = null
   private disposed = false
 
   constructor(
@@ -366,27 +369,30 @@ export class ConversationRuntime<Context> {
    * two cannot be the same statement.
    */
   setContext(context: Context | null): void {
-    // Re-arms a disposed runtime. `dispose` means "stop everything now", not
-    // "this instance is finished with": React's StrictMode mounts, unmounts and
-    // mounts again, so a hook that disposes in its cleanup would hand a dead
-    // runtime to the second mount. Pointing a runtime at a context is exactly
-    // the statement that it should be working again.
+    // `dispose` stops work but does not make the instance one-shot: React
+    // StrictMode can dispose and point the same runtime at the same context
+    // again. Remember that distinction before clearing the flag, because a
+    // same-key remount must genuinely re-arm reads and refresh.
+    const wasDisposed = this.disposed
     this.disposed = false
     const key = context === null ? null : this.adapter.contextKey(context)
 
-    // Same key, different value — and those are two different statements.
-    //
-    // The contract says `contextKey` is equal exactly when two contexts mean
-    // the same conversation *space*. It does not say every field is immutable
-    // while the key is equal, and a provider with a token, a client handle, a
-    // lease or routing metadata in its context has every right to change one
-    // without moving the space. Resetting there would throw away a readable
-    // transcript for a change that redefines nothing; ignoring it — which is
-    // what the hook did — leaves every later read asking with the context it
-    // replaced (`#1363` round 4). So: replace what future calls receive, and
-    // leave the selection, the items and both cursors alone.
     if (key !== null && key === this.contextKey) {
       this.context = context
+
+      if (wasDisposed) {
+        // Every pre-dispose response was invalidated by `dispose`; start fresh
+        // requests without throwing away the readable window already on screen.
+        void this.fetchList(key, ++this.listGeneration)
+        if (this.loadedId !== null) {
+          this.reloadNewest()
+        }
+      } else {
+        // The space did not change, but a push source may have. The provider's
+        // stable `sourceKey` decides whether the subscription is still valid;
+        // object identity deliberately does not.
+        this.syncRefresh()
+      }
       return
     }
 
@@ -470,6 +476,7 @@ export class ConversationRuntime<Context> {
   /** Stop every timer and subscription, and refuse further work. */
   dispose(): void {
     this.disposed = true
+    this.listGeneration += 1
     this.newestGeneration += 1
     this.olderGeneration += 1
     this.newestInFlight = null
@@ -535,20 +542,64 @@ export class ConversationRuntime<Context> {
     if (context === null) {
       return
     }
+
     try {
-      const result = await this.adapter.list(context)
-      if (!this.wanted(key, generation, this.listGeneration)) {
-        return
+      const conversations: AIConversationSummary[] = []
+      const seenConversations = new Set<string>()
+      const seenCursors = new Set<string>()
+      let bindingId: string | null = null
+      let cursor: string | undefined
+
+      for (;;) {
+        const result = await this.adapter.list(context, cursor)
+        if (!this.wanted(key, generation, this.listGeneration)) {
+          return
+        }
+
+        // A semantic non-ready answer describes the directory request, not the
+        // validity of facts already loaded from it. Preserve those facts — in
+        // particular the exact binding that keeps an auto-bound readable thread
+        // open — and expose only the changed directory state.
+        if (result.state !== 'ready') {
+          this.list = {
+            ...this.list,
+            state: result.state,
+            loading: false,
+            error:
+              result.state === 'error'
+                ? (result.error ?? 'The conversations could not be listed')
+                : null,
+          }
+          this.syncThread()
+          this.emit()
+          return
+        }
+
+        for (const conversation of result.conversations) {
+          if (!seenConversations.has(conversation.id)) {
+            seenConversations.add(conversation.id)
+            conversations.push(conversation)
+          }
+        }
+        bindingId ??= result.bindingId
+
+        const next = result.nextCursor
+        if (next === null) {
+          break
+        }
+        if (seenCursors.has(next)) {
+          throw new Error('Conversation list returned a repeated cursor')
+        }
+        seenCursors.add(next)
+        cursor = next
       }
+
       this.list = {
-        state: result.state,
-        conversations: result.conversations,
-        bindingId: result.bindingId,
+        state: 'ready',
+        conversations,
+        bindingId,
         loading: false,
-        error:
-          result.state === 'error'
-            ? (result.error ?? 'The conversations could not be listed')
-            : null,
+        error: null,
       }
       this.syncThread()
       this.emit()
@@ -644,6 +695,7 @@ export class ConversationRuntime<Context> {
         state: page.state,
         conversation: page.conversation ?? null,
         activity: page.activity ?? null,
+        partialTail: false,
         loading: false,
         error:
           page.state === 'error'
@@ -668,7 +720,6 @@ export class ConversationRuntime<Context> {
       conversation: page.conversation ?? null,
       activity: page.activity ?? null,
       partialTail: page.partialTail,
-      skipped: page.skipped,
       loading: false,
       error: null,
     }
@@ -748,12 +799,13 @@ export class ConversationRuntime<Context> {
       return
     }
     this.newestInFlight = null
-    if (this.newestPending) {
+    if (this.newestPending && this.refreshWanted()) {
       // Passive: the only requests that join rather than hand the slot over are
-      // polls, and a poll's failure is swallowed by design — the next tick asks
-      // again, and replacing a readable conversation with an error because one
-      // tick missed is a worse answer than a stale one.
+      // refresh signals. Re-check applicability at settlement time because the
+      // answer that just landed may itself have stopped refresh.
       this.startNewest(false)
+    } else {
+      this.newestPending = false
     }
   }
 
@@ -782,9 +834,12 @@ export class ConversationRuntime<Context> {
    * `unknown` keeps it, because a live conversation frozen on screen is worse
    * than a re-read that changes nothing.
    */
+  private refreshWanted(): boolean {
+    return this.thread.state === 'ready' && this.thread.activity !== 'inactive'
+  }
+
   private syncRefresh(): void {
-    const wanted = this.thread.state === 'ready' && this.thread.activity !== 'inactive'
-    if (wanted) {
+    if (this.refreshWanted()) {
       this.startRefresh()
     } else {
       this.stopRefresh()
@@ -802,11 +857,13 @@ export class ConversationRuntime<Context> {
       this.stopRefresh()
       return
     }
-    // Already watching exactly this. Re-arming would close and reopen a stream
-    // on every poll of a conversation that has not moved.
+
+    const sourceKey =
+      policy.kind === 'push' ? policy.sourceKey(context, conversationId) : null
     if (
       this.refreshArmedFor?.key === key &&
-      this.refreshArmedFor.conversationId === conversationId
+      this.refreshArmedFor.conversationId === conversationId &&
+      this.refreshArmedFor.sourceKey === sourceKey
     ) {
       return
     }
@@ -816,16 +873,21 @@ export class ConversationRuntime<Context> {
       this.timer = this.scheduler.setInterval(() => this.poll(), policy.intervalMs)
     } else {
       this.unsubscribePush = policy.subscribe(context, conversationId, () => {
-        // The provider may emit once more before its unsubscribe lands. That
-        // event is about a conversation the reader has left, so it is not a
-        // reason to re-read the one they are in.
-        if (this.contextKey !== key || this.loadedId !== conversationId) {
+        // Unsubscribe is not instantaneous for every source. A late event from
+        // an old lease/socket is stale even when the conversation-space key and
+        // conversation id are unchanged, so source identity participates in the
+        // callback guard too.
+        if (
+          this.contextKey !== key ||
+          this.loadedId !== conversationId ||
+          this.refreshArmedFor?.sourceKey !== sourceKey
+        ) {
           return
         }
         this.poll()
       })
     }
-    this.refreshArmedFor = { key, conversationId }
+    this.refreshArmedFor = { key, conversationId, sourceKey }
   }
 
   private stopRefresh(): void {
@@ -864,8 +926,8 @@ export class ConversationRuntime<Context> {
       activity: this.thread.activity,
       items: itemsOf(this.positions),
       hasMore: hasOlder(this.positions),
-      partialTail: this.thread.partialTail,
-      skipped: this.thread.skipped,
+      partialTail: this.thread.state === 'ready' ? this.thread.partialTail : false,
+      skipped: this.thread.state === 'ready' ? skippedOf(this.positions) : 0,
       listLoading: this.list.loading,
       threadLoading: openId !== null && this.thread.loading,
       loadingOlder: this.thread.loadingOlder,

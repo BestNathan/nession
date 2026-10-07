@@ -289,6 +289,54 @@ describe('ConversationView', () => {
     expect(within(notice).getByRole('button', { name: 'Retry' })).toBeDefined()
   })
 
+  it('shows the same stale-list warning after opening the pushed list', async () => {
+    render(
+      <ConversationView
+        snapshot={snapshot({
+          conversations: [summary()],
+          openId: 'c1',
+          state: 'ready',
+          items: transcript(1),
+          listError: 'refresh failed',
+        })}
+        providerLabel="Claude"
+        layout="push"
+        onSelect={() => undefined}
+        onLoadOlder={onLoadOlder}
+        onReload={() => undefined}
+      />,
+    )
+
+    await userEvent.click(screen.getByTestId('conversation-show-list'))
+
+    expect(screen.getByTestId('conversation-candidate-title')).toBeDefined()
+    const notice = screen.getByTestId('conversation-list-error')
+    expect(notice.textContent).toContain('refresh failed')
+    expect(within(notice).getByRole('button', { name: 'Retry' })).toBeDefined()
+  })
+
+  it('does not show ready-page metadata while the open thread is non-ready', () => {
+    render(
+      <ConversationView
+        snapshot={snapshot({
+          openId: 'c1',
+          state: 'unavailable',
+          conversation: summary(),
+          partialTail: true,
+          skipped: 3,
+        })}
+        providerLabel="Claude"
+        layout="push"
+        onSelect={() => undefined}
+        onLoadOlder={onLoadOlder}
+      />,
+    )
+
+    expect(screen.queryByTestId('conversation-partial')).toBeNull()
+    expect(screen.queryByTestId('conversation-skipped')).toBeNull()
+    expect(screen.getByTestId('conversation-unavailable')).toBeDefined()
+  })
+
   it('says nothing about the list when nothing failed', () => {
     // The complement, so the notice above is a state and not decoration: a
     // reader never sees a warning about a refresh that worked.
