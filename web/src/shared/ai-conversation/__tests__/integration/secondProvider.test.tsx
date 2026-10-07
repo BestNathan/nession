@@ -26,11 +26,13 @@ import { assistantMessage, toolItem, userMessage } from '../fixtures/items'
 function Harness({
   adapter,
   onReady,
+  context = 'scope:one',
 }: {
   adapter: AIConversationAdapter<string>
   onReady?: (handle: AIConversationHandle) => void
+  context?: string
 }) {
-  const handle = useAIConversation(adapter, 'scope:one')
+  const handle = useAIConversation(adapter, context)
   onReady?.(handle)
   return (
     <ConversationView
@@ -159,6 +161,7 @@ describe('a second provider through the shared conversation', () => {
       ],
       refresh: {
         kind: 'push',
+        sourceKey: (context, conversationId) => `${context}:${conversationId}`,
         subscribe: (_context, _conversationId, onChange) => {
           push.notify = onChange
           return () => undefined
@@ -213,6 +216,7 @@ describe('a second provider through the shared conversation', () => {
       partialTail: false,
       refresh: {
         kind: 'push',
+        sourceKey: (context, conversationId) => `${context}:${conversationId}`,
         subscribe: (_context, _conversationId, onChange) => {
           push.notify = onChange
           return () => undefined
@@ -273,6 +277,77 @@ describe('a second provider through the shared conversation', () => {
     expect(screen.getAllByTestId('conversation-turn')).toHaveLength(turnsBefore)
     // And nothing replaced it with a failure about something else.
     expect(screen.queryByTestId('conversation-error')).toBeNull()
+  })
+
+  it('rebinds a push provider when same-space refresh-source identity changes', async () => {
+    const subscribed: string[] = []
+    const unsubscribed: string[] = []
+    const adapter = conversationAdapter({
+      key: 'same-space',
+      conversations: [
+        {
+          id: 'thread-1',
+          activity: 'active',
+          items: [userMessage('u1', 'hello'), assistantMessage('a1', 'hi')],
+        },
+      ],
+      refresh: {
+        kind: 'push',
+        sourceKey: (context, conversationId) => `${context}:${conversationId}`,
+        subscribe: (context, _conversationId, _onChange) => {
+          subscribed.push(context)
+          return () => unsubscribed.push(context)
+        },
+      },
+    })
+
+    const view = render(<Harness adapter={adapter} context="lease-a" />)
+    await waitFor(() => expect(screen.getByTestId('conversation-open')).toBeDefined())
+
+    view.rerender(<Harness adapter={adapter} context="lease-b" />)
+    await waitFor(() => expect(subscribed).toEqual(['lease-a', 'lease-b']))
+
+    expect(unsubscribed).toEqual(['lease-a'])
+    expect(screen.getByTestId('conversation-open')).toBeDefined()
+  })
+
+  it('reconciles a changed overlap from an older page through the shared runtime', async () => {
+    let handle: AIConversationHandle | undefined
+    const adapter = new SyntheticAdapter({
+      conversations: [
+        {
+          id: 'thread-1',
+          activity: 'inactive',
+          items: [
+            userMessage('u0', 'before'),
+            toolItem('t1', { status: 'running', output: null }),
+            assistantMessage('a1', 'waiting'),
+          ],
+        },
+      ],
+      bindingId: 'thread-1',
+      pageSize: 2,
+      olderOverlap: 1,
+      refresh: { kind: 'manual' },
+    })
+
+    render(<Harness adapter={adapter} onReady={(value) => (handle = value)} />)
+    await waitFor(() => expect(handle?.snapshot.items.map((item) => item.id)).toEqual(['t1', 'a1']))
+
+    adapter.replaceItems('thread-1', [
+      userMessage('u0', 'before'),
+      toolItem('t1', {
+        status: 'success',
+        output: { text: 'done', kind: 'text', truncated: false },
+      }),
+      assistantMessage('a1', 'waiting'),
+    ])
+    act(() => {
+      handle?.loadOlder()
+    })
+
+    await waitFor(() => expect(handle?.snapshot.items.map((item) => item.id)).toEqual(['u0', 't1', 'a1']))
+    expect(handle?.snapshot.items[1]).toMatchObject({ id: 't1', status: 'success' })
   })
 
   it('lets the reader choose instead of guessing, and says what it skipped', async () => {
