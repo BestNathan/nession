@@ -75,6 +75,49 @@ describe('conversation positions', () => {
     expect(new Set(ids).size).toBe(ids.length)
   })
 
+  it('reconciles a changed item when an older page overlaps the loaded window', () => {
+    const first = withNewest(emptyPositions(), {
+      items: [
+        toolItem('t1', { status: 'running', output: null }),
+        assistantMessage('a1', 'waiting'),
+      ],
+      nextCursor: 'a',
+    })
+    const older = withOlderPage(first, {
+      items: [
+        userMessage('u0', 'before'),
+        toolItem('t1', {
+          status: 'success',
+          output: { text: 'done', kind: 'text', truncated: false },
+        }),
+      ],
+      nextCursor: null,
+    })
+
+    expect(itemsOf(older).map((item) => item.id)).toEqual(['u0', 't1', 'a1'])
+    expect(itemsOf(older)[1]).toMatchObject({ id: 't1', status: 'success' })
+  })
+
+  it('keeps provider-reported skipped records with the merged loaded window', () => {
+    const newest = withNewest(emptyPositions(), {
+      items: transcript(2),
+      nextCursor: 'a',
+      skipped: 1,
+    })
+    const older = withOlderPage(newest, {
+      items: transcript(2, 'old'),
+      nextCursor: null,
+      skipped: 3,
+    })
+    const refreshed = withNewest(older, {
+      items: transcript(2),
+      nextCursor: 'a',
+      skipped: 0,
+    })
+
+    expect(refreshed.skipped).toBe(4)
+  })
+
   it('follows the newest page cursor only while the reader has not paged back', () => {
     const first = withNewest(emptyPositions(), { items: transcript(2), nextCursor: 'a' })
     expect(first.cursor).toBe('a')
