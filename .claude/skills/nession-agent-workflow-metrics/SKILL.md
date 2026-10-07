@@ -70,7 +70,7 @@ Agent workflow
   -> append immutable JSON to metrics branch
 ```
 
-Only the trusted metrics-ingest boundary writes raw telemetry.
+Only the trusted metrics-ingest boundary writes raw telemetry. The ingest boundary must fail closed on upstream provenance: validate the GitHub run's canonical workflow path/event (and main ref for workflow_dispatch sources) with trusted default-branch tooling, then require the record's `identity.workflow_id` to match that trusted source. Artifact names and artifact JSON are untrusted data and never establish provenance by themselves.
 
 If the exact destination already exists:
 
