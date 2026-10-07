@@ -319,13 +319,14 @@ test.describe('real fixture surfaces satisfy their contracts', () => {
     expect(await workSurfaceOverhang(page)).toBeLessThanOrEqual(0);
   });
 
-  test('web: workspace capsule shows all capabilities and is inside the tool bar', async ({ page }) => {
+  test('web: workspace capsule shows lifecycle-eligible capabilities and hides unavailable ones', async ({ page }) => {
     await page.goto('/#/fixture/workspace');
     const bar = page.getByTestId('workspace-tool-bar');
     await expect(bar).toBeVisible();
 
-    // Capsule V2 (#1347): Workspace capsule shows ALL capabilities (scrollable).
-    // All capabilities with workspace view bindings are directly visible.
+    // Capsule V2 (#1347 / #1455): every lifecycle-eligible capability with a
+    // Workspace view is directly visible; unavailable/hidden capabilities do
+    // not reserve dead navigation chrome.
     const nav = page.getByRole('navigation', { name: 'Workspace capabilities' });
     const allCaps = nav.locator('button[data-testid^="workspace-tool-"]');
     expect(await allCaps.count()).toBeGreaterThan(0);
@@ -341,6 +342,10 @@ test.describe('real fixture surfaces satisfy their contracts', () => {
     await expect(capsule).toBeVisible();
     await expectSingleLine(capsule, WEB);
     await expectVisibleWithin(capsule, bar, WEB);
+
+    await page.goto('/#/fixture/workspace?files=unavailable');
+    await expect(page.getByTestId('workspace-capability-unavailable')).toBeVisible();
+    await expect(page.getByTestId('workspace-tool-files')).toHaveCount(0);
   });
 
   test('web: capability presence follows what the session was seen running', async ({ page }) => {
@@ -362,22 +367,22 @@ test.describe('real fixture surfaces satisfy their contracts', () => {
     await expectSingleLine(ran, WEB);
     await expectVisibleWithin(ran, bar, WEB);
 
-    // Capsule V2 (#1347): ALL capabilities are shown in the scrollable capsule,
-    // regardless of whether the session has run them. The capsule is the
-    // discovery path — no disclosure menu, everything is directly visible.
+    // Capsule V2 (#1347 / #1455): lifecycle-eligible capabilities remain in the
+    // scrollable Capsule regardless of whether the session has run them.
+    // Unavailable/hidden presence is the separate no-slot case above.
     await page.goto('/#/fixture/workspace');
     await expect(page.getByTestId('workspace-tool-claude-code')).toBeVisible();
   });
 
-  test('web: all capabilities are visible in the scrollable capsule', async ({ page }) => {
+  test('web: lifecycle-eligible capabilities stay directly visible in the scrollable capsule', async ({ page }) => {
     await page.goto('/#/fixture/workspace?pane=claude.exe');
 
-    // Capsule V2 (#1347): no bound on direct chrome — all capabilities are
-    // shown in the scrollable capsule.
+    // Capsule V2 (#1347 / #1455): there is no numeric cap on eligible direct
+    // chrome; the bounded Capsule handles a larger eligible set by scrolling.
     const nav = page.getByRole('navigation', { name: 'Workspace capabilities' });
     const allCaps = nav.locator('button[data-testid^="workspace-tool-"]');
     expect(await allCaps.count()).toBeGreaterThan(0);
-    // All capabilities are visible in the capsule, not disclosed.
+    // Eligible capabilities are visible in the Capsule rather than a More menu.
     await expect(page.getByTestId('workspace-capability-capsule')).toBeVisible();
   });
 });
