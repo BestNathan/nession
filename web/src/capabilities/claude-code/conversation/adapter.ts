@@ -100,9 +100,13 @@ export function createClaudeCodeAdapter(
         agent_id: context.agentId,
         session_id: context.sessionId,
         limit: LIST_LIMIT,
-        ...(cursor ? { cursor } : {}),
+        ...(cursor !== undefined ? { cursor } : {}),
       })
       const bound = response.binding ?? null
+      const nextCursor = response.has_more ? (response.next_cursor ?? null) : null
+      if (response.state === 'ready' && response.has_more && nextCursor === null) {
+        throw new Error('Claude conversation list said more pages exist without a cursor')
+      }
       return {
         state: response.state,
         conversations: (response.items ?? []).map((item) =>
@@ -117,7 +121,7 @@ export function createClaudeCodeAdapter(
           ),
         ),
         bindingId: bound?.conversation_id ?? null,
-        nextCursor: response.has_more ? (response.next_cursor ?? null) : null,
+        nextCursor,
         error: response.error ?? null,
       }
     },
