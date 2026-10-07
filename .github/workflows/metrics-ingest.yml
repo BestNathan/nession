@@ -57,9 +57,44 @@ jobs:
             echo "Invalid workflow run id: ${run_id}" >&2
             exit 1
           fi
-          run_attempt="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}" --jq '.run_attempt')"
+          source_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}")"
+          run_attempt="$(jq -r '.run_attempt' <<<"${source_json}")"
+          source_path="$(jq -r '.path' <<<"${source_json}")"
+          source_event="$(jq -r '.event' <<<"${source_json}")"
+          source_branch="$(jq -r '.head_branch // ""' <<<"${source_json}")"
+
+          case "${source_path}:${source_event}" in
+            .github/workflows/acceptance.yml:workflow_dispatch)
+              expected_workflow_id=requirement-acceptance
+              [[ "${source_branch}" == "main" ]] || {
+                echo "Direct Acceptance telemetry is trusted only from main; got branch ${source_branch}" >&2
+                exit 1
+              }
+              ;;
+            .github/workflows/requirement-acceptance.yml:pull_request_target|.github/workflows/requirement-acceptance.yml:issues)
+              expected_workflow_id=requirement-acceptance
+              ;;
+            .github/workflows/issue-audit.yml:issues)
+              expected_workflow_id=issue-audit
+              ;;
+            .github/workflows/issue-audit.yml:workflow_dispatch)
+              expected_workflow_id=issue-audit
+              [[ "${source_branch}" == "main" ]] || {
+                echo "Manual Issue Audit telemetry is trusted only from main; got branch ${source_branch}" >&2
+                exit 1
+              }
+              ;;
+            *)
+              echo "Untrusted telemetry source workflow/event: ${source_path} (${source_event})" >&2
+              exit 1
+              ;;
+          esac
+
           echo "run_id=${run_id}" >> "${GITHUB_OUTPUT}"
           echo "run_attempt=${run_attempt}" >> "${GITHUB_OUTPUT}"
+          echo "source_path=${source_path}" >> "${GITHUB_OUTPUT}"
+          echo "source_event=${source_event}" >> "${GITHUB_OUTPUT}"
+          echo "expected_workflow_id=${expected_workflow_id}" >> "${GITHUB_OUTPUT}"
 
       - name: Discover Agent telemetry artifacts
         id: artifacts
@@ -106,6 +141,7 @@ jobs:
           METRICS_DIR: ${{ github.workspace }}/metrics-store
           SOURCE_RUN_ID: ${{ steps.source.outputs.run_id }}
           SOURCE_RUN_ATTEMPT: ${{ steps.source.outputs.run_attempt }}
+          EXPECTED_WORKFLOW_ID: ${{ steps.source.outputs.expected_workflow_id }}
         run: |
           set -euo pipefail
           found=0
@@ -118,7 +154,12 @@ jobs:
             record_run_id="$(jq -r '.identity.github_run_id' "${file}")"
             record_attempt="$(jq -r '.identity.github_run_attempt' "${file}")"
             record_repo="$(jq -r '.identity.repository' "${file}")"
+            record_workflow_id="$(jq -r '.identity.workflow_id' "${file}")"
 
+            [[ "${record_workflow_id}" == "${EXPECTED_WORKFLOW_ID}" ]] || {
+              echo "Telemetry workflow id ${record_workflow_id} does not match trusted source ${EXPECTED_WORKFLOW_ID}: ${file}" >&2
+              exit 1
+            }
             [[ "${record_run_id}" == "${SOURCE_RUN_ID}" ]] || {
               echo "Telemetry run id ${record_run_id} does not match source run ${SOURCE_RUN_ID}: ${file}" >&2
               exit 1
@@ -156,6 +197,8 @@ jobs:
             echo "## Metrics Ingest"
             echo
             echo "- Source run: ${SOURCE_RUN_ID} attempt ${SOURCE_RUN_ATTEMPT}"
+            echo "- Trusted workflow: ${{ steps.source.outputs.source_path }} (${{ steps.source.outputs.source_event }})"
+            echo "- Canonical workflow ID: ${EXPECTED_WORKFLOW_ID}"
             echo "- Valid telemetry records: ${found}"
             echo "- New immutable records: ${changed}"
           } >> "${GITHUB_STEP_SUMMARY}"
