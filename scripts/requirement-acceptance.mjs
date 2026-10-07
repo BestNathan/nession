@@ -285,18 +285,36 @@ function parseClosingIssueNumbers(body, owner, name) {
   return [...numbers];
 }
 
-function parseImplementingIssueNumbers(body, owner, name) {
+function issueReferencePattern(owner, name) {
+  const escapedOwner = owner.replace(/[.*+?^$(){}|[\]\\]/g, '\\$&');
+  const escapedName = name.replace(/[.*+?^$(){}|[\]\\]/g, '\\$&');
+  return '(?:#(\\d+)|' + escapedOwner + '\\/' + escapedName + '#(\\d+)|https:\\/\\/github\\.com\\/' + escapedOwner + '\\/' + escapedName + '\\/issues\\/(\\d+))';
+}
+
+function collectIssueReferences(text, owner, name) {
+  const numbers = new Set();
+  const reference = new RegExp(issueReferencePattern(owner, name), 'gi');
+  for (const match of String(text ?? '').matchAll(reference)) {
+    const value = match[1] ?? match[2] ?? match[3];
+    if (value) numbers.add(Number(value));
+  }
+  return numbers;
+}
+
+function parseAssociatedIssueNumbers(body, owner, name) {
   const text = String(body ?? '').replace(/<!--[^]*?-->/g, '');
   const lines = text.replace(/\r\n?/g, '\n').split('\n');
   const numbers = new Set();
   let fence = null;
-  const escapedOwner = owner.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const reference = '(?:#(\\d+)|' + escapedOwner + '\\/' + escapedName + '#(\\d+)|https:\\/\\/github\\.com\\/' + escapedOwner + '\\/' + escapedName + '\\/issues\\/(\\d+))';
-  const implementing = new RegExp('\\b(?:implement(?:s|ed)?)\\s+' + reference + '\\b', 'gi');
+
+  // Explicit implementation/association language seen in historical PRs.
+  // Dependency-only language (Depends on / Blocked by) is intentionally excluded:
+  // a dependency is not evidence that this PR implements that requirement.
+  const actionAssociation = /\b(?:implement(?:s|ed|ing)?|address(?:es|ed|ing)?)\b/i;
+  const leadingAssociation = /^\s*(?:[-*+]\s+)?(?:\x60+\s*)?(?:refs?|references?|related\s+to|relates\s+to|part\s+of|follow[- ]up\s+(?:to|from)|issues?)\b\s*:?[^\S\r\n]*/i;
 
   for (const rawLine of lines) {
-    const fenceMatch = rawLine.match(/^\s*(`{3,}|~{3,})/);
+    const fenceMatch = rawLine.match(/^\s*(\x60{3,}|~{3,})/);
     if (fenceMatch) {
       const marker = fenceMatch[1][0];
       if (fence === marker) fence = null;
@@ -304,20 +322,47 @@ function parseImplementingIssueNumbers(body, owner, name) {
       continue;
     }
     if (fence || /^\s*>/.test(rawLine)) continue;
-    const line = rawLine.replace(/`[^`]*`/g, '');
-    for (const match of line.matchAll(implementing)) {
-      const value = match[1] ?? match[2] ?? match[3];
-      if (value) numbers.add(Number(value));
+
+    const leading = rawLine.match(leadingAssociation);
+    const action = rawLine.match(actionAssociation);
+    const associationStart = leading
+      ? (leading.index ?? 0) + leading[0].length
+      : action
+        ? (action.index ?? 0) + action[0].length
+        : -1;
+    if (associationStart < 0) continue;
+
+    for (const number of collectIssueReferences(rawLine.slice(associationStart), owner, name)) {
+      numbers.add(number);
     }
   }
   return [...numbers];
 }
 
-function parsePreMergeIssueNumbers(body, owner, name) {
+function parseTitleIssueNumbers(title, owner, name) {
+  const numbers = new Set();
+  const text = String(title ?? '');
+
+  // Historical PR titles commonly carry their issue as "(#123)" or
+  // "(#123 SC-04)"; treat those as explicit implementation associations.
+  for (const match of text.matchAll(/\(([^)]*#\d+[^)]*)\)/g)) {
+    for (const number of collectIssueReferences(match[1], owner, name)) numbers.add(number);
+  }
+
+  // Also honor explicit action/association language in a title, e.g. "close #1455".
+  for (const number of parseClosingIssueNumbers(text, owner, name)) numbers.add(number);
+  for (const number of parseAssociatedIssueNumbers(text, owner, name)) numbers.add(number);
+
+  return [...numbers];
+}
+
+function parsePreMergeIssueNumbers(body, owner, name, title = '') {
   const numbers = new Set(parseClosingIssueNumbers(body, owner, name));
-  for (const number of parseImplementingIssueNumbers(body, owner, name)) numbers.add(number);
+  for (const number of parseAssociatedIssueNumbers(body, owner, name)) numbers.add(number);
+  for (const number of parseTitleIssueNumbers(title, owner, name)) numbers.add(number);
   return [...numbers].sort((a, b) => a - b);
 }
+
 async function closingRequirementIssues({ owner, name, body, token }) {
   const issues = [];
   const numbers = parseClosingIssueNumbers(body, owner, name);
@@ -328,9 +373,9 @@ async function closingRequirementIssues({ owner, name, body, token }) {
   }
   return issues;
 }
-async function preMergeRequirementIssues({ owner, name, body, token }) {
+async function preMergeRequirementIssues({ owner, name, title = '', body, token }) {
   const issues = [];
-  const numbers = parsePreMergeIssueNumbers(body, owner, name);
+  const numbers = parsePreMergeIssueNumbers(body, owner, name, title);
   for (const number of numbers) {
     const issue = await githubRequest(`/repos/${owner}/${name}/issues/${number}`, { token });
     const labels = new Set((issue.labels ?? []).map((label) => typeof label === 'string' ? label : label.name));
@@ -353,7 +398,7 @@ async function discoverPreMergeRequirements() {
   const pr = event.pull_request;
   if (!owner || !name || !pr) throw new Error('pull_request event context is required');
   const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
-  const requirements = await preMergeRequirementIssues({ owner, name, body: pr.body, token });
+  const requirements = await preMergeRequirementIssues({ owner, name, title: pr.title, body: pr.body, token });
   process.stdout.write(JSON.stringify(requirements.map((issue) => String(issue.number)).sort((a, b) => Number(a) - Number(b))) + '\n');
 }
 
@@ -365,7 +410,7 @@ async function runPrGate({ mode = 'merge', discovery = 'closing' } = {}) {
   if (!owner || !name || !number || !pr) throw new Error('pull_request event context is required');
   const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
   const requirements = discovery === 'pre-merge'
-    ? await preMergeRequirementIssues({ owner, name, body: pr.body, token })
+    ? await preMergeRequirementIssues({ owner, name, title: pr.title, body: pr.body, token })
     : await closingRequirementIssues({ owner, name, body: pr.body, token });
   const failures = [];
   for (const issue of requirements) {
@@ -504,8 +549,35 @@ function runSelfTest() {
     [12, 13, 14],
   );
   assert.deepEqual(
-    parsePreMergeIssueNumbers('Implements #30\nCloses #31\nRefs #32', 'BestNathan', 'nession'),
-    [30, 31],
+    parsePreMergeIssueNumbers(
+      [
+        'Implements #30',
+        'Closes #31',
+        'Refs #32, #33',
+        'Refs: #34',
+        'References BestNathan/nession#35',
+        'Related to #36',
+        'Relates to #37',
+        'Addresses the remaining acceptance gap in #38',
+        'Follow-up to the review on #39',
+        'Part of #40',
+        'Issue #41 — implementation slice',
+        'Implements the first architecture slice of #42 / #43',
+        '\x60Refs #44\x60。',
+      ].join('\n'),
+      'BestNathan',
+      'nession',
+      'fix(test): historical title linkage (#45 SC-04)',
+    ),
+    [30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45],
+  );
+  assert.deepEqual(
+    parsePreMergeIssueNumbers(
+      'Depends on #50\nBlocked by #51\nMentions #52\n> Refs #53\n\x60\x60\x60md\nRefs #54\n\x60\x60\x60',
+      'BestNathan',
+      'nession',
+    ),
+    [],
   );
   assert.deepEqual(
     parseClosingIssueNumbers('`Closes #20`\n> Closes #21\n```md\nCloses #22\n```\n<!-- Closes #23 -->\nCloses #24', 'BestNathan', 'nession'),
