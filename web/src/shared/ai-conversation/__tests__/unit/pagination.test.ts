@@ -115,7 +115,7 @@ describe('conversation positions', () => {
       skipped: 0,
     })
 
-    expect(refreshed.skipped).toBe(4)
+    expect(refreshed.skipped).toBe(3)
   })
 
   it('follows the newest page cursor only while the reader has not paged back', () => {
