@@ -184,7 +184,7 @@ function writeRecord(outDir, record) {
         },
         tokens: agent.usage ?? {},
         cost: {
-          raw_usd: agent.reported_cost_usd ?? null,
+          raw_usd: null,
           charged_usd: null,
           estimated_usd: agent.estimated_cost_usd ?? null,
         },
