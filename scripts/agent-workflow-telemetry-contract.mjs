@@ -12,6 +12,53 @@ const AGENT_SIGNALS = [
   /\bclaude\s+--version\b/,
 ];
 
+
+const TRUSTED_TELEMETRY_SOURCES = new Map([
+  ['.github/workflows/acceptance.yml', {
+    workflow_id: 'requirement-acceptance',
+    events: new Set(['workflow_dispatch']),
+    workflow_dispatch_main_only: true,
+  }],
+  ['.github/workflows/requirement-acceptance.yml', {
+    workflow_id: 'requirement-acceptance',
+    events: new Set(['pull_request_target', 'issues']),
+    workflow_dispatch_main_only: false,
+  }],
+  ['.github/workflows/issue-audit.yml', {
+    workflow_id: 'issue-audit',
+    events: new Set(['issues', 'workflow_dispatch']),
+    workflow_dispatch_main_only: true,
+  }],
+]);
+
+export function validateTelemetrySourceRun(run, repository = process.env.GITHUB_REPOSITORY) {
+  const path = String(run?.path ?? '');
+  const event = String(run?.event ?? '');
+  const headBranch = String(run?.head_branch ?? '');
+  const sourceRepository = String(run?.repository?.full_name ?? repository ?? '');
+  const source = TRUSTED_TELEMETRY_SOURCES.get(path);
+
+  if (!source) throw new Error('untrusted telemetry source workflow: ' + path);
+  if (!source.events.has(event)) {
+    throw new Error('untrusted telemetry source event for ' + path + ': ' + event);
+  }
+  if (repository && sourceRepository !== repository) {
+    throw new Error('telemetry source repository mismatch: ' + sourceRepository + ' != ' + repository);
+  }
+  if (source.workflow_dispatch_main_only && event === 'workflow_dispatch' && headBranch !== 'main') {
+    throw new Error('workflow_dispatch telemetry is trusted only from main: ' + path + ' @ ' + headBranch);
+  }
+
+  return {
+    workflow_id: source.workflow_id,
+    path,
+    event,
+    head_branch: headBranch || null,
+    github_run_id: Number(run?.id ?? 0),
+    github_run_attempt: Number(run?.run_attempt ?? 0),
+  };
+}
+
 function workflowName(text, file) {
   const match = text.match(/^name:\s*([^#\n]+?)\s*$/m);
   return match ? match[1].trim().replace(/^['"]|['"]$/g, '') : basename(file);
@@ -135,10 +182,54 @@ function selfTest() {
 
   const missingIngest = auditAgentWorkflowTelemetry(files, 'workflows:\n  - Example Agent\n');
   assert.match(missingIngest.errors.join('\n'), /Example Caller/);
-  console.log('agent-workflow-telemetry-contract self-test: 3 cases passed');
+
+  assert.equal(validateTelemetrySourceRun({
+    id: 10,
+    run_attempt: 2,
+    path: '.github/workflows/requirement-acceptance.yml',
+    event: 'pull_request_target',
+    head_branch: 'feature',
+    repository: { full_name: 'BestNathan/nession' },
+  }, 'BestNathan/nession').workflow_id, 'requirement-acceptance');
+
+  assert.equal(validateTelemetrySourceRun({
+    id: 11,
+    run_attempt: 1,
+    path: '.github/workflows/issue-audit.yml',
+    event: 'issues',
+    head_branch: 'main',
+    repository: { full_name: 'BestNathan/nession' },
+  }, 'BestNathan/nession').workflow_id, 'issue-audit');
+
+  assert.throws(() => validateTelemetrySourceRun({
+    id: 12,
+    run_attempt: 1,
+    path: '.github/workflows/issue-audit.yml',
+    event: 'workflow_dispatch',
+    head_branch: 'feature',
+    repository: { full_name: 'BestNathan/nession' },
+  }, 'BestNathan/nession'), /trusted only from main/);
+
+  assert.throws(() => validateTelemetrySourceRun({
+    id: 13,
+    run_attempt: 1,
+    path: '.github/workflows/fake-agent.yml',
+    event: 'workflow_dispatch',
+    head_branch: 'main',
+    repository: { full_name: 'BestNathan/nession' },
+  }, 'BestNathan/nession'), /untrusted telemetry source workflow/);
+
+  console.log('agent-workflow-telemetry-contract self-test: 7 cases passed');
 }
 
 const command = process.argv[2] ?? 'check';
 if (command === 'self-test' || command === '--self-test') selfTest();
 else if (command === 'check') checkRepository();
-else throw new Error('usage: agent-workflow-telemetry-contract.mjs <check|self-test>');
+else if (command === 'provenance') {
+  const file = process.argv[3];
+  if (!file) throw new Error('usage: agent-workflow-telemetry-contract.mjs provenance RUN_JSON');
+  const result = validateTelemetrySourceRun(JSON.parse(readFileSync(file, 'utf8')));
+  process.stdout.write(JSON.stringify(result) + '\n');
+} else {
+  throw new Error('usage: agent-workflow-telemetry-contract.mjs <check|self-test|provenance RUN_JSON>');
+}
