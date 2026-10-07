@@ -231,7 +231,7 @@ function runDeepSeek(context, workspace) {
     tools_observed: false,
     tokens: claudeUsage(envelope),
     cost: {
-      raw_usd: envelope.total_cost_usd == null ? null : Number(envelope.total_cost_usd),
+      raw_usd: null,
       charged_usd: null,
       estimated_usd: null,
     },
@@ -337,11 +337,30 @@ async function main() {
       writeAgentWorkflowTelemetry(telemetryFile, buildAgentWorkflowTelemetry(telemetryInput(context, meta, result)));
     }
   } catch (error) {
-    if (telemetryFile && error?.agentMeta) {
-      const fallback = { criteria: [] };
+    if (telemetryFile) {
+      const fallbackMeta = error?.agentMeta ?? {
+        provider,
+        model: provider === 'cursor'
+          ? requestedCursorModel()
+          : { id: process.env.ANTHROPIC_MODEL || 'gateway-default', request_model: process.env.ACCEPTANCE_CLAUDE_MODEL || 'claude-sonnet-5' },
+        run_id: null,
+        request_id: null,
+        status: 'error',
+        turns: null,
+        model_requests: null,
+        tool_calls: null,
+        tools_observed: false,
+        tokens: {},
+        cost: {},
+        timing: {
+          started_at: new Date().toISOString(),
+          finished_at: new Date().toISOString(),
+          agent_duration_ms: null,
+        },
+      };
       writeAgentWorkflowTelemetry(
         telemetryFile,
-        buildAgentWorkflowTelemetry(telemetryInput(context, error.agentMeta, fallback, 'agent-error')),
+        buildAgentWorkflowTelemetry(telemetryInput(context, fallbackMeta, { criteria: [] }, 'agent-error')),
       );
     }
     throw error;
