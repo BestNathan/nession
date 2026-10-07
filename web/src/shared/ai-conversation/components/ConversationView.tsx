@@ -72,7 +72,7 @@ function ConversationHeader({
             <span data-testid="conversation-partial">· still being written</span>
           ) : null}
           {snapshot.state === 'ready' && snapshot.skipped > 0 ? (
-            <span data-testid="conversation-skipped">· {snapshot.skipped} records not shown</span>
+            <span data-testid="conversation-skipped">· At least {snapshot.skipped} records not shown</span>
           ) : null}
         </p>
       </div>
