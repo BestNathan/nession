@@ -6,7 +6,7 @@ import {
   withNewest,
   withOlderPage,
 } from '../../runtime/pagination'
-import { assistantMessage, transcript, userMessage } from '../fixtures/items'
+import { assistantMessage, toolItem, transcript, userMessage } from '../fixtures/items'
 
 describe('conversation positions', () => {
   it('replaces the newest page and keeps everything behind it', () => {
