@@ -431,6 +431,72 @@ async function capsuleOuterBox(
   });
 }
 
+async function assertCapabilityCountOnlyChangesScrollExtent(
+  page: import('@playwright/test').Page,
+  experience: 'web' | 'app',
+): Promise<void> {
+  if (experience === 'app') {
+    await page.goto('/#/fixture/app');
+    await page.getByTestId('app-header-workspace').first().click();
+    await expect(page.getByTestId('files-app-layout')).toBeVisible();
+  } else {
+    await page.goto('/#/fixture/workspace');
+  }
+
+  const capsule = page.getByTestId('workspace-capability-capsule');
+  const scroll = page.getByTestId('workspace-capability-scroll');
+  const beforeOuter = await capsuleOuterBox(capsule);
+  const before = await scroll.evaluate((node) => ({
+    scrollWidth: node.scrollWidth,
+    clientWidth: node.clientWidth,
+    scrollHeight: node.scrollHeight,
+    clientHeight: node.clientHeight,
+    childCount: node.children.length,
+    flexWrap: getComputedStyle(node).flexWrap,
+  }));
+
+  // Multiply the real rendered capability slots without changing their recipe.
+  // This isolates the family-level count invariant: more eligible capability
+  // entries extend the horizontal axis; they never create another row or
+  // increase/move the Capsule vertically. The Capsule may use available width
+  // before overflow becomes scrollable — SC-20 does not require a fixed width.
+  await scroll.evaluate((node) => {
+    const entries = Array.from(node.children);
+    for (let batch = 0; batch < 3; batch += 1) {
+      for (const entry of entries) {
+        const clone = entry.cloneNode(true) as HTMLElement;
+        clone.removeAttribute('id');
+        clone.removeAttribute('data-testid');
+        clone.setAttribute('aria-hidden', 'true');
+        clone.setAttribute('tabindex', '-1');
+        node.appendChild(clone);
+      }
+    }
+  });
+
+  await expect.poll(async () => scroll.evaluate((node) => node.scrollWidth))
+    .toBeGreaterThan(before.scrollWidth);
+
+  const afterOuter = await capsuleOuterBox(capsule);
+  const after = await scroll.evaluate((node) => ({
+    scrollWidth: node.scrollWidth,
+    clientWidth: node.clientWidth,
+    scrollHeight: node.scrollHeight,
+    clientHeight: node.clientHeight,
+    childCount: node.children.length,
+    flexWrap: getComputedStyle(node).flexWrap,
+  }));
+
+  expect(before.flexWrap).toBe('nowrap');
+  expect(after.flexWrap).toBe('nowrap');
+  expect(after.childCount).toBeGreaterThan(before.childCount);
+  expect(after.scrollWidth).toBeGreaterThan(before.scrollWidth);
+  expect(Math.abs(after.scrollHeight - before.scrollHeight)).toBeLessThanOrEqual(1);
+  expect(Math.abs(after.clientHeight - before.clientHeight)).toBeLessThanOrEqual(1);
+  expect(Math.abs(afterOuter.height - beforeOuter.height)).toBeLessThanOrEqual(1);
+  expect(Math.abs(afterOuter.bottom - beforeOuter.bottom)).toBeLessThanOrEqual(1);
+}
+
 async function assertWebCapsuleOuterGeometry(
   page: import('@playwright/test').Page,
 ): Promise<void> {
@@ -507,16 +573,52 @@ async function assertWorkRingPerceptible(
 
   const signal = await ring.locator('circle').evaluate((node) => {
     const style = getComputedStyle(node);
+    const surface = document.querySelector<HTMLElement>('[data-testid="capsule-shell"]');
+    if (!surface) throw new Error('capsule-shell not found');
+
+    // Chromium preserves modern CSS colors such as oklch() in computed style.
+    // Rasterize a 1px fill so the browser performs the CSS Color -> device-sRGB
+    // conversion before applying the WCAG relative-luminance calculation.
+    const canvas = document.createElement('canvas');
+    canvas.width = 1;
+    canvas.height = 1;
+    const context = canvas.getContext('2d', { willReadFrequently: true });
+    if (!context) throw new Error('2d canvas context unavailable');
+
+    const toRgb = (value: string): [number, number, number] => {
+      context.clearRect(0, 0, 1, 1);
+      context.fillStyle = value;
+      context.fillRect(0, 0, 1, 1);
+      const [r, g, b] = context.getImageData(0, 0, 1, 1).data;
+      return [r, g, b];
+    };
+    const luminance = (value: string): number => {
+      const [r, g, b] = toRgb(value).map((part) => {
+        const channel = part / 255;
+        return channel <= 0.04045
+          ? channel / 12.92
+          : ((channel + 0.055) / 1.055) ** 2.4;
+      }) as [number, number, number];
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    };
+
+    const color = style.color;
+    const surfaceColor = getComputedStyle(surface).backgroundColor;
+    const lighter = Math.max(luminance(color), luminance(surfaceColor));
+    const darker = Math.min(luminance(color), luminance(surfaceColor));
+
     return {
-      color: style.color,
+      color,
+      surfaceColor,
+      contrastRatio: (lighter + 0.05) / (darker + 0.05),
       animationName: style.animationName,
     };
   });
-  const surface = await page.getByTestId('capsule-shell').evaluate((node) => {
-    return getComputedStyle(node).backgroundColor;
-  });
 
-  expect(signal.color).not.toBe(surface);
+  // The ring is non-text state UI; 3:1 keeps the signal deliberately quiet
+  // while making perceptibility an executable relationship rather than merely
+  // proving the two CSS strings are not identical.
+  expect(signal.contrastRatio).toBeGreaterThanOrEqual(3);
   expect(signal.animationName).toBe('none');
 }
 
@@ -566,6 +668,10 @@ for (const row of viewports.filter((v) => v.experience === 'web')) {
 
     test('Workspace Capsule keeps one outer height and anchor across state/label changes (#1455)', async ({ page }) => {
       await assertWebCapsuleOuterGeometry(page);
+    });
+
+    test('Workspace Capsule capability count changes horizontal scroll extent only (#1455)', async ({ page }) => {
+      await assertCapabilityCountOnlyChangesScrollExtent(page, 'web');
     });
 
     test('destination actions share Capsule material without sharing its radius (#1455)', async ({ page }) => {
@@ -817,6 +923,11 @@ for (const row of viewports.filter((v) => v.experience === 'app')) {
       expect(Math.abs(longLabelCapability.bottom - capability.bottom)).toBeLessThanOrEqual(1);
       expect(Math.abs(longLabelCapability.insetLeft - capability.insetLeft)).toBeLessThanOrEqual(1);
       expect(Math.abs(longLabelCapability.insetRight - capability.insetRight)).toBeLessThanOrEqual(1);
+    });
+
+
+    test('App Capability Capsule capability count changes horizontal scroll extent only (#1455)', async ({ page }) => {
+      await assertCapabilityCountOnlyChangesScrollExtent(page, 'app');
     });
 
     test('App working state ring is quiet but perceptible (#1455)', async ({ page }) => {

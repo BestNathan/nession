@@ -116,7 +116,7 @@ function UnavailableCapability({ title }: { title: string }) {
       <div className="max-w-sm space-y-1.5">
         <p className={cn('text-foreground', chromeSansRole('primary'))}>{title} is not available here</p>
         <p className={cn('text-muted-foreground', chromeSansRole('metadata'))}>
-          Choose another capability from More. Nession will keep this view stable instead of switching automatically.
+          Choose another capability from the Capability Capsule. Nession will keep this view stable instead of switching automatically.
         </p>
       </div>
     </div>

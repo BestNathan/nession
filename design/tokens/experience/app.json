@@ -239,20 +239,12 @@
       "ref": "primitive.typography.size"
     },
     "capabilitySlotWidth": {
-      "$description": "Fixed slot for one capability entry in the Workspace capsule. The bound is what keeps a long label (Claude Code) from widening the row: the slot stays this wide and the label wraps inside it instead (#1347 follow-up).",
+      "$description": "Fixed slot for one capability entry in the Workspace capsule. Capability identity is constrained inside this slot: the shipped compact-label recipe is one line, with truncation only as a defensive containment fallback. Slot content never owns or grows the Capsule's outer height (#1455 / #1458).",
       "value": "72px"
     },
-    "capabilityEntryHeight": {
-      "$description": "One labeled capability entry's height — the standard App control band, so the Capability Form's row IS the Conversation form's row: 44px of entry plus the shell's own pad lands both Capsule states on 56px total (owner correction 2026-10-03: the labeled form had grown to 82px, and \"太高了\"). It is a floor, not a cap — a label that genuinely takes two lines grows the entry by its own line box rather than clipping (no capability does that today; measured 2026-10-03, every title is one line at the labeled sizes).",
-      "value": "2.75rem"
-    },
     "capabilityLabelFontSize": {
-      "$description": "Capability entry label, one line. The entry reads icon-over-label; a label that fits one line gets this size.",
+      "$description": "Capability entry compact-label size inside the fixed control.md band. The label stays one line in the shipped recipe; its full capability title remains available through accessible name/title.",
       "value": "12px"
-    },
-    "capabilityLabelWrappedFontSize": {
-      "$description": "Capability entry label, two lines. Same slot, smaller type — a wrapped label at the one-line size would crowd the icon and outweigh its neighbours (#1347 follow-up). The entry picks between the two by its own measured line count.",
-      "value": "10px"
     },
     "popoverWidth": {
       "value": "22rem"

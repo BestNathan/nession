@@ -170,9 +170,7 @@
   --nession-terminal-capsule-terminal-clearance-gap: 0.375rem;
   --nession-terminal-capsule-caption-font-size: 1rem;
   --nession-terminal-capsule-capability-slot-width: 72px;
-  --nession-terminal-capsule-capability-entry-height: 2.5rem;
   --nession-terminal-capsule-capability-label-font-size: 12px;
-  --nession-terminal-capsule-capability-label-wrapped-font-size: 10px;
   --nession-terminal-capsule-quick-key-font-size: 1rem;
   --nession-terminal-capsule-phys-key-font-size: 1rem;
   --nession-terminal-capsule-popover-width: 20rem;
@@ -467,9 +465,7 @@
   --spacing-terminal-capsule-terminal-clearance-gap: var(--nession-terminal-capsule-terminal-clearance-gap);
   --spacing-terminal-capsule-caption-font-size: var(--nession-terminal-capsule-caption-font-size);
   --spacing-terminal-capsule-capability-slot-width: var(--nession-terminal-capsule-capability-slot-width);
-  --spacing-terminal-capsule-capability-entry-height: var(--nession-terminal-capsule-capability-entry-height);
   --spacing-terminal-capsule-capability-label-font-size: var(--nession-terminal-capsule-capability-label-font-size);
-  --spacing-terminal-capsule-capability-label-wrapped-font-size: var(--nession-terminal-capsule-capability-label-wrapped-font-size);
   --spacing-terminal-capsule-quick-key-font-size: var(--nession-terminal-capsule-quick-key-font-size);
   --spacing-terminal-capsule-phys-key-font-size: var(--nession-terminal-capsule-phys-key-font-size);
   --spacing-terminal-capsule-popover-width: var(--nession-terminal-capsule-popover-width);
@@ -578,9 +574,7 @@
   --nession-terminal-capsule-terminal-clearance-gap: 0.375rem;
   --nession-terminal-capsule-caption-font-size: 1rem;
   --nession-terminal-capsule-capability-slot-width: 72px;
-  --nession-terminal-capsule-capability-entry-height: 2.75rem;
   --nession-terminal-capsule-capability-label-font-size: 12px;
-  --nession-terminal-capsule-capability-label-wrapped-font-size: 10px;
   --nession-terminal-capsule-popover-width: 22rem;
   --nession-terminal-capsule-popover-viewport-inset: 1rem;
   --nession-terminal-capsule-popover-max-height: 45vh;
