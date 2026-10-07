@@ -191,7 +191,9 @@ export function validateRequirementBody(body, { mode = 'closure' } = {}) {
     if (!ACCEPTED_RESULTS.has(normalizedResult)) {
       const expectation = mode === 'merge'
         ? 'expected Pass or N/A before merge unless this is an explicit post-merge Pending criterion'
-        : 'expected Pass or N/A before closure';
+        : mode === 'pre-merge'
+          ? 'expected Pass or N/A before the pre-merge gate'
+          : 'expected Pass or N/A before closure';
       errors.push(`${criterion.id} result is ${row.result}; ${expectation}`);
     }
     if (PLACEHOLDER_EVIDENCE.has(row.evidence.trim().toLowerCase())) {
@@ -288,8 +290,8 @@ function parseImplementingIssueNumbers(body, owner, name) {
   const lines = text.replace(/\r\n?/g, '\n').split('\n');
   const numbers = new Set();
   let fence = null;
-  const escapedOwner = owner.replace(/[.*+?^${}()|[\]\\]/g, '\\async function closingRequirementIssues({ owner, name, body, token }) {');
-  const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, '\\async function closingRequirementIssues({ owner, name, body, token }) {');
+  const escapedOwner = owner.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const reference = '(?:#(\\d+)|' + escapedOwner + '\\/' + escapedName + '#(\\d+)|https:\\/\\/github\\.com\\/' + escapedOwner + '\\/' + escapedName + '\\/issues\\/(\\d+))';
   const implementing = new RegExp('\\b(?:implement(?:s|ed)?)\\s+' + reference + '\\b', 'gi');
 
@@ -352,7 +354,7 @@ async function discoverPreMergeRequirements() {
   if (!owner || !name || !pr) throw new Error('pull_request event context is required');
   const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
   const requirements = await preMergeRequirementIssues({ owner, name, body: pr.body, token });
-  process.stdout.write(JSON.stringify(requirements.map((issue) => Number(issue.number)).sort((a, b) => a - b)) + '\n');
+  process.stdout.write(JSON.stringify(requirements.map((issue) => String(issue.number)).sort((a, b) => Number(a) - Number(b))) + '\n');
 }
 
 async function runPrGate({ mode = 'merge', discovery = 'closing' } = {}) {
