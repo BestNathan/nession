@@ -294,7 +294,7 @@ describe('a second provider through the shared conversation', () => {
       refresh: {
         kind: 'push',
         sourceKey: (context, conversationId) => `${context}:${conversationId}`,
-        subscribe: (context, _conversationId, _onChange) => {
+        subscribe: (context) => {
           subscribed.push(context)
           return () => unsubscribed.push(context)
         },
