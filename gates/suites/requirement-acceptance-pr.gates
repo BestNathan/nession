@@ -3,4 +3,5 @@
 requirement-acceptance-selftest
 acceptance-executor-selftest
 acceptance-agent-selftest
+requirement-acceptance-pre-merge
 requirement-acceptance-pr
