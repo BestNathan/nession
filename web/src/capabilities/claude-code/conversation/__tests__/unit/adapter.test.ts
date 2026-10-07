@@ -157,6 +157,15 @@ describe('Claude Code adapter', () => {
     expect(result.conversations.map((c) => c.activity)).toEqual(['unknown', 'active'])
   })
 
+  it('rejects a list page that says more exists without a continuation cursor', async () => {
+    const api = apiWith(conversationsResponse({ has_more: true, next_cursor: null }))
+    const adapter = createClaudeCodeAdapter(api)
+
+    await expect(adapter.list(context)).rejects.toThrow(
+      'Claude conversation list said more pages exist without a cursor',
+    )
+  })
+
   it('passes the shared list cursor back to the provider', async () => {
     const api = apiWith(conversationsResponse())
     const adapter = createClaudeCodeAdapter(api)
