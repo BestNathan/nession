@@ -5,12 +5,11 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { basename, join } from 'node:path';
 
 const AGENT_SIGNALS = [
-  /CURSOR_API_KEY/,
+  /NSESSION_AGENT_WORKFLOW_ID:/,
+  /CURSOR_API_KEY:/,
   /@cursor\/sdk/,
   /@anthropic-ai\/claude-code/,
   /\bclaude\s+--version\b/,
-  /acceptance-agent\.mjs/,
-  /issue-audit-(?:agent|cursor)\.mjs/,
 ];
 
 function workflowName(text, file) {
@@ -130,7 +129,7 @@ function selfTest() {
   assert.equal(auditAgentWorkflowTelemetry(files, ingest).ok, true);
 
   const missingArtifact = {
-    'agent.yml': 'name: Bad Agent\nenv:\n  NSESSION_AGENT_WORKFLOW_ID: bad\njobs:\n  x:\n    steps:\n      - run: echo $CURSOR_API_KEY\n',
+    'agent.yml': 'name: Bad Agent\nenv:\n  NSESSION_AGENT_WORKFLOW_ID: bad\njobs:\n  x:\n    steps:\n      - run: echo missing artifact\n',
   };
   assert.match(auditAgentWorkflowTelemetry(missingArtifact, 'workflows:\n  - Bad Agent\n').errors.join('\n'), /agent-telemetry/);
 
