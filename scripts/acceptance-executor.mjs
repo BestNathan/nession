@@ -88,6 +88,7 @@ export function buildAcceptanceContext(issue, stage, options = {}) {
       return ref;
     })(),
     deployment: options.deployment ? String(options.deployment).trim() : null,
+    ci_evidence: options.ciEvidence ?? null,
     criteria,
     requirement_body: String(issue.body ?? ''),
   };
@@ -283,13 +284,17 @@ function fetchIssue(issueNumber) {
   return JSON.parse(raw);
 }
 
-function prepareCommand(issueNumber, stage, targetRef, outFile, deployment) {
+function prepareCommand(issueNumber, stage, targetRef, outFile, deployment, ciEvidenceFile) {
   const issue = fetchIssue(issueNumber);
   if (String(issue.state).toUpperCase() !== 'OPEN') throw new Error('requirement #' + issueNumber + ' is not open');
   if (!labelNames(issue).includes('requirement')) throw new Error('issue #' + issueNumber + ' is not labeled requirement');
+  const ciEvidence = ciEvidenceFile
+    ? JSON.parse(fs.readFileSync(ciEvidenceFile, 'utf8'))
+    : null;
   const context = buildAcceptanceContext(issue, stage, {
     targetRef,
     deployment,
+    ciEvidence,
     runId: process.env.ACCEPTANCE_RUN_ID ?? process.env.GITHUB_RUN_ID,
   });
   fs.writeFileSync(outFile, JSON.stringify(context, null, 2) + '\n');
@@ -354,8 +359,21 @@ function fixtureBody() {
 
 function selfTest() {
   const issue = { number: 1360, title: 'Requirement: fixture', url: 'https://example.test/1360', body: fixtureBody() };
-  const staging = buildAcceptanceContext(issue, 'staging', { targetRef: 'abc123', deployment: 'staging', runId: 100 });
+  const staging = buildAcceptanceContext(issue, 'staging', {
+    targetRef: 'abc123',
+    deployment: 'staging',
+    runId: 100,
+    ciEvidence: {
+      schema_version: 1,
+      kind: 'acceptance_ci_evidence',
+      target_sha: 'abc123',
+      direct_runs: [{ id: 42, name: 'E2E Tests', status: 'completed', conclusion: 'success', head_sha: 'abc123' }],
+      pull_requests: [],
+    },
+  });
   assert.deepEqual(staging.criteria.map((item) => item.criterion), ['SC-01']);
+  assert.equal(staging.ci_evidence.target_sha, 'abc123');
+  assert.equal(staging.ci_evidence.direct_runs[0].id, 42);
   const pass = normalizeAcceptanceResult(staging, {
     criteria: [{
       criterion: 'SC-01',
@@ -402,11 +420,11 @@ function selfTest() {
   const changed = passedBody.replace('deterministic update works', 'changed wording');
   assert.throws(() => applyAcceptanceResultToBody(changed, pass), /contract changed/);
 
-  console.log('acceptance-executor self-test: 10 cases passed');
+  console.log('acceptance-executor self-test: 12 cases passed');
 }
 
 function usage() {
-  return 'usage: acceptance-executor.mjs <self-test|prepare ISSUE STAGE TARGET_REF OUT [DEPLOYMENT]|normalize-result CONTEXT RAW OUT SOURCE|apply ISSUE RESULT>';
+  return 'usage: acceptance-executor.mjs <self-test|prepare ISSUE STAGE TARGET_REF OUT [DEPLOYMENT] [CI_EVIDENCE_JSON]|normalize-result CONTEXT RAW OUT SOURCE|apply ISSUE RESULT>';
 }
 
 function main() {
@@ -414,7 +432,7 @@ function main() {
   if (command === 'self-test') return selfTest();
   if (command === 'prepare') {
     if (args.length < 4) throw new Error(usage());
-    return prepareCommand(Number(args[0]), args[1], args[2], args[3], args[4]);
+    return prepareCommand(Number(args[0]), args[1], args[2], args[3], args[4], args[5]);
   }
   if (command === 'normalize-result') {
     if (args.length < 4) throw new Error(usage());
