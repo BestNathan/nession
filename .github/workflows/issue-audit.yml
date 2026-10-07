@@ -26,6 +26,9 @@ on:
 permissions:
   contents: read
 
+env:
+  NSESSION_AGENT_WORKFLOW_ID: issue-audit
+
 concurrency:
   group: issue-audit-${{ github.event.issue.number || inputs.issue_number || github.run_id }}
   cancel-in-progress: true
@@ -261,11 +264,11 @@ jobs:
               ;;
           esac
 
-      - name: Upload issue audit usage
+      - name: Upload canonical Agent telemetry
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: issue-audit-${{ needs.contract.outputs.provider }}-${{ needs.contract.outputs.issue_number }}-${{ github.run_id }}
-          path: ${{ runner.temp }}/issue-audit/*.json
+          name: agent-telemetry-issue-audit-${{ needs.contract.outputs.provider }}-${{ needs.contract.outputs.issue_number }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/issue-audit/agent-telemetry.json
           if-no-files-found: warn
           retention-days: 30
