@@ -279,6 +279,54 @@ describe('fixture conversation surface', () => {
     ).rejects.toThrow(/no page handed out/);
   });
 
+
+  it('models working, streaming and settled reads with stable ids', async () => {
+    const live = fixtureConversationSurface('?conversation=streaming');
+    const list = await live.request<ConversationsResponse>('claude-code.conversations', {});
+    const boundId = list.binding?.conversation_id as string;
+
+    const work = await live.request<MessagesResponse>('claude-code.messages', {
+      conversation_id: boundId,
+    });
+    const stream = await live.request<MessagesResponse>('claude-code.messages', {
+      conversation_id: boundId,
+    });
+    const settled = await live.request<MessagesResponse>('claude-code.messages', {
+      conversation_id: boundId,
+    });
+
+    expect(work.activity).toBe('active');
+    expect(work.partial_tail).toBe(false);
+    expect((work.items ?? []).filter((item) => item.kind === 'message' && item.role === 'assistant').at(-1)?.id)
+      .not.toBe('stream-answer');
+
+    expect(stream.activity).toBe('active');
+    expect(stream.partial_tail).toBe(true);
+    expect(settled.activity).toBe('inactive');
+    expect(settled.partial_tail).toBe(false);
+
+    const streamIds = (stream.items ?? []).map((item) => item.id);
+    const settledIds = (settled.items ?? []).map((item) => item.id);
+    expect(settledIds).toEqual(streamIds);
+
+    const statusOf = (page: MessagesResponse, id: string) =>
+      (page.items ?? []).find((item) => item.id === id && item.kind === 'tool')?.tool.status;
+
+    expect(statusOf(work, 'stream-tool-read')).toBe('running');
+    expect(statusOf(stream, 'stream-tool-read')).toBe('success');
+    expect(statusOf(stream, 'stream-tool-test')).toBe('running');
+    expect(statusOf(settled, 'stream-tool-test')).toBe('success');
+
+    const answerText = (page: MessagesResponse) => {
+      const answer = (page.items ?? []).find((item) => item.id === 'stream-answer');
+      return answer?.kind === 'message' && answer.content[0]?.type === 'text'
+        ? answer.content[0].text
+        : null;
+    };
+    expect(answerText(stream)).toBe('The ownership handoff stays stable while');
+    expect(answerText(settled)).toContain('final tool result settles');
+  });
+
   it('models a list refresh that fails only after a thread was opened', async () => {
     // The state `ListStateGuard` cannot draw: rows on screen and a refresh that
     // did not arrive. The trigger is the reader's own action, and this pins
