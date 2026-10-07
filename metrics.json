@@ -2,12 +2,12 @@
   "schema_version": 2,
   "repository_name": "BestNathan/nession",
   "branch": "main",
-  "commit_sha": "d236ed7b0d66f0a637fc9dd42b3c7980b409f365",
-  "generated_at": "2026-10-07T06:04:43.949Z",
+  "commit_sha": "a1c074f3c044b98adf44208a1b4d3352b3baf0ce",
+  "generated_at": "2026-10-07T21:24:56.189Z",
   "repository": {
     "source": {
-      "loc": 219775,
-      "files": 1139
+      "loc": 220036,
+      "files": 1140
     },
     "tests": {
       "unit": {
@@ -158,43 +158,43 @@
   },
   "efficiency": {
     "window": "7d",
-    "window_start": "2026-09-30T06:04:43.949Z",
-    "window_30d_start": "2026-09-07T06:04:43.949Z",
+    "window_start": "2026-09-30T21:24:56.189Z",
+    "window_30d_start": "2026-09-07T21:24:56.189Z",
     "source_churn": {
-      "additions": 36651,
-      "deletions": 7211,
-      "baseline": "26c5c2174f69c6016f5c68e25e4d09de134b7f24"
+      "additions": 26388,
+      "deletions": 6007,
+      "baseline": "68bfc1184bfb7216737c4998c44b5e711161aa0a"
     },
     "source_churn_30d": {
-      "additions": 182919,
-      "deletions": 64548,
-      "baseline": "4579f2c81753d3a7442d187c17a4ed07bcda1836"
+      "additions": 181799,
+      "deletions": 65375,
+      "baseline": "c3712b6957da267220515f1d6ea40ddcf86bffd1"
     },
     "commits": {
-      "total": 3526,
-      "last_7d": 372,
-      "last_30d": 1684
+      "total": 3535,
+      "last_7d": 277,
+      "last_30d": 1660
     },
     "issues": {
       "total": 297,
-      "open": 15,
-      "created_7d": 28,
-      "closed_7d": 36,
-      "created_30d": 195,
-      "closed_30d": 218
+      "open": 13,
+      "created_7d": 13,
+      "closed_7d": 22,
+      "created_30d": 187,
+      "closed_30d": 220
     },
     "pull_requests": {
-      "total": 1169,
+      "total": 1175,
       "open": 1,
-      "created_7d": 143,
-      "merged_7d": 134,
-      "created_30d": 627,
-      "merged_30d": 579
+      "created_7d": 108,
+      "merged_7d": 104,
+      "created_30d": 626,
+      "merged_30d": 578
     },
     "workflow_runs": {
-      "total": 5098,
-      "last_7d": 1464,
-      "last_30d": 3683
+      "total": 5222,
+      "last_7d": 1321,
+      "last_30d": 3783
     }
   }
 }
