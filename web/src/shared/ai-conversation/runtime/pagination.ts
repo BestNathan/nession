@@ -49,19 +49,19 @@ export interface ConversationPositions {
   /** Whether the reader has paged back at least once. */
   paged: boolean
   /**
-   * Provider-reported records that could not be modelled in the loaded window.
+   * Safe lower bound for unmodelled records in the loaded window.
    *
-   * The provider gives this per page, while this object is the merged window.
-   * Older pages add to it; rolling newest pages never make an already-observed
-   * omission disappear merely because the provider's tail moved forward.
+   * A provider reports only a page-local count and pages are explicitly allowed
+   * to overlap, so an exact union is unknowable without identities for skipped
+   * records. The maximum count observed across loaded pages is the strongest
+   * overlap-safe statement the runtime can make: at least this many records
+   * were omitted somewhere in the window.
    */
   skipped: number
-  /** The rolling newest-page contribution, kept separately for reconciliation. */
-  newestSkipped: number
 }
 
 export function emptyPositions(): ConversationPositions {
-  return { items: [], cursor: null, paged: false, skipped: 0, newestSkipped: 0 }
+  return { items: [], cursor: null, paged: false, skipped: 0 }
 }
 
 /** The two fields a page contributes to the window. */
@@ -83,13 +83,11 @@ export function withNewest(
   current: ConversationPositions,
   page: PageSlice,
 ): ConversationPositions {
-  const newestSkipped = Math.max(current.newestSkipped, page.skipped ?? 0)
   return {
     items: merging(current.items, page.items ?? []),
     cursor: current.paged ? current.cursor : (page.nextCursor ?? null),
     paged: current.paged,
-    skipped: current.skipped - current.newestSkipped + newestSkipped,
-    newestSkipped,
+    skipped: Math.max(current.skipped, page.skipped ?? 0),
   }
 }
 
@@ -119,8 +117,7 @@ export function withOlderPage(
     items: [...arriving, ...reconciledHeld],
     cursor: page.nextCursor ?? null,
     paged: true,
-    skipped: current.skipped + (page.skipped ?? 0),
-    newestSkipped: current.newestSkipped,
+    skipped: Math.max(current.skipped, page.skipped ?? 0),
   }
 }
 
@@ -129,7 +126,7 @@ export function itemsOf(positions: ConversationPositions): AIConversationItem[] 
   return positions.items
 }
 
-/** Provider-reported omissions accumulated for the loaded window. */
+/** Safe lower bound for provider-reported omissions in the loaded window. */
 export function skippedOf(positions: ConversationPositions): number {
   return positions.skipped
 }
