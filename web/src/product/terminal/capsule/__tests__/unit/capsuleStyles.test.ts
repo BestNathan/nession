@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   capsuleCaptionTextClass,
+  capsuleOuterGeometry,
   capsuleEmptyStatePadClass,
   capsuleFloatingMaterialClass,
   capsuleHistoryCommandClass,
@@ -53,9 +54,14 @@ describe('capsuleStyles', () => {
   });
 
   it('keeps working state perceptible without inventing a second material', () => {
-    expect(capsuleWorkRingClass).toContain('text-muted-foreground');
+    expect(capsuleWorkRingClass).toContain('var(--nession-text-secondary)');
     expect(capsuleWorkRingClass).not.toContain('terminal-capsule-surface');
     expect(capsuleWorkRingClass).not.toMatch(/animate-|spin|pulse/);
+  });
+
+  it('allows Capsule flex items to shrink so capability count becomes inner scroll, not outer growth', () => {
+    expect(capsuleOuterGeometry('web', 'flat', 'intrinsic').shellClass).toContain('min-w-0');
+    expect(capsuleOuterGeometry('app', 'flat', 'stretch').shellClass).toContain('min-w-0');
   });
 
   it('keeps Capsule history/popover chrome off the composer writing scale', () => {
