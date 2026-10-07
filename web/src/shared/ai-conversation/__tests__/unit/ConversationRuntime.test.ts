@@ -510,6 +510,7 @@ describe('ConversationRuntime — refresh policy', () => {
     const { runtime, adapter } = setup({
       refresh: {
         kind: 'push',
+        sourceKey: (context, conversationId) => `${context}:${conversationId}`,
         subscribe: (_context, _conversationId, onChange) => {
           push.notify = onChange
           return unsubscribe
@@ -543,6 +544,7 @@ describe('ConversationRuntime — refresh policy', () => {
       bindingId: 'c1',
       refresh: {
         kind: 'push',
+        sourceKey: (context, conversationId) => `${context}:${conversationId}`,
         subscribe: (context, conversationId, onChange) => {
           targets.push({ context, conversationId, notify: onChange })
           return () => disposed.push(conversationId)
@@ -815,5 +817,152 @@ describe('ConversationRuntime — state the surface draws', () => {
     // Fully re-armed, refresh included: this conversation is active, so the
     // re-armed runtime polls it just as a fresh one would.
     expect(clock.armed()).toBe(1)
+  })
+})
+
+
+describe('ConversationRuntime — round 6 contract boundaries', () => {
+  it.each(['unavailable', 'error'] as const)(
+    'keeps an auto-bound readable thread when the list answers %s',
+    async (state) => {
+      const { runtime, adapter } = setup()
+      runtime.setContext('a:s1')
+      await flush()
+      const before = ids(runtime)
+
+      adapter.forcedListState = state
+      runtime.reload()
+      await flush()
+
+      const snapshot = runtime.getSnapshot()
+      expect(snapshot.listState).toBe(state)
+      expect(snapshot.openId).toBe('c1')
+      expect(ids(runtime)).toEqual(before)
+      expect(snapshot.conversations).toHaveLength(1)
+    },
+  )
+
+  it('walks the canonical list cursor until the whole directory is loaded', async () => {
+    const conversations = Array.from({ length: 5 }, (_, index) => ({
+      id: `c${index}`,
+      title: `Conversation ${index}`,
+      items: transcript(1, `c${index}-`),
+    }))
+    const { runtime, adapter } = setup({
+      conversations,
+      bindingId: 'c0',
+      listPageSize: 2,
+      refresh: { kind: 'manual' },
+    })
+
+    runtime.setContext('a:s1')
+    await flush()
+
+    expect(runtime.getSnapshot().conversations.map((item) => item.id)).toEqual([
+      'c0',
+      'c1',
+      'c2',
+      'c3',
+      'c4',
+    ])
+    expect(
+      adapter.calls.filter((call) => call.kind === 'list').map((call) => call.cursor),
+    ).toEqual([undefined, '2', '4'])
+  })
+
+  it('re-arms a push source only when its stable source identity changes', async () => {
+    const subscriptions: string[] = []
+    const unsubscribed: string[] = []
+    const { runtime } = sameKeySetup({
+      refresh: {
+        kind: 'push',
+        sourceKey: (context, conversationId) => `${context}:${conversationId}`,
+        subscribe: (context, _conversationId, _onChange) => {
+          subscriptions.push(context)
+          return () => unsubscribed.push(context)
+        },
+      },
+    })
+
+    runtime.setContext('lease-a')
+    await flush()
+    runtime.setContext('lease-a')
+    runtime.setContext('lease-b')
+    await flush()
+
+    // Equal source identity is a no-op even when setContext is called again;
+    // changing the provider-owned source identity tears down exactly once.
+    expect(subscriptions).toEqual(['lease-a', 'lease-b'])
+    expect(unsubscribed).toEqual(['lease-a'])
+  })
+
+  it('genuinely re-arms after dispose when the context key is unchanged', async () => {
+    const { runtime, adapter, clock } = setup()
+    runtime.setContext('a:s1')
+    await flush()
+    expect(clock.armed()).toBe(1)
+
+    const listBefore = adapter.calls.filter((call) => call.kind === 'list').length
+    const readBefore = adapter.calls.filter((call) => call.kind === 'read').length
+    runtime.dispose()
+    expect(clock.armed()).toBe(0)
+
+    runtime.setContext('a:s1')
+    await flush()
+
+    expect(adapter.calls.filter((call) => call.kind === 'list')).toHaveLength(listBefore + 1)
+    expect(adapter.calls.filter((call) => call.kind === 'read')).toHaveLength(readBefore + 1)
+    expect(clock.armed()).toBe(1)
+  })
+
+  it('drops a queued passive refresh after the answer semantically stops refresh', async () => {
+    const { runtime, adapter, clock } = setup()
+    runtime.setContext('a:s1')
+    await flush()
+
+    const readsBefore = adapter.calls.filter((call) => call.kind === 'read').length
+    const release = adapter.hold('read')
+    adapter.setActivity('c1', 'inactive')
+
+    clock.tick()
+    clock.tick()
+    release()
+    await flush()
+
+    expect(adapter.calls.filter((call) => call.kind === 'read')).toHaveLength(readsBefore + 1)
+    expect(runtime.getSnapshot().activity).toBe('inactive')
+    expect(clock.armed()).toBe(0)
+  })
+
+  it('does not expose ready-page metadata after a non-ready newest answer', async () => {
+    const { runtime, adapter } = setup({ partialTail: true, skipped: 3 })
+    runtime.setContext('a:s1')
+    await flush()
+    expect(runtime.getSnapshot()).toMatchObject({ partialTail: true, skipped: 3 })
+
+    adapter.forcedReadState = 'unavailable'
+    runtime.reload()
+    await flush()
+
+    expect(runtime.getSnapshot()).toMatchObject({
+      state: 'unavailable',
+      partialTail: false,
+      skipped: 0,
+    })
+  })
+
+  it('accumulates skipped records reported by an older page into the loaded window', async () => {
+    const { runtime } = setup({
+      refresh: { kind: 'manual' },
+      skippedFor: (cursor) => (cursor === undefined ? 0 : 3),
+    })
+    runtime.setContext('a:s1')
+    await flush()
+    expect(runtime.getSnapshot().skipped).toBe(0)
+
+    runtime.loadOlder()
+    await flush()
+
+    expect(runtime.getSnapshot().skipped).toBe(3)
   })
 })
