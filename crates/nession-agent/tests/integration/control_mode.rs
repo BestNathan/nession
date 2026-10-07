@@ -1,57 +1,81 @@
 //! ControlModeSession 集成测试
 //!
-//! Requires tmux binary on PATH. Each test creates and cleans up its own
-//! tmux session using a unique name to avoid interference.
+//! Requires tmux binary on PATH. Each test owns a private temporary tmux
+//! socket/server plus a unique session, so parallel integration tests cannot
+//! tear down or heal the server underneath a control-mode attach.
 
 use anyhow::{anyhow, Result};
+use nession_agent::tmux::cmd::TmuxCmd;
 use nession_agent::tmux::control::ControlModeSession;
 use nession_agent::tmux::ops::TmuxDep;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::sleep;
 
-use super::TestSession;
+use super::unique_session_name;
 
-/// Create a detached tmux session at 200x60 (matching production sizing).
-async fn create_session(name: &str) -> Result<()> {
-    let status = nession_agent::tmux::cmd::global()
-        .tokio()
-        .args(["new-session", "-d", "-s", name, "-x", "200", "-y", "60"])
-        .status()
-        .await?;
-    if !status.success() {
-        return Err(anyhow!("failed to create tmux session {name}: {status}"));
-    }
-    Ok(())
+/// One control-mode integration test's private tmux server.
+///
+/// The repository-level test harness intentionally gives the whole test run one
+/// socket, which is correct for production-path integration tests but unsafe for
+/// these timing-sensitive control-mode tests: another parallel test can remove
+/// the last session, let tmux exit, or race stale-socket healing while this test
+/// is between create and attach. A per-test injected dependency makes the tmux
+/// server lifetime part of the fixture instead of shared ambient state.
+struct ControlTestSession {
+    name: String,
+    dep: TmuxDep,
+    _dir: tempfile::TempDir,
 }
 
-/// Read a session's window size **from tmux**, for tests that must assert what
-/// tmux actually did rather than what a backend was asked to do.
-///
-/// Errors on unparsable output instead of defaulting: `display-message` exits 0
-/// and prints nothing for a target that does not exist, so a silent fallback
-/// would turn "no such session" into a passing assertion.
-async fn window_size(name: &str) -> Result<(u16, u16)> {
-    let out = nession_agent::tmux::cmd::global()
-        .tokio()
-        .args([
-            "display-message",
-            "-p",
-            "-t",
+impl ControlTestSession {
+    async fn new(prefix: &str) -> Result<Self> {
+        let dir = tempfile::tempdir()?;
+        let dep = TmuxDep::injected(TmuxCmd::new("tmux", dir.path().join("tmux.sock")));
+        let name = unique_session_name(prefix);
+
+        let output = dep
+            .cmd()
+            .output(&["new-session", "-d", "-s", &name, "-x", "200", "-y", "60"])
+            .await?;
+        if !output.status.success() {
+            return Err(anyhow!(
+                "failed to create isolated tmux session {name}: {} ({})",
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim()
+            ));
+        }
+
+        sleep(Duration::from_millis(300)).await;
+
+        Ok(Self {
             name,
-            "#{window_width} #{window_height}",
-        ])
-        .output()
-        .await?;
-    let text = String::from_utf8_lossy(&out.stdout);
-    let mut parts = text.split_whitespace();
-    match (parts.next(), parts.next()) {
-        (Some(c), Some(r)) => match (c.parse::<u16>(), r.parse::<u16>()) {
-            (Ok(c), Ok(r)) => Ok((c, r)),
-            _ => Err(anyhow!("unparsable window size in {text:?}")),
-        },
-        _ => Err(anyhow!("unparsable window size in {text:?}")),
+            dep,
+            _dir: dir,
+        })
     }
+
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn dep(&self) -> &TmuxDep {
+        &self.dep
+    }
+}
+
+impl Drop for ControlTestSession {
+    fn drop(&mut self) {
+        let _ = self
+            .dep
+            .cmd()
+            .output_blocking(&["kill-session", "-t", &self.name]);
+    }
+}
+
+/// Read a session's window size from the exact tmux server this fixture owns.
+async fn window_size(session: &ControlTestSession) -> Result<(u16, u16)> {
+    session.dep().ops().window_size(session.name()).await
 }
 
 /// Drain the output receiver, accumulating bytes until either the deadline
@@ -83,12 +107,10 @@ async fn test_attach_and_receive_output() -> Result<()> {
     if cfg!(target_os = "macos") {
         return Ok(());
     }
-    let guard = TestSession::new("ctrl-attach");
-    create_session(guard.name()).await?;
-    sleep(Duration::from_millis(300)).await;
+    let guard = ControlTestSession::new("ctrl-attach").await?;
 
     let (mut session, mut rx, _resize_rx, capture) =
-        ControlModeSession::attach(&TmuxDep::global(), guard.name(), 80, 24, None).await?;
+        ControlModeSession::attach(guard.dep(), guard.name(), 80, 24, None).await?;
     assert!(capture.is_none(), "no capture was requested");
 
     // Drain any startup output (initial screen redraw from refresh-client).
@@ -116,12 +138,10 @@ async fn test_resize_updates_viewport() -> Result<()> {
     if cfg!(target_os = "macos") {
         return Ok(());
     }
-    let guard = TestSession::new("ctrl-resize");
-    create_session(guard.name()).await?;
-    sleep(Duration::from_millis(300)).await;
+    let guard = ControlTestSession::new("ctrl-resize").await?;
 
     let (mut session, _rx, _resize_rx, _capture) =
-        ControlModeSession::attach(&TmuxDep::global(), guard.name(), 80, 24, None).await?;
+        ControlModeSession::attach(guard.dep(), guard.name(), 80, 24, None).await?;
 
     assert_eq!(session.viewport(), (80, 24));
 
@@ -154,21 +174,19 @@ async fn two_clients_share_one_window() -> Result<()> {
     if cfg!(target_os = "macos") {
         return Ok(());
     }
-    let guard = TestSession::new("ctrl-shared");
-    create_session(guard.name()).await?;
-    sleep(Duration::from_millis(300)).await;
+    let guard = ControlTestSession::new("ctrl-shared").await?;
 
     let (mut client1, _rx1, _rz1, _cap1) =
-        ControlModeSession::attach(&TmuxDep::global(), guard.name(), 80, 24, None).await?;
+        ControlModeSession::attach(guard.dep(), guard.name(), 80, 24, None).await?;
     let (mut client2, _rx2, _rz2, _cap2) =
-        ControlModeSession::attach(&TmuxDep::global(), guard.name(), 120, 40, None).await?;
+        ControlModeSession::attach(guard.dep(), guard.name(), 120, 40, None).await?;
     sleep(Duration::from_millis(300)).await;
 
     // client2 attached second, and `attach` resizes the window on the way in,
     // so the one shared window is its size. client1's 80×24 did not survive,
     // and client1 does not get a viewport of its own to keep it in.
     assert_eq!(
-        window_size(guard.name()).await?,
+        window_size(&guard).await?,
         (120, 40),
         "the second attach resizes the one shared window"
     );
@@ -179,7 +197,7 @@ async fn two_clients_share_one_window() -> Result<()> {
     client1.resize(100, 30).await?;
     sleep(Duration::from_millis(300)).await;
     assert_eq!(
-        window_size(guard.name()).await?,
+        window_size(&guard).await?,
         (100, 30),
         "client1's resize moves the shared window that client2 also sees"
     );
@@ -207,12 +225,10 @@ async fn a_peer_driven_resize_reaches_the_other_client() -> Result<()> {
     if cfg!(target_os = "macos") {
         return Ok(());
     }
-    let guard = TestSession::new("ctrl-peer-reflow");
-    create_session(guard.name()).await?;
-    sleep(Duration::from_millis(300)).await;
+    let guard = ControlTestSession::new("ctrl-peer-reflow").await?;
 
     let (mut client1, _rx1, mut rz1, _cap1) =
-        ControlModeSession::attach(&TmuxDep::global(), guard.name(), 80, 24, None).await?;
+        ControlModeSession::attach(guard.dep(), guard.name(), 80, 24, None).await?;
     sleep(Duration::from_millis(300)).await;
 
     // Whatever the first attach reported about its own resize is not this
@@ -222,7 +238,7 @@ async fn a_peer_driven_resize_reaches_the_other_client() -> Result<()> {
     // The second client attaches at a different size, which moves the one
     // shared window — the peer reflow.
     let (mut client2, _rx2, _rz2, _cap2) =
-        ControlModeSession::attach(&TmuxDep::global(), guard.name(), 120, 40, None).await?;
+        ControlModeSession::attach(guard.dep(), guard.name(), 120, 40, None).await?;
 
     let reported = tokio::time::timeout(Duration::from_secs(5), rz1.recv())
         .await
@@ -248,12 +264,10 @@ async fn test_close_is_idempotent() -> Result<()> {
     if cfg!(target_os = "macos") {
         return Ok(());
     }
-    let guard = TestSession::new("ctrl-close");
-    create_session(guard.name()).await?;
-    sleep(Duration::from_millis(300)).await;
+    let guard = ControlTestSession::new("ctrl-close").await?;
 
     let (mut session, _rx, _resize_rx, _capture) =
-        ControlModeSession::attach(&TmuxDep::global(), guard.name(), 80, 24, None).await?;
+        ControlModeSession::attach(guard.dep(), guard.name(), 80, 24, None).await?;
 
     session.close().await?;
     session.close().await?;
@@ -277,24 +291,18 @@ async fn the_bootstrap_capture_and_the_live_stream_join_exactly() -> Result<()> 
     if cfg!(target_os = "macos") {
         return Ok(());
     }
-    let guard = TestSession::new("ctrl-barrier");
-    create_session(guard.name()).await?;
-    sleep(Duration::from_millis(300)).await;
+    let guard = ControlTestSession::new("ctrl-barrier").await?;
 
     // Start the producer BEFORE attaching: 60 numbered lines, 50ms apart, so
     // production straddles the control attach and the capture.
-    let status = nession_agent::tmux::cmd::global()
-        .tokio()
-        .args([
-            "send-keys",
-            "-t",
+    guard
+        .dep()
+        .ops()
+        .send_keys(
             guard.name(),
             "for i in $(seq 1 60); do printf 'GAP-%03d\\n' $i; sleep 0.05; done",
-            "Enter",
-        ])
-        .status()
+        )
         .await?;
-    assert!(status.success(), "send-keys failed: {status}");
 
     // Let the stream get ahead of the attach: at 50ms/line, 300ms is ~6
     // lines in the scrollback before the control client exists. Without the
@@ -304,7 +312,7 @@ async fn the_bootstrap_capture_and_the_live_stream_join_exactly() -> Result<()> 
     sleep(Duration::from_millis(300)).await;
 
     let (mut session, mut rx, _resize_rx, capture) =
-        ControlModeSession::attach(&TmuxDep::global(), guard.name(), 80, 24, Some(5000)).await?;
+        ControlModeSession::attach(guard.dep(), guard.name(), 80, 24, Some(5000)).await?;
 
     // The producer takes 3s; the deadline covers it plus attach overhead.
     let live = drain_bytes(&mut rx, 10_000).await;
