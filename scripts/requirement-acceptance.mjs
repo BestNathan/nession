@@ -139,7 +139,7 @@ export function parseAcceptanceReport(section) {
 }
 
 export function validateRequirementBody(body, { mode = 'closure' } = {}) {
-  if (!new Set(['merge', 'closure']).has(mode)) {
+  if (!new Set(['pre-merge', 'merge', 'closure']).has(mode)) {
     throw new Error(`unsupported acceptance validation mode: ${mode}`);
   }
 
@@ -165,6 +165,10 @@ export function validateRequirementBody(body, { mode = 'closure' } = {}) {
       continue;
     }
 
+    if (mode === 'pre-merge' && row.stage !== 'pre-merge') {
+      continue;
+    }
+
     const deferredPostMerge =
       mode === 'merge'
       && row.stage === 'post-merge'
@@ -187,7 +191,9 @@ export function validateRequirementBody(body, { mode = 'closure' } = {}) {
     if (!ACCEPTED_RESULTS.has(normalizedResult)) {
       const expectation = mode === 'merge'
         ? 'expected Pass or N/A before merge unless this is an explicit post-merge Pending criterion'
-        : 'expected Pass or N/A before closure';
+        : mode === 'pre-merge'
+          ? 'expected Pass or N/A before the pre-merge gate'
+          : 'expected Pass or N/A before closure';
       errors.push(`${criterion.id} result is ${row.result}; ${expectation}`);
     }
     if (PLACEHOLDER_EVIDENCE.has(row.evidence.trim().toLowerCase())) {
@@ -210,7 +216,12 @@ export function validateRequirementBody(body, { mode = 'closure' } = {}) {
 }
 
 function formatErrors(issueNumber, errors, context = 'acceptance') {
-  const label = context === 'merge' ? 'is not merge-ready' : 'acceptance is incomplete';
+  const label =
+    context === 'merge'
+      ? 'is not merge-ready'
+      : context === 'pre-merge'
+        ? 'has incomplete pre-merge acceptance'
+        : 'acceptance is incomplete';
   return [
     `Requirement #${issueNumber} ${label}:`,
     ...errors.map((error) => `- ${error}`),
@@ -274,6 +285,39 @@ function parseClosingIssueNumbers(body, owner, name) {
   return [...numbers];
 }
 
+function parseImplementingIssueNumbers(body, owner, name) {
+  const text = String(body ?? '').replace(/<!--[^]*?-->/g, '');
+  const lines = text.replace(/\r\n?/g, '\n').split('\n');
+  const numbers = new Set();
+  let fence = null;
+  const escapedOwner = owner.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const reference = '(?:#(\\d+)|' + escapedOwner + '\\/' + escapedName + '#(\\d+)|https:\\/\\/github\\.com\\/' + escapedOwner + '\\/' + escapedName + '\\/issues\\/(\\d+))';
+  const implementing = new RegExp('\\b(?:implement(?:s|ed)?)\\s+' + reference + '\\b', 'gi');
+
+  for (const rawLine of lines) {
+    const fenceMatch = rawLine.match(/^\s*(`{3,}|~{3,})/);
+    if (fenceMatch) {
+      const marker = fenceMatch[1][0];
+      if (fence === marker) fence = null;
+      else if (fence == null) fence = marker;
+      continue;
+    }
+    if (fence || /^\s*>/.test(rawLine)) continue;
+    const line = rawLine.replace(/`[^`]*`/g, '');
+    for (const match of line.matchAll(implementing)) {
+      const value = match[1] ?? match[2] ?? match[3];
+      if (value) numbers.add(Number(value));
+    }
+  }
+  return [...numbers];
+}
+
+function parsePreMergeIssueNumbers(body, owner, name) {
+  const numbers = new Set(parseClosingIssueNumbers(body, owner, name));
+  for (const number of parseImplementingIssueNumbers(body, owner, name)) numbers.add(number);
+  return [...numbers].sort((a, b) => a - b);
+}
 async function closingRequirementIssues({ owner, name, body, token }) {
   const issues = [];
   const numbers = parseClosingIssueNumbers(body, owner, name);
@@ -281,6 +325,16 @@ async function closingRequirementIssues({ owner, name, body, token }) {
     const issue = await githubRequest(`/repos/${owner}/${name}/issues/${number}`, { token });
     const labels = new Set((issue.labels ?? []).map((label) => typeof label === 'string' ? label : label.name));
     if (labels.has('requirement')) issues.push(issue);
+  }
+  return issues;
+}
+async function preMergeRequirementIssues({ owner, name, body, token }) {
+  const issues = [];
+  const numbers = parsePreMergeIssueNumbers(body, owner, name);
+  for (const number of numbers) {
+    const issue = await githubRequest(`/repos/${owner}/${name}/issues/${number}`, { token });
+    const labels = new Set((issue.labels ?? []).map((label) => typeof label === 'string' ? label : label.name));
+    if (labels.has('requirement') && String(issue.state).toLowerCase() === 'open') issues.push(issue);
   }
   return issues;
 }
@@ -293,34 +347,61 @@ async function closePullRequest(owner, name, number, token) {
   });
 }
 
-async function runPrGate() {
+async function discoverPreMergeRequirements() {
+  const event = JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'));
+  const [owner, name] = process.env.GITHUB_REPOSITORY.split('/');
+  const pr = event.pull_request;
+  if (!owner || !name || !pr) throw new Error('pull_request event context is required');
+  const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
+  const requirements = await preMergeRequirementIssues({ owner, name, body: pr.body, token });
+  process.stdout.write(JSON.stringify(requirements.map((issue) => String(issue.number)).sort((a, b) => Number(a) - Number(b))) + '\n');
+}
+
+async function runPrGate({ mode = 'merge', discovery = 'closing' } = {}) {
   const event = JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'));
   const [owner, name] = process.env.GITHUB_REPOSITORY.split('/');
   const pr = event.pull_request;
   const number = pr?.number ?? event.number;
   if (!owner || !name || !number || !pr) throw new Error('pull_request event context is required');
   const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
-  const requirements = await closingRequirementIssues({ owner, name, body: pr.body, token });
+  const requirements = discovery === 'pre-merge'
+    ? await preMergeRequirementIssues({ owner, name, body: pr.body, token })
+    : await closingRequirementIssues({ owner, name, body: pr.body, token });
   const failures = [];
   for (const issue of requirements) {
-    const result = validateRequirementBody(issue.body, { mode: 'merge' });
-    if (!result.ok) failures.push(formatErrors(issue.number, result.errors, 'merge'));
-    else if (result.deferredPostMergeCount > 0) {
+    const result = validateRequirementBody(issue.body, { mode });
+    if (!result.ok) failures.push(formatErrors(issue.number, result.errors, mode));
+    else if (mode === 'merge' && result.deferredPostMergeCount > 0) {
       console.log(`Requirement #${issue.number}: merge-ready with ${result.deferredPostMergeCount} deferred post-merge criterion/criteria.`);
     } else {
-      console.log(`Requirement #${issue.number}: ${result.criteriaCount} criteria accepted before merge.`);
+      console.log(
+        mode === 'pre-merge'
+          ? `Requirement #${issue.number}: pre-merge criteria accepted.`
+          : `Requirement #${issue.number}: ${result.criteriaCount} criteria accepted before merge.`,
+      );
     }
   }
   if (failures.length) {
     if (pr.state !== 'closed') {
       await closePullRequest(owner, name, number, token);
-      console.error(`PR #${number} was closed because requirement acceptance is incomplete. Fix acceptance, then reopen the PR.`);
+      console.error(
+        mode === 'pre-merge'
+          ? `PR #${number} was closed because pre-merge requirement acceptance is incomplete. Fix acceptance, then reopen the PR.`
+          : `PR #${number} was closed because requirement acceptance is incomplete. Fix acceptance, then reopen the PR.`,
+      );
     }
-    throw new Error(`Requirement acceptance gate failed:\n\n${failures.join('\n\n')}`);
+    throw new Error(
+      mode === 'pre-merge'
+        ? `Pre-merge requirement acceptance gate failed:\n\n${failures.join('\n\n')}`
+        : `Requirement acceptance gate failed:\n\n${failures.join('\n\n')}`,
+    );
   }
-  console.log(`Requirement acceptance gate passed for PR #${number} (${requirements.length} requirement issue(s)).`);
+  console.log(
+    mode === 'pre-merge'
+      ? `Pre-merge requirement acceptance gate passed for PR #${number} (${requirements.length} requirement issue(s)).`
+      : `Requirement acceptance gate passed for PR #${number} (${requirements.length} requirement issue(s)).`,
+  );
 }
-
 async function runIssueCloseGuard() {
   const event = JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'));
   const issue = event.issue;
@@ -385,6 +466,12 @@ function postMergePendingBody(evidence = 'requires production deployment; verify
 function runSelfTest() {
   const cases = [
     ['valid accepted requirement', validBody(), 'closure', true, null],
+    ['pre-merge ignores later-stage pending criteria', validBody()
+      .replace('- [x] SC-02 behaves', '- [ ] SC-02 behaves')
+      .replace('| SC-02 | staging | N/A | superseded by #88 after requirement amendment |', '| SC-02 | staging | Pending | verify after staging deployment |'), 'pre-merge', true, null],
+    ['pre-merge still requires pre-merge criteria', validBody()
+      .replace('- [x] SC-01 works', '- [ ] SC-01 works')
+      .replace('| SC-01 | pre-merge | Pass | unit test: scripts/foo.test |', '| SC-01 | pre-merge | Pending | implementation not yet verified |'), 'pre-merge', false, 'SC-01 is not checked'],
     ['h2 success criteria remains supported', validBody().replace('### Success Criteria', '## Success Criteria'), 'closure', true, null],
     ['legacy three-column report remains supported', validLegacyBody(), 'closure', true, null],
     ['missing success criteria', '## Acceptance Report\n\n| Criterion | Stage | Result | Evidence |\n|---|---|---|---|', 'closure', false, 'missing Success Criteria section'],
@@ -417,19 +504,25 @@ function runSelfTest() {
     [12, 13, 14],
   );
   assert.deepEqual(
+    parsePreMergeIssueNumbers('Implements #30\nCloses #31\nRefs #32', 'BestNathan', 'nession'),
+    [30, 31],
+  );
+  assert.deepEqual(
     parseClosingIssueNumbers('`Closes #20`\n> Closes #21\n```md\nCloses #22\n```\n<!-- Closes #23 -->\nCloses #24', 'BestNathan', 'nession'),
     [24],
   );
 
-  console.log(`requirement-acceptance self-test: ${cases.length + 2} cases passed`);
+  console.log(`requirement-acceptance self-test: ${cases.length + 3} cases passed`);
 }
 
 async function main() {
   const command = process.argv[2];
   if (command === 'self-test') return runSelfTest();
+  if (command === 'discover-pre-merge') return discoverPreMergeRequirements();
+  if (command === 'pre-merge-pr-gate') return runPrGate({ mode: 'pre-merge', discovery: 'pre-merge' });
   if (command === 'pr-gate') return runPrGate();
   if (command === 'issue-close-guard') return runIssueCloseGuard();
-  throw new Error('usage: node scripts/requirement-acceptance.mjs <self-test|pr-gate|issue-close-guard>');
+  throw new Error('usage: node scripts/requirement-acceptance.mjs <self-test|discover-pre-merge|pre-merge-pr-gate|pr-gate|issue-close-guard>');
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
