@@ -57,9 +57,19 @@ jobs:
             echo "Invalid workflow run id: ${run_id}" >&2
             exit 1
           fi
-          run_attempt="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}" --jq '.run_attempt')"
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}" > "${RUNNER_TEMP}/telemetry-source-run.json"
+          provenance="$(node trusted/scripts/agent-workflow-telemetry-contract.mjs provenance "${RUNNER_TEMP}/telemetry-source-run.json")"
+
+          run_attempt="$(jq -r '.github_run_attempt' <<<"${provenance}")"
+          source_path="$(jq -r '.path' <<<"${provenance}")"
+          source_event="$(jq -r '.event' <<<"${provenance}")"
+          expected_workflow_id="$(jq -r '.workflow_id' <<<"${provenance}")"
+
           echo "run_id=${run_id}" >> "${GITHUB_OUTPUT}"
           echo "run_attempt=${run_attempt}" >> "${GITHUB_OUTPUT}"
+          echo "source_path=${source_path}" >> "${GITHUB_OUTPUT}"
+          echo "source_event=${source_event}" >> "${GITHUB_OUTPUT}"
+          echo "expected_workflow_id=${expected_workflow_id}" >> "${GITHUB_OUTPUT}"
 
       - name: Discover Agent telemetry artifacts
         id: artifacts
@@ -106,6 +116,7 @@ jobs:
           METRICS_DIR: ${{ github.workspace }}/metrics-store
           SOURCE_RUN_ID: ${{ steps.source.outputs.run_id }}
           SOURCE_RUN_ATTEMPT: ${{ steps.source.outputs.run_attempt }}
+          EXPECTED_WORKFLOW_ID: ${{ steps.source.outputs.expected_workflow_id }}
         run: |
           set -euo pipefail
           found=0
@@ -118,7 +129,12 @@ jobs:
             record_run_id="$(jq -r '.identity.github_run_id' "${file}")"
             record_attempt="$(jq -r '.identity.github_run_attempt' "${file}")"
             record_repo="$(jq -r '.identity.repository' "${file}")"
+            record_workflow_id="$(jq -r '.identity.workflow_id' "${file}")"
 
+            [[ "${record_workflow_id}" == "${EXPECTED_WORKFLOW_ID}" ]] || {
+              echo "Telemetry workflow id ${record_workflow_id} does not match trusted source ${EXPECTED_WORKFLOW_ID}: ${file}" >&2
+              exit 1
+            }
             [[ "${record_run_id}" == "${SOURCE_RUN_ID}" ]] || {
               echo "Telemetry run id ${record_run_id} does not match source run ${SOURCE_RUN_ID}: ${file}" >&2
               exit 1
@@ -156,6 +172,8 @@ jobs:
             echo "## Metrics Ingest"
             echo
             echo "- Source run: ${SOURCE_RUN_ID} attempt ${SOURCE_RUN_ATTEMPT}"
+            echo "- Trusted workflow: ${{ steps.source.outputs.source_path }} (${{ steps.source.outputs.source_event }})"
+            echo "- Canonical workflow ID: ${EXPECTED_WORKFLOW_ID}"
             echo "- Valid telemetry records: ${found}"
             echo "- New immutable records: ${changed}"
           } >> "${GITHUB_STEP_SUMMARY}"
