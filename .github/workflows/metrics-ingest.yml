@@ -57,38 +57,13 @@ jobs:
             echo "Invalid workflow run id: ${run_id}" >&2
             exit 1
           fi
-          source_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}")"
-          run_attempt="$(jq -r '.run_attempt' <<<"${source_json}")"
-          source_path="$(jq -r '.path' <<<"${source_json}")"
-          source_event="$(jq -r '.event' <<<"${source_json}")"
-          source_branch="$(jq -r '.head_branch // ""' <<<"${source_json}")"
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}" > "${RUNNER_TEMP}/telemetry-source-run.json"
+          provenance="$(node trusted/scripts/agent-workflow-telemetry-contract.mjs provenance "${RUNNER_TEMP}/telemetry-source-run.json")"
 
-          case "${source_path}:${source_event}" in
-            .github/workflows/acceptance.yml:workflow_dispatch)
-              expected_workflow_id=requirement-acceptance
-              [[ "${source_branch}" == "main" ]] || {
-                echo "Direct Acceptance telemetry is trusted only from main; got branch ${source_branch}" >&2
-                exit 1
-              }
-              ;;
-            .github/workflows/requirement-acceptance.yml:pull_request_target|.github/workflows/requirement-acceptance.yml:issues)
-              expected_workflow_id=requirement-acceptance
-              ;;
-            .github/workflows/issue-audit.yml:issues)
-              expected_workflow_id=issue-audit
-              ;;
-            .github/workflows/issue-audit.yml:workflow_dispatch)
-              expected_workflow_id=issue-audit
-              [[ "${source_branch}" == "main" ]] || {
-                echo "Manual Issue Audit telemetry is trusted only from main; got branch ${source_branch}" >&2
-                exit 1
-              }
-              ;;
-            *)
-              echo "Untrusted telemetry source workflow/event: ${source_path} (${source_event})" >&2
-              exit 1
-              ;;
-          esac
+          run_attempt="$(jq -r '.github_run_attempt' <<<"${provenance}")"
+          source_path="$(jq -r '.path' <<<"${provenance}")"
+          source_event="$(jq -r '.event' <<<"${provenance}")"
+          expected_workflow_id="$(jq -r '.workflow_id' <<<"${provenance}")"
 
           echo "run_id=${run_id}" >> "${GITHUB_OUTPUT}"
           echo "run_attempt=${run_attempt}" >> "${GITHUB_OUTPUT}"
