@@ -48,6 +48,7 @@ jobs:
         run: ./gates/run instruction-contract
       - name: Verify repository tooling
         run: |
+          ./gates/run gate-runtime-contract
           node scripts/collect-repo-health.mjs --self-test
           node scripts/generate-repo-metrics.mjs --self-test
           ./gates/run agent-workflow-telemetry
