@@ -90,6 +90,8 @@ Treat the files themselves as live truth:
 - `.github/workflows/e2e.yml`
 - `.github/workflows/requirement-acceptance.yml`
 - `.github/workflows/acceptance.yml`
+- `.github/workflows/repo-metrics.yml`
+- `.github/workflows/metrics-ingest.yml`
 - `.github/workflows/deploy.yml`
 
 When this Skill and workflow YAML disagree, inspect history/intent and repair the stale prose; do not copy the YAML's rule lists into this Skill.
