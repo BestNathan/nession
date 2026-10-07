@@ -431,7 +431,92 @@ async function capsuleOuterBox(
   });
 }
 
-async function assertCapabilityCountOnlyChangesScrollExtent(
+async function captureProductionWorkspaceCapabilityRow(
+  page: import('@playwright/test').Page,
+  route: string,
+): Promise<{
+  outer: { height: number; bottom: number };
+  ids: string[];
+  states: string[];
+  row: {
+    scrollWidth: number;
+    clientWidth: number;
+    scrollHeight: number;
+    clientHeight: number;
+    contentWidth: number;
+    flexWrap: string;
+  };
+}> {
+  await page.goto(route);
+
+  const capsule = page.getByTestId('workspace-capability-capsule');
+  const scroll = page.getByTestId('workspace-capability-scroll');
+  const outer = await capsuleOuterBox(capsule);
+  const ids = await scroll.locator('button[data-testid^="workspace-tool-"]').evaluateAll((nodes) =>
+    nodes.map((node) => (node.getAttribute('data-testid') ?? '').replace('workspace-tool-', '')),
+  );
+  const states = await scroll.locator('button[data-testid^="workspace-tool-"]').evaluateAll((nodes) =>
+    nodes.map((node) => node.getAttribute('data-capability-state') ?? ''),
+  );
+  const row = await scroll.evaluate((node) => {
+    const entries = Array.from(
+      node.querySelectorAll<HTMLElement>('button[data-testid^="workspace-tool-"]'),
+    );
+    const first = entries[0]?.getBoundingClientRect();
+    const last = entries.at(-1)?.getBoundingClientRect();
+    return {
+      scrollWidth: node.scrollWidth,
+      clientWidth: node.clientWidth,
+      scrollHeight: node.scrollHeight,
+      clientHeight: node.clientHeight,
+      contentWidth: first && last ? last.right - first.left : 0,
+      flexWrap: getComputedStyle(node).flexWrap,
+    };
+  });
+
+  return { outer, ids, states, row };
+}
+
+async function assertProductionCapabilityCountOnlyChangesScrollExtent(
+  page: import('@playwright/test').Page,
+): Promise<void> {
+  // Keep the real Web composition, but make the available band narrow enough
+  // that the registered capability set must exercise the row's overflow path.
+  // This is still registry -> state -> presence -> Workspace presentation ->
+  // binding -> CapabilityCapsule; no DOM entries are manufactured by the test.
+  const originalViewport = page.viewportSize();
+  await page.setViewportSize({ width: 320, height: originalViewport?.height ?? 800 });
+
+  const reduced = await captureProductionWorkspaceCapabilityRow(
+    page,
+    '/#/fixture/workspace?files=unavailable',
+  );
+  const full = await captureProductionWorkspaceCapabilityRow(page, '/#/fixture/workspace');
+
+  expect(reduced.ids).toEqual(['session', 'agent', 'env', 'claude-code', 'git']);
+  expect(full.ids).toEqual(['files', 'session', 'agent', 'env', 'claude-code', 'git']);
+  expect(full.ids.length).toBeGreaterThan(2);
+  expect(full.ids.length).toBe(reduced.ids.length + 1);
+  expect(full.states.every((state) => state !== 'unavailable')).toBe(true);
+
+  // More eligible, view-bound capabilities extend only the row's horizontal
+  // content/scroll axis. The Capsule keeps one row and one vertical object.
+  expect(reduced.row.flexWrap).toBe('nowrap');
+  expect(full.row.flexWrap).toBe('nowrap');
+  expect(full.row.contentWidth).toBeGreaterThan(reduced.row.contentWidth);
+  expect(full.row.scrollWidth).toBeGreaterThan(reduced.row.scrollWidth);
+  expect(full.row.scrollWidth).toBeGreaterThan(full.row.clientWidth);
+  expect(Math.abs(full.row.scrollHeight - reduced.row.scrollHeight)).toBeLessThanOrEqual(1);
+  expect(Math.abs(full.row.clientHeight - reduced.row.clientHeight)).toBeLessThanOrEqual(1);
+  expect(Math.abs(full.outer.height - reduced.outer.height)).toBeLessThanOrEqual(1);
+  expect(Math.abs(full.outer.bottom - reduced.outer.bottom)).toBeLessThanOrEqual(1);
+
+  if (originalViewport) {
+    await page.setViewportSize(originalViewport);
+  }
+}
+
+async function assertCapabilityRowCssStress(
   page: import('@playwright/test').Page,
   experience: 'web' | 'app',
 ): Promise<void> {
@@ -455,11 +540,9 @@ async function assertCapabilityCountOnlyChangesScrollExtent(
     flexWrap: getComputedStyle(node).flexWrap,
   }));
 
-  // Multiply the real rendered capability slots without changing their recipe.
-  // This isolates the family-level count invariant: more eligible capability
-  // entries extend the horizontal axis; they never create another row or
-  // increase/move the Capsule vertically. The Capsule may use available width
-  // before overflow becomes scrollable — SC-20 does not require a fixed width.
+  // Supplemental CSS stress only. SC-20 is proved above through the production
+  // registry/presence/presentation/binding path; these clones intentionally do
+  // not count as product-path evidence.
   await scroll.evaluate((node) => {
     const entries = Array.from(node.children);
     for (let batch = 0; batch < 3; batch += 1) {
@@ -503,18 +586,48 @@ async function assertWebCapsuleOuterGeometry(
   await page.goto('/#/fixture');
   const conversation = await capsuleOuterBox(page.getByTestId('capsule-shell'));
 
-  await page.goto('/#/fixture/workspace');
-  const capability = page.getByTestId('workspace-capability-capsule');
-  const active = await capsuleOuterBox(capability);
+  const lifecycle = [
+    {
+      state: 'available',
+      route: '/#/fixture/workspace?capability=claude-code&pane=zsh',
+    },
+    {
+      state: 'relevant',
+      route: '/#/fixture/workspace?capability=claude-code&pane=zsh&observed=claude.exe',
+    },
+    {
+      state: 'active',
+      route: '/#/fixture/workspace?capability=claude-code&pane=claude.exe',
+    },
+  ] as const;
 
-  // The reciprocal long control is one Web Capsule family. Switching surface
-  // changes content/role, not vertical mass.
-  expect(Math.abs(active.height - conversation.height)).toBeLessThanOrEqual(1);
+  let lifecycleBaseline: { height: number; bottom: number } | null = null;
+  for (const probe of lifecycle) {
+    await page.goto(probe.route);
+    const entry = page.getByTestId('workspace-tool-claude-code');
+    await expect(entry).toHaveAttribute('data-capability-state', probe.state);
+    await expect(entry).toHaveAttribute('aria-pressed', 'true');
 
+    const box = await capsuleOuterBox(page.getByTestId('workspace-capability-capsule'));
+    expect(Math.abs(box.height - conversation.height)).toBeLessThanOrEqual(1);
+    if (lifecycleBaseline) {
+      expect(Math.abs(box.height - lifecycleBaseline.height)).toBeLessThanOrEqual(1);
+      expect(Math.abs(box.bottom - lifecycleBaseline.bottom)).toBeLessThanOrEqual(1);
+    } else {
+      lifecycleBaseline = box;
+    }
+  }
+
+  if (!lifecycleBaseline) {
+    throw new Error('the lifecycle fixture must produce a Workspace Capsule');
+  }
+
+  // Selection is a separate axis from lifecycle state (#1458). Switch the
+  // selected capability and prove the outer object still keeps its geometry.
   await page.goto('/#/fixture/workspace?capability=git');
-  const inactive = await capsuleOuterBox(page.getByTestId('workspace-capability-capsule'));
-  expect(Math.abs(inactive.height - active.height)).toBeLessThanOrEqual(1);
-  expect(Math.abs(inactive.bottom - active.bottom)).toBeLessThanOrEqual(1);
+  const switched = await capsuleOuterBox(page.getByTestId('workspace-capability-capsule'));
+  expect(Math.abs(switched.height - lifecycleBaseline.height)).toBeLessThanOrEqual(1);
+  expect(Math.abs(switched.bottom - lifecycleBaseline.bottom)).toBeLessThanOrEqual(1);
 
   // Deliberately force a label far beyond the slot. Normal capability identity
   // is bounded by shortTitle now; this keeps truncation as the final defensive
@@ -524,8 +637,8 @@ async function assertWebCapsuleOuterGeometry(
       'Environment Configuration and Runtime Diagnostics with a Deliberately Long Name';
   });
   const longLabel = await capsuleOuterBox(page.getByTestId('workspace-capability-capsule'));
-  expect(Math.abs(longLabel.height - active.height)).toBeLessThanOrEqual(1);
-  expect(Math.abs(longLabel.bottom - active.bottom)).toBeLessThanOrEqual(1);
+  expect(Math.abs(longLabel.height - lifecycleBaseline.height)).toBeLessThanOrEqual(1);
+  expect(Math.abs(longLabel.bottom - lifecycleBaseline.bottom)).toBeLessThanOrEqual(1);
 }
 
 async function assertDestinationSharesCapsuleMaterial(
@@ -670,8 +783,8 @@ for (const row of viewports.filter((v) => v.experience === 'web')) {
       await assertWebCapsuleOuterGeometry(page);
     });
 
-    test('Workspace Capsule capability count changes horizontal scroll extent only (#1455)', async ({ page }) => {
-      await assertCapabilityCountOnlyChangesScrollExtent(page, 'web');
+    test('Workspace Capsule production capability set changes horizontal scroll extent only (#1455)', async ({ page }) => {
+      await assertProductionCapabilityCountOnlyChangesScrollExtent(page);
     });
 
     test('destination actions share Capsule material without sharing its radius (#1455)', async ({ page }) => {
@@ -926,8 +1039,8 @@ for (const row of viewports.filter((v) => v.experience === 'app')) {
     });
 
 
-    test('App Capability Capsule capability count changes horizontal scroll extent only (#1455)', async ({ page }) => {
-      await assertCapabilityCountOnlyChangesScrollExtent(page, 'app');
+    test('App Capability Capsule keeps one row under synthetic overflow stress (#1455)', async ({ page }) => {
+      await assertCapabilityRowCssStress(page, 'app');
     });
 
     test('App working state ring is quiet but perceptible (#1455)', async ({ page }) => {
