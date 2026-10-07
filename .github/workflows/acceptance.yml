@@ -66,6 +66,9 @@ on:
 permissions:
   contents: read
 
+env:
+  NSESSION_AGENT_WORKFLOW_ID: requirement-acceptance
+
 concurrency:
   group: acceptance-${{ inputs.issue_number }}-${{ inputs.stage }}
   cancel-in-progress: false
@@ -217,7 +220,16 @@ jobs:
         working-directory: trusted
         run: |
           set -euo pipefail
-          node scripts/acceptance-agent.mjs             "${RUNNER_TEMP}/acceptance-context.json" "${ACCEPTANCE_PROVIDER}"             "${GITHUB_WORKSPACE}/workspace" "${RUNNER_TEMP}/acceptance-raw.json"
+          node scripts/acceptance-agent.mjs             "${RUNNER_TEMP}/acceptance-context.json"             "${ACCEPTANCE_PROVIDER}"             "${GITHUB_WORKSPACE}/workspace"             "${RUNNER_TEMP}/acceptance-raw.json"             "${RUNNER_TEMP}/agent-telemetry.json"
+
+      - name: Upload canonical Agent telemetry
+        if: always() && inputs.deterministic_result_json == '' && steps.prepare.outputs.has_criteria == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-telemetry-requirement-acceptance-${{ inputs.issue_number }}-${{ inputs.stage }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/agent-telemetry.json
+          if-no-files-found: warn
+          retention-days: 30
 
       - name: Select structured-result source
         id: source
