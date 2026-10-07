@@ -109,8 +109,15 @@ export const capsuleFloatingSurfaceClass = cn(
 
 export const capsuleShellSurfaceClass = capsuleFloatingSurfaceClass;
 
-/** Quiet but perceivable ambient working state around the + affordance. */
-export const capsuleWorkRingClass = 'text-muted-foreground';
+/**
+ * Quiet but perceivable ambient working state around the + affordance.
+ *
+ * `muted-foreground` measured only 2.53:1 against the Capsule surface in the
+ * canonical browser matrix. The secondary text semantic remains below primary
+ * foreground emphasis while clearing the 3:1 non-text state-signal relation.
+ */
+export const capsuleWorkRingClass =
+  'text-[color:var(--nession-text-secondary)]';
 
 /**
  * Canonical visual grammar for the dock's one upper Capsule slot (#1446).
@@ -201,7 +208,11 @@ export function capsuleOuterGeometry(
     // exactly one of the two.
     shellClass: [
       'pointer-events-auto flex min-h-[length:var(--nession-control-md)] items-center overflow-hidden',
-      width === 'stretch' ? 'w-full' : 'max-w-full',
+      // Flex items default to min-width:auto, which lets the scrolling row's
+      // min-content width enlarge the Capsule instead of creating inner
+      // overflow. min-w-0 is therefore part of the outer geometry contract:
+      // capability count may grow scrollWidth, never the Capsule itself.
+      width === 'stretch' ? 'min-w-0 w-full' : 'min-w-0 max-w-full',
       capsuleShellSurfaceClass,
       shape === 'pill' ? capsuleShellPillRadiusClass : capsuleShellCapsuleRadiusClass,
       capsuleShellInnerPadClass,
