@@ -71,6 +71,12 @@ capture 2 "$TMP_DIR/syntax.out" "$TMP_DIR/repo/gates/run" --validate
 assert_contains "$TMP_DIR/syntax.out" '[ERROR] gate shell syntax invalid: broken'
 rm -f "$TMP_DIR/repo/gates/checks/broken.sh"
 
+make_gate nonexec 0
+chmod -x "$TMP_DIR/repo/gates/checks/nonexec.sh"
+capture 2 "$TMP_DIR/nonexec.out" "$TMP_DIR/repo/gates/run" --validate
+assert_contains "$TMP_DIR/nonexec.out" '[ERROR] gate is not executable: nonexec'
+rm -f "$TMP_DIR/repo/gates/checks/nonexec.sh"
+
 capture 0 "$TMP_DIR/suites.out" "$TMP_DIR/repo/gates/run" --list-suites
 assert_contains "$TMP_DIR/suites.out" 'sample'
 
