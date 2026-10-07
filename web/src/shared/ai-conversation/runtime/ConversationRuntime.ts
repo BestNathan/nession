@@ -118,7 +118,7 @@ export interface AIConversationSnapshot {
   hasMore: boolean
   /** The transcript ended mid-record — normal for one being appended to. */
   partialTail: boolean
-  /** Records the adapter could not model, so the surface can say so. */
+  /** Safe lower bound for records omitted somewhere in the loaded window. */
   skipped: number
   /**
    * Whether the *list* is being read.
