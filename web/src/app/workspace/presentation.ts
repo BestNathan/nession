@@ -1,11 +1,8 @@
-import {
-  resolveCapabilityDisclosure,
-  type CapabilityId,
-  type CapabilityPresence,
-  type CapabilitySnapshot,
+import type {
+  CapabilityId,
+  CapabilityPresence,
+  CapabilitySnapshot,
 } from '@/product/capability';
-
-export const WORKSPACE_DIRECT_CAPABILITY_LIMIT = 2;
 
 export interface WorkspacePresentationItem {
   snapshot: CapabilitySnapshot;
@@ -16,70 +13,54 @@ export interface WorkspacePresentationModel {
   /** The explicitly opened capability, even when it has become hidden/unavailable. */
   opened?: WorkspacePresentationItem;
   /**
-   * Visible capabilities allowed into direct chrome, in registration order.
+   * Every lifecycle-visible capability that has a Workspace view, in registry order.
    *
-   * One list, not an opened-first split: the opened capability's privilege is
-   * *membership* — it keeps a direct slot even past the cap — not placement.
-   * Activation is drawn on the entry (selected state), never by moving it
-   * (owner follow-up, 2026-10-03).
+   * Workspace no longer has a second disclosure owner. #1347 retired the old
+   * direct-slot cap / More model; the bounded Capsule row itself owns overflow
+   * through horizontal scrolling.
    */
-  direct: WorkspacePresentationItem[];
-  /** Visible capabilities intentionally revealed through More/discovery. */
-  discoverable: WorkspacePresentationItem[];
+  items: WorkspacePresentationItem[];
 }
 
 export interface WorkspacePresentationInput {
   snapshots: readonly CapabilitySnapshot[];
   presences: readonly CapabilityPresence[];
   openedCapabilityId?: CapabilityId | null;
-  directLimit?: number;
+  /** Capability ids that have a concrete Workspace view binding. */
+  viewBoundCapabilityIds: ReadonlySet<CapabilityId>;
 }
 
 /**
  * Nession-owned Workspace presentation policy.
  *
- * The rule that decides slot / disclosure / absence lives in the capability
- * layer (`resolveCapabilityDisclosure`); what belongs to the Workspace is how
- * many direct slots it has and that the opened capability keeps one of them.
- * Every list here comes back in registration order — the disclosure resolver
- * may lead with the pinned capability, and that ordering is deliberately
- * undone, because a surface places entries by registration and marks the
- * opened one in place (owner follow-up, 2026-10-03).
+ * Capability state is resolved upstream, then presence decides hidden vs visible.
+ * Workspace adds exactly one rule: only capabilities with a Workspace view may
+ * enter its navigation row. The row preserves registry order and never re-ranks,
+ * caps, or partitions entries into a second disclosure path.
  */
 export function buildWorkspacePresentationModel({
   snapshots,
   presences,
   openedCapabilityId,
-  directLimit = WORKSPACE_DIRECT_CAPABILITY_LIMIT,
+  viewBoundCapabilityIds,
 }: WorkspacePresentationInput): WorkspacePresentationModel {
-  const items = snapshots.flatMap((snapshot) => {
-    const presence = presences.find((candidate) => candidate.capabilityId === snapshot.id);
+  const presenceById = new Map(
+    presences.map((presence) => [presence.capabilityId, presence]),
+  );
+
+  const allItems = snapshots.flatMap((snapshot) => {
+    const presence = presenceById.get(snapshot.id);
     return presence ? [{ snapshot, presence }] : [];
   });
-  const itemById = new Map(items.map((item) => [item.snapshot.id, item]));
-
-  const disclosure = resolveCapabilityDisclosure(presences, {
-    directLimit,
-    pinned: openedCapabilityId ? [openedCapabilityId] : [],
-  });
-
-  const registrationOrder = new Map(snapshots.map((snapshot, index) => [snapshot.id, index]));
-  const direct = disclosure.direct
-    .flatMap((presence) => {
-      const item = itemById.get(presence.capabilityId);
-      return item ? [item] : [];
-    })
-    .sort(
-      (a, b) =>
-        (registrationOrder.get(a.snapshot.id) ?? 0) - (registrationOrder.get(b.snapshot.id) ?? 0),
-    );
 
   return {
-    opened: openedCapabilityId ? itemById.get(openedCapabilityId) : undefined,
-    direct,
-    discoverable: disclosure.discoverable.flatMap((presence) => {
-      const item = itemById.get(presence.capabilityId);
-      return item ? [item] : [];
-    }),
+    opened: openedCapabilityId
+      ? allItems.find((item) => item.snapshot.id === openedCapabilityId)
+      : undefined,
+    items: allItems.filter(
+      (item) =>
+        item.presence.level !== 'hidden' &&
+        viewBoundCapabilityIds.has(item.snapshot.id),
+    ),
   };
 }

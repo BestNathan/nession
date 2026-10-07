@@ -8,11 +8,7 @@ import { cn } from '@/shared/lib/utils';
 import { useWorkspaceCapsuleClearance } from '@/app/workspace/hooks/useWorkspaceCapsuleClearance';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import { resolveWorkspaceCapabilities } from '@/app/workspace/capabilities';
-import {
-  buildWorkspacePresentationModel,
-  type WorkspacePresentationItem,
-  type WorkspacePresentationModel,
-} from '@/app/workspace/presentation';
+import { buildWorkspacePresentationModel } from '@/app/workspace/presentation';
 import { WORKSPACE_VIEW_BINDINGS } from '@/app/workspace/viewBindings';
 import type {
   WorkspaceContext,
@@ -24,6 +20,9 @@ import { capsuleZoneAppClass, capsuleZoneClass } from '@/product/terminal/capsul
 
 const workspaceViewBindings = new Map<string, WorkspaceViewBinding>(
   WORKSPACE_VIEW_BINDINGS.map((view) => [view.id, view]),
+);
+const workspaceViewBoundCapabilityIds = new Set<CapabilityId>(
+  WORKSPACE_VIEW_BINDINGS.map((view) => view.id),
 );
 
 export interface WorkspaceShellProps {
@@ -57,32 +56,6 @@ export interface WorkspaceShellProps {
  * `undefined` at the point an App view is rendered.
  */
 const NO_DEPTH_CONTROL: WorkspaceDepthControl = { setPush: () => undefined };
-
-function bindingFor(item: WorkspacePresentationItem): WorkspaceViewBinding | undefined {
-  return workspaceViewBindings.get(item.snapshot.id);
-}
-
-/**
- * The capsule row: every capability that holds a slot, in registration order.
- *
- * Membership comes from the presentation model (which groups a capability's
- * slot by presence); placement comes from the binding registry, so the row
- * never reorders itself around the open capability (see the call site).
- */
-function resolveCapsuleItems(
-  presentation: WorkspacePresentationModel,
-): WorkspacePresentationItem[] {
-  const itemById = new Map(
-    [...presentation.direct, ...presentation.discoverable]
-      .filter(bindingFor)
-      .map((item) => [item.snapshot.id, item]),
-  );
-  return WORKSPACE_VIEW_BINDINGS.flatMap((view) => {
-    const item = itemById.get(view.id);
-    return item ? [item] : [];
-  });
-}
-
 
 /**
  * Surface navigation (#1204): the destination action's own `nav`, adjacent to
@@ -124,9 +97,10 @@ function UnavailableCapability({ title }: { title: string }) {
 }
 
 /**
- * Workspace framework: semantic capabilities resolve first, then a bounded
- * Nession-owned presentation model decides what earns direct presence and what
- * stays progressively discoverable through More.
+ * Workspace framework: semantic capabilities resolve first, then one
+ * Nession-owned presentation model yields the lifecycle-visible, view-bound
+ * registration-ordered row. Overflow belongs to the row itself, not to a
+ * second direct/More disclosure owner.
  */
 export function WorkspaceShell({
   ctx,
@@ -155,6 +129,7 @@ export function WorkspaceShell({
     snapshots: resolution.snapshots,
     presences,
     openedCapabilityId: activeCapabilityId,
+    viewBoundCapabilityIds: workspaceViewBoundCapabilityIds,
   });
 
   const openedPresence = presentation.opened?.presence;
@@ -181,9 +156,9 @@ export function WorkspaceShell({
   // *marked* by its entry surface, never moved. The owner's follow-up settled
   // this: activation is not placement, so the entry under the thumb stays where
   // it was and a row does not reshuffle itself as the work changes. The
-  // presentation model still decides *membership* (which capabilities hold
-  // slots at all); placement here is the binding registry's own order.
-  const allCapsuleItems = resolveCapsuleItems(presentation);
+  // presentation model is now the single membership/order owner: it already
+  // removed hidden and unbound capabilities and preserved registry order.
+  const allCapsuleItems = presentation.items;
   const hasNavigation = allCapsuleItems.length > 0;
   // Owner decision 2026-10-03, superseding `#1051`'s dock half: **the capsule
   // is present at every Workspace depth.** The old rule hid it over a pushed
