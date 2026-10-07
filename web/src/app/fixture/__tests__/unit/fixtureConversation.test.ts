@@ -297,8 +297,10 @@ describe('fixture conversation surface', () => {
 
     expect(work.activity).toBe('active');
     expect(work.partial_tail).toBe(false);
-    expect((work.items ?? []).filter((item) => item.kind === 'message' && item.role === 'assistant').at(-1)?.id)
-      .not.toBe('stream-answer');
+    const workAssistants = (work.items ?? []).filter(
+      (item) => item.kind === 'message' && item.role === 'assistant',
+    );
+    expect(workAssistants[workAssistants.length - 1]?.id).not.toBe('stream-answer');
 
     expect(stream.activity).toBe('active');
     expect(stream.partial_tail).toBe(true);
@@ -309,8 +311,10 @@ describe('fixture conversation surface', () => {
     const settledIds = (settled.items ?? []).map((item) => item.id);
     expect(settledIds).toEqual(streamIds);
 
-    const statusOf = (page: MessagesResponse, id: string) =>
-      (page.items ?? []).find((item) => item.id === id && item.kind === 'tool')?.tool.status;
+    const statusOf = (page: MessagesResponse, id: string) => {
+      const item = (page.items ?? []).find((candidate) => candidate.id === id);
+      return item?.kind === 'tool' ? item.tool.status : undefined;
+    };
 
     expect(statusOf(work, 'stream-tool-read')).toBe('running');
     expect(statusOf(stream, 'stream-tool-read')).toBe('success');

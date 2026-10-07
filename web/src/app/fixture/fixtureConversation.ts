@@ -844,6 +844,26 @@ function activePage(conversation: ConversationItemV1, items: MessageItemV1[]): M
   };
 }
 
+function acceptancePageFor(
+  scenario: string,
+  conversation: ConversationItemV1,
+  streamingPhase: number,
+): MessagesResponse | null {
+  if (scenario === 'streaming') {
+    const phase = Math.max(0, Math.min(streamingPhase, 2));
+    return {
+      state: 'ready',
+      conversation,
+      activity: phase >= 2 ? 'inactive' : 'active',
+      items: streamingItems(phase),
+      has_more: false,
+      partial_tail: phase === 1,
+      skipped: 0,
+    };
+  }
+  return scenario === 'tool-scroll' ? activePage(conversation, TOOL_SCROLL_ITEMS) : null;
+}
+
 /**
  * What the `messages` unit answers for a named scenario and an explicit id.
  *
@@ -881,6 +901,12 @@ function messagesFor(
       skipped: 0,
     };
   }
+
+  const acceptancePage = acceptancePageFor(scenario, named, streamingPhase);
+  if (acceptancePage !== null) {
+    return acceptancePage;
+  }
+
   switch (scenario) {
     case 'list-stale':
     case 'thread-unavailable':
@@ -900,20 +926,6 @@ function messagesFor(
         partial_tail: false,
         skipped: 0,
       };
-    case 'streaming': {
-      const phase = Math.max(0, Math.min(streamingPhase, 2));
-      return {
-        state: 'ready',
-        conversation: named,
-        activity: phase >= 2 ? 'inactive' : 'active',
-        items: streamingItems(phase),
-        has_more: false,
-        partial_tail: phase === 1,
-        skipped: 0,
-      };
-    }
-    case 'tool-scroll':
-      return activePage(named, TOOL_SCROLL_ITEMS);
     case 'ready':
       return activePage(named, ITEMS);
     case 'paged': {
