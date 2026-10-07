@@ -452,12 +452,14 @@ async function assertCapabilityCountOnlyChangesScrollExtent(
     scrollHeight: node.scrollHeight,
     clientHeight: node.clientHeight,
     childCount: node.children.length,
+    flexWrap: getComputedStyle(node).flexWrap,
   }));
 
   // Multiply the real rendered capability slots without changing their recipe.
   // This isolates the family-level count invariant: more eligible capability
-  // entries may extend only the horizontal scroll axis, never create another
-  // row or change the Capsule's outer geometry.
+  // entries extend the horizontal axis; they never create another row or
+  // increase/move the Capsule vertically. The Capsule may use available width
+  // before overflow becomes scrollable — SC-20 does not require a fixed width.
   await scroll.evaluate((node) => {
     const entries = Array.from(node.children);
     for (let batch = 0; batch < 3; batch += 1) {
@@ -482,11 +484,13 @@ async function assertCapabilityCountOnlyChangesScrollExtent(
     scrollHeight: node.scrollHeight,
     clientHeight: node.clientHeight,
     childCount: node.children.length,
+    flexWrap: getComputedStyle(node).flexWrap,
   }));
 
+  expect(before.flexWrap).toBe('nowrap');
+  expect(after.flexWrap).toBe('nowrap');
   expect(after.childCount).toBeGreaterThan(before.childCount);
   expect(after.scrollWidth).toBeGreaterThan(before.scrollWidth);
-  expect(after.clientWidth).toBe(before.clientWidth);
   expect(Math.abs(after.scrollHeight - before.scrollHeight)).toBeLessThanOrEqual(1);
   expect(Math.abs(after.clientHeight - before.clientHeight)).toBeLessThanOrEqual(1);
   expect(Math.abs(afterOuter.height - beforeOuter.height)).toBeLessThanOrEqual(1);
@@ -572,15 +576,24 @@ async function assertWorkRingPerceptible(
     const surface = document.querySelector<HTMLElement>('[data-testid="capsule-shell"]');
     if (!surface) throw new Error('capsule-shell not found');
 
-    const parseRgb = (value: string): [number, number, number] => {
-      const values = value.match(/[0-9.]+/g)?.slice(0, 3).map(Number);
-      if (!values || values.length !== 3 || values.some((part) => !Number.isFinite(part))) {
-        throw new Error(`unsupported computed color: ${value}`);
-      }
-      return values as [number, number, number];
+    // Chromium preserves modern CSS colors such as oklch() in computed style.
+    // Rasterize a 1px fill so the browser performs the CSS Color -> device-sRGB
+    // conversion before applying the WCAG relative-luminance calculation.
+    const canvas = document.createElement('canvas');
+    canvas.width = 1;
+    canvas.height = 1;
+    const context = canvas.getContext('2d', { willReadFrequently: true });
+    if (!context) throw new Error('2d canvas context unavailable');
+
+    const toRgb = (value: string): [number, number, number] => {
+      context.clearRect(0, 0, 1, 1);
+      context.fillStyle = value;
+      context.fillRect(0, 0, 1, 1);
+      const [r, g, b] = context.getImageData(0, 0, 1, 1).data;
+      return [r, g, b];
     };
     const luminance = (value: string): number => {
-      const [r, g, b] = parseRgb(value).map((part) => {
+      const [r, g, b] = toRgb(value).map((part) => {
         const channel = part / 255;
         return channel <= 0.04045
           ? channel / 12.92
