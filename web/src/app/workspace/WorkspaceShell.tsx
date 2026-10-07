@@ -156,9 +156,9 @@ export function WorkspaceShell({
   // *marked* by its entry surface, never moved. The owner's follow-up settled
   // this: activation is not placement, so the entry under the thumb stays where
   // it was and a row does not reshuffle itself as the work changes. The
-  // presentation model still decides *membership* (which capabilities hold
-  // slots at all); placement here is the binding registry's own order.
-  const allCapsuleItems = resolveCapsuleItems(presentation);
+  // presentation model is now the single membership/order owner: it already
+  // removed hidden and unbound capabilities and preserved registry order.
+  const allCapsuleItems = presentation.items;
   const hasNavigation = allCapsuleItems.length > 0;
   // Owner decision 2026-10-03, superseding `#1051`'s dock half: **the capsule
   // is present at every Workspace depth.** The old rule hid it over a pushed
