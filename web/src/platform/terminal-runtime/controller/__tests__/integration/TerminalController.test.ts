@@ -373,7 +373,7 @@ describe('TerminalController', () => {
     controller.detach();
   });
 
-  it('reports hasSessionOutput only once output has arrived, bootstrap included', () => {
+  it('reports hasSessionOutput only once output has arrived, bootstrap included', async () => {
     const transport = makeTransport();
     const controller = new TerminalController(makeSession(), () => transport);
     controller.attach(host());
@@ -387,8 +387,56 @@ describe('TerminalController', () => {
     controller.write('local banner');
     expect(controller.hasSessionOutput).toBe(false);
 
+    // A snapshot is handed over, not held: the flag answers "does my Terminal
+    // hold the session's history", and xterm has not parsed this yet (#1491).
+    // Lifting it here is how an attach that arrives mid-parse decides it needs
+    // no snapshot — over a buffer that is still empty.
     transport.onOutput!(new Uint8Array([104, 105]), { requestedLines: 5000, truncated: false });
+    expect(controller.hasSessionOutput).toBe(false);
+
+    await flush();
     expect(controller.hasSessionOutput).toBe(true);
+    controller.detach();
+  });
+
+  it('latches hasSessionOutput on arrival for live output, which has no completion (#1491)', () => {
+    const transport = makeTransport();
+    const controller = new TerminalController(makeSession(), () => transport);
+    controller.attach(host());
+
+    // No bootstrap marker: this is the session's stream. Waiting for a write
+    // callback here would report "no session output" for as long as the
+    // callback takes — and there is nothing for it to prove.
+    transport.onOutput!(new Uint8Array([104, 105]));
+    expect(controller.hasSessionOutput).toBe(true);
+    controller.detach();
+  });
+
+  it('ignores a superseded snapshot when it finally lands (#1491)', async () => {
+    const transport = makeTransport();
+    const controller = new TerminalController(makeSession(), () => transport);
+    controller.attach(host());
+
+    // Two snapshots in flight — a re-attach arriving while the first is still
+    // parsing, which is what a large history plus a rewire produces. The first
+    // callback describes a buffer the second one has since erased, so it must
+    // not lift the flag; only the newest snapshot speaks for the buffer.
+    const writes: Array<() => void> = [];
+    const writeSpy = vi.spyOn(controller.terminal!, 'write').mockImplementation(
+      ((_data: unknown, callback?: () => void) => { if (callback) { writes.push(callback); } }) as never,
+    );
+
+    transport.onOutput!(new Uint8Array([49]), { requestedLines: 5000, truncated: false });
+    transport.onOutput!(new Uint8Array([50]), { requestedLines: 5000, truncated: false });
+    expect(writes).toHaveLength(2);
+
+    writes[0]!();  // the superseded snapshot lands
+    expect(controller.hasSessionOutput).toBe(false);
+
+    writes[1]!();  // the one the buffer actually holds
+    expect(controller.hasSessionOutput).toBe(true);
+
+    writeSpy.mockRestore();
     controller.detach();
   });
 
@@ -498,6 +546,62 @@ describe('TerminalController', () => {
       // 1024/8=128, 600/16=37 (8×16 fallback cell size in jsdom).
       expect(transport.sendResize).toHaveBeenCalledWith(128, 37);
     } finally {
+      restore();
+    }
+  });
+
+  it('holds the first PTY size back until the cell box is final, then sends it once (#1490)', async () => {
+    // The defect: xterm measures one cell at open() and caches it, so a grid
+    // computed before the webfont lands is the *fallback's*. That grid was
+    // published and sent, and the font-load correction then sent a second
+    // size — two real resizes of the shared tmux window per page reload, each
+    // repainting an inline-drawing application into its scrollback. The local
+    // grid keeps following the container in the first frame; only the half
+    // that leaves the client waits.
+    const restore = installCapturingResizeObserver();
+    const hadFonts = Object.prototype.hasOwnProperty.call(document, 'fonts');
+    const fontsStub = {
+      status: 'loading' as FontFaceSet['status'],
+      ready: Promise.resolve(),
+      // TerminalInstance warms the terminal face at construction; the stub
+      // only has to not throw there.
+      load: () => Promise.resolve([]),
+    };
+    let resolveReady: () => void = () => {};
+    fontsStub.ready = new Promise<void>((resolve) => { resolveReady = resolve; });
+    Object.defineProperty(document, 'fonts', { configurable: true, value: fontsStub });
+    try {
+      const transport = makeTransport();
+      const controller = new TerminalController(makeSession(), () => transport);
+      controller.attach(host());
+      await flush(); // RAF fires → observe() captures the callback
+
+      const entry = { contentRect: { width: 1024, height: 600 } } as unknown as ResizeObserverEntry;
+      capturedCallback!([entry], capturedObserver!);
+
+      // The local grid follows at once, from the cell box xterm has now
+      // (8×16 fallback cells in jsdom): 1024/8=128, 600/16=37.
+      expect(controller.terminal!.cols).toBe(128);
+      expect(controller.terminal!.rows).toBe(37);
+      // Nothing left the client — this grid is a size the pane never had.
+      expect(transport.sendResize).not.toHaveBeenCalled();
+
+      // The webfont lands: `TerminalInstance`'s font-load correction reports
+      // the grid through onCellSizeChange → remeasure.
+      fontsStub.status = 'loaded';
+      resolveReady();
+      await flush();
+
+      // Exactly one size left the client, and it is the one recomputed at
+      // settle time. The numbers match the pre-font grid here only because
+      // jsdom has no real font metrics; that the *recomputed* size wins over
+      // the `grid` this fire captured is what the browser measurement shows
+      // (one SIGWINCH per reload instead of two — #1490).
+      expect(transport.sendResize).toHaveBeenCalledTimes(1);
+      expect(transport.sendResize).toHaveBeenCalledWith(128, 37);
+      controller.dispose();
+    } finally {
+      if (!hadFonts) { delete (document as { fonts?: unknown }).fonts; }
       restore();
     }
   });
