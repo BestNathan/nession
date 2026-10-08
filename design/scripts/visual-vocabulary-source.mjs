@@ -213,6 +213,44 @@ export function scanVisualUtilitySource(
   return violations;
 }
 
+/**
+ * Cross-file contract for Nession runtime-local CSS variables.
+ * CSS declarations, inline style declarations, and JS setProperty calls are
+ * producers; var() expressions in CSS and TS/TSX are consumers.
+ * Explicit runtime names are required; dynamically composed names cannot be
+ * statically verified and must be expressed through a shared constant.
+ */
+export function scanLocalVariableContracts(files) {
+  const producers = new Map();
+  const consumers = [];
+  const addProducer = (name, file) => {
+    if (!producers.has(name)) producers.set(name, []);
+    producers.get(name).push(file);
+  };
+  for (const { file, source } of files) {
+    const code = maskComments(source);
+    for (const match of code.matchAll(/(--nession-local-[A-Za-z0-9_-]+)\\s*:/g)) {
+      addProducer(match[1], file);
+    }
+    for (const match of code.matchAll(/\\.setProperty\\(\\s*['"`](--nession-local-[A-Za-z0-9_-]+)['"`]/g)) {
+      addProducer(match[1], file);
+    }
+    for (const match of code.matchAll(/\\.setProperty\\(\\s*['"`](--nession-local-[A-Za-z0-9_-]+)['"`]/g)) {
+      addProducer(match[1], file);
+    }
+    for (const match of code.matchAll(/var\\(\\s*(--nession-local-[A-Za-z0-9_-]+)/g)) {
+      consumers.push({ file, line: lineNumber(source, match.index), name: match[1] });
+    }
+  }
+  return consumers.filter(({ name }) => !producers.has(name)).map(({ file, line, name }) => ({
+    file,
+    line,
+    kind: 'undefined-local-variable',
+    actual: `var(${name})`,
+    repair: `declare ${name} in CSS/inline styles or produce it with style.setProperty; don't invent local variables in consumers`,
+  }));
+}
+
 export function scanVisualVocabularySuppression(source, file = '<fixture>') {
   const violations = [];
   for (const match of source.matchAll(/eslint-disable(?:-next-line|-line)?[^\n]*nession\/visual-vocabulary/g)) {
@@ -247,11 +285,13 @@ function walk(dir) {
 
 export function scanRepository(root = ROOT) {
   const violations = [];
+  const sources = [];
   for (const path of walk(join(root, 'web', 'src'))) {
     const ext = extname(path);
     if (!['.css', '.ts', '.tsx', '.js', '.jsx'].includes(ext)) continue;
     const rel = relative(root, path).replaceAll('\\', '/');
     const source = readFileSync(path, 'utf8');
+    if (!isTestSource(rel)) sources.push({ file: rel, source });
     if (ext === '.css') violations.push(...scanCssSource(source, rel));
     if (ext !== '.css') {
       violations.push(...scanVisualVocabularySuppression(source, rel));
@@ -260,6 +300,7 @@ export function scanRepository(root = ROOT) {
       }
     }
   }
+  violations.push(...scanLocalVariableContracts(sources));
   return violations;
 }
 
