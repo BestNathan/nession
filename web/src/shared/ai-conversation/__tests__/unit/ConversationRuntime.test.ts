@@ -994,9 +994,8 @@ describe('ConversationRuntime — round 7 authority and list snapshot boundaries
     runtime.setContext('lease-b')
     await flush()
     expect(runtime.getSnapshot().state).toBe('ready')
-    expect(
-      adapter.calls.filter((call) => call.kind === 'read').at(-1)?.context,
-    ).toBe('lease-b')
+    const reads = adapter.calls.filter((call) => call.kind === 'read')
+    expect(reads[reads.length - 1]?.context).toBe('lease-b')
 
     releaseOld()
     await flush()
