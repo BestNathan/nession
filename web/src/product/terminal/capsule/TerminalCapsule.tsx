@@ -47,6 +47,24 @@ export interface TerminalCapsuleProps {
   workContext?: ResolvedWorkContext;
 }
 
+function useContextPeekFocusIntent(projectionId?: string) {
+  const intentRef = useRef<string | null>(null);
+  const onDeepen = useCallback((capabilityId: string) => {
+    intentRef.current = capabilityId;
+  }, []);
+  const onFocusFromContextHandled = useCallback(() => {
+    if (projectionId && intentRef.current === projectionId) {
+      intentRef.current = null;
+    }
+  }, [projectionId]);
+
+  return {
+    onDeepen,
+    focusFromContext: Boolean(projectionId && intentRef.current === projectionId),
+    onFocusFromContextHandled,
+  };
+}
+
 export function TerminalCapsule({
   sendText,
   sendPhysKey,
@@ -77,6 +95,7 @@ export function TerminalCapsule({
    */
   const projectionOwnsInputFocus = Boolean(capabilityProjection?.ownsInputFocus);
   const projectionId = capabilityProjection?.id ?? null;
+  const peekFocus = useContextPeekFocusIntent(capabilityProjection?.id);
 
   /**
    * The accessory takes the keyboard when it appears.
@@ -169,6 +188,7 @@ export function TerminalCapsule({
         disclosure={capabilityDisclosure}
         workContext={workContext}
         onDismiss={() => restState.setContextOpen(false)}
+        onDeepen={peekFocus.onDeepen}
         triggerRef={restState.contextTriggerRef}
       />
     ) : capabilityProjection ? (
@@ -177,6 +197,9 @@ export function TerminalCapsule({
         sendText={sendText}
         sendPhysKey={sendPhysKey}
         disabled={disabled}
+        triggerRef={restState.contextTriggerRef}
+        focusFromContext={peekFocus.focusFromContext}
+        onFocusFromContextHandled={peekFocus.onFocusFromContextHandled}
       />
     ) : null;
 

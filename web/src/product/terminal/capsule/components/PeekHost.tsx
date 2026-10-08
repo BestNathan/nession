@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { X } from 'lucide-react';
 import {
   Dialog,
@@ -50,6 +50,9 @@ export function PeekHost({
   sendText,
   sendPhysKey,
   disabled,
+  triggerRef,
+  focusFromContext,
+  onFocusFromContextHandled,
 }: {
   projection: CapsuleCapabilityProjection;
   /** How a capability's body reaches the terminal — the capsule owns this. */
@@ -59,8 +62,15 @@ export function PeekHost({
     semanticKey?: import('@/platform/terminal-runtime/interaction/TerminalInteractionController').TerminalSemanticKey;
   }) => void;
   disabled: boolean;
+  /** Stable lower-Capsule trigger that owns focus when this upper layer closes. */
+  triggerRef: React.RefObject<HTMLButtonElement | null>;
+  /** Only explicit Context-row deepening should move focus out of the composer. */
+  focusFromContext: boolean;
+  /** Clears the one-shot Context focus intent after the host consumes it. */
+  onFocusFromContextHandled: () => void;
 }) {
   const [focus, setFocus] = useState<string | undefined>(undefined);
+  const surfaceRef = useRef<HTMLDivElement>(null);
   // The approved child overlay (#1120). Held here rather than by the capability
   // so that placement, dismissal and the accessible name stay the host's — a
   // capability supplies content and nothing else, exactly as it does for the
@@ -68,8 +78,20 @@ export function PeekHost({
   const [detail, setDetail] = useState<CapsuleDetail | null>(null);
   const { title, onDismiss, onOpenWorkspace } = projection;
 
+  usePeekFocusLifecycle({
+    focusFromContext,
+    onFocusFromContextHandled,
+    projectionId: projection.id,
+    surfaceRef,
+    triggerRef,
+  });
+
   return (
     <div
+      ref={surfaceRef}
+      tabIndex={-1}
+      role="region"
+      aria-label={`${title} Peek`}
       data-testid="capsule-capability-projection"
       data-capability={projection.id}
       className={[
@@ -188,3 +210,42 @@ export function PeekHost({
     </div>
   );
 }
+function usePeekFocusLifecycle({
+  focusFromContext,
+  onFocusFromContextHandled,
+  projectionId,
+  surfaceRef,
+  triggerRef,
+}: {
+  focusFromContext: boolean;
+  onFocusFromContextHandled: () => void;
+  projectionId: string;
+  surfaceRef: React.RefObject<HTMLDivElement | null>;
+  triggerRef: React.RefObject<HTMLButtonElement | null>;
+}) {
+  const returnFocusToTriggerRef = useRef(false);
+
+  useEffect(() => {
+    if (!focusFromContext) {
+      return;
+    }
+    returnFocusToTriggerRef.current = true;
+    surfaceRef.current?.focus({ preventScroll: true });
+    onFocusFromContextHandled();
+  }, [focusFromContext, onFocusFromContextHandled, projectionId, surfaceRef]);
+
+  useEffect(
+    () => () => {
+      if (!returnFocusToTriggerRef.current) {
+        return;
+      }
+      const active = document.activeElement;
+      const stranded = active === null || active === document.body || surfaceRef.current?.contains(active);
+      if (stranded) {
+        triggerRef.current?.focus({ preventScroll: true });
+      }
+    },
+    [surfaceRef, triggerRef],
+  );
+}
+

@@ -21,6 +21,8 @@ export interface ContextCapsuleProps {
   workContext?: ResolvedWorkContext;
   /** Close the surface. The lower Capsule is not this component's to move. */
   onDismiss: () => void;
+  /** Record explicit Context -> Peek deepening so the new upper layer may own focus. */
+  onDeepen: (capabilityId: string) => void;
   /** The `+` that opened this surface — where focus goes when it closes. */
   triggerRef: React.RefObject<HTMLButtonElement | null>;
 }
@@ -39,14 +41,22 @@ export interface ContextCapsuleProps {
  * a capability is never more than one row away, and `resolveContextRows` is what
  * keeps a sensed capability from also appearing in the catalog half.
  *
- * Its height is fixed and identical in every sense state, so the pair does not
- * jump as rows come and go (SC-44); overflow scrolls inside it and no other
- * gesture belongs to it.
+ * Its height is content-driven up to the Capsule-owned max-height ceiling.
+ * Sense changes only reorder/relabel the same one-row-per-capability list, so
+ * work/no-work/context-only keep one shell and one row band without inventing
+ * a fixed-height box. Overflow scrolls inside it and no other gesture belongs
+ * to it.
  *
  * The trigger (`+`) is not here: it lives in the composer row and points at this
  * surface with `aria-controls`.
  */
-export function ContextCapsule({ disclosure, workContext, onDismiss, triggerRef }: ContextCapsuleProps) {
+export function ContextCapsule({
+  disclosure,
+  workContext,
+  onDismiss,
+  onDeepen,
+  triggerRef,
+}: ContextCapsuleProps) {
   const rows = useMemo(
     () =>
       resolveContextRows(
@@ -59,6 +69,7 @@ export function ContextCapsule({ disclosure, workContext, onDismiss, triggerRef 
 
   const surfaceRef = useRef<HTMLDivElement>(null);
   const firstRowRef = useRef<HTMLButtonElement>(null);
+  const restoreTriggerOnUnmountRef = useRef(true);
 
   // Focus enters the surface when it opens. This is what the menu primitive did
   // before the list became a Capsule, and on App it matters more rather than
@@ -68,24 +79,21 @@ export function ContextCapsule({ disclosure, workContext, onDismiss, triggerRef 
     firstRowRef.current?.focus();
   }, []);
 
-  // …and leaves it again when the surface closes, back on the control that
-  // opened it. The menu primitive did this for free and the Capsule inherited
-  // the obligation with the surface: without it every dismissal — Escape, a
-  // pointer outside, the trigger, or picking a row — drops focus on `body`, and
-  // a keyboard user restarts from the top of the document.
+  // Dismissal returns focus to the control that opened this surface. Deepening
+  // is deliberately different: Context -> Peek is one upper-layer transition,
+  // so focus belongs to the newly mounted Peek rather than the lower `+`.
   //
-  // Guarded, because "dismissed" is not the same as "the user is done with the
-  // surface": a sense that ends while someone is typing in the composer (SC-36)
-  // unmounts this component too, and yanking focus out of the field they are
-  // using would be worse than the bug. Focus is only taken back when it would
-  // otherwise be lost — still inside the surface, or already fallen to `body`
-  // because the focused row just left the DOM.
+  // The cleanup is guarded for a second reason too: if the user has moved focus
+  // elsewhere before an external close, do not steal it back.
   useEffect(
     () => () => {
+      if (!restoreTriggerOnUnmountRef.current) {
+        return;
+      }
       const active = document.activeElement;
       const stranded = active === null || active === document.body || surfaceRef.current?.contains(active);
       if (stranded) {
-        triggerRef.current?.focus();
+        triggerRef.current?.focus({ preventScroll: true });
       }
     },
     [surfaceRef, triggerRef],
@@ -93,29 +101,18 @@ export function ContextCapsule({ disclosure, workContext, onDismiss, triggerRef 
 
   useDismissOnEscapeAndOutside(surfaceRef, onDismiss);
 
-  // SC-36: a sense that ends while the list is open dismisses it, the way the
-  // ring goes out. The rule survives the surface changing from a menu to a
-  // Capsule — it was never about the primitive — but it now has to be stated
-  // here rather than inherited from a `sawSensed` effect the menu owned.
-  //
-  // A Peek the user opened is a different case: it lives in this same slot but
-  // answers to the user, not to sensing, which is why the projection path does
-  // not dismiss itself.
-  const sensedCount = rows.filter((row) => row.kind !== 'ordinary').length;
-  const sawSensed = useRef(false);
-  useEffect(() => {
-    if (sensedCount > 0) {
-      sawSensed.current = true;
-    } else if (sawSensed.current) {
-      onDismiss();
-    }
-  }, [onDismiss, sensedCount]);
+  // SC-36 / SC-44: sensing changes the rows in this same surface. Losing the
+  // final WorkSignal must not close a disclosure the user explicitly opened;
+  // it simply falls back to the ordinary capability list while the Work Ring
+  // disappears independently in the lower Capsule.
 
   const select = (row: ContextRow) => {
     // Every row opens its capability at Peek depth — the detail (#1347 SC-20).
     // Sensed and ordinary rows behave alike: picking something in this list is
     // asking to look at it, and the Peek is where the way on to the Workspace
     // lives. The surface closes because the Peek takes this same slot.
+    restoreTriggerOnUnmountRef.current = false;
+    onDeepen(row.capabilityId);
     disclosure.onSelect(row.capabilityId);
     onDismiss();
   };
