@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "d196aa898b4db27ac733d2b81123d02c3566aa994a0ad1c90e62648a4378b6bb",
+  "run_id": 37777917273,
+  "run_attempt": 1,
+  "issue": 1474,
+  "criterion": "SC-13",
+  "criterion_text": "Existing trusted Acceptance updater and Requirement gate consume results without giving verifier scripts Issue write privileges; stale SHA/contract results cannot replace newer eligible conclusions.",
+  "stage": "staging",
+  "target_sha": "a8c6c788007e168d240281340d931ec15f7fa3fd",
+  "contract_sha256": "fab566bde8b733db8827fbdf1cb4db9e7078d19bdf053618a579774ab7a82837",
+  "case_revision": "a8c6c788007e168d240281340d931ec15f7fa3fd",
+  "case_tree_sha": "5098f106b7ca7899c57d8c7944108fdc78b7bf7e",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-08T12:38:37.626Z",
+  "finished_at": "2026-10-08T12:38:43.578Z",
+  "duration_ms": 5951,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.js",
+      "result": "Pass",
+      "summary": "Untrusted Case execution is read-only; trusted ingestion alone writes durable records and Issue projections with stale SHA/contract defenses.",
+      "evidence": [
+        {
+          "type": "security",
+          "value": "Case workflow permissions=contents:read,issues:read"
+        },
+        {
+          "type": "security",
+          "value": "trusted ingest validates current SHA, association, contract digest and selected SC before Issue write"
+        }
+      ],
+      "duration_ms": 35,
+      "exit_code": 0
+    }
+  ],
+  "provenance": {
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/37777917273",
+    "record_path": "runs/2026-10-08/37777917273-1/1474/SC-13.json",
+    "source_result_sha256": "4a4bdd7febdd4ed86301af58b2a2ad1be02d106cea3a6d12bf9df2b6e4bf65b6"
+  }
+}
