@@ -247,6 +247,8 @@ check-instructions:
 # The workflow invokes the same script; rules live in one place.
 requirement-acceptance-selftest:
     node scripts/requirement-acceptance.mjs self-test
+    node scripts/acceptance-executor.mjs self-test
+    node scripts/acceptance-case-ingest.mjs self-test
 
 # Static check: every tmux spawn carries an explicit -S socket (runs in pre-commit)
 check-tmux-socket:

@@ -356,7 +356,7 @@ function parseTitleIssueNumbers(title, owner, name) {
   return [...numbers];
 }
 
-function parsePreMergeIssueNumbers(body, owner, name, title = '') {
+export function parsePreMergeIssueNumbers(body, owner, name, title = '') {
   const numbers = new Set(parseClosingIssueNumbers(body, owner, name));
   for (const number of parseAssociatedIssueNumbers(body, owner, name)) numbers.add(number);
   for (const number of parseTitleIssueNumbers(title, owner, name)) numbers.add(number);
@@ -382,6 +382,48 @@ async function preMergeRequirementIssues({ owner, name, title = '', body, token 
     if (labels.has('requirement') && String(issue.state).toLowerCase() === 'open') issues.push(issue);
   }
   return issues;
+}
+
+async function requirementIssuesForRef({ owner, name, sha, token }) {
+  const targetSha = String(sha ?? '').trim();
+  if (!/^[0-9a-f]{40}$/i.test(targetSha)) {
+    throw new Error('exact 40-character target SHA is required');
+  }
+  const pulls = await githubRequest(
+    `/repos/${owner}/${name}/commits/${targetSha}/pulls?per_page=100`,
+    { token },
+  );
+  const numbers = new Set();
+  for (const pr of pulls ?? []) {
+    for (const number of parsePreMergeIssueNumbers(pr.body, owner, name, pr.title)) {
+      numbers.add(number);
+    }
+  }
+
+  const issues = [];
+  for (const number of [...numbers].sort((a, b) => a - b)) {
+    const issue = await githubRequest(`/repos/${owner}/${name}/issues/${number}`, { token });
+    const labels = new Set((issue.labels ?? []).map((label) => typeof label === 'string' ? label : label.name));
+    if (labels.has('requirement') && String(issue.state).toLowerCase() === 'open') {
+      issues.push(issue);
+    }
+  }
+  return issues;
+}
+
+async function discoverRefRequirements(shaArg) {
+  const [owner, name] = process.env.GITHUB_REPOSITORY.split('/');
+  if (!owner || !name) throw new Error('GITHUB_REPOSITORY is required');
+  const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
+  const requirements = await requirementIssuesForRef({
+    owner,
+    name,
+    sha: shaArg,
+    token,
+  });
+  process.stdout.write(
+    JSON.stringify(requirements.map((issue) => String(issue.number))) + '\n',
+  );
 }
 
 async function closePullRequest(owner, name, number, token) {
@@ -591,10 +633,11 @@ async function main() {
   const command = process.argv[2];
   if (command === 'self-test') return runSelfTest();
   if (command === 'discover-pre-merge') return discoverPreMergeRequirements();
+  if (command === 'discover-ref') return discoverRefRequirements(process.argv[3]);
   if (command === 'pre-merge-pr-gate') return runPrGate({ mode: 'pre-merge', discovery: 'pre-merge' });
   if (command === 'pr-gate') return runPrGate();
   if (command === 'issue-close-guard') return runIssueCloseGuard();
-  throw new Error('usage: node scripts/requirement-acceptance.mjs <self-test|discover-pre-merge|pre-merge-pr-gate|pr-gate|issue-close-guard>');
+  throw new Error('usage: node scripts/requirement-acceptance.mjs <self-test|discover-pre-merge|discover-ref SHA|pre-merge-pr-gate|pr-gate|issue-close-guard>');
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
