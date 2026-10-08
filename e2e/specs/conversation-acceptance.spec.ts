@@ -157,10 +157,12 @@ test.describe('SC-19/20 · live transcript identity and scroll ownership', () =>
       el.dataset.acceptanceIdentity = 'live-group';
     });
 
-    await viewport.evaluate((el) => {
-      const bottom = el.scrollHeight - el.clientHeight;
-      el.scrollTop = Math.max(0, bottom - 280);
-    });
+    // Release tail-follow through a real reader gesture. Directly assigning
+    // scrollTop only moves the viewport; it deliberately does not tell the
+    // MessageScroller that the reader has taken ownership, so the next streamed
+    // chunk is allowed to re-engage the live edge.
+    await viewport.hover();
+    await page.mouse.wheel(0, -420);
     await expect.poll(() => bottomGap(viewport)).toBeGreaterThan(150);
     const readerTop = await viewport.evaluate((el) => el.scrollTop);
 
