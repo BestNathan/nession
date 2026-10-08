@@ -159,6 +159,72 @@ export function normalizeAcceptanceResult(context, raw, source = 'agent') {
   };
 }
 
+export function normalizeAcceptanceCaseResult(context, record, source = 'case-runner') {
+  if (!record || typeof record !== 'object') throw new Error('Case result must be an object');
+  const criterion = String(record.criterion ?? '').trim().toUpperCase();
+  if (!/^SC-\d{2,}$/.test(criterion)) throw new Error('invalid Case criterion');
+  if (Number(record.issue) !== Number(context.issue.number)) throw new Error('Case result Issue does not match Acceptance context');
+  if (String(record.stage) !== String(context.stage)) throw new Error('Case result stage does not match Acceptance context');
+  if (String(record.contract_sha256) !== String(context.contract_sha256)) {
+    throw new Error('Case result contract digest does not match Acceptance context');
+  }
+  if (String(record.target_sha) !== String(context.target_ref)) {
+    throw new Error('Case result target SHA does not match Acceptance context');
+  }
+  if (!context.criteria.some((item) => item.criterion === criterion)) {
+    throw new Error('Case result criterion is absent from requested Acceptance stage');
+  }
+
+  const caseResult = String(record.result ?? '');
+  const projected = caseResult === 'Pass'
+    ? 'Pass'
+    : caseResult === 'Fail'
+      ? 'Fail'
+      : 'Pending';
+  const evidence = [
+    {
+      type: 'case',
+      value: 'execution=' + String(record.execution_id ?? '(missing)') +
+        ' tree=' + String(record.case_tree_sha ?? '(missing)') +
+        ' revision=' + String(record.case_revision ?? '(missing)'),
+    },
+  ];
+  for (const verifier of record.verifiers ?? []) {
+    for (const item of verifier.evidence ?? []) {
+      evidence.push({
+        type: String(item.type ?? verifier.type ?? 'case'),
+        value: String(item.value ?? '').trim(),
+      });
+    }
+  }
+  if (record.provenance?.workflow_url) {
+    evidence.push({ type: 'workflow', value: String(record.provenance.workflow_url) });
+  }
+  if (record.provenance?.record_path) {
+    evidence.push({ type: 'record', value: String(record.provenance.record_path) });
+  }
+
+  return {
+    schema_version: 1,
+    issue: context.issue.number,
+    stage: context.stage,
+    contract_sha256: context.contract_sha256,
+    run_id: context.run_id,
+    target_ref: context.target_ref,
+    deployment: context.deployment,
+    source: String(source || 'case-runner'),
+    selected_criteria: [criterion],
+    criteria: [normalizeCriterion({
+      criterion,
+      result: projected,
+      evidence,
+      summary: caseResult === 'Error'
+        ? 'Acceptance Case infrastructure error: ' + String(record.infrastructure_error ?? 'unknown error')
+        : String((record.verifiers ?? []).map((item) => item.summary).filter(Boolean).join(' | ') || caseResult),
+    })],
+  };
+}
+
 function replaceSection(body, heading, transform) {
   const lines = String(body ?? '').replace(/\r\n?/g, '\n').split('\n');
   const wanted = heading.toLowerCase();
@@ -242,9 +308,17 @@ export function applyAcceptanceResultToBody(body, normalized) {
   const runId = runIdOf(normalized.run_id);
   if (!Array.isArray(normalized.criteria)) throw new Error('acceptance result criteria must be an array');
 
-  const expected = [...contract.criteria.values()]
+  const stageExpected = [...contract.criteria.values()]
     .filter((criterion) => contract.rows.get(criterion.id).stage === stage)
     .map((criterion) => criterion.id);
+  const expected = Array.isArray(normalized.selected_criteria)
+    ? normalized.selected_criteria.map((id) => String(id).trim().toUpperCase())
+    : stageExpected;
+  if (expected.length === 0) throw new Error('acceptance result selects no criteria');
+  if (new Set(expected).size !== expected.length) throw new Error('acceptance result has duplicate selected criteria');
+  for (const id of expected) {
+    if (!stageExpected.includes(id)) throw new Error('selected criterion ' + id + ' is unknown or belongs to another stage');
+  }
   const resultMap = new Map();
   for (const raw of normalized.criteria) {
     const result = normalizeCriterion(raw);
@@ -252,6 +326,7 @@ export function applyAcceptanceResultToBody(body, normalized) {
     const row = contract.rows.get(result.criterion);
     if (!row) throw new Error('unknown criterion ' + result.criterion);
     if (row.stage !== stage) throw new Error(result.criterion + ' belongs to ' + row.stage + ', not requested stage ' + stage);
+    if (!expected.includes(result.criterion)) throw new Error('criterion ' + result.criterion + ' was not selected for this partial acceptance result');
     resultMap.set(result.criterion, result);
   }
   const missing = expected.filter((id) => !resultMap.has(id));
