@@ -44,6 +44,7 @@ jobs:
     env:
       RUSTC_WRAPPER: ""
       NESSION_ACCEPTANCE_TRUSTED_ROOT: ${{ github.workspace }}/trusted
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.cache/ms-playwright
     steps:
       - name: Checkout trusted discovery tooling
         uses: actions/checkout@v4
@@ -178,8 +179,6 @@ jobs:
 
       - name: Install browser verifier runtime
         if: steps.select.outputs.needs_browser == 'true'
-        env:
-          PLAYWRIGHT_BROWSERS_PATH: ~/.cache/ms-playwright
         run: |
           set -euo pipefail
           cd workspace/e2e
