@@ -1,0 +1,83 @@
+name: E2E Run Ingest
+
+# Main-owned trusted ingestion; serialized with Acceptance Case Ingest.
+on:
+  workflow_run:
+    workflows: ["E2E Scenario Smoke"]
+    types: [completed]
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: acceptance-results-ingest
+  cancel-in-progress: false
+
+jobs:
+  ingest-scenario:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout trusted main ingestion
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: trusted
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Self-test source and evidence contract
+        run: node trusted/scripts/e2e-run-ingest.mjs self-test
+      - name: Download authenticated source-run artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: e2e-terminal-scenario-${{ github.event.workflow_run.id }}-${{ github.event.workflow_run.run_attempt }}
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: incoming
+      - name: Append immutable records and indexes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir results-repo
+          git -C results-repo init
+          git -C results-repo config user.name "github-actions[bot]"
+          git -C results-repo config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C results-repo remote add origin "https://x-access-token:$GH_TOKEN@github.com/$GITHUB_REPOSITORY.git"
+          git -C results-repo fetch --depth=1 origin acceptance-results
+          git -C results-repo checkout -B acceptance-results FETCH_HEAD
+          count=0
+          while IFS= read -r input; do
+            paths="$(node trusted/scripts/e2e-run-ingest.mjs attest "$input" "$GITHUB_EVENT_PATH")"
+            record="$(jq -r .record <<<"$paths")"
+            index="$(jq -r .index <<<"$paths")"
+            scratch="$(mktemp -d)"
+            node trusted/scripts/e2e-run-ingest.mjs enrich "$input" "$GITHUB_EVENT_PATH" "$scratch/record.json" "$scratch/index.json"
+            for dest in "$record" "$index"; do
+              case "$dest" in runs/*|indexes/by-sha/*) ;; *) echo "::error::Unsafe result path" >&2; exit 1 ;; esac
+              source="$scratch/index.json"
+              if [[ "$dest" == "$record" ]]; then source="$scratch/record.json"; fi
+              if [[ -e "results-repo/$dest" ]]; then
+                cmp -s "$source" "results-repo/$dest" || { echo "::error::Immutable collision: $dest" >&2; exit 1; }
+              else
+                mkdir -p "results-repo/$(dirname "$dest")"
+                cp "$source" "results-repo/$dest"
+              fi
+            done
+            rm -rf "$scratch"
+            count=$((count + 1))
+          done < <(find incoming -type f -name 'scenario-*.json' -print | sort)
+          if [[ "$count" -eq 0 ]]; then echo "::error::No Scenario evidence" >&2; exit 1; fi
+          git -C results-repo add runs indexes
+          if git -C results-repo diff --cached --quiet; then
+            echo "Idempotent retry: existing bytes matched"
+          else
+            git -C results-repo commit -m "e2e: ingest source run ${{ github.event.workflow_run.id }} attempt ${{ github.event.workflow_run.run_attempt }}"
+            git -C results-repo push origin acceptance-results
+          fi
+          echo "Scenario records ingested: $count; orphan branch: acceptance-results" >> "$GITHUB_STEP_SUMMARY"
+          echo "External evidence: source Actions artifact (14-day retention, not indefinitely durable)" >> "$GITHUB_STEP_SUMMARY"
