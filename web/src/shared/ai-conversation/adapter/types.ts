@@ -86,6 +86,25 @@ export interface AIConversationListResult {
    * rest of the directory unreachable (#1363 round 6).
    */
   nextCursor: string | null
+  /**
+   * Stable identity of the directory snapshot this page belongs to.
+   *
+   * A paged provider must return the same non-null id for every page reached
+   * from one first-page read. The runtime uses it to reject a continuation that
+   * quietly crossed into a re-sorted/rebound directory (#1363 round 7).
+   * Single-page providers may leave it null/undefined because there is no
+   * continuation boundary to make inconsistent.
+   */
+  listingId?: string | null
+  /**
+   * The supplied cursor belonged to a directory snapshot that no longer exists.
+   *
+   * This is not a list failure: it asks the shared runtime to discard only the
+   * in-progress aggregation and restart from page one, under the same logical
+   * context. Providers use this instead of silently applying an offset cursor
+   * to a freshly re-sorted directory.
+   */
+  restart?: boolean
   error?: string | null
 }
 
@@ -197,11 +216,27 @@ export interface AIConversationAdapter<Context = AIConversationContext> {
   contextKey(context: Context): string
 
   /**
+   * Identity of the request authority captured by list/read calls.
+   *
+   * Usually this is the same value as `contextKey`. A provider whose logical
+   * conversation space stays equal while a token, lease, client or other
+   * request-capable handle rotates must return a different key here. Changing
+   * it invalidates old in-flight list/read work without resetting the reader's
+   * selection or loaded window. Object identity is never used for this.
+   *
+   * Optional for providers whose request authority is exactly their
+   * `contextKey`; the runtime falls back to that key.
+   */
+  requestKey?(context: Context): string
+
+  /**
    * Read one page of the conversation directory.
    *
    * Without a cursor this is the first page; with one it continues from a
-   * previous `nextCursor`. The shared runtime walks the cursor to completion,
-   * so surfaces never inherit a provider's per-request item ceiling.
+   * previous `nextCursor`. The shared runtime walks a coherent listing to
+   * completion under a hard page/restart budget. Paged providers therefore
+   * supply `listingId`, and stale continuation cursors return `restart: true`
+   * rather than being applied to a freshly re-sorted directory.
    */
   list(context: Context, cursor?: string): Promise<AIConversationListResult>
 
