@@ -165,3 +165,15 @@ test('owned CSS runtime contract accepts a declared producer', () => {
   ];
   assert.deepEqual(scanLocalVariableContracts(files, { [name]: ['web/src/index.css'] }), []);
 });
+
+test('runtime-local producer resolves a shared exported CSS variable constant', () => {
+  const files = [
+    {file: 'web/src/shared/lib/workspaceScrollClearance.ts',
+      source: "export const WORKSPACE_CONTENT_BOTTOM_INSET = '--nession-local-workspace-content-bottom-inset';"},
+    {file: 'web/src/product/workspace/hooks/useClearance.ts',
+      source: "host.style.setProperty(WORKSPACE_CONTENT_BOTTOM_INSET, '20px');"},
+    {file: 'web/src/app/experiences/app/AppFilesSearchPanel.tsx',
+      source: "const spacing = 'var(--nession-local-workspace-content-bottom-inset, 0px)';"},
+  ];
+  assert.deepEqual(scanLocalVariableContracts(files), []);
+});
