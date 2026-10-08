@@ -30,6 +30,24 @@ function positivePort(value, label) {
   return port;
 }
 
+async function allocateLoopbackPort() {
+  return await new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.unref();
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      if (!address || typeof address === 'string') {
+        server.close();
+        reject(new Error('failed to allocate loopback port'));
+        return;
+      }
+      const port = address.port;
+      server.close((error) => error ? reject(error) : resolve(port));
+    });
+  });
+}
+
 function tomlString(value) {
   return String(value).replaceAll('\\', '\\\\').replaceAll('"', '\\"');
 }
@@ -394,6 +412,7 @@ function selfTest() {
 }
 
 module.exports = {
+  allocateLoopbackPort,
   assertTargetSha,
   renderAgentConfig,
   renderServerConfig,
