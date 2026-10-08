@@ -354,6 +354,191 @@ const SETTLED_ITEMS: MessageItemV1[] = [
   },
 ];
 
+
+/**
+ * Browser acceptance corpus for #1363 SC-19/20.
+ *
+ * The same ids move through three provider reads:
+ *
+ * 0. work only — two tool calls are running and there is no answer;
+ * 1. streaming — one tool settles, the second keeps running, and a stable
+ *    assistant row arrives while the page reports a partial tail;
+ * 2. settled — the second tool and the same assistant row finish, and activity
+ *    becomes inactive so the real Claude polling adapter stops asking.
+ *
+ * The history is intentionally long enough to overflow a Web viewport. That
+ * lets Playwright prove tail-follow and reader override against the same
+ * runtime transition that proves row/group identity.
+ */
+const STREAM_HISTORY: MessageItemV1[] = Array.from(
+  { length: 7 },
+  (_, index): MessageItemV1[] => {
+    const minute = String(index * 2).padStart(2, '0');
+    const answerMinute = String(index * 2 + 1).padStart(2, '0');
+    return [
+      {
+        id: `stream-history-user-${index}`,
+        kind: 'message',
+        role: 'user',
+        timestamp: `2026-09-01T10:${minute}:00Z`,
+        content: [
+          {
+            type: 'text',
+            text: `History turn ${index + 1}: keep this transcript long enough to exercise reader-owned scrolling.`,
+          },
+        ],
+      },
+      {
+        id: `stream-history-answer-${index}`,
+        kind: 'message',
+        role: 'assistant',
+        timestamp: `2026-09-01T10:${answerMinute}:00Z`,
+        content: [
+          {
+            type: 'text',
+            text: `History answer ${index + 1}. The content is settled and only exists to make the live tail scroll inside a real transcript.`,
+          },
+        ],
+      },
+    ];
+  },
+).flat();
+
+function streamingItems(phase: number): MessageItemV1[] {
+  const toolOneSettled = phase >= 1;
+  const toolTwoSettled = phase >= 2;
+  const current: MessageItemV1[] = [
+    {
+      id: 'stream-user',
+      kind: 'message',
+      role: 'user',
+      timestamp: '2026-09-01T12:20:00Z',
+      content: [
+        {
+          type: 'text',
+          text: 'Keep the live answer pinned while the two tool results arrive, unless I scroll away to read history.',
+        },
+      ],
+    },
+    {
+      id: 'stream-tool-read',
+      kind: 'tool',
+      timestamp: '2026-09-01T12:20:10Z',
+      tool: {
+        call_id: 'stream-call-read',
+        name: 'Read',
+        status: toolOneSettled ? 'success' : 'running',
+        summary: 'web/src/shared/ai-conversation/runtime/ConversationRuntime.ts',
+        input: {
+          text: '{"file_path":"web/src/shared/ai-conversation/runtime/ConversationRuntime.ts"}',
+          kind: 'json',
+          truncated: false,
+        },
+        ...(toolOneSettled
+          ? {
+              output: {
+                text: 'private applyNewest(page: AIConversationPage) { /* stable ids reconcile here */ }',
+                kind: 'text' as const,
+                truncated: false,
+              },
+            }
+          : {}),
+      },
+    },
+    {
+      id: 'stream-tool-test',
+      kind: 'tool',
+      timestamp: '2026-09-01T12:20:20Z',
+      tool: {
+        call_id: 'stream-call-test',
+        name: 'Bash',
+        status: toolTwoSettled ? 'success' : 'running',
+        summary: 'npm run test -- conversation',
+        ...(toolTwoSettled
+          ? {
+              output: {
+                text: 'conversation acceptance tests passed',
+                kind: 'text' as const,
+                truncated: false,
+              },
+            }
+          : {}),
+      },
+    },
+  ];
+
+  if (phase >= 1) {
+    current.push({
+      id: 'stream-answer',
+      kind: 'message',
+      role: 'assistant',
+      timestamp: '2026-09-01T12:20:30Z',
+      content: [
+        {
+          type: 'text',
+          text:
+            phase >= 2
+              ? 'The ownership handoff stays stable while the final tool result settles.'
+              : 'The ownership handoff stays stable while',
+        },
+      ],
+    });
+  }
+
+  return [...STREAM_HISTORY, ...current];
+}
+
+/**
+ * A settled turn with enough adjacent tool calls to make the inner group a real
+ * scroll owner. A short group can prove disclosure but cannot prove the body is
+ * bounded or that scrolling it leaves the transcript alone (SC-18/20).
+ */
+const TOOL_SCROLL_ITEMS: MessageItemV1[] = [
+  {
+    id: 'tool-scroll-user',
+    kind: 'message',
+    role: 'user',
+    timestamp: '2026-09-01T12:30:00Z',
+    content: [
+      {
+        type: 'text',
+        text: 'Inspect every ownership call without letting the process block drown the final answer or the conversation controls.',
+      },
+    ],
+  },
+  ...Array.from(
+    { length: 24 },
+    (_, index): MessageItemV1 => ({
+      id: `tool-scroll-${index}`,
+      kind: 'tool',
+      timestamp: `2026-09-01T12:30:${String(index + 1).padStart(2, '0')}Z`,
+      tool: {
+        call_id: `tool-scroll-call-${index}`,
+        name: index % 3 === 0 ? 'Read' : index % 3 === 1 ? 'Grep' : 'Bash',
+        status: 'success',
+        summary: `acceptance activity ${index + 1} of 24`,
+        output: {
+          text: `stable acceptance output ${index + 1}`,
+          kind: 'text',
+          truncated: false,
+        },
+      },
+    }),
+  ),
+  {
+    id: 'tool-scroll-answer',
+    kind: 'message',
+    role: 'assistant',
+    timestamp: '2026-09-01T12:31:00Z',
+    content: [
+      {
+        type: 'text',
+        text: 'All 24 activities remain inspectable inside the bounded process group; the answer remains the primary reading surface.',
+      },
+    ],
+  },
+];
+
 /** The item a `messages` answer carries whole — no client join by id (#1222). */
 function itemOf(conversationId: string): ConversationItemV1 | undefined {
   return [...CONVERSATIONS, RICH_CONVERSATION].find((c) => c.id === conversationId);
@@ -611,6 +796,8 @@ function conversationsFor(scenario: string): ConversationsResponse | undefined {
     // The comment is above the labels rather than inside the first one: a case
     // that holds only a comment is not empty to `no-fallthrough`, and this is a
     // fall-through on purpose.
+    case 'streaming':
+    case 'tool-scroll':
     case 'list-stale':
     case 'settled':
       return {
@@ -657,6 +844,26 @@ function activePage(conversation: ConversationItemV1, items: MessageItemV1[]): M
   };
 }
 
+function acceptancePageFor(
+  scenario: string,
+  conversation: ConversationItemV1,
+  streamingPhase: number,
+): MessagesResponse | null {
+  if (scenario === 'streaming') {
+    const phase = Math.max(0, Math.min(streamingPhase, 2));
+    return {
+      state: 'ready',
+      conversation,
+      activity: phase >= 2 ? 'inactive' : 'active',
+      items: streamingItems(phase),
+      has_more: false,
+      partial_tail: phase === 1,
+      skipped: 0,
+    };
+  }
+  return scenario === 'tool-scroll' ? activePage(conversation, TOOL_SCROLL_ITEMS) : null;
+}
+
 /**
  * What the `messages` unit answers for a named scenario and an explicit id.
  *
@@ -668,6 +875,7 @@ function messagesFor(
   scenario: string,
   conversationId: string,
   cursor?: string,
+  streamingPhase = 0,
 ): MessagesResponse | undefined {
   const named = itemOf(conversationId);
   if (conversationsFor(scenario) === undefined) {
@@ -693,6 +901,12 @@ function messagesFor(
       skipped: 0,
     };
   }
+
+  const acceptancePage = acceptancePageFor(scenario, named, streamingPhase);
+  if (acceptancePage !== null) {
+    return acceptancePage;
+  }
+
   switch (scenario) {
     case 'list-stale':
     case 'thread-unavailable':
@@ -891,6 +1105,10 @@ export function fixtureConversationSurface(search: string): PluginSurface {
    * `ListStateGuard` already draws.
    */
   let threadOpened = false;
+  // Only the streaming acceptance scenario is read-count driven. Production
+  // fixture E2E uses the Vite preview build (no StrictMode double effect), and
+  // the Claude adapter's real 3s poll advances these phases exactly once each.
+  let streamingReads = 0;
 
   // The same directory the git surface publishes, built from the same
   // `manifestsOf`, so this route cannot present a capability directory the app
@@ -931,7 +1149,11 @@ export function fixtureConversationSurface(search: string): PluginSurface {
             new Error('fixture messages request with a non-string cursor — the contract sends a string'),
           );
         }
-        const response = messagesFor(scenario, conversationId, cursor);
+        const streamingPhase =
+          scenario === 'streaming' && cursor === undefined
+            ? Math.min(streamingReads++, 2)
+            : 0;
+        const response = messagesFor(scenario, conversationId, cursor, streamingPhase);
         if (response === undefined) {
           // Either the scenario is unmodelled at all, or the scenario is
           // `paged` and the cursor is not the one its newest page handed out.
