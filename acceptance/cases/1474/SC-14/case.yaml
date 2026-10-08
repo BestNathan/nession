@@ -1,0 +1,11 @@
+schema_version: 1
+issue: 1474
+criterion: SC-14
+stage: staging
+runtime: full-stack-local
+verifiers:
+  - type: browser
+    entry: verify.spec.js
+  - type: protocol
+    entry: verify.js
+result_policy: all-pass

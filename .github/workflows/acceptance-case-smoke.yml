@@ -9,9 +9,12 @@ on:
     branches: [staging]
     paths:
       - 'acceptance/**'
+      - 'docs/architecture/acceptance-cases.md'
+      - '.claude/skills/nession-acceptance/SKILL.md'
       - 'scripts/acceptance-cases-selftest.mjs'
       - 'justfile'
       - '.github/workflows/acceptance-case-smoke.yml'
+      - '.github/workflows/acceptance-cases.yml'
   workflow_dispatch:
 
 concurrency:
@@ -19,11 +22,12 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  protocol-case:
+  case-smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     env:
       RUSTC_WRAPPER: ""
+      PLAYWRIGHT_BROWSERS_PATH: ~/.cache/ms-playwright
     steps:
       - uses: actions/checkout@v4
 
@@ -34,7 +38,9 @@ jobs:
         with:
           node-version: '24'
           cache: 'npm'
-          cache-dependency-path: web/package-lock.json
+          cache-dependency-path: |
+            web/package-lock.json
+            e2e/package-lock.json
 
       - run: sudo apt-get update && sudo apt-get install -y tmux
 
@@ -49,13 +55,19 @@ jobs:
           cd ..
           cargo build -p nession-server -p nession-agent
 
+      - name: Install browser Case runtime
+        run: |
+          cd e2e
+          npm ci
+          npx playwright install chromium --with-deps
+
       - name: Fetch trusted Requirement contract
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh api "repos/${GITHUB_REPOSITORY}/issues/1474" > /tmp/issue-1474.json
 
-      - name: Run protocol-only source-aligned Case
-        id: case
+      - name: Run SC-03 protocol-only Case
+        id: protocol
         continue-on-error: true
         run: |
           target_sha="$(git rev-parse HEAD)"
@@ -67,16 +79,34 @@ jobs:
             --target-sha "$target_sha" \
             --run-id "${GITHUB_RUN_ID}" \
             --run-attempt "${GITHUB_RUN_ATTEMPT}" \
-            --output /tmp/acceptance-case-result.json
+            --output /tmp/acceptance-case-SC-03.json
+
+      - name: Run SC-14 browser + protocol Case
+        id: browser_protocol
+        continue-on-error: true
+        run: |
+          target_sha="$(git rev-parse HEAD)"
+          node acceptance/run-case.mjs \
+            --issue-json /tmp/issue-1474.json \
+            --issue 1474 \
+            --criterion SC-14 \
+            --stage staging \
+            --target-sha "$target_sha" \
+            --run-id "${GITHUB_RUN_ID}" \
+            --run-attempt "${GITHUB_RUN_ATTEMPT}" \
+            --output /tmp/acceptance-case-SC-14.json
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: acceptance-case-1474-SC-03
-          path: /tmp/acceptance-case-result.json
-          if-no-files-found: error
+          name: acceptance-case-smoke-1474
+          path: |
+            /tmp/acceptance-case-SC-03.json
+            /tmp/acceptance-case-SC-14.json
+            e2e/test-results/
+          if-no-files-found: warn
           retention-days: 14
 
-      - name: Enforce Case result
-        if: steps.case.outcome != 'success'
+      - name: Enforce Case results
+        if: steps.protocol.outcome != 'success' || steps.browser_protocol.outcome != 'success'
         run: exit 1
