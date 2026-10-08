@@ -38,7 +38,7 @@
  * unable to carry the previous Session's selection.
  */
 
-import type { AIConversationAdapter, AIConversationPage } from '../adapter/types'
+import type { AIConversationAdapter, AIConversationListResult, AIConversationPage } from '../adapter/types'
 import type {
   AIConversationActivity,
   AIConversationItem,
@@ -172,6 +172,111 @@ const DEFAULT_SCHEDULER: ConversationScheduler = {
 const LIST_PAGE_BUDGET = 32
 /** A moving directory may be retried, but not allowed to livelock forever. */
 const LIST_RESTART_BUDGET = 2
+
+/**
+ * Mutable state for one bounded, coherent directory aggregation.
+ *
+ * Keeping cursor/snapshot validation here makes `fetchList` orchestration
+ * readable and, more importantly, gives every invariant one owner.
+ */
+class ListAggregation {
+  readonly conversations: AIConversationSummary[] = []
+  private readonly seenConversations = new Set<string>()
+  private readonly seenCursors = new Set<string>()
+  private listingId: string | null = null
+  private bindingSeen = false
+  private pages = 0
+  private restarts = 0
+  bindingId: string | null = null
+
+  beginPage(): void {
+    this.pages += 1
+    if (this.pages > LIST_PAGE_BUDGET) {
+      throw new Error(
+        `Conversation list exceeded the bounded ${LIST_PAGE_BUDGET}-page budget`,
+      )
+    }
+  }
+
+  restart(cursor: string | undefined): void {
+    if (cursor === undefined) {
+      throw new Error('Conversation list asked to restart its first page')
+    }
+    this.restarts += 1
+    if (this.restarts > LIST_RESTART_BUDGET) {
+      throw new Error(
+        `Conversation list changed more than ${LIST_RESTART_BUDGET} times while loading`,
+      )
+    }
+    this.conversations.length = 0
+    this.seenConversations.clear()
+    this.seenCursors.clear()
+    this.listingId = null
+    this.bindingSeen = false
+    this.bindingId = null
+  }
+
+  acceptReadyPage(
+    result: AIConversationListResult,
+    cursor: string | undefined,
+  ): string | null {
+    this.acceptListingIdentity(result, cursor)
+    this.acceptBinding(result.bindingId)
+    this.acceptConversations(result.conversations)
+
+    const next = result.nextCursor
+    if (next === null) {
+      return null
+    }
+    if (this.seenCursors.has(next)) {
+      throw new Error('Conversation list returned a repeated cursor')
+    }
+    this.seenCursors.add(next)
+    return next
+  }
+
+  private acceptListingIdentity(
+    result: AIConversationListResult,
+    cursor: string | undefined,
+  ): void {
+    const pageListingId = result.listingId ?? null
+    const paged = cursor !== undefined || result.nextCursor !== null
+    if (paged && pageListingId === null) {
+      throw new Error('Paged conversation list omitted its stable listing id')
+    }
+    if (pageListingId === null) {
+      return
+    }
+    if (this.listingId === null) {
+      this.listingId = pageListingId
+      return
+    }
+    if (this.listingId !== pageListingId) {
+      throw new Error('Conversation list crossed listing generations')
+    }
+  }
+
+  private acceptBinding(bindingId: string | null): void {
+    if (!this.bindingSeen) {
+      this.bindingId = bindingId
+      this.bindingSeen = true
+      return
+    }
+    if (this.bindingId !== bindingId) {
+      throw new Error('Conversation binding changed inside one listing snapshot')
+    }
+  }
+
+  private acceptConversations(conversations: AIConversationSummary[]): void {
+    for (const conversation of conversations) {
+      if (this.seenConversations.has(conversation.id)) {
+        continue
+      }
+      this.seenConversations.add(conversation.id)
+      this.conversations.push(conversation)
+    }
+  }
+}
 
 interface ListState {
   state: AIConversationListState | null
@@ -581,24 +686,11 @@ export class ConversationRuntime<Context> {
     }
 
     try {
-      let conversations: AIConversationSummary[] = []
-      let seenConversations = new Set<string>()
-      let seenCursors = new Set<string>()
-      let bindingId: string | null = null
-      let bindingSeen = false
-      let listingId: string | null = null
+      const aggregation = new ListAggregation()
       let cursor: string | undefined
-      let pages = 0
-      let restarts = 0
 
       for (;;) {
-        pages += 1
-        if (pages > LIST_PAGE_BUDGET) {
-          throw new Error(
-            `Conversation list exceeded the bounded ${LIST_PAGE_BUDGET}-page budget`,
-          )
-        }
-
+        aggregation.beginPage()
         const result = await this.adapter.list(context, cursor)
         if (!this.wanted(key, generation, this.listGeneration)) {
           return
@@ -609,21 +701,7 @@ export class ConversationRuntime<Context> {
         // its snapshot disappear asks for a bounded restart instead of silently
         // crossing generations.
         if (result.restart) {
-          if (cursor === undefined) {
-            throw new Error('Conversation list asked to restart its first page')
-          }
-          restarts += 1
-          if (restarts > LIST_RESTART_BUDGET) {
-            throw new Error(
-              `Conversation list changed more than ${LIST_RESTART_BUDGET} times while loading`,
-            )
-          }
-          conversations = []
-          seenConversations = new Set<string>()
-          seenCursors = new Set<string>()
-          bindingId = null
-          bindingSeen = false
-          listingId = null
+          aggregation.restart(cursor)
           cursor = undefined
           continue
         }
@@ -633,62 +711,21 @@ export class ConversationRuntime<Context> {
         // particular the exact binding that keeps an auto-bound readable thread
         // open — and expose only the changed directory state.
         if (result.state !== 'ready') {
-          this.list = {
-            ...this.list,
-            state: result.state,
-            loading: false,
-            error:
-              result.state === 'error'
-                ? (result.error ?? 'The conversations could not be listed')
-                : null,
-          }
-          this.syncThread()
-          this.emit()
+          this.applyListUnavailable(result)
           return
         }
 
-        const pageListingId = result.listingId ?? null
-        const paged = cursor !== undefined || result.nextCursor !== null
-        if (paged && pageListingId === null) {
-          throw new Error('Paged conversation list omitted its stable listing id')
-        }
-        if (pageListingId !== null) {
-          if (listingId === null) {
-            listingId = pageListingId
-          } else if (listingId !== pageListingId) {
-            throw new Error('Conversation list crossed listing generations')
-          }
-        }
-
-        if (!bindingSeen) {
-          bindingId = result.bindingId
-          bindingSeen = true
-        } else if (bindingId !== result.bindingId) {
-          throw new Error('Conversation binding changed inside one listing snapshot')
-        }
-
-        for (const conversation of result.conversations) {
-          if (!seenConversations.has(conversation.id)) {
-            seenConversations.add(conversation.id)
-            conversations.push(conversation)
-          }
-        }
-
-        const next = result.nextCursor
+        const next = aggregation.acceptReadyPage(result, cursor)
         if (next === null) {
           break
         }
-        if (seenCursors.has(next)) {
-          throw new Error('Conversation list returned a repeated cursor')
-        }
-        seenCursors.add(next)
         cursor = next
       }
 
       this.list = {
         state: 'ready',
-        conversations,
-        bindingId,
+        conversations: aggregation.conversations,
+        bindingId: aggregation.bindingId,
         loading: false,
         error: null,
       }
@@ -705,6 +742,20 @@ export class ConversationRuntime<Context> {
       }
       this.emit()
     }
+  }
+
+  private applyListUnavailable(result: AIConversationListResult): void {
+    this.list = {
+      ...this.list,
+      state: result.state,
+      loading: false,
+      error:
+        result.state === 'error'
+          ? (result.error ?? 'The conversations could not be listed')
+          : null,
+    }
+    this.syncThread()
+    this.emit()
   }
 
   private async fetchNewest(
