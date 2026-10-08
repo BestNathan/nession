@@ -100,7 +100,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          while IFS=
+          while IFS=$'\t' read -r source durable_path; do
             destination="results-repo/${durable_path}"
             if [[ -e "${destination}" ]]; then
               echo "immutable acceptance record already exists: ${durable_path}" >&2
