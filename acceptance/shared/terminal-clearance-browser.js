@@ -35,10 +35,6 @@ async function verifyTerminalClearance(page, expect, runtime, targetSha) {
   await expect(page.locator('.xterm')).toBeVisible({ timeout: 25000 });
   await expect(page.getByTestId('terminal-connecting')).toBeHidden({ timeout: 30000 });
 
-  const readTerm = () => page.evaluate(() => {
-    const el = document.querySelector('.xterm');
-    return el && el.parentElement && el.parentElement.xtermInstance;
-  });
   await expect.poll(async () => page.evaluate(() => {
     const element = document.querySelector('.xterm');
     return Boolean(element && element.parentElement && element.parentElement.xtermInstance);
