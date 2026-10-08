@@ -71,14 +71,12 @@ jobs:
         continue-on-error: true
         run: |
           target_sha="$(git rev-parse HEAD)"
-          node acceptance/run-case.mjs \
+          ./e2e/run acceptance \
             --issue-json /tmp/issue-1474.json \
             --issue 1474 \
-            --criterion SC-03 \
+            --sc SC-03 \
             --stage pre-merge \
-            --target-sha "$target_sha" \
-            --run-id "${GITHUB_RUN_ID}" \
-            --run-attempt "${GITHUB_RUN_ATTEMPT}" \
+            --sha "$target_sha" \
             --output /tmp/acceptance-case-SC-03.json
 
       - name: Run SC-14 browser + protocol Case
@@ -86,14 +84,12 @@ jobs:
         continue-on-error: true
         run: |
           target_sha="$(git rev-parse HEAD)"
-          node acceptance/run-case.mjs \
+          ./e2e/run acceptance \
             --issue-json /tmp/issue-1474.json \
             --issue 1474 \
-            --criterion SC-14 \
+            --sc SC-14 \
             --stage staging \
-            --target-sha "$target_sha" \
-            --run-id "${GITHUB_RUN_ID}" \
-            --run-attempt "${GITHUB_RUN_ATTEMPT}" \
+            --sha "$target_sha" \
             --output /tmp/acceptance-case-SC-14.json
 
       - uses: actions/upload-artifact@v4
