@@ -13,7 +13,7 @@ async function verifyTerminalClearance(page, expect, runtime, targetSha) {
   const create = page.getByTestId('create-session');
   await expect(create).toBeEnabled({ timeout: 20000 });
   await create.click();
-  const name = 'case-1482-' + process.pid;
+  const name = 'case-1482-' + process.pid + '-' + Date.now();
   const dialog = page.getByRole('dialog');
   await expect(dialog).toBeVisible();
   await page.locator('#name').fill(name);
