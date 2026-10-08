@@ -331,8 +331,9 @@ async function startFullStackRuntime(options) {
       },
     );
     processes.push(webProcess);
-    const baseURL = 'http://127.0.0.1:' + webPort;
-    await waitForHttp(baseURL, 30_000, webProcess.child, webProcess.label);
+    const readinessURL = 'http://127.0.0.1:' + webPort;
+    const baseURL = 'http://localhost:' + webPort;
+    await waitForHttp(readinessURL, 30_000, webProcess.child, webProcess.label);
 
     const metadata = {
       schema_version: 1,
