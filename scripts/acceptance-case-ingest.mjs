@@ -175,12 +175,12 @@ export function assertSourceBoundRecord(record, source) {
   return item;
 }
 
-async function attestCaseRecord(record, { event, repository, token }) {
+async function attestCaseRecord(record, { event, repository, token, request = githubRequest }) {
   const source = sourceRunIdentity(event, repository);
   const item = assertSourceBoundRecord(record, source);
   const [owner, repo] = repository.split('/');
-  const commit = await githubRequest('/repos/' + owner + '/' + repo + '/git/commits/' + item.target_sha, { token });
-  const tree = await githubRequest('/repos/' + owner + '/' + repo + '/git/trees/' + commit.tree.sha + '?recursive=1', { token });
+  const commit = await request('/repos/' + owner + '/' + repo + '/git/commits/' + item.target_sha, { token });
+  const tree = await request('/repos/' + owner + '/' + repo + '/git/trees/' + commit.tree.sha + '?recursive=1', { token });
   if (tree.truncated) throw new Error('source tree listing is truncated; cannot attest Case tree');
   const casePath = 'acceptance/cases/' + item.issue + '/' + item.criterion;
   const actual = tree.tree?.find((entry) => entry.path === casePath && entry.type === 'tree');
@@ -361,7 +361,7 @@ function fixtureRecord(overrides = {}) {
   };
 }
 
-function selfTest() {
+async function selfTest() {
   const valid = fixtureRecord();
   const canonical = JSON.stringify({
     schema_version: 1, run_id: valid.run_id, run_attempt: valid.run_attempt,
@@ -385,6 +385,39 @@ function selfTest() {
     head_branch: 'staging', head_sha: valid.target_sha, event: 'push',
     id: 100, run_attempt: 1, workflow_id: 9,
   }};
+  // Exercise the actual attest path without credentials: a fetched source commit
+  // must contain the exact Case tree claimed by the immutable record.
+  const sourceTree = 'f'.repeat(40);
+  const expectedPath = 'acceptance/cases/1474/SC-14';
+  const attestationRequest = async (apiPath) => {
+    if (apiPath.endsWith('/git/commits/' + valid.target_sha)) return { tree: { sha: sourceTree } };
+    if (apiPath.includes('/git/trees/' + sourceTree)) return {
+      truncated: false, tree: [{ path: expectedPath, type: 'tree', sha: valid.case_tree_sha }],
+    };
+    throw new Error('unexpected API path in test: ' + apiPath);
+  };
+  const attestation = { event: fixtureEvent, repository: 'BestNathan/nession',
+    token: 'self-test', request: attestationRequest };
+  assert.equal((await attestCaseRecord(valid, attestation)).item.case_tree_sha, valid.case_tree_sha);
+  await assert.rejects(() => attestCaseRecord({ ...valid, execution_id: 'a'.repeat(64) }, attestation), /execution_id/);
+  await assert.rejects(() => attestCaseRecord(valid, {
+    ...attestation,
+    request: async (apiPath) => {
+      const response = await attestationRequest(apiPath);
+      return response.tree && Array.isArray(response.tree)
+        ? { ...response, tree: [{ ...response.tree[0], sha: 'e'.repeat(40) }] }
+        : response;
+    },
+  }), /Case Git tree does not match/);
+  await assert.rejects(() => attestCaseRecord(valid, {
+    ...attestation,
+    request: async (apiPath) => {
+      const response = await attestationRequest(apiPath);
+      return response.tree && Array.isArray(response.tree)
+        ? { ...response, truncated: true }
+        : response;
+    },
+  }), /truncated/);
   assert.equal(sourceRunIdentity(fixtureEvent, 'BestNathan/nession').head_sha, valid.target_sha);
   assert.throws(() => sourceRunIdentity({ workflow_run: { ...fixtureEvent.workflow_run, repository: {full_name: 'other/repo'} } }, 'BestNathan/nession'), /repository mismatch/);
   assert.equal(validateCaseRecord(valid).result, 'Pass');
