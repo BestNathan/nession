@@ -67,6 +67,7 @@ export function TerminalCapsule({
   const contentRef = useRef<HTMLDivElement>(null);
   const inputRowRef = useRef<HTMLDivElement>(null);
   const fieldRef = useRef<HTMLTextAreaElement>(null);
+  const contextPeekFocusRef = useRef<string | null>(null);
 
   /**
    * A projection that claims the keyboard, and the composer competing for it.
@@ -169,6 +170,9 @@ export function TerminalCapsule({
         disclosure={capabilityDisclosure}
         workContext={workContext}
         onDismiss={() => restState.setContextOpen(false)}
+        onDeepen={(capabilityId) => {
+          contextPeekFocusRef.current = capabilityId;
+        }}
         triggerRef={restState.contextTriggerRef}
       />
     ) : capabilityProjection ? (
@@ -178,6 +182,12 @@ export function TerminalCapsule({
         sendPhysKey={sendPhysKey}
         disabled={disabled}
         triggerRef={restState.contextTriggerRef}
+        focusFromContext={contextPeekFocusRef.current === capabilityProjection.id}
+        onFocusFromContextHandled={() => {
+          if (contextPeekFocusRef.current === capabilityProjection.id) {
+            contextPeekFocusRef.current = null;
+          }
+        }}
       />
     ) : null;
 
