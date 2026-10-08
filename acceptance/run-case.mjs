@@ -20,7 +20,7 @@ const require = createRequire(import.meta.url);
 const {
   allocateLoopbackPort,
   startFullStackRuntime,
-} = require('./runtime/full-stack.js');
+} = require('../e2e/runner/runtime/full-stack.js');
 
 function arg(name, required = false) {
   const index = process.argv.indexOf('--' + name);
