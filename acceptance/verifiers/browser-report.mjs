@@ -19,7 +19,7 @@ function countAssertions(steps) {
   return count;
 }
 
-export function classifyBrowserReport(report, exitCode) {
+export function classifyBrowserReport(report, exitCode, proof) {
   if (!report || typeof report !== 'object' || !report.stats) {
     return { result: 'Error', summary: 'Playwright JSON reporter output missing or invalid', evidence: [] };
   }
@@ -29,8 +29,14 @@ export function classifyBrowserReport(report, exitCode) {
   const skipped = Number(stats.skipped);
   const flaky = Number(stats.flaky ?? 0);
   const tests = allTests(report.suites);
-  const assertions = tests.reduce((total, test) =>
-    total + (test.results ?? []).reduce((n, run) => n + countAssertions(run.steps), 0), 0);
+  // The Playwright JSON reporter omits step events. A second reporter supplies
+  // step callback counts; never infer that exit=0 implies actual assertions.
+  if (!proof || proof.schema_version !== 1 ||
+      !Number.isSafeInteger(proof.assertions) || proof.assertions < 0 ||
+      !Number.isSafeInteger(proof.executed) || proof.executed < 0) {
+    return { result: 'Error', summary: 'missing/invalid Playwright assertion reporter evidence', evidence: [] };
+  }
+  const assertions = proof.assertions;
   if (![expected, unexpected, skipped, flaky].every((n) => Number.isSafeInteger(n) && n >= 0)) {
     return { result: 'Error', summary: 'invalid Playwright execution counters', evidence: [] };
   }
@@ -38,6 +44,9 @@ export function classifyBrowserReport(report, exitCode) {
     return { result: 'Error', summary: 'Playwright test discovery/count mismatch', evidence: [] };
   }
   const facts = { discovered: tests.length, passed: expected, failed: unexpected, skipped, flaky, assertions };
+  if (expected > proof.executed) {
+    return { result: 'Error', summary: 'JSON and assertion reporter execution counts disagree', evidence: [], execution: facts };
+  }
   if (unexpected > 0 || (exitCode !== 0 && expected > 0)) {
     return { result: 'Fail', summary: 'Playwright assertions failed', evidence: [], execution: facts };
   }
@@ -68,14 +77,15 @@ function selfTest() {
   const report = (tests, expected, skipped = 0, unexpected = 0, flaky = 0) => ({
     suites: [{ specs: [{ tests }] }], stats: { expected, skipped, unexpected, flaky },
   });
-  assert.equal(classifyBrowserReport(report([test()], 1), 0).result, 'Pass');
-  assert.equal(classifyBrowserReport(report([], 0), 0).result, 'Error');
-  assert.equal(classifyBrowserReport(report([test()], 0, 1), 0).result, 'Pending');
-  assert.equal(classifyBrowserReport(report([test(), test()], 1, 1), 0).result, 'Pending');
-  assert.equal(classifyBrowserReport(report([test([])], 1), 0).result, 'Pending');
-  assert.equal(classifyBrowserReport(report([test()], 0, 0, 1), 1).result, 'Fail');
+  assert.equal(classifyBrowserReport(report([test()], 1), 0, { schema_version: 1, executed: 1, assertions: 2 }).result, 'Pass');
+  assert.equal(classifyBrowserReport(report([], 0), 0, { schema_version: 1, executed: 0, assertions: 0 }).result, 'Error');
+  assert.equal(classifyBrowserReport(report([test()], 0, 1), 0, { schema_version: 1, executed: 0, assertions: 0 }).result, 'Pending');
+  assert.equal(classifyBrowserReport(report([test(), test()], 1, 1), 0, { schema_version: 1, executed: 1, assertions: 1 }).result, 'Pending');
+  assert.equal(classifyBrowserReport(report([test([])], 1), 0, { schema_version: 1, executed: 1, assertions: 0 }).result, 'Pending');
+  assert.equal(classifyBrowserReport(report([test()], 0, 0, 1), 1, { schema_version: 1, executed: 1, assertions: 1 }).result, 'Fail');
   assert.equal(classifyBrowserReport(null, 0).result, 'Error');
-  assert.equal(classifyBrowserReport(report([test()], 1), 1).result, 'Fail');
-  console.log('browser report contract: 8 positive/negative fixtures passed');
+  assert.equal(classifyBrowserReport(report([test()], 1), 0).result, 'Error');
+  assert.equal(classifyBrowserReport(report([test()], 1), 1, { schema_version: 1, executed: 1, assertions: 1 }).result, 'Fail');
+  console.log('browser report contract: 9 positive/negative fixtures passed');
 }
 if (process.argv[1]?.endsWith('browser-report.mjs') && process.argv[2] === 'self-test') selfTest();
