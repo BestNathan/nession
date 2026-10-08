@@ -30,8 +30,11 @@ jobs:
     runs-on: ubuntu-latest
     # PLAYWRIGHT_BROWSERS_PATH applies to BOTH install and test — keeps them
     # pointed at the same directory (and the same one the cache restores to).
+    # NESSION_TARGET_SHA binds the shared Runtime Harness to the exact checkout
+    # that this workflow is verifying.
     env:
       PLAYWRIGHT_BROWSERS_PATH: ~/.cache/ms-playwright
+      NESSION_TARGET_SHA: ${{ github.sha }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
