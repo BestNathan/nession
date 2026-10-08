@@ -146,3 +146,22 @@ test('runtime-local variable gate accepts CSS and JS producers for consumers', (
   ];
   assert.deepEqual(scanLocalVariableContracts(files), []);
 });
+
+test('owned CSS runtime contract rejects a producer from the wrong file', () => {
+  const name = '--nession-local-terminal-content-bottom-inset';
+  const files = [
+    { file: 'web/src/index.css', source: '.term { width: var(' + name + '); }' },
+    { file: 'web/src/not-the-owner.ts', source: "host.style.setProperty('" + name + "', '20px')" },
+  ];
+  const failures = scanLocalVariableContracts(files, { [name]: ['web/src/index.css'] });
+  assert.deepEqual(failures.map(v => v.kind), ['missing-owned-producer', 'unowned-producer']);
+});
+
+test('owned CSS runtime contract accepts a declared producer', () => {
+  const name = '--nession-local-terminal-content-bottom-inset';
+  const files = [
+    { file: 'web/src/index.css', source: '.term { ' + name + ': 12px; }' },
+    { file: 'web/src/consumer.ts', source: "const x = 'var(" + name + ", 0px)'" },
+  ];
+  assert.deepEqual(scanLocalVariableContracts(files, { [name]: ['web/src/index.css'] }), []);
+});
