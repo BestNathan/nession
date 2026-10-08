@@ -230,7 +230,7 @@ function verifyAndKillTmux(tmuxSocket) {
     ).trim();
     if (reported !== tmuxSocket) {
       console.warn(
-        '[e2e runner] refusing tmux cleanup: socket reported ' +
+        '[e2e runner] refusing socket cleanup: reported ' +
         reported + ', expected ' + tmuxSocket,
       );
       return;
