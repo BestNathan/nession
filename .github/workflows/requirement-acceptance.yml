@@ -32,6 +32,7 @@ jobs:
       has_requirements: ${{ steps.discover.outputs.has_requirements }}
       head_sha: ${{ steps.context.outputs.head_sha }}
       quality_run_id: ${{ steps.quality.outputs.run_id }}
+      e2e_run_id: ${{ steps.e2e.outputs.run_id }}
     steps:
       # pull_request_target is credentialed. Always execute trusted main tooling;
       # never checkout or execute PR-head code in this orchestration job.
@@ -110,6 +111,52 @@ jobs:
           done
 
           echo "::error::No successful completed Quality Gate run appeared for PR head ${HEAD_SHA}."
+          exit 1
+
+      - name: Wait for E2E Tests on the exact PR head
+        id: e2e
+        if: steps.discover.outputs.has_requirements == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+
+          for _ in $(seq 1 240); do
+            runs="$(gh run list \
+              --repo "${GITHUB_REPOSITORY}" \
+              --workflow e2e.yml \
+              --commit "${HEAD_SHA}" \
+              --event pull_request \
+              --limit 20 \
+              --json databaseId,status,conclusion)"
+
+            run="$(jq -c '.[0] // empty' <<<"${runs}")"
+            if [[ -z "${run}" ]]; then
+              sleep 10
+              continue
+            fi
+
+            status="$(jq -r '.status' <<<"${run}")"
+            conclusion="$(jq -r '.conclusion // ""' <<<"${run}")"
+            run_id="$(jq -r '.databaseId' <<<"${run}")"
+
+            if [[ "${status}" != "completed" ]]; then
+              sleep 10
+              continue
+            fi
+
+            if [[ "${conclusion}" != "success" ]]; then
+              echo "::error::E2E Tests run ${run_id} for ${HEAD_SHA} concluded ${conclusion}."
+              exit 1
+            fi
+
+            echo "run_id=${run_id}" >> "${GITHUB_OUTPUT}"
+            echo "E2E Tests run ${run_id} passed for PR head ${HEAD_SHA}."
+            exit 0
+          done
+
+          echo "::error::No successful completed E2E Tests run appeared for PR head ${HEAD_SHA}."
           exit 1
 
   pre-merge-acceptance:
