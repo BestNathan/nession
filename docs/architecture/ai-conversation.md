@@ -103,35 +103,44 @@ export const myProviderConversationAdapter: AIConversationAdapter<MyContext> = {
   id: 'my-provider',
   identity: { label: 'My Provider' },
   contextKey: (context) => `${context.a}:${context.b}`,
-  async list(context, cursor) { /* → AIConversationListResult + nextCursor */ },
+  requestKey: (context) => context.leaseId,
+  async list(context, cursor) { /* → result + nextCursor/listingId/restart */ },
   async read(context, conversationId, cursor) { /* → AIConversationPage */ },
   refresh: { kind: 'poll', intervalMs: 3000 },
 }
 ```
 
-Four decisions, all yours: how to list one directory page, how to read one
-timeline page, what makes two contexts the same conversation space, and how you
-learn that something changed (`poll`, `push`, or `manual`). The runtime owns
-walking both cursors and merging their windows; a surface never needs a
-provider-specific "load page 2" branch.
+Six decisions, all yours: how to list one directory page, how to read one
+timeline page, what makes two contexts the same conversation space, what makes
+old in-flight work still authoritative, what makes one list continuation a
+coherent snapshot, and how you learn that something changed (`poll`, `push`,
+or `manual`). The runtime owns transcript paging/reconciliation and a bounded
+complete-list aggregation; a surface never needs a provider-specific "load page
+2" branch.
 
-Four obligations:
+Provider obligations:
 
-- **`nextCursor` is the provider's continuation token, or `null`.** Never
-  collapse a provider ceiling into "the whole directory". The runtime follows
-  this token until the listing is complete, so 201 conversations are as
-  reachable as 20.
+- **`nextCursor` is opaque and `listingId` names one coherent directory
+  snapshot.** If a continuation is no longer valid because the directory
+  re-sorted/rebound, return `restart: true`; never apply an old offset to a new
+  ordering. The runtime restarts at most twice and follows at most 32 pages for
+  one logical list read. Crossing either bound is a list error that preserves a
+  previously readable directory instead of looping forever.
 - **`bindingId` is an exact id** the provider named, or `null`. Never a guess
-  from a timestamp or a list of one — a reader who sees a conversation open
-  must be seeing one the provider said was *theirs*.
+  from a timestamp or a list of one. Every page of one `listingId` must report
+  the same binding.
 - **`contextKey` is equal exactly when two contexts mean the same conversation
-  space.** It is how the runtime tags a selection and discards a stale
-  response, and it is the one thing only you can answer.
+  space.** It scopes selection and visible conversation identity.
+- **`requestKey` changes when work issued under the old Context must no longer
+  publish.** Providers whose request authority is exactly `contextKey` may omit
+  it. If a token/lease/client can rotate while the space stays equal, implement
+  it explicitly; object identity is not a request-generation contract.
 - **A push policy also supplies `sourceKey(context, conversationId)`.** It is
-  equal exactly while the concrete subscription can be reused. A token, lease,
-  client, socket or stream handle may change while `contextKey` stays equal;
-  this stable source identity tells the runtime to unsubscribe and re-arm
-  without treating a fresh object on every React render as a new source.
+  equal exactly while the concrete subscription can be reused. Source
+  replacement is claimed before `subscribe()` may synchronously signal, and
+  the runtime performs a catch-up newest read to close the unsubscribe/subscribe
+  delivery gap.
+
 
 Export the adapter as a module-level constant: the hook treats it as the
 provider's identity, so building a new one per render would be asserting that
