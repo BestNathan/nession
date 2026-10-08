@@ -51,13 +51,16 @@ jobs:
           SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
           SOURCE_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
           SOURCE_WORKFLOW_URL: ${{ github.event.workflow_run.html_url }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           : > "${RUNNER_TEMP}/persisted-records.txt"
           : > "${RUNNER_TEMP}/records-to-ingest.tsv"
           count=0
           while IFS= read -r file; do
-            durable_path="$(node trusted/scripts/acceptance-case-ingest.mjs record-path "${file}")"
+            # Never create a persistent path until the GitHub-owned source run
+            # identity and immutable source Case tree have been attested.
+            durable_path="$(node trusted/scripts/acceptance-case-ingest.mjs attest "${file}" "${GITHUB_EVENT_PATH}")"
             echo "${file}"$'\t'"${durable_path}" >> "${RUNNER_TEMP}/records-to-ingest.tsv"
             count=$((count + 1))
           done < <(find incoming -type f -name '*.case.json' -print | sort)
@@ -94,9 +97,55 @@ jobs:
         if: steps.records.outputs.count != '0'
         env:
           SOURCE_WORKFLOW_URL: ${{ github.event.workflow_run.html_url }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          while IFS=$'\t' read -r source durable_path; do
+          while IFS=
+            destination="results-repo/${durable_path}"
+            if [[ -e "${destination}" ]]; then
+              echo "immutable acceptance record already exists: ${durable_path}" >&2
+              exit 1
+            fi
+            mkdir -p "$(dirname "${destination}")"
+            node trusted/scripts/acceptance-case-ingest.mjs enrich \
+              "${source}" "${destination}" "${SOURCE_WORKFLOW_URL}" "${durable_path}" "${GITHUB_EVENT_PATH}"
+            node trusted/scripts/acceptance-case-ingest.mjs validate "${destination}" >/dev/null
+            printf '%s\n' "${durable_path}" >> "${RUNNER_TEMP}/persisted-records.txt"
+          done < "${RUNNER_TEMP}/records-to-ingest.tsv"
+
+          git -C results-repo add README.md runs/
+          git -C results-repo commit -m "acceptance: ingest run ${{ github.event.workflow_run.id }} attempt ${{ github.event.workflow_run.run_attempt }}"
+          git -C results-repo push origin acceptance-results
+
+      - name: Project only currently eligible results
+        if: steps.records.outputs.count != '0'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -uo pipefail
+          failed=0
+          while IFS= read -r durable_path; do
+            echo "Projecting ${durable_path}"
+            if ! node trusted/scripts/acceptance-case-ingest.mjs apply "results-repo/${durable_path}"; then
+              echo "::error::Projection failed for ${durable_path}"
+              failed=1
+            fi
+          done < "${RUNNER_TEMP}/persisted-records.txt"
+          exit "${failed}"
+
+      - name: Summarize ingestion
+        if: always()
+        run: |
+          {
+            echo "## Acceptance Case ingestion"
+            echo
+            echo "- Source run: ${{ github.event.workflow_run.html_url }}"
+            echo "- Source conclusion: \`${{ github.event.workflow_run.conclusion }}\`"
+            echo "- Compact records discovered: \`${{ steps.records.outputs.count || '0' }}\`"
+            echo "- Durable branch: \`acceptance-results\`"
+          } >> "${GITHUB_STEP_SUMMARY}"
+\t' read -r source durable_path; do
             destination="results-repo/${durable_path}"
             if [[ -e "${destination}" ]]; then
               echo "immutable acceptance record already exists: ${durable_path}" >&2
