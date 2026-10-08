@@ -50,6 +50,7 @@ jobs:
           node scripts/generate-repo-metrics.mjs --self-test
           node scripts/protocol-gate.mjs --json >/dev/null
           node scripts/issue-contract.mjs self-test
+          node acceptance/verifiers/browser-report.mjs self-test
           node scripts/issue-audit-agent.mjs self-test
           node scripts/issue-audit-cursor.mjs self-test
       - run: cd web && npm ci
