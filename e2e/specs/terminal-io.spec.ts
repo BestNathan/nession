@@ -896,6 +896,7 @@ test.describe('Terminal I/O', () => {
     await expect
       .poll(async () => readScrollMode(page), { timeout: 5_000 })
       .toBe('history');
+    await expect.poll(async () => page.locator('[data-terminal-viewport]').evaluate(el => Number.parseFloat(getComputedStyle(el).paddingBottom))).toBe(0);
     const parked = await readViewport(page);
 
     // Output arrives while the user is reading — from the session, with nothing
@@ -932,6 +933,7 @@ test.describe('Terminal I/O', () => {
     await expect
       .poll(async () => (await readViewport(page)).following, { timeout: 15_000 })
       .toBe(true);
+    await expect.poll(async () => page.locator('[data-terminal-viewport]').evaluate(el => Number.parseFloat(getComputedStyle(el).paddingBottom))).toBeGreaterThan(0);
   });
 
   test('the application, not tmux, owns the terminal the browser drives (#321 S3)', async ({ page }, testInfo) => {
