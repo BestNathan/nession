@@ -161,6 +161,18 @@ const DEFAULT_SCHEDULER: ConversationScheduler = {
   clearInterval: (handle) => clearInterval(handle as ReturnType<typeof setInterval>),
 }
 
+/**
+ * A complete-list fetch is deliberately bounded.
+ *
+ * The contract still gives surfaces a complete directory, but it no longer
+ * means "follow cursors forever". Thirty-two provider pages are enough for
+ * thousands of Claude conversations at its 200-row ceiling while keeping one
+ * logical refresh finite even if a provider keeps inventing cursors.
+ */
+const LIST_PAGE_BUDGET = 32
+/** A moving directory may be retried, but not allowed to livelock forever. */
+const LIST_RESTART_BUDGET = 2
+
 interface ListState {
   state: AIConversationListState | null
   conversations: AIConversationSummary[]
@@ -273,6 +285,14 @@ export class ConversationRuntime<Context> {
 
   private context: Context | null = null
   private contextKey: string | null = null
+  /**
+   * Which concrete request authority current list/read work belongs to.
+   *
+   * Equal context keys mean "same conversation space"; equal request keys mean
+   * "work issued under the old Context may still publish". They are different
+   * questions when a token/lease/client rotates in place (#1363 round 7).
+   */
+  private requestKey: string | null = null
   private chosen: { key: string; id: string } | null = null
   /** What the thread currently holds — the id the loaded items belong to. */
   private loadedId: string | null = null
@@ -376,21 +396,37 @@ export class ConversationRuntime<Context> {
     const wasDisposed = this.disposed
     this.disposed = false
     const key = context === null ? null : this.adapter.contextKey(context)
+    const requestKey =
+      context === null ? null : (this.adapter.requestKey?.(context) ?? key)
 
     if (key !== null && key === this.contextKey) {
+      const requestChanged = requestKey !== this.requestKey
       this.context = context
+      this.requestKey = requestKey
 
-      if (wasDisposed) {
-        // Every pre-dispose response was invalidated by `dispose`; start fresh
-        // requests without throwing away the readable window already on screen.
+      if (wasDisposed || requestChanged) {
+        // Keep the visible space/window, but revoke every request issued under
+        // the old authority. A late A response is not allowed to publish merely
+        // because A and B point at the same conversation space.
+        this.listGeneration += 1
+        this.newestGeneration += 1
+        this.olderGeneration += 1
+        this.newestInFlight = null
+        this.newestPending = false
+
         void this.fetchList(key, ++this.listGeneration)
         if (this.loadedId !== null) {
           this.reloadNewest()
         }
+
+        // A push source may rotate with the same logical space as well. Its own
+        // sourceKey decides whether it needs a new subscription; startRefresh
+        // closes that handoff with a catch-up read.
+        this.syncRefresh()
       } else {
-        // The space did not change, but a push source may have. The provider's
-        // stable `sourceKey` decides whether the subscription is still valid;
-        // object identity deliberately does not.
+        // Same space and same request authority. A push source may still have a
+        // provider-specific identity (for example a reconnecting stream), so
+        // only the source contract decides whether re-arming is necessary.
         this.syncRefresh()
       }
       return
@@ -398,6 +434,7 @@ export class ConversationRuntime<Context> {
 
     this.context = context
     this.contextKey = key
+    this.requestKey = requestKey
     this.newestGeneration += 1
     this.olderGeneration += 1
     this.positions = emptyPositions()
@@ -544,16 +581,51 @@ export class ConversationRuntime<Context> {
     }
 
     try {
-      const conversations: AIConversationSummary[] = []
-      const seenConversations = new Set<string>()
-      const seenCursors = new Set<string>()
+      let conversations: AIConversationSummary[] = []
+      let seenConversations = new Set<string>()
+      let seenCursors = new Set<string>()
       let bindingId: string | null = null
+      let bindingSeen = false
+      let listingId: string | null = null
       let cursor: string | undefined
+      let pages = 0
+      let restarts = 0
 
       for (;;) {
+        pages += 1
+        if (pages > LIST_PAGE_BUDGET) {
+          throw new Error(
+            `Conversation list exceeded the bounded ${LIST_PAGE_BUDGET}-page budget`,
+          )
+        }
+
         const result = await this.adapter.list(context, cursor)
         if (!this.wanted(key, generation, this.listGeneration)) {
           return
+        }
+
+        // A continuation token describes one snapshot, not "start at this
+        // numeric offset in whatever order exists now". A provider that sees
+        // its snapshot disappear asks for a bounded restart instead of silently
+        // crossing generations.
+        if (result.restart) {
+          if (cursor === undefined) {
+            throw new Error('Conversation list asked to restart its first page')
+          }
+          restarts += 1
+          if (restarts > LIST_RESTART_BUDGET) {
+            throw new Error(
+              `Conversation list changed more than ${LIST_RESTART_BUDGET} times while loading`,
+            )
+          }
+          conversations = []
+          seenConversations = new Set<string>()
+          seenCursors = new Set<string>()
+          bindingId = null
+          bindingSeen = false
+          listingId = null
+          cursor = undefined
+          continue
         }
 
         // A semantic non-ready answer describes the directory request, not the
@@ -575,13 +647,32 @@ export class ConversationRuntime<Context> {
           return
         }
 
+        const pageListingId = result.listingId ?? null
+        const paged = cursor !== undefined || result.nextCursor !== null
+        if (paged && pageListingId === null) {
+          throw new Error('Paged conversation list omitted its stable listing id')
+        }
+        if (pageListingId !== null) {
+          if (listingId === null) {
+            listingId = pageListingId
+          } else if (listingId !== pageListingId) {
+            throw new Error('Conversation list crossed listing generations')
+          }
+        }
+
+        if (!bindingSeen) {
+          bindingId = result.bindingId
+          bindingSeen = true
+        } else if (bindingId !== result.bindingId) {
+          throw new Error('Conversation binding changed inside one listing snapshot')
+        }
+
         for (const conversation of result.conversations) {
           if (!seenConversations.has(conversation.id)) {
             seenConversations.add(conversation.id)
             conversations.push(conversation)
           }
         }
-        bindingId ??= result.bindingId
 
         const next = result.nextCursor
         if (next === null) {
@@ -867,12 +958,27 @@ export class ConversationRuntime<Context> {
     ) {
       return
     }
+
+    // Only a replacement has a handoff gap to close. The initial subscription
+    // follows the newest page that just made the thread readable, so asking
+    // immediately again would only duplicate that first read.
+    const replacing = this.refreshArmedFor !== null
     this.stopRefresh()
+
+    // Claim the target before the provider can call us back. Some push APIs send
+    // a synchronous "current state changed" signal from subscribe(); assigning
+    // this afterwards used to make the guard discard that perfectly valid
+    // first signal.
+    this.refreshArmedFor = { key, conversationId, sourceKey }
 
     if (policy.kind === 'poll') {
       this.timer = this.scheduler.setInterval(() => this.poll(), policy.intervalMs)
-    } else {
-      this.unsubscribePush = policy.subscribe(context, conversationId, () => {
+      return
+    }
+
+    let synchronousSignal = false
+    try {
+      const unsubscribe = policy.subscribe(context, conversationId, () => {
         // Unsubscribe is not instantaneous for every source. A late event from
         // an old lease/socket is stale even when the conversation-space key and
         // conversation id are unchanged, so source identity participates in the
@@ -884,10 +990,39 @@ export class ConversationRuntime<Context> {
         ) {
           return
         }
+        synchronousSignal = true
         this.poll()
       })
+      // A synchronous callback may have caused a page to settle and stop
+      // refresh before subscribe() returned. Do not resurrect that source.
+      if (
+        this.refreshArmedFor?.key === key &&
+        this.refreshArmedFor.conversationId === conversationId &&
+        this.refreshArmedFor.sourceKey === sourceKey
+      ) {
+        this.unsubscribePush = unsubscribe
+      } else {
+        unsubscribe()
+        return
+      }
+    } catch {
+      if (
+        this.refreshArmedFor?.key === key &&
+        this.refreshArmedFor.conversationId === conversationId &&
+        this.refreshArmedFor.sourceKey === sourceKey
+      ) {
+        this.refreshArmedFor = null
+      }
+      this.unsubscribePush = null
+      return
     }
-    this.refreshArmedFor = { key, conversationId, sourceKey }
+
+    // A source replacement can miss a change between "A stopped" and "B is
+    // listening". Close that gap explicitly. If B synchronously told us it had
+    // a change, that signal already did the catch-up; otherwise request one now.
+    if (replacing && !synchronousSignal) {
+      this.poll()
+    }
   }
 
   private stopRefresh(): void {
