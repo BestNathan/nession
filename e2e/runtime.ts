@@ -41,7 +41,7 @@ export const E2E_SERVER_PORT = 19090;
 export const E2E_AGENT_PORT = 19091;
 export const E2E_STALLED_PROBE_PORT = 19092;
 export const E2E_WEB_PORT = 4173;
-export const E2E_WEB_URL = `http://127.0.0.1:${E2E_WEB_PORT}`;
+export const E2E_WEB_URL = `http://localhost:${E2E_WEB_PORT}`;
 
 /** Environment shared by the isolated Rust processes. */
 export const E2E_ISOLATION_ENV = {
