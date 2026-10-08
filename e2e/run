@@ -32,7 +32,7 @@ function walk(dir, fileName) {
     const child = path.join(dir, dirent.name);
     if (dirent.isSymbolicLink()) throw new Error('catalog may not contain symlinks: ' + child);
     if (dirent.isDirectory()) found.push(...walk(child, fileName));
-    else if (dirent.isFile() && dirent.name === fileName) found.push(child);
+    else if (dirent.isFile() && (!fileName || dirent.name === fileName)) found.push(child);
   }
   return found.sort();
 }
