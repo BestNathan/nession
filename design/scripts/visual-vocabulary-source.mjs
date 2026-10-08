@@ -228,6 +228,14 @@ export const LOCAL_CSS_VARIABLE_OWNERS = Object.freeze({
 export function scanLocalVariableContracts(files, owners = {}) {
   const producers = new Map();
   const consumers = [];
+  const constantBindings = new Map();
+  // A runtime owner may use a shared exported CSS variable name constant.
+  for (const { source } of files) {
+    const code = maskComments(source);
+    for (const m of code.matchAll(/\b(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*['"`](--nession-local-[A-Za-z0-9_-]+)['"`]/g)) {
+      constantBindings.set(m[1], m[2]);
+    }
+  }
   const addProducer = (name, file) => {
     if (!producers.has(name)) producers.set(name, []);
     producers.get(name).push(file);
@@ -239,6 +247,10 @@ export function scanLocalVariableContracts(files, owners = {}) {
     }
     for (const match of code.matchAll(/\.setProperty\(\s*['"\x60](--nession-local-[A-Za-z0-9_-]+)['"\x60]/g)) {
       addProducer(match[1], file);
+    }
+    for (const match of code.matchAll(/\.setProperty\(\s*([A-Za-z_$][\w$]*)\s*,/g)) {
+      const name = constantBindings.get(match[1]);
+      if (name) addProducer(name, file);
     }
     for (const match of code.matchAll(/var\(\s*(--nession-local-[A-Za-z0-9_-]+)/g)) {
       consumers.push({ file, line: lineNumber(source, match.index), name: match[1] });
