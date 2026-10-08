@@ -1,6 +1,6 @@
 import path from 'node:path';
 
-import { startFullStackRuntime } from '../acceptance/runtime/full-stack.mjs';
+const { startFullStackRuntime } = require('../acceptance/runtime/full-stack.js');
 import {
   E2E_AGENT_PORT,
   E2E_RUN_DIR,
