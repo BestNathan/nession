@@ -13,8 +13,8 @@
  *   carry — `agent_id` finds the target, it is not part of what the target is
  *   asked.
  * - The page sizes. The provider clamps them to its own ceiling; the adapter
- *   asks for that ceiling and exposes the provider cursor, while the shared
- *   runtime continues until the directory is complete.
+ *   asks for that ceiling and exposes a revisioned provider cursor. The shared
+ *   runtime completes one coherent listing under its bounded page budget.
  * - The poll interval. Whether a provider polls, is pushed to, or waits to be
  *   asked is a fact about the provider's transport, and Claude Code has no push
  *   channel for conversations — `#1005` scope 5 allows polling for v1, and the
@@ -63,6 +63,22 @@ export interface ClaudeCodeConversationApi {
 /** Ask for the provider's own ceiling; the runtime follows the returned cursor. */
 const LIST_LIMIT = 200
 
+/**
+ * Conversation-list cursors are `<listing-revision>:<offset>`.
+ *
+ * The wire keeps the revision inside the cursor so v1 does not need a second
+ * response field. The adapter lifts it into the generic `listingId` contract:
+ * the first page gets it from `next_cursor`, later/final pages get it from the
+ * cursor they were asked with.
+ */
+function listingIdOf(cursor?: string | null): string | null {
+  if (!cursor) {
+    return null
+  }
+  const separator = cursor.lastIndexOf(':')
+  return separator > 0 ? cursor.slice(0, separator) : null
+}
+
 /** One page of a timeline. The provider clamps this to its ceiling. */
 const PAGE_LIMIT = 60
 
@@ -94,6 +110,9 @@ export function createClaudeCodeAdapter(
     // Session's cwd, so two Sessions are two different directories, and a
     // selection made in one is not a selection in the other.
     contextKey: (context) => `${context.agentId}:${context.sessionId}`,
+    // Every field Claude reads with is already part of the logical key today.
+    // Kept explicit so a future lease/client handle cannot rotate invisibly.
+    requestKey: (context) => `${context.agentId}:${context.sessionId}`,
 
     async list(context, cursor): Promise<AIConversationListResult> {
       const response = await api.claudeCodeConversations({
@@ -106,6 +125,10 @@ export function createClaudeCodeAdapter(
       const nextCursor = response.has_more ? (response.next_cursor ?? null) : null
       if (response.state === 'ready' && response.has_more && nextCursor === null) {
         throw new Error('Claude conversation list said more pages exist without a cursor')
+      }
+      const listingId = listingIdOf(cursor ?? nextCursor)
+      if (response.state === 'ready' && response.has_more && listingId === null) {
+        throw new Error('Claude conversation list returned an unversioned continuation cursor')
       }
       return {
         state: response.state,
@@ -122,6 +145,8 @@ export function createClaudeCodeAdapter(
         ),
         bindingId: bound?.conversation_id ?? null,
         nextCursor,
+        listingId,
+        restart: response.state === 'error' && response.error === 'listing_changed',
         error: response.error ?? null,
       }
     },
