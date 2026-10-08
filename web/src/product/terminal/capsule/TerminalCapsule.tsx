@@ -47,6 +47,24 @@ export interface TerminalCapsuleProps {
   workContext?: ResolvedWorkContext;
 }
 
+function useContextPeekFocusIntent(projectionId?: string) {
+  const intentRef = useRef<string | null>(null);
+  const onDeepen = useCallback((capabilityId: string) => {
+    intentRef.current = capabilityId;
+  }, []);
+  const onFocusFromContextHandled = useCallback(() => {
+    if (projectionId && intentRef.current === projectionId) {
+      intentRef.current = null;
+    }
+  }, [projectionId]);
+
+  return {
+    onDeepen,
+    focusFromContext: Boolean(projectionId && intentRef.current === projectionId),
+    onFocusFromContextHandled,
+  };
+}
+
 export function TerminalCapsule({
   sendText,
   sendPhysKey,
@@ -67,7 +85,6 @@ export function TerminalCapsule({
   const contentRef = useRef<HTMLDivElement>(null);
   const inputRowRef = useRef<HTMLDivElement>(null);
   const fieldRef = useRef<HTMLTextAreaElement>(null);
-  const contextPeekFocusRef = useRef<string | null>(null);
 
   /**
    * A projection that claims the keyboard, and the composer competing for it.
@@ -78,6 +95,7 @@ export function TerminalCapsule({
    */
   const projectionOwnsInputFocus = Boolean(capabilityProjection?.ownsInputFocus);
   const projectionId = capabilityProjection?.id ?? null;
+  const peekFocus = useContextPeekFocusIntent(capabilityProjection?.id);
 
   /**
    * The accessory takes the keyboard when it appears.
@@ -170,9 +188,7 @@ export function TerminalCapsule({
         disclosure={capabilityDisclosure}
         workContext={workContext}
         onDismiss={() => restState.setContextOpen(false)}
-        onDeepen={(capabilityId) => {
-          contextPeekFocusRef.current = capabilityId;
-        }}
+        onDeepen={peekFocus.onDeepen}
         triggerRef={restState.contextTriggerRef}
       />
     ) : capabilityProjection ? (
@@ -182,12 +198,8 @@ export function TerminalCapsule({
         sendPhysKey={sendPhysKey}
         disabled={disabled}
         triggerRef={restState.contextTriggerRef}
-        focusFromContext={contextPeekFocusRef.current === capabilityProjection.id}
-        onFocusFromContextHandled={() => {
-          if (contextPeekFocusRef.current === capabilityProjection.id) {
-            contextPeekFocusRef.current = null;
-          }
-        }}
+        focusFromContext={peekFocus.focusFromContext}
+        onFocusFromContextHandled={peekFocus.onFocusFromContextHandled}
       />
     ) : null;
 
