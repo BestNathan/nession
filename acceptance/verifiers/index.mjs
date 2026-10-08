@@ -141,7 +141,7 @@ async function executeNodeVerifier(verifier, context) {
 
 async function executeBrowserVerifier(verifier, context) {
   const playwright = path.join(context.repoRoot, 'e2e', 'node_modules', '.bin', 'playwright');
-  const config = path.join(context.repoRoot, 'acceptance', 'verifiers', 'playwright.config.ts');
+  const config = path.join(context.repoRoot, 'acceptance', 'verifiers', 'playwright.config.cjs');
   const entry = path.relative(
     path.join(context.repoRoot, 'acceptance', 'cases'),
     path.join(context.caseDir, verifier.entry),
