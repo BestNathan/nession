@@ -128,10 +128,19 @@ export class TerminalController {
   private readonly scrollbackMode: TerminalScrollbackMode;
   private attached = false;
   /**
-   * Whether the transport has delivered any of this session's output into this
-   * xterm. Latches — output arriving is the only transition — and a bootstrap
-   * counts, because the buffer it replaces is gone while what replaced it is
-   * history the user can see.
+   * Whether this xterm holds output of the session's. Latches — the thing it
+   * describes arriving is the only transition — and a bootstrap counts,
+   * because the buffer it replaces is gone while what replaced it is history
+   * the user can see.
+   *
+   * **A bootstrap counts when xterm has parsed it, not when it was handed
+   * over** (#1491). The flag's reader asks "does my Terminal hold the session's
+   * history" and decides from the answer whether to ask the agent for a
+   * snapshot, so a flag lifted by bytes still in the write queue answers for a
+   * buffer that is empty or half-filled — and the attach it steers then skips
+   * the snapshot that would have filled it. Live frames have no such moment
+   * and latch on arrival: they are a stream, and a reader waiting on a
+   * callback would see "no output" for a session that is producing plenty.
    *
    * Read by the attach path (`!hasSessionOutput` ⇒ ask for a bootstrap, #321).
    * A local {@link TerminalController.write} deliberately does not set it: that
@@ -139,6 +148,14 @@ export class TerminalController {
    * snapshot must still be able to ask for one.
    */
   private _hasSessionOutput = false;
+  /**
+   * Numbers the snapshots this controller has handed to xterm, so the newest
+   * one's write callback is the only one that can lift
+   * {@link hasSessionOutput}. A re-attach while a large snapshot is still
+   * parsing hands over a second one; both callbacks run, and the older of them
+   * describes a buffer that has since been erased (#1491).
+   */
+  private bootstrapSequence = 0;
   events?: TerminalControllerEvents;
 
   /** Callbacks → Jotai */
@@ -260,12 +277,30 @@ export class TerminalController {
         terminal.write(bootstrap.truncated ? BOOTSTRAP_SCREEN_RESET : BOOTSTRAP_BUFFER_RESET);
       }
       const follow = this.capsuleOcclusionScroll?.snapshotFollowing() ?? false;
+      // A snapshot is this buffer's *history*, and handing it to xterm is not
+      // the same fact as xterm holding it: the parse is asynchronous, so the
+      // one moment that can be vouched for is the write callback (#1491). The
+      // sequence is what keeps a superseded snapshot's callback from vouching
+      // for a buffer it no longer describes — the flag means "my Terminal
+      // holds the session's history", and until the newest snapshot has
+      // landed, it does not.
+      //
+      // Live output is the other way round: it is a *stream*, with no
+      // completion to wait for, so it latches on arrival. A reader that waited
+      // for a callback there would report "no session output" for every
+      // session that never sends a bootstrap.
+      const bootstrapSeq = bootstrap ? ++this.bootstrapSequence : null;
       terminal.write(data, () => {
+        if (bootstrapSeq !== null
+          && bootstrapSeq === this.bootstrapSequence
+          && this._terminal === terminal) {
+          this.markSessionOutput();
+        }
         if (follow) {
           this.capsuleOcclusionScroll?.afterOutputWhileFollowing();
         }
       });
-      this.markSessionOutput();
+      if (bootstrapSeq === null) { this.markSessionOutput(); }
     };
     transport.onResize = (cols: number, rows: number) => { terminal.resize(cols, rows); };
     transport.onError = (err: Error) => { this.onError?.(err); };
@@ -665,20 +700,30 @@ export class ResizeController {
         const grid = gridFor(size, this.lastCell);
         if (grid === null) { continue; }
 
+        // Local grid first, on EVERY fire — the container has already changed
+        // size, so xterm must repaint at the new size in this same frame or
+        // the mismatch shows as a flicker. That half is never deferred: it is
+        // drawing, and the cell box xterm has right now is the one it draws
+        // with.
+        this.controller.resizeLocal(grid.cols, grid.rows);
+
+        if (this.isFirstFire) {
+          this.isFirstFire = false;
+          // The half that leaves this client — the atom the attach reads and
+          // the size the PTY is moved to — is deferred while the cell box is
+          // still provisional, because then it is a size the pane never had:
+          // see {@link metricsAreProvisional}, which is also where the report
+          // that *does* land comes from.
+          if (!this.metricsAreProvisional()) { this.remeasure(); }
+          continue;
+        }
+
+        if (this.metricsAreProvisional()) { continue; }
+
         // Publish to the atom the state machine reads on (re)attach so
         // client.attach / beginRelay carry the current viewport size. Covers
         // both the immediate first fire and the debounced subsequent fires.
         this.controller.publishViewportResize(grid.cols, grid.rows);
-
-        if (this.isFirstFire) {
-          this.isFirstFire = false;
-          this.controller.resize(grid.cols, grid.rows);
-          continue;
-        }
-
-        // Local grid now — the container has already changed size, so xterm
-        // must repaint at the new size in this same frame.
-        this.controller.resizeLocal(grid.cols, grid.rows);
 
         // PTY notification debounced, so a drag sends one final size.
         if (this.debounceTimer) { clearTimeout(this.debounceTimer); }
@@ -688,6 +733,39 @@ export class ResizeController {
       }
     });
     this.observer.observe(container);
+  }
+
+  /**
+   * Whether the cell box xterm reports right now is the terminal's **final**
+   * one — false while a webfont is still loading.
+   *
+   * xterm measures one cell at `open()` and caches it; a face that lands after
+   * that leaves the cached cell as the *fallback's*. `TerminalInstance`
+   * already treats this as a real state — `remeasureOnFontLoad` waits for
+   * `document.fonts.ready` and corrects the grid — but the size that leaves
+   * this client had no such guard, and the consequence is not a mis-drawn
+   * glyph (#1490): on a reload, `142x37` was published and sent from the
+   * fallback's cell, then the font-load correction sent `142x32` 52 ms later.
+   * Both are real resizes of the **shared** window (`window-size latest`), so
+   * the pane moved twice, the kernel delivered two SIGWINCHes to it, and an
+   * inline-drawing application repainted into the scrollback on each — which
+   * is the reported "history grows with every refresh".
+   *
+   * Neither size can be recognised as the redundant one downstream: the first
+   * is a faithful measurement of a cell box that never existed on screen. So
+   * the report is held here instead of deduped later, and the container has
+   * not moved in the meantime — the size that arrives is the same one, once.
+   *
+   * The report that lands in the provisional case is the font-load correction
+   * itself: `TerminalInstance.remeasureOnFontLoad` waits on the same `ready`
+   * and calls back through `onCellSizeChange`, which is this controller's
+   * `remeasure()`. Reporting from both would send the same size twice.
+   * `document.fonts.ready` resolves when the loading finishes *or fails*, so
+   * a face that never arrives still releases the report.
+   */
+  private metricsAreProvisional(): boolean {
+    const fonts = typeof document === 'undefined' ? undefined : document.fonts;
+    return fonts?.status === 'loading';
   }
 
   /** Recompute cols/rows from the last observed container size and the LIVE
