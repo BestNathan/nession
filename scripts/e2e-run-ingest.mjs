@@ -85,6 +85,12 @@ export function validateScenario(raw, source) {
   iso(raw.started_at, 'started_at'); iso(raw.finished_at, 'finished_at');
   if (Date.parse(raw.finished_at) < Date.parse(raw.started_at)) throw new Error('negative duration');
   hex(raw.config_sha256, 64, 'config_sha256');
+  allowedKeys(raw.config, ['generated_lines', 'samples_max', 'transport', 'reload'], 'scenario.config');
+  positive(raw.config.generated_lines, 'config.generated_lines');
+  positive(raw.config.samples_max, 'config.samples_max');
+  if (raw.config.generated_lines > 500 || raw.config.samples_max > 24 ||
+      raw.config.transport !== 'Relay' || raw.config.reload !== true)
+    throw new Error('unbounded or unsupported Scenario configuration');
   if (!Array.isArray(raw.observations) || raw.observations.length > 24)
     throw new Error('observation count/storage bound exceeded');
   if (raw.observations.length !== raw.observation_count)
@@ -155,7 +161,7 @@ function selfTest() {
     target_sha: source.target_sha, scenario_revision: source.target_sha,
     run_id: 12, run_attempt: 1, run_index: 1,
     started_at: '2026-10-09T00:00:00.000Z', finished_at: '2026-10-09T00:01:00.000Z',
-    status: 'Completed', config_sha256: 'c'.repeat(64), config: { transport: 'Relay' },
+    status: 'Completed', config_sha256: 'c'.repeat(64), config: { generated_lines: 240, samples_max: 12, transport: 'Relay', reload: true },
     observations: [observation('before-reload'), observation('after-reload')], observation_count: 2 };
   assert.equal(validateScenario(valid, source).status, 'Completed');
   assert.throws(() => validateScenario({ ...valid, run_id: 99 }, source), /identity/);
