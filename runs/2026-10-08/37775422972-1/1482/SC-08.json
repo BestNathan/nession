@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "b8d6664c4909a0e2803e4ec1c39ed0a1e77d02948ec92cc73b5d3bacde5278c0",
+  "run_id": 37775422972,
+  "run_attempt": 1,
+  "issue": 1482,
+  "criterion": "SC-08",
+  "criterion_text": ": Validation evidence (commands, browser geometry/result, tested SHA) is linked in this issue, and affected acceptance for #1347 SC-12 is revalidated.",
+  "stage": "staging",
+  "target_sha": "be3bfe976b2bc0ccecc843936b935ff0a78068b2",
+  "contract_sha256": "12919e0980a6f1c7fd92c8133aa5bd28c94a04cb19ad5be84552998136e8952e",
+  "case_revision": "be3bfe976b2bc0ccecc843936b935ff0a78068b2",
+  "case_tree_sha": "9781e931888ec0bd351757e79f6401430fcf9396",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Fail",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-08T12:17:05.004Z",
+  "finished_at": "2026-10-08T12:17:11.976Z",
+  "duration_ms": 6972,
+  "verifiers": [
+    {
+      "type": "browser",
+      "entry": "verify.spec.js",
+      "result": "Fail",
+      "summary": "Playwright verifier reported assertion failures",
+      "evidence": [
+        {
+          "type": "browser",
+          "value": "Playwright case verify.spec.js exit=1"
+        }
+      ],
+      "duration_ms": 1069,
+      "exit_code": 1
+    }
+  ],
+  "provenance": {
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/37775422972",
+    "record_path": "runs/2026-10-08/37775422972-1/1482/SC-08.json",
+    "source_result_sha256": "346f293cb3f3ac96584123eb19d8c909c7be9abd6aebcc415d0afe14d9b3c8b0"
+  }
+}
