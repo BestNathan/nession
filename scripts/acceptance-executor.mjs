@@ -287,7 +287,7 @@ function fetchIssue(issueNumber) {
 
 function implicitCiEvidenceFile(outFile) {
   if (process.env.GITHUB_ACTIONS !== 'true') return null;
-  const root = String(process.env.GITHUB_WORKSPACE ?? '').trim().replace(/\\/+$/, '');
+  const root = String(process.env.GITHUB_WORKSPACE ?? '').trim().replace(/\/+$/, '');
   if (!root) return null;
 
   const workspace = root + '/workspace';
