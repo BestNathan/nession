@@ -152,13 +152,18 @@ async function executeBrowserVerifier(verifier, context) {
   const started = Date.now();
   const reportDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nession-case-browser-'));
   const reportFile = path.join(reportDir, 'report.json');
-  const processResult = await runProcess(playwright, ['test', entry, '--config', config, '--reporter=json'], {
+  const proofFile = path.join(reportDir, 'proof.json');
+  const assertionReporter = path.join(context.repoRoot, 'acceptance', 'verifiers', 'assertion-reporter.cjs');
+  const processResult = await runProcess(playwright, [
+    'test', entry, '--config', config, '--reporter=json,' + assertionReporter,
+  ], {
     cwd: path.join(context.repoRoot, 'e2e'),
     timeoutMs: context.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     env: {
       ...process.env,
       NODE_PATH: path.join(context.repoRoot, 'e2e', 'node_modules'),
       PLAYWRIGHT_JSON_OUTPUT_FILE: reportFile,
+      NESSION_PLAYWRIGHT_PROOF_FILE: proofFile,
       NESSION_ACCEPTANCE_RUNTIME_FILE: context.runtimeFile,
       NESSION_ACCEPTANCE_BASE_URL: context.baseURL,
       NESSION_ACCEPTANCE_TARGET_SHA: context.targetSha,
@@ -191,14 +196,16 @@ async function executeBrowserVerifier(verifier, context) {
   }
 
   let report = null;
+  let proof = null;
   try {
     if (fs.existsSync(reportFile)) report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
+    if (fs.existsSync(proofFile)) proof = JSON.parse(fs.readFileSync(proofFile, 'utf8'));
   } catch {
     // Missing/invalid reporter output is a hard Error rather than a false Pass.
   } finally {
     fs.rmSync(reportDir, { recursive: true, force: true });
   }
-  const verdict = classifyBrowserReport(report, processResult.code);
+  const verdict = classifyBrowserReport(report, processResult.code, proof);
   return {
     type: verifier.type,
     entry: verifier.entry,
