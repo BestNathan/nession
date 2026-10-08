@@ -51,6 +51,8 @@ export function PeekHost({
   sendPhysKey,
   disabled,
   triggerRef,
+  focusFromContext,
+  onFocusFromContextHandled,
 }: {
   projection: CapsuleCapabilityProjection;
   /** How a capability's body reaches the terminal — the capsule owns this. */
@@ -62,9 +64,14 @@ export function PeekHost({
   disabled: boolean;
   /** Stable lower-Capsule trigger that owns focus when this upper layer closes. */
   triggerRef: React.RefObject<HTMLButtonElement | null>;
+  /** Only explicit Context-row deepening should move focus out of the composer. */
+  focusFromContext: boolean;
+  /** Clears the one-shot Context focus intent after the host consumes it. */
+  onFocusFromContextHandled: () => void;
 }) {
   const [focus, setFocus] = useState<string | undefined>(undefined);
   const surfaceRef = useRef<HTMLDivElement>(null);
+  const returnFocusToTriggerRef = useRef(false);
   // The approved child overlay (#1120). Held here rather than by the capability
   // so that placement, dismissal and the accessible name stay the host's — a
   // capability supplies content and nothing else, exactly as it does for the
@@ -74,16 +81,29 @@ export function PeekHost({
 
   // Context -> Peek is a depth transition in one upper slot (#1347 SC-45).
   // The host, not a capability body, owns the deterministic focus handoff.
+  //
+  // This is intentionally one-shot and context-specific. An ambient/read-only
+  // Peek (for example Git while the user is typing) must preserve the composer's
+  // focus; only an explicit Context row selection transfers focus into Peek.
   useEffect(() => {
+    if (!focusFromContext) {
+      return;
+    }
+    returnFocusToTriggerRef.current = true;
     surfaceRef.current?.focus({ preventScroll: true });
-  }, [projection.id]);
+    onFocusFromContextHandled();
+  }, [focusFromContext, onFocusFromContextHandled, projection.id]);
 
-  // Leaving Peek returns focus to the stable lower-Capsule trigger, but only
+  // Leaving a context-opened Peek returns focus to the stable lower-Capsule
+  // trigger, but only
   // when focus would otherwise be stranded inside the disappearing surface.
   // If the user already moved elsewhere, external projection teardown must not
   // steal their focus back.
   useEffect(
     () => () => {
+      if (!returnFocusToTriggerRef.current) {
+        return;
+      }
       const active = document.activeElement;
       const stranded = active === null || active === document.body || surfaceRef.current?.contains(active);
       if (stranded) {
