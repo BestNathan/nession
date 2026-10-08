@@ -144,6 +144,11 @@ pub struct ConversationsRequestV1 {
     pub session_id: String,
 
     /// Where to continue from, from a previous response's `next_cursor`.
+    ///
+    /// The token is opaque to callers. v1 currently encodes a directory
+    /// revision plus offset so a continuation cannot be applied to a freshly
+    /// re-sorted listing; a changed revision answers `error: listing_changed`
+    /// and the caller restarts from page one.
     #[serde(default)]
     #[cfg_attr(feature = "codegen", ts(optional))]
     pub cursor: Option<String>,
@@ -175,6 +180,9 @@ pub struct ConversationsResponseV1 {
     pub binding: Option<ConversationBindingV1>,
 
     /// Pass back to continue. Absent when there are no more conversations.
+    ///
+    /// Opaque and snapshot-bound: never parse this as a naked offset outside
+    /// the provider.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub next_cursor: Option<String>,
 
