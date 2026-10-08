@@ -89,7 +89,6 @@ jobs:
         env:
           CI: true
         run: |
-          cd e2e
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.update_visual_snapshots }}" = "true" ]; then
             # `=all` is required, not optional. A bare `--update-snapshots` means
             # mode "changed", which still compares through maxDiffPixelRatio and
@@ -99,9 +98,9 @@ jobs:
             # stale through the contextual-bar change (#714). The ratio is far
             # tighter since #1038, which narrows this window but does not close
             # it: any drift under the current value is still skipped in silence.
-            npx playwright test fixture-visual --update-snapshots=all
+            ./e2e/run test --suite fixture-visual --update-snapshots=all
           else
-            npx playwright test
+            ./e2e/run test --all
           fi
 
       - uses: actions/upload-artifact@v4
