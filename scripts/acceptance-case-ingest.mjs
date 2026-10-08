@@ -422,7 +422,7 @@ async function main() {
       event, repository: process.env.GITHUB_REPOSITORY,
       token: process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN,
     });
-    process.stdout.write(recordPath(record) + '\\n');
+    process.stdout.write(recordPath(record) + '\n');
     return;
   }
   if (command === 'enrich') {
