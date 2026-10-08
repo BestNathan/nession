@@ -860,8 +860,21 @@ test.describe('Terminal I/O', () => {
     // The block is painted, and from here only a resize can add a line.
     await expect
       .poll(async () => readPane(SESSION_NAME).markers, { timeout: 20_000 })
-      .toBe(20);
-    const before = readPane(SESSION_NAME);
+      .toBeGreaterThanOrEqual(20);
+
+    // The baseline is the *settled* pane rather than the count right after the
+    // fixture started: the attach's own resize is legitimate, and only the
+    // reloads below are under test. Two agreeing reads is that condition,
+    // the same shape `waitForStableGrid` uses.
+    let before = readPane(SESSION_NAME);
+    await expect
+      .poll(async () => {
+        const now = readPane(SESSION_NAME);
+        const settled = now.sha === before.sha && now.markers >= 20;
+        before = now;
+        return settled;
+      }, { timeout: 20_000 })
+      .toBe(true);
 
     for (let i = 0; i < 3; i += 1) {
       await page.reload();
