@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "7ebe08c9cc7f93c03559bee88fbc9573488fa5218d7e23388ab5ba51086cd873",
+  "run_id": 37765109100,
+  "run_attempt": 1,
+  "issue": 1474,
+  "criterion": "SC-09",
+  "criterion_text": "Staging merged-SHA acceptance is automatically triggerable using the shared runner and existing Issue association discovery.",
+  "stage": "staging",
+  "target_sha": "a273ac1031e2f435227299227b56bc758205d264",
+  "contract_sha256": "fab566bde8b733db8827fbdf1cb4db9e7078d19bdf053618a579774ab7a82837",
+  "case_revision": "a273ac1031e2f435227299227b56bc758205d264",
+  "case_tree_sha": "9c6ce5ad55ed9d9c33dc5c841e5056d54784df77",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-08T10:44:40.891Z",
+  "finished_at": "2026-10-08T10:44:46.838Z",
+  "duration_ms": 5947,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.js",
+      "result": "Pass",
+      "summary": "Automatic staging merged-SHA Case selection uses trusted association discovery and exact checkout.",
+      "evidence": [
+        {
+          "type": "workflow",
+          "value": "Acceptance Cases event=push branch=staging target_sha=a273ac1031e2f435227299227b56bc758205d264"
+        },
+        {
+          "type": "contract",
+          "value": "trusted discover-ref maps merged SHA to associated Requirement Issues"
+        }
+      ],
+      "duration_ms": 34,
+      "exit_code": 0
+    }
+  ],
+  "provenance": {
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/37765109100",
+    "record_path": "runs/2026-10-08/37765109100-1/1474/SC-09.json",
+    "source_result_sha256": "e8fc72b11f8bcfa099c7d75ba0a6b6ef140c82c7461bca37c01ac7c8c3ac2766"
+  }
+}

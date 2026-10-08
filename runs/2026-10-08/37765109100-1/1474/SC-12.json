@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "c5818873820ab7688f1f173b80f4e530329de613ebab13ad49d97031ff5cdcd1",
+  "run_id": 37765109100,
+  "run_attempt": 1,
+  "issue": 1474,
+  "criterion": "SC-12",
+  "criterion_text": "Run records are immutable and independently durable, with safe concurrent ingestion, detailed provenance and large evidence stored out of the product tree.",
+  "stage": "staging",
+  "target_sha": "a273ac1031e2f435227299227b56bc758205d264",
+  "contract_sha256": "fab566bde8b733db8827fbdf1cb4db9e7078d19bdf053618a579774ab7a82837",
+  "case_revision": "a273ac1031e2f435227299227b56bc758205d264",
+  "case_tree_sha": "b8de6ac37cf686bcfd29b85aa8c24486478ecb4b",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-08T10:45:13.857Z",
+  "finished_at": "2026-10-08T10:45:19.798Z",
+  "duration_ms": 5941,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.js",
+      "result": "Pass",
+      "summary": "Compact Case records are serialized into an append-only orphan branch with checksummed provenance; large artifacts stay outside product Git.",
+      "evidence": [
+        {
+          "type": "record",
+          "value": "durable_branch=acceptance-results mode=orphan append-only serialized-ingest"
+        },
+        {
+          "type": "artifact",
+          "value": "large browser traces/screenshots/logs remain GitHub Actions artifacts"
+        }
+      ],
+      "duration_ms": 32,
+      "exit_code": 0
+    }
+  ],
+  "provenance": {
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/37765109100",
+    "record_path": "runs/2026-10-08/37765109100-1/1474/SC-12.json",
+    "source_result_sha256": "6bb0185d1415888713a90f13c12cb7770467fa1d227647d354c295ae29756520"
+  }
+}

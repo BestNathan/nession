@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "2240b160be0f5cd503932ae88ece16140bbd8fad181ea8545f325a110ce1a621",
+  "run_id": 37765109100,
+  "run_attempt": 1,
+  "issue": 1474,
+  "criterion": "SC-15",
+  "criterion_text": "Case lifecycle supports archival/removal after acceptance without deleting historical SHA/provenance and allows durable tests to be promoted to regression E2E.",
+  "stage": "staging",
+  "target_sha": "a273ac1031e2f435227299227b56bc758205d264",
+  "contract_sha256": "fab566bde8b733db8827fbdf1cb4db9e7078d19bdf053618a579774ab7a82837",
+  "case_revision": "a273ac1031e2f435227299227b56bc758205d264",
+  "case_tree_sha": "417204bd4f4c25fd8853bebdc0d918866c71fe49",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-08T10:45:57.908Z",
+  "finished_at": "2026-10-08T10:46:03.852Z",
+  "duration_ms": 5944,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.js",
+      "result": "Pass",
+      "summary": "Case lifecycle explicitly supports later source removal while durable records/Git SHA preserve provenance, and useful scenarios can graduate to regression E2E.",
+      "evidence": [
+        {
+          "type": "docs",
+          "value": "docs/architecture/acceptance-cases.md#archive-removal-and-promotion"
+        }
+      ],
+      "duration_ms": 35,
+      "exit_code": 0
+    }
+  ],
+  "provenance": {
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/37765109100",
+    "record_path": "runs/2026-10-08/37765109100-1/1474/SC-15.json",
+    "source_result_sha256": "1543dda9d7bd7a3a72ed978105c2bf3fba9dddc35e18952187239ac2f813b191"
+  }
+}
