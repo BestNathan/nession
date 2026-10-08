@@ -190,3 +190,22 @@ If one of these does not fit your provider, that is a conversation about the
   unproven interaction semantics are not to be unified early.
 - **`AIConversationContent` has only `text` and `unknown`.** Images, files and
   citations are added when a provider demonstrates the need, not in advance.
+
+
+## Staging browser acceptance matrix
+
+The provider-agnostic conversation staging contract is exercised by
+`e2e/specs/conversation-acceptance.spec.ts`. This is the canonical browser
+evidence for #1363; visual fixture snapshots are supplemental and must not be
+used as a substitute for these interaction assertions.
+
+| Criterion | Executable staging evidence |
+| --- | --- |
+| SC-14 | Wide Web, narrow Web, and App/touch run the shared renderer and verify typography/density, Process/Tool disclosure, nested scroll isolation, copy reachability, and focus behavior. |
+| SC-17 | Wide Web verifies bounded user bubble, assistant reading column, lower-emphasis process typography, shared spacing tokens, and settled progressive disclosure. |
+| SC-18 | Wide/narrow/touch exercise a 24-activity Tool Group, semantic compact summary, nested disclosure, bounded inner scrolling, pointer focus reveal, and no-hover/touch actions. |
+| SC-19 | Wide/narrow/touch run the same working → streaming → settled fixture and assert stable Tool Group, assistant answer, and action-row DOM identity, in-place tool status changes, stable row count, and stable action geometry. |
+| SC-20 | Wide/narrow/touch verify tail-follow, reader override through a real input gesture, jump-to-bottom re-engagement, load-older anchor preservation, nested group scroll isolation, and focus-preserving settle/collapse behavior. |
+
+Acceptance must pair these source-level assertions with a completed successful
+E2E workflow whose `head_sha` exactly matches the staging target SHA.
