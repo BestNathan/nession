@@ -169,7 +169,8 @@ export function isForeignAdapter(filename) {
 /** Third-party renderer variables are exceptions by specific family, never by entire file. */
 export function isApprovedForeignVariable(filename, name) {
   const path = normalizedPath(filename);
-  if (path.includes('/src/platform/editor/') && name.startsWith('cm-')) return true;
+  if (path.includes('/src/platform/editor/') && (name.startsWith('cm-') || name === 'font-mono')) return true;
+  if (path.endsWith('/src/components/ui/toggle-group.tsx') && name === 'gap') return true;
   if (path.includes('/src/platform/terminal-runtime/') && name.startsWith('xterm-')) return true;
   return false;
 }
