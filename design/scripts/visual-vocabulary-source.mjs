@@ -213,6 +213,68 @@ export function scanVisualUtilitySource(
   return violations;
 }
 
+/**
+ * Cross-file contract for Nession runtime-local CSS variables.
+ * CSS declarations, inline style declarations, and JS setProperty calls are
+ * producers; var() expressions in CSS and TS/TSX are consumers.
+ * Explicit runtime names are required; dynamically composed names cannot be
+ * statically verified and must be expressed through a shared constant.
+ */
+export const LOCAL_CSS_VARIABLE_OWNERS = Object.freeze({
+  '--nession-local-terminal-capsule-occlusion': ['web/src/product/terminal/capsule/hooks/useCapsuleDockClearance.ts'],
+  '--nession-local-terminal-content-bottom-inset': ['web/src/index.css', 'web/src/platform/terminal-runtime/capsule/occlusionScroll.ts'],
+});
+
+export function scanLocalVariableContracts(files, owners = {}) {
+  const producers = new Map();
+  const consumers = [];
+  const constantBindings = new Map();
+  // A runtime owner may use a shared exported CSS variable name constant.
+  for (const { source } of files) {
+    const code = maskComments(source);
+    for (const m of code.matchAll(/\b(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*['"`](--nession-local-[A-Za-z0-9_-]+)['"`]/g)) {
+      constantBindings.set(m[1], m[2]);
+    }
+  }
+  const addProducer = (name, file) => {
+    if (!producers.has(name)) producers.set(name, []);
+    producers.get(name).push(file);
+  };
+  for (const { file, source } of files) {
+    const code = maskComments(source);
+    for (const match of code.matchAll(/(--nession-local-[A-Za-z0-9_-]+)\s*:/g)) {
+      addProducer(match[1], file);
+    }
+    for (const match of code.matchAll(/\.setProperty\(\s*['"\x60](--nession-local-[A-Za-z0-9_-]+)['"\x60]/g)) {
+      addProducer(match[1], file);
+    }
+    for (const match of code.matchAll(/\.setProperty\(\s*([A-Za-z_$][\w$]*)\s*,/g)) {
+      const name = constantBindings.get(match[1]);
+      if (name) addProducer(name, file);
+    }
+    for (const match of code.matchAll(/var\(\s*(--nession-local-[A-Za-z0-9_-]+)/g)) {
+      consumers.push({ file, line: lineNumber(source, match.index), name: match[1] });
+    }
+  }
+  const violations = consumers.filter(({ name }) => !producers.has(name)).map(({ file, line, name }) => ({
+    file,
+    line,
+    kind: 'undefined-local-variable',
+    actual: `var(${name})`,
+    repair: `declare ${name} in CSS/inline styles or produce it with style.setProperty`,
+  }));
+  for (const [name, allowed] of Object.entries(owners)) {
+    const actual = producers.get(name) ?? [];
+    if (!actual.some(file => allowed.includes(file))) {
+      violations.push({ file: allowed[0], line: 1, kind: 'missing-owned-producer', actual: name, repair: `restore registered producer of ${name}` });
+    }
+    for (const file of actual) {
+      if (!allowed.includes(file)) violations.push({ file, line: 1, kind: 'unowned-producer', actual: name, repair: `only registered owner may publish ${name}` });
+    }
+  }
+  return violations;
+}
+
 export function scanVisualVocabularySuppression(source, file = '<fixture>') {
   const violations = [];
   for (const match of source.matchAll(/eslint-disable(?:-next-line|-line)?[^\n]*nession\/visual-vocabulary/g)) {
@@ -247,11 +309,13 @@ function walk(dir) {
 
 export function scanRepository(root = ROOT) {
   const violations = [];
+  const sources = [];
   for (const path of walk(join(root, 'web', 'src'))) {
     const ext = extname(path);
     if (!['.css', '.ts', '.tsx', '.js', '.jsx'].includes(ext)) continue;
     const rel = relative(root, path).replaceAll('\\', '/');
     const source = readFileSync(path, 'utf8');
+    if (!isTestSource(rel)) sources.push({ file: rel, source });
     if (ext === '.css') violations.push(...scanCssSource(source, rel));
     if (ext !== '.css') {
       violations.push(...scanVisualVocabularySuppression(source, rel));
@@ -260,6 +324,7 @@ export function scanRepository(root = ROOT) {
       }
     }
   }
+  violations.push(...scanLocalVariableContracts(sources, LOCAL_CSS_VARIABLE_OWNERS));
   return violations;
 }
 

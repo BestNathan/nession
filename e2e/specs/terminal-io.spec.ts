@@ -874,6 +874,16 @@ test.describe('Terminal I/O', () => {
       .toBeGreaterThan(100);
     expect(await readScrollMode(page)).toBe('following');
 
+    // #1482: assert the computed terminal grid clearance, not a CSS string.
+    await expect.poll(async () => page.evaluate(() => {
+      const viewport = document.querySelector('[data-terminal-viewport]');
+      const shell = document.querySelector('[data-testid="capsule-shell"]');
+      if (!(viewport instanceof HTMLElement) || !(shell instanceof HTMLElement)) return false;
+      const inset = Number.parseFloat(getComputedStyle(viewport).paddingBottom);
+      const contentBottom = viewport.getBoundingClientRect().bottom - inset;
+      return inset > 0 && contentBottom <= shell.getBoundingClientRect().top + 1;
+    }), { timeout: 10_000 }).toBe(true);
+
     // What the *command line* contributes to the count. `BROWSING-` appears
     // once in the echoed `printf` and never again — the output is
     // `BROWSING-01` — so any growth past this is output the session produced.
@@ -886,6 +896,7 @@ test.describe('Terminal I/O', () => {
     await expect
       .poll(async () => readScrollMode(page), { timeout: 5_000 })
       .toBe('history');
+    await expect.poll(async () => page.locator('[data-terminal-viewport]').evaluate(el => Number.parseFloat(getComputedStyle(el).paddingBottom))).toBe(0);
     const parked = await readViewport(page);
 
     // Output arrives while the user is reading — from the session, with nothing
@@ -922,6 +933,7 @@ test.describe('Terminal I/O', () => {
     await expect
       .poll(async () => (await readViewport(page)).following, { timeout: 15_000 })
       .toBe(true);
+    await expect.poll(async () => page.locator('[data-terminal-viewport]').evaluate(el => Number.parseFloat(getComputedStyle(el).paddingBottom))).toBeGreaterThan(0);
   });
 
   test('the application, not tmux, owns the terminal the browser drives (#321 S3)', async ({ page }, testInfo) => {

@@ -2,7 +2,7 @@
  * Trailing scroll clearance for the Workspace's Capsule Zone (#1347 SC-12).
  *
  * The Terminal's half of SC-12 is one owner and one consumer: `useCapsuleDockClearance`
- * measures the shell against the capsule host, publishes `--terminal-capsule-occlusion`,
+ * measures the shell against the capsule host, publishes `--nession-local-terminal-capsule-occlusion`,
  * and `TerminalViewport` spends it as `padding-bottom` — so the live bottom of the
  * terminal always sits above whatever the capsule actually occupies.
  *
@@ -33,7 +33,7 @@
  * Published by `useWorkspaceCapsuleClearance` on the Workspace shell; consumed
  * as trailing padding by every scroll container that reaches the pane bottom.
  *
- * The name is the terminal's consumed vocabulary (`--terminal-content-bottom-inset`)
+ * The name is the terminal's consumed vocabulary (`--nession-local-terminal-content-bottom-inset`)
  * with the surface that owns it swapped in, so the two halves of SC-12 read as
  * one mechanism.
  */
