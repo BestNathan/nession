@@ -51,6 +51,7 @@ jobs:
           node scripts/protocol-gate.mjs --json >/dev/null
           node scripts/issue-contract.mjs self-test
           node e2e/runner/runtime/full-stack.js self-test
+          node e2e/runner/cli-selftest.mjs
           node e2e/scenarios/terminal-attach-resume/reproduce.cjs --self-test
           ./e2e/run --list
           ./e2e/run --validate
