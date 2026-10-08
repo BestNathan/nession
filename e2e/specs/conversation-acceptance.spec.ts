@@ -60,9 +60,12 @@ test.describe('SC-14/17/18 · Web conversation contract', () => {
     await expect(process).toHaveAttribute('aria-expanded', 'true');
     await expect(group).toBeVisible();
     expect(await group.evaluate((el) => el.dataset.acceptanceIdentity)).toBe('tool-group');
-    await expect(group.getByTestId('conversation-tool-group-summary')).toContainText('24');
+    await expect(group).toHaveAttribute('data-count', '24');
+    await expect(group.getByTestId('conversation-tool-group-summary')).toHaveText(
+      '8 commands · 8 file reads · 8 searches',
+    );
 
-    await group.locator('summary').click();
+    await group.locator(':scope > summary').click();
     const body = group.getByTestId('conversation-tool-group-body');
     await expect(body).toBeVisible();
     const bodyMetrics = await body.evaluate((el) => ({
@@ -175,7 +178,10 @@ test.describe('SC-19/20 · live transcript identity and scroll ownership', () =>
 
     const jump = page.getByRole('button', { name: 'Scroll to end' });
     await expect(jump).toHaveAttribute('data-active', 'true');
-    await jump.click();
+    // Dispatch the real control event directly: Playwright's pointer actionability
+    // waits on animation frames, which are intentionally frozen by the fake clock.
+    await jump.dispatchEvent('click');
+    await page.clock.fastForward(500);
     await expect.poll(() => bottomGap(viewport)).toBeLessThan(BOTTOM_EPSILON);
 
     await liveAnswer.evaluate((el) => {
@@ -188,7 +194,7 @@ test.describe('SC-19/20 · live transcript identity and scroll ownership', () =>
     const actionHeight = await actions.evaluate((el) => el.getBoundingClientRect().height);
     await expect(actions.getByRole('button', { name: 'Copy answer' })).toHaveCount(0);
 
-    await group.locator('summary').click();
+    await group.locator(':scope > summary').click();
     const firstTool = group.getByTestId('conversation-tool').first();
     await firstTool.locator('summary').click();
     const copyOutput = firstTool.getByRole('button', { name: 'Copy output' });
@@ -250,7 +256,7 @@ test.describe('SC-14/18/20 · App touch parity', () => {
     const group = page.getByTestId('conversation-tool-group');
     await expect(process).toHaveAttribute('aria-expanded', 'false');
     await process.click();
-    await group.locator('summary').click();
+    await group.locator(':scope > summary').click();
 
     const body = group.getByTestId('conversation-tool-group-body');
     const metrics = await body.evaluate((el) => ({
