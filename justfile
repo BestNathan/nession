@@ -67,12 +67,17 @@ build-cache-verify:
 
 # Full CI checks (fmt + lint + runtime/tmux/protocol gates + codegen drift +
 # coverage — coverage runs all tests)
-check: fmt lint check-rustc-wrapper check-worktree-target-seed check-build-cache-verify check-acceptance-runtime check-tmux-socket check-protocol check-codegen coverage
+check: fmt lint check-rustc-wrapper check-worktree-target-seed check-build-cache-verify check-acceptance-runtime check-acceptance-cases check-tmux-socket check-protocol check-codegen coverage
 
 # Prove the shared Acceptance full-stack harness keeps its config/target contract
 # deterministic without launching the runtime.
 check-acceptance-runtime:
     node acceptance/runtime/full-stack.js self-test
+
+# Validate source-aligned Case discovery/schema, trusted contract matching and
+# deterministic Pass/Fail/Pending/Error aggregation without provisioning.
+check-acceptance-cases:
+    node scripts/acceptance-cases-selftest.mjs
 
 # ── Protocol codegen (#678 Phase 5) ─────────────────────────────────────────
 
