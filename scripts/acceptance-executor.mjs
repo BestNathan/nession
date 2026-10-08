@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import {
   extractSection,
   parseAcceptanceReport,
@@ -284,12 +285,36 @@ function fetchIssue(issueNumber) {
   return JSON.parse(raw);
 }
 
+function implicitCiEvidenceFile(outFile) {
+  if (process.env.GITHUB_ACTIONS !== 'true') return null;
+  const root = String(process.env.GITHUB_WORKSPACE ?? '').trim().replace(/\\/+$/, '');
+  if (!root) return null;
+
+  const workspace = root + '/workspace';
+  if (!fs.existsSync(workspace)) return null;
+
+  const evidenceFile = outFile + '.ci-evidence.json';
+  const collector = fileURLToPath(new URL('./acceptance-ci-evidence.mjs', import.meta.url));
+  execFileSync(process.execPath, [collector, 'collect', workspace, evidenceFile], {
+    env: process.env,
+    stdio: 'inherit',
+  });
+  return evidenceFile;
+}
+
 function prepareCommand(issueNumber, stage, targetRef, outFile, deployment, ciEvidenceFile) {
   const issue = fetchIssue(issueNumber);
   if (String(issue.state).toUpperCase() !== 'OPEN') throw new Error('requirement #' + issueNumber + ' is not open');
   if (!labelNames(issue).includes('requirement')) throw new Error('issue #' + issueNumber + ' is not labeled requirement');
-  const ciEvidence = ciEvidenceFile
-    ? JSON.parse(fs.readFileSync(ciEvidenceFile, 'utf8'))
+
+  // Current Acceptance workflows pass a trusted CI-evidence file explicitly.
+  // Older workflow runs do not. GitHub re-runs preserve the workflow definition
+  // from the original run, while this trusted harness is checked out from main.
+  // Recover the same evidence from the already checked-out target workspace so
+  // historical re-runs cannot silently degrade to ci_evidence=null.
+  const evidencePath = ciEvidenceFile || implicitCiEvidenceFile(outFile);
+  const ciEvidence = evidencePath
+    ? JSON.parse(fs.readFileSync(evidencePath, 'utf8'))
     : null;
   const context = buildAcceptanceContext(issue, stage, {
     targetRef,
