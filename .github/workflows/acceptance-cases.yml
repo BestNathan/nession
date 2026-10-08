@@ -43,6 +43,7 @@ jobs:
     timeout-minutes: 45
     env:
       RUSTC_WRAPPER: ""
+      NESSION_ACCEPTANCE_TRUSTED_ROOT: ${{ github.workspace }}/trusted
     steps:
       - name: Checkout trusted discovery tooling
         uses: actions/checkout@v4
