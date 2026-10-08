@@ -21,6 +21,8 @@ export interface ContextCapsuleProps {
   workContext?: ResolvedWorkContext;
   /** Close the surface. The lower Capsule is not this component's to move. */
   onDismiss: () => void;
+  /** Record explicit Context -> Peek deepening so the new upper layer may own focus. */
+  onDeepen: (capabilityId: string) => void;
   /** The `+` that opened this surface — where focus goes when it closes. */
   triggerRef: React.RefObject<HTMLButtonElement | null>;
 }
@@ -48,7 +50,13 @@ export interface ContextCapsuleProps {
  * The trigger (`+`) is not here: it lives in the composer row and points at this
  * surface with `aria-controls`.
  */
-export function ContextCapsule({ disclosure, workContext, onDismiss, triggerRef }: ContextCapsuleProps) {
+export function ContextCapsule({
+  disclosure,
+  workContext,
+  onDismiss,
+  onDeepen,
+  triggerRef,
+}: ContextCapsuleProps) {
   const rows = useMemo(
     () =>
       resolveContextRows(
@@ -104,6 +112,7 @@ export function ContextCapsule({ disclosure, workContext, onDismiss, triggerRef 
     // asking to look at it, and the Peek is where the way on to the Workspace
     // lives. The surface closes because the Peek takes this same slot.
     restoreTriggerOnUnmountRef.current = false;
+    onDeepen(row.capabilityId);
     disclosure.onSelect(row.capabilityId);
     onDismiss();
   };
