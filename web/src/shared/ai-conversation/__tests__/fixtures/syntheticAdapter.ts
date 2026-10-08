@@ -76,6 +76,14 @@ export interface SyntheticAdapterOptions {
   skippedFor?: (cursor?: string) => number
   /** Context key this adapter reports. Defaults to the context string itself. */
   key?: string
+  /** Request-authority key. Defaults to the concrete context string. */
+  requestKey?: (context: string) => string
+  /** Stable id for one paged directory snapshot. */
+  listingId?: string
+  /** Override the listing id per request when a test needs a generation change. */
+  listingIdFor?: (context: string, cursor?: string) => string
+  /** Mark a continuation as stale so the runtime must restart page one. */
+  restartListFor?: (context: string, cursor?: string) => boolean
 }
 
 export interface RecordedCall {
@@ -166,6 +174,10 @@ export class SyntheticAdapter implements AIConversationAdapter<string> {
     return this.options.key ?? context
   }
 
+  requestKey(context: string): string {
+    return this.options.requestKey?.(context) ?? context
+  }
+
   get refresh(): AIRefreshPolicy<string> {
     return this.options.refresh ?? { kind: 'manual' }
   }
@@ -215,6 +227,17 @@ export class SyntheticAdapter implements AIConversationAdapter<string> {
       throw new Error('the list could not be read')
     }
 
+    if (this.options.restartListFor?.(context, cursor)) {
+      return {
+        state: 'error',
+        conversations: [],
+        bindingId: null,
+        nextCursor: null,
+        restart: true,
+        error: 'the listing changed',
+      }
+    }
+
     const state = this.forcedListState ?? this.options.listState ?? 'ready'
     if (state !== 'ready') {
       return {
@@ -241,6 +264,10 @@ export class SyntheticAdapter implements AIConversationAdapter<string> {
         ? this.options.bindingFor(context)
         : (this.options.bindingId ?? null),
       nextCursor: end < this.options.conversations.length ? String(end) : null,
+      listingId:
+        this.options.listingIdFor?.(context, cursor) ??
+        this.options.listingId ??
+        `synthetic:${this.contextKey(context)}`,
     }
   }
 

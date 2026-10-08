@@ -72,6 +72,10 @@ describe('a context whose value moves without its key', () => {
       bindingId: 'c1',
       pageSize: 10,
       key: 'one-space',
+      // This case is specifically "new Context value, same request authority".
+      // Token/lease rotation is the distinct round-7 case and advertises a
+      // changed requestKey so old in-flight work is revoked automatically.
+      requestKey: () => 'one-authority',
       // Manual, so the only reads are ones this test asks for and can count.
       refresh: { kind: 'manual' },
     })
@@ -79,9 +83,9 @@ describe('a context whose value moves without its key', () => {
   it('reaches the provider without resetting what the reader is looking at', async () => {
     // #1363 round 4. The effect that hands the context over depended on
     // `adapter.contextKey(context)` — the derived key — so a same-key change
-    // never ran it and the runtime kept the context it had replaced. Every
-    // later poll, reload and push went out with the old value, which for a
-    // provider carrying a token or a lease is a request that cannot succeed.
+    // never ran it and the runtime kept the context it had replaced. The value
+    // still has to reach later reads even when the provider explicitly says the
+    // old and new Context values share one request authority.
     const provider = movingValue()
     const { rerender } = render(<Reloadable adapter={provider} context="token-a" />)
     await waitFor(() => expect(screen.getAllByRole('listitem')).toHaveLength(4))

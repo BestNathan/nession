@@ -17,6 +17,8 @@
 //! needs a new contract version and a client update together, so this migration
 //! types what ships rather than changing it in passing.
 
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -272,10 +274,28 @@ impl ClaudeCodeAgentExtension {
             None => None,
         };
 
+        // A continuation belongs to this exact directory snapshot. An offset
+        // by itself is unsafe because updated_at is mutable: a conversation can
+        // move across an already-consumed boundary between two page requests.
+        // The revision makes that movement detectable rather than silently
+        // losing the row (#1363 round 7).
+        let revision = conversation_listing_revision(&found, binding.as_ref());
         let start = match &request.cursor {
-            Some(raw) => match raw.parse::<usize>() {
-                Ok(index) if index <= found.len() => index,
-                _ => {
+            Some(raw) => match raw.rsplit_once(':') {
+                Some((cursor_revision, _)) if cursor_revision != revision => {
+                    return Ok(serde_json::to_value(ConversationsResponseV1::error(
+                        "listing_changed",
+                    ))?)
+                }
+                Some((_, raw_index)) => match raw_index.parse::<usize>() {
+                    Ok(index) if index <= found.len() => index,
+                    _ => {
+                        return Ok(serde_json::to_value(ConversationsResponseV1::error(
+                            "cursor is not a position in this list",
+                        ))?)
+                    }
+                },
+                None => {
                     return Ok(serde_json::to_value(ConversationsResponseV1::error(
                         "cursor is not a position in this list",
                     ))?)
@@ -299,7 +319,7 @@ impl ClaudeCodeAgentExtension {
             cwd: Some(cwd),
             items,
             binding,
-            next_cursor: has_more.then(|| end.to_string()),
+            next_cursor: has_more.then(|| format!("{revision}:{end}")),
             has_more,
             error: None,
         })?)
@@ -610,6 +630,37 @@ async fn read_page_blocking(
     .await
     .map_err(ReadFailure::Task)?
     .map_err(ReadFailure::Read)
+}
+
+/// Identity of one coherent conversation-directory snapshot.
+///
+/// The cursor carries this value together with its offset. Recomputing the
+/// directory on every request is acceptable only because a continuation whose
+/// facts/order changed is rejected and restarted by the shared runtime instead
+/// of applying the old offset to a new sort order.
+fn conversation_listing_revision(
+    found: &[conversation::Discovered],
+    binding: Option<&ConversationBindingV1>,
+) -> String {
+    let mut hasher = DefaultHasher::new();
+    found.len().hash(&mut hasher);
+    for item in found {
+        item.claude_session_id.hash(&mut hasher);
+        item.cwd.hash(&mut hasher);
+        item.updated_at.hash(&mut hasher);
+        item.title.hash(&mut hasher);
+        item.preview.hash(&mut hasher);
+    }
+    binding.map(|item| &item.conversation_id).hash(&mut hasher);
+    if let Some(binding) = binding {
+        match binding.activity {
+            ConversationActivityV1::Active => 1_u8,
+            ConversationActivityV1::Inactive => 2_u8,
+            ConversationActivityV1::Unknown => 3_u8,
+        }
+        .hash(&mut hasher);
+    }
+    format!("{:016x}", hasher.finish())
 }
 
 /// A discovered conversation as the wire item. The provider-internal
@@ -1148,6 +1199,54 @@ mod tests {
                 .unwrap();
             assert_eq!(value["state"], "error", "cursor {bad:?}: {value}");
         }
+    }
+
+    #[tokio::test]
+    async fn a_conversation_cursor_rejects_a_resorted_directory() {
+        use std::io::Write;
+
+        let (root, _guard) = projects(&[
+            ("aaa", BOUND_CWD, "2026-09-25T00:00:01Z"),
+            ("bbb", BOUND_CWD, "2026-09-25T00:00:05Z"),
+            ("ccc", BOUND_CWD, "2026-09-25T00:00:09Z"),
+        ]);
+        let extension = ClaudeCodeAgentExtension::new(Arc::new(FixedContext::at(Some(BOUND_CWD))));
+
+        let first = extension
+            .handle_conversations(serde_json::json!({"session_id": "agent:s", "limit": 2}))
+            .await
+            .unwrap();
+        let cursor = first["next_cursor"]
+            .as_str()
+            .expect("a continuation exists")
+            .to_string();
+
+        // Move the old tail to the front after page one. A numeric offset would
+        // now skip it entirely; the revisioned cursor must refuse that tear.
+        let path = transcript_path(root.path(), "aaa");
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(path)
+            .expect("open transcript");
+        writeln!(
+            file,
+            "{}",
+            serde_json::json!({
+                "type": "system",
+                "timestamp": "2026-09-25T00:00:20Z"
+            })
+        )
+        .expect("append timestamp");
+
+        let second = extension
+            .handle_conversations(
+                serde_json::json!({"session_id": "agent:s", "limit": 2, "cursor": cursor}),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(second["state"], "error", "{second}");
+        assert_eq!(second["error"], "listing_changed", "{second}");
     }
 
     #[tokio::test]
