@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "1f656cf18e25c5f2c4baa26c1ef01d2bc5426fde00463d143411e2eac9d4431a",
+  "run_id": 37800638668,
+  "run_attempt": 1,
+  "issue": 1474,
+  "criterion": "SC-16",
+  "criterion_text": "Documentation and skills specify creation, stage selection, verification methods, evidence quality, independent results and security isolation.",
+  "stage": "staging",
+  "target_sha": "7741e031ea3a37a8707442d0e307a7fdd923d93e",
+  "contract_sha256": "b07c06889b642821066631a90eedcdfb38679cfbda8944383c1dda1d986f9c95",
+  "case_revision": "7741e031ea3a37a8707442d0e307a7fdd923d93e",
+  "case_tree_sha": "3c0be843cd560a9da41d9c4c523031c835a860aa",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-08T15:29:31.509Z",
+  "finished_at": "2026-10-08T15:29:37.466Z",
+  "duration_ms": 5956,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.js",
+      "result": "Pass",
+      "summary": "Architecture docs and project skill define Case creation, stages, verifier choice, evidence quality, independent reporting and security isolation.",
+      "evidence": [
+        {
+          "type": "docs",
+          "value": "docs/architecture/acceptance-cases.md"
+        },
+        {
+          "type": "skill",
+          "value": ".claude/skills/nession-acceptance/SKILL.md"
+        }
+      ],
+      "duration_ms": 43,
+      "exit_code": 0
+    }
+  ],
+  "provenance": {
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/37800638668",
+    "record_path": "runs/2026-10-08/37800638668-1/1474/SC-16.json",
+    "source_result_sha256": "0613b7413dbe0b6604954213930a362cc54b687486421efb5731a50a2c7af193"
+  }
+}

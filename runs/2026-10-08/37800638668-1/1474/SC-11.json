@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "716ba9572cb9a9194bdde2b5158f34484eb2a94b73b9319eb8af74b42e83220b",
+  "run_id": 37800638668,
+  "run_attempt": 1,
+  "issue": 1474,
+  "criterion": "SC-11",
+  "criterion_text": "A manual run can select a specific Issue/SC, SHA, stage and runtime profile and produces reproducible evidence.",
+  "stage": "staging",
+  "target_sha": "7741e031ea3a37a8707442d0e307a7fdd923d93e",
+  "contract_sha256": "b07c06889b642821066631a90eedcdfb38679cfbda8944383c1dda1d986f9c95",
+  "case_revision": "7741e031ea3a37a8707442d0e307a7fdd923d93e",
+  "case_tree_sha": "2e6bd622e2f74fe2c57e119c28ffa57510dc1aad",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-08T15:28:23.056Z",
+  "finished_at": "2026-10-08T15:28:29.004Z",
+  "duration_ms": 5947,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.js",
+      "result": "Pass",
+      "summary": "Manual dispatch selects Issue, SC, exact SHA, stage and runtime profile through the same deterministic Case runner.",
+      "evidence": [
+        {
+          "type": "contract",
+          "value": "workflow_dispatch inputs=issue_number,criterion,target_sha,stage,runtime_profile"
+        },
+        {
+          "type": "contract",
+          "value": "target_sha validated as exact 40-character commit SHA"
+        }
+      ],
+      "duration_ms": 34,
+      "exit_code": 0
+    }
+  ],
+  "provenance": {
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/37800638668",
+    "record_path": "runs/2026-10-08/37800638668-1/1474/SC-11.json",
+    "source_result_sha256": "84f24f537f9b74c5edffaf4676f94f1e8f33202289b459b7cc890b14b63a12c8"
+  }
+}
