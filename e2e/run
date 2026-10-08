@@ -46,8 +46,8 @@ function catalog() {
     cases: walk(casesRoot, 'case.yaml').map((p) => path.relative(root, p)),
     scenarios: walk(at('e2e', 'scenarios'), 'scenario.yaml')
       .map((p) => path.relative(root, p)),
-    browserTests: walk(at('e2e', 'tests', 'browser'), '.spec.ts').length +
-      walk(at('e2e', 'specs'), '.spec.ts').length,
+    browserTests: [...walk(at('e2e', 'tests', 'browser'), ''), ...walk(at('e2e', 'specs'), '')]
+      .filter((name) => name.endsWith('.spec.ts')).length,
   };
 }
 function exitByCode(code) { process.exitCode = code; }
