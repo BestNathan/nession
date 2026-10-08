@@ -229,16 +229,13 @@ export function scanLocalVariableContracts(files) {
   };
   for (const { file, source } of files) {
     const code = maskComments(source);
-    for (const match of code.matchAll(/(--nession-local-[A-Za-z0-9_-]+)\\s*:/g)) {
+    for (const match of code.matchAll(/(--nession-local-[A-Za-z0-9_-]+)\s*:/g)) {
       addProducer(match[1], file);
     }
-    for (const match of code.matchAll(/\\.setProperty\\(\\s*['"`](--nession-local-[A-Za-z0-9_-]+)['"`]/g)) {
+    for (const match of code.matchAll(/\.setProperty\(\s*['"\x60](--nession-local-[A-Za-z0-9_-]+)['"\x60]/g)) {
       addProducer(match[1], file);
     }
-    for (const match of code.matchAll(/\\.setProperty\\(\\s*['"`](--nession-local-[A-Za-z0-9_-]+)['"`]/g)) {
-      addProducer(match[1], file);
-    }
-    for (const match of code.matchAll(/var\\(\\s*(--nession-local-[A-Za-z0-9_-]+)/g)) {
+    for (const match of code.matchAll(/var\(\s*(--nession-local-[A-Za-z0-9_-]+)/g)) {
       consumers.push({ file, line: lineNumber(source, match.index), name: match[1] });
     }
   }
@@ -247,7 +244,7 @@ export function scanLocalVariableContracts(files) {
     line,
     kind: 'undefined-local-variable',
     actual: `var(${name})`,
-    repair: `declare ${name} in CSS/inline styles or produce it with style.setProperty; don't invent local variables in consumers`,
+    repair: `declare ${name} in CSS/inline styles or produce it with style.setProperty`,
   }));
 }
 
