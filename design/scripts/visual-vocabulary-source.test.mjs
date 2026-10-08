@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   scanCssSource,
+  scanLocalVariableContracts,
   scanVisualUtilitySource,
   scanVisualVocabularySuppression,
 } from './visual-vocabulary-source.mjs';
@@ -124,4 +125,24 @@ test('visual vocabulary rule cannot be disabled in a consumer', () => {
   assert.equal(violations.length, 1);
   assert.equal(violations[0].kind, 'local-suppression');
   assert.match(violations[0].repair, /adapter boundary/);
+});
+
+test('runtime-local variable gate requires a producer even for namespaced refs', () => {
+  const consumer = { file: 'web/src/product/terminal/components/TerminalViewport.tsx',
+    source: "export const inset = 'var(--nession-local-terminal-content-botton-inset, 0px)';" };
+  const producer = { file: 'web/src/index.css',
+    source: '.term { --nession-local-terminal-content-bottom-inset: 40px; }' };
+  const failures = scanLocalVariableContracts([consumer, producer]);
+  assert.equal(failures.length, 1);
+  assert.equal(failures[0].kind, 'undefined-local-variable');
+  assert.match(failures[0].actual, /botton-inset/);
+});
+
+test('runtime-local variable gate accepts CSS and JS producers for consumers', () => {
+  const files = [
+    { file: 'web/src/index.css', source: '.term { --nession-local-terminal-content-bottom-inset: 40px; width: var(--nession-local-terminal-capsule-occlusion); }' },
+    { file: 'web/src/product/terminal/capsule/useClearance.ts', source: "host.style.setProperty('--nession-local-terminal-capsule-occlusion', '64px');" },
+    { file: 'web/src/product/terminal/components/TerminalViewport.tsx', source: "const inset = 'var(--nession-local-terminal-content-bottom-inset, 0px)';" },
+  ];
+  assert.deepEqual(scanLocalVariableContracts(files), []);
 });
