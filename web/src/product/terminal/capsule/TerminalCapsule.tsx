@@ -177,6 +177,7 @@ export function TerminalCapsule({
         sendText={sendText}
         sendPhysKey={sendPhysKey}
         disabled={disabled}
+        triggerRef={restState.contextTriggerRef}
       />
     ) : null;
 
