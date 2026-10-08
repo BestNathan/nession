@@ -1,3 +1,4 @@
+import { createRef } from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
@@ -34,9 +35,24 @@ function projection(
  * reach — and, once the key row stopped carrying sequences of its own (#1096
  * criterion 4), that configuration stopped being able to send anything at all.
  */
-function frame(value: CapsuleCapabilityProjection) {
+const peekTriggerRef = createRef<HTMLButtonElement>();
+
+function frame(value: CapsuleCapabilityProjection | null) {
   return (
-    <PeekHost projection={value} sendText={sendText} sendPhysKey={sendPhysKey} disabled={false} />
+    <>
+      <button type="button" ref={peekTriggerRef} data-testid="peek-trigger">
+        +
+      </button>
+      {value ? (
+        <PeekHost
+          projection={value}
+          sendText={sendText}
+          sendPhysKey={sendPhysKey}
+          disabled={false}
+          triggerRef={peekTriggerRef}
+        />
+      ) : null}
+    </>
   );
 }
 
@@ -59,6 +75,23 @@ describe('capability projection frame', () => {
     const title = screen.getByTestId('capsule-capability-title');
     expect(title.tagName).toBe('H2');
     expect(title).not.toHaveAttribute('role', 'button');
+  });
+
+  it('owns focus while active and returns it to the stable trigger when removed (#1347 SC-45)', async () => {
+    const { rerender } = renderFrame(projection());
+
+    const host = screen.getByTestId('capsule-capability-projection');
+    await waitFor(() => expect(host).toHaveFocus());
+    expect(host).toHaveAttribute('role', 'region');
+    expect(host).toHaveAccessibleName('Git Peek');
+
+    const trigger = screen.getByTestId('peek-trigger');
+    expect(trigger).not.toHaveFocus();
+
+    rerender(frame(null));
+
+    await waitFor(() => expect(trigger).toHaveFocus());
+    expect(document.activeElement).not.toBe(document.body);
   });
 
   it('carries the containment boundary that keeps a body inside the host (#1347 SC-27)', () => {
