@@ -282,7 +282,7 @@ impl ClaudeCodeAgentExtension {
         let revision = conversation_listing_revision(&found, binding.as_ref());
         let start = match &request.cursor {
             Some(raw) => match raw.rsplit_once(':') {
-                Some((cursor_revision, raw_index)) if cursor_revision != revision => {
+                Some((cursor_revision, _)) if cursor_revision != revision => {
                     return Ok(serde_json::to_value(ConversationsResponseV1::error(
                         "listing_changed",
                     ))?)
