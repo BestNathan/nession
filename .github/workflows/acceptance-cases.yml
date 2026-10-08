@@ -180,7 +180,8 @@ jobs:
           const duplicates = selectedKeys.filter((key, index) => selectedKeys.indexOf(key) !== index);
           if (unexpected.length || duplicates.length) throw new Error(
             'Case selection includes wrong-stage/unknown or duplicate entries: ' + [...unexpected, ...duplicates].join(', '));
-          const missing = expected.filter((key) => !selectedKeys.includes(key));
+          const selectionScope = requested ? expected.filter((key) => key === issueNumbers[0] + '/' + requested) : expected;
+          const missing = selectionScope.filter((key) => !selectedKeys.includes(key));
           if (requested && (selected.length !== 1 || selected[0].criterion !== requested ||
             issueNumbers.length !== 1 || missing.includes(issueNumbers[0] + '/' + requested))) {
             throw new Error('manual Case selection missing or wrong stage/profile: ' + issueNumbers[0] + '/' + requested);
