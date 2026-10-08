@@ -36,8 +36,9 @@ function projection(
  * criterion 4), that configuration stopped being able to send anything at all.
  */
 const peekTriggerRef = createRef<HTMLButtonElement>();
+const onFocusFromContextHandled = vi.fn();
 
-function frame(value: CapsuleCapabilityProjection | null) {
+function frame(value: CapsuleCapabilityProjection | null, focusFromContext = false) {
   return (
     <>
       <button type="button" ref={peekTriggerRef} data-testid="peek-trigger">
@@ -50,14 +51,16 @@ function frame(value: CapsuleCapabilityProjection | null) {
           sendPhysKey={sendPhysKey}
           disabled={false}
           triggerRef={peekTriggerRef}
+          focusFromContext={focusFromContext}
+          onFocusFromContextHandled={onFocusFromContextHandled}
         />
       ) : null}
     </>
   );
 }
 
-function renderFrame(value: CapsuleCapabilityProjection) {
-  return render(frame(value));
+function renderFrame(value: CapsuleCapabilityProjection, focusFromContext = false) {
+  return render(frame(value, focusFromContext));
 }
 
 describe('capability projection frame', () => {
@@ -78,7 +81,7 @@ describe('capability projection frame', () => {
   });
 
   it('owns focus while active and returns it to the stable trigger when removed (#1347 SC-45)', async () => {
-    const { rerender } = renderFrame(projection());
+    const { rerender } = renderFrame(projection(), true);
 
     const host = screen.getByTestId('capsule-capability-projection');
     await waitFor(() => expect(host).toHaveFocus());
@@ -88,7 +91,7 @@ describe('capability projection frame', () => {
     const trigger = screen.getByTestId('peek-trigger');
     expect(trigger).not.toHaveFocus();
 
-    rerender(frame(null));
+    rerender(frame(null, true));
 
     await waitFor(() => expect(trigger).toHaveFocus());
     expect(document.activeElement).not.toBe(document.body);
