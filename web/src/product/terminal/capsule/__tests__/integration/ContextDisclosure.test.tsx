@@ -377,14 +377,19 @@ describe('Context Disclosure', () => {
     expect(screen.queryByTestId('capsule-context-disclosure')).not.toBeInTheDocument();
   });
 
-  it('dismisses itself when the sensed work ends while it is open (SC-36)', async () => {
+  it('keeps the same Context Capsule open when sensed work ends (SC-36/SC-44)', async () => {
     const caps = disclosure();
     const { rerender } = render(
       <TerminalCapsule experience="web" sendText={vi.fn()} capabilityDisclosure={caps} workContext={workContext()} />,
     );
 
-    await userEvent.click(screen.getByTestId('capsule-capability-more'));
-    expect(await screen.findByTestId('capsule-context-item-claude-code')).toBeInTheDocument();
+    const trigger = screen.getByTestId('capsule-capability-more');
+    await userEvent.click(trigger);
+    const surface = await screen.findByTestId('capsule-context-disclosure');
+    const shell = screen.getByTestId('capsule-shell');
+    const sensed = screen.getByTestId('capsule-context-item-claude-code');
+    expect(sensed).toHaveFocus();
+    expect(screen.getByTestId('work-ring')).toBeInTheDocument();
 
     rerender(
       <TerminalCapsule
@@ -395,16 +400,19 @@ describe('Context Disclosure', () => {
       />,
     );
 
-    await screen.findByTestId('capsule-capability-more');
-
-    // The surface is gone, and that is now the whole assertion: it is an
-    // in-flow sibling of the shell, not a portalled popup, so there is no exit
-    // transition leaving a `data-closed` node behind for the assertion to
-    // mistake for "still open".
-    await waitFor(() => {
-      expect(screen.queryByTestId('capsule-context-disclosure')).not.toBeInTheDocument();
-    });
+    // Sense is data inside the disclosure, not ownership of the disclosure.
+    // The same upper surface remains mounted and falls back to the ordinary
+    // capability list; the lower Capsule stays the same anchor.
+    expect(screen.getByTestId('capsule-context-disclosure')).toBe(surface);
+    expect(screen.getByTestId('capsule-shell')).toBe(shell);
     expect(screen.queryByTestId('capsule-context-item-claude-code')).not.toBeInTheDocument();
+
+    const ordinaryClaude = screen.getByTestId('capsule-capability-picker-claude-code');
+    expect(ordinaryClaude).toBe(sensed);
+    expect(ordinaryClaude).toHaveFocus();
+    expect(screen.getByTestId('capsule-capability-picker-git')).toBeInTheDocument();
+    expect(screen.queryByTestId('work-ring')).not.toBeInTheDocument();
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
   });
 
   // The focus contract of the approved interaction, and the one thing the menu
@@ -450,13 +458,19 @@ describe('Context Disclosure', () => {
     });
   });
 
-  it('hands focus back to the trigger when a row deepens the surface into a Peek', async () => {
-    // The same loss on the one dismissal a user is most likely to perform.
-    render(
+  it('moves focus into Peek when a row deepens the upper layer (SC-45)', async () => {
+    const caps = disclosure();
+    const projection: CapsuleCapabilityProjection = {
+      id: 'git',
+      title: 'Git',
+      body: () => <p data-testid="projection-body">peek</p>,
+      onDismiss: vi.fn(),
+    };
+    const { rerender } = render(
       <TerminalCapsule
         experience="web"
         sendText={vi.fn()}
-        capabilityDisclosure={disclosure()}
+        capabilityDisclosure={caps}
         workContext={workContext()}
       />,
     );
@@ -466,13 +480,27 @@ describe('Context Disclosure', () => {
     await userEvent.click(await screen.findByTestId('capsule-capability-picker-git'));
 
     expect(screen.queryByTestId('capsule-context-disclosure')).not.toBeInTheDocument();
-    expect(trigger).toHaveFocus();
+
+    // The real projection state is owned above TerminalCapsule. Re-render with
+    // that state as the production hook would, then assert the new upper layer
+    // receives focus rather than leaving it on the lower `+`.
+    rerender(
+      <TerminalCapsule
+        experience="web"
+        sendText={vi.fn()}
+        capabilityDisclosure={caps}
+        capabilityProjection={projection}
+        workContext={workContext()}
+      />,
+    );
+
+    const peek = await screen.findByTestId('capsule-capability-projection');
+    await waitFor(() => expect(peek).toHaveFocus());
+    expect(trigger).not.toHaveFocus();
+    expect(document.activeElement).not.toBe(document.body);
   });
 
-  it('leaves focus alone when a sense ends under a user who has moved on (SC-36)', async () => {
-    // The guard, and the reason this is not simply "restore on unmount": a
-    // sense can end while the user is typing in the composer, which unmounts
-    // the same component. Focus belongs where the user put it.
+  it('does not steal focus when sense data updates after the user moved elsewhere (SC-36)', async () => {
     const caps = disclosure();
     const { rerender } = render(
       <TerminalCapsule experience="web" sendText={vi.fn()} capabilityDisclosure={caps} workContext={workContext()} />,
@@ -481,7 +509,6 @@ describe('Context Disclosure', () => {
     await userEvent.click(screen.getByTestId('capsule-capability-more'));
     await screen.findByTestId('capsule-context-item-claude-code');
 
-    // The user has moved on: the composer holds focus.
     const field = screen.getByTestId('capsule-ghost-input');
     field.focus();
     expect(field).toHaveFocus();
@@ -495,9 +522,8 @@ describe('Context Disclosure', () => {
       />,
     );
 
-    await waitFor(() => {
-      expect(screen.queryByTestId('capsule-context-disclosure')).not.toBeInTheDocument();
-    });
+    expect(screen.getByTestId('capsule-context-disclosure')).toBeInTheDocument();
+    expect(screen.getByTestId('capsule-capability-picker-claude-code')).toBeInTheDocument();
     expect(field).toHaveFocus();
   });
 });
