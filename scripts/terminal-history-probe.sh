@@ -80,9 +80,12 @@ case "$mode" in
   compare)
     [[ $# -eq 2 ]] || { usage; exit 2; }
     dir="$2"
-    find "$dir" -maxdepth 1 -name '*.meta' -type f -print0 | sort -z |
-      xargs -0 -r awk -F= '/^(label|history_size|line_count|sha256|numbered_markers)=/ {printf "%s=%s ", $1, $2} END {print ""}'
-    echo "Compare separate .meta files in chronological label order."
+    for f in "$dir"/*.meta; do
+      [[ -f "$f" ]] || continue
+      echo "----- $(basename "$f") -----"
+      grep -E '^(label|history_size|pane_width|pane_height|line_count|sha256|numbered_markers)=' "$f"
+    done
+    echo "Source history must remain invariant when no application output or geometry change occurs."
     ;;
   *)
     usage
