@@ -220,7 +220,12 @@ export function scanVisualUtilitySource(
  * Explicit runtime names are required; dynamically composed names cannot be
  * statically verified and must be expressed through a shared constant.
  */
-export function scanLocalVariableContracts(files) {
+export const LOCAL_CSS_VARIABLE_OWNERS = Object.freeze({
+  '--nession-local-terminal-capsule-occlusion': ['web/src/product/terminal/capsule/hooks/useCapsuleDockClearance.ts'],
+  '--nession-local-terminal-content-bottom-inset': ['web/src/index.css', 'web/src/platform/terminal-runtime/capsule/occlusionScroll.ts'],
+});
+
+export function scanLocalVariableContracts(files, owners = {}) {
   const producers = new Map();
   const consumers = [];
   const addProducer = (name, file) => {
@@ -239,13 +244,23 @@ export function scanLocalVariableContracts(files) {
       consumers.push({ file, line: lineNumber(source, match.index), name: match[1] });
     }
   }
-  return consumers.filter(({ name }) => !producers.has(name)).map(({ file, line, name }) => ({
+  const violations = consumers.filter(({ name }) => !producers.has(name)).map(({ file, line, name }) => ({
     file,
     line,
     kind: 'undefined-local-variable',
     actual: `var(${name})`,
     repair: `declare ${name} in CSS/inline styles or produce it with style.setProperty`,
   }));
+  for (const [name, allowed] of Object.entries(owners)) {
+    const actual = producers.get(name) ?? [];
+    if (!actual.some(file => allowed.includes(file))) {
+      violations.push({ file: allowed[0], line: 1, kind: 'missing-owned-producer', actual: name, repair: `restore registered producer of ${name}` });
+    }
+    for (const file of actual) {
+      if (!allowed.includes(file)) violations.push({ file, line: 1, kind: 'unowned-producer', actual: name, repair: `only registered owner may publish ${name}` });
+    }
+  }
+  return violations;
 }
 
 export function scanVisualVocabularySuppression(source, file = '<fixture>') {
@@ -297,7 +312,7 @@ export function scanRepository(root = ROOT) {
       }
     }
   }
-  violations.push(...scanLocalVariableContracts(sources));
+  violations.push(...scanLocalVariableContracts(sources, LOCAL_CSS_VARIABLE_OWNERS));
   return violations;
 }
 
