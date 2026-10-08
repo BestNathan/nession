@@ -1,0 +1,82 @@
+name: Acceptance Case Smoke
+
+permissions:
+  contents: read
+  issues: read
+
+on:
+  pull_request:
+    branches: [staging]
+    paths:
+      - 'acceptance/**'
+      - 'scripts/acceptance-cases-selftest.mjs'
+      - 'justfile'
+      - '.github/workflows/acceptance-case-smoke.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: acceptance-case-smoke-${{ github.event.pull_request.number || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  protocol-case:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      RUSTC_WRAPPER: ""
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with: { cache-workspaces: ".", cache-all-crates: "true" }
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+
+      - run: sudo apt-get update && sudo apt-get install -y tmux
+
+      - name: Validate Case contract
+        run: node scripts/acceptance-cases-selftest.mjs
+
+      - name: Build runtime
+        run: |
+          cd web
+          npm ci
+          npm run build
+          cd ..
+          cargo build -p nession-server -p nession-agent
+
+      - name: Fetch trusted Requirement contract
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api "repos/${GITHUB_REPOSITORY}/issues/1474" > /tmp/issue-1474.json
+
+      - name: Run protocol-only source-aligned Case
+        id: case
+        continue-on-error: true
+        run: |
+          target_sha="$(git rev-parse HEAD)"
+          node acceptance/run-case.mjs \
+            --issue-json /tmp/issue-1474.json \
+            --issue 1474 \
+            --criterion SC-03 \
+            --stage pre-merge \
+            --target-sha "$target_sha" \
+            --run-id "${GITHUB_RUN_ID}" \
+            --run-attempt "${GITHUB_RUN_ATTEMPT}" \
+            --output /tmp/acceptance-case-result.json
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: acceptance-case-1474-SC-03
+          path: /tmp/acceptance-case-result.json
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Enforce Case result
+        if: steps.case.outcome != 'success'
+        run: exit 1
