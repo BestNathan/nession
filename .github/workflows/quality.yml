@@ -51,6 +51,10 @@ jobs:
           node scripts/protocol-gate.mjs --json >/dev/null
           node scripts/issue-contract.mjs self-test
           node acceptance/verifiers/browser-report.mjs self-test
+          node e2e/runner/runtime/full-stack.js self-test
+          node e2e/runner/cli-selftest.mjs
+          ./e2e/run --list
+          ./e2e/run --validate
           node scripts/issue-audit-agent.mjs self-test
           node scripts/issue-audit-cursor.mjs self-test
       - run: cd web && npm ci

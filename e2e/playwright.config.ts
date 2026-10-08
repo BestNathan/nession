@@ -7,7 +7,7 @@ import { FIXTURE_SCREENSHOT } from './helpers/fixtureVisual';
  * E2E test configuration.
  *
  * The real Server + Agent + isolated tmux + production Web lifecycle is owned
- * by `acceptance/runtime/full-stack.js`. `globalSetup.ts` provisions that
+ * by `e2e/runner/runtime/full-stack.js`. `globalSetup.ts` provisions that
  * shared runtime before the regression suite and returns its teardown.
  *
  * Playwright therefore owns browser/test behavior only; protocol/runtime
