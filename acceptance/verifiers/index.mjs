@@ -1,5 +1,8 @@
 import { spawn } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+import { classifyBrowserReport } from './browser-report.mjs';
 
 const DEFAULT_TIMEOUT_MS = 120_000;
 
@@ -147,12 +150,15 @@ async function executeBrowserVerifier(verifier, context) {
     path.join(context.caseDir, verifier.entry),
   );
   const started = Date.now();
-  const processResult = await runProcess(playwright, ['test', entry, '--config', config], {
+  const reportDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nession-case-browser-'));
+  const reportFile = path.join(reportDir, 'report.json');
+  const processResult = await runProcess(playwright, ['test', entry, '--config', config, '--reporter=json'], {
     cwd: path.join(context.repoRoot, 'e2e'),
     timeoutMs: context.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     env: {
       ...process.env,
       NODE_PATH: path.join(context.repoRoot, 'e2e', 'node_modules'),
+      PLAYWRIGHT_JSON_OUTPUT_FILE: reportFile,
       NESSION_ACCEPTANCE_RUNTIME_FILE: context.runtimeFile,
       NESSION_ACCEPTANCE_BASE_URL: context.baseURL,
       NESSION_ACCEPTANCE_TARGET_SHA: context.targetSha,
@@ -184,17 +190,19 @@ async function executeBrowserVerifier(verifier, context) {
     };
   }
 
+  let report = null;
+  try {
+    if (fs.existsSync(reportFile)) report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
+  } catch {
+    // Missing/invalid reporter output is a hard Error rather than a false Pass.
+  } finally {
+    fs.rmSync(reportDir, { recursive: true, force: true });
+  }
+  const verdict = classifyBrowserReport(report, processResult.code);
   return {
     type: verifier.type,
     entry: verifier.entry,
-    result: processResult.code === 0 ? 'Pass' : 'Fail',
-    summary: processResult.code === 0
-      ? 'Playwright verifier completed successfully'
-      : 'Playwright verifier reported assertion failures',
-    evidence: [{
-      type: 'browser',
-      value: 'Playwright case ' + verifier.entry + ' exit=' + processResult.code,
-    }],
+    ...verdict,
     duration_ms: Date.now() - started,
     exit_code: processResult.code,
     stderr: processResult.stderr.trim() || undefined,
