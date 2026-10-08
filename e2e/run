@@ -133,7 +133,12 @@ function tests(args) {
   }
   const suite = arg(args, 'suite');
   if (suite && !/^[a-z0-9-]+$/.test(suite)) throw new Error('unsafe suite selection');
-  return execute('npx', ['playwright', 'test', ...(suite ? [suite] : [])], at('e2e'));
+  const update = args.includes('--update-snapshots=all');
+  if (update && (suite !== 'fixture-visual' || args.includes('--all'))) {
+    throw new Error('visual baseline rewrite only allowed for explicit fixture-visual suite');
+  }
+  return execute('npx', ['playwright', 'test', ...(suite ? [suite] : []),
+    ...(update ? ['--update-snapshots=all'] : [])], at('e2e'));
 }
 function scenario(args) {
   const id = args[0];
