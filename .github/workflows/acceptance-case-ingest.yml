@@ -119,11 +119,16 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set -euo pipefail
+          set -uo pipefail
+          failed=0
           while IFS= read -r durable_path; do
             echo "Projecting ${durable_path}"
-            node trusted/scripts/acceptance-case-ingest.mjs apply "results-repo/${durable_path}"
+            if ! node trusted/scripts/acceptance-case-ingest.mjs apply "results-repo/${durable_path}"; then
+              echo "::error::Projection failed for ${durable_path}"
+              failed=1
+            fi
           done < "${RUNNER_TEMP}/persisted-records.txt"
+          exit "${failed}"
 
       - name: Summarize ingestion
         if: always()

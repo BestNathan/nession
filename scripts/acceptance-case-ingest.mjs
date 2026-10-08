@@ -138,23 +138,47 @@ export function enrichCaseRecord(record, { workflowUrl, recordPath: durablePath 
   };
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function githubRequest(apiPath, { token, method = 'GET', body } = {}) {
   if (!token) throw new Error('GITHUB_TOKEN/GH_TOKEN is required');
-  const response = await fetch('https://api.github.com' + apiPath, {
-    method,
-    headers: {
-      Accept: 'application/vnd.github+json',
-      Authorization: 'Bearer ' + token,
-      'X-GitHub-Api-Version': '2022-11-28',
-      'User-Agent': 'nession-acceptance-case-ingest',
-      ...(body ? { 'Content-Type': 'application/json' } : {}),
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  if (!response.ok) {
-    throw new Error('GitHub API ' + method + ' ' + apiPath + ' failed: ' + response.status + ' ' + await response.text());
+  const attempts = 4;
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      const response = await fetch('https://api.github.com' + apiPath, {
+        method,
+        headers: {
+          Accept: 'application/vnd.github+json',
+          Authorization: 'Bearer ' + token,
+          'X-GitHub-Api-Version': '2022-11-28',
+          'User-Agent': 'nession-acceptance-case-ingest',
+          ...(body ? { 'Content-Type': 'application/json' } : {}),
+        },
+        body: body ? JSON.stringify(body) : undefined,
+      });
+
+      if (response.ok) return response.status === 204 ? null : response.json();
+
+      const detail = await response.text();
+      const retriable = response.status === 429 || response.status >= 500;
+      const error = new Error(
+        'GitHub API ' + method + ' ' + apiPath + ' failed: ' + response.status + ' ' + detail,
+      );
+      if (!retriable || attempt === attempts) throw error;
+      lastError = error;
+    } catch (error) {
+      lastError = error;
+      if (attempt === attempts) throw error;
+    }
+
+    await sleep(250 * (2 ** (attempt - 1)));
   }
-  return response.status === 204 ? null : response.json();
+
+  throw lastError ?? new Error('GitHub API request failed without an error');
 }
 
 async function issueIsAssociatedWithSha(owner, name, issueNumber, targetSha, token) {
