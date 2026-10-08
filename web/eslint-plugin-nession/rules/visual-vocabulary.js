@@ -162,9 +162,17 @@ export function isForeignAdapter(filename) {
     path.includes('/src/components/ui/') ||
     path.includes('/src/platform/editor/') ||
     path.includes('/src/platform/terminal-runtime/') ||
-    path.endsWith('/src/product/terminal/components/TerminalViewport.tsx') ||
     path.endsWith('/src/shared/markdown/markdownVisualGrammar.ts')
   );
+}
+
+/** Third-party renderer variables are exceptions by specific family, never by entire file. */
+export function isApprovedForeignVariable(filename, name) {
+  const path = normalizedPath(filename);
+  if (path.includes('/src/platform/editor/') && (name.startsWith('cm-') || name === 'font-mono')) return true;
+  if (path.endsWith('/src/components/ui/toggle-group.tsx') && name === 'gap') return true;
+  if (path.includes('/src/platform/terminal-runtime/') && name.startsWith('xterm-')) return true;
+  return false;
 }
 
 function isCapabilitySource(filename) {
@@ -224,7 +232,7 @@ export function findVisualVariableViolations(value, metadata, filename = '') {
       continue;
     }
 
-    if (!adapter) {
+    if (!adapter || !isApprovedForeignVariable(filename, name)) {
       violations.push({
         name,
         kind: name.startsWith('nession-') ? 'unknown-nession' : 'foreign',

@@ -98,7 +98,7 @@ describe('TerminalViewport', () => {
     const { container } = render(<TerminalViewport controller={controller} />);
 
     expect(container.firstElementChild).toHaveStyle({
-      paddingBottom: 'var(--terminal-content-bottom-inset, 0px)',
+      paddingBottom: 'var(--nession-local-terminal-content-bottom-inset, 0px)',
     });
   });
 

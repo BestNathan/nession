@@ -17,13 +17,13 @@ import { registerWorkspaceFileLinkProvider } from '@/product/terminal/workspaceF
  * ## The inset
  *
  * Three sides take the Experience inset (`experience.{web,app}.terminal.pad*`,
- * `--terminal-pad-x` / `--terminal-pad-y`): the mockup's `.term` draws
+ * `--nession-terminal-pad-x` / `--nession-terminal-pad-y`): the mockup's `.term` draws
  * `padding: 18px 18px 52px`, and this box-border element spends those as real
  * inset so the first line is not flush against the well's edge.
  *
  * The fourth is **not** the mockup's literal. Its 52px bottom is the resting
  * capsule's own box (14px bottom margin + a 36px capsule + 2), i.e. the
- * clearance already measured into `--terminal-content-bottom-inset` from the
+ * clearance already measured into `--nession-local-terminal-content-bottom-inset` from the
  * live capsule geometry — and the capsule here is not the mockup's 26px control
  * on a 14px margin, it is the contract's `control.md` band, so the real
  * clearance differs and is the number that must win. Freezing a reserve instead
@@ -79,7 +79,7 @@ export function TerminalViewport({
       ref={containerRef}
       data-terminal-viewport
       className={cn(terminalViewportBoxClass, terminalViewportInsetClass)}
-      style={{ paddingBottom: 'var(--terminal-content-bottom-inset, 0px)' }}
+      style={{ paddingBottom: 'var(--nession-local-terminal-content-bottom-inset, 0px)' }}
     />
   );
 }

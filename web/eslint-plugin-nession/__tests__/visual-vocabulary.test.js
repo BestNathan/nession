@@ -22,6 +22,7 @@ const PRODUCT = '/proj/web/src/product/session/components/Probe.tsx';
 const EDITOR_ADAPTER = '/proj/web/src/platform/editor/model/editorTheme.ts';
 const MARKDOWN_ADAPTER = '/proj/web/src/shared/markdown/markdownVisualGrammar.ts';
 const CAPABILITY = '/proj/web/src/capabilities/probe/components/Probe.tsx';
+const TERMINAL_VIEWPORT = '/proj/web/src/product/terminal/components/TerminalViewport.tsx';
 
 test('generated metadata makes the --nession-* namespace machine-readable', () => {
   assert.ok(lintMetadata.cssVariables.includes('--nession-background'));
@@ -121,6 +122,12 @@ test('findVisualVariableViolations rejects legacy, unknown and foreign vocabular
   );
 });
 
+test('terminal viewport is not a blanket variable exception', () => {
+  assert.equal(findVisualVariableViolations('var(--terminal-content-bottom-inset, 0px)', lintMetadata, TERMINAL_VIEWPORT)[0]?.kind, 'foreign');
+  assert.equal(findVisualVariableViolations('var(--unregistered-renderer-value)', lintMetadata, EDITOR_ADAPTER)[0]?.kind, 'foreign');
+  assert.deepEqual(findVisualVariableViolations('var(--cm-editor-background)', lintMetadata, EDITOR_ADAPTER), []);
+});
+
 test('a legal token still fails when a capability consumes host-owned chrome', () => {
   const violations = findVisualVariableViolations(
     'px-[length:var(--nession-terminal-capsule-shell-pad-x)]',
@@ -190,6 +197,11 @@ test('visual-vocabulary reports non-canonical production variables', () => {
       },
     ],
     invalid: [
+      {
+        code: 'export const x = "var(--terminal-content-bottom-inset, 0px)";',
+        filename: TERMINAL_VIEWPORT,
+        errors: [{ messageId: 'violation' }],
+      },
       {
         code: 'export const x = "bg-[var(--background)]";',
         filename: PRODUCT,
