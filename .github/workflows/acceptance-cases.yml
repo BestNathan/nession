@@ -44,7 +44,7 @@ jobs:
     env:
       RUSTC_WRAPPER: ""
       NESSION_ACCEPTANCE_TRUSTED_ROOT: ${{ github.workspace }}/trusted
-      PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/ms-playwright
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.cache/ms-playwright
     steps:
       - name: Checkout trusted discovery tooling
         uses: actions/checkout@v4
