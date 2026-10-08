@@ -71,7 +71,6 @@ export function PeekHost({
 }) {
   const [focus, setFocus] = useState<string | undefined>(undefined);
   const surfaceRef = useRef<HTMLDivElement>(null);
-  const returnFocusToTriggerRef = useRef(false);
   // The approved child overlay (#1120). Held here rather than by the capability
   // so that placement, dismissal and the accessible name stay the host's — a
   // capability supplies content and nothing else, exactly as it does for the
@@ -79,39 +78,13 @@ export function PeekHost({
   const [detail, setDetail] = useState<CapsuleDetail | null>(null);
   const { title, onDismiss, onOpenWorkspace } = projection;
 
-  // Context -> Peek is a depth transition in one upper slot (#1347 SC-45).
-  // The host, not a capability body, owns the deterministic focus handoff.
-  //
-  // This is intentionally one-shot and context-specific. An ambient/read-only
-  // Peek (for example Git while the user is typing) must preserve the composer's
-  // focus; only an explicit Context row selection transfers focus into Peek.
-  useEffect(() => {
-    if (!focusFromContext) {
-      return;
-    }
-    returnFocusToTriggerRef.current = true;
-    surfaceRef.current?.focus({ preventScroll: true });
-    onFocusFromContextHandled();
-  }, [focusFromContext, onFocusFromContextHandled, projection.id]);
-
-  // Leaving a context-opened Peek returns focus to the stable lower-Capsule
-  // trigger, but only
-  // when focus would otherwise be stranded inside the disappearing surface.
-  // If the user already moved elsewhere, external projection teardown must not
-  // steal their focus back.
-  useEffect(
-    () => () => {
-      if (!returnFocusToTriggerRef.current) {
-        return;
-      }
-      const active = document.activeElement;
-      const stranded = active === null || active === document.body || surfaceRef.current?.contains(active);
-      if (stranded) {
-        triggerRef.current?.focus({ preventScroll: true });
-      }
-    },
-    [triggerRef],
-  );
+  usePeekFocusLifecycle({
+    focusFromContext,
+    onFocusFromContextHandled,
+    projectionId: projection.id,
+    surfaceRef,
+    triggerRef,
+  });
 
   return (
     <div
@@ -237,3 +210,42 @@ export function PeekHost({
     </div>
   );
 }
+function usePeekFocusLifecycle({
+  focusFromContext,
+  onFocusFromContextHandled,
+  projectionId,
+  surfaceRef,
+  triggerRef,
+}: {
+  focusFromContext: boolean;
+  onFocusFromContextHandled: () => void;
+  projectionId: string;
+  surfaceRef: React.RefObject<HTMLDivElement | null>;
+  triggerRef: React.RefObject<HTMLButtonElement | null>;
+}) {
+  const returnFocusToTriggerRef = useRef(false);
+
+  useEffect(() => {
+    if (!focusFromContext) {
+      return;
+    }
+    returnFocusToTriggerRef.current = true;
+    surfaceRef.current?.focus({ preventScroll: true });
+    onFocusFromContextHandled();
+  }, [focusFromContext, onFocusFromContextHandled, projectionId, surfaceRef]);
+
+  useEffect(
+    () => () => {
+      if (!returnFocusToTriggerRef.current) {
+        return;
+      }
+      const active = document.activeElement;
+      const stranded = active === null || active === document.body || surfaceRef.current?.contains(active);
+      if (stranded) {
+        triggerRef.current?.focus({ preventScroll: true });
+      }
+    },
+    [surfaceRef, triggerRef],
+  );
+}
+
