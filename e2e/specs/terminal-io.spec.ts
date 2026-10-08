@@ -1,8 +1,11 @@
 import { test, expect } from '@playwright/test';
+import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { openCapsuleCapability } from '../helpers/capsule';
 import { waitForShell } from '../helpers/shell';
+import { E2E_TMUX_SOCKET } from '../runtime';
 
 // __dirname (not import.meta): Playwright transforms specs to CJS — this
 // package.json is not "type": "module". Same convention as
@@ -370,6 +373,43 @@ async function stopPtyProbe(page: import('@playwright/test').Page): Promise<void
   await expect
     .poll(async () => /runner:\S*\$/m.test(await readTerminalBuffer(page)), { timeout: 15_000 })
     .toBe(true);
+}
+
+/**
+ * The Session's own pane, straight from tmux — the source side of the history
+ * the browser is showing.
+ *
+ * `-S` is not optional and not a formality: nession never uses tmux's default
+ * socket, and this run's is its own (`E2E_TMUX_SOCKET`). `=` makes the target
+ * an exact name rather than a prefix match, so a session called `e2e-history`
+ * can never be read as another called `e2e-history-1`.
+ *
+ * `-S -` captures from the top of the saved history, so this is every line the
+ * pane holds, not just the visible screen.
+ */
+function readPane(sessionName: string): { text: string; sha: string; markers: number } {
+  const text = execFileSync(
+    'tmux',
+    ['-S', E2E_TMUX_SOCKET, 'capture-pane', '-p', '-t', `=${sessionName}`, '-S', '-'],
+    { encoding: 'utf8' },
+  );
+  return {
+    text,
+    sha: createHash('sha256').update(text).digest('hex'),
+    markers: text.split('\n').filter((line) => line.includes('REPAINT-')).length,
+  };
+}
+
+/**
+ * Put the repainting inline fixture into the Session's working directory.
+ *
+ * Same shape as `ptyProbeInstaller` and for the same reason: the PTY's cwd is
+ * `/tmp/nession-e2e`, not the checkout, and base64 keeps the committed script
+ * the only copy of itself.
+ */
+function repaintFixtureInstaller(): string {
+  const script = readFileSync(join(__dirname, '..', 'fixtures', 'inline-repaint.sh'), 'utf8');
+  return `printf '%s' '${Buffer.from(script).toString('base64')}' | base64 -d > inline-repaint.sh`;
 }
 
 /** The last line with anything on it — where a terminal's cursor actually is. */
@@ -791,6 +831,64 @@ test.describe('Terminal I/O', () => {
       expect(await countInBuffer(page, '^[OA')).toBeGreaterThan(before);
     }).toPass({ timeout: 15_000 });
   });
+
+  // Both transports, because the size reaches the agent on two different wires
+  // and the guard this fixes lives below both of them (#1490 SC-03).
+  for (const mode of ['Relay', 'P2P'] as const) {
+  test(`a reload re-observes the session without repainting history into it (${mode}, #1490)`, async ({ page }, testInfo) => {
+    // The reported symptom, at the level it was reported: a page refresh must
+    // re-observe the same Session and leave its history alone. What made it
+    // grow was the client asking for a size the pane was never at — a grid
+    // measured while the webfont was still loading — and then correcting it, so
+    // an attach moved the shared window twice. An inline-drawing application
+    // repaints on each SIGWINCH and its repaint scrolls into the history the
+    // user reads.
+    //
+    // The fixture is that application, deterministically: it paints a numbered
+    // block and repaints on resize, and prints nothing else. So **the pane is
+    // byte-stable between resizes**, and any growth across the reloads below is
+    // the client's doing rather than the application's.
+    test.skip(!process.env.CI, 'local only — runs in CI workflow only');
+    const SESSION_NAME = `e2e-history-${mode.toLowerCase()}-${testInfo.retry}`;
+    await createSession(page, SESSION_NAME);
+    await attachToSession(page, SESSION_NAME, mode);
+    await waitForInteractiveShell(page);
+
+    await submitTerminalCommand(page, repaintFixtureInstaller());
+    await submitTerminalCommand(page, 'bash inline-repaint.sh');
+
+    // The block is painted, and from here only a resize can add a line.
+    await expect
+      .poll(async () => readPane(SESSION_NAME).markers, { timeout: 20_000 })
+      .toBe(20);
+    const before = readPane(SESSION_NAME);
+
+    for (let i = 0; i < 3; i += 1) {
+      await page.reload();
+      // The snapshot the reload asked for is the whole history — no prompt is
+      // on screen for `waitForInteractiveShell` to find, so readiness is the
+      // fixture's own last line arriving.
+      await expect
+        .poll(async () => readTerminalBuffer(page), { timeout: 30_000 })
+        .toContain('REPAINT-initial-0020');
+    }
+    await page.waitForTimeout(1_000);
+
+    // The invariant: with no producer and an unchanged viewport, tmux's history
+    // is untouched. The hash is the whole capture, so it catches a change the
+    // line count would not — a repaint that replaced lines rather than adding
+    // them.
+    const after = readPane(SESSION_NAME);
+    expect(after.sha).toBe(before.sha);
+    expect(after.markers).toBe(before.markers);
+
+    // And the client holds exactly one copy of the history it was sent: not a
+    // second copy appended by a re-attach, not a gap where the erase landed.
+    const text = await readTerminalBuffer(page);
+    expect(text.match(/REPAINT-initial-0020/g) ?? []).toHaveLength(1);
+    expect(text.match(/REPAINT-initial-0001/g) ?? []).toHaveLength(1);
+  });
+  }
 
   test('a restored session still takes input after the reload (#1429)', async ({ page }, testInfo) => {
     // #1429's reported flow: create, use, leave (reload), restore, type.
