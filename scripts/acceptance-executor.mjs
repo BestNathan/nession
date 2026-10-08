@@ -520,7 +520,44 @@ function selfTest() {
   const changed = passedBody.replace('deterministic update works', 'changed wording');
   assert.throws(() => applyAcceptanceResultToBody(changed, pass), /contract changed/);
 
-  console.log('acceptance-executor self-test: 12 cases passed');
+  const multiBody = fixtureBody().replace(
+    '| SC-02 | post-merge | Pending | requires production deployment; verify after release |',
+    '| SC-02 | staging | Pending | second staging criterion pending |',
+  );
+  const multiIssue = { ...issue, body: multiBody };
+  const multiContext = buildAcceptanceContext(multiIssue, 'staging', {
+    targetRef: 'a'.repeat(40),
+    deployment: 'staging',
+    runId: 300,
+  });
+  assert.deepEqual(multiContext.criteria.map((item) => item.criterion), ['SC-01', 'SC-02']);
+  const caseProjection = normalizeAcceptanceCaseResult(multiContext, {
+    issue: 1360,
+    criterion: 'SC-01',
+    stage: 'staging',
+    target_sha: 'a'.repeat(40),
+    contract_sha256: multiContext.contract_sha256,
+    execution_id: 'b'.repeat(64),
+    case_tree_sha: 'c'.repeat(40),
+    case_revision: 'a'.repeat(40),
+    result: 'Pass',
+    verifiers: [{
+      type: 'runtime',
+      result: 'Pass',
+      summary: 'runtime proof',
+      evidence: [{ type: 'runtime', value: 'proof=ok' }],
+    }],
+  });
+  assert.deepEqual(caseProjection.selected_criteria, ['SC-01']);
+  const partialBody = applyAcceptanceResultToBody(multiBody, caseProjection);
+  assert.match(partialBody, /\| SC-01 \| staging \| Pass \| run 300;/);
+  assert.match(partialBody, /\| SC-02 \| staging \| Pending \| second staging criterion pending \|/);
+  assert.throws(
+    () => applyAcceptanceResultToBody(multiBody, { ...caseProjection, selected_criteria: ['SC-99'] }),
+    /unknown or belongs to another stage/,
+  );
+
+  console.log('acceptance-executor self-test: 16 cases passed');
 }
 
 function usage() {
