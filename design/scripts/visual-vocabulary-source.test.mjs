@@ -106,6 +106,16 @@ test('fast source gate rejects legacy custom properties in TS/TSX strings', () =
   assert.match(violations[0].repair, /--nession-background/);
 });
 
+test('source gate rejects old terminal local variable in renderer mount', () => {
+  const violations = scanVisualUtilitySource(
+    "export const inset = 'var(--terminal-content-bottom-inset, 0px)';",
+    'web/src/product/terminal/components/TerminalViewport.tsx',
+    metadata,
+  );
+  assert.equal(violations.length, 1);
+  assert.equal(violations[0].kind, 'variable-foreign');
+});
+
 test('visual vocabulary rule cannot be disabled in a consumer', () => {
   const violations = scanVisualVocabularySuppression(
     '// eslint-disable-next-line nession/visual-vocabulary\nconst x = 1;',
