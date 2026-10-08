@@ -157,7 +157,7 @@ async function main() {
       agentPort,
       stalledProbePort,
       webPort,
-      cleanupHome: false,
+      cleanupHome: true,
     });
     infrastructureStatus = 'ready';
 
