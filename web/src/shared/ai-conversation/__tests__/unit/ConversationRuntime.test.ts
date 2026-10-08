@@ -121,7 +121,11 @@ describe('ConversationRuntime — opening', () => {
 
 describe('ConversationRuntime — a context whose value moves without its key', () => {
   it('replaces what later reads are asked with, without resetting the space', async () => {
-    const { runtime, adapter } = sameKeySetup()
+    const { runtime, adapter } = sameKeySetup({
+      // The concrete Context value changes, but this provider says both values
+      // are the same request authority. No automatic reload is warranted.
+      requestKey: () => 'authority-1',
+    })
     runtime.setContext('token-a')
     await flush()
     expect(ids(runtime)).toEqual(['m3', 'm4', 'm5'])
@@ -964,5 +968,169 @@ describe('ConversationRuntime — round 6 contract boundaries', () => {
     await flush()
 
     expect(runtime.getSnapshot().skipped).toBe(3)
+  })
+})
+
+
+describe('ConversationRuntime — round 7 authority and list snapshot boundaries', () => {
+  it('invalidates an in-flight read when request authority rotates inside one space', async () => {
+    const { runtime, adapter } = sameKeySetup({
+      requestKey: (context) => context,
+    })
+    runtime.setContext('lease-a')
+    await flush()
+    expect(runtime.getSnapshot().state).toBe('ready')
+
+    // Capture an answer under A that would semantically stop the readable
+    // thread if it were still allowed to publish.
+    const releaseOld = adapter.hold('read')
+    adapter.forcedReadState = 'unavailable'
+    runtime.reload()
+    await flush()
+
+    // B is the same conversation space but a new request authority. Its fresh
+    // read is allowed to land before A is released.
+    adapter.forcedReadState = null
+    runtime.setContext('lease-b')
+    await flush()
+    expect(runtime.getSnapshot().state).toBe('ready')
+    expect(
+      adapter.calls.filter((call) => call.kind === 'read').at(-1)?.context,
+    ).toBe('lease-b')
+
+    releaseOld()
+    await flush()
+
+    // A's late non-ready answer cannot tear down B's readable state.
+    expect(runtime.getSnapshot().state).toBe('ready')
+    expect(ids(runtime)).toEqual(['m3', 'm4', 'm5'])
+  })
+
+  it('closes the gap when a push source is replaced without replaying old events', async () => {
+    const callbacks = new Map<string, () => void>()
+    const { runtime, adapter } = sameKeySetup({
+      // Isolate source rotation from request rotation: reads remain authorized,
+      // only the concrete push source changes.
+      requestKey: () => 'authority-1',
+      refresh: {
+        kind: 'push',
+        sourceKey: (context, conversationId) => `${context}:${conversationId}`,
+        subscribe: (context, _conversationId, onChange) => {
+          callbacks.set(context, onChange)
+          return () => undefined
+        },
+      },
+    })
+
+    runtime.setContext('lease-a')
+    await flush()
+    expect(callbacks.has('lease-a')).toBe(true)
+
+    adapter.replaceItems('c1', [
+      ...transcript(6),
+      assistantMessage('m6', 'arrived during source handoff', 'streaming'),
+    ])
+
+    // B emits nothing. The runtime itself must issue one catch-up newest read
+    // after replacing A, otherwise m6 is invisible until some future event.
+    runtime.setContext('lease-b')
+    await flush()
+
+    expect(callbacks.has('lease-b')).toBe(true)
+    expect(ids(runtime)).toContain('m6')
+  })
+
+  it('accepts a synchronous new-source signal and rejects a late old-source signal', async () => {
+    const callbacks = new Map<string, () => void>()
+    const { runtime, adapter } = sameKeySetup({
+      requestKey: () => 'authority-1',
+      refresh: {
+        kind: 'push',
+        sourceKey: (context, conversationId) => `${context}:${conversationId}`,
+        subscribe: (context, _conversationId, onChange) => {
+          callbacks.set(context, onChange)
+          if (context === 'lease-b') {
+            // Some push APIs synchronously report current state from subscribe.
+            // The target must already be claimed when this fires.
+            onChange()
+          }
+          return () => undefined
+        },
+      },
+    })
+
+    runtime.setContext('lease-a')
+    await flush()
+    adapter.replaceItems('c1', [
+      ...transcript(6),
+      assistantMessage('m6', 'synchronous source signal', 'streaming'),
+    ])
+
+    runtime.setContext('lease-b')
+    await flush()
+    expect(ids(runtime)).toContain('m6')
+
+    const readsAfterB = adapter.calls.filter((call) => call.kind === 'read').length
+    callbacks.get('lease-a')?.()
+    await flush()
+    expect(adapter.calls.filter((call) => call.kind === 'read')).toHaveLength(readsAfterB)
+  })
+
+  it('restarts a complete-list read when a continuation snapshot went stale', async () => {
+    let restarted = false
+    const conversations = Array.from({ length: 5 }, (_, index) => ({
+      id: `c${index}`,
+      title: `Conversation ${index}`,
+      items: transcript(1, `c${index}-`),
+    }))
+    const { runtime, adapter } = setup({
+      conversations,
+      bindingId: 'c0',
+      listPageSize: 2,
+      refresh: { kind: 'manual' },
+      restartListFor: (_context, cursor) => {
+        if (cursor === '2' && !restarted) {
+          restarted = true
+          return true
+        }
+        return false
+      },
+    })
+
+    runtime.setContext('a:s1')
+    await flush()
+
+    expect(runtime.getSnapshot().conversations.map((item) => item.id)).toEqual([
+      'c0',
+      'c1',
+      'c2',
+      'c3',
+      'c4',
+    ])
+    expect(runtime.getSnapshot().listError).toBeNull()
+    expect(
+      adapter.calls.filter((call) => call.kind === 'list').map((call) => call.cursor),
+    ).toEqual([undefined, '2', undefined, '2', '4'])
+  })
+
+  it('bounds eager complete-list work even when a provider keeps returning cursors', async () => {
+    const conversations = Array.from({ length: 40 }, (_, index) => ({
+      id: `c${index}`,
+      items: transcript(1, `c${index}-`),
+    }))
+    const { runtime, adapter } = setup({
+      conversations,
+      bindingId: null,
+      listPageSize: 1,
+      refresh: { kind: 'manual' },
+    })
+
+    runtime.setContext('a:s1')
+    await flush()
+
+    const listCalls = adapter.calls.filter((call) => call.kind === 'list')
+    expect(listCalls).toHaveLength(32)
+    expect(runtime.getSnapshot().listError).toContain('bounded 32-page budget')
+    expect(runtime.getSnapshot().conversations).toEqual([])
   })
 })
