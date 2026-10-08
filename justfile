@@ -72,7 +72,7 @@ check: fmt lint check-rustc-wrapper check-worktree-target-seed check-build-cache
 # Prove the shared Acceptance full-stack harness keeps its config/target contract
 # deterministic without launching the runtime.
 check-acceptance-runtime:
-    node acceptance/runtime/full-stack.mjs self-test
+    node acceptance/runtime/full-stack.js self-test
 
 # ── Protocol codegen (#678 Phase 5) ─────────────────────────────────────────
 
