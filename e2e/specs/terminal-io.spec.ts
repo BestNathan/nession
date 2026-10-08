@@ -380,9 +380,13 @@ async function stopPtyProbe(page: import('@playwright/test').Page): Promise<void
  * the browser is showing.
  *
  * `-S` is not optional and not a formality: nession never uses tmux's default
- * socket, and this run's is its own (`E2E_TMUX_SOCKET`). `=` makes the target
- * an exact name rather than a prefix match, so a session called `e2e-history`
- * can never be read as another called `e2e-history-1`.
+ * socket, and this run's is its own (`E2E_TMUX_SOCKET`).
+ *
+ * The target is `=<name>:` — the `=` is an exact-name match rather than a
+ * prefix one (so `e2e-history-1` can never be read as `e2e-history-10`), and
+ * the trailing colon is what makes it a **session** target. Without it tmux
+ * reads `=name` as a pane name and answers `can't find pane: =name`, which is
+ * measured, not assumed.
  *
  * `-S -` captures from the top of the saved history, so this is every line the
  * pane holds, not just the visible screen.
@@ -390,7 +394,7 @@ async function stopPtyProbe(page: import('@playwright/test').Page): Promise<void
 function readPane(sessionName: string): { text: string; sha: string; markers: number } {
   const text = execFileSync(
     'tmux',
-    ['-S', E2E_TMUX_SOCKET, 'capture-pane', '-p', '-t', `=${sessionName}`, '-S', '-'],
+    ['-S', E2E_TMUX_SOCKET, 'capture-pane', '-p', '-t', `=${sessionName}:`, '-S', '-'],
     { encoding: 'utf8' },
   );
   return {
