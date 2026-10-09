@@ -195,18 +195,26 @@ ok(() => {
   assert.equal(result.status, 0, 'staging merge parent parser self-test failed: ' + result.stderr);
   assert.match(result.stdout, /raw-object proof self-test passed/);
 });
-// Even a source Case with a protocol/runtime verifier can invoke the real
-// Terminal Scenario, which imports @playwright/test transitively. The trusted
-// workflow must install browser tooling for every selected Case, never just
-// manifests declaring type=browser (regression for #1498 staging failure).
+// Canonical manifest type=browser is the trusted dependency declaration.
+// A runtime Case invoking the Terminal Scenario transitively must list a real
+// Browser verifier, so the main-owned Case selector provisions Playwright.
 ok(() => {
   const workflow = fs.readFileSync(path.join(repoRoot, '.github', 'workflows',
     'acceptance-cases.yml'), 'utf8');
   assert.match(workflow,
-    /- name: Install browser verifier runtime\s+if: steps\.select\.outputs\.count != '0'/,
-    'runtime/protocol Case dependencies must not be skipped');
+    /- name: Install browser verifier runtime\s+if: steps\.select\.outputs\.needs_browser == 'true'/);
   assert.match(workflow,
     /- name: Install browser verifier runtime[\s\S]*?cd workspace\/e2e\s+npm ci\s+npx playwright install chromium --with-deps/);
+  assert.match(workflow, /needs_browser: verifiers\.some\(\(item\) => item\.type === 'browser'\)/);
+  for (const n of ['01','02','03','04']) {
+    const caseDir = path.join(canonicalRoot, '1498', 'SC-' + n);
+    const item = discoverCases(canonicalRoot).find(x =>
+      x.manifest.issue === 1498 && x.manifest.criterion === 'SC-' + n);
+    assert.ok(item, 'missing staged Scenario Case SC-' + n);
+    assert.ok(item.manifest.verifiers.some(v => v.type === 'browser'),
+      'SC-' + n + ' must declare real Playwright dependency');
+    assert.ok(fs.existsSync(path.join(caseDir, 'verify.spec.js')));
+  }
 });
 
 console.log('acceptance Case self-test: ' + cases + ' cases passed');
