@@ -183,7 +183,7 @@ function runAgent(issue) {
   return parsed;
 }
 
-function selfTest() {
+async function selfTest() {
   const sample = {
     usage: { input_tokens: 10, output_tokens: 4, cache_read_input_tokens: 20, cache_creation_input_tokens: 3 },
     total_cost_usd: 0.01, session_id: 's1', num_turns: 2, duration_ms: 100,
@@ -191,6 +191,8 @@ function selfTest() {
   assert.deepEqual(extractUsage(sample), { input_tokens: 10, output_tokens: 4, cache_read_tokens: 20, cache_write_tokens: 3 });
   const modelUsage = { modelUsage: { deepseek: { inputTokens: 7, outputTokens: 2, cacheReadInputTokens: 5, cacheCreationInputTokens: 1 } } };
   assert.deepEqual(extractUsage(modelUsage), { input_tokens: 7, output_tokens: 2, cache_read_tokens: 5, cache_write_tokens: 1 });
+  const oldRepo = process.env.GITHUB_REPOSITORY;
+  process.env.GITHUB_REPOSITORY ||= 'BestNathan/nession';
   const previous = process.env.ISSUE_AUDIT_CLAUDE_MODEL;
   process.env.ISSUE_AUDIT_CLAUDE_MODEL = 'claude-sonnet-5';
   const args = buildClaudeArgs({ number: 1, labels: [], body: '', url: 'https://example.test/1' }, { errors: [] }, 'Read', 'Edit');
@@ -198,6 +200,9 @@ function selfTest() {
   assert.match(args[1], /By turn 8, stop investigating/);
   if (previous == null) delete process.env.ISSUE_AUDIT_CLAUDE_MODEL;
   else process.env.ISSUE_AUDIT_CLAUDE_MODEL = previous;
+  if (oldRepo == null) delete process.env.GITHUB_REPOSITORY;
+  else process.env.GITHUB_REPOSITORY = oldRepo;
+  await import('./lib/agent/selftest.mjs');
   console.log('issue-audit-agent self-test: 4 cases passed');
 }
 
