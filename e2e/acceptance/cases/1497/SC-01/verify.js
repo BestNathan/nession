@@ -22,6 +22,9 @@ async function main() {
   assert.match(scenario, /require\(['"]\.\.\/\.\.\/runner\/runtime\/full-stack\.js['"]\)/);
   assert.equal(fs.existsSync(path.join(repo,'acceptance/runtime/full-stack.js')),false);
   assert.equal(fs.existsSync(path.join(repo,'acceptance/run-case.mjs')),false);
+  assert.equal(fs.existsSync(path.join(repo,'acceptance/verifiers')),false,'legacy driver path still present');
+  assert.ok(fs.existsSync(path.join(repo,'e2e/runner/drivers/index.mjs')),'shared verifier driver missing');
+  assert.ok(fs.existsSync(path.join(repo,'e2e/runner/drivers/playwright.config.cjs')));
   const protocol = await verifyOnlineAgent(runtime);
   assert.equal(protocol.status, 'pass');
   const response = await fetch(runtime.base_url + '/', {signal:AbortSignal.timeout(8000)});
@@ -29,7 +32,7 @@ async function main() {
   console.log(JSON.stringify({status:'pass',summary:'Regression, Acceptance and Scenario share the same full-stack owner; real Server, Agent and Web responded at pinned SHA.',evidence:[
     {type:'runtime',value:'target_sha='+target+' profile='+runtime.profile+' Web HTTP='+response.status},
     {type:'protocol',value:'real server.auth and server.agent.list observed e2e-test-node'},
-    {type:'ownership',value:'globalSetup, Case evaluator and Scenario import e2e/runner/runtime/full-stack.js; no legacy runner files'},
+    {type:'ownership',value:'globalSetup, Case evaluator and Scenario use shared e2e/runner Runtime; verifier Drivers solely under e2e/runner/drivers'},
   ]}));
 }
 main().catch(e=>{const msg=e instanceof Error?e.message:String(e);console.error(msg);console.log(JSON.stringify({status:'fail',summary:msg,evidence:[{type:'runtime',value:'shared runtime ownership or live probe failed'}]}));process.exitCode=1;});

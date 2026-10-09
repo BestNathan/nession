@@ -13,7 +13,7 @@ import {
   discoverCases,
   validateCaseAgainstAcceptanceContext,
 } from '../../../acceptance/cases.mjs';
-import { executeVerifier } from '../../../acceptance/verifiers/index.mjs';
+import { executeVerifier } from '../../runner/drivers/index.mjs';
 import { buildAcceptanceContext } from '../../../scripts/acceptance-executor.mjs';
 
 const require = createRequire(import.meta.url);

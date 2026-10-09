@@ -280,7 +280,7 @@ jobs:
         with:
           name: acceptance-case-evidence-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
-            workspace/acceptance/verifiers/test-results/
+            workspace/e2e/runner/drivers/test-results/
             workspace/e2e/test-results/
           if-no-files-found: warn
           retention-days: 90

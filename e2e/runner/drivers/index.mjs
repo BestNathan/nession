@@ -144,7 +144,7 @@ async function executeNodeVerifier(verifier, context) {
 
 async function executeBrowserVerifier(verifier, context) {
   const playwright = path.join(context.repoRoot, 'e2e', 'node_modules', '.bin', 'playwright');
-  const config = path.join(context.repoRoot, 'acceptance', 'verifiers', 'playwright.config.cjs');
+  const config = path.join(context.repoRoot, 'e2e', 'runner', 'drivers', 'playwright.config.cjs');
   const entry = path.relative(
     path.join(context.repoRoot, 'e2e', 'acceptance', 'cases'),
     path.join(context.caseDir, verifier.entry),
@@ -153,7 +153,7 @@ async function executeBrowserVerifier(verifier, context) {
   const reportDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nession-case-browser-'));
   const reportFile = path.join(reportDir, 'report.json');
   const proofFile = path.join(reportDir, 'proof.json');
-  const assertionReporter = path.join(context.repoRoot, 'acceptance', 'verifiers', 'assertion-reporter.cjs');
+  const assertionReporter = path.join(context.repoRoot, 'e2e', 'runner', 'drivers', 'assertion-reporter.cjs');
   const processResult = await runProcess(playwright, [
     'test', entry, '--config', config, '--reporter=json,' + assertionReporter,
   ], {

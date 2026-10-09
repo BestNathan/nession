@@ -67,6 +67,12 @@ assert.equal(fs.existsSync(path.join(repo, 'acceptance', 'run-case.mjs')), false
   'legacy public Case runner must be retired');
 assert.equal(fs.existsSync(path.join(repo, 'acceptance', 'runtime', 'full-stack.js')), false,
   'legacy Runtime alias must be retired');
+assert.equal(fs.existsSync(path.join(repo,'acceptance','verifiers')),false,
+  'legacy verifier driver path must be retired');
+assert.ok(fs.existsSync(path.join(repo,'e2e','runner','drivers','index.mjs')));
+assert.ok(fs.existsSync(path.join(repo,'e2e','runner','drivers','playwright.config.cjs')));
+const driverGate=fs.readFileSync(path.join(repo,'.github','workflows','quality.yml'),'utf8');
+assert.match(driverGate,/node e2e\/runner\/drivers\/browser-report\.mjs self-test/);
 assert.equal(fs.existsSync(path.join(repo, 'e2e', 'acceptance', 'evaluator', 'run-case.mjs')), true,
   'canonical internal Case evaluator must exist');
 const gateRecipes = fs.readFileSync(path.join(repo, 'justfile'), 'utf8');
