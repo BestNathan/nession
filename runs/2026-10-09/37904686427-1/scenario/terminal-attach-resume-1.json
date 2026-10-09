@@ -1,0 +1,96 @@
+{
+  "schema_version": 1,
+  "kind": "e2e_scenario_observation",
+  "mode": "scenario",
+  "scenario": "terminal-attach-resume",
+  "target_sha": "8ddf791f3bdd9ed970c7c67017fd3f2a130ac458",
+  "scenario_revision": "8ddf791f3bdd9ed970c7c67017fd3f2a130ac458",
+  "run_id": 37904686427,
+  "run_attempt": 1,
+  "run_index": 1,
+  "status": "Completed",
+  "evaluation": null,
+  "started_at": "2026-10-09T08:26:53.907Z",
+  "finished_at": "2026-10-09T08:27:04.380Z",
+  "config_sha256": "02570e8ea79bef27b3596233d77e63cada084f43a56f2e11df811513f96f8826",
+  "config": {
+    "generated_lines": 240,
+    "samples_max": 12,
+    "transport": "Relay",
+    "reload": true
+  },
+  "observation_count": 3,
+  "observations": [
+    {
+      "at": "2026-10-09T08:27:03.712Z",
+      "browser": {
+        "mounted": true,
+        "marker_count": 241,
+        "viewport": {
+          "baseY": 210,
+          "viewportY": 210
+        }
+      },
+      "backend": {
+        "marker_count": 240,
+        "sha256": "55b26f38da7f155594a65da95a1aad07599106f1f8bd44aa3e10a223a8a28656",
+        "bytes": 9572
+      },
+      "stage": "before-reload"
+    },
+    {
+      "at": "2026-10-09T08:27:03.868Z",
+      "browser": {
+        "mounted": false,
+        "marker_count": 0,
+        "viewport": null
+      },
+      "backend": {
+        "marker_count": 240,
+        "sha256": "55b26f38da7f155594a65da95a1aad07599106f1f8bd44aa3e10a223a8a28656",
+        "bytes": 9572
+      },
+      "stage": "after-reload"
+    },
+    {
+      "at": "2026-10-09T08:27:04.325Z",
+      "browser": {
+        "mounted": true,
+        "marker_count": 241,
+        "viewport": {
+          "baseY": 210,
+          "viewportY": 210
+        }
+      },
+      "backend": {
+        "marker_count": 240,
+        "sha256": "55b26f38da7f155594a65da95a1aad07599106f1f8bd44aa3e10a223a8a28656",
+        "bytes": 9572
+      },
+      "stage": "after-reload"
+    }
+  ],
+  "privacy": "whitelisted counters/timestamps/digests only; no terminal bytes",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 37904686427,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/1520-shallow-merge-parent-proof",
+    "target_sha": "8ddf791f3bdd9ed970c7c67017fd3f2a130ac458",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/37904686427",
+    "scenario_tree_sha": "96ae71e441342a6b448289c64cc8ca2ac8f00659",
+    "original_sha256": "84b9655682cc331b973f3cc207f1c128e46f6a1d4f6225ac7a5624cf9052134e"
+  },
+  "evidence": {
+    "provider": "github-actions-artifact",
+    "artifact_name": "e2e-terminal-scenario-37904686427-1",
+    "sha256": "84b9655682cc331b973f3cc207f1c128e46f6a1d4f6225ac7a5624cf9052134e",
+    "retention_days": 14,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/37904686427",
+    "durability": "time-limited; object archival not configured"
+  },
+  "execution_id": "6337e06f9918ca5faa5b2757e64fff3c34e3b57a8a8916416638fc22eb73d726"
+}
