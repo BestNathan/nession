@@ -110,7 +110,7 @@ jobs:
           const wf = fs.readFileSync('.github/workflows/acceptance.yml','utf8');
           const targetCheckout = wf.split('- name: Checkout target ref for read-only verification')[1]?.split('\n      - ')[0] || '';
           assert(targetCheckout.includes('fetch-depth: 0') && targetCheckout.includes('persist-credentials: false'));
-          assert(targetCheckout.includes('ref: \${{ inputs.target_ref }}'));
+          assert(targetCheckout.includes('ref: ${{ inputs.target_ref }}'));
           const guard = fs.readFileSync('scripts/requirement-acceptance.mjs','utf8');
           assert(guard.includes('function enforcePrAcceptance(') && !guard.includes('closePullRequest'));
           const source = fs.readFileSync('scripts/acceptance-ci-evidence.mjs','utf8');
