@@ -161,8 +161,9 @@ export function validateCaseManifest(raw, caseDir) {
 
 export function readCase(caseDir) {
   const manifestPath = path.join(caseDir, 'case.yaml');
-  if (!fs.existsSync(manifestPath)) throw new Error('missing case.yaml: ' + manifestPath);
-  if (fs.lstatSync(manifestPath).isSymbolicLink() || !fs.lstatSync(manifestPath).isFile()) throw new Error('Case manifest must be a real file');
+  const manifestStat = fs.lstatSync(manifestPath, { throwIfNoEntry: false });
+  if (!manifestStat) throw new Error('missing case.yaml: ' + manifestPath);
+  if (manifestStat.isSymbolicLink() || !manifestStat.isFile()) throw new Error('Case manifest must be a real file');
   const raw = parseCaseYaml(fs.readFileSync(manifestPath, 'utf8'), manifestPath);
   return {
     dir: path.resolve(caseDir),
