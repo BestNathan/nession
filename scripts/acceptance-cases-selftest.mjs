@@ -146,6 +146,17 @@ try {
   fs.rmSync(root, { recursive: true, force: true });
 }
 
+// Runtime verifiers can invoke Browser Scenarios without declaring type: browser.
+// The source Case may not obtain Playwright by bypassing the trusted workflow.
+ok(() => {
+  const workflow = fs.readFileSync(path.join(process.cwd(),
+    '.github', 'workflows', 'acceptance-cases.yml'), 'utf8');
+  assert.match(workflow,
+    /Install browser-capable Case runtime[\s\S]*?if: steps\.select\.outputs\.count != '0'[\s\S]*?cd workspace\/e2e[\s\S]*?npm ci[\s\S]*?playwright install chromium/);
+  assert.doesNotMatch(workflow,
+    /Install browser verifier runtime[\s\S]*?if: steps\.select\.outputs\.needs_browser/);
+});
+
 // Canonical Driver self-tests must keep their actual relocation in the gate.
 ok(() => {
   assert.equal(fs.existsSync(path.join(process.cwd(), 'acceptance', 'verifiers')), false,
