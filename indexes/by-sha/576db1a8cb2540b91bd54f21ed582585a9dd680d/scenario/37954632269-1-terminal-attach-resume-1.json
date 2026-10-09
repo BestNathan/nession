@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 37954632269,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/1498-acceptance-transitive-playwright-deps",
+    "target_sha": "576db1a8cb2540b91bd54f21ed582585a9dd680d",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/37954632269",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "58b8d4af31f4716462e3e4f34b1ed96aa590a018833a64a9dd34f1822d266dde"
+  },
+  "record": "runs/2026-10-09/37954632269-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "e60ee492af5d351f8ae6ebc5da97a66b259034923c195dccaf7297ab3febb3d6"
+}

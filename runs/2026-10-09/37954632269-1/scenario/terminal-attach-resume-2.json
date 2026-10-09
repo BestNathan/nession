@@ -1,0 +1,99 @@
+{
+  "schema_version": 1,
+  "kind": "e2e_scenario_observation",
+  "mode": "scenario",
+  "scenario": "terminal-attach-resume",
+  "target_sha": "576db1a8cb2540b91bd54f21ed582585a9dd680d",
+  "scenario_revision": "576db1a8cb2540b91bd54f21ed582585a9dd680d",
+  "run_id": 37954632269,
+  "run_attempt": 1,
+  "run_index": 2,
+  "status": "Completed",
+  "evaluation": null,
+  "started_at": "2026-10-09T15:52:21.435Z",
+  "finished_at": "2026-10-09T15:52:30.704Z",
+  "config_sha256": "02570e8ea79bef27b3596233d77e63cada084f43a56f2e11df811513f96f8826",
+  "config": {
+    "generated_lines": 240,
+    "samples_max": 12,
+    "transport": "Relay",
+    "reload": true
+  },
+  "observation_count": 3,
+  "observations": [
+    {
+      "at": "2026-10-09T15:52:29.917Z",
+      "stage": "before-reload",
+      "browser": {
+        "mounted": true,
+        "marker_count": 241,
+        "viewport": {
+          "baseY": 210,
+          "viewportY": 210
+        }
+      },
+      "backend": {
+        "marker_count": 240,
+        "sha256": "980392191ed44f030d1eccbe11bc02763ade3ff455209bc046c0c81fa70e963b",
+        "bytes": 9572
+      }
+    },
+    {
+      "at": "2026-10-09T15:52:30.139Z",
+      "stage": "after-reload",
+      "browser": {
+        "mounted": true,
+        "marker_count": 0,
+        "viewport": {
+          "baseY": 0,
+          "viewportY": 0
+        }
+      },
+      "backend": {
+        "marker_count": 240,
+        "sha256": "980392191ed44f030d1eccbe11bc02763ade3ff455209bc046c0c81fa70e963b",
+        "bytes": 9572
+      }
+    },
+    {
+      "at": "2026-10-09T15:52:30.644Z",
+      "stage": "after-reload",
+      "browser": {
+        "mounted": true,
+        "marker_count": 241,
+        "viewport": {
+          "baseY": 210,
+          "viewportY": 210
+        }
+      },
+      "backend": {
+        "marker_count": 240,
+        "sha256": "980392191ed44f030d1eccbe11bc02763ade3ff455209bc046c0c81fa70e963b",
+        "bytes": 9572
+      }
+    }
+  ],
+  "privacy": "whitelisted counters/timestamps/digests only; no terminal bytes",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 37954632269,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/1498-acceptance-transitive-playwright-deps",
+    "target_sha": "576db1a8cb2540b91bd54f21ed582585a9dd680d",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/37954632269",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "e2b0d70cdca119b53146a30c4d714ca7b3b17ca1eaa341cdc2274ca7390079b9"
+  },
+  "evidence": {
+    "provider": "github-actions-artifact",
+    "artifact_name": "e2e-terminal-scenario-37954632269-1",
+    "sha256": "e2b0d70cdca119b53146a30c4d714ca7b3b17ca1eaa341cdc2274ca7390079b9",
+    "retention_days": 14,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/37954632269",
+    "durability": "time-limited; object archival not configured"
+  },
+  "execution_id": "d784da97e3d2dad5c1314298e8e146d30fa882ad3d5eadffa7f84764b1f7fd6d"
+}
