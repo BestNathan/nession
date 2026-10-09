@@ -114,10 +114,55 @@ function scenarioSamples(record) {
     timeline,
   };
 }
+
+function compareProvenance(record) {
+  // A local JSON file may describe a trustworthy source, but only main-owned
+  // workflow_run ingestion can authenticate that claim against GitHub.
+  if (record.source == null) {
+    return { source_fields: 'absent', independently_authenticated: false };
+  }
+  const source = record.source;
+  if (!source || typeof source !== 'object' || Array.isArray(source)) {
+    throw new Error('invalid Scenario source identity');
+  }
+  const validId = (value) => Number.isSafeInteger(value) && value > 0;
+  if (source.target_sha !== record.target_sha ||
+      source.run_id !== record.run_id ||
+      source.run_attempt !== record.run_attempt ||
+      !validId(source.workflow_id) ||
+      !validId(source.run_id) ||
+      !validId(source.run_attempt) ||
+      !validId(record.run_index) ||
+      typeof source.repository !== 'string' ||
+      !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(source.repository) ||
+      !['pull_request', 'push', 'workflow_dispatch'].includes(source.event) ||
+      !/^[a-f0-9]{40}$/.test(source.scenario_tree_sha ?? '') ||
+      !/^[a-f0-9]{64}$/.test(source.original_sha256 ?? '')) {
+    throw new Error('Scenario record source identity conflicts with run/SHA or has missing provenance');
+  }
+  return {
+    source_fields: 'internally-consistent-but-unverified',
+    independently_authenticated: false,
+    repository: source.repository,
+    workflow_id: source.workflow_id,
+    run_id: source.run_id,
+    run_attempt: source.run_attempt,
+    event: source.event,
+    scenario_tree_sha: source.scenario_tree_sha,
+  };
+}
+function readComparisonInput(filename) {
+  const input = path.resolve(filename);
+  const stat = fs.lstatSync(input);
+  if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 1024 * 1024) {
+    throw new Error('compare input must be a regular, non-symlink JSON record <= 1MiB');
+  }
+  return JSON.parse(fs.readFileSync(input, 'utf8'));
+}
 function compare(args) {
   if (args.length !== 2) throw new Error('compare requires two immutable Run Record JSON file paths');
-  const [left, right] = args.map((name) => JSON.parse(fs.readFileSync(path.resolve(name), 'utf8')));
-  const compareKeys = ['kind', 'mode', 'target_sha', 'runtime_profile', 'stage', 'execution_id', 'result'];
+  const [left, right] = args.map(readComparisonInput);
+  const compareKeys = ['kind', 'mode', 'target_sha', 'runtime_profile', 'stage', 'execution_id', 'result', 'run_id', 'run_attempt', 'run_index', 'config_sha256'];
   const differences = compareKeys.filter((key) => left[key] !== right[key])
     .map((key) => ({ field: key, left: left[key] ?? null, right: right[key] ?? null }));
   if (left.kind === 'e2e_scenario_observation' || right.kind === 'e2e_scenario_observation') {
@@ -126,6 +171,8 @@ function compare(args) {
     }
     const a = scenarioSamples(left);
     const b = scenarioSamples(right);
+    const sourceLeft = compareProvenance(left);
+    const sourceRight = compareProvenance(right);
     console.log(JSON.stringify({
       status: 'Completed', evaluation: null, scenario: left.scenario,
       differences, left: a, right: b,
@@ -134,7 +181,16 @@ function compare(args) {
         max_browser_marker_count: b.max_browser_marker_count - a.max_browser_marker_count,
       },
       config_comparable: a.config_sha256 === b.config_sha256,
-      limitations: 'Wallclock samples are not synchronized; browser/network/tmux scheduling is nondeterministic. Observations cannot establish causal improvement or Acceptance Pass. Local JSON file paths are not authenticated orphan-store records.',
+      source_comparison: {
+        same_target_sha: a.target_sha === b.target_sha,
+        same_source_run: sourceLeft.run_id != null && sourceRight.run_id != null &&
+          sourceLeft.repository === sourceRight.repository &&
+          sourceLeft.run_id === sourceRight.run_id &&
+          sourceLeft.run_attempt === sourceRight.run_attempt,
+        left: sourceLeft, right: sourceRight,
+        environment_identity: 'not-recorded',
+      },
+      limitations: 'Wallclock samples are not synchronized; browser/network/tmux scheduling is nondeterministic and environment/seed identity is not recorded. Observations cannot establish causal improvement or Acceptance Pass. Self-described source fields, even when internally consistent, are not independently authenticated: verify against trusted workflow_run and orphan Git objects before using them as authoritative evidence.',
     }, null, 2));
     return;
   }
