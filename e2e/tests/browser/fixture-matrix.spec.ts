@@ -1,4 +1,4 @@
-// e2e/specs/fixture-matrix.spec.ts
+// e2e/tests/browser/fixture-matrix.spec.ts
 // #561 Phase 6 — remaining canonical viewport matrix entries:
 //   Web compact 1024×768 (Active Terminal + Workspace)
 //   App Sessions 390×844

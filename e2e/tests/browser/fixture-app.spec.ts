@@ -1,7 +1,7 @@
-// e2e/specs/fixture-app.spec.ts
+// e2e/tests/browser/fixture-app.spec.ts
 import { expect, test, type Page } from '@playwright/test';
-import { openCapsuleCapability } from '../helpers/capsule';
-import { openFixtureFile } from '../helpers/fixtureVisual';
+import { openCapsuleCapability } from '../../helpers/capsule';
+import { openFixtureFile } from '../../helpers/fixtureVisual';
 
 // Local runs are forbidden: the webServer stack compiles and runs
 // nession-server/agent (which operate tmux), and globalSetup executes

@@ -1,4 +1,4 @@
-// e2e/specs/fixture-env.spec.ts
+// e2e/tests/browser/fixture-env.spec.ts
 //
 // #1202 — Environment as a context-first capability, asserted against real DOM
 // through the fixture's canned `server.env.*` backend (fixtureEnv.ts). Every
@@ -11,7 +11,7 @@
 // *is* the copy (the Environment-language empty state, the impact dialog that
 // must never say "Force").
 import { expect, test, type Page } from '@playwright/test';
-import { gotoFixtureApp } from '../helpers/fixtureVisual';
+import { gotoFixtureApp } from '../../helpers/fixtureVisual';
 
 // Local runs are forbidden: the webServer stack compiles and runs
 // nession-server/agent (which operate tmux), and globalSetup executes

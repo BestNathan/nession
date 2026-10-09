@@ -16,7 +16,7 @@ import { FIXTURE_SCREENSHOT } from './helpers/fixtureVisual';
  */
 
 export default defineConfig({
-  testDir: './specs',
+  testDir: './tests/browser',
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
