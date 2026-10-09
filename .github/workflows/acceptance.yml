@@ -286,6 +286,9 @@ jobs:
   update-issue:
     name: Deterministic Issue updater
     needs: execute
+    # No eligible SCs in this stage is explicit no-op, not an Acceptance Pass.
+    # Never hand an empty result to the Issue projector. Other stages remain Pending.
+    if: needs.execute.result == 'success' && needs.execute.outputs.criteria_count != '0'
     runs-on: ubuntu-latest
     permissions:
       contents: read
