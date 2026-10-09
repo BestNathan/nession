@@ -176,3 +176,44 @@ jobs:
       target_ref: '5cf11aa6663efa4a4b2be55c3fbca9661b6dc9e8'
       deterministic_result_json: '{"criteria":[{"criterion":"SC-03","result":"Pass","summary":"Real #1520 Acceptance recorded two trusted verified ancestry sources and completed successfully without bypassing gates.","evidence":[{"type":"workflow","value":"Acceptance https://github.com/BestNathan/nession/actions/runs/37923901176 completed success for 5cf11aa6663efa4a4b2be55c3fbca9661b6dc9e8"},{"type":"issue","value":"#1520 SC-01 pre-merge Pass with ci_evidence.source_ancestry: original main and staging exact SHAs is_ancestor=true status=verified"}]}]}'
     secrets: inherit
+
+  close_accepted_issues:
+    needs: [pre1522, pre1523, stage1523, pre1527, stage1527]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify final deterministic Issue contract before closure
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { execFileSync } from 'node:child_process';
+          import { validateRequirementBody } from './scripts/requirement-acceptance.mjs';
+          for (const number of [1522, 1523, 1527]) {
+            const issue = JSON.parse(execFileSync('gh', ['issue', 'view', String(number),
+              '--repo', 'BestNathan/nession', '--json', 'state,body,labels'], {encoding:'utf8'}));
+            assert.equal(issue.state, 'OPEN', 'Issue state');
+            const report = validateRequirementBody(issue.body, {mode:'closure'});
+            assert(report.ok, 'Issue ' + number + ' not accepted: ' + report.errors.join('; '));
+            console.log('Issue ' + number + ' all SCs accepted');
+          }
+          NODE
+      - name: Close only fully accepted issues
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          for issue in 1522 1523 1527; do
+            gh issue close "$issue" --repo "BestNathan/nession" --reason completed \
+              --comment "Closed after trusted exact-SHA evidence replay and deterministic Acceptance Report projection. All Success Criteria independently verified by the repository closure gate."
+          done
