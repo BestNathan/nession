@@ -61,12 +61,34 @@ export function sourceIdentity(event, repo) {
     throw new Error('unexpected source workflow path');
   if (!['pull_request', 'push', 'workflow_dispatch'].includes(run.event))
     throw new Error('unsupported source workflow event');
-  if (!/^(feat|fix)\//.test(run.head_branch) && !['staging', 'main'].includes(run.head_branch))
-    throw new Error('untrusted/invalid branch');
+  // The invariant: a Scenario run may be attested only when it is this
+  // repository's own. What that means is fixed by the source workflow's trigger
+  // surface, not by how a branch is named: `e2e-scenario-smoke.yml` runs on
+  // `pull_request` targeting `staging` — which admits every PR head branch —
+  // and on `workflow_dispatch`, which admits any ref at all. A branch-name list
+  // cannot express that surface, and every attempt to guess one has gone red on
+  // a branch the repository itself created: a four-prefix list rejected
+  // `chore/*`, then the measured families in use (feat, fix, chore, docs, test,
+  // refactor, diag) outgrew it again with `test/*` (#1542).
+  //
+  // What is enforceable is repository ownership, and it is enforced above: both
+  // `repository` and `head_repository` must be this repository, so a run from a
+  // fork — the only source that could actually be untrusted — stays rejected
+  // regardless of what its branch is called. A run from a branch of this
+  // repository can only have been pushed by someone who can also push
+  // `feat/*`, so a name check adds no boundary; it only rejects legitimate
+  // work. The branch is still recorded in the attestation, which lets curation
+  // happen after the fact on real names instead of in advance on a guess.
+  //
+  // The shape check is kept: the attested record must carry a real single-line
+  // branch name.
+  const branch = run.head_branch;
+  if (typeof branch !== 'string' || branch.length === 0 || /[\r\n]/.test(branch))
+    throw new Error('invalid branch');
   return {
     repository: repo, workflow_id: positive(run.workflow_id, 'workflow_id'),
     run_id: positive(run.id, 'run_id'), run_attempt: positive(run.run_attempt, 'run_attempt'),
-    event: run.event, branch: run.head_branch,
+    event: run.event, branch,
     target_sha: hex(run.head_sha, 40, 'workflow_run.head_sha'),
     conclusion: run.conclusion,
     source_url: 'https://github.com/' + repo + '/actions/runs/' + run.id,
@@ -218,9 +240,21 @@ function selfTest() {
   assert.throws(() => sourceIdentity({ workflow_run: { ...event.workflow_run,
     event: 'workflow_run' } }, 'BestNathan/nession'), /unsupported/);
   assert.throws(() => sourceIdentity({ workflow_run: { ...event.workflow_run,
-    head_branch: 'other-repo' } }, 'BestNathan/nession'), /invalid branch/);
-  assert.throws(() => sourceIdentity({ workflow_run: { ...event.workflow_run,
     head_repository: { full_name: 'other/repo' } } }, 'BestNathan/nession'), /repository mismatch/);
+  // Eligibility is repository ownership (a fork run is refused above), not a
+  // branch name: the source workflow admits any PR head branch and any
+  // dispatched ref, so every branch of this repository is attestable. The
+  // violation fixture is therefore a malformed branch, not an unexpected name.
+  for (const branch of [undefined, '', 'feat/x\ninjected', 42]) {
+    assert.throws(() => sourceIdentity({ workflow_run: { ...event.workflow_run,
+      head_branch: branch } }, 'BestNathan/nession'), /invalid branch/);
+  }
+  for (const branch of ['feat/x', 'fix/x', 'chore/x', 'docs/x',
+    'test/1516-canonical-case-ingest-proof', 'refactor/one-set-environment',
+    'diag/terminal-io-p2p-freeze', 'staging', 'main']) {
+    assert.equal(sourceIdentity({ workflow_run: { ...event.workflow_run,
+      head_branch: branch } }, 'BestNathan/nession').branch, branch);
+  }
   return { valid, event };
 }
 async function selfTestAttestation() {
