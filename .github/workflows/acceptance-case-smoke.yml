@@ -1,0 +1,111 @@
+name: Acceptance Case Smoke
+
+permissions:
+  contents: read
+  issues: read
+
+on:
+  pull_request:
+    branches: [staging]
+    paths:
+      - 'e2e/acceptance/**'
+      - 'e2e/runner/**'
+      - 'e2e/run'
+      - 'acceptance/**'
+      - 'docs/architecture/acceptance-cases.md'
+      - '.claude/skills/nession-acceptance/SKILL.md'
+      - 'scripts/acceptance-cases-selftest.mjs'
+      - 'justfile'
+      - '.github/workflows/acceptance-case-smoke.yml'
+      - '.github/workflows/acceptance-cases.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: acceptance-case-smoke-${{ github.event.pull_request.number || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  case-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      RUSTC_WRAPPER: ""
+      PLAYWRIGHT_BROWSERS_PATH: ~/.cache/ms-playwright
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with: { cache-workspaces: ".", cache-all-crates: "true" }
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: |
+            web/package-lock.json
+            e2e/package-lock.json
+
+      - run: sudo apt-get update && sudo apt-get install -y tmux
+
+      - name: Validate Case contract
+        run: node scripts/acceptance-cases-selftest.mjs
+
+      - name: Build runtime
+        run: |
+          cd web
+          npm ci
+          npm run build
+          cd ..
+          cargo build -p nession-server -p nession-agent
+
+      - name: Install browser Case runtime
+        run: |
+          cd e2e
+          npm ci
+          npx playwright install chromium --with-deps
+
+      - name: Fetch trusted Requirement contract
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api "repos/${GITHUB_REPOSITORY}/issues/1474" > /tmp/issue-1474.json
+
+      - name: Run SC-03 protocol-only Case
+        id: protocol
+        continue-on-error: true
+        run: |
+          target_sha="$(git rev-parse HEAD)"
+          ./e2e/run acceptance \
+            --issue-json /tmp/issue-1474.json \
+            --issue 1474 \
+            --sc SC-03 \
+            --stage pre-merge \
+            --sha "$target_sha" \
+            --output /tmp/acceptance-case-SC-03.json
+
+      - name: Run SC-14 browser + protocol Case
+        id: browser_protocol
+        continue-on-error: true
+        run: |
+          target_sha="$(git rev-parse HEAD)"
+          ./e2e/run acceptance \
+            --issue-json /tmp/issue-1474.json \
+            --issue 1474 \
+            --sc SC-14 \
+            --stage staging \
+            --sha "$target_sha" \
+            --output /tmp/acceptance-case-SC-14.json
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: acceptance-case-smoke-1474
+          path: |
+            /tmp/acceptance-case-SC-03.json
+            /tmp/acceptance-case-SC-14.json
+            e2e/test-results/
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Enforce Case results
+        if: steps.protocol.outcome != 'success' || steps.browser_protocol.outcome != 'success'
+        run: exit 1
