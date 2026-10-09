@@ -30,6 +30,7 @@ function valueOf(context, key) {
 
 function expand(text, context, sources, stack = [], overrides = {}) {
   let result = text.replace(/\{\{\s*>\s*([a-z0-9-]+(?:\/[a-z0-9-]+)*)\s*\}\}/g, (_, name) => {
+    if (name === 'actions' && !overrides.actions) throw new Error('Missing required Prompt variant for actions');
     const relative = overrides[name] || 'shared/' + name + '.hbs';
     if (stack.includes(relative)) throw new Error('Cyclic Prompt partial: ' + [...stack, relative].join(' -> '));
     return expand(source(relative, sources), context, sources, [...stack, relative], overrides);
