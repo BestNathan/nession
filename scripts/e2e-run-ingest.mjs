@@ -61,7 +61,15 @@ export function sourceIdentity(event, repo) {
     throw new Error('unexpected source workflow path');
   if (!['pull_request', 'push', 'workflow_dispatch'].includes(run.event))
     throw new Error('unsupported source workflow event');
-  if (!/^(feat|fix)\//.test(run.head_branch) && !['staging', 'main'].includes(run.head_branch))
+  // The invariant: only branches this repository's own flow creates are
+  // attested, and `CLAUDE.md`'s branch table names exactly four of them —
+  // `feat/**` and `fix/**`, which reach main through staging, and `chore/**`
+  // and `docs/**`, which go to main directly — plus the two long-lived
+  // branches. `chore/` was missing here, so every Scenario Smoke run from a
+  // `chore/*` branch failed this ingest on main and the workflow went red for
+  // a branch the repository's own convention created (#1542).
+  if (!/^(feat|fix|chore|docs)\//.test(run.head_branch)
+      && !['staging', 'main'].includes(run.head_branch))
     throw new Error('untrusted/invalid branch');
   return {
     repository: repo, workflow_id: positive(run.workflow_id, 'workflow_id'),
