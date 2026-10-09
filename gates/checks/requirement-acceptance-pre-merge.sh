@@ -9,7 +9,7 @@ GATE_NAME='Requirement pre-merge acceptance guard'
 GATE_COMMAND='node scripts/requirement-acceptance.mjs pre-merge-pr-gate'
 GATE_SUCCESS='every requirement implemented by the PR has accepted pre-merge criteria'
 GATE_FAILURE='a requirement implemented by the PR does not satisfy its pre-merge acceptance criteria'
-GATE_REPAIR='fix the implementation or acceptance evidence, rerun pre-merge Acceptance, then reopen the PR if it was closed'
+GATE_REPAIR='fix the implementation or acceptance evidence, rerun pre-merge Acceptance, keep the blocked PR open for further work'
 GATE_OWNER='scripts/requirement-acceptance.mjs + GitHub requirement issue state'
 
 gate_check() {
