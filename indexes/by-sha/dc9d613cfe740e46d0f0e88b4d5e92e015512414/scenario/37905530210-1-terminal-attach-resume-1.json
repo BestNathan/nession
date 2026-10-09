@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 37905530210,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/1520-shallow-merge-parent-proof",
+    "target_sha": "dc9d613cfe740e46d0f0e88b4d5e92e015512414",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/37905530210",
+    "scenario_tree_sha": "96ae71e441342a6b448289c64cc8ca2ac8f00659",
+    "original_sha256": "f18011e71d0905c69bd0d1e68e843f0462242cdbc708233351a4146719483ab8"
+  },
+  "record": "runs/2026-10-09/37905530210-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "00e9f3c0173c235f5a548eec8f5a10694226ad7c181bf1706ebc5e7a9a5f1da4"
+}
