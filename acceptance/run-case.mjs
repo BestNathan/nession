@@ -54,7 +54,7 @@ function git(repoRoot, args) {
 function caseTreeSha(repoRoot, targetSha, issue, criterion) {
   return git(repoRoot, [
     'rev-parse',
-    targetSha + ':acceptance/cases/' + issue + '/' + criterion,
+    targetSha + ':e2e/acceptance/cases/' + issue + '/' + criterion,
   ]);
 }
 
@@ -73,7 +73,7 @@ function executionId({ runId, runAttempt, targetSha, issue, criterion, contractS
 }
 
 function selectedCase(repoRoot, issue, criterion) {
-  const cases = discoverCases(path.join(repoRoot, 'acceptance', 'cases'));
+  const cases = discoverCases(path.join(repoRoot, 'e2e', 'acceptance', 'cases'));
   const found = cases.filter(
     (item) => item.manifest.issue === issue && item.manifest.criterion === criterion,
   );

@@ -96,7 +96,7 @@ A successful Acceptance workflow only means the acceptance infrastructure execut
 
 ## Source-aligned Acceptance Cases
 
-Use a source-aligned Case when one Success Criterion needs executable evidence tied to an exact product SHA. The canonical shape is `acceptance/cases/<issue>/<SC>/`: **one Case per Issue/SC**, one independently reported result, optional multiple verifier steps.
+Use a source-aligned Case when one Success Criterion needs executable evidence tied to an exact product SHA. The canonical shape is `e2e/acceptance/cases/<issue>/<SC>/`: **one Case per Issue/SC**, one independently reported result, optional multiple verifier steps.
 
 Choose the Case stage from the Issue Acceptance Report. Use `browser` for UI/browser-observable behavior, `protocol` for wire/WebSocket behavior, and `runtime` for orchestration/process/config/file evidence. All verifier types may share the same `full-stack-local` Runtime Harness; protocol/runtime verification must not launch Playwright unless a browser verifier is declared.
 
