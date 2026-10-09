@@ -12,15 +12,15 @@ import {
   aggregateVerifierResults,
   discoverCases,
   validateCaseAgainstAcceptanceContext,
-} from './cases.mjs';
-import { executeVerifier } from './verifiers/index.mjs';
-import { buildAcceptanceContext } from '../scripts/acceptance-executor.mjs';
+} from '../../../acceptance/cases.mjs';
+import { executeVerifier } from '../../runner/drivers/index.mjs';
+import { buildAcceptanceContext } from '../../../scripts/acceptance-executor.mjs';
 
 const require = createRequire(import.meta.url);
 const {
   allocateLoopbackPort,
   startFullStackRuntime,
-} = require('../e2e/runner/runtime/full-stack.js');
+} = require('../../runner/runtime/full-stack.js');
 
 function arg(name, required = false) {
   const index = process.argv.indexOf('--' + name);

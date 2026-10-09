@@ -34,7 +34,7 @@ Do not mark a criterion Pass because implementation exists; execute/observe the 
 
 ## Execute through the trusted workflow
 
-Acceptance execution is routed through `.github/workflows/acceptance.yml`.
+Model-backed **Requirement Acceptance** evaluation is routed through `.github/workflows/acceptance.yml`. Source-aligned Issue/SC **Cases** use `.github/workflows/acceptance-cases.yml` and the single canonical `./e2e/run acceptance --issue N --sc SC-NN --sha SHA --stage STAGE --profile full-stack-local --issue-json CONTRACT --output RECORD` interface. Regression tests use `./e2e/run test`, observational reproduction uses `./e2e/run scenario`/`compare`; CI alone may execute live stack paths. The underlying `e2e/acceptance/evaluator/run-case.mjs` is internal to the CLI and does not receive Issue-write credentials.
 
 Manual execution uses **Actions -> Acceptance -> Run workflow** (`workflow_dispatch`) with:
 
