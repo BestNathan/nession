@@ -18,14 +18,42 @@ function parseJsonText(raw) {
   if (!text) throw new Error('Acceptance Agent returned empty output');
   const fenced = text.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
   if (fenced) text = fenced[1].trim();
-  try {
-    return JSON.parse(text);
-  } catch {
-    const start = text.indexOf('{');
-    const end = text.lastIndexOf('}');
-    if (start >= 0 && end > start) return JSON.parse(text.slice(start, end + 1));
-    throw new Error('Acceptance Agent output did not contain valid JSON');
+  try { return JSON.parse(text); } catch { /* Agent may append diagnostic or repeated JSON. */ }
+
+  // Do not greedily splice from the first '{' to the last '}': a Cursor run
+  // may return multiple top-level JSON objects or fenced diagnostics.
+  // Extract only balanced, quote-aware JSON objects, and reject ambiguity.
+  const candidates = [];
+  let depth = 0, start = -1, quoted = false, escape = false;
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (quoted) {
+      if (escape) escape = false;
+      else if (ch === '\\') escape = true;
+      else if (ch === '"') quoted = false;
+      continue;
+    }
+    if (ch === '"') { quoted = true; continue; }
+    if (ch === '{') {
+      if (depth++ === 0) start = i;
+    } else if (ch === '}' && depth > 0 && --depth === 0) {
+      try {
+        const value = JSON.parse(text.slice(start, i + 1));
+        if (value && !Array.isArray(value) && Array.isArray(value.criteria) &&
+            value.criteria.every(item => item && typeof item === 'object' &&
+              typeof item.criterion === 'string' &&
+              ['Pass', 'Fail', 'Pending', 'N/A'].includes(item.result))) {
+          candidates.push(value);
+        }
+      } catch { /* Not a standalone JSON object; do not silently accept it. */ }
+    }
   }
+  if (!candidates.length) throw new Error('Acceptance Agent output had no valid criteria JSON object');
+  const unique = new Map(candidates.map(value => [JSON.stringify(value), value]));
+  if (unique.size !== 1) {
+    throw new Error('Acceptance Agent output contained conflicting criteria JSON objects');
+  }
+  return unique.values().next().value;
 }
 
 function requestedCursorModel() {
@@ -189,6 +217,15 @@ function selfTest() {
   assert.match(prompt, /"id": 42/);
   assert.deepEqual(parseJsonText('{"criteria":[]}'), { criteria: [] });
   assert.deepEqual(parseJsonText('```json\n{"criteria":[]}\n```'), { criteria: [] });
+  const passed = '{"criteria":[{"criterion":"SC-03","result":"Pass","evidence":[]}]}';
+  const pending = '{"criteria":[{"criterion":"SC-03","result":"Pending","evidence":[]}]}';
+  assert.deepEqual(parseJsonText('diagnostic\\n' + passed), JSON.parse(passed));
+  assert.deepEqual(parseJsonText(passed + '\\n' + passed), JSON.parse(passed));
+  assert.deepEqual(parseJsonText('diagnostic\\n' + passed + '\\nadditional tool notice'), JSON.parse(passed));
+  assert.throws(() => parseJsonText(passed + '\\n' + pending), /conflicting criteria/);
+  assert.throws(() => parseJsonText('{"criteria":[{"criterion":"SC-03","result":"Pass"}]'), /no valid criteria/);
+  assert.throws(() => parseJsonText('{"status":"not-an-acceptance-result"}\\nnoise'), /no valid criteria/);
+
   const catalog = [{ id: 'composer-2.5', parameters: [{ id: 'fast', values: [{ value: 'true' }] }] }];
   assert.deepEqual(selectCursorModel(catalog, { id: 'composer-2.5', fast: true }), {
     id: 'composer-2.5',
