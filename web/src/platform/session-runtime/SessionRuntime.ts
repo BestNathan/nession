@@ -224,6 +224,16 @@ export class SessionRuntime {
   private routeIntentEpoch: number;
   private transportGeneration = 0;
   private lastResize: { cols: number; rows: number } | null = null;
+  /**
+   * The size the in-flight attach carried, held from the moment it is sent.
+   *
+   * Not `lastResize`: that is the *latest* viewport, which may have moved while
+   * the attach was in flight — and in that case the newer size is exactly the
+   * one the flush must still send. The attach states this pair and the agent
+   * applies it, so it is the pair the transport may treat as already known
+   * (#1503 follow-up); read once by {@link applyAttachSeedToLiveTransport}.
+   */
+  private attachedSize: { cols: number; rows: number } | null = null;
   private transportReady = false;
   /**
    * Runtime-owned dynamic relay fallback: every P2P candidate failed, so the
@@ -587,14 +597,18 @@ export class SessionRuntime {
     if (!this.attachController.canStartAttach(this.transportReady, true, false, 'p2p')) {
       return;
     }
+    // Held for the attach's own lifetime: this is what the payload states, and
+    // `lastResize` may move past it before the reply lands.
+    const attachSize = this.lastResize;
     this.attachController.startP2PAttach({
       sessionName: this.config.sessionName,
       agentApi: this.agentTerminalApi,
       manualRoute: this.config.manualOverride !== null,
-      lastResize: this.lastResize,
+      lastResize: attachSize,
       needsBootstrap: this.needsBootstrap(),
       transportGeneration: this.transportGeneration,
       onAttachOk: (result) => {
+        this.attachedSize = attachSize;
         this.p2pAttachSeed = {
           streamEpoch: result.streamEpoch,
           streamCursor: result.streamCursor,
@@ -692,6 +706,13 @@ export class SessionRuntime {
         appliedThrough: seed.inputAppliedThrough,
         controlGeneration: seed.controlGeneration,
       });
+    }
+    // Before the flush, so a coalesced size that only repeats what the attach
+    // already stated does not go back out as a change (#1503 follow-up).
+    const attached = this.attachedSize;
+    this.attachedSize = null;
+    if (attached) {
+      transport.noteAttachedSize?.(attached.cols, attached.rows);
     }
     transport.flushAllOutbound();
     if (seed) {

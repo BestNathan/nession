@@ -81,6 +81,7 @@ function relativeEntry(value) {
   if (path.isAbsolute(entry) || entry.split(/[\\/]+/).includes('..')) {
     throw new Error('verifier entry must stay inside its Case directory: ' + entry);
   }
+  if (entry === '.' || entry.startsWith('./')) throw new Error('verifier entry must use a canonical relative filename');
   return entry.replaceAll('\\', '/');
 }
 
@@ -129,7 +130,7 @@ export function validateCaseManifest(raw, caseDir) {
     if (caseDir) {
       const full = path.resolve(caseDir, entry);
       const root = path.resolve(caseDir) + path.sep;
-      if (!full.startsWith(root) || !fs.existsSync(full) || !fs.statSync(full).isFile()) {
+      if (!full.startsWith(root) || !fs.existsSync(full) || (fs.lstatSync(full).isSymbolicLink() || !fs.lstatSync(full).isFile())) {
         throw new Error('missing verifier entry: ' + entry);
       }
     }
@@ -160,7 +161,9 @@ export function validateCaseManifest(raw, caseDir) {
 
 export function readCase(caseDir) {
   const manifestPath = path.join(caseDir, 'case.yaml');
-  if (!fs.existsSync(manifestPath)) throw new Error('missing case.yaml: ' + manifestPath);
+  const manifestStat = fs.lstatSync(manifestPath, { throwIfNoEntry: false });
+  if (!manifestStat) throw new Error('missing case.yaml: ' + manifestPath);
+  if (manifestStat.isSymbolicLink() || !manifestStat.isFile()) throw new Error('Case manifest must be a real file');
   const raw = parseCaseYaml(fs.readFileSync(manifestPath, 'utf8'), manifestPath);
   return {
     dir: path.resolve(caseDir),
@@ -172,18 +175,19 @@ export function readCase(caseDir) {
 export function discoverCases(casesRoot) {
   const root = path.resolve(casesRoot);
   if (!fs.existsSync(root)) return [];
+  if (fs.lstatSync(root).isSymbolicLink()) throw new Error('Case root symlink forbidden');
   const cases = [];
   const owners = new Set();
 
   for (const issueName of fs.readdirSync(root).sort()) {
     const issueDir = path.join(root, issueName);
-    if (!fs.statSync(issueDir).isDirectory()) throw new Error('case registry contains non-directory: ' + issueName);
+    if (fs.lstatSync(issueDir).isSymbolicLink() || !fs.lstatSync(issueDir).isDirectory()) throw new Error('case registry contains non-directory or symlink: ' + issueName);
     if (!/^\d+$/.test(issueName)) throw new Error('invalid Issue directory in case registry: ' + issueName);
 
     for (const criterionName of fs.readdirSync(issueDir).sort()) {
       const caseDir = path.join(issueDir, criterionName);
-      if (!fs.statSync(caseDir).isDirectory()) {
-        throw new Error('Issue case registry contains non-directory: ' + issueName + '/' + criterionName);
+      if (fs.lstatSync(caseDir).isSymbolicLink() || !fs.lstatSync(caseDir).isDirectory()) {
+        throw new Error('Issue case registry contains non-directory or symlink: ' + issueName + '/' + criterionName);
       }
       if (!/^SC-\d{2,}$/.test(criterionName)) {
         throw new Error('invalid SC directory in case registry: ' + issueName + '/' + criterionName);
