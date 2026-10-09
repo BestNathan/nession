@@ -408,12 +408,28 @@ function normalizeCommand(contextFile, rawFile, outFile, source) {
   fs.writeFileSync(outFile, JSON.stringify(normalized, null, 2) + '\n');
 }
 
+function isSupersededRunError(error) {
+  return error instanceof Error && /^SC-\d{2,} has newer acceptance run \d+; refusing stale run \d+$/.test(error.message);
+}
+
 function applyCommand(issueNumber, resultFile) {
   const issue = fetchIssue(issueNumber);
   if (!labelNames(issue).includes('requirement')) throw new Error('issue #' + issueNumber + ' is not labeled requirement');
   const normalized = JSON.parse(fs.readFileSync(resultFile, 'utf8'));
   if (Number(normalized.issue) !== Number(issueNumber)) throw new Error('result targets issue #' + normalized.issue + ', not #' + issueNumber);
-  const updated = applyAcceptanceResultToBody(issue.body, normalized);
+  // Concurrent Acceptance runs may finish out of order. Never project older
+  // evidence over a newer run, but treat the superseded updater as a no-op.
+  // All other contract, provenance and result validation errors still fail.
+  let updated;
+  try {
+    updated = applyAcceptanceResultToBody(issue.body, normalized);
+  } catch (error) {
+    if (isSupersededRunError(error)) {
+      console.log('superseded acceptance run ' + normalized.run_id + ' for requirement #' + issueNumber + '; newer Issue evidence preserved');
+      return;
+    }
+    throw error;
+  }
   if (updated === issue.body) {
     console.log('requirement #' + issueNumber + ' already matches acceptance run ' + normalized.run_id);
     return;
@@ -517,6 +533,9 @@ function selfTest() {
 
   const newer = passedBody.replace('run 100; ref abc123;', 'run 200; ref newer;');
   assert.throws(() => applyAcceptanceResultToBody(newer, pass), /newer acceptance run 200/);
+  assert.equal(isSupersededRunError(new Error('SC-01 has newer acceptance run 200; refusing stale run 100')), true);
+  assert.equal(isSupersededRunError(new Error('requirement contract changed after acceptance started; refusing stale result')), false);
+  assert.equal(isSupersededRunError(new Error('SC-01 has newer acceptance run 200; refusing stale run 100; forged')), false);
   const changed = passedBody.replace('deterministic update works', 'changed wording');
   assert.throws(() => applyAcceptanceResultToBody(changed, pass), /contract changed/);
 

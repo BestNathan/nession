@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 
 import {
   aggregateVerifierResults,
@@ -153,5 +154,13 @@ ok(() => {
     'legacy Case tree must not survive canonical source migration');
   const discovered = discoverCases(canonicalRoot);
   assert.ok(discovered.length >= 12, 'canonical Case discovery must never silently be empty');
+});
+ok(() => {
+  const verifier = path.join(canonicalRoot, '1520', 'SC-04', 'verify.js');
+  const result = spawnSync(process.execPath, [verifier, '--self-test'], {
+    cwd: repoRoot, encoding: 'utf8', timeout: 5000,
+  });
+  assert.equal(result.status, 0, 'staging merge parent parser self-test failed: ' + result.stderr);
+  assert.match(result.stdout, /raw-object proof self-test passed/);
 });
 console.log('acceptance Case self-test: ' + cases + ' cases passed');

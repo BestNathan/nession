@@ -3,10 +3,6 @@ name: E2E Scenario Smoke
 on:
   pull_request:
     branches: [staging]
-    paths:
-      - 'e2e/**'
-      - 'acceptance/runtime/**'
-      - '.github/workflows/e2e-scenario-smoke.yml'
   workflow_dispatch:
 
 permissions:
