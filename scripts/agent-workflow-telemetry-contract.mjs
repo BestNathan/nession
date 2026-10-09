@@ -29,6 +29,11 @@ const TRUSTED_TELEMETRY_SOURCES = new Map([
     events: new Set(['issues', 'workflow_dispatch']),
     workflow_dispatch_main_only: true,
   }],
+  ['.github/workflows/agent-provider-smoke.yml', {
+    workflow_id: 'agent-provider-smoke',
+    events: new Set(['push', 'workflow_dispatch']),
+    workflow_dispatch_main_only: true,
+  }],
 ]);
 
 export function validateTelemetrySourceRun(run, repository = process.env.GITHUB_REPOSITORY) {
@@ -45,7 +50,7 @@ export function validateTelemetrySourceRun(run, repository = process.env.GITHUB_
   if (repository && sourceRepository !== repository) {
     throw new Error('telemetry source repository mismatch: ' + sourceRepository + ' != ' + repository);
   }
-  if (source.workflow_dispatch_main_only && event === 'workflow_dispatch' && headBranch !== 'main') {
+  if (source.workflow_dispatch_main_only && (event === 'workflow_dispatch' || event === 'push') && headBranch !== 'main') {
     throw new Error('workflow_dispatch telemetry is trusted only from main: ' + path + ' @ ' + headBranch);
   }
 
@@ -219,7 +224,21 @@ function selfTest() {
     repository: { full_name: 'BestNathan/nession' },
   }, 'BestNathan/nession'), /untrusted telemetry source workflow/);
 
-  console.log('agent-workflow-telemetry-contract self-test: 7 cases passed');
+  assert.equal(validateTelemetrySourceRun({
+    id: 14, run_attempt: 1,
+    path: '.github/workflows/agent-provider-smoke.yml',
+    event: 'push', head_branch: 'main',
+    repository: { full_name: 'BestNathan/nession' },
+  }, 'BestNathan/nession').workflow_id, 'agent-provider-smoke');
+
+  assert.throws(() => validateTelemetrySourceRun({
+    id: 15, run_attempt: 1,
+    path: '.github/workflows/agent-provider-smoke.yml',
+    event: 'push', head_branch: 'feature',
+    repository: { full_name: 'BestNathan/nession' },
+  }, 'BestNathan/nession'), /trusted only from main/);
+
+  console.log('agent-workflow-telemetry-contract self-test: 9 cases passed');
 }
 
 const command = process.argv[2] ?? 'check';
