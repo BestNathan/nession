@@ -227,8 +227,12 @@ jobs:
           cd ..
           cargo build -p nession-server -p nession-agent
 
-      - name: Install browser verifier runtime
-        if: steps.select.outputs.needs_browser == 'true'
+      - name: Install browser-capable Case runtime
+        # A type: runtime verifier may itself exercise an opt-in browser Scenario.
+        # Static verifier type alone cannot safely predict this dependency.
+        # Install the toolchain for selected Cases; launch browsers only inside
+        # those verifiers that actually require them (protocol-only stays headless).
+        if: steps.select.outputs.count != '0'
         run: |
           set -euo pipefail
           cd workspace/e2e
