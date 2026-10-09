@@ -166,6 +166,12 @@ ok(() => {
     'legacy Case tree must not survive canonical source migration');
   const discovered = discoverCases(canonicalRoot);
   assert.ok(discovered.length >= 12, 'canonical Case discovery must never silently be empty');
+  const sharedScenario = path.join(repoRoot,'e2e','acceptance','shared','terminal-scenario-evidence.cjs');
+  const sharedResult = spawnSync(process.execPath,['--check',sharedScenario],{
+    cwd:repoRoot,encoding:'utf8',timeout:5000,
+  });
+  assert.equal(sharedResult.status,0,
+    'shared Terminal Scenario Case helper syntax invalid: '+sharedResult.stderr);
   // Guard syntax of every in-tree JavaScript verifier before stage execution.
   // A malformed new Case must fail the PR gate rather than fail only on push.
   for (const item of discovered) {
