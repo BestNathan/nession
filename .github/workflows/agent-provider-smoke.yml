@@ -6,7 +6,11 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths: [.github/workflows/agent-provider-smoke.yml]
+    paths:
+      - .github/workflows/agent-provider-smoke.yml
+      - scripts/acceptance-agent.mjs
+      - scripts/lib/agent/provider-smoke.mjs
+      - scripts/lib/agent/telemetry/run-name.mjs
 
 permissions:
   contents: read
