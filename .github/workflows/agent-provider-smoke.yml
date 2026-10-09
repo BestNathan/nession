@@ -1,0 +1,112 @@
+name: AI Agent Provider Smoke
+
+# Runs only on a trusted main push of this workflow or an explicit dispatch.
+# No credentialed PR-head execution, GitHub Issue writes, or deployment.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [.github/workflows/agent-provider-smoke.yml]
+
+permissions:
+  contents: read
+
+env:
+  NSESSION_AGENT_WORKFLOW_ID: agent-provider-smoke
+
+concurrency:
+  group: ai-agent-provider-smoke-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    name: Read-only Acceptance (${{ matrix.provider }})
+    if: github.repository == 'BestNathan/nession' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        provider: [cursor, deepseek]
+    environment: ${{ matrix.provider }}
+    env:
+      CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
+      CURSOR_MODEL: ${{ vars.CURSOR_MODEL || 'composer-2.5' }}
+      CURSOR_MODEL_FAST: ${{ vars.CURSOR_MODEL_FAST || 'true' }}
+      CURSOR_SDK_VERSION: ${{ vars.CURSOR_SDK_VERSION || 'latest' }}
+      ACCEPTANCE_MAX_TURNS: '3'
+      ACCEPTANCE_CLAUDE_MODEL: ${{ vars.ACCEPTANCE_CLAUDE_MODEL || 'claude-sonnet-5' }}
+      ANTHROPIC_BASE_URL: ${{ vars.ANTHROPIC_BASE_URL || secrets.ANTHROPIC_BASE_URL }}
+      ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      ANTHROPIC_MODEL: ${{ vars.ANTHROPIC_MODEL }}
+      ANTHROPIC_DEFAULT_SONNET_MODEL: ${{ vars.ANTHROPIC_DEFAULT_SONNET_MODEL }}
+    steps:
+      - name: Checkout exact trusted main SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify deterministic Agent contracts
+        run: |
+          set -euo pipefail
+          node scripts/lib/agent/provider-smoke.mjs self-test
+          node scripts/acceptance-agent.mjs self-test
+          node scripts/agent-workflow-telemetry.mjs self-test
+      - name: Check selected provider environment
+        env:
+          PROVIDER: ${{ matrix.provider }}
+        run: |
+          set -euo pipefail
+          if [[ "$PROVIDER" == cursor ]]; then
+            [[ -n "$CURSOR_API_KEY" ]] || { echo 'CURSOR_API_KEY missing in cursor Environment' >&2; exit 1; }
+          else
+            [[ -n "$ANTHROPIC_BASE_URL" ]] || { echo 'ANTHROPIC_BASE_URL missing in deepseek Environment' >&2; exit 1; }
+            [[ -n "$ANTHROPIC_AUTH_TOKEN" || -n "$ANTHROPIC_API_KEY" ]] ||
+              { echo 'DeepSeek authentication missing in deepseek Environment' >&2; exit 1; }
+          fi
+      - name: Install selected Provider
+        env:
+          PROVIDER: ${{ matrix.provider }}
+          CLAUDE_CODE_VERSION: ${{ vars.CLAUDE_CODE_VERSION || 'latest' }}
+        run: |
+          set -euo pipefail
+          if [[ "$PROVIDER" == cursor ]]; then
+            sdk_root="$RUNNER_TEMP/cursor-sdk"
+            mkdir -p "$sdk_root"
+            npm install --prefix "$sdk_root" "@cursor/sdk@$CURSOR_SDK_VERSION"
+            echo "CURSOR_SDK_ROOT=$sdk_root" >> "$GITHUB_ENV"
+          else
+            npm install -g "@anthropic-ai/claude-code@$CLAUDE_CODE_VERSION"
+            claude --version
+          fi
+      - name: Prepare synthetic read-only Acceptance
+        run: node scripts/lib/agent/provider-smoke.mjs prepare "$RUNNER_TEMP/context.json" "$GITHUB_SHA"
+      - name: Invoke real Provider using production Acceptance entrypoint
+        env:
+          PROVIDER: ${{ matrix.provider }}
+        run: |
+          set -euo pipefail
+          node scripts/acceptance-agent.mjs \
+            "$RUNNER_TEMP/context.json" "$PROVIDER" "$GITHUB_WORKSPACE" \
+            "$RUNNER_TEMP/acceptance-result.json" "$RUNNER_TEMP/agent-telemetry.json"
+      - name: Verify strict Pending and Provider telemetry
+        env:
+          PROVIDER: ${{ matrix.provider }}
+        run: |
+          set -euo pipefail
+          node scripts/lib/agent/provider-smoke.mjs verify \
+            "$RUNNER_TEMP/context.json" \
+            "$RUNNER_TEMP/acceptance-result.json" \
+            "$RUNNER_TEMP/agent-telemetry.json" "$PROVIDER"
+      - name: Upload canonical Agent metadata
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-telemetry-provider-smoke-${{ matrix.provider }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/agent-telemetry.json
+          if-no-files-found: warn
+          retention-days: 14
