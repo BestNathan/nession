@@ -1,0 +1,58 @@
+import assert from 'node:assert/strict';
+import { renderAgentPrompt } from './prompt/index.mjs';
+import { renderIssueAuditPrompt } from './tasks/issue-audit.mjs';
+import { renderAcceptancePrompt } from './tasks/acceptance.mjs';
+import { candidateIssue, createIssueUpdateTool } from './tools/gh/issue/update.mjs';
+import { createIssueCommentTool } from './tools/gh/issue/comment.mjs';
+import { createIssueReadTool } from './tools/gh/issue/read.mjs';
+import { normalizeCursorUsage, normalizeCursorCost, selectCursorModel } from './providers/cursor.mjs';
+import { normalizeClaudeUsage, parseClaudeJson } from './providers/claude-code.mjs';
+
+const issue = {
+  number: 17,
+  title: 'Bug: example',
+  url: 'https://github.com/example/repo/issues/17',
+  labels: [{ name: 'bug' }, { name: 'web' }, { name: 'in-progress' }],
+  body: 'Reporter data: {{not_a_template_variable}}',
+};
+const audit = { errors: ['missing Location'] };
+const cursor = renderIssueAuditPrompt(issue, audit, 'cursor', 'example/repo');
+const claude = renderIssueAuditPrompt(issue, audit, 'deepseek', 'example/repo');
+assert.equal(cursor.template_sha256, claude.template_sha256);
+assert.deepEqual(cursor, renderIssueAuditPrompt(issue, audit, 'cursor', 'example/repo'));
+assert.match(cursor.text, /update_target_issue/);
+assert.match(claude.text, /gh issue edit 17/);
+assert.match(cursor.text, /missing Location/);
+assert.ok(cursor.text.includes('{{not_a_template_variable}}'));
+assert.match(cursor.template_sha256, /^[0-9a-f]{64}$/);
+assert.equal(cursor.messages.length, 2);
+assert.throws(() => renderAgentPrompt({ id: '../escape', version: 'v1', context: {} }), /Invalid Prompt/);
+assert.throws(() => renderAgentPrompt({ id: 'issue-audit', version: 'v1', context: {} }), /Missing Prompt/);
+
+const acceptance = renderAcceptancePrompt({
+  issue: { number: 17 }, stage: 'pre-merge', target_ref: 'sha', deployment: null,
+  criteria: [{ criterion: 'SC-01', text: 'works' }], requirement_body: 'report',
+});
+assert.match(acceptance.text, /Do not add, remove, rename, rewrite, weaken/);
+assert.match(acceptance.text, /"target_ref": "sha"/);
+assert.equal(acceptance.template_version, 'v1');
+const candidate = candidateIssue(issue, 'Bug: fixed', 'body', ['bug', 'ci']);
+assert.deepEqual(candidate.labels.map((value) => value.name).sort(), ['bug', 'ci', 'in-progress']);
+assert.deepEqual(issue.labels.map((value) => value.name), ['bug', 'web', 'in-progress']);
+
+const update = createIssueUpdateTool(issue, 'example/repo');
+const comment = createIssueCommentTool(issue, 'example/repo');
+const read = createIssueReadTool(issue, 'example/repo');
+assert.ok(update.inputSchema.additionalProperties === false);
+assert.ok(comment.inputSchema.additionalProperties === false);
+assert.ok(read.inputSchema.additionalProperties === false);
+const catalog = [{ id: 'composer-2.5', parameters: [{ id: 'fast', values: [{ value: 'true' }] }] }];
+assert.deepEqual(selectCursorModel(catalog, { id: 'composer-2.5', fast: true }), {
+  id: 'composer-2.5', params: [{ id: 'fast', value: 'true' }],
+});
+assert.throws(() => selectCursorModel([], { id: 'composer-2.5', fast: true }), /fallback/i);
+assert.equal(normalizeCursorUsage({ inputTokens: 3 }).input, 3);
+assert.equal(normalizeCursorCost({ cost: { chargedCents: 20 } }).charged_usd, 0.2);
+assert.equal(normalizeClaudeUsage({ usage: { input_tokens: 4 } }).input, 4);
+assert.equal(parseClaudeJson('{"result":"ok"}').result, 'ok');
+console.log('agent library self-test: 24 assertions passed');
