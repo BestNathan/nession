@@ -109,18 +109,31 @@ jobs:
             workspace/web/package-lock.json
             workspace/e2e/package-lock.json
 
+      - name: Fetch trusted Requirement contracts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBERS: ${{ steps.target.outputs.issues }}
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/acceptance-contracts"
+          jq -r '.[]' <<<"${ISSUE_NUMBERS}" | while read -r issue; do
+            gh api "repos/${GITHUB_REPOSITORY}/issues/${issue}" > "${RUNNER_TEMP}/acceptance-contracts/${issue}.json"
+          done
+
       - name: Select source-aligned Cases
         id: select
         env:
           ISSUE_NUMBERS: ${{ steps.target.outputs.issues }}
           ACCEPTANCE_STAGE: ${{ steps.target.outputs.stage }}
           MANUAL_CRITERION: ${{ steps.target.outputs.manual_criterion }}
+          TARGET_SHA: ${{ steps.target.outputs.target_sha }}
           RUNTIME_PROFILE: ${{ steps.target.outputs.runtime_profile }}
         run: |
           set -euo pipefail
           mkdir -p "${RUNNER_TEMP}/acceptance-case-results"
           if [[ ! -f workspace/acceptance/cases.mjs ]]; then
-            printf '%s\n' '[]' > "${RUNNER_TEMP}/selected-cases.json"
+            echo "::error::Case discovery source missing at requested SHA; cannot claim acceptance"
+            exit 2
           else
             node --input-type=module <<'NODE' > "${RUNNER_TEMP}/selected-cases.json"
           import path from 'node:path';
@@ -146,6 +159,43 @@ jobs:
           process.stdout.write(JSON.stringify(selected));
           NODE
           fi
+          # Coverage is computed against the trusted Issue contract on main,
+          # not against a target-controlled list that can silently drop Cases.
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          import { pathToFileURL } from 'node:url';
+          const trusted = await import(pathToFileURL(path.resolve('trusted/scripts/acceptance-executor.mjs')).href);
+          const stage = process.env.ACCEPTANCE_STAGE;
+          const issueNumbers = JSON.parse(process.env.ISSUE_NUMBERS || '[]').map(Number);
+          const requested = process.env.MANUAL_CRITERION || '';
+          const selected = JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP + '/selected-cases.json', 'utf8'));
+          const expected = [];
+          for (const issueNumber of issueNumbers) {
+            const issue = JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP + '/acceptance-contracts/' + issueNumber + '.json', 'utf8'));
+            const context = trusted.buildAcceptanceContext(issue, stage, { targetRef: process.env.TARGET_SHA, runId: process.env.GITHUB_RUN_ID });
+            for (const criterion of context.criteria) expected.push(issueNumber + '/' + criterion.criterion);
+          }
+          const selectedKeys = selected.map((entry) => entry.issue + '/' + entry.criterion);
+          const unexpected = selectedKeys.filter((key) => !expected.includes(key));
+          const duplicates = selectedKeys.filter((key, index) => selectedKeys.indexOf(key) !== index);
+          if (unexpected.length || duplicates.length) throw new Error(
+            'Case selection includes wrong-stage/unknown or duplicate entries: ' + [...unexpected, ...duplicates].join(', '));
+          const selectionScope = requested ? expected.filter((key) => key === issueNumbers[0] + '/' + requested) : expected;
+          const missing = selectionScope.filter((key) => !selectedKeys.includes(key));
+          if (requested && (selected.length !== 1 || selected[0].criterion !== requested ||
+            issueNumbers.length !== 1 || missing.includes(issueNumbers[0] + '/' + requested))) {
+            throw new Error('manual Case selection missing or wrong stage/profile: ' + issueNumbers[0] + '/' + requested);
+          }
+          if (issueNumbers.length > 0 && selected.length === 0) {
+            throw new Error('no source-aligned Cases selected for associated Issues and stage ' + stage);
+          }
+          const coverage = { stage, expected, selected: selectedKeys, missing };
+          fs.writeFileSync(process.env.RUNNER_TEMP + '/case-coverage.json', JSON.stringify(coverage, null, 2));
+          if (missing.length) {
+            console.error('::warning::Missing stage-specific Case coverage: ' + missing.join(', '));
+          }
+          NODE
           count="$(jq 'length' "${RUNNER_TEMP}/selected-cases.json")"
           needs_browser="$(jq 'any(.needs_browser == true)' "${RUNNER_TEMP}/selected-cases.json")"
           cp "${RUNNER_TEMP}/selected-cases.json" "${RUNNER_TEMP}/acceptance-case-results/selection.json"
@@ -185,17 +235,6 @@ jobs:
           npm ci
           npx playwright install chromium --with-deps
 
-      - name: Fetch trusted Requirement contracts
-        if: steps.select.outputs.count != '0'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          mkdir -p "${RUNNER_TEMP}/acceptance-contracts"
-          jq -r '.[].issue' "${RUNNER_TEMP}/selected-cases.json" | sort -nu | while read -r issue; do
-            gh api "repos/${GITHUB_REPOSITORY}/issues/${issue}" > "${RUNNER_TEMP}/acceptance-contracts/${issue}.json"
-          done
-
       - name: Execute selected Cases
         id: cases
         if: steps.select.outputs.count != '0'
@@ -219,6 +258,18 @@ jobs:
               --output "${output}" || failed=1
           done < <(jq -r '.[] | [.issue, .criterion] | @tsv' "${RUNNER_TEMP}/selected-cases.json")
           exit "${failed}"
+
+      - name: Enforce Case coverage without suppressing executed Case evidence
+        if: always() && steps.select.outcome == 'success'
+        run: |
+          set -euo pipefail
+          missing="$(jq '.missing | length' "${RUNNER_TEMP}/case-coverage.json")"
+          echo "Missing eligible SC Cases: ${missing}" >> "${GITHUB_STEP_SUMMARY}"
+          if [[ "${missing}" -gt 0 ]]; then
+            jq -r '.missing[]' "${RUNNER_TEMP}/case-coverage.json" >&2
+            echo "::error::Missing Issue/SC Case coverage remains Pending; fix Cases before green Acceptance"
+            exit 1
+          fi
 
       - name: Upload compact Case results
         uses: actions/upload-artifact@v4

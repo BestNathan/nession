@@ -1,0 +1,156 @@
+#!/usr/bin/env node
+'use strict';
+
+// The transitional CLI owns dispatch, never a second stack lifecycle.
+// Harness: e2e/runner/runtime; verifier/source migration tracked in #1497.
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { execFileSync, spawnSync } = require('node:child_process');
+const { pathToFileURL } = require('node:url');
+
+const root = path.resolve(__dirname, '..');
+const at = (...segments) => path.join(root, ...segments);
+const arg = (args, name) => {
+  const index = args.indexOf('--' + name);
+  return index < 0 ? '' : args[index + 1] ?? '';
+};
+const required = (args, name) => {
+  const value = arg(args, name);
+  if (!value || value.startsWith('--')) throw new Error('--' + name + ' is required');
+  return value;
+};
+function execute(command, args, cwd = root) {
+  const child = spawnSync(command, args, { cwd, stdio: 'inherit', env: process.env });
+  if (child.error) throw child.error;
+  return child.status ?? 2;
+}
+function walk(dir, fileName) {
+  if (!fs.existsSync(dir)) return [];
+  const found = [];
+  for (const dirent of fs.readdirSync(dir, { withFileTypes: true })) {
+    const child = path.join(dir, dirent.name);
+    if (dirent.isSymbolicLink()) throw new Error('catalog may not contain symlinks: ' + child);
+    if (dirent.isDirectory()) found.push(...walk(child, fileName));
+    else if (dirent.isFile() && (!fileName || dirent.name === fileName)) found.push(child);
+  }
+  return found.sort();
+}
+function catalog() {
+  const canonical = at('e2e', 'acceptance', 'cases');
+  const legacy = at('acceptance', 'cases');
+  const casesRoot = fs.existsSync(canonical) ? canonical : legacy;
+  return {
+    caseRoot: casesRoot,
+    caseLayout: casesRoot === canonical ? 'canonical' : 'migration-alias',
+    cases: walk(casesRoot, 'case.yaml').map((p) => path.relative(root, p)),
+    scenarios: walk(at('e2e', 'scenarios'), 'scenario.yaml')
+      .map((p) => path.relative(root, p)),
+    browserTests: [...walk(at('e2e', 'tests', 'browser'), ''), ...walk(at('e2e', 'specs'), '')]
+      .filter((name) => name.endsWith('.spec.ts')).length,
+  };
+}
+function exitByCode(code) { process.exitCode = code; }
+async function validate() {
+  const state = catalog();
+  const sourceModule = fs.existsSync(at('e2e', 'acceptance', 'contract', 'cases.mjs'))
+    ? at('e2e', 'acceptance', 'contract', 'cases.mjs')
+    : at('acceptance', 'cases.mjs');
+  if (!fs.existsSync(sourceModule)) throw new Error('missing Case contract; fix: restore canonical discovery source');
+  const { discoverCases } = await import(pathToFileURL(sourceModule).href);
+  const cases = discoverCases(state.caseRoot);
+  if (cases.length !== state.cases.length) throw new Error('Case manifest discovery count differs from files');
+  for (const item of cases) {
+    if (fs.realpathSync(item.dir) !== item.dir) throw new Error('Case directory symlink is forbidden: ' + item.dir);
+    for (const verifier of item.manifest.verifiers) {
+      const entry = path.resolve(item.dir, verifier.entry);
+      if (!fs.realpathSync(entry).startsWith(fs.realpathSync(item.dir) + path.sep)) {
+        throw new Error('Case verifier path escapes through symlink: ' + verifier.entry);
+      }
+    }
+  }
+  console.log(JSON.stringify({ status: 'Validated', case_count: cases.length,
+    layout: state.caseLayout, scenario_count: state.scenarios.length }));
+}
+function compare(args) {
+  if (args.length !== 2) throw new Error('compare requires two immutable Run Record JSON file paths');
+  const [left, right] = args.map((name) => JSON.parse(fs.readFileSync(path.resolve(name), 'utf8')));
+  const compareKeys = ['kind', 'mode', 'target_sha', 'runtime_profile', 'stage', 'execution_id', 'result'];
+  const differences = compareKeys.filter((key) => left[key] !== right[key])
+    .map((key) => ({ field: key, left: left[key] ?? null, right: right[key] ?? null }));
+  console.log(JSON.stringify({ status: 'Completed', evaluation: null, differences,
+    limitations: 'Environment/seed/clock effects are not comparable without recorded provenance' }, null, 2));
+}
+function acceptance(args) {
+  const issue = Number(required(args, 'issue'));
+  const criterion = required(args, 'sc').toUpperCase();
+  const sha = required(args, 'sha');
+  const stage = required(args, 'stage');
+  const profile = arg(args, 'profile') || 'full-stack-local';
+  if (!Number.isSafeInteger(issue) || issue <= 0 ||
+      !/^SC-\d{2,}$/.test(criterion) || !/^[0-9a-f]{40}$/.test(sha) ||
+      !['pre-merge', 'staging', 'post-merge'].includes(stage) || profile !== 'full-stack-local') {
+    throw new Error('invalid Case selector or runtime profile');
+  }
+  const targetSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
+  if (sha !== targetSha) throw new Error('requested SHA does not match checked-out source SHA');
+  const cases = catalog();
+  const caseDir = path.join(cases.caseRoot, String(issue), criterion);
+  if (!fs.existsSync(path.join(caseDir, 'case.yaml'))) {
+    throw new Error('no source-aligned Case for ' + issue + '/' + criterion);
+  }
+  let issueFile = arg(args, 'issue-json');
+  let disposable = '';
+  if (!issueFile) {
+    disposable = fs.mkdtempSync(path.join(os.tmpdir(), 'nession-e2e-contract-'));
+    issueFile = path.join(disposable, 'issue.json');
+    try {
+      const body = execFileSync('gh', ['api', 'repos/BestNathan/nession/issues/' + issue], {
+        cwd: root, encoding: 'utf8',
+      });
+      fs.writeFileSync(issueFile, body);
+    } catch {
+      throw new Error('cannot fetch Issue contract; fix: set GH_TOKEN or pass --issue-json');
+    }
+  }
+  try {
+    return execute(process.execPath, [
+      at('acceptance', 'run-case.mjs'), '--repo-root', root, '--issue-json', issueFile,
+      '--issue', String(issue), '--criterion', criterion, '--target-sha', sha,
+      '--stage', stage, '--run-id', process.env.GITHUB_RUN_ID ?? '1',
+      '--run-attempt', process.env.GITHUB_RUN_ATTEMPT ?? '1',
+      ...(arg(args, 'output') ? ['--output', arg(args, 'output')] : []),
+    ]);
+  } finally {
+    if (disposable) fs.rmSync(disposable, { recursive: true, force: true });
+  }
+}
+function tests(args) {
+  if (process.env.CI !== 'true') throw new Error(
+    'runtime E2E tests are CI-only; local machine can use: cd e2e && npx playwright test --list');
+  if (!args.includes('--all') && !arg(args, 'suite')) {
+    throw new Error('specify --all or --suite <name>');
+  }
+  const suite = arg(args, 'suite');
+  if (suite && !/^[a-z0-9-]+$/.test(suite)) throw new Error('unsafe suite selection');
+  return execute('npx', ['playwright', 'test', ...(suite ? [suite] : [])], at('e2e'));
+}
+function scenario(args) {
+  const id = args[0];
+  if (!id || !/^[a-z0-9][a-z0-9.-]*$/.test(id)) throw new Error('scenario ID required');
+  const file = walk(at('e2e', 'scenarios'), 'scenario.yaml').find((name) =>
+    fs.readFileSync(name, 'utf8').split('\n').some((line) => line.trim() === 'id: ' + id));
+  if (!file) throw new Error('Scenario not found: ' + id + ' (no silent success)');
+  throw new Error('Scenario execution requires the #1498 scenario adapter; discovery alone is not a run');
+}
+async function main() {
+  const [mode, ...args] = process.argv.slice(2);
+  if (mode === '--list') return console.log(JSON.stringify(catalog(), null, 2));
+  if (mode === '--validate') return await validate();
+  if (mode === 'test') return exitByCode(tests(args));
+  if (mode === 'acceptance') return exitByCode(acceptance(args));
+  if (mode === 'scenario') return scenario(args);
+  if (mode === 'compare') return compare(args);
+  throw new Error('usage: ./e2e/run --list|--validate|test --all|acceptance --issue N --sc SC-NN --sha SHA --stage staging|scenario ID|compare LEFT RIGHT');
+}
+main().catch((error) => { console.error('E2E Error: ' + error.message); process.exitCode = 2; });
