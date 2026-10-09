@@ -7,17 +7,6 @@ permissions:
 on:
   pull_request:
     branches: [staging]
-    paths:
-      - 'e2e/acceptance/**'
-      - 'e2e/runner/**'
-      - 'e2e/run'
-      - 'acceptance/**'
-      - 'docs/architecture/acceptance-cases.md'
-      - '.claude/skills/nession-acceptance/SKILL.md'
-      - 'scripts/acceptance-cases-selftest.mjs'
-      - 'justfile'
-      - '.github/workflows/acceptance-case-smoke.yml'
-      - '.github/workflows/acceptance-cases.yml'
   workflow_dispatch:
 
 concurrency:
