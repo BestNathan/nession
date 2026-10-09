@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "6ef520a67d8bdc5997ce17519ad496edb7ff36ddaa258c662ef08220ce21e1b6",
+  "run_id": 37905466554,
+  "run_attempt": 1,
+  "issue": 1516,
+  "criterion": "SC-03",
+  "criterion_text": "Real full-stack Case smoke and merged staging SHA workflow produce authenticated results without false Pass.",
+  "stage": "staging",
+  "target_sha": "0bf32472b7261719475921e0689e2d247f8e10aa",
+  "contract_sha256": "15e60fe45acaace9901353fe455aa53dd6a1f0fa79a9c366dd9c87dd9625f0b8",
+  "case_revision": "0bf32472b7261719475921e0689e2d247f8e10aa",
+  "case_tree_sha": "67dacc971996a9e509a640d087d01b5160327db2",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-09T08:33:32.944Z",
+  "finished_at": "2026-10-09T08:33:39.010Z",
+  "duration_ms": 6066,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.js",
+      "result": "Pass",
+      "summary": "The exact staged SHA owns the unique canonical Case tree and starts a working shared full stack.",
+      "evidence": [
+        {
+          "type": "case-tree",
+          "value": "e2e/acceptance/cases/1516/SC-03 tree_sha=67dacc971996a9e509a640d087d01b5160327db2"
+        },
+        {
+          "type": "runtime",
+          "value": "exact_sha=0bf32472b7261719475921e0689e2d247f8e10aa shared full-stack Web HTTP=200"
+        },
+        {
+          "type": "test",
+          "value": "trusted Case schema/source discovery 14 Cases; deterministic self-test passed"
+        }
+      ],
+      "duration_ms": 167,
+      "exit_code": 0
+    }
+  ],
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 37905466554,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "0bf32472b7261719475921e0689e2d247f8e10aa",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/37905466554",
+    "record_path": "runs/2026-10-09/37905466554-1/1516/SC-03.json",
+    "source_result_sha256": "d75dd5b3e2e8e408b80cc362fb8d797eb2d72ed1d0a2bbcb31b662bbd7123c18"
+  }
+}
