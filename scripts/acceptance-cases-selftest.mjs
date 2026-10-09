@@ -195,4 +195,18 @@ ok(() => {
   assert.equal(result.status, 0, 'staging merge parent parser self-test failed: ' + result.stderr);
   assert.match(result.stdout, /raw-object proof self-test passed/);
 });
+// Even a source Case with a protocol/runtime verifier can invoke the real
+// Terminal Scenario, which imports @playwright/test transitively. The trusted
+// workflow must install browser tooling for every selected Case, never just
+// manifests declaring type=browser (regression for #1498 staging failure).
+ok(() => {
+  const workflow = fs.readFileSync(path.join(repoRoot, '.github', 'workflows',
+    'acceptance-cases.yml'), 'utf8');
+  assert.match(workflow,
+    /- name: Install browser verifier runtime\s+if: steps\.select\.outputs\.count != '0'/,
+    'runtime/protocol Case dependencies must not be skipped');
+  assert.match(workflow,
+    /- name: Install browser verifier runtime[\s\S]*?cd workspace\/e2e\s+npm ci\s+npx playwright install chromium --with-deps/);
+});
+
 console.log('acceptance Case self-test: ' + cases + ' cases passed');
