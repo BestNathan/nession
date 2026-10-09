@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 37947688492,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "feat/1498-terminal-scenario-acceptance-cases",
+    "target_sha": "111c70df96d126c23d7dddc3d924e5a83bfafc43",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/37947688492",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "52c9f24ec5b13086eae5843c83d051db642025c9e884bc0c89f3506803a5ed92"
+  },
+  "record": "runs/2026-10-09/37947688492-1/scenario/terminal-attach-resume-2.json",
+  "execution_id": "6bfad2678a3774a62c9d21cd6055f61794902364e4566067acb73a9f75b102b0"
+}
