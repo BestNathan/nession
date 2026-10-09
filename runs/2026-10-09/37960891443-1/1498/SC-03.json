@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "20a1f9f177783ab4173fb82895529016489369236d69c64fa912a5325ba88da9",
+  "run_id": 37960891443,
+  "run_attempt": 1,
+  "issue": 1498,
+  "criterion": "SC-03",
+  "criterion_text": "Repeated runs and cross-SHA compare show raw data and uncertainty.",
+  "stage": "staging",
+  "target_sha": "dc5b7a9c329ddadd72657e0ad750b81f512f3060",
+  "contract_sha256": "cf51139b85e1c4f2f0171584b3ff4c3248fbb22f0f7317383dd7d1d6be85d9eb",
+  "case_revision": "dc5b7a9c329ddadd72657e0ad750b81f512f3060",
+  "case_tree_sha": "be5eeacaf6b1deb2d1fe739bb622192757d9ea1e",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-09T16:45:27.526Z",
+  "finished_at": "2026-10-09T16:46:00.245Z",
+  "duration_ms": 32719,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.js",
+      "result": "Pass",
+      "summary": "Two real staging repetitions and authenticated pinned-orphan cross-SHA observations compared without a synthetic evaluation",
+      "evidence": [
+        {
+          "type": "repetition",
+          "value": "target=dc5b7a9c329ddadd72657e0ad750b81f512f3060 runs=2 samples=3,3"
+        },
+        {
+          "type": "historical",
+          "value": "run=37943100476 sha=59653b2372f1692da0d0fdeecfeaad335fe12dfb pinned_git_blob=7cf2752c5123c841f3e1151175302e04dde250aa"
+        },
+        {
+          "type": "comparison",
+          "value": "sameSHA_final_delta=0 crossSHA_final_delta=0"
+        },
+        {
+          "type": "uncertainty",
+          "value": "Wallclock unsynchronized, scheduling nondeterministic; no causal speed or Acceptance claim from raw Run Records"
+        }
+      ],
+      "duration_ms": 24556,
+      "exit_code": 0
+    },
+    {
+      "type": "browser",
+      "entry": "verify.spec.js",
+      "result": "Pass",
+      "summary": "Playwright JSON confirms executed passing tests and assertions with no skips",
+      "evidence": [
+        {
+          "type": "browser",
+          "value": "Playwright discovered=1 passed=1 skipped=0 assertions=4"
+        }
+      ],
+      "execution": {
+        "discovered": 1,
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 4
+      },
+      "duration_ms": 2256,
+      "exit_code": 0
+    }
+  ],
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 37960891443,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "dc5b7a9c329ddadd72657e0ad750b81f512f3060",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/37960891443",
+    "record_path": "runs/2026-10-09/37960891443-1/1498/SC-03.json",
+    "source_result_sha256": "a145984e3913a25bd4a6d3877e845d2ec8864e754eb0634679a0b812a3f01f1f"
+  }
+}
