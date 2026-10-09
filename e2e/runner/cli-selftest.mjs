@@ -63,6 +63,21 @@ assert.match(caseWorkflow, /node workspace\/e2e\/run "\$\{args\[@\]\}"/);
 assert.match(caseWorkflow, /while read -r issue criterion profile; do/);
 assert.match(caseWorkflow, /done < <\(jq -r/);
 assert.doesNotMatch(caseWorkflow, /node workspace\/acceptance\/run-case\.mjs/);
+assert.equal(fs.existsSync(path.join(repo, 'acceptance', 'run-case.mjs')), false,
+  'legacy public Case runner must be retired');
+assert.equal(fs.existsSync(path.join(repo, 'acceptance', 'runtime', 'full-stack.js')), false,
+  'legacy Runtime alias must be retired');
+assert.equal(fs.existsSync(path.join(repo, 'e2e', 'acceptance', 'evaluator', 'run-case.mjs')), true,
+  'canonical internal Case evaluator must exist');
+const gateRecipes = fs.readFileSync(path.join(repo, 'justfile'), 'utf8');
+assert.match(gateRecipes, /check-acceptance-runtime:[\s\S]*?\.\/e2e\/run --validate/);
+assert.doesNotMatch(gateRecipes, /acceptance\/runtime\/full-stack\.js/);
+const acceptanceSkill = fs.readFileSync(path.join(repo, '.claude', 'skills',
+  'nession-acceptance', 'SKILL.md'), 'utf8');
+assert.match(acceptanceSkill, /\.\/e2e\/run acceptance/);
+const acceptanceArchitecture = fs.readFileSync(path.join(repo, 'docs', 'architecture',
+  'acceptance-cases.md'), 'utf8');
+assert.match(acceptanceArchitecture, /e2e\/runner\/runtime\/full-stack\.js/);
 assert.match(caseWorkflow, /--profile "\$\{profile\}"/);
 assert.match(caseWorkflow, /--sha "\$\{TARGET_SHA\}"/);
 const regressionWorkflow = fs.readFileSync(
