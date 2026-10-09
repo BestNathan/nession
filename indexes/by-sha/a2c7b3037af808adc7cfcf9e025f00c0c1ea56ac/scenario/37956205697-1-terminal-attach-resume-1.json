@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 37956205697,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/1499-case-sha-index-idempotent-ingest",
+    "target_sha": "a2c7b3037af808adc7cfcf9e025f00c0c1ea56ac",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/37956205697",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "c54f78b033fe32b891b977834e1f22c44e1fe43f05c3ae5fe627cf3a33cb7486"
+  },
+  "record": "runs/2026-10-09/37956205697-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "0b26f40165af30a2986731e172695bd5e58f771c24073c131eeffd661ef928f1"
+}
