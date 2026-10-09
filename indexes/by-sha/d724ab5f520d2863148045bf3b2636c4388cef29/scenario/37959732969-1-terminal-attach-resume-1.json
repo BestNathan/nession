@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 37959732969,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "feat/1498-provenance-aware-scenario-compare",
+    "target_sha": "d724ab5f520d2863148045bf3b2636c4388cef29",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/37959732969",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "4318abf5a5fd175751f4c977d1e69485041507e23f44af2a0a224a18f27eed27"
+  },
+  "record": "runs/2026-10-09/37959732969-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "f0becb2d85ce3d4695925ecbe832bc51139576af3fc7cf8f4f2c9baaac44b73d"
+}
