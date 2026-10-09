@@ -391,11 +391,30 @@ describe('TerminalController', () => {
     // hold the session's history", and xterm has not parsed this yet (#1491).
     // Lifting it here is how an attach that arrives mid-parse decides it needs
     // no snapshot — over a buffer that is still empty.
+    // Wait for the *specific bootstrap write* to finish, not a 50ms sleep:
+    // under concurrent CI load xterm can legitimately take longer to parse.
+    // Intercept the callback while still performing the real xterm write.
+    const terminal = controller.terminal!;
+    const originalWrite = terminal.write.bind(terminal);
+    let signalParsed: () => void = () => {};
+    const bootstrapParsed = new Promise<void>((resolve) => { signalParsed = resolve; });
+    const writeSpy = vi.spyOn(terminal, 'write').mockImplementation(
+      ((data: string | Uint8Array, callback?: () => void) => {
+        originalWrite(data, callback
+          ? () => {
+            callback();
+            signalParsed();
+          }
+          : undefined);
+      }) as never,
+    );
+
     transport.onOutput!(new Uint8Array([104, 105]), { requestedLines: 5000, truncated: false });
     expect(controller.hasSessionOutput).toBe(false);
 
-    await flush();
+    await bootstrapParsed;
     expect(controller.hasSessionOutput).toBe(true);
+    writeSpy.mockRestore();
     controller.detach();
   });
 
