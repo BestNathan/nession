@@ -4,7 +4,9 @@
 
 Nession uses Playwright for end-to-end testing of the web UI and its integration with the server and agent components. E2E tests run in CI on every PR to staging and can be triggered manually.
 
-## Test Structure\n\nThe canonical Issue/SC verification tree is \`e2e/acceptance/cases/<issue>/<SC>/\`. It uses the shared Runner; verifier source is committed and immutable results live only on \`acceptance-results\`.
+## Test Structure
+
+The canonical Issue/SC verification tree is `e2e/acceptance/cases/<issue>/<SC>/`. It uses the shared Runner; verifier source is committed and immutable results live only on `acceptance-results`.
 
 ```
 e2e/
