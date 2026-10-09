@@ -21,7 +21,7 @@ try {
   fs.writeFileSync(path.join(caseDir, 'verify.js'), 'process.stdout.write("{}");\n');
   assert.equal(discoverCases(root).length, 1);
   assert.equal(discoverCases(root)[0].manifest.stage, 'pre-merge');
-  expectRejected(() => parseCaseYaml('verifiers:\n  - bad\\tkey: value'), /tabs/);
+  expectRejected(() => parseCaseYaml('verifiers:\n  - bad\tkey: value'), /tabs/);
   const manifest = path.join(caseDir, 'case.yaml');
   fs.writeFileSync(manifest, valid.replace('pre-merge','production'));
   expectRejected(() => discoverCases(root), /unsupported case stage/);
