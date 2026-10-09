@@ -145,4 +145,13 @@ try {
   fs.rmSync(root, { recursive: true, force: true });
 }
 
+// Real source Case discovery is part of the mandatory canonical contract.
+const repoRoot = path.resolve(process.cwd());
+const canonicalRoot = path.join(repoRoot, 'e2e', 'acceptance', 'cases');
+ok(() => {
+  assert.equal(fs.existsSync(path.join(repoRoot, 'acceptance', 'cases')), false,
+    'legacy Case tree must not survive canonical source migration');
+  const discovered = discoverCases(canonicalRoot);
+  assert.ok(discovered.length >= 12, 'canonical Case discovery must never silently be empty');
+});
 console.log('acceptance Case self-test: ' + cases + ' cases passed');

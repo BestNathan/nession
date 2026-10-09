@@ -131,20 +131,20 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "${RUNNER_TEMP}/acceptance-case-results"
-          if [[ ! -f workspace/acceptance/cases.mjs ]]; then
+          if [[ ! -f trusted/acceptance/cases.mjs ]]; then
             echo "::error::Case discovery source missing at requested SHA; cannot claim acceptance"
             exit 2
           else
             node --input-type=module <<'NODE' > "${RUNNER_TEMP}/selected-cases.json"
           import path from 'node:path';
           import { pathToFileURL } from 'node:url';
-          const moduleUrl = pathToFileURL(path.resolve('workspace/acceptance/cases.mjs')).href;
+          const moduleUrl = pathToFileURL(path.resolve('trusted/acceptance/cases.mjs')).href;
           const { discoverCases } = await import(moduleUrl);
           const issueSet = new Set(JSON.parse(process.env.ISSUE_NUMBERS || '[]').map(Number));
           const stage = process.env.ACCEPTANCE_STAGE;
           const manual = process.env.MANUAL_CRITERION || '';
           const runtime = process.env.RUNTIME_PROFILE || '';
-          const selected = discoverCases(path.resolve('workspace/acceptance/cases'))
+          const selected = discoverCases(path.resolve('workspace/e2e/acceptance/cases'))
             .map((item) => item.manifest)
             .filter((item) => issueSet.has(item.issue))
             .filter((item) => item.stage === stage)

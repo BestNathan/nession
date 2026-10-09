@@ -6,7 +6,15 @@
   <img alt="Nession Repository Telemetry — repository health and rolling engineering efficiency" src="https://raw.githubusercontent.com/BestNathan/nession/metrics/repo-metrics-light.svg?sanitize=true&v=2">
 </picture>
 
-<sub>Generated every 4 hours from <code>main</code> · rolling 7d · <a href="https://raw.githubusercontent.com/BestNathan/nession/metrics/metrics.json">raw metrics</a></sub>
+<sub>Generated every 4 hours from <code>main</code> · rolling 7d / 30d · <a href="https://raw.githubusercontent.com/BestNathan/nession/metrics/metrics.json">raw metrics</a></sub>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/BestNathan/nession/metrics/agent-metrics-dark.svg?sanitize=true&v=1">
+  <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/BestNathan/nession/metrics/agent-metrics-light.svg?sanitize=true&v=1">
+  <img alt="Nession Agent Workflow Telemetry — rolling 7d and 30d runs, turns, tools, tokens, duration and cost" src="https://raw.githubusercontent.com/BestNathan/nession/metrics/agent-metrics-light.svg?sanitize=true&v=1">
+</picture>
+
+<sub>Agent workflow telemetry · rolling 7d / 30d · <a href="https://raw.githubusercontent.com/BestNathan/nession/metrics/agent-metrics.json">aggregate JSON</a> · immutable raw runs under <code>raw/workflows/</code> on the <code>metrics</code> branch</sub>
 
 > An intelligent workspace for continuous work across devices, environments, and compute nodes.
 

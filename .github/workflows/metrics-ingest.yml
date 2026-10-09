@@ -1,0 +1,202 @@
+name: Metrics Ingest
+
+on:
+  workflow_run:
+    workflows:
+      - Acceptance
+      - Requirement Acceptance
+      - Issue Audit Agent
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: GitHub Actions run ID whose agent telemetry artifacts should be ingested
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: metrics-writer
+  cancel-in-progress: false
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout trusted telemetry tooling
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: trusted
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Verify telemetry tooling
+        working-directory: trusted
+        run: |
+          node scripts/agent-workflow-telemetry.mjs self-test
+          node scripts/agent-workflow-telemetry-contract.mjs self-test
+
+      - name: Resolve source run
+        id: source
+        env:
+          EVENT_RUN_ID: ${{ github.event.workflow_run.id }}
+          INPUT_RUN_ID: ${{ inputs.run_id }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          run_id="${EVENT_RUN_ID:-${INPUT_RUN_ID:-}}"
+          if ! [[ "${run_id}" =~ ^[0-9]+$ ]] || [[ "${run_id}" -le 0 ]]; then
+            echo "Invalid workflow run id: ${run_id}" >&2
+            exit 1
+          fi
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}" > "${RUNNER_TEMP}/telemetry-source-run.json"
+          provenance="$(node trusted/scripts/agent-workflow-telemetry-contract.mjs provenance "${RUNNER_TEMP}/telemetry-source-run.json")"
+
+          run_attempt="$(jq -r '.github_run_attempt' <<<"${provenance}")"
+          source_path="$(jq -r '.path' <<<"${provenance}")"
+          source_event="$(jq -r '.event' <<<"${provenance}")"
+          expected_workflow_id="$(jq -r '.workflow_id' <<<"${provenance}")"
+
+          echo "run_id=${run_id}" >> "${GITHUB_OUTPUT}"
+          echo "run_attempt=${run_attempt}" >> "${GITHUB_OUTPUT}"
+          echo "source_path=${source_path}" >> "${GITHUB_OUTPUT}"
+          echo "source_event=${source_event}" >> "${GITHUB_OUTPUT}"
+          echo "expected_workflow_id=${expected_workflow_id}" >> "${GITHUB_OUTPUT}"
+
+      - name: Discover Agent telemetry artifacts
+        id: artifacts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_ID: ${{ steps.source.outputs.run_id }}
+        run: |
+          set -euo pipefail
+          count="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/artifacts?per_page=100"             --jq '[.artifacts[] | select(.expired == false and (.name | startswith("agent-telemetry-")))] | length')"
+          echo "count=${count}" >> "${GITHUB_OUTPUT}"
+          if [[ "${count}" -eq 0 ]]; then
+            {
+              echo "## Metrics Ingest"
+              echo
+              echo "- Source run: ${RUN_ID}"
+              echo "- Agent telemetry artifacts: 0"
+              echo "- Action: nothing to persist"
+            } >> "${GITHUB_STEP_SUMMARY}"
+          fi
+
+      - name: Download Agent telemetry artifacts
+        if: steps.artifacts.outputs.count != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_ID: ${{ steps.source.outputs.run_id }}
+        run: |
+          mkdir -p "${RUNNER_TEMP}/agent-telemetry"
+          gh run download "${RUN_ID}"             --repo "${GITHUB_REPOSITORY}"             --pattern 'agent-telemetry-*'             --dir "${RUNNER_TEMP}/agent-telemetry"
+
+      - name: Checkout metrics history
+        if: steps.artifacts.outputs.count != '0'
+        uses: actions/checkout@v4
+        with:
+          ref: metrics
+          path: metrics-store
+          fetch-depth: 0
+
+      - name: Validate and append immutable telemetry
+        if: steps.artifacts.outputs.count != '0'
+        id: persist
+        working-directory: trusted
+        env:
+          SOURCE_DIR: ${{ runner.temp }}/agent-telemetry
+          METRICS_DIR: ${{ github.workspace }}/metrics-store
+          SOURCE_RUN_ID: ${{ steps.source.outputs.run_id }}
+          SOURCE_RUN_ATTEMPT: ${{ steps.source.outputs.run_attempt }}
+          EXPECTED_WORKFLOW_ID: ${{ steps.source.outputs.expected_workflow_id }}
+        run: |
+          set -euo pipefail
+          found=0
+          changed=0
+
+          while IFS= read -r -d '' file; do
+            found=$((found + 1))
+            rel="$(node scripts/agent-workflow-telemetry.mjs validate "${file}")"
+
+            record_run_id="$(jq -r '.identity.github_run_id' "${file}")"
+            record_attempt="$(jq -r '.identity.github_run_attempt' "${file}")"
+            record_repo="$(jq -r '.identity.repository' "${file}")"
+            record_workflow_id="$(jq -r '.identity.workflow_id' "${file}")"
+
+            [[ "${record_workflow_id}" == "${EXPECTED_WORKFLOW_ID}" ]] || {
+              echo "Telemetry workflow id ${record_workflow_id} does not match trusted source ${EXPECTED_WORKFLOW_ID}: ${file}" >&2
+              exit 1
+            }
+            [[ "${record_run_id}" == "${SOURCE_RUN_ID}" ]] || {
+              echo "Telemetry run id ${record_run_id} does not match source run ${SOURCE_RUN_ID}: ${file}" >&2
+              exit 1
+            }
+            [[ "${record_attempt}" == "${SOURCE_RUN_ATTEMPT}" ]] || {
+              echo "Telemetry run attempt ${record_attempt} does not match source attempt ${SOURCE_RUN_ATTEMPT}: ${file}" >&2
+              exit 1
+            }
+            [[ "${record_repo}" == "${GITHUB_REPOSITORY}" ]] || {
+              echo "Telemetry repository ${record_repo} does not match ${GITHUB_REPOSITORY}: ${file}" >&2
+              exit 1
+            }
+
+            destination="${METRICS_DIR}/${rel}"
+            mkdir -p "$(dirname "${destination}")"
+            if [[ -e "${destination}" ]]; then
+              cmp -s "${file}" "${destination}" || {
+                echo "Immutable telemetry collision at ${rel}" >&2
+                exit 1
+              }
+              continue
+            fi
+
+            cp "${file}" "${destination}"
+            changed=$((changed + 1))
+          done < <(find "${SOURCE_DIR}" -type f -name '*.json' -print0)
+
+          [[ "${found}" -gt 0 ]] || {
+            echo 'Agent telemetry artifact contained no JSON record.' >&2
+            exit 1
+          }
+
+          echo "changed=${changed}" >> "${GITHUB_OUTPUT}"
+          {
+            echo "## Metrics Ingest"
+            echo
+            echo "- Source run: ${SOURCE_RUN_ID} attempt ${SOURCE_RUN_ATTEMPT}"
+            echo "- Trusted workflow: ${{ steps.source.outputs.source_path }} (${{ steps.source.outputs.source_event }})"
+            echo "- Canonical workflow ID: ${EXPECTED_WORKFLOW_ID}"
+            echo "- Valid telemetry records: ${found}"
+            echo "- New immutable records: ${changed}"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Regenerate rolling Agent metrics
+        if: steps.artifacts.outputs.count != '0' && steps.persist.outputs.changed != '0'
+        working-directory: trusted
+        run: |
+          set -euo pipefail
+          node scripts/agent-workflow-telemetry.mjs aggregate             "${GITHUB_WORKSPACE}/metrics-store/raw/workflows"             "${RUNNER_TEMP}/agent-metrics"
+          cp "${RUNNER_TEMP}/agent-metrics/agent-metrics.json" "${GITHUB_WORKSPACE}/metrics-store/"
+          cp "${RUNNER_TEMP}/agent-metrics/agent-metrics-light.svg" "${GITHUB_WORKSPACE}/metrics-store/"
+          cp "${RUNNER_TEMP}/agent-metrics/agent-metrics-dark.svg" "${GITHUB_WORKSPACE}/metrics-store/"
+
+      - name: Commit metrics history
+        if: steps.artifacts.outputs.count != '0' && steps.persist.outputs.changed != '0'
+        working-directory: metrics-store
+        env:
+          SOURCE_RUN_ID: ${{ steps.source.outputs.run_id }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add raw/workflows agent-metrics.json agent-metrics-light.svg agent-metrics-dark.svg
+          git commit -m "metrics: ingest agent telemetry from run ${SOURCE_RUN_ID}"
+          git push origin HEAD:metrics
