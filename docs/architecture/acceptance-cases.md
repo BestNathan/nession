@@ -44,7 +44,7 @@ The Case stage must exactly match the SC row in the Issue Acceptance Report. Aut
 
 ## Runtime contract
 
-`acceptance/runtime/full-stack.js` owns the real local full stack:
+`e2e/runner/runtime/full-stack.js` owns the real local full stack and `e2e/runner/drivers/` owns Browser/Protocol/Runtime verifier execution (including Playwright assertion reporting). Workflow callers dispatch via `./e2e/run acceptance` and the source Case evaluator is `e2e/acceptance/evaluator/run-case.mjs`; neither `acceptance/runtime` nor `acceptance/run-case.mjs` remains a public entrypoint:
 
 - Nession Server;
 - Nession Agent;
