@@ -556,9 +556,16 @@ where
                 size_known,
                 needs_bootstrap,
             } => {
+                let mut dispatch = RelayDispatch {
+                    handler: &handler,
+                    lanes: &mut lanes,
+                    command_broker: &command_broker,
+                    sender: &sender,
+                };
                 let outcome = relay_bidirectional_via_channel(
                     &mut read,
                     sender.clone(),
+                    &mut dispatch,
                     RelayRequest {
                         agent_ws_urls: &agent_ws_urls,
                         session_name: &session_name,
@@ -838,6 +845,7 @@ where
 async fn relay_bidirectional_via_channel<RS>(
     client_read: &mut RS,
     sender: crate::server::outbound::WsMessageSender,
+    dispatch: &mut RelayDispatch<'_>,
     request: RelayRequest<'_>,
 ) -> anyhow::Result<RelayEnd>
 where
@@ -1101,8 +1109,13 @@ where
 
     // ── Step 2: Bidirectional forwarding ──
 
-    let client_to_agent =
-        forward_client_to_agent(client_read, &mut agent_write, session_name, INPUT_THROTTLE);
+    let client_to_agent = forward_client_to_agent(
+        client_read,
+        &mut agent_write,
+        session_name,
+        INPUT_THROTTLE,
+        Some(dispatch),
+    );
 
     // Forward agent -> client, through the terminal lane of the outbound queue.
     //
@@ -1222,6 +1235,11 @@ enum ClientFrame {
     TerminalInput,
     /// `server.session.relay.end` — control: ends the relay, never forwarded.
     RelayEnd,
+    /// A wire the **Server** serves — the connection's own work, asked while it
+    /// happens to be attached: attach settings, `server.session.create`,
+    /// `server.info`, `server.env.list`. Answered here by the Server, never
+    /// forwarded (#1504).
+    ServerUnit,
     /// Everything else, forwarded unchanged and in arrival order.
     Other,
 }
@@ -1255,8 +1273,76 @@ fn classify_client_frame(msg: &Message) -> ClientFrame {
     match envelope.msg_type {
         Some(TERMINAL_INPUT_WIRE) => ClientFrame::TerminalInput,
         Some(RELAY_END_WIRE) => ClientFrame::RelayEnd,
+        // The split is the protocol's own rule, not a convention invented here:
+        // a wire's first segment names the runtime that **answers** it
+        // (`docs/architecture/protocol.md`), so `server.` is the wire saying
+        // the Server serves it. The relay used to send everything that was not
+        // terminal input onward — which asks the Agent for an answer it has no
+        // unit for, and its reply was `unknown message type` for every
+        // server-scoped request a client made while attached (#1504).
+        Some(wire) if wire.starts_with("server.") => ClientFrame::ServerUnit,
         _ => ClientFrame::Other,
     }
+}
+
+/// Answer one Server-served unit while a relay holds this connection (#1504).
+///
+/// The read half belongs to the relay for as long as it runs, so nothing else
+/// can dispatch the frames it reads — and the connection's owner is still using
+/// it: attach settings, session create and `server.info` are all asked *while*
+/// attached. This runs them through the same lane discipline the connection's
+/// ordinary loop applies ([`ExecutionPolicy`]), so a relay is not a window in
+/// which one mutation may jump another mutation of the same session.
+///
+/// [`answer`] is the shared unit runner, and it already refuses what cannot
+/// happen from here: a unit answering with a connection transition (a second
+/// relay, a close) is reported rather than obeyed, because a lane runs against
+/// a snapshot of the connection.
+///
+/// Returns false only if the frame cannot be decoded — which
+/// [`classify_client_frame`] has already ruled out for the frames that reach
+/// this, so the caller's fallback is a formality rather than a path.
+async fn answer_server_unit(
+    handler: &ConnectionHandler,
+    lanes: &mut Lanes,
+    command_broker: &CommandBroker,
+    sender: &WsMessageSender,
+    text: &str,
+) -> bool {
+    let Ok(msg) = serde_json::from_str::<ProtocolMessage<serde_json::Value>>(text) else {
+        return false;
+    };
+    // Claimed once, up front, exactly as the ordinary loop claims for both lane
+    // arms before its task is scheduled. It is a no-op for a browser client —
+    // the claim is about an *agent's* control channel — which is every
+    // connection that reaches a relay.
+    claim_agent_channel(handler, command_broker, sender).await;
+    match policy_for_wire(&msg.msg_type, &msg.payload) {
+        ExecutionPolicy::Query => {
+            lanes
+                .query(answer(handler.clone(), msg, sender.clone(), "a query"))
+                .await;
+        }
+        ExecutionPolicy::Key(key) => {
+            lanes
+                .key(
+                    key,
+                    Box::pin(answer(handler.clone(), msg, sender.clone(), "a mutation")),
+                )
+                .await;
+        }
+        // The barrier an ordered unit waits behind is what makes it
+        // deterministic on a connection that is no longer serial, so it is
+        // applied here for the same reason it is applied out there.
+        ExecutionPolicy::Ordered => {
+            lanes.drain().await;
+            answer(handler.clone(), msg, sender.clone(), "an ordered unit").await;
+        }
+        ExecutionPolicy::Inline => {
+            answer(handler.clone(), msg, sender.clone(), "an inline unit").await;
+        }
+    }
+    true
 }
 
 /// Where one terminal-input frame says its bytes sit in the session's input
@@ -1510,11 +1596,30 @@ enum ClientToAgent {
 /// window past any scheduling stall, so "the drain loop ran" is a property of
 /// the test rather than of the machine. Production has one value, in
 /// [`INPUT_THROTTLE`].
+/// What the relay needs to serve the connection's own Server-scoped units while
+/// it holds the read half (#1504).
+///
+/// Borrowed rather than cloned because these are the connection's dispatcher,
+/// its lanes and its reply path — the same objects the ordinary loop uses, so a
+/// relay is not a second answer to "who may dispatch on this connection".
+struct RelayDispatch<'a> {
+    handler: &'a ConnectionHandler,
+    lanes: &'a mut Lanes,
+    command_broker: &'a CommandBroker,
+    sender: &'a WsMessageSender,
+}
+
+/// `dispatch` is `None` only in the throttle's unit tests, which drive this
+/// pump over frames that carry no Server units — a real relay always has one.
+/// A Server unit that arrived without a dispatcher is reported and dropped:
+/// forwarding it is the defect this parameter exists to remove (#1504), so the
+/// unreachable branch errs on the side of not answering the wrong runtime.
 async fn forward_client_to_agent<RS, AS>(
     client_read: &mut RS,
     agent_write: &mut AS,
     session_name: &str,
     input_throttle: std::time::Duration,
+    mut dispatch: Option<&mut RelayDispatch<'_>>,
 ) -> ClientToAgent
 where
     RS: futures_util::Stream<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
@@ -1546,6 +1651,22 @@ where
             ClientFrame::RelayEnd => {
                 info!("Client requested relay end for session '{}'", session_name);
                 return ClientToAgent::ClientRequested;
+            }
+            // The connection's own unit, asked while it is attached: answered
+            // here, and deliberately **not** written to the agent — that is the
+            // whole of #1504.
+            ClientFrame::ServerUnit => {
+                if let (Some(dispatch), Ok(text)) = (dispatch.as_deref_mut(), msg.to_text()) {
+                    answer_server_unit(
+                        dispatch.handler,
+                        dispatch.lanes,
+                        dispatch.command_broker,
+                        dispatch.sender,
+                        text,
+                    )
+                    .await;
+                }
+                continue;
             }
             ClientFrame::Other => {
                 if let Err(e) = agent_write.send(msg).await {
@@ -1600,6 +1721,25 @@ where
                     // window when it asked to stop (#962).
                     ClientFrame::RelayEnd => {
                         end_requested = true;
+                        break;
+                    }
+                    // A Server unit, read inside the window: the same ordering
+                    // rule as `Other` — nothing the client wrote earlier may be
+                    // overtaken by it — but its destination is the Server.
+                    ClientFrame::ServerUnit => {
+                        if !flush_burst(agent_write, &mut burst).await {
+                            break 'forward;
+                        }
+                        if let (Some(dispatch), Ok(text)) = (dispatch.as_deref_mut(), m.to_text()) {
+                            answer_server_unit(
+                                dispatch.handler,
+                                dispatch.lanes,
+                                dispatch.command_broker,
+                                dispatch.sender,
+                                text,
+                            )
+                            .await;
+                        }
                         break;
                     }
                     // Not coalescable, and sent *after* the frame being held:
@@ -1794,8 +1934,14 @@ mod tests {
         let mut client_read = futures_util::stream::iter(items);
         let mut agent_write = RecordingSink::default();
 
-        let outcome =
-            forward_client_to_agent(&mut client_read, &mut agent_write, "sess", WIDE_WINDOW).await;
+        let outcome = forward_client_to_agent(
+            &mut client_read,
+            &mut agent_write,
+            "sess",
+            WIDE_WINDOW,
+            None,
+        )
+        .await;
 
         (agent_write.sent, outcome)
     }
@@ -2092,8 +2238,15 @@ mod tests {
     /// command line quoting it — ended the user's relay and was dropped.
     #[tokio::test]
     async fn a_payload_mentioning_relay_end_is_forwarded_not_obeyed() {
-        let innocent =
-            frame_with_payload("server.info", "info-1", json!({ "note": RELAY_END_WIRE }));
+        // Carried on a wire the relay forwards, because that is where the
+        // substring defence has to hold: the claim is about the *payload* not
+        // deciding anything. (`server.info` would be a Server unit now and is
+        // dispatched rather than forwarded — see #1504.)
+        let innocent = frame_with_payload(
+            "agent.terminal.resize",
+            "info-1",
+            json!({ "note": RELAY_END_WIRE }),
+        );
 
         // The frame has to carry the literal text for this test to mean
         // anything. serde escapes the quotes, so assert on the wire form the
@@ -2123,8 +2276,15 @@ mod tests {
     /// Silent data loss on frames that have nothing to do with a terminal.
     #[tokio::test]
     async fn a_payload_mentioning_terminal_input_is_not_coalesced() {
-        let each =
-            |id: &str| frame_with_payload("server.info", id, json!({ "note": "terminal.input" }));
+        // Same carrier choice as the relay.end case above: a wire the relay
+        // forwards, so what is under test is the payload's irrelevance.
+        let each = |id: &str| {
+            frame_with_payload(
+                "agent.terminal.resize",
+                id,
+                json!({ "note": "terminal.input" }),
+            )
+        };
         let (a, b, c) = (each("info-1"), each("info-2"), each("info-3"));
 
         let text = a.to_text().unwrap_or_default().to_string();
@@ -2162,7 +2322,7 @@ mod tests {
         for literal in ["terminal.input", RELAY_END_WIRE] {
             assert_eq!(
                 classify_client_frame(&frame_with_payload(
-                    "server.info",
+                    "agent.terminal.resize",
                     "x",
                     json!({ "note": literal })
                 )),
@@ -2170,6 +2330,23 @@ mod tests {
                 "a payload quoting {literal} is not {literal}"
             );
         }
+
+        // And the wire's first segment decides *whose* unit it is: the protocol
+        // names the answering runtime there, so this is the rule the relay
+        // splits on rather than a list it keeps (#1504). A payload cannot move
+        // a frame into or out of that class.
+        for payload in [json!({}), json!({ "note": "terminal.input" })] {
+            assert_eq!(
+                classify_client_frame(&frame_with_payload("server.info", "x", payload)),
+                ClientFrame::ServerUnit,
+                "a `server.` wire is the Server's unit whatever it carries"
+            );
+        }
+        assert_eq!(
+            classify_client_frame(&frame_with_payload("agent.terminal.resize", "x", json!({}))),
+            ClientFrame::Other,
+            "an agent wire still belongs to the agent"
+        );
 
         // The pre-rename spelling of terminal input is not terminal input. The
         // wire is the one the Agent answers, and accepting a second spelling

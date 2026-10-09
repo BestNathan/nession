@@ -2679,6 +2679,36 @@ async fn expect_frame_of_type(
     }
 }
 
+/// Assert the agent receives **no** frame of `msg_type` within `window`.
+///
+/// The mirror of [`expect_frame_of_type`], and safe in the same direction: it
+/// can only go red when the Server starts sending something to the agent that
+/// it did not send before. Frames of other types are skipped rather than
+/// failing the check.
+async fn no_frame_of_type_within(
+    frames: &mut tokio::sync::mpsc::UnboundedReceiver<serde_json::Value>,
+    msg_type: &str,
+    window: std::time::Duration,
+) -> anyhow::Result<()> {
+    let deadline = tokio::time::Instant::now() + window;
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return Ok(());
+        }
+        match tokio::time::timeout(remaining, frames.recv()).await {
+            Ok(Some(frame))
+                if frame.get("msg_type").and_then(serde_json::Value::as_str) == Some(msg_type) =>
+            {
+                anyhow::bail!("the agent received a {msg_type} frame it does not serve: {frame}")
+            }
+            Ok(Some(_)) => {}
+            Ok(None) => anyhow::bail!("the endpoint's frame channel closed"),
+            Err(_) => return Ok(()),
+        }
+    }
+}
+
 /// Assert that nothing replying to `id` arrives within `window`.
 ///
 /// The negative half of an ordering claim, and safe in that direction: it can
@@ -2980,28 +3010,30 @@ async fn the_relay_forwards_what_the_agent_says_before_it_answers() -> anyhow::R
     Ok(())
 }
 
-/// While the relay is on, the connection's frames belong to it.
+/// While the relay is on, it owns the connection's **terminal** frames — and
+/// only those. The Server still serves its own units on that connection.
 ///
-/// This is the "relay mode entered" edge case, and what it characterizes is
-/// stronger than the requirement asks for: it is not that the ordinary
-/// dispatcher is kept from *competing* for these frames, it is that there is no
-/// dispatcher on this connection at all while the mode is on. `relay.begin`
-/// hands the read half of the socket to `relay_bidirectional_via_channel`, so
-/// `handle_ws_stream` is parked inside the relay until the relay returns — and
-/// a unit the Server itself serves, sent meanwhile, is forwarded to the agent
-/// like any other frame.
+/// This test used to assert the opposite, and it was titled for it
+/// (`relay_mode_owns_the_connections_frames_until_it_ends`): `relay.begin`
+/// parks `handle_ws_stream` inside the relay, the relay forwarded everything
+/// that was not terminal input, and a unit the Server itself serves — sent
+/// meanwhile — went to the agent, which has no unit for it. The client was
+/// answered nothing, and the *agent* answered `unknown message type` for every
+/// server-scoped request a client made while attached (#1504). The ownership
+/// model is what changed, deliberately, and this test is where it is stated:
+/// the wire's first segment names the runtime that answers it
+/// (`docs/architecture/protocol.md`), so `server.` means the Server, and a
+/// relay may not take that away from the connection it is only borrowing.
 ///
-/// The witness is positive: the agent *has* the frame. The negative half (the
-/// client was answered nothing for it) is what makes this about ownership
-/// rather than about a slow Server.
+/// What the old test was protecting — that a frame read *before*
+/// `relay.begin` is still applied first, and that `relay.end` hands the
+/// connection back to the ordinary dispatcher — is asserted below unchanged.
+/// That is the connection-ordering half, and it is untouched by this split.
 ///
-/// **Must not flip.** `#961-B`/`#961-C` restructure this loop into a reader
-/// plus lanes, and the mode transition is exactly what has to keep the relay's
-/// exclusivity when they do. A red here means a frame was dispatched by the
-/// Server while the relay believed it owned the connection — which is the
-/// "mode transition" invariant the requirement lists as connection-ordered.
+/// The witness here is positive in both directions: the Server **answers** the
+/// unit, and the agent **never sees** it.
 #[tokio::test]
-async fn relay_mode_owns_the_connections_frames_until_it_ends() -> anyhow::Result<()> {
+async fn a_relay_serves_the_servers_own_units_and_forwards_only_its_wires() -> anyhow::Result<()> {
     let (_db_dir, addr, _handle) = start_ownership_server("test_ws_relay_lane.db").await?;
     let mut endpoint = start_mock_agent_endpoint().await?;
 
@@ -3035,19 +3067,20 @@ async fn relay_mode_owns_the_connections_frames_until_it_ends() -> anyhow::Resul
     .await?;
     assert_eq!(attach["payload"]["session_name"], serde_json::json!("dev"));
 
-    // A unit the *Server* serves, written during relay mode: it goes to the
-    // agent, which is the whole point.
+    // A unit the *Server* serves, written during relay mode: the Server
+    // answers it — the client is still using this connection to talk to the
+    // Server — and the agent is not asked about it at all (#1504).
     send_json(&mut client, session_list_request("in-relay-1")).await?;
-    let forwarded = expect_frame_of_type(
+    let replies = replies_in_arrival_order(&mut client, &["in-relay-1"]).await?;
+    assert_eq!(replies[0]["msg_type"], "server.session.list");
+    anyhow::ensure!(
+        replies[0]["payload"]["sessions"].is_array(),
+        "the unit the Server serves was not dispatched while the relay was on: {}",
+        replies[0]
+    );
+    no_frame_of_type_within(
         &mut endpoint.frames,
         "server.session.list",
-        std::time::Duration::from_secs(5),
-    )
-    .await?;
-    assert_eq!(forwarded["id"], serde_json::json!("in-relay-1"));
-    no_reply_for(
-        &mut client,
-        "in-relay-1",
         std::time::Duration::from_millis(500),
     )
     .await?;
