@@ -1,6 +1,6 @@
 import { test as base, expect } from '@playwright/test';
-import { waitForShell } from '../helpers/shell';
-import { watchSessionReports } from '../helpers/sessionReport';
+import { waitForShell } from '../../helpers/shell';
+import { watchSessionReports } from '../../helpers/sessionReport';
 
 /**
  * Watch the session lists from **before the page navigates** (#1326).

@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { gotoFixtureApp } from '../helpers/fixtureVisual';
+import { gotoFixtureApp } from '../../helpers/fixtureVisual';
 
 // Local runs are forbidden: the webServer stack compiles and runs
 // nession-server/agent (which operate tmux). CI-only, like every spec here.

@@ -82,7 +82,7 @@ const FULL_COMMANDS = [
 const BROWSER_COMMANDS = [
   {
     id: 'browser-ui-contracts',
-    command: 'cd e2e && npx playwright test specs/ui-contract-assertions.spec.ts specs/ui-contract-matrix.spec.ts',
+    command: 'cd e2e && npx playwright test tests/browser/ui-contract-assertions.spec.ts tests/browser/ui-contract-matrix.spec.ts',
     owner: 'design/contracts/* + e2e/helpers/ui-assert/',
     expected: 'canonical browser surfaces satisfy resolved UI contracts across the viewport matrix',
     repair: 'fix the drifting implementation or the canonical contract owner; do not update baselines to hide a structured failure',
@@ -97,7 +97,7 @@ const BROWSER_COMMANDS = [
     // measures computed styles on the running editor, which is the claim SC9
     // actually makes.
     id: 'codemirror-rendered-metrics',
-    command: 'cd e2e && npx playwright test specs/design-renderer-boundary.spec.ts',
+    command: 'cd e2e && npx playwright test tests/browser/design-renderer-boundary.spec.ts',
     owner: 'web/src/platform/editor/model/editorTheme.ts',
     expected: "CodeMirror's rendered metrics match the workspace editor tokens rather than its own defaults",
     repair: "the token did not reach the rendered result — move the decision into EditorView.theme; a utility class loses to CodeMirror's injected theme",

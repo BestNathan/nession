@@ -1,4 +1,4 @@
-// e2e/specs/ui-contract-assertions.spec.ts
+// e2e/tests/browser/ui-contract-assertions.spec.ts
 // #546 — reusable browser UI assertions over design/contracts (#545).
 //
 // Two halves:
@@ -22,8 +22,8 @@ import {
   expectTouchTarget,
   expectTouchTargetsWithin,
   expectVisibleWithin,
-} from '../helpers/ui-assert/assertions';
-import { patternBlock } from '../helpers/ui-assert/contracts';
+} from '../../helpers/ui-assert/assertions';
+import { patternBlock } from '../../helpers/ui-assert/contracts';
 
 test.skip(!process.env.CI, 'local only — runs in CI workflow only');
 

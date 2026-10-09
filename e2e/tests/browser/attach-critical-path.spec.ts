@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { waitForShell } from '../helpers/shell';
+import { waitForShell } from '../../helpers/shell';
 
 const APP_URL =
   '/?token=e2e-test-token&server_url=' + encodeURIComponent('ws://localhost:19090/ws');

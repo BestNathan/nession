@@ -1,4 +1,4 @@
-// e2e/specs/fixture-workspace.spec.ts
+// e2e/tests/browser/fixture-workspace.spec.ts
 import { expect, test } from '@playwright/test';
 
 // Local runs are forbidden: the webServer stack compiles and runs

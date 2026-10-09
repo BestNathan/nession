@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
-import { waitForShell } from '../helpers/shell';
-import { resetAuth } from '../helpers/reset';
+import { waitForShell } from '../../helpers/shell';
+import { resetAuth } from '../../helpers/reset';
 
 /**
  * Direct WebSocket URL — bypasses vite preview's WS proxy, which has been

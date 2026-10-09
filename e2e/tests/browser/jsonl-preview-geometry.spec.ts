@@ -14,8 +14,8 @@ import {
   scrollJsonlPreview,
   scrollJsonlRecordIntoView,
   scrollJsonlUntilWindowChanges,
-} from '../helpers/jsonlPreviewGeometry';
-import { gotoFixtureWorkspace } from '../helpers/fixtureVisual';
+} from '../../helpers/jsonlPreviewGeometry';
+import { gotoFixtureWorkspace } from '../../helpers/fixtureVisual';
 
 test.skip(!process.env.CI, 'local only — runs in CI workflow only');
 

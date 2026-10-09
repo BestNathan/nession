@@ -108,7 +108,7 @@ jobs:
         if: github.event_name == 'workflow_dispatch' && inputs.update_visual_snapshots == true
         with:
           name: canonical-visual-baselines
-          path: e2e/specs/__snapshots__/
+          path: e2e/tests/browser/__snapshots__/
           retention-days: 7
 
       # ── Report ────────────────────────────────────────────────────────
@@ -125,5 +125,5 @@ jobs:
           name: visual-snapshot-diffs
           path: |
             e2e/test-results/
-            e2e/specs/__snapshots__/
+            e2e/tests/browser/__snapshots__/
           retention-days: 14
