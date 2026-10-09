@@ -1,65 +1,65 @@
 {
   "schema_version": 1,
   "kind": "agent_metrics_aggregate",
-  "generated_at": "2026-10-09T02:41:21.292Z",
+  "generated_at": "2026-10-09T02:45:37.854Z",
   "windows": {
     "7d": {
       "runs": {
-        "total": 37,
+        "total": 38,
         "by_workflow": {
           "issue-audit": 7,
-          "requirement-acceptance": 30
+          "requirement-acceptance": 31
         },
         "by_provider": {
-          "cursor": 37
+          "cursor": 38
         },
         "by_result": {
-          "completed": 30,
+          "completed": 31,
           "repaired": 7
         }
       },
       "turns": {
-        "observed_runs": 37,
-        "total": 37,
+        "observed_runs": 38,
+        "total": 38,
         "avg": 1,
         "p50": 1,
         "p95": 1
       },
       "model_requests": {
-        "observed_runs": 37,
-        "total": 37,
+        "observed_runs": 38,
+        "total": 38,
         "avg": 1,
         "p50": 1,
         "p95": 1
       },
       "tools": {
-        "observed_runs": 37,
-        "total": 1242,
-        "avg": 33.567567567567565,
+        "observed_runs": 38,
+        "total": 1398,
+        "avg": 36.78947368421053,
         "p50": 24,
-        "p95": 108,
+        "p95": 156,
         "by_name": {
-          "read": 1013,
-          "glob": 116,
-          "grep": 99,
+          "read": 1159,
+          "glob": 124,
+          "grep": 101,
           "mcp": 14
         }
       },
       "tokens": {
         "input": {
-          "observed_runs": 37,
-          "total": 11794630
+          "observed_runs": 38,
+          "total": 13942844
         },
         "output": {
-          "observed_runs": 37,
-          "total": 148369
+          "observed_runs": 38,
+          "total": 158338
         },
         "cache_read": {
-          "observed_runs": 37,
-          "total": 10404800
+          "observed_runs": 38,
+          "total": 12466912
         },
         "cache_write": {
-          "observed_runs": 37,
+          "observed_runs": 38,
           "total": 0
         },
         "reasoning": {
@@ -67,16 +67,16 @@
           "total": null
         },
         "total": {
-          "observed_runs": 37,
-          "total": 22347799
+          "observed_runs": 38,
+          "total": 26568094
         }
       },
       "duration_ms": {
-        "observed_runs": 37,
-        "total": 1570601,
-        "avg": 42448.67567567567,
+        "observed_runs": 38,
+        "total": 1675419,
+        "avg": 44089.97368421053,
         "p50": 32174,
-        "p95": 102273
+        "p95": 104818
       },
       "cost_usd": {
         "raw": {
@@ -95,61 +95,61 @@
     },
     "30d": {
       "runs": {
-        "total": 37,
+        "total": 38,
         "by_workflow": {
           "issue-audit": 7,
-          "requirement-acceptance": 30
+          "requirement-acceptance": 31
         },
         "by_provider": {
-          "cursor": 37
+          "cursor": 38
         },
         "by_result": {
-          "completed": 30,
+          "completed": 31,
           "repaired": 7
         }
       },
       "turns": {
-        "observed_runs": 37,
-        "total": 37,
+        "observed_runs": 38,
+        "total": 38,
         "avg": 1,
         "p50": 1,
         "p95": 1
       },
       "model_requests": {
-        "observed_runs": 37,
-        "total": 37,
+        "observed_runs": 38,
+        "total": 38,
         "avg": 1,
         "p50": 1,
         "p95": 1
       },
       "tools": {
-        "observed_runs": 37,
-        "total": 1242,
-        "avg": 33.567567567567565,
+        "observed_runs": 38,
+        "total": 1398,
+        "avg": 36.78947368421053,
         "p50": 24,
-        "p95": 108,
+        "p95": 156,
         "by_name": {
-          "read": 1013,
-          "glob": 116,
-          "grep": 99,
+          "read": 1159,
+          "glob": 124,
+          "grep": 101,
           "mcp": 14
         }
       },
       "tokens": {
         "input": {
-          "observed_runs": 37,
-          "total": 11794630
+          "observed_runs": 38,
+          "total": 13942844
         },
         "output": {
-          "observed_runs": 37,
-          "total": 148369
+          "observed_runs": 38,
+          "total": 158338
         },
         "cache_read": {
-          "observed_runs": 37,
-          "total": 10404800
+          "observed_runs": 38,
+          "total": 12466912
         },
         "cache_write": {
-          "observed_runs": 37,
+          "observed_runs": 38,
           "total": 0
         },
         "reasoning": {
@@ -157,16 +157,16 @@
           "total": null
         },
         "total": {
-          "observed_runs": 37,
-          "total": 22347799
+          "observed_runs": 38,
+          "total": 26568094
         }
       },
       "duration_ms": {
-        "observed_runs": 37,
-        "total": 1570601,
-        "avg": 42448.67567567567,
+        "observed_runs": 38,
+        "total": 1675419,
+        "avg": 44089.97368421053,
         "p50": 32174,
-        "p95": 102273
+        "p95": 104818
       },
       "cost_usd": {
         "raw": {
@@ -185,61 +185,61 @@
     },
     "all_time": {
       "runs": {
-        "total": 37,
+        "total": 38,
         "by_workflow": {
           "issue-audit": 7,
-          "requirement-acceptance": 30
+          "requirement-acceptance": 31
         },
         "by_provider": {
-          "cursor": 37
+          "cursor": 38
         },
         "by_result": {
-          "completed": 30,
+          "completed": 31,
           "repaired": 7
         }
       },
       "turns": {
-        "observed_runs": 37,
-        "total": 37,
+        "observed_runs": 38,
+        "total": 38,
         "avg": 1,
         "p50": 1,
         "p95": 1
       },
       "model_requests": {
-        "observed_runs": 37,
-        "total": 37,
+        "observed_runs": 38,
+        "total": 38,
         "avg": 1,
         "p50": 1,
         "p95": 1
       },
       "tools": {
-        "observed_runs": 37,
-        "total": 1242,
-        "avg": 33.567567567567565,
+        "observed_runs": 38,
+        "total": 1398,
+        "avg": 36.78947368421053,
         "p50": 24,
-        "p95": 108,
+        "p95": 156,
         "by_name": {
-          "read": 1013,
-          "glob": 116,
-          "grep": 99,
+          "read": 1159,
+          "glob": 124,
+          "grep": 101,
           "mcp": 14
         }
       },
       "tokens": {
         "input": {
-          "observed_runs": 37,
-          "total": 11794630
+          "observed_runs": 38,
+          "total": 13942844
         },
         "output": {
-          "observed_runs": 37,
-          "total": 148369
+          "observed_runs": 38,
+          "total": 158338
         },
         "cache_read": {
-          "observed_runs": 37,
-          "total": 10404800
+          "observed_runs": 38,
+          "total": 12466912
         },
         "cache_write": {
-          "observed_runs": 37,
+          "observed_runs": 38,
           "total": 0
         },
         "reasoning": {
@@ -247,16 +247,16 @@
           "total": null
         },
         "total": {
-          "observed_runs": 37,
-          "total": 22347799
+          "observed_runs": 38,
+          "total": 26568094
         }
       },
       "duration_ms": {
-        "observed_runs": 37,
-        "total": 1570601,
-        "avg": 42448.67567567567,
+        "observed_runs": 38,
+        "total": 1675419,
+        "avg": 44089.97368421053,
         "p50": 32174,
-        "p95": 102273
+        "p95": 104818
       },
       "cost_usd": {
         "raw": {
