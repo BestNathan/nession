@@ -6,6 +6,8 @@ Nession uses Playwright for end-to-end testing of the web UI and its integration
 
 ## Test Structure
 
+The canonical Issue/SC verification tree is `e2e/acceptance/cases/<issue>/<SC>/`. It uses the shared Runner; verifier source is committed and immutable results live only on `acceptance-results`.
+
 ```
 e2e/
 ├── fixtures/              # Configuration for server and agent
@@ -17,7 +19,7 @@ e2e/
 │   ├── reset.ts           # resetAuth helper
 │   ├── fixtureVisual.ts   # Frozen-clock helpers for fixture visual baselines
 │   └── ui-assert/         # Reusable UI assertions (composer)
-├── tests/browser/         # Test specifications
+├── tests/browser/                 # Test specifications
 │   ├── login.spec.ts      # Authentication tests
 │   ├── session-lifecycle.spec.ts  # Session create/kill tests
 │   ├── terminal-io.spec.ts       # Terminal I/O tests (relay + P2P)

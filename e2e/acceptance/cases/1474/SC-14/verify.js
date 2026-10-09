@@ -1,4 +1,4 @@
-const { runtimeFromEnv, verifyOnlineAgent } = require('../../../shared/protocol-online-agent.js');
+const { runtimeFromEnv, verifyOnlineAgent } = require('../../../../../acceptance/shared/protocol-online-agent.js');
 
 async function main() {
   const result = await verifyOnlineAgent(runtimeFromEnv());
