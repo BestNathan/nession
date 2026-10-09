@@ -88,7 +88,6 @@ jobs:
       - name: Invoke real Provider using production Acceptance entrypoint
         env:
           PROVIDER: ${{ matrix.provider }}
-          NSESSION_AGENT_WORKFLOW_ID: requirement-acceptance
         run: |
           set -euo pipefail
           node scripts/acceptance-agent.mjs \
