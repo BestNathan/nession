@@ -112,6 +112,26 @@ export class ConnectionManager implements TerminalTransport {
    */
   private pendingResize: { cols: number; rows: number } | null = null;
   /**
+   * The size the session last heard from this client (#1503 follow-up).
+   *
+   * A repeat of it is a round trip that cannot change anything: the agent's own
+   * guard makes a resize to the size the window already has a no-op (#1490), so
+   * what the client saves by not sending it is traffic and a `%output`-visible
+   * wake-up, not correctness. The ResizeObserver produces these readily — a
+   * container that moves and comes back, a debounced fire that lands on the size
+   * already sent, and, on every attach, the coalesced size that the attach
+   * itself already stated.
+   *
+   * **What this must not become is a claim that a repeat is meaningless in
+   * general.** The window is shared (`window-size manual`, last writer wins), so
+   * another client may have moved it since — and only the agent sees every
+   * `resize-window`, including the ones it did not get from us. So the dedup
+   * covers exactly what this client knows: sizes it put on the wire itself, and
+   * the one the attach stated (which is where {@link noteAttachedSize} seeds
+   * it). Anything else is the agent's call, and it already makes it.
+   */
+  private lastSentResize: { cols: number; rows: number } | null = null;
+  /**
    * Owns the stream cursor and the order frames are applied in (#1303). This
    * class moves bytes and never decides what is next in the timeline: a live
    * frame and a replay answer are handed to the same reconciler, which is the
@@ -361,13 +381,31 @@ export class ConnectionManager implements TerminalTransport {
     this.flushPendingResize();
   }
 
+  /**
+   * Seed the size the session was told at attach, so the coalesced resize that
+   * follows the attach is not sent back as a "change" (#1503 follow-up). The
+   * attach states a size and the agent applies it; a client that then sends the
+   * same pair is describing where it already is.
+   */
+  noteAttachedSize(cols: number, rows: number): void {
+    this.lastSentResize = { cols, rows };
+  }
+
   private sendResizeRaw(cols: number, rows: number): void {
+    const last = this.lastSentResize;
+    if (last !== null && last.cols === cols && last.rows === rows) {
+      return;
+    }
     if (this.mode === 'p2p' && this.agentApi) {
       try {
         this.agentApi.sendResize(this.sessionName, cols, rows);
+        // Recorded only where the call returned: a throw means nothing left the
+        // client, so the next attempt must still send it.
+        this.lastSentResize = { cols, rows };
       } catch { /* transport reconnecting — coalesced via the isAttached gate */ }
     } else if (this.mode === 'relay' && this.serverConnection?.isReady()) {
       this.serverConnection.sendRelayResize(this.sessionName, cols, rows);
+      this.lastSentResize = { cols, rows };
     }
   }
 
