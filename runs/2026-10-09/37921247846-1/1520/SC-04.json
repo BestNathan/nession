@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "dddaf7517361ef4ca733e61a1aeaae3c66af45f159a86f6787f76c1a06eb5949",
+  "run_id": 37921247846,
+  "run_attempt": 1,
+  "issue": 1520,
+  "criterion": "SC-04",
+  "criterion_text": "Staging receives the reviewed integration using an ordinary merge commit, and actual staging SHA verification is recorded separately from release/main deployment.",
+  "stage": "staging",
+  "target_sha": "32bc4781e31a2ea6b73463f67db8542a220eb0ba",
+  "contract_sha256": "7c396f6ad6048c4e7be29b709ef6f2f0e12ac2493a58b384fb59ba750eeed55a",
+  "case_revision": "32bc4781e31a2ea6b73463f67db8542a220eb0ba",
+  "case_tree_sha": "6ff81270b70b30d5ff9b4c3f52c4669f7cd61bea",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-09T11:03:45.056Z",
+  "finished_at": "2026-10-09T11:03:50.813Z",
+  "duration_ms": 5757,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.js",
+      "result": "Pass",
+      "summary": "Normal two-parent staging merge commit runs isolated product Web at the exact SHA; production release is explicitly separate.",
+      "evidence": [
+        {
+          "type": "git",
+          "value": "staging merge=32bc4781e31a2ea6b73463f67db8542a220eb0ba parent0=5ee6ee0b45484a082ac2f9ddcc028608391f3207 parent1=3ecaec0e3d96b4017faec3a295c24ad540762698"
+        },
+        {
+          "type": "runtime",
+          "value": "full-stack target_sha=32bc4781e31a2ea6b73463f67db8542a220eb0ba Web HTTP=200"
+        },
+        {
+          "type": "release-boundary",
+          "value": "staging verification only; main/prod deployment not asserted"
+        }
+      ],
+      "duration_ms": 69,
+      "exit_code": 0
+    }
+  ],
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 37921247846,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "32bc4781e31a2ea6b73463f67db8542a220eb0ba",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/37921247846",
+    "record_path": "runs/2026-10-09/37921247846-1/1520/SC-04.json",
+    "source_result_sha256": "8210369f495f99be9b2c4aaec86a5a5041849af45e84b5525bb4eec7c219fd03"
+  }
+}
