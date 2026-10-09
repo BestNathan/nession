@@ -55,6 +55,7 @@ jobs:
           node scripts/protocol-gate.mjs --json >/dev/null
           node scripts/issue-contract.mjs self-test
           node scripts/e2e-run-ingest.mjs self-test
+          node scripts/e2e-run-ingest-negative-selftest.mjs
           node scripts/issue-audit-agent.mjs self-test
           node scripts/issue-audit-cursor.mjs self-test
           node scripts/requirement-acceptance.mjs self-test
