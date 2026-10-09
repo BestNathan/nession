@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "6e89172c72959d29f32f602203e920422273eb14b5a064dc50e4f8a33f4d2bc7",
+  "run_id": 37911124065,
+  "run_attempt": 1,
+  "issue": 1512,
+  "criterion": "SC-02",
+  "criterion_text": "Canonical browser regression runs against the new tree with exact-head E2E, Quality, and acceptance evidence; visual baseline behavior unchanged.",
+  "stage": "staging",
+  "target_sha": "02a14fd93b84b975b989ea9d6d82cd6fcd5fdff1",
+  "contract_sha256": "a8ddfbb5048a673cb9e7cc4f90879c88b04995b376bb29487cc407a744949904",
+  "case_revision": "02a14fd93b84b975b989ea9d6d82cd6fcd5fdff1",
+  "case_tree_sha": "1fc985f08feb534b7abc9308e18f6cc375f0ae73",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-09T09:26:54.156Z",
+  "finished_at": "2026-10-09T09:27:00.496Z",
+  "duration_ms": 6340,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.js",
+      "result": "Pass",
+      "summary": "The exact merged SHA serves isolated production Web and the canonical 21-spec/43-PNG parity and Case catalogs validate.",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "shared full-stack target_sha=02a14fd93b84b975b989ea9d6d82cd6fcd5fdff1 Web HTTP=200"
+        },
+        {
+          "type": "test",
+          "value": "e2e/runner/cli-selftest.mjs passed 21 specs and 43 git-hashed PNG snapshots"
+        },
+        {
+          "type": "test",
+          "value": "./e2e/run --validate found 15 source-aligned Cases"
+        }
+      ],
+      "duration_ms": 450,
+      "exit_code": 0
+    }
+  ],
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 37911124065,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "02a14fd93b84b975b989ea9d6d82cd6fcd5fdff1",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/37911124065",
+    "record_path": "runs/2026-10-09/37911124065-1/1512/SC-02.json",
+    "source_result_sha256": "c264a2acfe98437aedc7ae69a5e324f81b31f4ac523b8e7b20e2d73f1057eb57"
+  }
+}
