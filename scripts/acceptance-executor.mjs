@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import {
   extractSection,
   parseAcceptanceReport,
@@ -88,6 +89,7 @@ export function buildAcceptanceContext(issue, stage, options = {}) {
       return ref;
     })(),
     deployment: options.deployment ? String(options.deployment).trim() : null,
+    ci_evidence: options.ciEvidence ?? null,
     criteria,
     requirement_body: String(issue.body ?? ''),
   };
@@ -154,6 +156,72 @@ export function normalizeAcceptanceResult(context, raw, source = 'agent') {
     deployment: context.deployment,
     source: String(source || 'unknown'),
     criteria,
+  };
+}
+
+export function normalizeAcceptanceCaseResult(context, record, source = 'case-runner') {
+  if (!record || typeof record !== 'object') throw new Error('Case result must be an object');
+  const criterion = String(record.criterion ?? '').trim().toUpperCase();
+  if (!/^SC-\d{2,}$/.test(criterion)) throw new Error('invalid Case criterion');
+  if (Number(record.issue) !== Number(context.issue.number)) throw new Error('Case result Issue does not match Acceptance context');
+  if (String(record.stage) !== String(context.stage)) throw new Error('Case result stage does not match Acceptance context');
+  if (String(record.contract_sha256) !== String(context.contract_sha256)) {
+    throw new Error('Case result contract digest does not match Acceptance context');
+  }
+  if (String(record.target_sha) !== String(context.target_ref)) {
+    throw new Error('Case result target SHA does not match Acceptance context');
+  }
+  if (!context.criteria.some((item) => item.criterion === criterion)) {
+    throw new Error('Case result criterion is absent from requested Acceptance stage');
+  }
+
+  const caseResult = String(record.result ?? '');
+  const projected = caseResult === 'Pass'
+    ? 'Pass'
+    : caseResult === 'Fail'
+      ? 'Fail'
+      : 'Pending';
+  const evidence = [
+    {
+      type: 'case',
+      value: 'execution=' + String(record.execution_id ?? '(missing)') +
+        ' tree=' + String(record.case_tree_sha ?? '(missing)') +
+        ' revision=' + String(record.case_revision ?? '(missing)'),
+    },
+  ];
+  for (const verifier of record.verifiers ?? []) {
+    for (const item of verifier.evidence ?? []) {
+      evidence.push({
+        type: String(item.type ?? verifier.type ?? 'case'),
+        value: String(item.value ?? '').trim(),
+      });
+    }
+  }
+  if (record.provenance?.workflow_url) {
+    evidence.push({ type: 'workflow', value: String(record.provenance.workflow_url) });
+  }
+  if (record.provenance?.record_path) {
+    evidence.push({ type: 'record', value: String(record.provenance.record_path) });
+  }
+
+  return {
+    schema_version: 1,
+    issue: context.issue.number,
+    stage: context.stage,
+    contract_sha256: context.contract_sha256,
+    run_id: context.run_id,
+    target_ref: context.target_ref,
+    deployment: context.deployment,
+    source: String(source || 'case-runner'),
+    selected_criteria: [criterion],
+    criteria: [normalizeCriterion({
+      criterion,
+      result: projected,
+      evidence,
+      summary: caseResult === 'Error'
+        ? 'Acceptance Case infrastructure error: ' + String(record.infrastructure_error ?? 'unknown error')
+        : String((record.verifiers ?? []).map((item) => item.summary).filter(Boolean).join(' | ') || caseResult),
+    })],
   };
 }
 
@@ -240,9 +308,17 @@ export function applyAcceptanceResultToBody(body, normalized) {
   const runId = runIdOf(normalized.run_id);
   if (!Array.isArray(normalized.criteria)) throw new Error('acceptance result criteria must be an array');
 
-  const expected = [...contract.criteria.values()]
+  const stageExpected = [...contract.criteria.values()]
     .filter((criterion) => contract.rows.get(criterion.id).stage === stage)
     .map((criterion) => criterion.id);
+  const expected = Array.isArray(normalized.selected_criteria)
+    ? normalized.selected_criteria.map((id) => String(id).trim().toUpperCase())
+    : stageExpected;
+  if (expected.length === 0) throw new Error('acceptance result selects no criteria');
+  if (new Set(expected).size !== expected.length) throw new Error('acceptance result has duplicate selected criteria');
+  for (const id of expected) {
+    if (!stageExpected.includes(id)) throw new Error('selected criterion ' + id + ' is unknown or belongs to another stage');
+  }
   const resultMap = new Map();
   for (const raw of normalized.criteria) {
     const result = normalizeCriterion(raw);
@@ -250,6 +326,7 @@ export function applyAcceptanceResultToBody(body, normalized) {
     const row = contract.rows.get(result.criterion);
     if (!row) throw new Error('unknown criterion ' + result.criterion);
     if (row.stage !== stage) throw new Error(result.criterion + ' belongs to ' + row.stage + ', not requested stage ' + stage);
+    if (!expected.includes(result.criterion)) throw new Error('criterion ' + result.criterion + ' was not selected for this partial acceptance result');
     resultMap.set(result.criterion, result);
   }
   const missing = expected.filter((id) => !resultMap.has(id));
@@ -283,13 +360,41 @@ function fetchIssue(issueNumber) {
   return JSON.parse(raw);
 }
 
-function prepareCommand(issueNumber, stage, targetRef, outFile, deployment) {
+function implicitCiEvidenceFile(outFile) {
+  if (process.env.GITHUB_ACTIONS !== 'true') return null;
+  const root = String(process.env.GITHUB_WORKSPACE ?? '').trim().replace(/\/+$/, '');
+  if (!root) return null;
+
+  const workspace = root + '/workspace';
+  if (!fs.existsSync(workspace)) return null;
+
+  const evidenceFile = outFile + '.ci-evidence.json';
+  const collector = fileURLToPath(new URL('./acceptance-ci-evidence.mjs', import.meta.url));
+  execFileSync(process.execPath, [collector, 'collect', workspace, evidenceFile], {
+    env: process.env,
+    stdio: 'inherit',
+  });
+  return evidenceFile;
+}
+
+function prepareCommand(issueNumber, stage, targetRef, outFile, deployment, ciEvidenceFile) {
   const issue = fetchIssue(issueNumber);
   if (String(issue.state).toUpperCase() !== 'OPEN') throw new Error('requirement #' + issueNumber + ' is not open');
   if (!labelNames(issue).includes('requirement')) throw new Error('issue #' + issueNumber + ' is not labeled requirement');
+
+  // Current Acceptance workflows pass a trusted CI-evidence file explicitly.
+  // Older workflow runs do not. GitHub re-runs preserve the workflow definition
+  // from the original run, while this trusted harness is checked out from main.
+  // Recover the same evidence from the already checked-out target workspace so
+  // historical re-runs cannot silently degrade to ci_evidence=null.
+  const evidencePath = ciEvidenceFile || implicitCiEvidenceFile(outFile);
+  const ciEvidence = evidencePath
+    ? JSON.parse(fs.readFileSync(evidencePath, 'utf8'))
+    : null;
   const context = buildAcceptanceContext(issue, stage, {
     targetRef,
     deployment,
+    ciEvidence,
     runId: process.env.ACCEPTANCE_RUN_ID ?? process.env.GITHUB_RUN_ID,
   });
   fs.writeFileSync(outFile, JSON.stringify(context, null, 2) + '\n');
@@ -354,8 +459,21 @@ function fixtureBody() {
 
 function selfTest() {
   const issue = { number: 1360, title: 'Requirement: fixture', url: 'https://example.test/1360', body: fixtureBody() };
-  const staging = buildAcceptanceContext(issue, 'staging', { targetRef: 'abc123', deployment: 'staging', runId: 100 });
+  const staging = buildAcceptanceContext(issue, 'staging', {
+    targetRef: 'abc123',
+    deployment: 'staging',
+    runId: 100,
+    ciEvidence: {
+      schema_version: 1,
+      kind: 'acceptance_ci_evidence',
+      target_sha: 'abc123',
+      direct_runs: [{ id: 42, name: 'E2E Tests', status: 'completed', conclusion: 'success', head_sha: 'abc123' }],
+      pull_requests: [],
+    },
+  });
   assert.deepEqual(staging.criteria.map((item) => item.criterion), ['SC-01']);
+  assert.equal(staging.ci_evidence.target_sha, 'abc123');
+  assert.equal(staging.ci_evidence.direct_runs[0].id, 42);
   const pass = normalizeAcceptanceResult(staging, {
     criteria: [{
       criterion: 'SC-01',
@@ -402,11 +520,48 @@ function selfTest() {
   const changed = passedBody.replace('deterministic update works', 'changed wording');
   assert.throws(() => applyAcceptanceResultToBody(changed, pass), /contract changed/);
 
-  console.log('acceptance-executor self-test: 10 cases passed');
+  const multiBody = fixtureBody().replace(
+    '| SC-02 | post-merge | Pending | requires production deployment; verify after release |',
+    '| SC-02 | staging | Pending | second staging criterion pending |',
+  );
+  const multiIssue = { ...issue, body: multiBody };
+  const multiContext = buildAcceptanceContext(multiIssue, 'staging', {
+    targetRef: 'a'.repeat(40),
+    deployment: 'staging',
+    runId: 300,
+  });
+  assert.deepEqual(multiContext.criteria.map((item) => item.criterion), ['SC-01', 'SC-02']);
+  const caseProjection = normalizeAcceptanceCaseResult(multiContext, {
+    issue: 1360,
+    criterion: 'SC-01',
+    stage: 'staging',
+    target_sha: 'a'.repeat(40),
+    contract_sha256: multiContext.contract_sha256,
+    execution_id: 'b'.repeat(64),
+    case_tree_sha: 'c'.repeat(40),
+    case_revision: 'a'.repeat(40),
+    result: 'Pass',
+    verifiers: [{
+      type: 'runtime',
+      result: 'Pass',
+      summary: 'runtime proof',
+      evidence: [{ type: 'runtime', value: 'proof=ok' }],
+    }],
+  });
+  assert.deepEqual(caseProjection.selected_criteria, ['SC-01']);
+  const partialBody = applyAcceptanceResultToBody(multiBody, caseProjection);
+  assert.match(partialBody, /\| SC-01 \| staging \| Pass \| run 300;/);
+  assert.match(partialBody, /\| SC-02 \| staging \| Pending \| second staging criterion pending \|/);
+  assert.throws(
+    () => applyAcceptanceResultToBody(multiBody, { ...caseProjection, selected_criteria: ['SC-99'] }),
+    /unknown or belongs to another stage/,
+  );
+
+  console.log('acceptance-executor self-test: 16 cases passed');
 }
 
 function usage() {
-  return 'usage: acceptance-executor.mjs <self-test|prepare ISSUE STAGE TARGET_REF OUT [DEPLOYMENT]|normalize-result CONTEXT RAW OUT SOURCE|apply ISSUE RESULT>';
+  return 'usage: acceptance-executor.mjs <self-test|prepare ISSUE STAGE TARGET_REF OUT [DEPLOYMENT] [CI_EVIDENCE_JSON]|normalize-result CONTEXT RAW OUT SOURCE|apply ISSUE RESULT>';
 }
 
 function main() {
@@ -414,7 +569,7 @@ function main() {
   if (command === 'self-test') return selfTest();
   if (command === 'prepare') {
     if (args.length < 4) throw new Error(usage());
-    return prepareCommand(Number(args[0]), args[1], args[2], args[3], args[4]);
+    return prepareCommand(Number(args[0]), args[1], args[2], args[3], args[4], args[5]);
   }
   if (command === 'normalize-result') {
     if (args.length < 4) throw new Error(usage());

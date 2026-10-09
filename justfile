@@ -67,7 +67,11 @@ build-cache-verify:
 
 # Full CI checks (fmt + lint + runtime/tmux/protocol gates + codegen drift +
 # coverage — coverage runs all tests)
-check: fmt lint check-rustc-wrapper check-worktree-target-seed check-build-cache-verify check-acceptance-runtime check-acceptance-cases check-tmux-socket check-protocol check-codegen coverage
+check: fmt lint check-rustc-wrapper check-worktree-target-seed check-build-cache-verify check-acceptance-runtime check-acceptance-cases check-tmux-socket check-protocol check-codegen coverage check-instructions
+
+# Canonical instruction contract is owned by the main Gate catalog.
+check-instructions:
+    ./gates/run instruction-contract
 
 # Prove the shared Acceptance full-stack harness keeps its config/target contract
 # deterministic without launching the runtime.
@@ -78,6 +82,8 @@ check-acceptance-runtime:
 # deterministic Pass/Fail/Pending/Error aggregation without provisioning.
 check-acceptance-cases:
     node scripts/acceptance-cases-selftest.mjs
+    node scripts/acceptance-executor.mjs self-test
+    node scripts/acceptance-case-ingest.mjs self-test
 
 # ── Protocol codegen (#678 Phase 5) ─────────────────────────────────────────
 

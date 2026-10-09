@@ -2,7 +2,7 @@ const path = require('node:path');
 const { defineConfig } = require('../../e2e/node_modules/@playwright/test');
 
 module.exports = defineConfig({
-  testDir: path.resolve(__dirname, '../cases'),
+  testDir: path.resolve(__dirname, '../../e2e/acceptance/cases'),
   fullyParallel: false,
   workers: 1,
   retries: 0,

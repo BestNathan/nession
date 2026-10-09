@@ -1,0 +1,12 @@
+# pre-push
+# Gate IDs only. Not wired into current hooks/workflows yet.
+dev-workspace-push
+rust-test-unit
+rust-test-integration
+rust-coverage
+protocol-integrity
+protocol-codegen-drift
+design-system-full
+web-test-unit
+web-test-integration
+web-coverage
