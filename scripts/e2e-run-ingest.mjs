@@ -56,7 +56,8 @@ export function sourceIdentity(event, repo) {
     throw new Error('not a completed E2E Scenario Smoke workflow_run');
   if (run.repository?.full_name !== repo || run.head_repository?.full_name !== repo)
     throw new Error('source workflow repository mismatch');
-  if (run.path && !String(run.path).includes('/.github/workflows/e2e-scenario-smoke.yml'))
+  const canonicalPath = '.github/workflows/e2e-scenario-smoke.yml';
+  if (run.path !== canonicalPath && run.path !== repo + '/' + canonicalPath)
     throw new Error('unexpected source workflow path');
   if (!['pull_request', 'push', 'workflow_dispatch'].includes(run.event))
     throw new Error('unsupported source workflow event');
@@ -204,8 +205,16 @@ function selfTest() {
     conclusion: 'success', event: 'pull_request', head_branch: 'feat/scenario',
     id: 12, run_attempt: 1, workflow_id: 70, head_sha: source.target_sha,
     repository: { full_name: 'BestNathan/nession' },
-    head_repository: { full_name: 'BestNathan/nession' } } };
+    head_repository: { full_name: 'BestNathan/nession' },
+    path: '.github/workflows/e2e-scenario-smoke.yml' } };
   assert.equal(sourceIdentity(event, 'BestNathan/nession').run_id, 12);
+  assert.equal(sourceIdentity({ workflow_run: { ...event.workflow_run,
+    path: 'BestNathan/nession/.github/workflows/e2e-scenario-smoke.yml' } }, 'BestNathan/nession').run_id, 12);
+  for (const path of [undefined, '', 'other/.github/workflows/e2e-scenario-smoke.yml',
+    '.github/workflows/untrusted.yml', '.github/workflows/e2e-scenario-smoke.yml.backup']) {
+    assert.throws(() => sourceIdentity({ workflow_run: { ...event.workflow_run, path } },
+      'BestNathan/nession'), /unexpected source workflow path/);
+  }
   assert.throws(() => sourceIdentity({ workflow_run: { ...event.workflow_run,
     event: 'workflow_run' } }, 'BestNathan/nession'), /unsupported/);
   assert.throws(() => sourceIdentity({ workflow_run: { ...event.workflow_run,
