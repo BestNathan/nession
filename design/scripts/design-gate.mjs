@@ -82,7 +82,7 @@ const FULL_COMMANDS = [
 const BROWSER_COMMANDS = [
   {
     id: 'browser-ui-contracts',
-    command: 'cd e2e && npx playwright test tests/browser/ui-contract-assertions.spec.ts specs/ui-contract-matrix.spec.ts',
+    command: 'cd e2e && npx playwright test tests/browser/ui-contract-assertions.spec.ts tests/browser/ui-contract-matrix.spec.ts',
     owner: 'design/contracts/* + e2e/helpers/ui-assert/',
     expected: 'canonical browser surfaces satisfy resolved UI contracts across the viewport matrix',
     repair: 'fix the drifting implementation or the canonical contract owner; do not update baselines to hide a structured failure',
