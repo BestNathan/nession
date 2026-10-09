@@ -1,0 +1,99 @@
+{
+  "schema_version": 1,
+  "kind": "e2e_scenario_observation",
+  "mode": "scenario",
+  "scenario": "terminal-attach-resume",
+  "target_sha": "b2c776f50fe38071c733987ab2507ea2a9a97ff0",
+  "scenario_revision": "b2c776f50fe38071c733987ab2507ea2a9a97ff0",
+  "run_id": 37894504386,
+  "run_attempt": 1,
+  "run_index": 1,
+  "status": "Completed",
+  "evaluation": null,
+  "started_at": "2026-10-09T06:39:48.310Z",
+  "finished_at": "2026-10-09T06:39:58.115Z",
+  "config_sha256": "02570e8ea79bef27b3596233d77e63cada084f43a56f2e11df811513f96f8826",
+  "config": {
+    "generated_lines": 240,
+    "samples_max": 12,
+    "transport": "Relay",
+    "reload": true
+  },
+  "observation_count": 3,
+  "observations": [
+    {
+      "at": "2026-10-09T06:39:57.347Z",
+      "browser": {
+        "mounted": true,
+        "marker_count": 241,
+        "viewport": {
+          "baseY": 210,
+          "viewportY": 210
+        }
+      },
+      "backend": {
+        "marker_count": 240,
+        "sha256": "aa1114532e91ad22e162b47a45f541f3f653ef73595791c99d1cd89d7eb37e2a",
+        "bytes": 9572
+      },
+      "stage": "before-reload"
+    },
+    {
+      "at": "2026-10-09T06:39:57.569Z",
+      "browser": {
+        "mounted": true,
+        "marker_count": 0,
+        "viewport": {
+          "baseY": 0,
+          "viewportY": 0
+        }
+      },
+      "backend": {
+        "marker_count": 240,
+        "sha256": "aa1114532e91ad22e162b47a45f541f3f653ef73595791c99d1cd89d7eb37e2a",
+        "bytes": 9572
+      },
+      "stage": "after-reload"
+    },
+    {
+      "at": "2026-10-09T06:39:58.063Z",
+      "browser": {
+        "mounted": true,
+        "marker_count": 241,
+        "viewport": {
+          "baseY": 210,
+          "viewportY": 210
+        }
+      },
+      "backend": {
+        "marker_count": 240,
+        "sha256": "aa1114532e91ad22e162b47a45f541f3f653ef73595791c99d1cd89d7eb37e2a",
+        "bytes": 9572
+      },
+      "stage": "after-reload"
+    }
+  ],
+  "privacy": "whitelisted counters/timestamps/digests only; no terminal bytes",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 37894504386,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "test/1516-canonical-case-ingest-proof",
+    "target_sha": "b2c776f50fe38071c733987ab2507ea2a9a97ff0",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/37894504386",
+    "scenario_tree_sha": "96ae71e441342a6b448289c64cc8ca2ac8f00659",
+    "original_sha256": "715fe0fecb91900ddc90abbc6a37fb035b5b3c236f1a576495493f785d86f645"
+  },
+  "evidence": {
+    "provider": "github-actions-artifact",
+    "artifact_name": "e2e-terminal-scenario-37894504386-1",
+    "sha256": "715fe0fecb91900ddc90abbc6a37fb035b5b3c236f1a576495493f785d86f645",
+    "retention_days": 14,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/37894504386",
+    "durability": "time-limited; object archival not configured"
+  },
+  "execution_id": "8348034795d78745b4899b105af8fe1fe86f96b9acb2467f49bbd79deba2e805"
+}
