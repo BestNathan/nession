@@ -1,6 +1,7 @@
 // The canonical E2E dispatcher must fail closed and never claim zero-work Pass.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { createHash } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -26,6 +27,29 @@ const listed = call('--list');
 assert.equal(listed.code, 0);
 const catalog = JSON.parse(listed.stdout);
 assert.ok(catalog.browserTests > 0, 'regression catalog must never silently report 0 suites');
+const migration = JSON.parse(fs.readFileSync(path.join(repo, 'e2e', 'tests', 'browser', 'migration-parity.json'), 'utf8'));
+assert.equal(migration.schema_version, 1);
+assert.match(migration.source_sha, /^[a-f0-9]{40}$/);
+const browserRoot = path.join(repo, 'e2e', 'tests', 'browser');
+assert.equal(fs.existsSync(path.join(repo, 'e2e', 'specs')), false, 'legacy tests must be retired');
+const foundSpecs = fs.readdirSync(browserRoot).filter(name => name.endsWith('.spec.ts')).sort();
+assert.deepEqual(foundSpecs, migration.specs, 'browser spec inventory changed during migration');
+assert.equal(foundSpecs.length, 21, 'baseline migration needs all 21 spec files');
+assert.equal(catalog.browserTests, 21, 'catalog may not silently count duplicates or omit specs');
+const pngRoot = path.join(browserRoot, '__snapshots__', 'fixture-visual.spec.ts');
+const foundPngs = fs.readdirSync(pngRoot).filter(name => name.endsWith('.png')).sort();
+const pinned = Object.keys(migration.baseline_png_blobs).map(file => path.basename(file)).sort();
+assert.deepEqual(foundPngs, pinned, 'snapshot inventory mismatch');
+assert.equal(foundPngs.length, 43, 'all 43 snapshots must migrate unchanged');
+for (const [relative, expectedSha] of Object.entries(migration.baseline_png_blobs)) {
+  const filename = path.resolve(browserRoot, relative);
+  assert.ok(filename.startsWith(browserRoot + path.sep), 'snapshot path escaped browser tree');
+  assert.equal(fs.lstatSync(filename).isSymbolicLink(), false, 'snapshots must be real files');
+  const bytes = fs.readFileSync(filename);
+  const actual = createHash('sha1').update('blob ' + bytes.length + '\0').update(bytes).digest('hex');
+  assert.equal(actual, expectedSha, 'visual baseline bytes changed: ' + relative);
+}
+
 assert.ok(catalog.cases.length > 0, 'Case catalog must discover source-aligned Cases');
 assert.ok(catalog.scenarios.length > 0, 'scenario catalog must not silently disappear');
 

@@ -3,9 +3,9 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { openCapsuleCapability } from '../helpers/capsule';
-import { waitForShell } from '../helpers/shell';
-import { E2E_TMUX_SOCKET } from '../runtime';
+import { openCapsuleCapability } from '../../helpers/capsule';
+import { waitForShell } from '../../helpers/shell';
+import { E2E_TMUX_SOCKET } from '../../runtime';
 
 // __dirname (not import.meta): Playwright transforms specs to CJS — this
 // package.json is not "type": "module". Same convention as
@@ -355,7 +355,7 @@ async function countInBuffer(page: import('@playwright/test').Page, needle: stri
  * only copy of itself — an inlined copy here would drift from it silently.
  */
 function ptyProbeInstaller(): string {
-  const script = readFileSync(join(__dirname, '..', 'fixtures', 'pty-probe.sh'), 'utf8');
+  const script = readFileSync(join(__dirname, '..', '..', 'fixtures', 'pty-probe.sh'), 'utf8');
   return `printf '%s' '${Buffer.from(script).toString('base64')}' | base64 -d > pty-probe.sh`;
 }
 
@@ -412,7 +412,7 @@ function readPane(sessionName: string): { text: string; sha: string; markers: nu
  * the only copy of itself.
  */
 function repaintFixtureInstaller(): string {
-  const script = readFileSync(join(__dirname, '..', 'fixtures', 'inline-repaint.sh'), 'utf8');
+  const script = readFileSync(join(__dirname, '..', '..', 'fixtures', 'inline-repaint.sh'), 'utf8');
   return `printf '%s' '${Buffer.from(script).toString('base64')}' | base64 -d > inline-repaint.sh`;
 }
 

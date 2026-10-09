@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { gotoFixtureApp } from '../helpers/fixtureVisual';
+import { gotoFixtureApp } from '../../helpers/fixtureVisual';
 
 test.skip(!process.env.CI, 'local only — runs in CI workflow only');
 

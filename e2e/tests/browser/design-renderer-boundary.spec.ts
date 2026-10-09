@@ -17,7 +17,7 @@
 // selector must fail loudly. An assertion built on an empty query returns a
 // confident zero and passes forever.
 import { expect, test } from '@playwright/test';
-import { gotoFixtureWorkspace, openFixtureFile } from '../helpers/fixtureVisual';
+import { gotoFixtureWorkspace, openFixtureFile } from '../../helpers/fixtureVisual';
 
 test.skip(!process.env.CI, 'local only — runs in CI workflow only');
 

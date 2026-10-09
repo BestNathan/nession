@@ -1,4 +1,4 @@
-// e2e/specs/ui-contract-matrix.spec.ts
+// e2e/tests/browser/ui-contract-matrix.spec.ts
 // #547 — canonical Web/App viewport validation matrix.
 //
 // The matrix itself (ids, sizes, experience tags) is the SINGLE source in
@@ -24,10 +24,10 @@ import {
   expectTouchTargetsWithin,
   expectVisibleWithin,
   waitForSettledBox,
-} from '../helpers/ui-assert/assertions';
-import { loadContracts, patternBlock, type Experience } from '../helpers/ui-assert/contracts';
-import { swipeHorizontally } from '../helpers/shell';
-import { waitForFixtureTerminal } from '../helpers/fixtureVisual';
+} from '../../helpers/ui-assert/assertions';
+import { loadContracts, patternBlock, type Experience } from '../../helpers/ui-assert/contracts';
+import { swipeHorizontally } from '../../helpers/shell';
+import { waitForFixtureTerminal } from '../../helpers/fixtureVisual';
 
 test.skip(!process.env.CI, 'local only — runs in CI workflow only');
 

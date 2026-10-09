@@ -1,4 +1,4 @@
-// e2e/specs/fixture-git.spec.ts
+// e2e/tests/browser/fixture-git.spec.ts
 //
 // #750 SC2 and SC5, asserted against real DOM rather than a jsdom mock: the
 // listing groups changes and gives an untracked entry no expander, and the view
