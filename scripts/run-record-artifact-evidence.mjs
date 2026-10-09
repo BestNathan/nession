@@ -39,7 +39,8 @@ export function validateArtifactEvidence(value, context) {
     throw new Error('missing artifact evidence envelope');
   }
   const expected = artifactEvidence(context);
-  if (JSON.stringify(value) !== JSON.stringify(expected)) {
+  if (Object.keys(value).length !== Object.keys(expected).length ||
+      Object.entries(expected).some(([key, item]) => value[key] !== item)) {
     throw new Error('artifact evidence provenance, digest or retention mismatch');
   }
   return expected;
