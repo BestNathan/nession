@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 37956726847,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/1498-optin-browser-for-runtime-cases",
+    "target_sha": "3e8f0e3903d465454cddf21ccdf105b7770ca4f5",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/37956726847",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "e0ff73624f205c877a71face5e3e75e0b904e4d9a5fc36fe59262de7f5ffced8"
+  },
+  "record": "runs/2026-10-09/37956726847-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "6b633db231c4e9310e839a03aa972574732bacad46ef6927d28ab84ea7f602f4"
+}
