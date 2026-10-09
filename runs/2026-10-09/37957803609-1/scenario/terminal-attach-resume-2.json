@@ -1,0 +1,82 @@
+{
+  "schema_version": 1,
+  "kind": "e2e_scenario_observation",
+  "mode": "scenario",
+  "scenario": "terminal-attach-resume",
+  "target_sha": "f1163028541afcb681d76b91f37b929ee0f3a58c",
+  "scenario_revision": "f1163028541afcb681d76b91f37b929ee0f3a58c",
+  "run_id": 37957803609,
+  "run_attempt": 1,
+  "run_index": 2,
+  "status": "Completed",
+  "evaluation": null,
+  "started_at": "2026-10-09T16:17:55.728Z",
+  "finished_at": "2026-10-09T16:18:04.566Z",
+  "config_sha256": "02570e8ea79bef27b3596233d77e63cada084f43a56f2e11df811513f96f8826",
+  "config": {
+    "generated_lines": 240,
+    "samples_max": 12,
+    "transport": "Relay",
+    "reload": true
+  },
+  "observation_count": 2,
+  "observations": [
+    {
+      "at": "2026-10-09T16:18:04.192Z",
+      "stage": "before-reload",
+      "browser": {
+        "mounted": true,
+        "marker_count": 241,
+        "viewport": {
+          "baseY": 210,
+          "viewportY": 210
+        }
+      },
+      "backend": {
+        "marker_count": 240,
+        "sha256": "cb38031928db2d2654b928d1c69ff32be78cca49774e108a9177a2de069f5115",
+        "bytes": 9572
+      }
+    },
+    {
+      "at": "2026-10-09T16:18:04.436Z",
+      "stage": "after-reload",
+      "browser": {
+        "mounted": true,
+        "marker_count": 241,
+        "viewport": {
+          "baseY": 210,
+          "viewportY": 210
+        }
+      },
+      "backend": {
+        "marker_count": 240,
+        "sha256": "cb38031928db2d2654b928d1c69ff32be78cca49774e108a9177a2de069f5115",
+        "bytes": 9572
+      }
+    }
+  ],
+  "privacy": "whitelisted counters/timestamps/digests only; no terminal bytes",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 37957803609,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/1498-optin-browser-for-runtime-cases",
+    "target_sha": "f1163028541afcb681d76b91f37b929ee0f3a58c",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/37957803609",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "fff9682cbb3c696799246ba9718a97e47bd36810e8151bc71d0ac1ccef2e3021"
+  },
+  "evidence": {
+    "provider": "github-actions-artifact",
+    "artifact_name": "e2e-terminal-scenario-37957803609-1",
+    "sha256": "fff9682cbb3c696799246ba9718a97e47bd36810e8151bc71d0ac1ccef2e3021",
+    "retention_days": 14,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/37957803609",
+    "durability": "time-limited; object archival not configured"
+  },
+  "execution_id": "8e85e33fdb4969f8e55fe93aa272f9969555cbb42da9fe7b428e7ba5ed23a97f"
+}
