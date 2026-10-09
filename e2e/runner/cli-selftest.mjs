@@ -142,6 +142,40 @@ try {
   assert.equal(delta.left.timeline.length, 3);
   assert.equal(delta.observed_delta.final_browser_marker_count, 140);
   assert.match(delta.limitations, /not synchronized/);
+  assert.equal(delta.source_comparison.same_target_sha, false);
+  assert.equal(delta.source_comparison.left.independently_authenticated, false);
+  assert.equal(delta.source_comparison.environment_identity, 'not-recorded');
+  assert.match(delta.limitations, /not independently authenticated/);
+  const sourceRecord = (target, runId) => ({
+    ...fixture(target, 240), run_id: runId, run_attempt: 1, run_index: 1,
+    source: { repository: 'BestNathan/nession', workflow_id: 378682095,
+      run_id: runId, run_attempt: 1, event: 'pull_request',
+      target_sha: target.repeat(40), scenario_tree_sha: 'a'.repeat(40),
+      original_sha256: 'd'.repeat(64) },
+  });
+  fs.writeFileSync(left, JSON.stringify(sourceRecord('a', 101)));
+  fs.writeFileSync(right, JSON.stringify(sourceRecord('b', 102)));
+  const cross = call('compare', left, right);
+  assert.equal(cross.code, 0);
+  const comparison = JSON.parse(cross.stdout);
+  assert.equal(comparison.source_comparison.left.source_fields,
+    'internally-consistent-but-unverified');
+  assert.equal(comparison.source_comparison.left.run_id, 101);
+  assert.equal(comparison.source_comparison.right.run_id, 102);
+  assert.equal(comparison.source_comparison.same_source_run, false);
+  assert.equal(comparison.source_comparison.same_target_sha, false);
+  assert.equal(comparison.source_comparison.left.independently_authenticated, false);
+  const spoof = sourceRecord('b', 102);
+  spoof.source.target_sha = 'a'.repeat(40);
+  fs.writeFileSync(right, JSON.stringify(spoof));
+  expectError('compare', left, right);
+  const crossRun = sourceRecord('b', 102);
+  crossRun.source.run_id = 999;
+  fs.writeFileSync(right, JSON.stringify(crossRun));
+  expectError('compare', left, right);
+  // Source identity fields may be consistent yet still not authenticated.
+  // This compares observations only; trusted ingestion must attest workflow_run.
+
   const corrupt = fixture('a', 240);
   corrupt.observations[1].browser.marker_count = -1;
   fs.writeFileSync(right, JSON.stringify(corrupt));
