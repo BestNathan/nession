@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 37945978630,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "docs/e2e-remote-vpn-runner-trust-contract",
+    "target_sha": "a78e40ede11fc492ce9c6c161b1df1c4447f9e21",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/37945978630",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "3e324fa91af02d8fe54f1fb83615d3f7a3c75d078f94eea79dd9bb1598b3ee7f"
+  },
+  "record": "runs/2026-10-09/37945978630-1/scenario/terminal-attach-resume-2.json",
+  "execution_id": "233b5e26d180f5dc4d3552018fb7d62f304fdbeddf1799912efe025fd92fc5c2"
+}
