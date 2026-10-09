@@ -19,10 +19,10 @@ const issue = {
 const audit = { errors: ['missing Location'] };
 const cursor = renderIssueAuditPrompt(issue, audit, 'cursor', 'example/repo');
 const claude = renderIssueAuditPrompt(issue, audit, 'deepseek', 'example/repo');
-assert.equal(cursor.template_sha256, claude.template_sha256);
+assert.notEqual(cursor.template_sha256, claude.template_sha256);
 assert.deepEqual(cursor, renderIssueAuditPrompt(issue, audit, 'cursor', 'example/repo'));
 assert.match(cursor.text, /update_target_issue/);
-assert.match(claude.text, /only to issue #17/);
+assert.match(claude.text, /Return a JSON repair proposal only/);
 assert.match(cursor.text, /missing Location/);
 assert.ok(cursor.text.includes('{{not_a_template_variable}}'));
 assert.match(cursor.template_sha256, /^[0-9a-f]{64}$/);

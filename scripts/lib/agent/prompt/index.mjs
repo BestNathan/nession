@@ -28,11 +28,11 @@ function valueOf(context, key) {
   return String(value);
 }
 
-function expand(text, context, sources, stack = []) {
+function expand(text, context, sources, stack = [], overrides = {}) {
   let result = text.replace(/\{\{\s*>\s*([a-z0-9-]+(?:\/[a-z0-9-]+)*)\s*\}\}/g, (_, name) => {
-    const relative = 'shared/' + name + '.hbs';
+    const relative = overrides[name] || 'shared/' + name + '.hbs';
     if (stack.includes(relative)) throw new Error('Cyclic Prompt partial: ' + [...stack, relative].join(' -> '));
-    return expand(source(relative, sources), context, sources, [...stack, relative]);
+    return expand(source(relative, sources), context, sources, [...stack, relative], overrides);
   });
   result = result.replace(/\{\{\{\s*([^{}]+?)\s*\}\}\}|\{\{\s*([^{}]+?)\s*\}\}/g, (_, rawKey, key) => {
     const name = (rawKey || key).trim();
@@ -42,17 +42,19 @@ function expand(text, context, sources, stack = []) {
   return result;
 }
 
-export function renderAgentPrompt({ id, version, context }) {
+export function renderAgentPrompt({ id, version, context, variant = null }) {
   if (!IDENTIFIER.test(id) || !/^v[1-9][0-9]*$/.test(version)) {
     throw new Error('Invalid Prompt template ID or version');
   }
   if (!context || typeof context !== 'object' || Array.isArray(context)) {
     throw new Error('Prompt context must be an object');
   }
+  if (variant != null && !IDENTIFIER.test(variant)) throw new Error('Invalid Prompt variant');
   const sources = new Map();
   const root = id + '/' + version + '/';
-  const system = expand(source(root + 'system.hbs', sources), context, sources).trim();
-  const task = expand(source(root + 'task.hbs', sources), context, sources).trim();
+  const overrides = variant ? { actions: root + 'actions/' + variant + '.hbs' } : {};
+  const system = expand(source(root + 'system.hbs', sources), context, sources, [], overrides).trim();
+  const task = expand(source(root + 'task.hbs', sources), context, sources, [], overrides).trim();
   const digest = crypto.createHash('sha256');
   for (const [name, content] of [...sources].sort(([a], [b]) => a.localeCompare(b))) {
     digest.update(name + '\0' + content + '\0');
