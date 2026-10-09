@@ -418,7 +418,8 @@ function selfTest() {
     repository: 'BestNathan/nession',
     event: 'pull_request_target',
     task: { id: 'issue-1458-pre-merge', type: 'acceptance', issue: 1458, stage: 'pre-merge' },
-    agent: { provider: 'cursor', model: { id: 'composer-2.5' }, status: 'finished' },
+    agent: { provider: 'cursor', model: { id: 'composer-2.5' }, status: 'finished',
+      prompt: { id: 'issue-audit', version: 'v1', sha256: 'a'.repeat(64) } },
     execution: { turns: 3, model_requests: 3, tool_calls: ['read', 'grep', 'read'], tools_observed: true },
     tokens: { input: 10, output: 5, cache_read: 20, cache_write: 0 },
     cost: { charged_usd: 0.01 },
@@ -428,6 +429,8 @@ function selfTest() {
   assert.equal(telemetryStoragePath(fixture), 'raw/workflows/requirement-acceptance/2026-10-07/123-2-issue-1458-pre-merge.json');
   assert.deepEqual(fixture.execution.tools.by_name, { grep: 1, read: 2 });
   assert.equal(fixture.tokens.total, 35);
+  assert.equal(fixture.agent.prompt.sha256, 'a'.repeat(64));
+  assert.throws(() => validateAgentWorkflowTelemetry({ ...fixture, agent: { ...fixture.agent, prompt: { ...fixture.agent.prompt, sha256: 'broken' } } }), /invalid agent prompt/);
   const metrics = aggregateAgentWorkflowTelemetry([fixture], new Date('2026-10-08T00:00:00Z'));
   assert.equal(metrics.windows['7d'].runs.total, 1);
   assert.equal(metrics.windows['30d'].tools.total, 3);

@@ -10,7 +10,7 @@ import { createIssueUpdateTool, candidateIssue, issueLabelNames as labelNames } 
 import { createIssueCommentTool } from './lib/agent/tools/gh/issue/comment.mjs';
 import { renderIssueAuditPrompt } from './lib/agent/tasks/issue-audit.mjs';
 import { promptTelemetry } from './lib/agent/telemetry/prompt.mjs';
-import { loadCursorSdk, normalizeCursorSdkModule, selectCursorModel as modelSelectionFromCatalog, normalizeCursorUsage, normalizeCursorCost } from './lib/agent/providers/cursor.mjs';
+import { loadCursorSdk, runCursorSession, normalizeCursorSdkModule, selectCursorModel as modelSelectionFromCatalog, normalizeCursorUsage, normalizeCursorCost } from './lib/agent/providers/cursor.mjs';
 import { buildAgentWorkflowTelemetry, writeAgentWorkflowTelemetry } from './agent-workflow-telemetry.mjs';
 
 function ensureCursorConfig() {
@@ -211,73 +211,33 @@ function writeRecord(outDir, record) {
 
 async function runCursorAgent(issue, outDir) {
   ensureCursorConfig();
-  const sdk = await loadCursorSdkForAudit();
-  const catalog = await sdk.Cursor.models.list();
-  const requested = requestedModel();
-  const selection = modelSelectionFromCatalog(catalog, requested);
-  const store = new sdk.JsonlLocalAgentStore(path.join(outDir, 'cursor-store'));
-  const customTools = createCustomTools(issue);
-  const audit = auditIssue(issue);
-
-  const agent = await sdk.Agent.create({
+  const { result, meta } = await runCursorSession({
+    sdkLoader: loadCursorSdkForAudit,
     apiKey: process.env.CURSOR_API_KEY,
-    name: `nession-issue-audit-${issue.number}`,
-    model: selection,
+    name: 'nession-issue-audit-' + issue.number,
+    requestedModel: requestedModel(),
+    workspace: process.cwd(),
+    storePath: path.join(outDir, 'cursor-store'),
     tools: ['read', 'grep', 'glob', 'ls', 'mcp'],
-    local: {
-      cwd: process.cwd(),
-      settingSources: [],
-      store,
-      customTools,
-    },
+    customTools: createCustomTools(issue),
+    prompt: promptFor(issue, auditIssue(issue)),
   });
-
-  const startedAt = new Date();
-  try {
-    const run = await agent.send(promptFor(issue, audit));
-    let turns = 0;
-    let availableTools = [];
-    const toolCalls = [];
-    for await (const event of run.stream()) {
-      if (event.type === 'usage') turns += 1;
-      if (event.type === 'system' && Array.isArray(event.tools)) availableTools = event.tools;
-      if (event.type === 'tool_call' && event.status === 'running') toolCalls.push(event.name);
-    }
-    const result = await run.wait();
-    let billed = null;
-    try { billed = await agent.getUsage(); } catch {}
-    const usage = normalizeUsage(result.usage);
-    const cost = normalizeCost(billed);
-    const meta = {
-      invoked: true,
-      provider: 'cursor',
-      model: { id: selection.id, fast: requested.fast, params: selection.params ?? [] },
-      agent_id: agent.agentId,
-      run_id: result.id ?? run.id ?? null,
-      request_id: result.requestId ?? run.requestId ?? null,
-      turns,
-      available_tools: availableTools,
-      tool_calls: toolCalls,
-      final_text: typeof result.result === 'string' ? result.result.slice(0, 4000) : null,
-      started_at: startedAt.toISOString(),
-      finished_at: new Date().toISOString(),
-      duration_ms: result.durationMs ?? run.durationMs ?? (Date.now() - startedAt.getTime()),
-      usage,
-      raw_cost_usd: cost.raw_cost_usd,
-      charged_cost_usd: cost.charged_cost_usd,
-      status: result.status,
-      error: result.error ?? null,
-    };
-    if (result.status !== 'finished') {
-      const error = new Error(`Cursor Agent finished with status ${result.status}: ${result.error?.message ?? 'unknown error'}`);
-      error.cursorMeta = meta;
-      throw error;
-    }
-    return meta;
-  } finally {
-    if (typeof agent[Symbol.asyncDispose] === 'function') await agent[Symbol.asyncDispose]();
-    else agent.close?.();
+  const normalized = {
+    invoked: true, provider: 'cursor', model: meta.model,
+    agent_id: meta.agent_id, run_id: meta.run_id, request_id: meta.request_id,
+    turns: meta.turns, available_tools: meta.available_tools, tool_calls: meta.tool_calls,
+    final_text: typeof result.result === 'string' ? result.result.slice(0, 4000) : null,
+    started_at: meta.started_at, finished_at: meta.finished_at, duration_ms: meta.duration_ms,
+    usage: normalizeUsage(result.usage),
+    raw_cost_usd: meta.cost.raw_usd, charged_cost_usd: meta.cost.charged_usd,
+    status: meta.status, error: meta.error,
+  };
+  if (result.status !== 'finished') {
+    const error = new Error('Cursor Agent finished with status ' + result.status + ': ' + (result.error?.message ?? 'unknown error'));
+    error.cursorMeta = normalized;
+    throw error;
   }
+  return normalized;
 }
 
 function selfTest() {

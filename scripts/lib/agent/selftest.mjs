@@ -6,7 +6,7 @@ import { renderAcceptancePrompt } from './tasks/acceptance.mjs';
 import { candidateIssue, createIssueUpdateTool } from './tools/gh/issue/update.mjs';
 import { createIssueCommentTool } from './tools/gh/issue/comment.mjs';
 import { createIssueReadTool } from './tools/gh/issue/read.mjs';
-import { normalizeCursorUsage, normalizeCursorCost, selectCursorModel } from './providers/cursor.mjs';
+import { normalizeCursorUsage, normalizeCursorCost, selectCursorModel, runCursorSession } from './providers/cursor.mjs';
 import { normalizeClaudeUsage, parseClaudeJson } from './providers/claude-code.mjs';
 
 const issue = {
@@ -61,4 +61,42 @@ await assert.rejects(
   /unauthorized fields/
 );
 await assert.rejects(applyIssueAuditProposal(issue, { result: 'not json' }, 'example/repo'), /not valid JSON/);
+let disposed = false;
+let capturedTools = null;
+const mockSdk = {
+  Cursor: { models: { async list() { return catalog; } } },
+  JsonlLocalAgentStore: class { constructor(file) { this.file = file; } },
+  Agent: {
+    async create(options) {
+      capturedTools = options.tools;
+      return {
+        agentId: 'mock-agent',
+        async send() {
+          return {
+            id: 'mock-run',
+            async *stream() {
+              yield { type: 'usage' };
+              yield { type: 'tool_call', status: 'running', name: 'read' };
+            },
+            async wait() {
+              return { id: 'mock-run', status: 'finished', result: '{}', usage: { inputTokens: 5 } };
+            },
+          };
+        },
+        async getUsage() { return { cost: { chargedCents: 50 } }; },
+        async [Symbol.asyncDispose]() { disposed = true; },
+      };
+    },
+  },
+};
+const executed = await runCursorSession({
+  sdkLoader: async () => mockSdk, apiKey: 'fixture', name: 'fixture',
+  requestedModel: { id: 'composer-2.5', fast: true }, workspace: '/tmp',
+  storePath: '/tmp/fixture-store', tools: ['read'], prompt: 'fixture',
+});
+assert.deepEqual(capturedTools, ['read']);
+assert.equal(executed.meta.usage.input, 5);
+assert.equal(executed.meta.cost.charged_usd, 0.5);
+assert.equal(executed.meta.tool_calls[0], 'read');
+assert.equal(disposed, true);
 console.log('agent library self-test: passed');

@@ -7,7 +7,7 @@ import { buildAgentWorkflowTelemetry, writeAgentWorkflowTelemetry } from './agen
 import { renderAcceptancePrompt } from './lib/agent/tasks/acceptance.mjs';
 import { promptTelemetry } from './lib/agent/telemetry/prompt.mjs';
 import { runClaudeCli, normalizeClaudeUsage } from './lib/agent/providers/claude-code.mjs';
-import { loadCursorSdk, selectCursorModel, normalizeCursorUsage, normalizeCursorCost } from './lib/agent/providers/cursor.mjs';
+import { runCursorSession, selectCursorModel } from './lib/agent/providers/cursor.mjs';
 
 function promptFor(context) {
   return renderAcceptancePrompt(context).text;
@@ -37,62 +37,29 @@ function requestedCursorModel() {
 
 async function runCursor(context, workspace) {
   if (!process.env.CURSOR_API_KEY) throw new Error('CURSOR_API_KEY is required from the cursor GitHub Environment');
-  const sdk = await loadCursorSdk();
-  const selection = selectCursorModel(await sdk.Cursor.models.list());
-  const store = new sdk.JsonlLocalAgentStore(path.join(process.env.RUNNER_TEMP || workspace, 'acceptance-cursor-store'));
-  const agent = await sdk.Agent.create({
+  const { result, meta } = await runCursorSession({
     apiKey: process.env.CURSOR_API_KEY,
     name: 'nession-acceptance-' + context.issue.number + '-' + context.stage,
-    model: selection,
+    requestedModel: requestedCursorModel(),
     tools: ['read', 'grep', 'glob', 'ls'],
-    local: { cwd: workspace, settingSources: [], store },
+    workspace,
+    storePath: path.join(process.env.RUNNER_TEMP || workspace, 'acceptance-cursor-store'),
+    prompt: promptFor(context),
   });
-  const startedAt = new Date();
-  try {
-    const run = await agent.send(promptFor(context));
-    let turns = 0;
-    const toolCalls = [];
-    for await (const event of run.stream()) {
-      if (event.type === 'usage') turns += 1;
-      if (event.type === 'tool_call' && event.status === 'running') toolCalls.push(event.name);
-    }
-    const result = await run.wait();
-    let billed = null;
-    try { billed = await agent.getUsage(); } catch {}
-    const usage = normalizeCursorUsage(result.usage);
-    const costs = normalizeCursorCost(billed);
-    const meta = {
-      provider: 'cursor',
-      model: { id: selection.id, fast: requestedCursorModel().fast, params: selection.params ?? [] },
-      run_id: result.id ?? run.id ?? null,
-      request_id: result.requestId ?? run.requestId ?? null,
-      status: result.status,
-      turns,
-      model_requests: turns,
-      tool_calls: toolCalls,
-      tools_observed: true,
-      tokens: usage,
-      cost: {
-        raw_usd: costs.raw_usd,
-        charged_usd: costs.charged_usd,
-        estimated_usd: null,
-      },
-      timing: {
-        started_at: startedAt.toISOString(),
-        finished_at: new Date().toISOString(),
-        agent_duration_ms: result.durationMs ?? run.durationMs ?? (Date.now() - startedAt.getTime()),
-      },
-    };
-    if (result.status !== 'finished') {
-      const error = new Error('Cursor Acceptance Agent finished with status ' + result.status + ': ' + (result.error?.message || 'unknown error'));
-      error.agentMeta = meta;
-      throw error;
-    }
-    return { result: parseJsonText(result.result), meta };
-  } finally {
-    if (typeof agent[Symbol.asyncDispose] === 'function') await agent[Symbol.asyncDispose]();
-    else agent.close?.();
+  const normalized = {
+    provider: 'cursor',
+    model: meta.model, run_id: meta.run_id, request_id: meta.request_id,
+    status: meta.status, turns: meta.turns, model_requests: meta.turns,
+    tool_calls: meta.tool_calls, tools_observed: true,
+    tokens: meta.usage, cost: { ...meta.cost, estimated_usd: null },
+    timing: { started_at: meta.started_at, finished_at: meta.finished_at, agent_duration_ms: meta.duration_ms },
+  };
+  if (result.status !== 'finished') {
+    const error = new Error('Cursor Acceptance Agent finished with status ' + result.status + ': ' + (result.error?.message || 'unknown error'));
+    error.agentMeta = normalized;
+    throw error;
   }
+  return { result: parseJsonText(result.result), meta: normalized };
 }
 
 function claudeUsage(envelope) {
